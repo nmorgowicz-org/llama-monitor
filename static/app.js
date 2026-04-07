@@ -577,6 +577,34 @@ async function savePreset(event) {
     }
 }
 
+async function copyPreset() {
+    const id = document.getElementById('preset-select').value;
+    const p = presets.find(pr => pr.id === id);
+    if (!p) { showToast('No preset selected', 'warn'); return; }
+
+    const copy = Object.assign({}, p);
+    delete copy.id;
+    copy.name = p.name + ' (copy)';
+
+    try {
+        const resp = await fetch('/api/presets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(copy),
+        });
+        if (!resp.ok) {
+            const err = await resp.text().catch(() => 'Unknown error');
+            showToast('Copy failed: ' + err, 'error');
+            return;
+        }
+        const data = await resp.json();
+        await loadPresets(data.preset?.id || null);
+        showToast('Preset copied', 'success');
+    } catch (err) {
+        showToast('Copy failed: ' + err.message, 'error');
+    }
+}
+
 async function deletePreset() {
     const id = document.getElementById('preset-select').value;
     const p = presets.find(pr => pr.id === id);
