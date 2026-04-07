@@ -677,11 +677,16 @@ function getConfig() {
 }
 
 async function doStart() {
+    const config = getConfig();
+    if (!config.model_path) {
+        showToast('No model path set. Edit the preset to select a model.', 'error');
+        return;
+    }
     document.getElementById('btn-start').disabled = true;
     const resp = await fetch('/api/start', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(getConfig()),
+        body: JSON.stringify(config),
     });
     const data = await resp.json();
     if (!data.ok) showToast('Start failed: ' + (data.error || 'unknown'), 'error');

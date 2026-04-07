@@ -67,6 +67,23 @@ pub async fn start_server(
     config: ServerConfig,
     app_config: &AppConfig,
 ) -> Result<()> {
+    // Validate model path before starting
+    if config.model_path.is_empty() {
+        anyhow::bail!("Model path is empty. Edit the preset and set a model path.");
+    }
+    if !std::path::Path::new(&config.model_path).exists() {
+        anyhow::bail!("Model file not found: {}", config.model_path);
+    }
+
+    // Validate server binary (skip PATH lookup for bare names like "llama-server")
+    let server_path = &app_config.llama_server_path;
+    if server_path.components().count() > 1 && !server_path.exists() {
+        anyhow::bail!(
+            "llama-server binary not found: {}. Set it in Configuration.",
+            server_path.display()
+        );
+    }
+
     // Clear old logs
     {
         let mut logs = state.server_logs.lock().unwrap();
