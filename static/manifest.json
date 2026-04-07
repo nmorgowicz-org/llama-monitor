@@ -1,0 +1,11 @@
+{
+    "name": "Llama Monitor",
+    "short_name": "LlamaMonitor",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#2e3440",
+    "theme_color": "#2e3440",
+    "icons": [
+        { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    ]
+}

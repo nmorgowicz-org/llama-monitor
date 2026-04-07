@@ -1,0 +1,267 @@
+use anyhow::Result;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command as TokioCommand;
+
+use crate::config::AppConfig;
+use crate::gpu::env::{build_nvidia_env, build_rocm_env};
+use crate::state::AppState;
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ServerConfig {
+    pub model_path: String,
+    pub context_size: u64,
+    pub ctk: String,
+    pub ctv: String,
+    pub tensor_split: String,
+    pub batch_size: u32,
+    pub ubatch_size: u32,
+    pub no_mmap: bool,
+    pub port: u16,
+    pub ngram_spec: bool,
+    pub parallel_slots: u32,
+    // Model & memory
+    #[serde(default)]
+    pub gpu_layers: Option<i32>,
+    #[serde(default)]
+    pub mlock: bool,
+    // Attention
+    #[serde(default)]
+    pub flash_attn: String,
+    // GPU distribution
+    #[serde(default)]
+    pub split_mode: String,
+    #[serde(default)]
+    pub main_gpu: Option<u32>,
+    // Threading
+    #[serde(default)]
+    pub threads: Option<u32>,
+    #[serde(default)]
+    pub threads_batch: Option<u32>,
+    // Rope scaling
+    #[serde(default)]
+    pub rope_scaling: String,
+    #[serde(default)]
+    pub rope_freq_base: Option<f64>,
+    #[serde(default)]
+    pub rope_freq_scale: Option<f64>,
+    // Speculative decoding
+    #[serde(default)]
+    pub draft_model: String,
+    #[serde(default)]
+    pub draft_min: Option<u32>,
+    #[serde(default)]
+    pub draft_max: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_size: Option<u32>,
+    // Advanced
+    #[serde(default)]
+    pub seed: Option<i64>,
+    #[serde(default)]
+    pub system_prompt_file: String,
+    #[serde(default)]
+    pub extra_args: String,
+}
+
+pub async fn start_server(
+    state: &AppState,
+    config: ServerConfig,
+    app_config: &AppConfig,
+) -> Result<()> {
+    // Clear old logs
+    {
+        let mut logs = state.server_logs.lock().unwrap();
+        logs.clear();
+    }
+
+    let mut cmd = TokioCommand::new(&app_config.llama_server_path);
+    cmd.current_dir(&app_config.llama_server_cwd);
+
+    // Set GPU-specific environment variables
+    let gpu_env = state.gpu_env.lock().unwrap().clone();
+    let cwd = app_config.llama_server_cwd.display().to_string();
+    match app_config.gpu_backend.as_str() {
+        "nvidia" => {
+            for (key, val) in build_nvidia_env(&gpu_env) {
+                cmd.env(key, val);
+            }
+        }
+        "none" => {}
+        _ => {
+            for (key, val) in build_rocm_env(&gpu_env, &cwd) {
+                cmd.env(key, val);
+            }
+        }
+    }
+
+    // Build args — model & core
+    cmd.arg("-m").arg(&config.model_path);
+    cmd.arg("-ngl")
+        .arg(config.gpu_layers.unwrap_or(99).to_string());
+    cmd.arg("-ctk").arg(&config.ctk);
+    cmd.arg("-ctv").arg(&config.ctv);
+    cmd.arg("--host").arg("0.0.0.0");
+    cmd.arg("--port").arg(config.port.to_string());
+    cmd.arg("-c").arg(config.context_size.to_string());
+    cmd.arg("-b").arg(config.batch_size.to_string());
+    cmd.arg("-ub").arg(config.ubatch_size.to_string());
+    cmd.arg("--no-warmup");
+    cmd.arg("--jinja");
+    cmd.arg("--metrics");
+    cmd.arg("--webui-mcp-proxy");
+
+    // Memory
+    if config.no_mmap {
+        cmd.arg("--no-mmap");
+    }
+    if config.mlock {
+        cmd.arg("--mlock");
+    }
+
+    // Flash attention
+    if !config.flash_attn.is_empty() {
+        cmd.arg("-fa").arg(&config.flash_attn);
+    }
+
+    // GPU distribution
+    if !config.tensor_split.is_empty() {
+        cmd.arg("-ts").arg(&config.tensor_split);
+    }
+    if !config.split_mode.is_empty() {
+        cmd.arg("--split-mode").arg(&config.split_mode);
+    }
+    if let Some(mg) = config.main_gpu {
+        cmd.arg("-mg").arg(mg.to_string());
+    }
+
+    // Threading
+    if let Some(t) = config.threads {
+        cmd.arg("-t").arg(t.to_string());
+    }
+    if let Some(tb) = config.threads_batch {
+        cmd.arg("-tb").arg(tb.to_string());
+    }
+
+    // Rope scaling: explicit config takes priority, else auto-YaRN for large contexts
+    if !config.rope_scaling.is_empty() {
+        cmd.arg("--rope-scaling").arg(&config.rope_scaling);
+    } else if config.context_size > 262144 {
+        cmd.arg("--rope-scaling").arg("yarn");
+    }
+    if let Some(base) = config.rope_freq_base {
+        cmd.arg("--rope-freq-base").arg(format!("{:.6}", base));
+    }
+    if let Some(scale) = config.rope_freq_scale {
+        cmd.arg("--rope-freq-scale").arg(format!("{:.6}", scale));
+    } else if config.rope_scaling.is_empty() && config.context_size > 262144 {
+        // Auto-calculate YaRN scale when no explicit rope config
+        let scale = 262144.0 / config.context_size as f64;
+        cmd.arg("--rope-freq-scale").arg(format!("{:.6}", scale));
+        cmd.arg("--yarn-ext-factor").arg("1.0");
+        cmd.arg("--yarn-attn-factor").arg("1.0");
+        cmd.arg("--yarn-beta-fast").arg("32");
+        cmd.arg("--yarn-beta-slow").arg("1");
+    }
+
+    // Speculative decoding
+    if config.ngram_spec {
+        cmd.arg("--spec-type").arg("ngram-mod");
+        cmd.arg("--spec-ngram-size-n")
+            .arg(config.spec_ngram_size.unwrap_or(24).to_string());
+        cmd.arg("--draft-min")
+            .arg(config.draft_min.unwrap_or(8).to_string());
+        cmd.arg("--draft-max")
+            .arg(config.draft_max.unwrap_or(24).to_string());
+    }
+    if !config.draft_model.is_empty() {
+        cmd.arg("-md").arg(&config.draft_model);
+    }
+
+    // Slots
+    if config.parallel_slots > 0 {
+        cmd.arg("--parallel").arg(config.parallel_slots.to_string());
+    }
+
+    // Advanced
+    if let Some(seed) = config.seed {
+        cmd.arg("--seed").arg(seed.to_string());
+    }
+    if !config.system_prompt_file.is_empty() {
+        cmd.arg("--system-prompt-file")
+            .arg(&config.system_prompt_file);
+    }
+
+    // Extra args (arbitrary flags)
+    for arg in config.extra_args.split_whitespace() {
+        cmd.arg(arg);
+    }
+
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    let mut child = cmd.spawn()?;
+
+    // Capture stdout
+    if let Some(stdout) = child.stdout.take() {
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            let reader = BufReader::new(stdout);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                state_clone.push_log(line);
+            }
+        });
+    }
+
+    // Capture stderr
+    if let Some(stderr) = child.stderr.take() {
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            let reader = BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                state_clone.push_log(line);
+            }
+        });
+    }
+
+    {
+        let mut guard = state.server_child.lock().await;
+        *guard = Some(child);
+    }
+    {
+        let mut running = state.server_running.lock().unwrap();
+        *running = true;
+    }
+    {
+        let mut cfg = state.server_config.lock().unwrap();
+        *cfg = Some(config);
+    }
+
+    // Notify the llama poller to start
+    state.llama_poll_notify.notify_one();
+
+    Ok(())
+}
+
+pub async fn stop_server(state: &AppState) -> Result<()> {
+    let mut guard = state.server_child.lock().await;
+    if let Some(ref mut child) = *guard {
+        child.kill().await.ok();
+        child.wait().await.ok();
+    }
+    *guard = None;
+    {
+        let mut running = state.server_running.lock().unwrap();
+        *running = false;
+    }
+    {
+        let mut cfg = state.server_config.lock().unwrap();
+        *cfg = None;
+    }
+    {
+        let mut m = state.llama_metrics.lock().unwrap();
+        *m = crate::llama::metrics::LlamaMetrics::default();
+    }
+    state.push_log("[monitor] Server stopped.".into());
+    Ok(())
+}

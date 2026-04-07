@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+    <meta name='theme-color' content='#2e3440'>
+    <meta name='apple-mobile-web-app-capable' content='yes'>
+    <meta name='apple-mobile-web-app-status-bar-style' content='black-translucent'>
+    <link rel='manifest' href='/manifest.json'>
+    <link rel='icon' href='/icon.svg' type='image/svg+xml'>
+    <link rel='apple-touch-icon' href='/icon.svg'>
+    <title>Llama Monitor</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div class="title">
+        <h1>Llama Monitor</h1>
+        <div style="display:flex;align-items:center;gap:8px;padding-bottom:4px;">
+            <span class="status-dot stopped" id="status-dot"></span>
+            <span class="status-text" id="status-text">Stopped</span>
+        </div>
+    </div>
+
+    <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('server')" id="tab-server">Server<span class="tab-badge" id="badge-server"></span></button>
+        <button class="tab-btn" onclick="switchTab('monitor')" id="tab-monitor">Monitor<span class="tab-badge" id="badge-monitor"></span></button>
+        <button class="tab-btn" onclick="switchTab('chat')" id="tab-chat">Chat<span class="tab-badge" id="badge-chat"></span></button>
+    </div>
+
+    <!-- Page: Server (control + logs) -->
+    <div class="page active" id="page-server">
+        <details class="gpu-env-panel" id="gpu-env-panel">
+            <summary>GPU Environment <span id="gpu-env-info" style="font-weight:400;color:#6a7585;font-size:0.78rem;"></span></summary>
+            <div class="gpu-env-body">
+                <div class="gpu-env-row">
+                    <label class="gpu-env-field" title="GPU architecture for ROCm HSA_OVERRIDE_GFX_VERSION. Auto = let ROCm detect natively.">Architecture
+                        <select id="gpu-env-arch"></select>
+                    </label>
+                    <label class="gpu-env-field" title="Comma-separated GPU device indices to use (e.g. 0,1,2,3). Empty = all GPUs.">GPU Devices
+                        <input type="text" id="gpu-env-devices" placeholder="all">
+                    </label>
+                    <label class="gpu-env-field" title="Path to ROCm installation directory.">ROCm Path
+                        <input type="text" id="gpu-env-rocm-path" value="/opt/rocm">
+                    </label>
+                    <button class="btn btn-start" style="align-self:end;padding:6px 12px;" onclick="saveGpuEnv()">Save</button>
+                </div>
+                <div id="gpu-detected-info" style="font-size:0.72rem;color:#6a7585;margin-top:4px;"></div>
+            </div>
+        </details>
+
+        <h2>Server Control</h2>
+        <div class="control-bar" id="controls">
+            <label class="preset-label">Model Preset
+                <select id="preset-select"></select>
+                <span class="preset-actions">
+                    <button class="btn-sm btn-preset" onclick="openPresetModal('new')" title="Create new preset">New</button>
+                    <button class="btn-sm btn-preset" onclick="openPresetModal('edit')" title="Edit selected preset">Edit</button>
+                    <button class="btn-sm btn-preset btn-preset-delete" onclick="deletePreset()" title="Delete selected preset">Delete</button>
+                    <button class="btn-sm btn-preset-reset" onclick="resetPresets()" title="Reset all presets to built-in defaults">Reset defaults</button>
+                </span>
+            </label>
+            <label class="num-sm">Context
+                <input id="ctx" type="number" value="128000">
+            </label>
+            <label class="num-xs">KV Key
+                <input id="ctk" type="text" value="turbo3">
+            </label>
+            <label class="num-xs">KV Val
+                <input id="ctv" type="text" value="turbo3">
+            </label>
+            <label class="wide-label">Tensor Split
+                <input id="ts" type="text" value="" placeholder="4,5,5,5">
+            </label>
+            <label class="num-sm">Batch
+                <input id="batch" type="number" value="2048">
+            </label>
+            <label class="num-xs">Slots
+                <input id="slots" type="number" value="1">
+            </label>
+            <label class="num-xs">Port
+                <input id="port" type="number" value="8080">
+            </label>
+            <label class="chk"><input id="no_mmap" type="checkbox"> no-mmap</label>
+            <label class="chk"><input id="ngram_spec" type="checkbox"> ngram-spec</label>
+            <button class="btn btn-start" id="btn-start" onclick="doStart()">Start</button>
+            <button class="btn btn-stop" id="btn-stop" onclick="doStop()" disabled>Stop</button>
+        </div>
+        <small style="color:#6a7585;font-size:0.72rem">gfx906: Q4_0/Q4_1/Q8_0 use optimized MMVQ. Q4_K_M uses generic path (slower). turbo3 KV = 4.6x compression.</small>
+        <h2>Server Logs</h2>
+        <div class="log-panel" id="log-panel-server"></div>
+    </div>
+
+    <!-- Page: Monitor (inference + GPUs) -->
+    <div class="page" id="page-monitor">
+        <h2>Inference</h2>
+        <div class="inference-panel" id="inference">
+            <div class="metric-card"><div class="metric-label">Prompt Speed</div><div class="metric-value prompt" id="m-prompt">&mdash;</div></div>
+            <div class="metric-card"><div class="metric-label">Generation Speed</div><div class="metric-value gen" id="m-gen">&mdash;</div></div>
+            <div class="metric-card"><div class="metric-label">Context (KV Cache)</div><div class="metric-value ctx" id="m-ctx">&mdash;</div></div>
+            <div class="metric-card"><div class="metric-label">Slots</div><div class="metric-value slots" id="m-slots">&mdash;</div></div>
+            <div class="metric-card"><div class="metric-label">Server Status</div><div class="metric-value" id="m-status">&mdash;</div></div>
+        </div>
+        <h2>GPUs</h2>
+        <div class="table-wrap">
+        <table class="gpu-table">
+            <colgroup>
+                <col style="width:14%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:24%"><col style="width:16%"><col style="width:16%">
+            </colgroup>
+            <thead><tr>
+                <th>GPU</th><th>Temp</th><th>Load</th><th>VRAM</th><th>Power</th><th>SCLK</th><th>MCLK</th>
+            </tr></thead>
+            <tbody id="gpu-rows"></tbody>
+        </table>
+        </div>
+        <h2>Server Logs</h2>
+        <div class="log-panel" id="log-panel-monitor"></div>
+    </div>
+
+    <!-- Page: Chat -->
+    <div class="page" id="page-chat">
+        <div class="chat-actions">
+            <button onclick="clearChat()">Clear</button>
+        </div>
+        <div class="chat-messages" id="chat-messages"></div>
+        <div class="chat-input-row">
+            <textarea id="chat-input" rows="2" placeholder="Send a message... (Enter to send, Shift+Enter for newline)"></textarea>
+            <button class="btn btn-start" id="btn-send" onclick="sendChat()">Send</button>
+        </div>
+    </div>
+
+<!-- Preset Modal -->
+<div class="modal-overlay" id="preset-modal" style="display:none;">
+    <div class="modal">
+        <h2 id="modal-title">New Preset</h2>
+        <form id="preset-form" onsubmit="savePreset(event)">
+            <input type="hidden" id="modal-preset-id">
+
+            <!-- Model & Memory -->
+            <details class="modal-section" open>
+                <summary>Model &amp; Memory</summary>
+                <label class="modal-field" title="Display name for this preset">Name
+                    <input type="text" id="modal-name" required>
+                </label>
+                <label class="modal-field" title="Absolute path to the .gguf model file on disk">Model Path
+                    <div style="display:flex;gap:6px;">
+                        <input type="text" id="modal-model-path" required style="flex:1;">
+                        <button type="button" class="btn-sm btn-preset" onclick="toggleModelBrowser()" title="Browse discovered models">Browse</button>
+                    </div>
+                    <div id="model-browser" style="display:none;max-height:150px;overflow-y:auto;background:#2e3440;border:1px solid #4c566a;border-radius:4px;margin-top:4px;font-size:0.78rem;"></div>
+                </label>
+                <div class="modal-row">
+                    <label class="modal-field" title="Number of layers to offload to GPU. 99 = all layers. Lower values keep some layers on CPU to save VRAM.">GPU Layers (-ngl)
+                        <input type="number" id="modal-gpu-layers" placeholder="99">
+                    </label>
+                </div>
+                <div class="modal-row modal-checks">
+                    <label class="chk" title="Disable memory-mapped I/O. Required for models >16GB or on network storage."><input type="checkbox" id="modal-no-mmap"> no-mmap</label>
+                    <label class="chk" title="Lock model in RAM, preventing OS from swapping it to disk. Improves performance but requires enough physical RAM."><input type="checkbox" id="modal-mlock"> mlock</label>
+                </div>
+            </details>
+
+            <!-- Context & KV Cache -->
+            <details class="modal-section" open>
+                <summary>Context &amp; KV Cache</summary>
+                <label class="modal-field" title="Maximum context length in tokens. Larger values use more VRAM. Auto-enables YaRN scaling above 262144.">Context Size (-c)
+                    <input type="number" id="modal-context-size" value="128000">
+                </label>
+                <div class="modal-row">
+                    <label class="modal-field" title="KV cache key quantization type: f16 (best quality), q8_0, turbo3 (4.6x compression, fast)">KV Key Type (-ctk)
+                        <input type="text" id="modal-ctk" value="q8_0">
+                    </label>
+                    <label class="modal-field" title="KV cache value quantization type: f16 (best quality), q8_0, turbo3 (4.6x compression, fast)">KV Value Type (-ctv)
+                        <input type="text" id="modal-ctv" value="f16">
+                    </label>
+                    <label class="modal-field" title="Flash Attention mode: auto (default), on, off. Speeds up inference when supported by model architecture.">Flash Attn (-fa)
+                        <select id="modal-flash-attn">
+                            <option value="">(default)</option>
+                            <option value="auto">auto</option>
+                            <option value="on">on</option>
+                            <option value="off">off</option>
+                        </select>
+                    </label>
+                </div>
+            </details>
+
+            <!-- Batching & Slots -->
+            <details class="modal-section" open>
+                <summary>Batching &amp; Slots</summary>
+                <div class="modal-row">
+                    <label class="modal-field" title="Logical batch size: max tokens processed in parallel during prompt evaluation. Higher = faster prompts, more VRAM.">Batch Size (-b)
+                        <input type="number" id="modal-batch-size" value="2048">
+                    </label>
+                    <label class="modal-field" title="Physical micro-batch size. Controls memory granularity. Usually same as batch_size.">Micro-batch (-ub)
+                        <input type="number" id="modal-ubatch-size" value="2048">
+                    </label>
+                    <label class="modal-field" title="Number of concurrent inference slots. Each slot reserves context_size tokens of KV cache VRAM.">Parallel Slots (-np)
+                        <input type="number" id="modal-parallel-slots" value="1">
+                    </label>
+                </div>
+            </details>
+
+            <!-- GPU Distribution -->
+            <details class="modal-section">
+                <summary>GPU Distribution</summary>
+                <label class="modal-field" title="VRAM distribution ratio across GPUs (e.g. '7,8,8,8' for 4 GPUs). Leave empty for single GPU.">Tensor Split (-ts)
+                    <input type="text" id="modal-tensor-split" placeholder="7,8,8,8">
+                </label>
+                <div class="modal-row">
+                    <label class="modal-field" title="How to split the model across GPUs: layer (default, split by layer) or row (split large tensors).">Split Mode
+                        <select id="modal-split-mode">
+                            <option value="">(default)</option>
+                            <option value="layer">layer</option>
+                            <option value="row">row</option>
+                        </select>
+                    </label>
+                    <label class="modal-field" title="Index of the GPU to use for model computation (0-based). Others used for offloading.">Main GPU (-mg)
+                        <input type="number" id="modal-main-gpu" placeholder="0">
+                    </label>
+                </div>
+            </details>
+
+            <!-- Threading -->
+            <details class="modal-section">
+                <summary>Threading</summary>
+                <div class="modal-row">
+                    <label class="modal-field" title="Number of CPU threads for token generation. Leave empty to use all available CPUs.">Threads (-t)
+                        <input type="number" id="modal-threads" placeholder="auto">
+                    </label>
+                    <label class="modal-field" title="Number of CPU threads for prompt/batch processing. Leave empty to use same as threads.">Threads Batch (-tb)
+                        <input type="number" id="modal-threads-batch" placeholder="auto">
+                    </label>
+                </div>
+            </details>
+
+            <!-- Rope Scaling -->
+            <details class="modal-section">
+                <summary>Rope Scaling</summary>
+                <p style="font-size:0.72rem;color:#6a7585;margin-bottom:8px;">Leave empty for auto-YaRN when context &gt; 262144. Set explicitly to override.</p>
+                <div class="modal-row">
+                    <label class="modal-field" title="RoPE scaling method: yarn (for extended context), linear, or none. Auto-enabled as yarn for context > 262144 if left empty.">Rope Scaling
+                        <select id="modal-rope-scaling">
+                            <option value="">(auto)</option>
+                            <option value="yarn">yarn</option>
+                            <option value="linear">linear</option>
+                            <option value="none">none</option>
+                        </select>
+                    </label>
+                    <label class="modal-field" title="RoPE base frequency. Model-specific default if not set. Higher values extend context at quality cost.">Freq Base
+                        <input type="number" id="modal-rope-freq-base" step="any" placeholder="model default">
+                    </label>
+                    <label class="modal-field" title="RoPE frequency scaling factor. Auto-calculated for YaRN if not set. Lower = more context extension.">Freq Scale
+                        <input type="number" id="modal-rope-freq-scale" step="any" placeholder="auto">
+                    </label>
+                </div>
+            </details>
+
+            <!-- Speculative Decoding -->
+            <details class="modal-section">
+                <summary>Speculative Decoding</summary>
+                <div class="modal-row modal-checks">
+                    <label class="chk" title="Enable ngram-mod speculative decoding. Boosts generation speed ~47% on compatible models (pure transformers)."><input type="checkbox" id="modal-ngram-spec"> ngram-spec</label>
+                </div>
+                <div class="modal-row">
+                    <label class="modal-field" title="N-gram size for speculative lookup table. Larger = better predictions but more memory.">N-gram Size
+                        <input type="number" id="modal-spec-ngram-size" placeholder="24">
+                    </label>
+                    <label class="modal-field" title="Minimum number of tokens to draft before verification.">Draft Min
+                        <input type="number" id="modal-draft-min" placeholder="8">
+                    </label>
+                    <label class="modal-field" title="Maximum number of tokens to draft per speculation step.">Draft Max
+                        <input type="number" id="modal-draft-max" placeholder="24">
+                    </label>
+                </div>
+                <label class="modal-field" title="Path to a smaller draft model for model-based speculative decoding (alternative to ngram).">Draft Model (-md)
+                    <input type="text" id="modal-draft-model" placeholder="/path/to/draft-model.gguf">
+                </label>
+            </details>
+
+            <!-- Advanced -->
+            <details class="modal-section">
+                <summary>Advanced</summary>
+                <div class="modal-row">
+                    <label class="modal-field" title="Random seed for reproducible generation. -1 = random.">Seed (-s)
+                        <input type="number" id="modal-seed" placeholder="random">
+                    </label>
+                    <label class="modal-field" title="Path to a text file containing the system prompt.">System Prompt File
+                        <input type="text" id="modal-system-prompt-file" placeholder="/path/to/system.txt">
+                    </label>
+                </div>
+                <label class="modal-field" title="Additional llama-server CLI flags (space-separated). Example: --log-verbosity 2 --no-perf">Extra Args
+                    <input type="text" id="modal-extra-args" placeholder="--flag1 value1 --flag2">
+                </label>
+            </details>
+
+            <div class="modal-buttons">
+                <button type="button" class="btn btn-modal-cancel" onclick="closePresetModal()">Cancel</button>
+                <button type="submit" class="btn btn-modal-save">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
