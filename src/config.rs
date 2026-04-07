@@ -19,11 +19,8 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn from_args(args: AppArgs) -> Self {
-        let default_server_path = PathBuf::from(
-            "/home/artefact/llamacpp-turbo/llama-cpp-gfx906-turbo/build/bin/llama-server",
-        );
-        let default_server_cwd =
-            PathBuf::from("/home/artefact/llamacpp-turbo/llama-cpp-gfx906-turbo");
+        let default_server_path = PathBuf::from("llama-server");
+        let default_server_cwd = PathBuf::from(".");
 
         let config_dir = dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))
