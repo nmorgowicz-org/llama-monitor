@@ -389,8 +389,6 @@ function openPresetModal(mode) {
     const form = document.getElementById('preset-form');
     form.reset();
     clearFieldErrors();
-    // Close model browser if open
-    document.getElementById('model-browser').classList.remove('open');
 
     if (mode === 'edit') {
         const id = document.getElementById('preset-select').value;
@@ -639,64 +637,6 @@ async function resetPresets() {
     } catch (err) {
         showToast('Reset failed: ' + err.message, 'error');
     }
-}
-
-// --- Model Browser ---
-
-let cachedModels = [];
-
-async function toggleModelBrowser() {
-    const browser = document.getElementById('model-browser');
-    if (browser.classList.contains('open')) {
-        browser.classList.remove('open');
-        return;
-    }
-    const list = document.getElementById('model-browser-list');
-    const search = document.getElementById('model-browser-search');
-    search.value = '';
-    list.innerHTML = '<div style="padding:8px;color:#6a7585;">Loading...</div>';
-    browser.classList.add('open');
-    try {
-        const resp = await fetch('/api/models');
-        cachedModels = await resp.json();
-        if (cachedModels.length === 0) {
-            list.innerHTML = '<div style="padding:8px;color:#6a7585;">No models found. Use --models-dir to specify a directory.</div>';
-            return;
-        }
-        renderModelList(cachedModels);
-        search.focus();
-    } catch (err) {
-        list.innerHTML = '<div style="padding:8px;color:#bf616a;">Error: ' + err.message + '</div>';
-    }
-}
-
-function filterModels(query) {
-    const q = query.toLowerCase();
-    const filtered = q ? cachedModels.filter(m =>
-        (m.model_name || m.filename || '').toLowerCase().includes(q) ||
-        (m.quant_type || '').toLowerCase().includes(q)
-    ) : cachedModels;
-    renderModelList(filtered);
-}
-
-function renderModelList(models) {
-    const list = document.getElementById('model-browser-list');
-    list.innerHTML = models.map(m => {
-        const name = m.model_name || m.filename;
-        const quant = m.quant_type ? '<span class="model-item-quant">' + m.quant_type + '</span>' : '';
-        const split = m.is_split ? '<span class="model-item-split">[split]</span>' : '';
-        return '<div class="model-item" onclick="selectModel(\'' + m.path.replace(/'/g, "\\'") + '\')">' +
-            '<span class="model-item-name">' + name + '</span>' +
-            '<span class="model-item-meta">' + quant + split +
-            '<span class="model-item-size">' + m.size_display + '</span></span>' +
-            '</div>';
-    }).join('');
-}
-
-function selectModel(path) {
-    document.getElementById('modal-model-path').value = path;
-    document.getElementById('modal-model-path').classList.remove('field-error');
-    document.getElementById('model-browser').classList.remove('open');
 }
 
 // Clear field errors on input

@@ -204,14 +204,9 @@
                 <label class="modal-field" title="Absolute path to the .gguf model file on disk">Model Path
                     <div style="display:flex;gap:6px;">
                         <input type="text" id="modal-model-path" required style="flex:1;">
-                        <button type="button" class="btn-sm btn-preset" onclick="toggleModelBrowser()" title="Browse discovered models" id="btn-model-browse">Models</button>
-                        <button type="button" class="btn-sm btn-preset" onclick="openFileBrowser('modal-model-path','gguf')" title="Browse filesystem for .gguf files">Files</button>
+                        <button type="button" class="btn-sm btn-preset" onclick="openFileBrowser('modal-model-path','gguf')" title="Browse filesystem for .gguf files">Browse</button>
                     </div>
                     <span class="field-error-msg">Model path is required</span>
-                    <div class="model-browser-wrap" id="model-browser">
-                        <input type="text" class="model-browser-search" id="model-browser-search" placeholder="Filter models..." oninput="filterModels(this.value)">
-                        <div class="model-browser-list" id="model-browser-list"></div>
-                    </div>
                 </label>
                 <div class="modal-row">
                     <label class="modal-field" title="Number of layers to offload to GPU. 99 = all layers. Lower values keep some layers on CPU to save VRAM.">GPU Layers (-ngl)
