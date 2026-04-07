@@ -64,6 +64,9 @@ function collectSettings() {
         slots: document.getElementById('slots').value,
         no_mmap: document.getElementById('no_mmap').checked,
         ngram_spec: document.getElementById('ngram_spec').checked,
+        llama_server_path: document.getElementById('set-server-path').value,
+        llama_server_cwd: document.getElementById('set-server-cwd').value,
+        models_dir: document.getElementById('set-models-dir').value,
     };
 }
 
@@ -90,6 +93,11 @@ function applySettings(s) {
     if (s.slots) document.getElementById('slots').value = s.slots;
     if (s.no_mmap !== undefined) document.getElementById('no_mmap').checked = s.no_mmap;
     if (s.ngram_spec !== undefined) document.getElementById('ngram_spec').checked = s.ngram_spec;
+    // Server paths
+    if (s.llama_server_path !== undefined) document.getElementById('set-server-path').value = s.llama_server_path;
+    if (s.llama_server_cwd !== undefined) document.getElementById('set-server-cwd').value = s.llama_server_cwd;
+    if (s.models_dir !== undefined) document.getElementById('set-models-dir').value = s.models_dir;
+    updateServerPathsInfo();
 }
 
 // Auto-save on any control bar change
@@ -218,6 +226,129 @@ async function saveGpuEnv() {
         showToast('Failed to save GPU env: ' + err.message, 'error');
     }
 }
+
+// --- Server Paths ---
+
+function updateServerPathsInfo() {
+    const path = document.getElementById('set-server-path').value;
+    const dir = document.getElementById('set-models-dir').value;
+    const parts = [];
+    if (path) parts.push(path.split('/').pop() || path);
+    if (dir) parts.push('models: ' + (dir.split('/').pop() || dir));
+    document.getElementById('server-paths-info').textContent = parts.length ? ' \u2014 ' + parts.join(', ') : '';
+}
+
+function saveServerPaths() {
+    saveSettings();
+    // Force immediate save (bypass debounce)
+    clearTimeout(settingsSaveTimer);
+    fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectSettings()),
+    }).then(() => {
+        showToast('Server paths saved', 'success');
+        updateServerPathsInfo();
+    }).catch(() => showToast('Failed to save', 'error'));
+}
+
+// --- File Browser ---
+
+let fbTargetId = '';
+let fbFilter = '';
+let fbCurrentPath = '';
+
+function openFileBrowser(targetId, filter) {
+    fbTargetId = targetId;
+    fbFilter = filter === 'dir' ? '' : (filter || '');
+    const modal = document.getElementById('file-browser-modal');
+    // If target already has a path, start there; otherwise home
+    const current = document.getElementById(targetId).value;
+    let startPath = '';
+    if (current) {
+        // Use parent directory of current value
+        const parts = current.split('/');
+        parts.pop();
+        startPath = parts.join('/') || '/';
+    }
+    // Show/hide "Select This Folder" for dir-mode
+    const selectBtn = modal.querySelector('.btn-modal-save');
+    selectBtn.style.display = filter === 'dir' ? '' : 'none';
+    modal.classList.add('open');
+    fileBrowserGo(startPath);
+}
+
+function closeFileBrowser() {
+    document.getElementById('file-browser-modal').classList.remove('open');
+}
+
+document.getElementById('file-browser-modal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeFileBrowser();
+});
+
+async function fileBrowserGo(path) {
+    const entriesEl = document.getElementById('fb-entries');
+    entriesEl.innerHTML = '<div class="fb-empty">Loading...</div>';
+    const params = new URLSearchParams();
+    if (path) params.set('path', path);
+    if (fbFilter) params.set('filter', fbFilter);
+    try {
+        const resp = await fetch('/api/browse?' + params);
+        const data = await resp.json();
+        if (data.error) {
+            entriesEl.innerHTML = '<div class="fb-empty">' + data.error + '</div>';
+            return;
+        }
+        fbCurrentPath = data.path;
+        document.getElementById('fb-path-input').value = data.path;
+        if (data.entries.length === 0) {
+            entriesEl.innerHTML = '<div class="fb-empty">Empty directory</div>';
+            return;
+        }
+        entriesEl.innerHTML = data.entries.map(e => {
+            if (e.is_dir) {
+                return '<div class="fb-entry fb-entry-dir" onclick="fileBrowserGo(\'' + e.path.replace(/'/g, "\\'") + '\')">' +
+                    '<span class="fb-entry-icon">\u{1F4C1}</span>' +
+                    '<span class="fb-entry-name">' + e.name + '</span></div>';
+            } else {
+                return '<div class="fb-entry fb-entry-file fb-match" onclick="fileBrowserSelect(\'' + e.path.replace(/'/g, "\\'") + '\')">' +
+                    '<span class="fb-entry-icon">\u{1F4C4}</span>' +
+                    '<span class="fb-entry-name">' + e.name + '</span>' +
+                    '<span class="fb-entry-size">' + e.size_display + '</span></div>';
+            }
+        }).join('');
+    } catch (err) {
+        entriesEl.innerHTML = '<div class="fb-empty">Error: ' + err.message + '</div>';
+    }
+}
+
+function fileBrowserUp() {
+    if (fbCurrentPath && fbCurrentPath !== '/') {
+        const parts = fbCurrentPath.split('/');
+        parts.pop();
+        fileBrowserGo(parts.join('/') || '/');
+    }
+}
+
+function fileBrowserSelect(path) {
+    document.getElementById(fbTargetId).value = path;
+    document.getElementById(fbTargetId).dispatchEvent(new Event('input', { bubbles: true }));
+    closeFileBrowser();
+}
+
+function fileBrowserSelectCurrent() {
+    document.getElementById(fbTargetId).value = fbCurrentPath;
+    document.getElementById(fbTargetId).dispatchEvent(new Event('input', { bubbles: true }));
+    closeFileBrowser();
+}
+
+// Close file browser on Escape
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && document.getElementById('file-browser-modal').classList.contains('open')) {
+        closeFileBrowser();
+        e.stopImmediatePropagation();
+    }
+}, true);
 
 // --- Preset Selection ---
 

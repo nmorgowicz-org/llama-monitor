@@ -34,6 +34,13 @@ pub struct UiSettings {
     pub no_mmap: bool,
     #[serde(default)]
     pub ngram_spec: bool,
+    // Server paths (configurable from UI, override CLI defaults)
+    #[serde(default)]
+    pub llama_server_path: String,
+    #[serde(default)]
+    pub llama_server_cwd: String,
+    #[serde(default)]
+    pub models_dir: String,
 }
 
 fn default_port() -> u16 {
@@ -53,6 +60,9 @@ impl Default for UiSettings {
             slots: String::new(),
             no_mmap: false,
             ngram_spec: false,
+            llama_server_path: String::new(),
+            llama_server_cwd: String::new(),
+            models_dir: String::new(),
         }
     }
 }

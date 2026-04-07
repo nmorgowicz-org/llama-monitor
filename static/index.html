@@ -30,6 +30,35 @@
 
     <!-- Page: Server (control + logs) -->
     <div class="page active" id="page-server">
+        <details class="gpu-env-panel" id="server-paths-panel">
+            <summary>Server Paths <span id="server-paths-info" style="font-weight:400;color:#6a7585;font-size:0.78rem;"></span></summary>
+            <div class="gpu-env-body">
+                <div class="gpu-env-row">
+                    <label class="gpu-env-field" style="flex:2;" title="Path to the llama-server binary. Leave empty to use $PATH.">llama-server binary
+                        <div style="display:flex;gap:4px;">
+                            <input type="text" id="set-server-path" placeholder="llama-server (from $PATH)">
+                            <button class="btn-sm btn-preset" onclick="openFileBrowser('set-server-path','executable')" title="Browse">Browse</button>
+                        </div>
+                    </label>
+                    <label class="gpu-env-field" title="Working directory for llama-server process.">Working Dir
+                        <div style="display:flex;gap:4px;">
+                            <input type="text" id="set-server-cwd" placeholder=". (current dir)">
+                            <button class="btn-sm btn-preset" onclick="openFileBrowser('set-server-cwd','dir')" title="Browse">Browse</button>
+                        </div>
+                    </label>
+                </div>
+                <div class="gpu-env-row" style="margin-top:8px;">
+                    <label class="gpu-env-field" style="flex:2;" title="Directory containing .gguf model files for auto-discovery.">Models Directory
+                        <div style="display:flex;gap:4px;">
+                            <input type="text" id="set-models-dir" placeholder="not set (use Browse in presets)">
+                            <button class="btn-sm btn-preset" onclick="openFileBrowser('set-models-dir','dir')" title="Browse">Browse</button>
+                        </div>
+                    </label>
+                    <button class="btn btn-start" style="align-self:end;padding:6px 12px;" onclick="saveServerPaths()">Save</button>
+                </div>
+            </div>
+        </details>
+
         <details class="gpu-env-panel" id="gpu-env-panel">
             <summary>GPU Environment <span id="gpu-env-info" style="font-weight:400;color:#6a7585;font-size:0.78rem;"></span></summary>
             <div class="gpu-env-body">
@@ -129,6 +158,27 @@
         </div>
     </div>
 
+<!-- File Browser Modal (z-index above preset modal) -->
+<div class="modal-overlay" id="file-browser-modal" style="z-index:1100;">
+    <div class="modal" style="width:560px;">
+        <div class="modal-header">
+            <h2>Browse</h2>
+            <button type="button" class="modal-close" onclick="closeFileBrowser()" aria-label="Close">&times;</button>
+        </div>
+        <div class="file-browser-bar">
+            <button class="btn-sm btn-preset" onclick="fileBrowserUp()" title="Parent directory">&uarr; Up</button>
+            <input type="text" id="fb-path-input" class="fb-path-input" onkeydown="if(event.key==='Enter')fileBrowserGo(this.value)">
+        </div>
+        <div class="modal-body" style="padding:0;">
+            <div id="fb-entries" class="fb-entries"></div>
+        </div>
+        <div class="modal-buttons">
+            <button type="button" class="btn btn-modal-cancel" onclick="closeFileBrowser()">Cancel</button>
+            <button type="button" class="btn btn-modal-save" onclick="fileBrowserSelectCurrent()">Select This Folder</button>
+        </div>
+    </div>
+</div>
+
 <!-- Toast notifications -->
 <div class="toast-container" id="toast-container"></div>
 
@@ -153,7 +203,8 @@
                 <label class="modal-field" title="Absolute path to the .gguf model file on disk">Model Path
                     <div style="display:flex;gap:6px;">
                         <input type="text" id="modal-model-path" required style="flex:1;">
-                        <button type="button" class="btn-sm btn-preset" onclick="toggleModelBrowser()" title="Browse discovered models" id="btn-model-browse">Browse</button>
+                        <button type="button" class="btn-sm btn-preset" onclick="toggleModelBrowser()" title="Browse discovered models" id="btn-model-browse">Models</button>
+                        <button type="button" class="btn-sm btn-preset" onclick="openFileBrowser('modal-model-path','gguf')" title="Browse filesystem for .gguf files">Files</button>
                     </div>
                     <span class="field-error-msg">Model path is required</span>
                     <div class="model-browser-wrap" id="model-browser">

@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use warp::Filter;
 
@@ -25,6 +26,7 @@ pub fn api_routes(
     let put_gpu_env = api_put_gpu_env(state.clone());
     let get_settings = api_get_settings(state.clone());
     let put_settings = api_put_settings(state.clone());
+    let browse = api_browse();
     let chat = api_chat(state);
 
     start
@@ -40,6 +42,7 @@ pub fn api_routes(
         .or(get_gpu_env)
         .or(put_settings)
         .or(get_settings)
+        .or(browse)
         .or(chat)
 }
 
@@ -54,7 +57,16 @@ fn api_start(
             let state = state.clone();
             let app_config = app_config.clone();
             async move {
-                match server::start_server(&state, config, &app_config).await {
+                // Build effective config: UI settings override CLI defaults
+                let ui = state.ui_settings.lock().unwrap().clone();
+                let mut eff_config = (*app_config).clone();
+                if !ui.llama_server_path.is_empty() {
+                    eff_config.llama_server_path = PathBuf::from(&ui.llama_server_path);
+                }
+                if !ui.llama_server_cwd.is_empty() {
+                    eff_config.llama_server_cwd = PathBuf::from(&ui.llama_server_cwd);
+                }
+                match server::start_server(&state, config, &eff_config).await {
                     Ok(()) => Ok::<_, warp::Rejection>(warp::reply::json(
                         &serde_json::json!({"ok": true}),
                     )),
@@ -243,10 +255,128 @@ fn api_put_settings(
         .and(warp::put())
         .and(warp::body::json())
         .map(move |updated: UiSettings| {
+            // Check if models_dir changed to rescan
+            let old_dir = state.ui_settings.lock().unwrap().models_dir.clone();
+            let new_dir = updated.models_dir.clone();
+
             let mut settings = state.ui_settings.lock().unwrap();
             *settings = updated;
             let _ = app_state::save_ui_settings(&state.ui_settings_path, &settings);
+            drop(settings);
+
+            // Rescan models if models_dir changed
+            if new_dir != old_dir && !new_dir.is_empty() {
+                if let Ok(discovered) = crate::models::scan_models_dir(&PathBuf::from(&new_dir)) {
+                    *state.discovered_models.lock().unwrap() = discovered;
+                }
+            }
+
             warp::reply::json(&serde_json::json!({"ok": true}))
+        })
+}
+
+fn api_browse(
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "browse")
+        .and(warp::get())
+        .and(warp::query::<std::collections::HashMap<String, String>>())
+        .map(|query: std::collections::HashMap<String, String>| {
+            let requested = query.get("path").cloned().unwrap_or_default();
+            let filter = query.get("filter").cloned().unwrap_or_default();
+
+            let dir = if requested.is_empty() {
+                dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+            } else {
+                PathBuf::from(&requested)
+            };
+
+            let dir = match dir.canonicalize() {
+                Ok(p) => p,
+                Err(_) => {
+                    return warp::reply::json(&serde_json::json!({
+                        "path": requested,
+                        "error": "Path not found"
+                    }));
+                }
+            };
+
+            if !dir.is_dir() {
+                return warp::reply::json(&serde_json::json!({
+                    "path": dir.display().to_string(),
+                    "error": "Not a directory"
+                }));
+            }
+
+            let parent = dir.parent().map(|p| p.display().to_string()).unwrap_or_default();
+
+            let mut entries: Vec<serde_json::Value> = Vec::new();
+            if let Ok(read_dir) = std::fs::read_dir(&dir) {
+                for entry in read_dir.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    // Skip hidden files
+                    if name.starts_with('.') {
+                        continue;
+                    }
+                    let meta = entry.metadata().ok();
+                    let is_dir = meta.as_ref().is_some_and(|m| m.is_dir());
+
+                    // Apply filter
+                    if !is_dir && !filter.is_empty() {
+                        let pass = match filter.as_str() {
+                            "gguf" => name.ends_with(".gguf"),
+                            "executable" => {
+                                #[cfg(unix)]
+                                {
+                                    use std::os::unix::fs::PermissionsExt;
+                                    meta.as_ref().is_some_and(|m| m.permissions().mode() & 0o111 != 0)
+                                }
+                                #[cfg(not(unix))]
+                                { true }
+                            }
+                            _ => true,
+                        };
+                        if !pass {
+                            continue;
+                        }
+                    }
+
+                    let size = if is_dir { 0 } else { meta.as_ref().map(|m| m.len()).unwrap_or(0) };
+                    let size_display = if is_dir {
+                        String::new()
+                    } else if size >= 1_000_000_000 {
+                        format!("{:.1} GB", size as f64 / 1_000_000_000.0)
+                    } else if size >= 1_000_000 {
+                        format!("{:.0} MB", size as f64 / 1_000_000.0)
+                    } else {
+                        format!("{:.0} KB", size as f64 / 1_000.0)
+                    };
+
+                    entries.push(serde_json::json!({
+                        "name": name,
+                        "is_dir": is_dir,
+                        "size": size,
+                        "size_display": size_display,
+                        "path": entry.path().display().to_string(),
+                    }));
+                }
+            }
+
+            // Sort: directories first, then alphabetical
+            entries.sort_by(|a, b| {
+                let a_dir = a["is_dir"].as_bool().unwrap_or(false);
+                let b_dir = b["is_dir"].as_bool().unwrap_or(false);
+                b_dir.cmp(&a_dir).then_with(|| {
+                    a["name"].as_str().unwrap_or("").to_lowercase().cmp(
+                        &b["name"].as_str().unwrap_or("").to_lowercase(),
+                    )
+                })
+            });
+
+            warp::reply::json(&serde_json::json!({
+                "path": dir.display().to_string(),
+                "parent": parent,
+                "entries": entries,
+            }))
         })
 }
 
