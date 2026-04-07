@@ -72,7 +72,13 @@ mod tests {
                 .contains("llama-monitor")
         );
         assert!(config.gpu_env_file.to_str().unwrap().contains("gpu-env"));
-        assert!(config.ui_settings_file.to_str().unwrap().contains("ui-settings"));
+        assert!(
+            config
+                .ui_settings_file
+                .to_str()
+                .unwrap()
+                .contains("ui-settings")
+        );
     }
 
     #[test]

@@ -265,18 +265,18 @@ fn api_put_settings(
             drop(settings);
 
             // Rescan models if models_dir changed
-            if new_dir != old_dir && !new_dir.is_empty() {
-                if let Ok(discovered) = crate::models::scan_models_dir(&PathBuf::from(&new_dir)) {
-                    *state.discovered_models.lock().unwrap() = discovered;
-                }
+            if new_dir != old_dir
+                && !new_dir.is_empty()
+                && let Ok(discovered) = crate::models::scan_models_dir(&PathBuf::from(&new_dir))
+            {
+                *state.discovered_models.lock().unwrap() = discovered;
             }
 
             warp::reply::json(&serde_json::json!({"ok": true}))
         })
 }
 
-fn api_browse(
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn api_browse() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "browse")
         .and(warp::get())
         .and(warp::query::<std::collections::HashMap<String, String>>())
@@ -307,7 +307,10 @@ fn api_browse(
                 }));
             }
 
-            let parent = dir.parent().map(|p| p.display().to_string()).unwrap_or_default();
+            let parent = dir
+                .parent()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
 
             let mut entries: Vec<serde_json::Value> = Vec::new();
             if let Ok(read_dir) = std::fs::read_dir(&dir) {
@@ -328,10 +331,13 @@ fn api_browse(
                                 #[cfg(unix)]
                                 {
                                     use std::os::unix::fs::PermissionsExt;
-                                    meta.as_ref().is_some_and(|m| m.permissions().mode() & 0o111 != 0)
+                                    meta.as_ref()
+                                        .is_some_and(|m| m.permissions().mode() & 0o111 != 0)
                                 }
                                 #[cfg(not(unix))]
-                                { true }
+                                {
+                                    true
+                                }
                             }
                             _ => true,
                         };
@@ -340,7 +346,11 @@ fn api_browse(
                         }
                     }
 
-                    let size = if is_dir { 0 } else { meta.as_ref().map(|m| m.len()).unwrap_or(0) };
+                    let size = if is_dir {
+                        0
+                    } else {
+                        meta.as_ref().map(|m| m.len()).unwrap_or(0)
+                    };
                     let size_display = if is_dir {
                         String::new()
                     } else if size >= 1_000_000_000 {
@@ -366,9 +376,11 @@ fn api_browse(
                 let a_dir = a["is_dir"].as_bool().unwrap_or(false);
                 let b_dir = b["is_dir"].as_bool().unwrap_or(false);
                 b_dir.cmp(&a_dir).then_with(|| {
-                    a["name"].as_str().unwrap_or("").to_lowercase().cmp(
-                        &b["name"].as_str().unwrap_or("").to_lowercase(),
-                    )
+                    a["name"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .cmp(&b["name"].as_str().unwrap_or("").to_lowercase())
                 })
             });
 
@@ -387,62 +399,64 @@ fn api_chat(
         .and(warp::post())
         .and(warp::query::<std::collections::HashMap<String, String>>())
         .and(warp::body::bytes())
-        .and_then(move |query: std::collections::HashMap<String, String>, body: bytes::Bytes| {
-            let state = state.clone();
-            async move {
-                // Use port from query param if provided, else from server config, else 8080
-                let port = query
-                    .get("port")
-                    .and_then(|p| p.parse::<u16>().ok())
-                    .unwrap_or_else(|| {
-                        state
-                            .server_config
-                            .lock()
-                            .unwrap()
-                            .as_ref()
-                            .map(|c| c.port)
-                            .unwrap_or(8080)
-                    });
-                let url = format!("http://127.0.0.1:{port}/v1/chat/completions");
+        .and_then(
+            move |query: std::collections::HashMap<String, String>, body: bytes::Bytes| {
+                let state = state.clone();
+                async move {
+                    // Use port from query param if provided, else from server config, else 8080
+                    let port = query
+                        .get("port")
+                        .and_then(|p| p.parse::<u16>().ok())
+                        .unwrap_or_else(|| {
+                            state
+                                .server_config
+                                .lock()
+                                .unwrap()
+                                .as_ref()
+                                .map(|c| c.port)
+                                .unwrap_or(8080)
+                        });
+                    let url = format!("http://127.0.0.1:{port}/v1/chat/completions");
 
-                let client = reqwest::Client::new();
-                match client
-                    .post(&url)
-                    .header("Content-Type", "application/json")
-                    .body(body.to_vec())
-                    .send()
-                    .await
-                {
-                    Ok(resp) => {
-                        let status = resp.status().as_u16();
-                        let ct = resp
-                            .headers()
-                            .get("content-type")
-                            .and_then(|v| v.to_str().ok())
-                            .unwrap_or("application/json")
-                            .to_string();
-                        let stream = resp.bytes_stream();
-                        let body = warp::hyper::Body::wrap_stream(stream);
-                        Ok::<_, warp::Rejection>(
-                            warp::http::Response::builder()
-                                .status(status)
-                                .header("content-type", ct)
-                                .body(body)
-                                .unwrap(),
-                        )
-                    }
-                    Err(e) => {
-                        let err = format!(
-                            r#"{{"error":{{"message":"{}","type":"proxy_error"}}}}"#,
-                            e.to_string().replace('"', "'")
-                        );
-                        Ok(warp::http::Response::builder()
-                            .status(502)
-                            .header("content-type", "application/json")
-                            .body(warp::hyper::Body::from(err))
-                            .unwrap())
+                    let client = reqwest::Client::new();
+                    match client
+                        .post(&url)
+                        .header("Content-Type", "application/json")
+                        .body(body.to_vec())
+                        .send()
+                        .await
+                    {
+                        Ok(resp) => {
+                            let status = resp.status().as_u16();
+                            let ct = resp
+                                .headers()
+                                .get("content-type")
+                                .and_then(|v| v.to_str().ok())
+                                .unwrap_or("application/json")
+                                .to_string();
+                            let stream = resp.bytes_stream();
+                            let body = warp::hyper::Body::wrap_stream(stream);
+                            Ok::<_, warp::Rejection>(
+                                warp::http::Response::builder()
+                                    .status(status)
+                                    .header("content-type", ct)
+                                    .body(body)
+                                    .unwrap(),
+                            )
+                        }
+                        Err(e) => {
+                            let err = format!(
+                                r#"{{"error":{{"message":"{}","type":"proxy_error"}}}}"#,
+                                e.to_string().replace('"', "'")
+                            );
+                            Ok(warp::http::Response::builder()
+                                .status(502)
+                                .header("content-type", "application/json")
+                                .body(warp::hyper::Body::from(err))
+                                .unwrap())
+                        }
                     }
                 }
-            }
-        })
+            },
+        )
 }
