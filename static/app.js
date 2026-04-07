@@ -19,7 +19,7 @@ function collectSettings() {
         port: parseInt(document.getElementById('port').value) || 8080,
         llama_server_path: document.getElementById('set-server-path').value,
         llama_server_cwd: document.getElementById('set-server-cwd').value,
-        models_dir: document.getElementById('set-models-dir').value,
+        models_dir: '',
     };
 }
 
@@ -40,7 +40,6 @@ function applySettings(s) {
     if (s.port) document.getElementById('port').value = s.port;
     if (s.llama_server_path !== undefined) document.getElementById('set-server-path').value = s.llama_server_path;
     if (s.llama_server_cwd !== undefined) document.getElementById('set-server-cwd').value = s.llama_server_cwd;
-    if (s.models_dir !== undefined) document.getElementById('set-models-dir').value = s.models_dir;
 }
 
 // Auto-save on any control bar change
