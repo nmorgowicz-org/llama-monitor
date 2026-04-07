@@ -19,23 +19,6 @@ pub struct UiSettings {
     #[serde(default = "default_port")]
     pub port: u16,
     #[serde(default)]
-    pub ctx: String,
-    #[serde(default)]
-    pub ctk: String,
-    #[serde(default)]
-    pub ctv: String,
-    #[serde(default)]
-    pub ts: String,
-    #[serde(default)]
-    pub batch: String,
-    #[serde(default)]
-    pub slots: String,
-    #[serde(default)]
-    pub no_mmap: bool,
-    #[serde(default)]
-    pub ngram_spec: bool,
-    // Server paths (configurable from UI, override CLI defaults)
-    #[serde(default)]
     pub llama_server_path: String,
     #[serde(default)]
     pub llama_server_cwd: String,
@@ -52,14 +35,6 @@ impl Default for UiSettings {
         Self {
             preset_id: String::new(),
             port: 8080,
-            ctx: String::new(),
-            ctk: String::new(),
-            ctv: String::new(),
-            ts: String::new(),
-            batch: String::new(),
-            slots: String::new(),
-            no_mmap: false,
-            ngram_spec: false,
             llama_server_path: String::new(),
             llama_server_cwd: String::new(),
             models_dir: String::new(),

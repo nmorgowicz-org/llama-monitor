@@ -171,12 +171,6 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
     flex-shrink: 0;
 }
 .modal-header h2 { color: #88c0d1; font-size: 1.1rem; margin: 0; }
-.modal-header .modal-edit-badge {
-    font-size: 0.68rem; font-weight: 500; color: #ebcb8b; background: rgba(235,203,139,0.1);
-    padding: 2px 8px; border-radius: 10px; margin-left: 10px;
-    display: none;
-}
-.modal-header .modal-edit-badge.visible { display: inline; }
 .modal-close {
     background: none; border: none; color: #6a7585; font-size: 1.2rem;
     cursor: pointer; padding: 4px 8px; border-radius: 4px; line-height: 1;
