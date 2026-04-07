@@ -5,45 +5,6 @@ function switchTab(name) {
     document.getElementById('tab-' + name).classList.add('active');
 }
 
-const PARAM_HINTS = {
-    // Model & Memory
-    name: "Display name for this preset",
-    model_path: "Absolute path to the .gguf model file on disk",
-    gpu_layers: "Number of layers to offload to GPU (-ngl). 99 = all layers. Lower values keep some on CPU to save VRAM.",
-    no_mmap: "Disable memory-mapped I/O (--no-mmap). Required for models >16GB or on network storage.",
-    mlock: "Lock model in RAM (--mlock), preventing OS from swapping to disk. Requires enough physical RAM.",
-    // Context & KV Cache
-    context_size: "Maximum context length in tokens (-c). Larger = more VRAM. Auto-enables YaRN for >262144.",
-    ctk: "KV cache key quantization (-ctk): f16 (best quality), q8_0, turbo3 (4.6x compression, fast)",
-    ctv: "KV cache value quantization (-ctv): f16 (best quality), q8_0, turbo3 (4.6x compression, fast)",
-    flash_attn: "Flash Attention (-fa): auto, on, off. Speeds up inference when supported.",
-    // Batching
-    batch_size: "Logical batch size (-b): max tokens processed in parallel during prompt evaluation.",
-    ubatch_size: "Physical micro-batch size (-ub). Controls memory granularity. Usually same as batch_size.",
-    parallel_slots: "Concurrent inference slots (-np). Each reserves context_size tokens of KV cache VRAM.",
-    // GPU Distribution
-    tensor_split: "VRAM distribution ratio across GPUs (-ts, e.g. '7,8,8,8'). Empty for single GPU.",
-    split_mode: "Multi-GPU split strategy (--split-mode): layer (default) or row (split large tensors).",
-    main_gpu: "GPU index for model computation (-mg, 0-based). Others used for offloading.",
-    // Threading
-    threads: "CPU threads for generation (-t). Leave empty = all available CPUs.",
-    threads_batch: "CPU threads for batch/prompt processing (-tb). Leave empty = same as threads.",
-    // Rope Scaling
-    rope_scaling: "RoPE method (--rope-scaling): yarn (extended ctx), linear, none. Auto yarn for ctx >262144.",
-    rope_freq_base: "RoPE base frequency (--rope-freq-base). Model default if not set.",
-    rope_freq_scale: "RoPE frequency scale (--rope-freq-scale). Auto-calculated for YaRN if not set.",
-    // Speculative Decoding
-    ngram_spec: "Enable ngram-mod speculative decoding (--spec-type ngram-mod). +47% on pure transformers.",
-    spec_ngram_size: "N-gram lookup table size (--spec-ngram-size-n). Larger = better predictions, more memory.",
-    draft_min: "Min tokens to draft per step (--draft-min). Default 8.",
-    draft_max: "Max tokens to draft per step (--draft-max). Default 24.",
-    draft_model: "Draft model path (-md) for model-based speculative decoding (alternative to ngram).",
-    // Advanced
-    seed: "Random seed (-s). -1 = random. Set for reproducible generation.",
-    system_prompt_file: "Path to text file containing system prompt (--system-prompt-file).",
-    extra_args: "Additional llama-server CLI flags (space-separated). E.g. '--log-verbosity 2 --no-perf'",
-};
-
 let presets = [];
 let serverRunning = false;
 let prevLogLen = 0;
@@ -56,14 +17,6 @@ function collectSettings() {
     return {
         preset_id: document.getElementById('preset-select').value,
         port: parseInt(document.getElementById('port').value) || 8080,
-        ctx: document.getElementById('ctx').value,
-        ctk: document.getElementById('ctk').value,
-        ctv: document.getElementById('ctv').value,
-        ts: document.getElementById('ts').value,
-        batch: document.getElementById('batch').value,
-        slots: document.getElementById('slots').value,
-        no_mmap: document.getElementById('no_mmap').checked,
-        ngram_spec: document.getElementById('ngram_spec').checked,
         llama_server_path: document.getElementById('set-server-path').value,
         llama_server_cwd: document.getElementById('set-server-cwd').value,
         models_dir: document.getElementById('set-models-dir').value,
@@ -85,15 +38,6 @@ function saveSettings() {
 function applySettings(s) {
     if (!s) return;
     if (s.port) document.getElementById('port').value = s.port;
-    if (s.ctx) document.getElementById('ctx').value = s.ctx;
-    if (s.ctk) document.getElementById('ctk').value = s.ctk;
-    if (s.ctv) document.getElementById('ctv').value = s.ctv;
-    if (s.ts !== undefined) document.getElementById('ts').value = s.ts;
-    if (s.batch) document.getElementById('batch').value = s.batch;
-    if (s.slots) document.getElementById('slots').value = s.slots;
-    if (s.no_mmap !== undefined) document.getElementById('no_mmap').checked = s.no_mmap;
-    if (s.ngram_spec !== undefined) document.getElementById('ngram_spec').checked = s.ngram_spec;
-    // Server paths
     if (s.llama_server_path !== undefined) document.getElementById('set-server-path').value = s.llama_server_path;
     if (s.llama_server_cwd !== undefined) document.getElementById('set-server-cwd').value = s.llama_server_cwd;
     if (s.models_dir !== undefined) document.getElementById('set-models-dir').value = s.models_dir;
@@ -121,39 +65,14 @@ async function loadPresets(selectId) {
         sel.appendChild(opt);
     });
 
-    // Determine which preset to select
-    // Only restore overrides if settings were previously saved (preset_id non-empty)
-    const hasSaved = saved && saved.preset_id;
-    const targetId = selectId ?? (hasSaved ? saved.preset_id : null);
-
-    if (targetId) {
-        const exists = presets.find(p => p.id === targetId);
-        if (exists) {
-            sel.value = targetId;
-            applyPresetById(targetId);
-            if (selectId === undefined && hasSaved) applySettings(saved);
-            return;
-        }
-    }
-    // Default: select first
-    if (presets.length > 0) {
+    const targetId = selectId ?? (saved?.preset_id || null);
+    if (targetId && presets.find(p => p.id === targetId)) {
+        sel.value = targetId;
+    } else if (presets.length > 0) {
         sel.value = presets[0].id;
-        applyPresetById(presets[0].id);
-        if (hasSaved) applySettings(saved);
     }
-}
 
-function applyPresetById(id) {
-    const p = presets.find(pr => pr.id === id);
-    if (!p) return;
-    document.getElementById('ctx').value = p.context_size;
-    document.getElementById('ctk').value = p.ctk;
-    document.getElementById('ctv').value = p.ctv;
-    document.getElementById('ts').value = p.tensor_split;
-    document.getElementById('batch').value = p.batch_size;
-    document.getElementById('slots').value = p.parallel_slots || 1;
-    document.getElementById('no_mmap').checked = !!p.no_mmap;
-    document.getElementById('ngram_spec').checked = !!p.ngram_spec;
+    if (selectId === undefined && saved) applySettings(saved);
     saveSettings();
 }
 
@@ -319,13 +238,7 @@ function fileBrowserUp() {
 }
 
 function fileBrowserSelect(path) {
-    document.getElementById(fbTargetId).value = path;
-    document.getElementById(fbTargetId).dispatchEvent(new Event('input', { bubbles: true }));
-    closeFileBrowser();
-}
-
-function fileBrowserSelectCurrent() {
-    document.getElementById(fbTargetId).value = fbCurrentPath;
+    document.getElementById(fbTargetId).value = path || fbCurrentPath;
     document.getElementById(fbTargetId).dispatchEvent(new Event('input', { bubbles: true }));
     closeFileBrowser();
 }
@@ -340,9 +253,7 @@ document.addEventListener('keydown', e => {
 
 // --- Preset Selection ---
 
-document.getElementById('preset-select').addEventListener('change', e => {
-    applyPresetById(e.target.value);
-});
+document.getElementById('preset-select').addEventListener('change', () => saveSettings());
 
 // --- Toast Notifications ---
 
@@ -373,7 +284,6 @@ function clearFieldErrors() {
 function openPresetModal(mode) {
     const modal = document.getElementById('preset-modal');
     const title = document.getElementById('modal-title');
-    const badge = document.getElementById('modal-edit-badge');
     const form = document.getElementById('preset-form');
     form.reset();
     clearFieldErrors();
@@ -383,7 +293,6 @@ function openPresetModal(mode) {
         const p = presets.find(pr => pr.id === id);
         if (!p) { showToast('No preset selected', 'warn'); return; }
         title.textContent = 'Edit Preset';
-        badge.classList.add('visible');
         setVal('modal-preset-id', p.id);
         // Model & Memory
         setVal('modal-name', p.name);
@@ -423,7 +332,6 @@ function openPresetModal(mode) {
         setVal('modal-extra-args', p.extra_args);
     } else {
         title.textContent = 'New Preset';
-        badge.classList.remove('visible');
         setVal('modal-preset-id', '');
         setVal('modal-context-size', 128000);
         setVal('modal-ctk', 'q8_0');
@@ -641,23 +549,20 @@ async function resetPresets() {
 function getConfig() {
     const id = document.getElementById('preset-select').value;
     const p = presets.find(pr => pr.id === id) || {};
-    // Quick-start bar overrides basic fields; all other params come from preset
-    const batchVal = parseInt(document.getElementById('batch').value) || 2048;
     return {
         model_path: p.model_path || '',
-        context_size: parseInt(document.getElementById('ctx').value) || 128000,
-        ctk: document.getElementById('ctk').value || 'q8_0',
-        ctv: document.getElementById('ctv').value || 'f16',
-        tensor_split: document.getElementById('ts').value || '',
-        batch_size: batchVal,
-        ubatch_size: batchVal,
-        no_mmap: document.getElementById('no_mmap').checked,
+        context_size: p.context_size || 128000,
+        ctk: p.ctk || 'q8_0',
+        ctv: p.ctv || 'f16',
+        tensor_split: p.tensor_split || '',
+        batch_size: p.batch_size || 2048,
+        ubatch_size: p.ubatch_size || p.batch_size || 2048,
+        no_mmap: !!p.no_mmap,
         port: parseInt(document.getElementById('port').value) || 8080,
-        ngram_spec: document.getElementById('ngram_spec').checked,
-        parallel_slots: parseInt(document.getElementById('slots').value) || 1,
-        // Pass-through from preset (not editable in quick-start bar)
+        ngram_spec: !!p.ngram_spec,
+        parallel_slots: p.parallel_slots || 1,
         gpu_layers: p.gpu_layers ?? null,
-        mlock: p.mlock || false,
+        mlock: !!p.mlock,
         flash_attn: p.flash_attn || '',
         split_mode: p.split_mode || '',
         main_gpu: p.main_gpu ?? null,
@@ -745,32 +650,26 @@ ws.onmessage = e => {
             '</tr>';
     }).join('');
 
-    // Logs (update both panels)
+    // Logs (single panel)
     const logs = d.logs || [];
     if (logs.length !== prevLogLen) {
-        const logText = logs.join('\n');
-        ['log-panel-server', 'log-panel-monitor'].forEach(id => {
-            const el = document.getElementById(id);
-            const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-            el.textContent = logText;
-            if (wasAtBottom) el.scrollTop = el.scrollHeight;
-        });
+        const el = document.getElementById('log-panel');
+        const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+        el.textContent = logs.join('\n');
+        if (wasAtBottom) el.scrollTop = el.scrollHeight;
         prevLogLen = logs.length;
     }
 
     // Tab badges
-    document.getElementById('badge-server').textContent = serverRunning ? ' Running' : ' Stopped';
-
-    const genTxt = l.generation_tokens_per_sec > 0 ? l.generation_tokens_per_sec.toFixed(1) + 't/s' : '';
+    const badgeParts = [];
+    if (serverRunning) badgeParts.push('Running');
+    if (l.generation_tokens_per_sec > 0) badgeParts.push(l.generation_tokens_per_sec.toFixed(1) + 't/s');
     const gpuEntries = Object.entries(d.gpu);
-    let gpuBadge = '';
-    if (gpuEntries.length > 0) {
-        const maxTemp = Math.max(...gpuEntries.map(([,m]) => m.temp));
-        gpuBadge = maxTemp.toFixed(0) + 'C';
-    }
-    document.getElementById('badge-monitor').textContent = [genTxt, gpuBadge].filter(Boolean).join(' \u00b7 ') ? ' ' + [genTxt, gpuBadge].filter(Boolean).join(' \u00b7 ') : '';
+    if (gpuEntries.length > 0) badgeParts.push(Math.max(...gpuEntries.map(([,m]) => m.temp)).toFixed(0) + 'C');
+    document.getElementById('badge-server').textContent = badgeParts.length ? ' ' + badgeParts.join(' \u00b7 ') : ' Stopped';
 
     document.getElementById('badge-chat').textContent = chatHistory.length > 0 ? ' ' + chatHistory.length + ' msg' : '';
+    document.getElementById('badge-logs').textContent = logs.length > 0 ? ' ' + logs.length : '';
 };
 ws.onerror = e => console.error('WebSocket error:', e);
 ws.onclose = () => { document.getElementById('status-text').textContent = 'Disconnected'; };

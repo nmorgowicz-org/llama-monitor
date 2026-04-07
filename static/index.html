@@ -25,13 +25,12 @@
 
     <div class="tab-bar">
         <button class="tab-btn active" onclick="switchTab('server')" id="tab-server">Server<span class="tab-badge" id="badge-server"></span></button>
-        <button class="tab-btn" onclick="switchTab('monitor')" id="tab-monitor">Monitor<span class="tab-badge" id="badge-monitor"></span></button>
         <button class="tab-btn" onclick="switchTab('chat')" id="tab-chat">Chat<span class="tab-badge" id="badge-chat"></span></button>
+        <button class="tab-btn" onclick="switchTab('logs')" id="tab-logs">Logs<span class="tab-badge" id="badge-logs"></span></button>
     </div>
 
-    <!-- Page: Server (control + logs) -->
+    <!-- Page: Server (control + monitor) -->
     <div class="page active" id="page-server">
-        <h2>Server Control</h2>
         <div class="control-bar" id="controls">
             <label class="preset-label">Model Preset
                 <select id="preset-select"></select>
@@ -40,42 +39,16 @@
                     <button class="btn-sm btn-preset" onclick="openPresetModal('edit')" title="Edit selected preset">Edit</button>
                     <button class="btn-sm btn-preset" onclick="copyPreset()" title="Duplicate selected preset">Copy</button>
                     <button class="btn-sm btn-preset btn-preset-delete" onclick="deletePreset()" title="Delete selected preset">Delete</button>
-                    <button class="btn-sm btn-preset-reset" onclick="resetPresets()" title="Reset all presets to built-in defaults">Reset defaults</button>
+                    <button class="btn-sm btn-preset-reset" onclick="resetPresets()" title="Reset all presets to built-in defaults">Reset</button>
                 </span>
-            </label>
-            <label class="num-sm">Context
-                <input id="ctx" type="number" value="128000">
-            </label>
-            <label class="num-xs">KV Key
-                <input id="ctk" type="text" value="turbo3">
-            </label>
-            <label class="num-xs">KV Val
-                <input id="ctv" type="text" value="turbo3">
-            </label>
-            <label class="wide-label">Tensor Split
-                <input id="ts" type="text" value="" placeholder="4,5,5,5">
-            </label>
-            <label class="num-sm">Batch
-                <input id="batch" type="number" value="2048">
-            </label>
-            <label class="num-xs">Slots
-                <input id="slots" type="number" value="1">
             </label>
             <label class="num-xs">Port
                 <input id="port" type="number" value="8080">
             </label>
-            <label class="chk"><input id="no_mmap" type="checkbox"> no-mmap</label>
-            <label class="chk"><input id="ngram_spec" type="checkbox"> ngram-spec</label>
             <button class="btn btn-start" id="btn-start" onclick="doStart()">Start</button>
             <button class="btn btn-stop" id="btn-stop" onclick="doStop()" disabled>Stop</button>
         </div>
-        <small style="color:#6a7585;font-size:0.72rem">Quantization performance varies by GPU architecture. turbo3 KV cache = 4.6x compression.</small>
-        <h2>Server Logs</h2>
-        <div class="log-panel" id="log-panel-server"></div>
-    </div>
 
-    <!-- Page: Monitor (inference + GPUs) -->
-    <div class="page" id="page-monitor">
         <h2>Inference</h2>
         <div class="inference-panel" id="inference">
             <div class="metric-card"><div class="metric-label">Prompt Speed</div><div class="metric-value prompt" id="m-prompt">&mdash;</div></div>
@@ -96,8 +69,6 @@
             <tbody id="gpu-rows"></tbody>
         </table>
         </div>
-        <h2>Server Logs</h2>
-        <div class="log-panel" id="log-panel-monitor"></div>
     </div>
 
     <!-- Page: Chat -->
@@ -110,6 +81,11 @@
             <textarea id="chat-input" rows="2" placeholder="Send a message... (Enter to send, Shift+Enter for newline)"></textarea>
             <button class="btn btn-start" id="btn-send" onclick="sendChat()">Send</button>
         </div>
+    </div>
+
+    <!-- Page: Logs -->
+    <div class="page" id="page-logs">
+        <div class="log-panel" id="log-panel" style="flex:1;"></div>
     </div>
 
 <!-- Config Modal -->
@@ -183,7 +159,7 @@
         </div>
         <div class="modal-buttons">
             <button type="button" class="btn btn-modal-cancel" onclick="closeFileBrowser()">Cancel</button>
-            <button type="button" class="btn btn-modal-save" onclick="fileBrowserSelectCurrent()">Select This Folder</button>
+            <button type="button" class="btn btn-modal-save" onclick="fileBrowserSelect()">Select This Folder</button>
         </div>
     </div>
 </div>
@@ -195,7 +171,7 @@
 <div class="modal-overlay" id="preset-modal">
     <div class="modal">
         <div class="modal-header">
-            <h2><span id="modal-title">New Preset</span><span class="modal-edit-badge" id="modal-edit-badge">editing &mdash; changes sync to control bar</span></h2>
+            <h2 id="modal-title">New Preset</h2>
             <button type="button" class="modal-close" onclick="closePresetModal()" aria-label="Close">&times;</button>
         </div>
         <form id="preset-form" onsubmit="savePreset(event)">
