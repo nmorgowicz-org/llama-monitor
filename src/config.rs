@@ -15,6 +15,7 @@ pub struct AppConfig {
     pub gpu_arch_override: Option<String>,
     pub gpu_devices_override: Option<String>,
     pub ui_settings_file: PathBuf,
+    pub sessions_file: PathBuf,
 }
 
 impl AppConfig {
@@ -41,6 +42,9 @@ impl AppConfig {
             gpu_arch_override: args.gpu_arch,
             gpu_devices_override: args.gpu_devices,
             ui_settings_file: config_dir.join("ui-settings.json"),
+            sessions_file: args
+                .sessions_file
+                .unwrap_or_else(|| config_dir.join("sessions.json")),
         }
     }
 }
@@ -60,25 +64,23 @@ mod tests {
             gpu_backend: "auto".into(),
             gpu_arch: None,
             gpu_devices: None,
+            sessions_file: None,
         };
         let config = AppConfig::from_args(args);
         assert_eq!(config.port, 7778);
         assert_eq!(config.gpu_backend, "auto");
-        assert!(
-            config
-                .presets_file
-                .to_str()
-                .unwrap()
-                .contains("llama-monitor")
-        );
+        assert!(config
+            .presets_file
+            .to_str()
+            .unwrap()
+            .contains("llama-monitor"));
         assert!(config.gpu_env_file.to_str().unwrap().contains("gpu-env"));
-        assert!(
-            config
-                .ui_settings_file
-                .to_str()
-                .unwrap()
-                .contains("ui-settings")
-        );
+        assert!(config
+            .ui_settings_file
+            .to_str()
+            .unwrap()
+            .contains("ui-settings"));
+        assert!(config.sessions_file.to_str().unwrap().contains("sessions"));
     }
 
     #[test]
@@ -92,6 +94,7 @@ mod tests {
             gpu_backend: "nvidia".into(),
             gpu_arch: Some("gfx1100".into()),
             gpu_devices: Some("0,1".into()),
+            sessions_file: None,
         };
         let config = AppConfig::from_args(args);
         assert_eq!(

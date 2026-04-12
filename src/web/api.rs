@@ -29,7 +29,11 @@ pub fn api_routes(
     let get_settings = api_get_settings(state.clone());
     let put_settings = api_put_settings(state.clone());
     let browse = api_browse();
-    let chat = api_chat(state);
+    let chat = api_chat(state.clone());
+    let get_sessions = api_get_sessions(state.clone());
+    let create_session = api_create_session(state.clone());
+    let delete_session = api_delete_session(state.clone());
+    let set_active_session = api_set_active_session(state.clone());
 
     start
         .or(stop)
@@ -47,6 +51,10 @@ pub fn api_routes(
         .or(kill_llama)
         .or(browse)
         .or(chat)
+        .or(get_sessions)
+        .or(create_session)
+        .or(delete_session)
+        .or(set_active_session)
 }
 
 fn api_start(
@@ -60,7 +68,6 @@ fn api_start(
             let state = state.clone();
             let app_config = app_config.clone();
             async move {
-                // Build effective config: UI settings override CLI defaults
                 let ui = state.ui_settings.lock().unwrap().clone();
                 let mut eff_config = (*app_config).clone();
                 if !ui.llama_server_path.is_empty() {
@@ -258,7 +265,6 @@ fn api_put_settings(
         .and(warp::put())
         .and(warp::body::json())
         .map(move |updated: UiSettings| {
-            // Check if models_dir changed to rescan
             let old_dir = state.ui_settings.lock().unwrap().models_dir.clone();
             let new_dir = updated.models_dir.clone();
 
@@ -267,7 +273,6 @@ fn api_put_settings(
             let _ = app_state::save_ui_settings(&state.ui_settings_path, &settings);
             drop(settings);
 
-            // Rescan models if models_dir changed
             if new_dir != old_dir
                 && !new_dir.is_empty()
                 && let Ok(discovered) = crate::models::scan_models_dir(&PathBuf::from(&new_dir))
@@ -319,14 +324,12 @@ fn api_browse() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reje
             if let Ok(read_dir) = std::fs::read_dir(&dir) {
                 for entry in read_dir.flatten() {
                     let name = entry.file_name().to_string_lossy().to_string();
-                    // Skip hidden files
                     if name.starts_with('.') {
                         continue;
                     }
                     let meta = entry.metadata().ok();
                     let is_dir = meta.as_ref().is_some_and(|m| m.is_dir());
 
-                    // Apply filter
                     if !is_dir && !filter.is_empty() {
                         let pass = match filter.as_str() {
                             "gguf" => name.ends_with(".gguf"),
@@ -374,7 +377,6 @@ fn api_browse() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reje
                 }
             }
 
-            // Sort: directories first, then alphabetical
             entries.sort_by(|a, b| {
                 let a_dir = a["is_dir"].as_bool().unwrap_or(false);
                 let b_dir = b["is_dir"].as_bool().unwrap_or(false);
@@ -406,7 +408,6 @@ fn api_chat(
             move |query: std::collections::HashMap<String, String>, body: bytes::Bytes| {
                 let state = state.clone();
                 async move {
-                    // Use port from query param if provided, else from server config, else 8080
                     let port = query
                         .get("port")
                         .and_then(|p| p.parse::<u16>().ok())
@@ -462,6 +463,81 @@ fn api_chat(
                 }
             },
         )
+}
+
+fn api_get_sessions(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "sessions")
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(move || {
+            let state = state.clone();
+            async move {
+                let sessions = state.get_sessions();
+                Ok::<_, warp::Rejection>(warp::reply::json(&sessions))
+            }
+        })
+}
+
+fn api_create_session(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "sessions")
+        .and(warp::path::end())
+        .and(warp::post())
+        .and(warp::body::json())
+        .and_then(move |session: app_state::Session| {
+            let state = state.clone();
+            async move {
+                if state.add_session(session) {
+                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+                } else {
+                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Maximum sessions reached"})))
+                }
+            }
+        })
+}
+
+fn api_delete_session(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "sessions" / String)
+        .and(warp::path::end())
+        .and(warp::delete())
+        .and_then(move |session_id: String| {
+            let state = state.clone();
+            async move {
+                if state.remove_session(&session_id) {
+                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+                } else {
+                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Session not found"})))
+                }
+            }
+        })
+}
+
+fn api_set_active_session(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "sessions" / "active")
+        .and(warp::path::end())
+        .and(warp::post())
+        .and(warp::body::json())
+        .and_then(move |payload: serde_json::Value| {
+            let state = state.clone();
+            async move {
+                let session_id = match payload.get("id") {
+                    Some(v) => v.as_str().unwrap_or("").to_string(),
+                    None => return Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Missing session id"}))),
+                };
+                if state.set_active_session(&session_id) {
+                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+                } else {
+                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Session not found"})))
+                }
+            }
+        })
 }
 
 fn api_kill_llama(state: AppState) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {

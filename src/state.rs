@@ -11,6 +11,7 @@ use crate::presets::ModelPreset;
 use crate::system::SystemMetrics;
 
 const MAX_LOG_LINES: usize = 500;
+const MAX_SESSIONS: usize = 10;
 
 /// Persisted UI control-bar settings (survives page reload).
  #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -28,6 +29,72 @@ const MAX_LOG_LINES: usize = 500;
         #[serde(default)]
         pub server_endpoint: String,
     }
+
+/// Session mode: either spawn a new server or attach to existing
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum SessionMode {
+    Spawn { port: u16 },
+    Attach { endpoint: String },
+}
+
+impl Default for SessionMode {
+    fn default() -> Self {
+        SessionMode::Spawn { port: 8001 }
+    }
+}
+
+/// A server session (active or inactive)
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Session {
+    pub id: String,
+    pub name: String,
+    pub mode: SessionMode,
+    pub status: SessionStatus,
+    pub last_active: u64,
+}
+
+impl Session {
+    pub fn new_spawn(id: String, name: String, port: u16) -> Self {
+        Self {
+            id,
+            name,
+            mode: SessionMode::Spawn { port },
+            status: SessionStatus::Stopped,
+            last_active: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        }
+    }
+
+    pub fn new_attach(id: String, name: String, endpoint: String) -> Self {
+        Self {
+            id,
+            name,
+            mode: SessionMode::Attach { endpoint },
+            status: SessionStatus::Disconnected,
+            last_active: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        }
+    }
+}
+
+/// Session status
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub enum SessionStatus {
+    Running,
+    Stopped,
+    Disconnected,
+    Error(String),
+}
+
+impl Default for SessionStatus {
+    fn default() -> Self {
+        SessionStatus::Stopped
+    }
+}
 
 fn default_port() -> u16 {
     8001
@@ -67,6 +134,42 @@ pub fn save_ui_settings(path: &Path, settings: &UiSettings) -> anyhow::Result<()
     Ok(())
 }
 
+/// Load sessions from file
+pub fn load_sessions(path: &Path) -> Vec<Session> {
+    if path.exists()
+        && let Ok(contents) = std::fs::read_to_string(path)
+        && let Ok(sessions) = serde_json::from_str::<Vec<Session>>(&contents)
+    {
+        return sessions;
+    }
+    // Return default session if no file exists
+    vec![Session::new_spawn(
+        "default".to_string(),
+        "Default Session".to_string(),
+        8001,
+    )]
+}
+
+/// Save sessions to file
+pub fn save_sessions(path: &Path, sessions: &[Session]) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    let json = serde_json::to_string_pretty(&sessions)?;
+    std::fs::write(&tmp, json)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+/// Generate unique session ID
+pub fn generate_session_id() -> String {
+    format!("session_{}", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis())
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub gpu_metrics: Arc<Mutex<BTreeMap<String, GpuMetrics>>>,
@@ -85,6 +188,9 @@ pub struct AppState {
     pub ui_settings: Arc<Mutex<UiSettings>>,
     pub ui_settings_path: PathBuf,
     pub system_metrics: Arc<Mutex<SystemMetrics>>,
+    pub sessions: Arc<Mutex<Vec<Session>>>,
+    pub active_session_id: Arc<Mutex<String>>,
+    pub sessions_path: PathBuf,
 }
 
 impl AppState {
@@ -96,6 +202,7 @@ impl AppState {
         gpu_env_path: PathBuf,
         ui_settings: UiSettings,
         ui_settings_path: PathBuf,
+        sessions_path: PathBuf,
     ) -> Self {
         let discovered = models_dir
             .as_ref()
@@ -126,6 +233,13 @@ impl AppState {
                 ram_total_gb: 0.0,
                 ram_used_gb: 0.0,
             })),
+            sessions: Arc::new(Mutex::new(vec![Session::new_spawn(
+                "default".to_string(),
+                "Default Session".to_string(),
+                8001,
+            )])),
+            active_session_id: Arc::new(Mutex::new("default".to_string())),
+            sessions_path,
         }
     }
 
@@ -135,5 +249,69 @@ impl AppState {
             logs.pop_front();
         }
         logs.push_back(line);
+    }
+
+    pub fn get_sessions(&self) -> Vec<Session> {
+        self.sessions.lock().unwrap().clone()
+    }
+
+    pub fn get_active_session(&self) -> Option<Session> {
+        let sessions = self.sessions.lock().unwrap();
+        let active_id = self.active_session_id.lock().unwrap();
+        sessions.iter().find(|s| s.id == *active_id).cloned()
+    }
+
+    pub fn set_active_session(&self, session_id: &str) -> bool {
+        let mut active = self.active_session_id.lock().unwrap();
+        let sessions = self.sessions.lock().unwrap();
+        let exists = sessions.iter().any(|s| s.id == session_id);
+        if exists {
+            *active = session_id.to_string();
+        }
+        exists
+    }
+
+    pub fn add_session(&self, session: Session) -> bool {
+        let mut sessions = self.sessions.lock().unwrap();
+        if sessions.len() >= MAX_SESSIONS {
+            return false;
+        }
+        // Update last_active timestamp
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let mut new_session = session;
+        new_session.last_active = now;
+        sessions.push(new_session);
+        true
+    }
+
+    pub fn remove_session(&self, session_id: &str) -> bool {
+        let mut sessions = self.sessions.lock().unwrap();
+        let len_before = sessions.len();
+        sessions.retain(|s| s.id != session_id);
+        // Also update active session if it was removed
+        let mut active = self.active_session_id.lock().unwrap();
+        if *active == session_id && !sessions.is_empty() {
+            *active = sessions[0].id.clone();
+        }
+        sessions.len() < len_before
+    }
+
+    pub fn update_session_status(&self, session_id: &str, status: SessionStatus) -> bool {
+        let mut sessions = self.sessions.lock().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        for session in sessions.iter_mut() {
+            if session.id == session_id {
+                session.status = status;
+                session.last_active = now;
+                return true;
+            }
+        }
+        false
     }
 }

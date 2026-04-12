@@ -342,3 +342,40 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
     .modal-row { flex-direction: column; gap: 0; }
     .preset-actions { flex-wrap: wrap; }
 }
+
+/* Session Manager */
+.session-manager {
+    display: flex; flex-direction: column; gap: 8px;
+    background: #3b4252; border-radius: 8px; padding: 12px; margin-bottom: 16px;
+}
+.session-manager h3 {
+    color: #88c0d1; font-size: 0.85rem; margin: 0 0 8px 0; font-weight: 600;
+}
+.session-list {
+    display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto;
+}
+.session-item {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    background: #2e3440; border-radius: 4px; cursor: pointer;
+    font-size: 0.82rem; transition: background 0.15s, border-color 0.15s;
+}
+.session-item:hover { background: #3b4252; }
+.session-item.active {
+    background: #4c566a; border-left: 3px solid #88c0d1;
+}
+.session-item-name { flex: 1; color: #d8dee9; }
+.session-item-mode {
+    font-family: monospace; font-size: 0.72rem; color: #6a7585; padding: 2px 6px;
+    background: #272c35; border-radius: 3px; text-transform: uppercase;
+}
+.session-item-status {
+    font-size: 0.72rem; color: #88c0d1;
+}
+.session-item.running .session-item-status { color: #a3be8c; }
+.session-item.stopped .session-item-status { color: #bf616a; }
+.session-item.disconnected .session-item-status { color: #ebcb8b; }
+.btn-session-new {
+    background: #81a1c1; color: #2e3440; border: none; border-radius: 4px;
+    padding: 6px 12px; font-size: 0.78rem; font-weight: 600; cursor: pointer;
+}
+.btn-session-new:hover { background: #88c0d1; }

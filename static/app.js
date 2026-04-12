@@ -11,9 +11,12 @@ let lastSystemMetrics = null;
 let lastGpuMetrics = null;
 let currentPollInterval = 5000;
 
-let presets = [];
-let serverRunning = false;
-let prevLogLen = 0;
+   let presets = [];
+    let serverRunning = false;
+    let prevLogLen = 0;
+    
+    let sessions = [];
+    let activeSessionId = 'default';
 
 // --- Settings Persistence (backend) ---
 
@@ -93,9 +96,10 @@ async function loadPresets(selectId) {
     saveSettings();
 }
 
-// Initial load
-loadPresets();
-loadGpuEnv();
+ // Initial load
+    loadPresets();
+    loadGpuEnv();
+    loadSessions();
 
 // --- GPU Environment ---
 
@@ -695,6 +699,102 @@ async function doStop() {
     document.getElementById('btn-stop').disabled = true;
     await fetch('/api/stop', { method: 'POST' });
     await doKillLlamaInternal();
+}
+
+// --- Session Management ---
+
+async function loadSessions() {
+    try {
+        const resp = await fetch('/api/sessions');
+        sessions = await resp.json();
+        renderSessionList();
+    } catch (err) {
+        console.error('Failed to load sessions:', err);
+    }
+}
+
+function renderSessionList() {
+    const list = document.getElementById('session-list');
+    if (!list) return;
+    
+    list.innerHTML = sessions.map(s => {
+        const is_active = s.id === activeSessionId;
+        const modeText = s.mode.type === 'Spawn' ? 'Spawn' : 'Attach';
+        const statusText = s.status === 'Running' ? 'Running' : 
+                          s.status === 'Stopped' ? 'Stopped' : 
+                          s.status === 'Disconnected' ? 'Disconnected' : s.status;
+        return '<div class="session-item ' + s.status + (is_active ? ' active' : '') + 
+               '" onclick="switchSession(\'' + s.id + '\')">' +
+               '<span class="session-item-name">' + s.name + '</span>' +
+               '<span class="session-item-mode">' + modeText + '</span>' +
+               '<span class="session-item-status">' + statusText + '</span>' +
+               '</div>';
+    }).join('');
+}
+
+async function switchSession(sessionId) {
+    try {
+        const resp = await fetch('/api/sessions/active', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: sessionId })
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            activeSessionId = sessionId;
+            renderSessionList();
+            showToast('Switched to session', 'success');
+            // Reload presets for this session
+            loadPresets();
+        } else {
+            showToast('Failed to switch session: ' + data.error, 'error');
+        }
+    } catch (err) {
+        showToast('Failed to switch session: ' + err.message, 'error');
+    }
+}
+
+function openSessionModal() {
+    const modal = document.getElementById('session-modal');
+    const title = document.getElementById('modal-session-title');
+    const form = document.getElementById('session-form');
+    form.reset();
+    title.textContent = 'New Session';
+    modal.classList.add('open');
+}
+
+function closeSessionModal() {
+    document.getElementById('session-modal').classList.remove('open');
+}
+
+function saveSession(event) {
+    event.preventDefault();
+    const mode = document.getElementById('session-mode').value;
+    const name = document.getElementById('session-name').value;
+    
+    if (!name) {
+        showToast('Please enter a session name', 'error');
+        return;
+    }
+    
+    const payload = { name, port: parseInt(document.getElementById('session-port').value) || 8001 };
+    
+    fetch('/api/sessions/spawn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            closeSessionModal();
+            loadSessions();
+            showToast('Session created', 'success');
+        } else {
+            showToast('Failed to create session: ' + data.error, 'error');
+        }
+    })
+    .catch(err => showToast('Failed to create session: ' + err.message, 'error'));
 }
 
 // WebSocket

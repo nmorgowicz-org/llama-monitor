@@ -31,7 +31,13 @@
 
     <!-- Page: Server (control + monitor) -->
     <div class="page active" id="page-server">
-      <div class="control-bar" id="controls">
+       <div class="session-manager" id="session-manager">
+            <h3>Sessions <button class="btn-session-new" onclick="openSessionModal()">+ New</button></h3>
+            <div class="session-list" id="session-list">
+                <!-- Session items will be injected here -->
+            </div>
+        </div>
+        <div class="control-bar" id="controls">
             <label class="num-sm" style="min-width:180px;">Server Endpoint (for attach)
                 <input id="server-endpoint" type="text" value="http://127.0.0.1:8001" style="width:240px;">
             </label>
@@ -170,6 +176,41 @@
             <button type="button" class="btn btn-modal-cancel" onclick="closeFileBrowser()">Cancel</button>
             <button type="button" class="btn btn-modal-save" onclick="fileBrowserSelect()">Select This Folder</button>
         </div>
+    </div>
+</div>
+
+<!-- Session Modal -->
+<div class="modal-overlay" id="session-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h2 id="session-modal-title">New Session</h2>
+            <button type="button" class="modal-close" onclick="closeSessionModal()" aria-label="Close">&times;</button>
+        </div>
+        <form id="session-form" onsubmit="saveSession(event)">
+            <input type="hidden" id="modal-session-id">
+            <div class="modal-body">
+                <label class="modal-field" title="Display name for this session">
+                    Session Name
+                    <input type="text" id="modal-session-name" required>
+                    <span class="field-error-msg">Session name is required</span>
+                </label>
+                <label class="modal-field" title="Session mode">
+                    Session Mode
+                    <select id="modal-session-mode">
+                        <option value="spawn">Spawn</option>
+                        <option value="attach">Attach</option>
+                    </select>
+                </label>
+                <label class="modal-field" title="Port for the spawned server">
+                    Port
+                    <input type="number" id="modal-session-port" placeholder="e.g. 8080">
+                </label>
+            </div>
+            <div class="modal-buttons">
+                <button type="button" class="btn btn-modal-cancel" onclick="closeSessionModal()">Cancel</button>
+                <button type="submit" class="btn btn-modal-save" id="btn-modal-save">Save</button>
+            </div>
+        </form>
     </div>
 </div>
 
