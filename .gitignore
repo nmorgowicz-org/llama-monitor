@@ -1,7 +1,24 @@
-target/
+# Build artifacts
+/target/
 Cargo.lock
-.DS_Store
-*.pdb
-*.exe
+**/target/
 debug/
 release/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+build.log
+
+# Special artifact files
+$null
