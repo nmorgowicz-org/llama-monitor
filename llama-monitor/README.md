@@ -23,8 +23,9 @@ Web dashboard for managing [llama.cpp](https://github.com/ggerganov/llama.cpp) s
 |--------|------|-----------|
 | AMD | `rocm-smi` | Auto-detected |
 | NVIDIA | `nvidia-smi` | Auto-detected |
+| Apple Silicon | `mactop` | Auto-detected (Apple Silicon only) |
 
-GPU backend is auto-detected at startup. Override with `--gpu-backend rocm|nvidia|none`.
+GPU backend is auto-detected at startup. Override with `--gpu-backend apple|rocm|nvidia|none`.
 
 ## Installation
 
@@ -43,7 +44,22 @@ The binary is at `target/release/llama-monitor`. It's a single self-contained ex
 ### Dependencies
 
 - **llama.cpp** -- `llama-server` binary (with `--metrics` and `--jinja` support)
-- **GPU monitoring** (optional) -- `rocm-smi` (AMD) or `nvidia-smi` (NVIDIA)
+- **GPU monitoring** (optional):
+  - AMD: `rocm-smi`
+  - NVIDIA: `nvidia-smi`
+  - Apple Silicon: `mactop` (`brew install mactop`)
+
+## Apple Silicon Support
+
+On macOS with Apple Silicon (M1/M2/M3), install `mactop` for GPU/system metrics:
+
+```bash
+brew install mactop
+```
+
+The backend is auto-detected. Override with `--gpu-backend apple`.
+
+See [`docs/2026-04-12-apple-silicon-implementation.md`](docs/2026-04-12-apple-silicon-implementation.md) for details.
 
 ## Quick Start
 

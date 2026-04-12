@@ -1,3 +1,4 @@
+pub mod apple;
 pub mod dummy;
 pub mod env;
 pub mod nvidia;
@@ -27,21 +28,40 @@ pub trait GpuBackend: Send + Sync + 'static {
 
 pub fn detect_backend(force: &str) -> Arc<dyn GpuBackend> {
     match force {
+        "apple" => Arc::new(apple::AppleBackend::new()),
         "rocm" => Arc::new(rocm::RocmBackend),
         "nvidia" => Arc::new(nvidia::NvidiaBackend),
         "none" => Arc::new(dummy::DummyBackend),
         _ => {
             // Auto-detect: check which GPU tool is available
-            if command_exists("rocm-smi") {
+            if is_apple_silicon() {
+                Arc::new(apple::AppleBackend::new())
+            } else if command_exists("rocm-smi") {
                 Arc::new(rocm::RocmBackend)
             } else if command_exists("nvidia-smi") {
                 Arc::new(nvidia::NvidiaBackend)
             } else {
-                eprintln!("[warn] No GPU monitoring tool found (rocm-smi / nvidia-smi)");
+                eprintln!("[warn] No GPU monitoring tool found (apple/mactop, rocm-smi, nvidia-smi)");
                 Arc::new(dummy::DummyBackend)
             }
         }
     }
+}
+
+fn is_apple_silicon() -> bool {
+    // Check for Apple Silicon by looking at the CPU brand string
+    let output = std::process::Command::new("sysctl")
+        .args(["-n", "machdep.cpu.brand_string"])
+        .output()
+        .ok();
+    
+    if let Some(output) = output {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return stdout.contains("Apple") || stdout.contains("M") || stdout.contains("M1") || stdout.contains("M2") || stdout.contains("M3") || stdout.contains("M4");
+    }
+    
+    // Fallback: check if mactop is available
+    command_exists("mactop")
 }
 
 fn command_exists(cmd: &str) -> bool {
