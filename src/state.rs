@@ -8,36 +8,40 @@ use crate::llama::metrics::LlamaMetrics;
 use crate::llama::server::ServerConfig;
 use crate::models::DiscoveredModel;
 use crate::presets::ModelPreset;
+use crate::system::SystemMetrics;
 
 const MAX_LOG_LINES: usize = 500;
 
 /// Persisted UI control-bar settings (survives page reload).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct UiSettings {
-    #[serde(default)]
-    pub preset_id: String,
-    #[serde(default = "default_port")]
-    pub port: u16,
-    #[serde(default)]
-    pub llama_server_path: String,
-    #[serde(default)]
-    pub llama_server_cwd: String,
-    #[serde(default)]
-    pub models_dir: String,
-}
+ #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    pub struct UiSettings {
+        #[serde(default)]
+        pub preset_id: String,
+        #[serde(default = "default_port")]
+        pub port: u16,
+        #[serde(default)]
+        pub llama_server_path: String,
+        #[serde(default)]
+        pub llama_server_cwd: String,
+        #[serde(default)]
+        pub models_dir: String,
+        #[serde(default)]
+        pub server_endpoint: String,
+    }
 
 fn default_port() -> u16 {
-    8080
+    8001
 }
 
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
             preset_id: String::new(),
-            port: 8080,
+            port: 8001,
             llama_server_path: String::new(),
             llama_server_cwd: String::new(),
             models_dir: String::new(),
+            server_endpoint: String::new(),
         }
     }
 }
@@ -80,6 +84,7 @@ pub struct AppState {
     pub gpu_env_path: PathBuf,
     pub ui_settings: Arc<Mutex<UiSettings>>,
     pub ui_settings_path: PathBuf,
+    pub system_metrics: Arc<Mutex<SystemMetrics>>,
 }
 
 impl AppState {
@@ -113,6 +118,14 @@ impl AppState {
             gpu_env_path,
             ui_settings: Arc::new(Mutex::new(ui_settings)),
             ui_settings_path,
+            system_metrics: Arc::new(Mutex::new(SystemMetrics {
+                cpu_name: "Unknown CPU".to_string(),
+                cpu_temp: 0.0,
+                cpu_load: 0,
+                cpu_clock_mhz: 0,
+                ram_total_gb: 0.0,
+                ram_used_gb: 0.0,
+            })),
         }
     }
 

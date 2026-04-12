@@ -5,6 +5,12 @@ function switchTab(name) {
     document.getElementById('tab-' + name).classList.add('active');
 }
 
+let lastServerState = null;
+let lastLlamaMetrics = null;
+let lastSystemMetrics = null;
+let lastGpuMetrics = null;
+let currentPollInterval = 5000;
+
 let presets = [];
 let serverRunning = false;
 let prevLogLen = 0;
@@ -13,15 +19,26 @@ let prevLogLen = 0;
 
 let settingsSaveTimer = null;
 
-function collectSettings() {
-    return {
-        preset_id: document.getElementById('preset-select').value,
-        port: parseInt(document.getElementById('port').value) || 8080,
-        llama_server_path: document.getElementById('set-server-path').value,
-        llama_server_cwd: document.getElementById('set-server-cwd').value,
-        models_dir: '',
-    };
-}
+   function collectSettings() {
+        const endpoint = document.getElementById('server-endpoint').value.trim();
+        let port = 8001;
+        if (endpoint) {
+            try {
+                const url = new URL(endpoint);
+                port = parseInt(url.port) || 8001;
+            } catch(e) {
+                // invalid URL, use default
+            }
+        }
+        return {
+            preset_id: document.getElementById('preset-select').value,
+            port: port,
+            llama_server_path: document.getElementById('set-server-path').value,
+            llama_server_cwd: document.getElementById('set-server-cwd').value,
+            models_dir: '',
+            server_endpoint: endpoint,
+        };
+    }
 
 function saveSettings() {
     // Debounce: wait 400ms of inactivity before saving
@@ -35,12 +52,13 @@ function saveSettings() {
     }, 400);
 }
 
-function applySettings(s) {
-    if (!s) return;
-    if (s.port) document.getElementById('port').value = s.port;
-    if (s.llama_server_path !== undefined) document.getElementById('set-server-path').value = s.llama_server_path;
-    if (s.llama_server_cwd !== undefined) document.getElementById('set-server-cwd').value = s.llama_server_cwd;
-}
+   function applySettings(s) {
+        if (!s) return;
+        if (s.port) document.getElementById('port').value = s.port;
+        if (s.llama_server_path !== undefined) document.getElementById('set-server-path').value = s.llama_server_path;
+        if (s.llama_server_cwd !== undefined) document.getElementById('set-server-cwd').value = s.llama_server_cwd;
+        if (s.server_endpoint) document.getElementById('server-endpoint').value = s.server_endpoint;
+    }
 
 // Auto-save on any control bar change
 document.getElementById('controls').addEventListener('input', saveSettings);
@@ -307,9 +325,16 @@ function openPresetModal(mode) {
         // Batching
         setVal('modal-batch-size', p.batch_size || 2048);
         setVal('modal-ubatch-size', p.ubatch_size || p.batch_size || 2048);
-        setVal('modal-parallel-slots', p.parallel_slots || 1);
-        // GPU
-        setVal('modal-tensor-split', p.tensor_split);
+     setVal('modal-parallel-slots', p.parallel_slots || 1);
+         // Generation
+         numOrEmpty('modal-temperature', p.temperature);
+         numOrEmpty('modal-top-p', p.top_p);
+         numOrEmpty('modal-top-k', p.top_k);
+         numOrEmpty('modal-min-p', p.min_p);
+         numOrEmpty('modal-repeat-penalty', p.repeat_penalty);
+         numOrEmpty('modal-n-cpu-moe', p.n_cpu_moe);
+         // GPU
+         setVal('modal-tensor-split', p.tensor_split);
         setOpt('modal-split-mode', p.split_mode);
         numOrEmpty('modal-main-gpu', p.main_gpu);
         // Threading
@@ -335,10 +360,16 @@ function openPresetModal(mode) {
         setVal('modal-context-size', 128000);
         setVal('modal-ctk', 'q8_0');
         setVal('modal-ctv', 'f16');
-        setVal('modal-batch-size', 2048);
-        setVal('modal-ubatch-size', 2048);
-        setVal('modal-parallel-slots', 1);
-    }
+     setVal('modal-batch-size', 2048);
+         setVal('modal-ubatch-size', 2048);
+         setVal('modal-parallel-slots', 1);
+         setVal('modal-temperature', 1.0);
+         setVal('modal-top-p', 0.95);
+         numOrEmpty('modal-top-k', 40);
+         numOrEmpty('modal-min-p', 0.01);
+         numOrEmpty('modal-repeat-penalty', 1.0);
+         numOrEmpty('modal-n-cpu-moe', 16);
+     }
 
     modal.classList.add('open');
     // Scroll modal body to top
@@ -389,9 +420,16 @@ async function savePreset(event) {
         // Batching
         batch_size: parseInt(document.getElementById('modal-batch-size').value) || 2048,
         ubatch_size: parseInt(document.getElementById('modal-ubatch-size').value) || 2048,
-        parallel_slots: parseInt(document.getElementById('modal-parallel-slots').value) || 1,
-        // GPU
-        tensor_split: strVal('modal-tensor-split'),
+      parallel_slots: parseInt(document.getElementById('modal-parallel-slots').value) || 1,
+         // Generation
+         temperature: floatOrNull('modal-temperature'),
+         top_p: floatOrNull('modal-top-p'),
+         top_k: floatOrNull('modal-top-k'),
+         min_p: floatOrNull('modal-min-p'),
+         repeat_penalty: floatOrNull('modal-repeat-penalty'),
+         n_cpu_moe: intOrNull('modal-n-cpu-moe'),
+         // GPU
+         tensor_split: strVal('modal-tensor-split'),
         split_mode: strVal('modal-split-mode'),
         main_gpu: intOrNull('modal-main-gpu'),
         // Threading
@@ -554,13 +592,20 @@ function getConfig() {
         ctk: p.ctk || 'q8_0',
         ctv: p.ctv || 'f16',
         tensor_split: p.tensor_split || '',
-        batch_size: p.batch_size || 2048,
-        ubatch_size: p.ubatch_size || p.batch_size || 2048,
-        no_mmap: !!p.no_mmap,
-        port: parseInt(document.getElementById('port').value) || 8080,
-        ngram_spec: !!p.ngram_spec,
-        parallel_slots: p.parallel_slots || 1,
-        gpu_layers: p.gpu_layers ?? null,
+      batch_size: p.batch_size || 2048,
+         ubatch_size: p.ubatch_size || p.batch_size || 2048,
+         no_mmap: !!p.no_mmap,
+         port: parseInt(document.getElementById('port').value) || 8001,
+         ngram_spec: !!p.ngram_spec,
+         parallel_slots: p.parallel_slots || 1,
+         // Generation
+         temperature: p.temperature,
+         top_p: p.top_p,
+         top_k: p.top_k,
+         min_p: p.min_p,
+         repeat_penalty: p.repeat_penalty,
+         n_cpu_moe: p.n_cpu_moe,
+         gpu_layers: p.gpu_layers ?? null,
         mlock: !!p.mlock,
         flash_attn: p.flash_attn || '',
         split_mode: p.split_mode || '',
@@ -587,6 +632,7 @@ async function doStart() {
         return;
     }
     document.getElementById('btn-start').disabled = true;
+    await doKillLlamaInternal();
     const resp = await fetch('/api/start', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -596,9 +642,59 @@ async function doStart() {
     if (!data.ok) showToast('Start failed: ' + (data.error || 'unknown'), 'error');
 }
 
+async function doKillLlamaInternal() {
+    try {
+        await fetch('/api/kill-llama', { method: 'POST' });
+    } catch(e) {
+        // Ignore errors from kill, just try to continue
+    }
+}
+
+async function doAttach() {
+    document.getElementById('btn-attach').disabled = true;
+    const endpoint = document.getElementById('server-endpoint').value.trim();
+    if (!endpoint) {
+        showToast('Please enter a server endpoint', 'error');
+        document.getElementById('btn-attach').disabled = false;
+        return;
+    }
+    const resp = await fetch('/api/attach', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ endpoint }),
+    });
+    const data = await resp.json();
+    if (!data.ok) showToast('Attach failed: ' + (data.error || 'unknown'), 'error');
+    else showToast('Attached to server', 'success');
+    document.getElementById('btn-attach').disabled = false;
+}
+
+async function doKillLlamaInternal() {
+    try {
+        await fetch('/api/kill-llama', { method: 'POST' });
+    } catch(e) {
+        // Ignore errors from kill, just try to continue
+    }
+}
+
+async function doKillLlama() {
+    if (!confirm('Kill all running llama-server processes?')) return;
+    document.getElementById('btn-kill').disabled = true;
+    try {
+        const resp = await fetch('/api/kill-llama', { method: 'POST' });
+        const data = await resp.json();
+        if (!data.ok) showToast('Kill failed: ' + (data.error || 'unknown'), 'error');
+        else showToast('llama-server killed', 'success');
+    } catch (e) {
+        showToast('Kill failed: ' + e.message, 'error');
+    }
+    document.getElementById('btn-kill').disabled = false;
+}
+
 async function doStop() {
     document.getElementById('btn-stop').disabled = true;
     await fetch('/api/stop', { method: 'POST' });
+    await doKillLlamaInternal();
 }
 
 // WebSocket
@@ -615,21 +711,44 @@ ws.onmessage = e => {
     document.getElementById('btn-start').disabled = serverRunning;
     document.getElementById('btn-stop').disabled = !serverRunning;
 
-    // Inference
-    const l = d.llama;
-    document.getElementById('m-prompt').textContent = l.prompt_tokens_per_sec > 0 ? l.prompt_tokens_per_sec.toFixed(1) + ' t/s' : '\u2014';
-    document.getElementById('m-gen').textContent = l.generation_tokens_per_sec > 0 ? l.generation_tokens_per_sec.toFixed(1) + ' t/s' : '\u2014';
-    if (l.kv_cache_max > 0) {
+    lastServerState = d.server_running;
+    lastLlamaMetrics = d.llama;
+    lastSystemMetrics = d.system || null;
+    lastGpuMetrics = d.gpu || {};
+
+    // Inference metrics
+    const l = lastLlamaMetrics;
+    document.getElementById('m-prompt').textContent = l && l.prompt_tokens_per_sec > 0 ? l.prompt_tokens_per_sec.toFixed(1) + ' t/s' : '\u2014';
+    document.getElementById('m-gen').textContent = l && l.generation_tokens_per_sec > 0 ? l.generation_tokens_per_sec.toFixed(1) + ' t/s' : '\u2014';
+    if (l && l.kv_cache_max > 0) {
         const pct = ((l.kv_cache_tokens / l.kv_cache_max) * 100).toFixed(1);
         document.getElementById('m-ctx').textContent = l.kv_cache_tokens + ' / ' + l.kv_cache_max + ' (' + pct + '%)';
     } else {
         document.getElementById('m-ctx').textContent = '\u2014';
     }
-    document.getElementById('m-slots').textContent = l.slots_idle + l.slots_processing > 0 ? l.slots_idle + ' idle / ' + l.slots_processing + ' busy' : '\u2014';
+    if (l) {
+        document.getElementById('m-slots').textContent = (l.slots_idle || 0) + (l.slots_processing || 0) > 0 ? (l.slots_idle || 0) + ' idle / ' + (l.slots_processing || 0) + ' busy' : '\u2014';
+    } else {
+        document.getElementById('m-slots').textContent = '\u2014';
+    }
 
     const statusEl = document.getElementById('m-status');
-    statusEl.textContent = l.status || '\u2014';
-    statusEl.className = 'metric-value ' + (l.status === 'ok' ? 'status-ok' : l.status === 'no slot available' ? 'status-busy' : 'status-err');
+    statusEl.textContent = l && l.status ? l.status : '\u2014';
+    statusEl.className = 'metric-value ' + (l && l.status === 'ok' ? 'status-ok' : l && l.status === 'no slot available' ? 'status-busy' : 'status-err');
+
+    // System table
+    const sys = lastSystemMetrics;
+    const sysRowsEl = document.getElementById('system-rows');
+    if (sysRowsEl) {
+        sysRowsEl.innerHTML = '<tr>' +
+            '<td class="card value">System</td>' +
+            '<td class="value temp">' + (sys && sys.cpu_temp > 0 ? Math.round(sys.cpu_temp) + 'C' : '\u2014') + '</td>' +
+            '<td class="value load">' + (sys && sys.cpu_load > 0 ? sys.cpu_load + '%' : '\u2014') + '</td>' +
+            '<td class="value sclk">' + (sys && sys.cpu_clock_mhz > 0 ? sys.cpu_clock_mhz + 'MHz' : '\u2014') + '</td>' +
+            '<td class="value vram">' + (sys && sys.ram_total_gb > 0 ? ((sys.ram_used_gb / sys.ram_total_gb) * 100).toFixed(0) + '% (' + (sys.ram_used_gb / 1024).toFixed(1) + ' GB)' : '\u2014') + '</td>' +
+            '<td class="value">' + (sys && sys.cpu_name ? sys.cpu_name.substring(0, 20) : '\u2014') + '</td>' +
+            '</tr>';
+    }
 
     // GPU table
     const tbody = document.getElementById('gpu-rows');
@@ -638,18 +757,33 @@ ws.onmessage = e => {
         const pcls = capped ? 'value capped' : 'value power';
         const ptxt = capped ? m.power_consumption.toFixed(1) + 'W!' : m.power_consumption.toFixed(1) + 'W / ' + m.power_limit + 'W';
         const vpct = m.vram_total > 0 ? Math.round((m.vram_used / m.vram_total) * 100) : 0;
+        const vgb = m.vram_total > 0 ? (m.vram_used / 1024).toFixed(1) : 0;
         return '<tr>' +
             '<td class="card value">' + card + '</td>' +
             '<td class="value temp">' + Math.round(m.temp) + 'C</td>' +
             '<td class="value load">' + m.load + '%</td>' +
-            '<td class="value vram">' + vpct + '%</td>' +
+            '<td class="value vram">' + vpct + '% (' + vgb + ' GB)</td>' +
             '<td class="' + pcls + '">' + ptxt + '</td>' +
             '<td class="value sclk">' + m.sclk_mhz + 'MHz</td>' +
             '<td class="value mclk">' + m.mclk_mhz + 'MHz</td>' +
             '</tr>';
     }).join('');
 
-    // Logs (single panel)
+    // System table
+    const sys = lastSystemMetrics;
+    const sysRowsEl = document.getElementById('system-rows');
+    if (sysRowsEl) {
+        sysRowsEl.innerHTML = '<tr>' +
+            '<td class="card value">System</td>' +
+            '<td class="value temp">' + (sys && sys.cpu_temp > 0 ? Math.round(sys.cpu_temp) + 'C' : '\u2014') + '</td>' +
+            '<td class="value load">' + (sys && sys.cpu_load > 0 ? sys.cpu_load + '%' : '\u2014') + '</td>' +
+            '<td class="value sclk">' + (sys && sys.cpu_clock_mhz > 0 ? sys.cpu_clock_mhz + 'MHz' : '\u2014') + '</td>' +
+            '<td class="value vram">' + (sys && sys.ram_total_gb > 0 ? ((sys.ram_used_gb / sys.ram_total_gb) * 100).toFixed(0) + '% (' + (sys.ram_used_gb / 1024).toFixed(1) + ' GB)' : '\u2014') + '</td>' +
+            '<td class="value">' + (sys && sys.cpu_name ? sys.cpu_name.substring(0, 20) : '\u2014') + '</td>' +
+            '</tr>';
+    }
+
+    // Logs
     const logs = d.logs || [];
     if (logs.length !== prevLogLen) {
         const el = document.getElementById('log-panel');
@@ -671,7 +805,10 @@ ws.onmessage = e => {
     document.getElementById('badge-logs').textContent = logs.length > 0 ? ' ' + logs.length : '';
 };
 ws.onerror = e => console.error('WebSocket error:', e);
-ws.onclose = () => { document.getElementById('status-text').textContent = 'Disconnected'; };
+ws.onclose = () => { 
+    document.getElementById('status-text').textContent = 'Disconnected'; 
+    prevLogLen = 0;
+};
 
 // Markdown
 if (typeof marked !== 'undefined') {
