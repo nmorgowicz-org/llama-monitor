@@ -16,6 +16,20 @@ pub struct ModelPreset {
     pub no_mmap: bool,
     pub ngram_spec: bool,
     pub parallel_slots: u32,
+    // Generation
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub top_p: Option<f64>,
+    #[serde(default)]
+    pub top_k: Option<i32>,
+    #[serde(default)]
+    pub min_p: Option<f64>,
+    #[serde(default)]
+    pub repeat_penalty: Option<f64>,
+    // CPU MOE
+    #[serde(default)]
+    pub n_cpu_moe: Option<i32>,
     // Model & memory
     #[serde(default)]
     pub gpu_layers: Option<i32>,
@@ -110,9 +124,15 @@ pub fn default_presets() -> Vec<ModelPreset> {
             tensor_split: String::new(),
             batch_size: 2048,
             ubatch_size: 2048,
-            no_mmap: false,
-            ngram_spec: false,
+            no_mmap: true,
+            ngram_spec: true,
             parallel_slots: 1,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            min_p: None,
+            repeat_penalty: None,
+            n_cpu_moe: None,
             gpu_layers: None,
             mlock: false,
             flash_attn: String::new(),
@@ -132,7 +152,7 @@ pub fn default_presets() -> Vec<ModelPreset> {
             extra_args: String::new(),
         },
         ModelPreset {
-            id: "default-2".into(),
+            id: "default-3".into(),
             name: "Example: Medium Model 256K turbo3 + ngram".into(),
             model_path: String::new(),
             context_size: 256000,
@@ -144,6 +164,12 @@ pub fn default_presets() -> Vec<ModelPreset> {
             no_mmap: true,
             ngram_spec: true,
             parallel_slots: 1,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            min_p: None,
+            repeat_penalty: None,
+            n_cpu_moe: None,
             gpu_layers: None,
             mlock: false,
             flash_attn: String::new(),
@@ -175,6 +201,12 @@ pub fn default_presets() -> Vec<ModelPreset> {
             no_mmap: true,
             ngram_spec: false,
             parallel_slots: 1,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            min_p: None,
+            repeat_penalty: None,
+            n_cpu_moe: None,
             gpu_layers: None,
             mlock: false,
             flash_attn: String::new(),
@@ -206,6 +238,12 @@ pub fn default_presets() -> Vec<ModelPreset> {
             no_mmap: true,
             ngram_spec: false,
             parallel_slots: 1,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            min_p: None,
+            repeat_penalty: None,
+            n_cpu_moe: None,
             gpu_layers: None,
             mlock: false,
             flash_attn: String::new(),

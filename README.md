@@ -2,20 +2,20 @@
 
 Web dashboard for managing [llama.cpp](https://github.com/ggerganov/llama.cpp) servers with real-time GPU monitoring.
 
-### Dashboard
-![Dashboard](https://github.com/arte-fact/llama-monitor/blob/main/Dashboard.png)
+</function>
+</tool_call>
+<tool_call>
+<function=edit>
+<parameter=filePath>
+D:\AI\metrics\llama-monitor\README.md
 
-### Presets
-![Dashboard](https://github.com/arte-fact/llama-monitor/blob/main/Presets.png)
 
-### Config
-![Dashboard](https://github.com/arte-fact/llama-monitor/blob/main/Configs.png)
 
-### TestChat
-![Dashboard](https://github.com/arte-fact/llama-monitor/blob/main/TestChat.png)
 
-### Server Logs
-![Dashboard](https://github.com/arte-fact/llama-monitor/blob/main/Logs.png)
+
+
+
+
 
 
 ## Features
@@ -46,7 +46,7 @@ GPU backend is auto-detected at startup. Override with `--gpu-backend rocm|nvidi
 # Install Rust if needed: https://rustup.rs
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-git clone https://github.com/arte-fact/llama-monitor.git && cd llama-monitor
+git clone https://github.com/nickveldrin/llama-monitor.git && cd llama-monitor
 cargo build --release
 ```
 

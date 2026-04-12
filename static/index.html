@@ -31,8 +31,11 @@
 
     <!-- Page: Server (control + monitor) -->
     <div class="page active" id="page-server">
-        <div class="control-bar" id="controls">
-            <label class="preset-label">Model Preset
+      <div class="control-bar" id="controls">
+            <label class="num-sm" style="min-width:180px;">Server Endpoint (for attach)
+                <input id="server-endpoint" type="text" value="http://127.0.0.1:8001" style="width:240px;">
+            </label>
+          <label class="preset-label" style="margin-left:10px;">Model Preset
                 <select id="preset-select"></select>
                 <span class="preset-actions">
                     <button class="btn-sm btn-preset" onclick="openPresetModal('new')" title="Create new preset">New</button>
@@ -42,11 +45,23 @@
                     <button class="btn-sm btn-preset-reset" onclick="resetPresets()" title="Reset all presets to built-in defaults">Reset</button>
                 </span>
             </label>
-            <label class="num-xs">Port
-                <input id="port" type="number" value="8080">
-            </label>
+            <button class="btn btn-attach" id="btn-attach" onclick="doAttach()">Attach</button>
+            <button class="btn btn-kill" id="btn-kill" onclick="doKillLlama()">Kill llama-server</button>
             <button class="btn btn-start" id="btn-start" onclick="doStart()">Start</button>
             <button class="btn btn-stop" id="btn-stop" onclick="doStop()" disabled>Stop</button>
+        </div>
+
+        <h2>System</h2>
+        <div class="table-wrap">
+        <table class="gpu-table">
+            <colgroup>
+                <col style="width:18%"><col style="width:10%"><col style="width:10%"><col style="width:18%"><col style="width:26%"><col style="width:18%">
+            </colgroup>
+            <thead><tr>
+                <th>System</th><th>Temp</th><th>Load</th><th>Clock</th><th>RAM</th><th>Model</th>
+            </tr></thead>
+            <tbody id="system-rows"></tbody>
+        </table>
         </div>
 
         <h2>Inference</h2>
@@ -233,6 +248,33 @@
                     </label>
                     <label class="modal-field" title="Number of concurrent inference slots. Each slot reserves context_size tokens of KV cache VRAM.">Parallel Slots (-np)
                         <input type="number" id="modal-parallel-slots" value="1">
+                    </label>
+                </div>
+            </details>
+
+            <!-- Generation -->
+            <details class="modal-section">
+                <summary>Generation</summary>
+                <div class="modal-row">
+                    <label class="modal-field" title="Temperature for sampling. Higher = more randomness.">Temperature (--temp)
+                        <input type="number" id="modal-temperature" step="any" value="1.0">
+                    </label>
+                    <label class="modal-field" title="Top-P cumulative probability threshold. Lower = more focused predictions.">Top-P (--top-p)
+                        <input type="number" id="modal-top-p" step="any" value="0.95">
+                    </label>
+                    <label class="modal-field" title="Top-K maximum number of tokens to consider. Lower = more deterministic.">Top-K (--top-k)
+                        <input type="number" id="modal-top-k" value="40">
+                    </label>
+                </div>
+                <div class="modal-row">
+                    <label class="modal-field" title="Minimum probability threshold. Filters out very low probability tokens.">Min-P (--min-p)
+                        <input type="number" id="modal-min-p" step="any" value="0.01">
+                    </label>
+                    <label class="modal-field" title="Penalty for repetition. Higher = less repetition.">Repeat Penalty (--repeat-penalty)
+                        <input type="number" id="modal-repeat-penalty" step="any" value="1.0">
+                    </label>
+                    <label class="modal-field" title="Number of CPU threads for MoE layers.">CPU MoE Threads (--n-cpu-moe)
+                        <input type="number" id="modal-n-cpu-moe" value="16">
                     </label>
                 </div>
             </details>

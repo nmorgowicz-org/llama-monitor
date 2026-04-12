@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Arc;
 use warp::Filter;
 
@@ -15,6 +16,7 @@ pub fn api_routes(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     let start = api_start(state.clone(), app_config);
     let stop = api_stop(state.clone());
+    let kill_llama = api_kill_llama(state.clone());
     let get_presets = api_get_presets(state.clone());
     let create_preset = api_create_preset(state.clone());
     let update_preset = api_update_preset(state.clone());
@@ -42,6 +44,7 @@ pub fn api_routes(
         .or(get_gpu_env)
         .or(put_settings)
         .or(get_settings)
+        .or(kill_llama)
         .or(browse)
         .or(chat)
 }
@@ -459,4 +462,69 @@ fn api_chat(
                 }
             },
         )
+}
+
+fn api_kill_llama(state: AppState) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "kill-llama")
+        .and(warp::post())
+        .and_then(move || {
+            let _state = state.clone();
+            async move {
+                #[cfg(target_os = "windows")]
+                {
+                    match Command::new("taskkill")
+                        .args(["/IM", "llama-server.exe", "/F"])
+                        .output()
+                    {
+                        Ok(output) => {
+                            if output.status.success() {
+                                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+                            } else {
+                                let err = String::from_utf8_lossy(&output.stderr);
+                                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": err})))
+                            }
+                        }
+                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()}))),
+                    }
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    match Command::new("pkill")
+                        .args(["-f", "llama-server"])
+                        .output()
+                    {
+                        Ok(output) => {
+                            if output.status.success() {
+                                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+                            } else {
+                                let err = String::from_utf8_lossy(&output.stderr);
+                                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": err})))
+                            }
+                        }
+                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()}))),
+                    }
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    match Command::new("pkill")
+                        .args(["-f", "llama-server"])
+                        .output()
+                    {
+                        Ok(output) => {
+                            if output.status.success() {
+                                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+                            } else {
+                                let err = String::from_utf8_lossy(&output.stderr);
+                                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": err})))
+                            }
+                        }
+                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()}))),
+                    }
+                }
+                #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+                {
+                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Unsupported platform"})))
+                }
+            }
+        })
 }

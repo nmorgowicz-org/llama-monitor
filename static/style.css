@@ -18,8 +18,10 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
 .control-bar .chk { flex-direction: row; align-items: center; gap: 6px; font-size: 0.85rem; color: #d8dee9; padding-bottom: 4px; }
 .btn { padding: 6px 18px; border: none; border-radius: 4px; font-size: 0.85rem; cursor: pointer; font-weight: 600; }
 .btn-start { background: #a3be8c; color: #2e3440; }
-.btn-stop { background: #bf616a; color: #eceff4; }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-stop { background: #bf616a; color: #eceff4; }
+    .btn-attach { background: #81a1c1; color: #eceff4; }
+    .btn-kill { background: #ab7967; color: #eceff4; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
 .status-dot.running { background: #a3be8c; }
 .status-dot.stopped { background: #4c566a; }
@@ -28,7 +30,17 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
 .btn-config:hover { color: #88c0d1; border-color: #88c0d1; }
 
 /* GPU table */
-.gpu-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.gpu-table { width: 100%; border-collapse: collapse; table-layout: auto; }
+.gputable th:first-child, .gpu-table td:first-child { width: auto; white-space: normal; word-break: break-word; }
+.gputable th:nth-child(2), .gpu-table td:nth-child(2) { width: 80px; }
+.gputable th:nth-child(3), .gpu-table td:nth-child(3) { width: 60px; }
+.gputable th:nth-child(4), .gpu-table td:nth-child(4) { width: 70px; }
+.gputable th:nth-child(5), .gpu-table td:nth-child(5) { width: 100px; }
+.gputable th:nth-child(6), .gpu-table td:nth-child(6) { width: 70px; }
+.gputable th:nth-child(7), .gpu-table td:nth-child(7) { width: 70px; }
+.gputable th { text-align: left; padding: 8px 10px; background: #3b4252; font-weight: 600; color: #88c0d1; font-size: 0.85rem; }
+.gputable td { padding: 8px 10px; border-bottom: 1px solid #4c566a; overflow: hidden; text-overflow: ellipsis; }
+.gputable tr:last-child td { border-bottom: none; }
 .gpu-table th { text-align: left; padding: 8px 10px; background: #3b4252; font-weight: 600; color: #88c0d1; font-size: 0.85rem; }
 .gpu-table td { padding: 8px 10px; border-bottom: 1px solid #4c566a; overflow: hidden; text-overflow: ellipsis; }
 .gpu-table tr:last-child td { border-bottom: none; }
@@ -41,6 +53,19 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
 .sclk { color: #88c0d1; }
 .mclk { color: #ebcb8b; }
 .capped { color: #bf616a; font-weight: 600; }
+
+/* System metrics section */
+.system-section { margin: 16px 0; }
+.system-section h2 { margin-top: 0; }
+.system-panel { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; }
+.system-metric-card { background: #3b4252; border-radius: 8px; padding: 12px 18px; min-width: 160px; }
+.system-metric-label { font-size: 0.75rem; color: #8899aa; text-transform: uppercase; letter-spacing: 0.5px; }
+.system-metric-value { font-family: monospace; font-size: 1.1rem; margin-top: 4px; }
+.system-metric-value.cpu-temp { color: #bf616a; }
+.system-metric-value.cpu-load { color: #81a1c1; }
+.system-metric-value.cpu-clock { color: #88c0d1; }
+.system-metric-value.ram { color: #b48ead; }
+.system-metric-value.cpu-name { color: #d8dee9; font-size: 1rem; word-break: break-word; }
 
 /* Inference panel */
 .inference-panel { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; }

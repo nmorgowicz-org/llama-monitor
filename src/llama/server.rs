@@ -19,7 +19,20 @@ pub struct ServerConfig {
     pub port: u16,
     pub ngram_spec: bool,
     pub parallel_slots: u32,
-    // Model & memory
+    // Generation
+    #[serde(default)]
+    pub temperature: Option<f64>,
+    #[serde(default)]
+    pub top_p: Option<f64>,
+    #[serde(default)]
+    pub top_k: Option<i32>,
+    #[serde(default)]
+    pub min_p: Option<f64>,
+    #[serde(default)]
+    pub repeat_penalty: Option<f64>,
+    // CPU MOE
+    #[serde(default)]
+    pub n_cpu_moe: Option<i32>,
     #[serde(default)]
     pub gpu_layers: Option<i32>,
     #[serde(default)]
@@ -196,6 +209,26 @@ pub async fn start_server(
     // Slots
     if config.parallel_slots > 0 {
         cmd.arg("--parallel").arg(config.parallel_slots.to_string());
+    }
+
+    // Generation
+    if let Some(t) = config.temperature {
+        cmd.arg("--temp").arg(format!("{:.2}", t));
+    }
+    if let Some(tp) = config.top_p {
+        cmd.arg("--top-p").arg(format!("{:.4}", tp));
+    }
+    if let Some(tk) = config.top_k {
+        cmd.arg("--top-k").arg(tk.to_string());
+    }
+    if let Some(mp) = config.min_p {
+        cmd.arg("--min-p").arg(format!("{:.4}", mp));
+    }
+    if let Some(rp) = config.repeat_penalty {
+        cmd.arg("--repeat-penalty").arg(format!("{:.2}", rp));
+    }
+    if let Some(n) = config.n_cpu_moe {
+        cmd.arg("--n-cpu-moe").arg(n.to_string());
     }
 
     // Advanced

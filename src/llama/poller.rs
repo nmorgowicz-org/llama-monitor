@@ -4,7 +4,7 @@ use crate::state::AppState;
 
 use super::metrics::parse_prometheus_metrics;
 
-const LLAMA_POLL_INTERVAL: Duration = Duration::from_secs(1);
+  const LLAMA_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 pub async fn llama_metrics_poller(state: AppState) {
     let client = reqwest::Client::builder()
@@ -13,16 +13,20 @@ pub async fn llama_metrics_poller(state: AppState) {
         .unwrap();
 
     loop {
-        // Determine port: from config if started via UI, else default 8080
-        let port = state
+        // Determine endpoint: from server_config if started via UI, else from UI settings, else default
+        let endpoint = state
             .server_config
             .lock()
             .unwrap()
             .as_ref()
-            .map(|c| c.port)
-            .unwrap_or(8080);
+            .map(|c| format!("http://127.0.0.1:{}", c.port))
+            .or_else(|| {
+                let ui = state.ui_settings.lock().unwrap();
+                (!ui.server_endpoint.is_empty()).then(|| ui.server_endpoint.clone())
+            })
+            .unwrap_or_else(|| "http://127.0.0.1:8001".to_string());
 
-        let base = format!("http://127.0.0.1:{port}");
+        let base = endpoint;
 
         // Poll /health first to detect if any server is reachable
         let server_reachable = if let Ok(resp) = client.get(format!("{base}/health")).send().await {
@@ -44,6 +48,12 @@ pub async fn llama_metrics_poller(state: AppState) {
         } else {
             false
         };
+
+        // Update server_running state based on whether we can reach the server
+        {
+            let mut running = state.server_running.lock().unwrap();
+            *running = server_reachable;
+        }
 
         if !server_reachable {
             {

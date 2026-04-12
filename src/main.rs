@@ -5,6 +5,7 @@ mod llama;
 mod models;
 mod presets;
 mod state;
+mod system;
 mod web;
 
 use anyhow::Result;
@@ -14,6 +15,7 @@ use std::thread;
 use std::time::Duration;
 
 const GPU_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const SYSTEM_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -90,6 +92,18 @@ async fn main() -> Result<()> {
                     Err(e) => eprintln!("[error] GPU metrics: {e}"),
                 }
                 thread::sleep(GPU_POLL_INTERVAL);
+            }
+        });
+    }
+
+    // System metrics poller
+    {
+        let s = state.clone();
+        thread::spawn(move || {
+            loop {
+                let metrics = system::get_system_metrics();
+                *s.system_metrics.lock().unwrap() = metrics;
+                std::thread::sleep(SYSTEM_POLL_INTERVAL);
             }
         });
     }

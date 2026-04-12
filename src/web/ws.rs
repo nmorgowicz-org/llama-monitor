@@ -25,12 +25,14 @@ pub fn ws_route(
                         let json = {
                             let gpu = state.gpu_metrics.lock().unwrap().clone();
                             let llama = state.llama_metrics.lock().unwrap().clone();
+                            let system = state.system_metrics.lock().unwrap().clone();
                             let logs: Vec<String> =
                                 state.server_logs.lock().unwrap().iter().cloned().collect();
                             let running = *state.server_running.lock().unwrap();
                             serde_json::json!({
                                 "gpu": gpu,
                                 "llama": llama,
+                                "system": system,
                                 "logs": logs,
                                 "server_running": running,
                             })
