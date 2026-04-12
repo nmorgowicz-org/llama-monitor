@@ -8,13 +8,13 @@ use crate::gpu::env::{self as gpu_env, GPU_ARCHITECTURES, GpuEnv};
 use crate::llama::server::{self, ServerConfig};
 use crate::models;
 use crate::presets::{self, ModelPreset};
-use crate::state::{self as app_state, AppState, UiSettings};
+use crate::state::{self as app_state, AppState, SessionStatus, UiSettings};
 
 pub fn api_routes(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    let start = api_start(state.clone(), app_config);
+    let start = api_start(state.clone(), app_config.clone());
     let stop = api_stop(state.clone());
     let kill_llama = api_kill_llama(state.clone());
     let get_presets = api_get_presets(state.clone());
@@ -33,7 +33,9 @@ pub fn api_routes(
     let get_sessions = api_get_sessions(state.clone());
     let create_session = api_create_session(state.clone());
     let delete_session = api_delete_session(state.clone());
+    let get_active_session = api_get_active_session(state.clone());
     let set_active_session = api_set_active_session(state.clone());
+    let spawn_session_with_preset = api_spawn_session_with_preset(state.clone(), app_config.clone());
 
     start
         .or(stop)
@@ -54,7 +56,9 @@ pub fn api_routes(
         .or(get_sessions)
         .or(create_session)
         .or(delete_session)
+        .or(get_active_session)
         .or(set_active_session)
+        .or(spawn_session_with_preset)
 }
 
 fn api_start(
@@ -517,6 +521,40 @@ fn api_delete_session(
         })
 }
 
+fn api_get_active_session(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "sessions" / "active")
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(move || {
+            let state = state.clone();
+            async move {
+                let session_id = state.active_session_id.lock().unwrap().clone();
+                let sessions = state.sessions.lock().unwrap();
+                let session = sessions.iter().find(|s| s.id == session_id).cloned();
+                drop(sessions);
+                
+                match session {
+                    Some(s) => {
+                        let mode_str = match s.mode {
+                            crate::state::SessionMode::Spawn { port } => format!("Spawn:{}", port),
+                            crate::state::SessionMode::Attach { endpoint } => format!("Attach:{}", endpoint),
+                        };
+                        Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                            "id": s.id,
+                            "name": s.name,
+                            "mode": mode_str,
+                            "status": s.status,
+                            "last_active": s.last_active
+                        })))
+                    }
+                    None => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"error": "No active session"})))
+                }
+            }
+        })
+}
+
 fn api_set_active_session(
     state: AppState,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -535,6 +573,125 @@ fn api_set_active_session(
                     Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
                 } else {
                     Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Session not found"})))
+                }
+            }
+        })
+}
+
+fn api_spawn_session_with_preset(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "sessions" / "spawn")
+        .and(warp::path::end())
+        .and(warp::post())
+        .and(warp::body::json())
+        .and_then(move |payload: serde_json::Value| {
+            let state = state.clone();
+            let app_config = app_config.clone();
+            async move {
+                // Extract port, name, and preset_id from payload
+                let port: u16 = match payload.get("port") {
+                    Some(v) => {
+                        if let Some(p) = v.as_u64() {
+                            p as u16
+                        } else {
+                            8001
+                        }
+                    }
+                    None => 8001,
+                };
+                let name: String = match payload.get("name") {
+                    Some(v) => {
+                        if let Some(s) = v.as_str() {
+                            s.to_string()
+                        } else {
+                            format!("Session on port {}", port)
+                        }
+                    }
+                    None => format!("Session on port {}", port),
+                };
+                let preset_id: String = match payload.get("preset_id") {
+                    Some(v) => {
+                        if let Some(s) = v.as_str() {
+                            s.to_string()
+                        } else {
+                            return Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Invalid preset_id"})));
+                        }
+                    }
+                    None => {
+                        return Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Missing preset_id"})));
+                    }
+                };
+                
+                // Load the preset (scope the lock)
+                let preset = {
+                    let presets = state.presets.lock().unwrap();
+                    match presets.iter().find(|p| p.id == preset_id).cloned() {
+                        Some(p) => p,
+                        None => return Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Preset not found"}))),
+                    }
+                };
+                
+                // Create session
+                let session_id = app_state::generate_session_id();
+                let session = app_state::Session::new_spawn(session_id.clone(), name.clone(), port);
+                
+                if !state.add_session(session) {
+                    return Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Failed to create session"})));
+                }
+                
+                // Set as active
+                state.set_active_session(&session_id);
+                
+                // Build server config from preset
+                let config = crate::llama::server::ServerConfig {
+                    model_path: preset.model_path.clone(),
+                    context_size: preset.context_size,
+                    ctk: preset.ctk.clone(),
+                    ctv: preset.ctv.clone(),
+                    tensor_split: preset.tensor_split.clone(),
+                    batch_size: preset.batch_size,
+                    ubatch_size: preset.ubatch_size,
+                    no_mmap: preset.no_mmap,
+                    port,
+                    ngram_spec: preset.ngram_spec,
+                    parallel_slots: preset.parallel_slots,
+                    temperature: preset.temperature,
+                    top_p: preset.top_p,
+                    top_k: preset.top_k,
+                    min_p: preset.min_p,
+                    repeat_penalty: preset.repeat_penalty,
+                    n_cpu_moe: preset.n_cpu_moe,
+                    gpu_layers: preset.gpu_layers,
+                    mlock: preset.mlock,
+                    flash_attn: preset.flash_attn.clone(),
+                    split_mode: preset.split_mode.clone(),
+                    main_gpu: preset.main_gpu,
+                    threads: preset.threads,
+                    threads_batch: preset.threads_batch,
+                    rope_scaling: preset.rope_scaling.clone(),
+                    rope_freq_base: preset.rope_freq_base,
+                    rope_freq_scale: preset.rope_freq_scale,
+                    draft_model: preset.draft_model.clone(),
+                    draft_min: preset.draft_min,
+                    draft_max: preset.draft_max,
+                    spec_ngram_size: preset.spec_ngram_size,
+                    seed: preset.seed,
+                    system_prompt_file: preset.system_prompt_file.clone(),
+                    extra_args: preset.extra_args.clone(),
+                };
+                
+                match crate::llama::server::start_server(&state, config, &app_config).await {
+                    Ok(()) => {
+                        // Update session status to Running
+                        state.update_session_status(&session_id, SessionStatus::Running);
+                        Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true, "session_id": session_id})))
+                    }
+                    Err(e) => {
+                        state.remove_session(&session_id);
+                        Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})))
+                    }
                 }
             }
         })

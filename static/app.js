@@ -17,6 +17,7 @@ let currentPollInterval = 5000;
     
     let sessions = [];
     let activeSessionId = 'default';
+    let activeSessionPort = 8080;
 
 // --- Settings Persistence (backend) ---
 
@@ -99,7 +100,9 @@ async function loadPresets(selectId) {
  // Initial load
     loadPresets();
     loadGpuEnv();
-    loadSessions();
+    loadSessions().then(() => {
+        updateActiveSessionInfo();
+    });
 
 // --- GPU Environment ---
 
@@ -721,14 +724,15 @@ function renderSessionList() {
         const is_active = s.id === activeSessionId;
         const modeText = s.mode.type === 'Spawn' ? 'Spawn' : 'Attach';
         const statusText = s.status === 'Running' ? 'Running' : 
-                          s.status === 'Stopped' ? 'Stopped' : 
-                          s.status === 'Disconnected' ? 'Disconnected' : s.status;
+                           s.status === 'Stopped' ? 'Stopped' : 
+                           s.status === 'Disconnected' ? 'Disconnected' : s.status;
         return '<div class="session-item ' + s.status + (is_active ? ' active' : '') + 
-               '" onclick="switchSession(\'' + s.id + '\')">' +
-               '<span class="session-item-name">' + s.name + '</span>' +
-               '<span class="session-item-mode">' + modeText + '</span>' +
-               '<span class="session-item-status">' + statusText + '</span>' +
-               '</div>';
+                '" onclick="switchSession(\'' + s.id + '\')">' +
+                '<span class="session-item-name">' + s.name + '</span>' +
+                '<span class="session-item-mode">' + modeText + '</span>' +
+                '<span class="session-item-port">' + (s.mode.port || activeSessionPort) + '</span>' +
+                '<span class="session-item-status">' + statusText + '</span>' +
+                '</div>';
     }).join('');
 }
 
@@ -799,6 +803,30 @@ function saveSession(event) {
 
 // WebSocket
 const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+
+async function updateActiveSessionInfo() {
+    try {
+        const resp = await fetch('/api/sessions/active');
+        const data = await resp.json();
+        if (data && data.mode) {
+            const modeParts = data.mode.split(':');
+            if (modeParts[0] === 'Spawn') {
+                activeSessionPort = parseInt(modeParts[1]) || 8080;
+            } else if (modeParts[0] === 'Attach') {
+                try {
+                    const url = new URL(modeParts[1]);
+                    activeSessionPort = parseInt(url.port) || 8080;
+                } catch(e) {
+                    activeSessionPort = 8080;
+                }
+            }
+        }
+    } catch (err) {
+        console.error('Failed to update active session info:', err);
+    }
+}
+
+setInterval(updateActiveSessionInfo, 5000);
 ws.onmessage = e => {
     const d = JSON.parse(e.data);
 
@@ -958,8 +986,7 @@ async function sendChat() {
     chatHistory.push({ role: 'user', content: text });
     appendMsg('user', text);
 
-    const chatPort = document.getElementById('port').value || '8080';
-    const url = '/api/chat?port=' + encodeURIComponent(chatPort);
+    const url = '/api/sessions/active';
 
     chatBusy = true;
     document.getElementById('btn-send').disabled = true;
@@ -971,6 +998,29 @@ async function sendChat() {
 
     try {
         const resp = await fetch(url, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' },
+        });
+             const sessionData = await resp.json();
+        if (sessionData.error) {
+            throw new Error(sessionData.error);
+        }
+        // Parse mode to get port (format: "Spawn:8001" or "Attach:http://...:8001")
+        const modeParts = sessionData.mode.split(':');
+        if (modeParts[0] === 'Spawn') {
+            activeSessionPort = parseInt(modeParts[1]) || 8080;
+        } else if (modeParts[0] === 'Attach') {
+            // Extract port from endpoint URL
+            try {
+                const url = new URL(modeParts[1]);
+                activeSessionPort = parseInt(url.port) || 8080;
+            } catch(e) {
+                // ignore, use default
+            }
+        }
+        const chatUrl = '/api/chat?port=' + encodeURIComponent(activeSessionPort);
+        
+        const chatResp = await fetch(chatUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -984,7 +1034,7 @@ async function sendChat() {
             }),
         });
 
-        const reader = resp.body.getReader();
+        const reader = chatResp.body.getReader();
         const decoder = new TextDecoder();
         let buf = '';
 

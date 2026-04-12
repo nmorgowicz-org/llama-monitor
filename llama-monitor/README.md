@@ -2,22 +2,6 @@
 
 Web dashboard for managing [llama.cpp](https://github.com/ggerganov/llama.cpp) servers with real-time GPU monitoring.
 
-</function>
-</tool_call>
-<tool_call>
-<function=edit>
-<parameter=filePath>
-D:\AI\metrics\llama-monitor\README.md
-
-
-
-
-
-
-
-
-
-
 ## Features
 
 - **Multi-Session Support** -- Run multiple llama-server instances simultaneously with independent session management

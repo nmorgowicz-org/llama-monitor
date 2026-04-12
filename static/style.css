@@ -368,6 +368,9 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
     font-family: monospace; font-size: 0.72rem; color: #6a7585; padding: 2px 6px;
     background: #272c35; border-radius: 3px; text-transform: uppercase;
 }
+.session-item-port {
+    font-family: monospace; font-size: 0.72rem; color: #81a1c1;
+}
 .session-item-status {
     font-size: 0.72rem; color: #88c0d1;
 }

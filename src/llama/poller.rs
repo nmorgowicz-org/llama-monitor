@@ -13,18 +13,22 @@ pub async fn llama_metrics_poller(state: AppState) {
         .unwrap();
 
     loop {
-        // Determine endpoint: from server_config if started via UI, else from UI settings, else default
-        let endpoint = state
-            .server_config
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|c| format!("http://127.0.0.1:{}", c.port))
-            .or_else(|| {
-                let ui = state.ui_settings.lock().unwrap();
-                (!ui.server_endpoint.is_empty()).then(|| ui.server_endpoint.clone())
-            })
-            .unwrap_or_else(|| "http://127.0.0.1:8001".to_string());
+        // Determine endpoint from active session
+        let endpoint = {
+            let active_id = state.active_session_id.lock().unwrap().clone();
+            let session = {
+                let sessions = state.sessions.lock().unwrap();
+                sessions.iter().find(|s| s.id == active_id).cloned()
+            };
+            
+            match session {
+                Some(sess) => match sess.mode {
+                    crate::state::SessionMode::Spawn { port } => format!("http://127.0.0.1:{}", port),
+                    crate::state::SessionMode::Attach { endpoint } => endpoint,
+                },
+                None => "http://127.0.0.1:8001".to_string(),
+            }
+        };
 
         let base = endpoint;
 
