@@ -16,5 +16,5 @@ jobs:
       - uses: googleapis/release-please-action@v4
         with:
           release-type: rust
-          token: ${{ secrets.MY_RELEASE_PLEASE_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           config-file: .github/release-please/config.json5
