@@ -134,10 +134,10 @@ fn get_cpu_temp_linux() -> f32 {
         "/sys/class/hwmon/hwmon0/temp1_input",
     ];
     for path in thermal_paths {
-        if let Ok(content) = fs::read_to_string(path) {
-            if let Ok(temp) = content.trim().parse::<u32>() {
-                return temp as f32 / 1000.0;
-            }
+        if let Ok(content) = fs::read_to_string(path)
+            && let Ok(temp) = content.trim().parse::<u32>()
+        {
+            return temp as f32 / 1000.0;
         }
     }
     0.0
@@ -268,18 +268,19 @@ fn get_cpu_clock_linux() -> u32 {
     use std::fs;
     if let Ok(content) = fs::read_to_string("/proc/cpuinfo") {
         for line in content.lines() {
-            if let Some(freq) = line.strip_prefix("cpu MHz\t: ") {
-                if let Ok(mhz) = freq.trim().parse::<f64>() {
-                    return mhz as u32;
-                }
+            if let Some(freq) = line.strip_prefix("cpu MHz\t: ")
+                && let Ok(mhz) = freq.trim().parse::<f64>()
+            {
+                return mhz as u32;
             }
-            if let Some(freq) = line.strip_prefix("clock") {
-                if let Some(colon) = freq.find(":") {
-                    let val = freq[colon + 1..].trim();
-                    if let Ok(mhz) = val.trim_end_matches("MHz").parse::<f64>() {
-                        return mhz as u32;
-                    }
-                }
+            if let Some(freq) = line.strip_prefix("clock")
+                && let Some(colon) = freq.find(":")
+                && let Ok(mhz) = freq[colon + 1..]
+                    .trim()
+                    .trim_end_matches("MHz")
+                    .parse::<f64>()
+            {
+                return mhz as u32;
             }
         }
     }
@@ -354,14 +355,14 @@ fn get_ram_info_linux() -> (f64, f64) {
     let mut free_kb = 0u64;
     for line in content.lines() {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 2 {
-            if let Ok(val) = parts[1].parse::<u64>() {
-                if line.starts_with("MemTotal:") {
-                    total_kb = val;
-                }
-                if line.starts_with("MemAvailable:") || line.starts_with("MemFree:") {
-                    free_kb = free_kb.max(val);
-                }
+        if parts.len() >= 2
+            && let Ok(val) = parts[1].parse::<u64>()
+        {
+            if line.starts_with("MemTotal:") {
+                total_kb = val;
+            }
+            if line.starts_with("MemAvailable:") || line.starts_with("MemFree:") {
+                free_kb = free_kb.max(val);
             }
         }
     }
