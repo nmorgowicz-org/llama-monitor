@@ -28,6 +28,7 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             artifact: llama-monitor-windows-x86_64.exe
+            binary-name: llama-monitor.exe
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -48,8 +49,12 @@ jobs:
 
       - name: Package
         run: |
-          cp target/${{ matrix.target }}/release/llama-monitor ${{ matrix.artifact }}
-          chmod +x ${{ matrix.artifact }}
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            cp target/${{ matrix.target }}/release/llama-monitor.exe ${{ matrix.artifact }}
+          else
+            cp target/${{ matrix.target }}/release/llama-monitor ${{ matrix.artifact }}
+            chmod +x ${{ matrix.artifact }}
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
