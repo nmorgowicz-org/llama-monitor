@@ -73,16 +73,18 @@ async fn main() -> Result<()> {
 
     let state = state::AppState::new(
         initial_presets,
-        app_config.presets_file.clone(),
-        app_config.models_dir.clone(),
+        state::AppPaths {
+            presets_path: app_config.presets_file.clone(),
+            models_dir: app_config.models_dir.clone(),
+            gpu_env_path: app_config.gpu_env_file.clone(),
+            ui_settings_path: app_config.ui_settings_file.clone(),
+            sessions_path: app_config.sessions_file.clone(),
+        },
         gpu_env,
-        app_config.gpu_env_file.clone(),
         ui_settings,
-        app_config.ui_settings_file.clone(),
-        app_config.sessions_file.clone(),
     );
 
-  if let Some(ref dir) = app_config.models_dir {
+    if let Some(ref dir) = app_config.models_dir {
         match state.discovered_models.lock() {
             Ok(models) => {
                 let count = models.len();
@@ -141,20 +143,22 @@ async fn main() -> Result<()> {
     let routes = web::build_routes(state.clone(), app_config.clone());
 
     println!("[info] Llama Monitor running on http://0.0.0.0:{port}");
-    
+
     // Start sessions persistence timer
     {
         let state = state.clone();
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-                if let Err(e) = state::save_sessions(&app_config.sessions_file, &state.get_sessions()) {
+                if let Err(e) =
+                    state::save_sessions(&app_config.sessions_file, &state.get_sessions())
+                {
                     eprintln!("[error] Failed to save sessions: {}", e);
                 }
             }
         });
     }
-    
+
     warp::serve(routes).run(([0, 0, 0, 0], port)).await;
 
     Ok(())

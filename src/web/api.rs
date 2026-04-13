@@ -35,7 +35,8 @@ pub fn api_routes(
     let delete_session = api_delete_session(state.clone());
     let get_active_session = api_get_active_session(state.clone());
     let set_active_session = api_set_active_session(state.clone());
-    let spawn_session_with_preset = api_spawn_session_with_preset(state.clone(), app_config.clone());
+    let spawn_session_with_preset =
+        api_spawn_session_with_preset(state.clone(), app_config.clone());
     let attach = api_attach(state.clone());
 
     start
@@ -499,7 +500,9 @@ fn api_create_session(
                 if state.add_session(session) {
                     Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
                 } else {
-                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Maximum sessions reached"})))
+                    Ok::<_, warp::Rejection>(warp::reply::json(
+                        &serde_json::json!({"ok": false, "error": "Maximum sessions reached"}),
+                    ))
                 }
             }
         })
@@ -517,7 +520,9 @@ fn api_delete_session(
                 if state.remove_session(&session_id) {
                     Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
                 } else {
-                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Session not found"})))
+                    Ok::<_, warp::Rejection>(warp::reply::json(
+                        &serde_json::json!({"ok": false, "error": "Session not found"}),
+                    ))
                 }
             }
         })
@@ -536,12 +541,14 @@ fn api_get_active_session(
                 let sessions = state.sessions.lock().unwrap();
                 let session = sessions.iter().find(|s| s.id == session_id).cloned();
                 drop(sessions);
-                
+
                 match session {
                     Some(s) => {
                         let mode_str = match s.mode {
                             crate::state::SessionMode::Spawn { port } => format!("Spawn:{}", port),
-                            crate::state::SessionMode::Attach { endpoint } => format!("Attach:{}", endpoint),
+                            crate::state::SessionMode::Attach { endpoint } => {
+                                format!("Attach:{}", endpoint)
+                            }
                         };
                         Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
                             "id": s.id,
@@ -551,7 +558,9 @@ fn api_get_active_session(
                             "last_active": s.last_active
                         })))
                     }
-                    None => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"error": "No active session"})))
+                    None => Ok::<_, warp::Rejection>(warp::reply::json(
+                        &serde_json::json!({"error": "No active session"}),
+                    )),
                 }
             }
         })
@@ -569,12 +578,18 @@ fn api_set_active_session(
             async move {
                 let session_id = match payload.get("id") {
                     Some(v) => v.as_str().unwrap_or("").to_string(),
-                    None => return Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Missing session id"}))),
+                    None => {
+                        return Ok::<_, warp::Rejection>(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": "Missing session id"}),
+                        ));
+                    }
                 };
                 if state.set_active_session(&session_id) {
                     Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
                 } else {
-                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Session not found"})))
+                    Ok::<_, warp::Rejection>(warp::reply::json(
+                        &serde_json::json!({"ok": false, "error": "Session not found"}),
+                    ))
                 }
             }
         })
@@ -618,34 +633,44 @@ fn api_spawn_session_with_preset(
                         if let Some(s) = v.as_str() {
                             s.to_string()
                         } else {
-                            return Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Invalid preset_id"})));
+                            return Ok::<_, warp::Rejection>(warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": "Invalid preset_id"}),
+                            ));
                         }
                     }
                     None => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Missing preset_id"})));
+                        return Ok::<_, warp::Rejection>(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": "Missing preset_id"}),
+                        ));
                     }
                 };
-                
+
                 // Load the preset (scope the lock)
                 let preset = {
                     let presets = state.presets.lock().unwrap();
                     match presets.iter().find(|p| p.id == preset_id).cloned() {
                         Some(p) => p,
-                        None => return Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Preset not found"}))),
+                        None => {
+                            return Ok::<_, warp::Rejection>(warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": "Preset not found"}),
+                            ));
+                        }
                     }
                 };
-                
+
                 // Create session
                 let session_id = app_state::generate_session_id();
                 let session = app_state::Session::new_spawn(session_id.clone(), name.clone(), port);
-                
+
                 if !state.add_session(session) {
-                    return Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Failed to create session"})));
+                    return Ok::<_, warp::Rejection>(warp::reply::json(
+                        &serde_json::json!({"ok": false, "error": "Failed to create session"}),
+                    ));
                 }
-                
+
                 // Set as active
                 state.set_active_session(&session_id);
-                
+
                 // Build server config from preset
                 let config = crate::llama::server::ServerConfig {
                     model_path: preset.model_path.clone(),
@@ -683,23 +708,29 @@ fn api_spawn_session_with_preset(
                     system_prompt_file: preset.system_prompt_file.clone(),
                     extra_args: preset.extra_args.clone(),
                 };
-                
+
                 match crate::llama::server::start_server(&state, config, &app_config).await {
                     Ok(()) => {
                         // Update session status to Running
                         state.update_session_status(&session_id, SessionStatus::Running);
-                        Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true, "session_id": session_id})))
+                        Ok::<_, warp::Rejection>(warp::reply::json(
+                            &serde_json::json!({"ok": true, "session_id": session_id}),
+                        ))
                     }
                     Err(e) => {
                         state.remove_session(&session_id);
-                        Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})))
+                        Ok::<_, warp::Rejection>(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": e.to_string()}),
+                        ))
                     }
                 }
             }
         })
 }
 
-fn api_attach(state: AppState) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn api_attach(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "attach")
         .and(warp::path::end())
         .and(warp::post())
@@ -712,31 +743,39 @@ fn api_attach(state: AppState) -> impl Filter<Extract = (impl warp::Reply,), Err
                         if let Some(s) = v.as_str() {
                             s.to_string()
                         } else {
-                            return Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Invalid endpoint"})));
+                            return Ok::<_, warp::Rejection>(warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": "Invalid endpoint"}),
+                            ));
                         }
                     }
                     None => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Missing endpoint"})));
+                        return Ok::<_, warp::Rejection>(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": "Missing endpoint"}),
+                        ));
                     }
                 };
-                
+
                 let session_id = crate::state::generate_session_id();
                 let session = crate::state::Session::new_attach(
                     session_id,
                     format!("Attached: {}", endpoint),
                     endpoint,
                 );
-                
+
                 if state.add_session(session) {
                     Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
                 } else {
-                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Maximum sessions reached"})))
+                    Ok::<_, warp::Rejection>(warp::reply::json(
+                        &serde_json::json!({"ok": false, "error": "Maximum sessions reached"}),
+                    ))
                 }
             }
         })
 }
 
-fn api_kill_llama(state: AppState) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn api_kill_llama(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "kill-llama")
         .and(warp::post())
         .and_then(move || {
@@ -750,52 +789,66 @@ fn api_kill_llama(state: AppState) -> impl Filter<Extract = (impl warp::Reply,),
                     {
                         Ok(output) => {
                             if output.status.success() {
-                                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+                                Ok::<_, warp::Rejection>(warp::reply::json(
+                                    &serde_json::json!({"ok": true}),
+                                ))
                             } else {
                                 let err = String::from_utf8_lossy(&output.stderr);
-                                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": err})))
+                                Ok::<_, warp::Rejection>(warp::reply::json(
+                                    &serde_json::json!({"ok": false, "error": err}),
+                                ))
                             }
                         }
-                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()}))),
+                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": e.to_string()}),
+                        )),
                     }
                 }
                 #[cfg(target_os = "linux")]
                 {
-                    match Command::new("pkill")
-                        .args(["-f", "llama-server"])
-                        .output()
-                    {
+                    match Command::new("pkill").args(["-f", "llama-server"]).output() {
                         Ok(output) => {
                             if output.status.success() {
-                                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+                                Ok::<_, warp::Rejection>(warp::reply::json(
+                                    &serde_json::json!({"ok": true}),
+                                ))
                             } else {
                                 let err = String::from_utf8_lossy(&output.stderr);
-                                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": err})))
+                                Ok::<_, warp::Rejection>(warp::reply::json(
+                                    &serde_json::json!({"ok": false, "error": err}),
+                                ))
                             }
                         }
-                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()}))),
+                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": e.to_string()}),
+                        )),
                     }
                 }
                 #[cfg(target_os = "macos")]
                 {
-                    match Command::new("pkill")
-                        .args(["-f", "llama-server"])
-                        .output()
-                    {
+                    match Command::new("pkill").args(["-f", "llama-server"]).output() {
                         Ok(output) => {
                             if output.status.success() {
-                                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+                                Ok::<_, warp::Rejection>(warp::reply::json(
+                                    &serde_json::json!({"ok": true}),
+                                ))
                             } else {
                                 let err = String::from_utf8_lossy(&output.stderr);
-                                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": err})))
+                                Ok::<_, warp::Rejection>(warp::reply::json(
+                                    &serde_json::json!({"ok": false, "error": err}),
+                                ))
                             }
                         }
-                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()}))),
+                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": e.to_string()}),
+                        )),
                     }
                 }
                 #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
                 {
-                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": "Unsupported platform"})))
+                    Ok::<_, warp::Rejection>(warp::reply::json(
+                        &serde_json::json!({"ok": false, "error": "Unsupported platform"}),
+                    ))
                 }
             }
         })

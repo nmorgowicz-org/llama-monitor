@@ -134,10 +134,10 @@ fn get_cpu_temp_linux() -> f32 {
         "/sys/class/hwmon/hwmon0/temp1_input",
     ];
     for path in thermal_paths {
-        if let Ok(content) = fs::read_to_string(path) {
-            if let Ok(temp) = content.trim().parse::<u32>() {
-                return temp as f32 / 1000.0;
-            }
+        if let Ok(content) = fs::read_to_string(path)
+            && let Ok(temp) = content.trim().parse::<u32>()
+        {
+            return temp as f32 / 1000.0;
         }
     }
     0.0
@@ -216,16 +216,15 @@ fn get_cpu_load_macos() -> u32 {
     if let Ok(output) = Command::new("top").args(["-l", "1", "-n", "0"]).output() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
-            if let Some(stats) = line.strip_prefix("CPU usage: ") {
-                if let Some(load) = stats.split(',').find_map(|s| {
+            if let Some(stats) = line.strip_prefix("CPU usage: ")
+                && let Some(load) = stats.split(',').find_map(|s| {
                     s.trim()
                         .strip_prefix("Load: ")
                         .or_else(|| s.trim().strip_prefix("cpu "))
-                }) {
-                    if let Ok(l) = load.trim().parse::<f32>() {
-                        return l as u32;
-                    }
-                }
+                })
+                && let Ok(l) = load.trim().parse::<f32>()
+            {
+                return l as u32;
             }
         }
     }
@@ -269,18 +268,19 @@ fn get_cpu_clock_linux() -> u32 {
     use std::fs;
     if let Ok(content) = fs::read_to_string("/proc/cpuinfo") {
         for line in content.lines() {
-            if let Some(freq) = line.strip_prefix("cpu MHz\t: ") {
-                if let Ok(mhz) = freq.trim().parse::<f64>() {
-                    return mhz as u32;
-                }
+            if let Some(freq) = line.strip_prefix("cpu MHz\t: ")
+                && let Ok(mhz) = freq.trim().parse::<f64>()
+            {
+                return mhz as u32;
             }
-            if let Some(freq) = line.strip_prefix("clock") {
-                if let Some(colon) = freq.find(":") {
-                    let val = freq[colon + 1..].trim();
-                    if let Ok(mhz) = val.trim_end_matches("MHz").parse::<f64>() {
-                        return mhz as u32;
-                    }
-                }
+            if let Some(freq) = line.strip_prefix("clock")
+                && let Some(colon) = freq.find(":")
+                && let Ok(mhz) = freq[colon + 1..]
+                    .trim()
+                    .trim_end_matches("MHz")
+                    .parse::<f64>()
+            {
+                return mhz as u32;
             }
         }
     }
@@ -355,14 +355,14 @@ fn get_ram_info_linux() -> (f64, f64) {
     let mut free_kb = 0u64;
     for line in content.lines() {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 2 {
-            if let Ok(val) = parts[1].parse::<u64>() {
-                if line.starts_with("MemTotal:") {
-                    total_kb = val;
-                }
-                if line.starts_with("MemAvailable:") || line.starts_with("MemFree:") {
-                    free_kb = free_kb.max(val);
-                }
+        if parts.len() >= 2
+            && let Ok(val) = parts[1].parse::<u64>()
+        {
+            if line.starts_with("MemTotal:") {
+                total_kb = val;
+            }
+            if line.starts_with("MemAvailable:") || line.starts_with("MemFree:") {
+                free_kb = free_kb.max(val);
             }
         }
     }
@@ -380,16 +380,16 @@ fn get_ram_info_macos() -> (f64, f64) {
     {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let lines: Vec<&str> = stdout.lines().collect();
-        if lines.len() >= 3 {
-            if let (Ok(total), Ok(free_pages), Ok(page_size)) = (
+        if lines.len() >= 3
+            && let (Ok(total), Ok(free_pages), Ok(page_size)) = (
                 lines[0].trim().parse::<u64>(),
                 lines[1].trim().parse::<u64>(),
                 lines[2].trim().parse::<u64>(),
-            ) {
-                let total_gb = total as f64 / 1024.0 / 1024.0 / 1024.0;
-                let free_gb = (free_pages * page_size) as f64 / 1024.0 / 1024.0 / 1024.0;
-                return (total_gb, free_gb);
-            }
+            )
+        {
+            let total_gb = total as f64 / 1024.0 / 1024.0 / 1024.0;
+            let free_gb = (free_pages * page_size) as f64 / 1024.0 / 1024.0 / 1024.0;
+            return (total_gb, free_gb);
         }
     }
     (0.0, 0.0)

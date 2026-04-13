@@ -19,5 +19,9 @@ Thumbs.db
 *.log
 build.log
 
+# Node.js
+node_modules/
+.npm
+
 # Special artifact files
 $null

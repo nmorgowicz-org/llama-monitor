@@ -1,0 +1,58 @@
+# Labels configuration
+# These labels will be automatically added to the repository
+
+- name: bug
+  color: d73a4a
+  description: Something isn't working
+
+- name: documentation
+  color: 0075ca
+  description: Improvements or additions to documentation
+
+- name: duplicate
+  color: cfd3d7
+  description: This issue or pull request already exists
+
+- name: enhancement
+  color: a2ee10
+  description: New feature or request
+
+- name: good first issue
+  color: 5319e7
+  description: Good for newcomers
+
+- name: help wanted
+  color: 008672
+  description: Extra attention is needed
+
+- name: invalid
+  color: e11d21
+  description: This doesn't seem right
+
+- name: question
+  color: d876e3
+  description: Further information is requested
+
+- name: wontfix
+  color: ffffff
+  description: This will not be worked on
+
+- name: dependencies
+  color: 0366d6
+  description: Pull requests that update dependencies
+
+- name: rust
+  color: 5e4c3b
+  description: Related to Rust code or build
+
+- name: github-actions
+  color: 26b2a0
+  description: Related to GitHub Actions workflows
+
+- name: ci
+  color: 20ce95
+  description: Related to CI/CD pipelines
+
+- name: release
+  color: f9b700
+  description: Related to release preparation

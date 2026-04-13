@@ -152,7 +152,7 @@ pub fn default_presets() -> Vec<ModelPreset> {
             extra_args: String::new(),
         },
         ModelPreset {
-            id: "default-3".into(),
+            id: "default-2".into(),
             name: "Example: Medium Model 256K turbo3 + ngram".into(),
             model_path: String::new(),
             context_size: 256000,

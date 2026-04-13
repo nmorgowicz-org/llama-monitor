@@ -69,17 +69,21 @@ mod tests {
         let config = AppConfig::from_args(args);
         assert_eq!(config.port, 7778);
         assert_eq!(config.gpu_backend, "auto");
-        assert!(config
-            .presets_file
-            .to_str()
-            .unwrap()
-            .contains("llama-monitor"));
+        assert!(
+            config
+                .presets_file
+                .to_str()
+                .unwrap()
+                .contains("llama-monitor")
+        );
         assert!(config.gpu_env_file.to_str().unwrap().contains("gpu-env"));
-        assert!(config
-            .ui_settings_file
-            .to_str()
-            .unwrap()
-            .contains("ui-settings"));
+        assert!(
+            config
+                .ui_settings_file
+                .to_str()
+                .unwrap()
+                .contains("ui-settings")
+        );
         assert!(config.sessions_file.to_str().unwrap().contains("sessions"));
     }
 
