@@ -14,21 +14,21 @@ const MAX_LOG_LINES: usize = 500;
 const MAX_SESSIONS: usize = 10;
 
 /// Persisted UI control-bar settings (survives page reload).
- #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-    pub struct UiSettings {
-        #[serde(default)]
-        pub preset_id: String,
-        #[serde(default = "default_port")]
-        pub port: u16,
-        #[serde(default)]
-        pub llama_server_path: String,
-        #[serde(default)]
-        pub llama_server_cwd: String,
-        #[serde(default)]
-        pub models_dir: String,
-        #[serde(default)]
-        pub server_endpoint: String,
-    }
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UiSettings {
+    #[serde(default)]
+    pub preset_id: String,
+    #[serde(default = "default_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub llama_server_path: String,
+    #[serde(default)]
+    pub llama_server_cwd: String,
+    #[serde(default)]
+    pub models_dir: String,
+    #[serde(default)]
+    pub server_endpoint: String,
+}
 
 /// Session mode: either spawn a new server or attach to existing
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -164,10 +164,13 @@ pub fn save_sessions(path: &Path, sessions: &[Session]) -> anyhow::Result<()> {
 
 /// Generate unique session ID
 pub fn generate_session_id() -> String {
-    format!("session_{}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis())
+    format!(
+        "session_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    )
 }
 
 #[derive(Clone)]
@@ -282,7 +285,7 @@ impl AppState {
         if sessions.len() >= MAX_SESSIONS {
             return false;
         }
-         let now = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        let now = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
             Ok(d) => d.as_secs(),
             Err(_) => {
                 eprintln!("[error] Failed to get system time");

@@ -4,7 +4,7 @@ use crate::state::AppState;
 
 use super::metrics::parse_prometheus_metrics;
 
-  const LLAMA_POLL_INTERVAL: Duration = Duration::from_secs(5);
+const LLAMA_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 pub async fn llama_metrics_poller(state: AppState) {
     let client = match reqwest::Client::builder()
@@ -26,10 +26,12 @@ pub async fn llama_metrics_poller(state: AppState) {
                 let sessions = state.sessions.lock().unwrap();
                 sessions.iter().find(|s| s.id == active_id).cloned()
             };
-            
+
             match session {
                 Some(sess) => match sess.mode {
-                    crate::state::SessionMode::Spawn { port } => format!("http://127.0.0.1:{}", port),
+                    crate::state::SessionMode::Spawn { port } => {
+                        format!("http://127.0.0.1:{}", port)
+                    }
                     crate::state::SessionMode::Attach { endpoint } => endpoint,
                 },
                 None => "http://127.0.0.1:8001".to_string(),
