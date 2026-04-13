@@ -14,19 +14,19 @@ jobs:
   build:
     strategy:
       matrix:
-        include:
+       include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: llama-monitor-linux-x86_64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: llama-monitor-linux-aarch64
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            artifact: llama-monitor-macos-x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
-            artifact: llama-monitor-macos-aarch64
+            artifact: llama-monitor-macos-arm64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact: llama-monitor-windows-x86_64.exe
 
     runs-on: ${{ matrix.os }}
     steps:
