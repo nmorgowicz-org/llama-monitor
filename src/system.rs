@@ -216,16 +216,15 @@ fn get_cpu_load_macos() -> u32 {
     if let Ok(output) = Command::new("top").args(["-l", "1", "-n", "0"]).output() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
-            if let Some(stats) = line.strip_prefix("CPU usage: ") {
-                if let Some(load) = stats.split(',').find_map(|s| {
+            if let Some(stats) = line.strip_prefix("CPU usage: ")
+                && let Some(load) = stats.split(',').find_map(|s| {
                     s.trim()
                         .strip_prefix("Load: ")
                         .or_else(|| s.trim().strip_prefix("cpu "))
-                }) {
-                    if let Ok(l) = load.trim().parse::<f32>() {
-                        return l as u32;
-                    }
-                }
+                })
+                && let Ok(l) = load.trim().parse::<f32>()
+            {
+                return l as u32;
             }
         }
     }
@@ -380,16 +379,16 @@ fn get_ram_info_macos() -> (f64, f64) {
     {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let lines: Vec<&str> = stdout.lines().collect();
-        if lines.len() >= 3 {
-            if let (Ok(total), Ok(free_pages), Ok(page_size)) = (
+        if lines.len() >= 3
+            && let (Ok(total), Ok(free_pages), Ok(page_size)) = (
                 lines[0].trim().parse::<u64>(),
                 lines[1].trim().parse::<u64>(),
                 lines[2].trim().parse::<u64>(),
-            ) {
-                let total_gb = total as f64 / 1024.0 / 1024.0 / 1024.0;
-                let free_gb = (free_pages * page_size) as f64 / 1024.0 / 1024.0 / 1024.0;
-                return (total_gb, free_gb);
-            }
+            )
+        {
+            let total_gb = total as f64 / 1024.0 / 1024.0 / 1024.0;
+            let free_gb = (free_pages * page_size) as f64 / 1024.0 / 1024.0 / 1024.0;
+            return (total_gb, free_gb);
         }
     }
     (0.0, 0.0)

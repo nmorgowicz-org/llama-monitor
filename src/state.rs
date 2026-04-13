@@ -82,18 +82,13 @@ impl Session {
 }
 
 /// Session status
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Default)]
 pub enum SessionStatus {
-    Running,
+    #[default]
     Stopped,
+    Running,
     Disconnected,
     Error(String),
-}
-
-impl Default for SessionStatus {
-    fn default() -> Self {
-        SessionStatus::Stopped
-    }
 }
 
 fn default_port() -> u16 {
@@ -162,6 +157,16 @@ pub fn save_sessions(path: &Path, sessions: &[Session]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Paths for app state
+#[derive(Clone)]
+pub struct AppPaths {
+    pub presets_path: PathBuf,
+    pub models_dir: Option<PathBuf>,
+    pub gpu_env_path: PathBuf,
+    pub ui_settings_path: PathBuf,
+    pub sessions_path: PathBuf,
+}
+
 /// Generate unique session ID
 pub fn generate_session_id() -> String {
     format!(
@@ -193,20 +198,22 @@ pub struct AppState {
     pub system_metrics: Arc<Mutex<SystemMetrics>>,
     pub sessions: Arc<Mutex<Vec<Session>>>,
     pub active_session_id: Arc<Mutex<String>>,
+    #[expect(dead_code)]
     pub sessions_path: PathBuf,
 }
 
 impl AppState {
     pub fn new(
         presets: Vec<ModelPreset>,
-        presets_path: PathBuf,
-        models_dir: Option<PathBuf>,
+        paths: AppPaths,
         gpu_env: GpuEnv,
-        gpu_env_path: PathBuf,
         ui_settings: UiSettings,
-        ui_settings_path: PathBuf,
-        sessions_path: PathBuf,
     ) -> Self {
+        let presets_path = paths.presets_path;
+        let models_dir = paths.models_dir;
+        let gpu_env_path = paths.gpu_env_path;
+        let ui_settings_path = paths.ui_settings_path;
+        let sessions_path = paths.sessions_path;
         let discovered = models_dir
             .as_ref()
             .and_then(|dir| crate::models::scan_models_dir(dir).ok())
@@ -258,6 +265,7 @@ impl AppState {
         self.sessions.lock().unwrap().clone()
     }
 
+    #[expect(dead_code)]
     pub fn get_active_session(&self) -> Option<Session> {
         let sessions = self.sessions.lock().unwrap();
         let active_id = self.active_session_id.lock().unwrap();

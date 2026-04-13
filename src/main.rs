@@ -73,13 +73,15 @@ async fn main() -> Result<()> {
 
     let state = state::AppState::new(
         initial_presets,
-        app_config.presets_file.clone(),
-        app_config.models_dir.clone(),
+        state::AppPaths {
+            presets_path: app_config.presets_file.clone(),
+            models_dir: app_config.models_dir.clone(),
+            gpu_env_path: app_config.gpu_env_file.clone(),
+            ui_settings_path: app_config.ui_settings_file.clone(),
+            sessions_path: app_config.sessions_file.clone(),
+        },
         gpu_env,
-        app_config.gpu_env_file.clone(),
         ui_settings,
-        app_config.ui_settings_file.clone(),
-        app_config.sessions_file.clone(),
     );
 
     if let Some(ref dir) = app_config.models_dir {
