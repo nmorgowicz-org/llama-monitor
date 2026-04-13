@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/nickveldrin/llama-monitor/compare/v0.3.0...v0.3.1) (2026-04-13)
+
+
+### Bug Fixes
+
+* use shell: bash for cross-platform packaging ([#14](https://github.com/nickveldrin/llama-monitor/issues/14)) ([0c350e0](https://github.com/nickveldrin/llama-monitor/commit/0c350e0bca83a3a32cf0130fcb9d0f92d35c7f30))
+
 ## [0.3.0](https://github.com/nickveldrin/llama-monitor/compare/v0.2.2...v0.3.0) (2026-04-13)
 
 
