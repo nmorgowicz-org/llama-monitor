@@ -93,3 +93,47 @@ cargo clippy -- -D warnings
 # Format
 cargo fmt
 ```
+
+## CI/CD Workflow
+
+### Pull Requests
+
+1. **Title format**: Use conventional commit format (`feat:`, `fix:`, etc.)
+2. **Auto-labeling**: GitHub labels PRs based on `src/` directory paths:
+   - `gpu/` → `gpu`, `nvidia/` or `rocm/` or `apple.rs` → related vendor labels
+   - `llama/` → `llama`, `web/` → `web`, `state.rs` → `core`
+3. **CI checks**: All PRs must pass:
+   - `cargo fmt -- --check`
+   - `cargo clippy -- -D warnings`
+   - `cargo test`
+   - `cargo build --release`
+
+### Releases
+
+- **Automated**: release-please creates release PRs when `feat:` or `fix:` commits merge to `main`
+- **Release type**: Rust (semantic versioning based on commit types)
+- **Version bump**: `feat:` → MINOR, `fix:` → PATCH, others → no bump
+
+## File Persistence
+
+All user data persists to `~/.config/llama-monitor/`:
+
+| File | Purpose |
+|------|---------|
+| `sessions.json` | Session definitions (spawn/attach mode, ports, server configs) |
+| `presets.json` | Model presets with all llama.cpp parameters |
+| `ui-settings.json` | Web UI preferences (paths, ports, presets) |
+| `gpu-env.json` | GPU environment config (architecture, device indices) |
+
+Data is persisted:
+- Sessions: every 30 seconds + on explicit save
+- Presets/Settings: on explicit save via API
+
+## Git Branch Strategy
+
+- **`main`**: Stable, release-ready code
+- **`feature/*`**: Feature development branches
+- **`release/*`**: Release preparation (created by release-please)
+- **`hotfix/*`**: Critical bug fixes for production
+
+All branches should be deleted after merge.
