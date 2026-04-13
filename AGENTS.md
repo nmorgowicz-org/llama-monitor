@@ -69,9 +69,8 @@ Examples:
 1. Create feature branch: `git checkout -b feature/my-feature`
 2. Make changes and commit with conventional format
 3. Push branch and create PR
-4. CI validates conventional commits
-5. Merge to `main` → release-please creates release PR
-6. Merge release PR → tag created → release artifacts built
+4. Merge to `main` → release-please creates release PR
+5. Merge release PR → tag created → release artifacts built
 
 ## Project Structure
 

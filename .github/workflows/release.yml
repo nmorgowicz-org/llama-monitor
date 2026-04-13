@@ -14,7 +14,7 @@ jobs:
   build:
     strategy:
       matrix:
-       include:
+        include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: llama-monitor-linux-x86_64
