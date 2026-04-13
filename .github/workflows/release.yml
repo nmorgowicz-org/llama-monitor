@@ -28,7 +28,6 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             artifact: llama-monitor-windows-x86_64.exe
-            binary-name: llama-monitor.exe
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -40,6 +39,7 @@ jobs:
 
       - name: Install cross-compilation tools
         if: matrix.target == 'aarch64-unknown-linux-gnu'
+        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
@@ -48,6 +48,7 @@ jobs:
       - run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package
+        shell: bash
         run: |
           if [ "${{ matrix.os }}" == "windows-latest" ]; then
             cp target/${{ matrix.target }}/release/llama-monitor.exe ${{ matrix.artifact }}
