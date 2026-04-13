@@ -39,6 +39,7 @@ jobs:
 
       - name: Install cross-compilation tools
         if: matrix.target == 'aarch64-unknown-linux-gnu'
+        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
@@ -47,9 +48,14 @@ jobs:
       - run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package
+        shell: bash
         run: |
-          cp target/${{ matrix.target }}/release/llama-monitor ${{ matrix.artifact }}
-          chmod +x ${{ matrix.artifact }}
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            cp target/${{ matrix.target }}/release/llama-monitor.exe ${{ matrix.artifact }}
+          else
+            cp target/${{ matrix.target }}/release/llama-monitor ${{ matrix.artifact }}
+            chmod +x ${{ matrix.artifact }}
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
