@@ -1,8 +1,4 @@
-use std::collections::HashMap;
 use sysinfo::System;
-
-#[cfg(target_os = "windows")]
-use wmi::{Variant, WMIConnection};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SystemMetrics {
@@ -41,16 +37,18 @@ pub fn get_system_metrics() -> SystemMetrics {
 
 #[cfg(target_os = "windows")]
 fn get_cpu_name() -> String {
+    use std::collections::HashMap;
+    use wmi::{Variant, WMIConnection};
     if let Ok(wmi) = WMIConnection::new() {
         let results: Vec<HashMap<String, Variant>> =
-            match wmi.raw_query("SELECT Name FROM Win32_Processor") {
+            match wmi.raw_query::<HashMap<String, Variant>>("SELECT Name FROM Win32_Processor") {
                 Ok(r) => r,
                 Err(_) => return "Unknown CPU".to_string(),
             };
-        if let Some(row) = results.first()
-            && let Some(Variant::String(name)) = row.get("Name")
-        {
-            return name.clone();
+        for row in &results {
+            if let Some(Variant::String(name)) = row.get("Name") {
+                return name.clone();
+            }
         }
     }
 
@@ -94,17 +92,21 @@ fn get_ram_info(sys: &System) -> (f64, f64) {
 
 #[cfg(target_os = "windows")]
 fn get_motherboard() -> String {
+    use std::collections::HashMap;
+    use wmi::{Variant, WMIConnection};
     if let Ok(wmi) = WMIConnection::new() {
-        match wmi.raw_query::<HashMap<String, Variant>>("SELECT Product FROM Win32_BaseBoard") {
-            Ok(results) => {
-                for row in &results {
-                    if let Some(Variant::String(product)) = row.get("Product") {
-                        return product.clone();
-                    }
-                }
-            }
+        let results: Vec<HashMap<String, Variant>> = match wmi
+            .raw_query::<HashMap<String, Variant>>("SELECT Product FROM Win32_BaseBoard")
+        {
+            Ok(r) => r,
             Err(_) => {
                 eprintln!("[system] WMI query failed for Win32_BaseBoard");
+                return "Unknown Motherboard".to_string();
+            }
+        };
+        for row in &results {
+            if let Some(Variant::String(product)) = row.get("Product") {
+                return product.clone();
             }
         }
     }

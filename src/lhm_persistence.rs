@@ -15,6 +15,7 @@ pub fn save_lhm_disabled(path: &Path, disabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn load_lhm_disabled(path: &Path) -> Result<bool, String> {
     if !path.exists() {
         return Ok(false);

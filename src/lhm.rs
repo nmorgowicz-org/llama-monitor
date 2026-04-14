@@ -1,5 +1,11 @@
 #[cfg(target_os = "windows")]
+use std::path::Path;
+
+#[cfg(target_os = "windows")]
 use wmi::{Variant, WMIConnection};
+
+#[cfg(target_os = "windows")]
+use std::collections::HashMap;
 
 #[cfg(target_os = "windows")]
 pub async fn ensure_lhm_available() -> Result<(), String> {
@@ -152,7 +158,8 @@ pub async fn download_and_install_lhm() -> Result<(), String> {
         if file.is_dir() {
             fs::create_dir_all(&path)
                 .map_err(|e| format!("Failed to create directory {}: {}", path.display(), e))?;
-        } else if let Some(parent) = path.parent() {
+        } else {
+            let parent: &Path = path.parent().unwrap();
             fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create directory {}: {}", parent.display(), e))?;
             let mut output = fs::File::create(&path)

@@ -21,7 +21,10 @@ impl Reject for ApiError {}
 
 use crate::config::AppConfig;
 use crate::gpu::env::{self as gpu_env, GPU_ARCHITECTURES, GpuEnv};
+
+#[cfg(target_os = "windows")]
 use crate::lhm;
+
 use crate::lhm_persistence as lhm_persist;
 use crate::llama::server::{self, ServerConfig};
 use crate::models;
