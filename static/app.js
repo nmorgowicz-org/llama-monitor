@@ -1785,7 +1785,7 @@ ws.onmessage = e => {
 
         sysRowsEl.innerHTML = '<tr>' +
 
-            '<td class="card value">System</td>' +
+            '<td class="card value">' + (sys && sys.motherboard && sys.motherboard !== "Unknown Motherboard" ? sys.motherboard : 'System') + '</td>' +
 
             '<td class="value temp">' + (sys && sys.cpu_temp > 0 ? Math.round(sys.cpu_temp) + 'C' : '\u2014') + '</td>' +
 
@@ -1795,7 +1795,7 @@ ws.onmessage = e => {
 
             '<td class="value vram">' + (sys && sys.ram_total_gb > 0 ? ((sys.ram_used_gb / sys.ram_total_gb) * 100).toFixed(0) + '% (' + (sys.ram_used_gb / 1024).toFixed(1) + ' GB)' : '\u2014') + '</td>' +
 
-            '<td class="value">' + (sys && sys.cpu_name ? sys.cpu_name.substring(0, 20) : '\u2014') + '</td>' +
+            '<td class="value">' + (sys && sys.cpu_name ? sys.cpu_name : '\u2014') + '</td>' +
 
             '</tr>';
 
