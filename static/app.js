@@ -2125,7 +2125,67 @@ async function sendChat() {
 
                             document.getElementById('chat-messages').insertBefore(thinkEl, msgEl);
 
-                        }
+  }
+}
+
+// LHM (LibreHardwareMonitor) integration - runs once on page load
+async function checkLHMAndPrompt() {
+    // Only run LHM checks on Windows
+    if (navigator.platform.indexOf('Win') === -1) {
+        return;
+    }
+    
+    // Check server-side config file first
+    let isDisabled = false;
+    try {
+        const statusResp = await fetch('/api/lhm/status');
+        if (statusResp.ok) {
+            const statusData = await statusResp.json();
+            isDisabled = statusData.disabled;
+        }
+    } catch (err) {
+        // Config doesn't exist or error - proceed normally
+    }
+    
+    // Check if LHM is available
+    let lhmAvailable = false;
+    try {
+        const checkResp = await fetch('/api/lhm/check');
+        if (checkResp.ok) {
+            const checkData = await checkResp.json();
+            lhmAvailable = checkData.available || false;
+        }
+    } catch (err) {
+        // API not available
+    }
+    
+    // Update the system metrics table
+    const sysRowsEl = document.getElementById('system-rows');
+    if (sysRowsEl) {
+        const isWindows = navigator.platform.indexOf('Win') !== -1;
+        
+        let tempColumn = '';
+        if (isWindows) {
+            if (lhmAvailable) {
+                tempColumn = '<td class="value temp" id="lhm-temp-col">—</td>';
+            } else if (isDisabled) {
+                tempColumn = '<td class="value temp" id="lhm-temp-col"><button class="btn-lhm-inline need-attention" onclick="showLHMNotification()" title="Install LibreHardwareMonitor for CPU temp monitoring">&#9971;</button></td>';
+            } else {
+                tempColumn = '<td class="value temp" id="lhm-temp-col"><button class="btn-lhm-inline" onclick="showLHMNotification()" title="Install LibreHardwareMonitor for CPU temp monitoring">&#9971;</button></td>';
+            }
+        } else {
+            tempColumn = '<td class="value temp">—</td>';
+        }
+        
+        const currentRow = sysRowsEl.querySelector('tr');
+        if (currentRow) {
+            const existingCells = currentRow.querySelectorAll('td');
+            if (existingCells.length >= 2) {
+                existingCells[1].outerHTML = tempColumn;
+            }
+       }
+    }
+}
 
                         thinkEl.querySelector('span').textContent = thinkContent;
 
@@ -2173,9 +2233,7 @@ async function sendChat() {
 
     document.getElementById('btn-send').disabled = false;
 
-}
-
-if ('serviceWorker' in navigator) {
+ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
@@ -2214,7 +2272,7 @@ async function showLHMNotification() {
         
      document.body.appendChild(overlay);
         
-        overlay.querySelector('#btn-lhm-install').onclick = async () => {
+      overlay.querySelector('#btn-lhm-install').onclick = () => {
             console.log('[LHM UI] Install button clicked');
             overlay.remove();
             resolve('install');
