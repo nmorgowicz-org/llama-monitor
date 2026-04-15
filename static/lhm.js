@@ -1,2 +1,3 @@
-// DEPRECATED: LHM integration code moved to app.js (removed in v0.4.1)
+// LHM (LibreHardwareMonitor) integration
+// NOTE: All functionality moved to app.js (v0.4.0)
 
