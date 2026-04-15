@@ -112,7 +112,7 @@ fn get_cpu_temp(sys: &System) -> (f32, bool) {
 
         if !components.is_empty() {
             if let Some(comp) = components.iter().next() {
-                return (comp.temperature() as f32, true);
+                return (comp.temperature().unwrap_or(0.0), true);
             }
         }
 
