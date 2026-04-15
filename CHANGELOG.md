@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/nickveldrin/llama-monitor/compare/v0.3.1...v0.4.0) (2026-04-15)
+
+
+### Features
+
+* add v0.4.0 features - motherboard detection, LHM integration, RAM fix, polling config ([#17](https://github.com/nickveldrin/llama-monitor/issues/17)) ([7b376c5](https://github.com/nickveldrin/llama-monitor/commit/7b376c5b17d69379e5d93ee61cb999623b916881))
+
+
+### Bug Fixes
+
+* LHM install button fix and Linux/MacOS system metrics ([#19](https://github.com/nickveldrin/llama-monitor/issues/19)) ([44358ff](https://github.com/nickveldrin/llama-monitor/commit/44358ffbb0535fe1347ab3af10a19743fd695d41))
+
 ## [0.4.0](https://github.com/nickveldrin/llama-monitor/compare/v0.3.1...v0.4.0) (2026-04-14)
 
 
