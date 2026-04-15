@@ -2285,164 +2285,185 @@ async function showLHMNotification() {
                     <button id="btn-lhm-install" style="flex:1;padding:10px;background:#a3be8c;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">Install Automatically</button>
                     <button id="btn-lhm-cancel" style="flex:1;padding:10px;background:#bf616a;border:none;border-radius:4px;cursor:pointer;">Disable</button>
                 `;
-                lhmButtonsEl.querySelector('#btn-lhm-install').onclick = async () => {
-            console.log('[LHM UI] Install button clicked');
-            overlay.remove();
-            
-            // Show UAC warning modal
-            const warningOverlay = createUACWarningOverlay();
-            const userConfirmed = await showWarningModal(warningOverlay);
-            
-            if (!userConfirmed) {
-                resolve('cancel');
-                return;
-            }
-            
-            console.log('[LHM UI] User confirmed, starting installation...');
-            
-            const progressOverlay = document.createElement('div');
-            progressOverlay.style.cssText = `
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                width: 400px;
-                background: #2e3440;
-                border: 2px solid #88c0d0;
-                border-radius: 12px;
-                box-shadow: 0 20px 60px rgba(0,0,0,0.7);
-                z-index: 99999;
-                padding: 30px;
-                color: #d8dee9;
-                text-align: center;
-            `;
-            
-            progressOverlay.innerHTML = `
-                <div style="margin-bottom: 20px;">
-                    <h3 style="margin: 0 0 10px 0; color: #88c0d0; font-size: 18px;">Installing LibreHardwareMonitor</h3>
-                    <p style="margin: 0; color: #bf616a;">This will open a UAC prompt.</p>
-                </div>
-                <div id="progress-bar-container" style="width: 100%; height: 8px; background: #4c566a; border-radius: 4px; overflow: hidden; margin-bottom: 15px;">
-                    <div id="progress-bar" style="width: 0%; height: 100%; background: #88c0d0; transition: width 0.3s ease;"></div>
-                </div>
-                <div id="progress-text" style="color: #bf616a; font-size: 14px;">Waiting for UAC...</div>
-                <div style="margin-top: 15px; font-size: 12px; color: #616e88;">
-                    <span class="spinner" style="display: inline-block; width: 12px; height: 12px; border: 2px solid #616e88; border-top: 2px solid #88c0d0; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px;"></span>
-                    Please wait...
-                </div>
-                <style>
-                    @keyframes spin { to { transform: rotate(360deg); } }
-                </style>
-            `;
-            
-            document.body.appendChild(progressOverlay);
-            
-            console.log('[LHM UI] Calling /api/lhm/install...');
-            try {
-                const response = await fetch('/api/lhm/install', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
-                console.log('[LHM UI] /api/lhm/install response status:', response.status);
                 
-                if (response.ok) {
-                    const data = await response.json();
-                    console.log('[LHM UI] /api/lhm/install response:', data);
-                    
-                    const progressText = document.getElementById('progress-text');
-                    const progressBar = document.getElementById('progress-bar');
-                    
-                    let attempts = 0;
-                    const maxAttempts = 60;
-                    
-                    const checkProgress = async () => {
-                        if (attempts >= maxAttempts) {
-                            if (progressOverlay) progressOverlay.remove();
-                            showToast('Installation timeout. Please check if LHM was installed.', 'error');
-                            return;
+                lhmButtonsEl.querySelector('#btn-lhm-cancel').onclick = async () => {
+                    overlay.remove();
+                    try {
+                        const disableResp = await fetch('/api/lhm/disable', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ disabled: true })
+                        });
+                        if (disableResp.ok) {
+                            showToast('LHM monitoring disabled', 'success');
+                            setTimeout(() => location.reload(), 1500);
                         }
+                    } catch (err) {
+                        showToast('Failed to disable LHM: ' + err.message, 'error');
+                    }
+                };
+                
+                lhmButtonsEl.querySelector('#btn-lhm-install').onclick = async () => {
+                    console.log('[LHM UI] Install button clicked');
+                    overlay.remove();
+                    
+                    // Show UAC warning modal
+                    const warningOverlay = createUACWarningOverlay();
+                    const userConfirmed = await showWarningModal(warningOverlay);
+                    
+                    if (!userConfirmed) {
+                        resolve('cancel');
+                        return;
+                    }
+                    
+                    console.log('[LHM UI] User confirmed, starting installation...');
+                    
+                    const progressOverlay = document.createElement('div');
+                    progressOverlay.style.cssText = `
+                        position: fixed;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        width: 400px;
+                        background: #2e3440;
+                        border: 2px solid #88c0d0;
+                        border-radius: 12px;
+                        box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+                        z-index: 99999;
+                        padding: 30px;
+                        color: #d8dee9;
+                        text-align: center;
+                    `;
+                    
+                    progressOverlay.innerHTML = `
+                        <div style="margin-bottom: 20px;">
+                            <h3 style="margin: 0 0 10px 0; color: #88c0d0; font-size: 18px;">Installing LibreHardwareMonitor</h3>
+                            <p style="margin: 0; color: #bf616a;">This will open a UAC prompt.</p>
+                        </div>
+                        <div id="progress-bar-container" style="width: 100%; height: 8px; background: #4c566a; border-radius: 4px; overflow: hidden; margin-bottom: 15px;">
+                            <div id="progress-bar" style="width: 0%; height: 100%; background: #88c0d0; transition: width 0.3s ease;"></div>
+                        </div>
+                        <div id="progress-text" style="color: #bf616a; font-size: 14px;">Waiting for UAC...</div>
+                        <div style="margin-top: 15px; font-size: 12px; color: #616e88;">
+                            <span class="spinner" style="display: inline-block; width: 12px; height: 12px; border: 2px solid #616e88; border-top: 2px solid #88c0d0; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px;"></span>
+                            Please wait...
+                        </div>
+                        <style>
+                            @keyframes spin { to { transform: rotate(360deg); } }
+                        </style>
+                    `;
+                    
+                    document.body.appendChild(progressOverlay);
+                    
+                    console.log('[LHM UI] Calling /api/lhm/install...');
+                    try {
+                        const response = await fetch('/api/lhm/install', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            }
+                        });
+                        console.log('[LHM UI] /api/lhm/install response status:', response.status);
                         
-                        attempts++;
-                        console.log(`[LHM UI] Checking progress (attempt ${attempts})...`);
-                        
-                        try {
-                            const progressResp = await fetch('/api/lhm/progress');
-                            if (progressResp.ok) {
-                                const progressData = await progressResp.json();
-                                const progress = progressData.progress || '';
-                                
-                                console.log('[LHM UI] Progress:', progress);
-                                
-                                if (progressText) {
-                                    let progressDisplay = progress;
-                                    let progressBarWidth = '0%';
-                                    
-                                    if (progress.includes('downloading:')) {
-                                        progressDisplay = 'Downloading...';
-                                        const pct = progress.match(/(\d+)%/);
-                                        if (pct) progressBarWidth = pct[1] + '%';
-                                    } else if (progress.includes('extracting:')) {
-                                        progressDisplay = progress;
-                                        const pct = progress.match(/(\d+)%/);
-                                        if (pct) progressBarWidth = pct[1] + '%';
-                                    } else if (progress === 'completed') {
-                                        progressDisplay = 'Installation complete! LHM is now running.';
-                                        if (progressBar) progressBar.style.background = '#a3be8c';
-                                    } else if (progress === 'failed') {
-                                        progressDisplay = 'Installation failed!';
-                                        if (progressBar) progressBar.style.background = '#bf616a';
-                                    }
-                                    
-                                    progressText.textContent = progressDisplay;
-                                    if (progressBar && progressBarWidth !== '0%') {
-                                        progressBar.style.width = progressBarWidth;
-                                    }
+                        if (response.ok) {
+                            const data = await response.json();
+                            console.log('[LHM UI] /api/lhm/install response:', data);
+                            
+                            const progressText = document.getElementById('progress-text');
+                            const progressBar = document.getElementById('progress-bar');
+                            
+                            let attempts = 0;
+                            const maxAttempts = 60;
+                            
+                            const checkProgress = async () => {
+                                if (attempts >= maxAttempts) {
+                                    if (progressOverlay) progressOverlay.remove();
+                                    showToast('Installation timeout. Please check if LHM was installed.', 'error');
+                                    return;
                                 }
                                 
-                                if (progress === 'completed' || progress === 'failed') {
-                                    setTimeout(() => {
-                                        if (progressOverlay) progressOverlay.remove();
-                                        showToast('Installation ' + (progress === 'completed' ? 'complete! Reloading...' : 'failed'), progress === 'completed' ? 'success' : 'error');
-                                        if (progress === 'completed') {
-                                            setTimeout(() => {
-                                                window.location.reload();
-                                            }, 2000);
+                                attempts++;
+                                console.log(`[LHM UI] Checking progress (attempt ${attempts})...`);
+                                
+                                try {
+                                    const progressResp = await fetch('/api/lhm/progress');
+                                    if (progressResp.ok) {
+                                        const progressData = await progressResp.json();
+                                        const progress = progressData.progress || '';
+                                        
+                                        console.log('[LHM UI] Progress:', progress);
+                                        
+                                        if (progressText) {
+                                            let progressDisplay = progress;
+                                            let progressBarWidth = '0%';
+                                            
+                                            if (progress.includes('downloading:')) {
+                                                progressDisplay = 'Downloading...';
+                                                const pct = progress.match(/(\d+)%/);
+                                                if (pct) progressBarWidth = pct[1] + '%';
+                                            } else if (progress.includes('extracting:')) {
+                                                progressDisplay = progress;
+                                                const pct = progress.match(/(\d+)%/);
+                                                if (pct) progressBarWidth = pct[1] + '%';
+                                            } else if (progress === 'completed') {
+                                                progressDisplay = 'Installation complete! LHM is now running.';
+                                                if (progressBar) progressBar.style.background = '#a3be8c';
+                                            } else if (progress === 'failed') {
+                                                progressDisplay = 'Installation failed!';
+                                                if (progressBar) progressBar.style.background = '#bf616a';
+                                            }
+                                            
+                                            progressText.textContent = progressDisplay;
+                                            if (progressBar && progressBarWidth !== '0%') {
+                                                progressBar.style.width = progressBarWidth;
+                                            }
                                         }
-                                    }, 1500);
-                                } else {
+                                        
+                                        if (progress === 'completed' || progress === 'failed') {
+                                            setTimeout(() => {
+                                                if (progressOverlay) progressOverlay.remove();
+                                                showToast('Installation ' + (progress === 'completed' ? 'complete! Reloading...' : 'failed'), progress === 'completed' ? 'success' : 'error');
+                                                if (progress === 'completed') {
+                                                    setTimeout(() => {
+                                                        window.location.reload();
+                                                    }, 2000);
+                                                }
+                                            }, 1500);
+                                        } else {
+                                            setTimeout(checkProgress, 500);
+                                        }
+                                    } else {
+                                        setTimeout(checkProgress, 500);
+                                    }
+                                } catch (err) {
+                                    console.error('[LHM UI] Progress check error:', err);
                                     setTimeout(checkProgress, 500);
                                 }
-                            } else {
-                                setTimeout(checkProgress, 500);
-                            }
-                        } catch (err) {
-                            console.error('[LHM UI] Progress check error:', err);
-                            setTimeout(checkProgress, 500);
-                        }
-                    };
-                    
-                    setTimeout(checkProgress, 1000);
-                } else {
-                    const data = await response.json();
-                    console.error('[LHM UI] /api/lhm/install failed:', data);
-                    if (progressOverlay) progressOverlay.remove();
-                    showToast(`Installation failed: ${data.error || 'Unknown error'}`, 'error');
-                }
-            } catch (err) {
-                console.error('[LHM UI] /api/lhm/install error:', err);
-                if (progressOverlay) progressOverlay.remove();
-                showToast(`Installation error: ${err.message}`, 'error');
-            }
-        };
-        
-        overlay.querySelector('#btn-lhm-cancel').onclick = () => {
-            overlay.remove();
-            resolve('cancel');
-        };
-    });
-}
+                            };
+                            
+                   setTimeout(checkProgress, 1000);
+                 } else {
+                     const data = await response.json();
+                     console.error('[LHM UI] /api/lhm/install failed:', data);
+                     if (progressOverlay) progressOverlay.remove();
+                     showToast(`Installation failed: ${data.error || 'Unknown error'}`, 'error');
+                 }
+             } catch (err) {
+                 console.error('[LHM UI] /api/lhm/install error:', err);
+                 if (progressOverlay) progressOverlay.remove();
+                 showToast(`Installation error: ${err.message}`, 'error');
+             }
+         };
+         
+         const btnCancel = overlay.querySelector('#btn-lhm-cancel');
+         if (btnCancel) {
+             btnCancel.onclick = () => {
+                 overlay.remove();
+                 resolve('cancel');
+             };
+         }
+     });
+ }
 
 // Create the UAC warning overlay
 function createUACWarningOverlay() {
