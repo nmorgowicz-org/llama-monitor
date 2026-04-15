@@ -204,9 +204,17 @@ pub async fn download_and_install_lhm() -> Result<(), String> {
     }
     eprintln!("[LHM] Executable verified");
 
-    eprintln!("[LHM] Running LHM installer (-s flag)...");
-    let output = std::process::Command::new(&lhm_exe)
-        .arg("-s")
+    eprintln!("[LHM] Running LHM installer (-s flag) with UAC elevation...");
+    let lhm_exe_str = lhm_exe.to_string_lossy().replace("\\", "\\\\");
+    let powershell_cmd = format!(
+        "Start-Process '{}' -ArgumentList '-s' -Verb RunAs -Wait",
+        lhm_exe_str
+    );
+    eprintln!("[LHM] PowerShell command: {}", powershell_cmd);
+
+    let output = std::process::Command::new("powershell")
+        .arg("-Command")
+        .arg(&powershell_cmd)
         .output()
         .map_err(|e| format!("Failed to run LHM installer: {}", e))?;
     eprintln!(
