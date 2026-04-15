@@ -1782,12 +1782,15 @@ ws.onmessage = e => {
     const sysRowsEl = document.getElementById('system-rows');
 
     if (sysRowsEl) {
+        // Only show CPU temp on Windows (LHM is Windows-only)
+        const isWindows = navigator.platform.indexOf('Win') !== -1;
+        const tempColumn = isWindows ? '<td class="value temp">' + (sys && sys.cpu_temp > 0 ? Math.round(sys.cpu_temp) + 'C' : '\u2014') + '</td>' : '';
 
         sysRowsEl.innerHTML = '<tr>' +
 
             '<td class="card value">' + (sys && sys.motherboard && sys.motherboard !== "Unknown Motherboard" ? sys.motherboard : 'System') + '</td>' +
 
-            '<td class="value temp">' + (sys && sys.cpu_temp > 0 ? Math.round(sys.cpu_temp) + 'C' : '\u2014') + '</td>' +
+            tempColumn +
 
             '<td class="value load">' + (sys && sys.cpu_load > 0 ? sys.cpu_load + '%' : '\u2014') + '</td>' +
 

@@ -1,5 +1,6 @@
-// LHM (LibreHardwareMonitor) integration - full implementation
-// This is what was in commit 205b92d
+// LHM (LibreHardwareMonitor) integration
+// This file is deprecated - functionality moved to app.js
+// Kept for backwards compatibility but not loaded
 
 async function checkLHMAndPrompt() {
     // Only run LHM checks on Windows
@@ -37,7 +38,6 @@ async function checkLHMAndPrompt() {
         
         // Add click handler to show notification
         lhmBtn.onclick = async () => {
-            lhmBtn.onclick = null; // Remove handler
             const action = await showLHMNotification();
             
             if (action === 'install') {
