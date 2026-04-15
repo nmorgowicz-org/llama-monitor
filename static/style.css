@@ -33,9 +33,9 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
 .status-text { font-size: 0.85rem; padding-bottom: 4px; }
 .btn-config { background: none; border: 1px solid #4c566a; color: #6a7585; font-size: 1.1rem; width: 30px; height: 30px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: color 0.15s, border-color 0.15s; line-height: 1; padding: 0; }
 .btn-config:hover { color: #88c0d1; border-color: #88c0d1; }
-.btn-lhm { background: none; border: 1px solid #ebcb8b; color: #ebcb8b; font-size: 1.1rem; width: 30px; height: 30px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; line-height: 1; padding: 0; }
-.btn-lhm:hover { color: #f0e68c; border-color: #f0e68c; box-shadow: 0 0 10px rgba(235, 203, 139, 0.3); }
-.btn-lhm.need-attention { animation: pulse 2s infinite; }
+.btn-lhm-inline { background: none; border: 1px solid #ebcb8b; color: #ebcb8b; font-size: 1.1rem; width: 30px; height: 30px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; line-height: 1; padding: 0; }
+.btn-lhm-inline:hover { color: #f0e68c; border-color: #f0e68c; box-shadow: 0 0 10px rgba(235, 203, 139, 0.3); }
+.btn-lhm-inline.need-attention { animation: pulse 2s infinite; }
 
 @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(235, 203, 139, 0.4); } 50% { box-shadow: 0 0 0 10px rgba(235, 203, 139, 0); } }
 

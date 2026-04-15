@@ -1784,7 +1784,23 @@ ws.onmessage = e => {
     if (sysRowsEl) {
         // Only show CPU temp on Windows (LHM is Windows-only)
         const isWindows = navigator.platform.indexOf('Win') !== -1;
-        const tempColumn = isWindows ? '<td class="value temp">' + (sys && sys.cpu_temp > 0 ? Math.round(sys.cpu_temp) + 'C' : '\u2014') + '</td>' : '';
+        
+        let tempColumn = '';
+        if (isWindows) {
+            const hasTemp = sys && sys.cpu_temp > 0;
+            const tempValue = hasTemp ? Math.round(sys.cpu_temp) + 'C' : '—';
+            const hasLHM = (sys && sys.cpu_temp_available) || false;
+            
+            if (hasLHM) {
+                // LHM is available, show temperature
+                tempColumn = '<td class="value temp">' + tempValue + '</td>';
+            } else {
+                // LHM not available, show install button
+                tempColumn = '<td class="value temp"><button class="btn-lhm-inline" onclick="showLHMNotification()" title="Install LibreHardwareMonitor for CPU temp monitoring">&#9971;</button></td>';
+            }
+        } else {
+            tempColumn = '<td class="value temp">—</td>';
+        }
 
         sysRowsEl.innerHTML = '<tr>' +
 
@@ -2217,9 +2233,6 @@ async function checkLHMAndPrompt() {
         return;
     }
     
-    const lhmBtn = document.getElementById('btn-lhm');
-    if (!lhmBtn) return;
-    
     // Check server-side config file first
     let isDisabled = false;
     try {
@@ -2244,50 +2257,33 @@ async function checkLHMAndPrompt() {
         // API not available
     }
     
-    // If LHM is available, hide button entirely
-    if (lhmAvailable) {
-        lhmBtn.style.display = 'none';
-        return;
-    }
-    
-    // LHM not available - show button
-    lhmBtn.style.display = 'flex';
-    
-    // If user disabled LHM, add pulse animation to notify them
-    if (isDisabled) {
-        lhmBtn.classList.add('need-attention');
-    } else {
-        // User hasn't been prompted yet - show notification
-        const action = await showLHMNotification();
+    // Update the system metrics table
+    const sysRowsEl = document.getElementById('system-rows');
+    if (sysRowsEl) {
+        const isWindows = navigator.platform.indexOf('Win') !== -1;
         
-        if (action === 'install') {
-            try {
-                const installResp = await fetch('/api/lhm/install', { method: 'POST' });
-                const installData = await installResp.json();
-                
-                if (installData.success) {
-                    showToast('LibreHardwareMonitor installed successfully! Reloading...', 'success');
-                    setTimeout(() => location.reload(), 2000);
-                } else {
-                    showToast('Failed to install LibreHardwareMonitor: ' + (installData.error || 'Unknown error'), 'error');
-                }
-            } catch (err) {
-                showToast('Failed to install LibreHardwareMonitor automatically. Please install manually.', 'error');
+        let tempColumn = '';
+        if (isWindows) {
+            if (lhmAvailable) {
+                tempColumn = '<td class="value temp" id="lhm-temp-col">—</td>';
+            } else if (isDisabled) {
+                tempColumn = '<td class="value temp" id="lhm-temp-col"><button class="btn-lhm-inline need-attention" onclick="showLHMNotification()" title="Install LibreHardwareMonitor for CPU temp monitoring">&#9971;</button></td>';
+            } else {
+                tempColumn = '<td class="value temp" id="lhm-temp-col"><button class="btn-lhm-inline" onclick="showLHMNotification()" title="Install LibreHardwareMonitor for CPU temp monitoring">&#9971;</button></td>';
             }
-        } else if (action === 'cancel') {
-            // Save to server-side config file
-            fetch('/api/lhm/disable', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ disabled: true })
-            }).catch(() => {
-                console.error('Failed to save LHM disable preference');
-            });
-            showToast('LHM monitoring disabled', 'info');
+        } else {
+            tempColumn = '<td class="value temp">—</td>';
         }
+        
+        const currentRow = sysRowsEl.querySelector('tr');
+        if (currentRow) {
+            const existingCells = currentRow.querySelectorAll('td');
+            if (existingCells.length >= 2) {
+                existingCells[1].outerHTML = tempColumn;
+            }
+       }
     }
 }
-
 async function showLHMNotification() {
     return new Promise((resolve) => {
         const overlay = document.createElement('div');
