@@ -21,10 +21,132 @@ impl Reject for ApiError {}
 
 use crate::config::AppConfig;
 use crate::gpu::env::{self as gpu_env, GPU_ARCHITECTURES, GpuEnv};
+
+#[cfg(target_os = "windows")]
+use crate::lhm;
+
+use crate::lhm_persistence as lhm_persist;
 use crate::llama::server::{self, ServerConfig};
 use crate::models;
 use crate::presets::{self, ModelPreset};
 use crate::state::{self as app_state, AppState, SessionStatus, UiSettings};
+
+fn api_check_lhm() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "lhm" / "check")
+        .and(warp::get())
+        .and_then(move || {
+            async move {
+                #[cfg(target_os = "windows")]
+                {
+                    match lhm::ensure_lhm_available().await {
+                        Ok(()) => {
+                            Ok::<_, warp::Rejection>(warp::reply::json(
+                                &serde_json::json!({"available": true}),
+                            ))
+                        }
+                        Err(_) => {
+                            Ok::<_, warp::Rejection>(warp::reply::json(
+                                &serde_json::json!({"available": false}),
+                            ))
+                        }
+                    }
+                }
+
+                #[cfg(not(target_os = "windows"))]
+                {
+                    Ok::<_, warp::Rejection>(warp::reply::json(
+                        &serde_json::json!({"available": false, "error": "Not supported on this platform"}),
+                    ))
+                }
+            }
+        })
+}
+
+fn api_lhm_status(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let lhm_disabled_file = app_config.lhm_disabled_file.clone();
+    warp::path!("api" / "lhm" / "status")
+        .and(warp::get())
+        .and_then(move || {
+            #[allow(unused_variables)]
+            let file = lhm_disabled_file.clone();
+            async move {
+                #[cfg(target_os = "windows")]
+                {
+                    match lhm_persist::load_lhm_disabled(&file) {
+                        Ok(disabled) => Ok::<_, warp::Rejection>(warp::reply::json(
+                            &serde_json::json!({"disabled": disabled}),
+                        )),
+                        Err(_) => Ok::<_, warp::Rejection>(warp::reply::json(
+                            &serde_json::json!({"disabled": false}),
+                        )),
+                    }
+                }
+
+                #[cfg(not(target_os = "windows"))]
+                {
+                    Ok::<_, warp::Rejection>(warp::reply::json(
+                        &serde_json::json!({"disabled": false}),
+                    ))
+                }
+            }
+        })
+}
+
+fn api_lhm_install() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
+{
+    warp::path!("api" / "lhm" / "install")
+        .and(warp::post())
+        .and_then(move || {
+            async move {
+                #[cfg(target_os = "windows")]
+                {
+                    match lhm::download_and_install_lhm().await {
+                        Ok(()) => {
+                            Ok::<_, warp::Rejection>(warp::reply::json(
+                                &serde_json::json!({"success": true}),
+                            ))
+                        }
+                        Err(e) => {
+                            Ok::<_, warp::Rejection>(warp::reply::json(
+                                &serde_json::json!({"success": false, "error": e}),
+                            ))
+                        }
+                    }
+                }
+
+                #[cfg(not(target_os = "windows"))]
+                {
+                    Ok::<_, warp::Rejection>(warp::reply::json(
+                        &serde_json::json!({"success": false, "error": "Not supported on this platform"}),
+                    ))
+                }
+            }
+        })
+}
+
+fn api_disable_lhm(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let lhm_disabled_file = app_config.lhm_disabled_file.clone();
+    warp::path!("api" / "lhm" / "disable")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and_then(move |body: serde_json::Value| {
+            let disabled = body["disabled"].as_bool().unwrap_or(false);
+            #[allow(unused_variables)]
+            let file = lhm_disabled_file.clone();
+            async move {
+                let result = lhm_persist::save_lhm_disabled(&file, disabled)
+                    .map(|_| warp::reply::json(&serde_json::json!({"ok": true})))
+                    .unwrap_or_else(|e| {
+                        warp::reply::json(&serde_json::json!({"ok": false, "error": e}))
+                    });
+                Ok::<_, warp::Rejection>(result)
+            }
+        })
+}
 
 pub fn api_routes(
     state: AppState,
@@ -54,6 +176,10 @@ pub fn api_routes(
     let spawn_session_with_preset =
         api_spawn_session_with_preset(state.clone(), app_config.clone());
     let attach = api_attach(state.clone());
+    let check_lhm = api_check_lhm();
+    let install_lhm = api_lhm_install();
+    let status_lhm = api_lhm_status(app_config.clone());
+    let disable_lhm = api_disable_lhm(app_config.clone());
 
     start
         .or(stop)
@@ -78,6 +204,10 @@ pub fn api_routes(
         .or(set_active_session)
         .or(spawn_session_with_preset)
         .or(attach)
+        .or(check_lhm)
+        .or(status_lhm)
+        .or(install_lhm)
+        .or(disable_lhm)
 }
 
 fn api_start(
@@ -625,7 +755,6 @@ fn api_spawn_session_with_preset(
             let state = state.clone();
             let app_config = app_config.clone();
             async move {
-                // Extract port, name, and preset_id from payload
                 let port: u16 = match payload.get("port") {
                     Some(v) => {
                         if let Some(p) = v.as_u64() {
@@ -663,7 +792,6 @@ fn api_spawn_session_with_preset(
                     }
                 };
 
-                // Load the preset (scope the lock)
                 let preset = {
                     let presets = state.presets.lock().unwrap();
                     match presets.iter().find(|p| p.id == preset_id).cloned() {
@@ -676,7 +804,6 @@ fn api_spawn_session_with_preset(
                     }
                 };
 
-                // Create session
                 let session_id = app_state::generate_session_id();
                 let session = app_state::Session::new_spawn(session_id.clone(), name.clone(), port);
 
@@ -686,10 +813,8 @@ fn api_spawn_session_with_preset(
                     ));
                 }
 
-                // Set as active
                 state.set_active_session(&session_id);
 
-                // Build server config from preset
                 let config = crate::llama::server::ServerConfig {
                     model_path: preset.model_path.clone(),
                     context_size: preset.context_size,
@@ -729,7 +854,6 @@ fn api_spawn_session_with_preset(
 
                 match crate::llama::server::start_server(&state, config, &app_config).await {
                     Ok(()) => {
-                        // Update session status to Running
                         state.update_session_status(&session_id, SessionStatus::Running);
                         Ok::<_, warp::Rejection>(warp::reply::json(
                             &serde_json::json!({"ok": true, "session_id": session_id}),
@@ -774,6 +898,7 @@ fn api_attach(
                 };
 
                 let session_id = crate::state::generate_session_id();
+                let session_id_for_active = session_id.clone();
                 let session = crate::state::Session::new_attach(
                     session_id,
                     format!("Attached: {}", endpoint),
@@ -781,6 +906,7 @@ fn api_attach(
                 );
 
                 if state.add_session(session) {
+                    state.set_active_session(&session_id_for_active);
                     Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
                 } else {
                     Ok::<_, warp::Rejection>(warp::reply::json(

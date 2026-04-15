@@ -42,4 +42,8 @@ pub struct AppArgs {
     /// Visible GPU device indices (e.g. 0,1,2,3)
     #[arg(long)]
     pub gpu_devices: Option<String>,
+
+    /// Llama metrics polling interval in seconds (default: 1)
+    #[arg(long, default_value_t = 1)]
+    pub llama_poll_interval: u64,
 }

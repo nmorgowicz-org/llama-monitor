@@ -3,6 +3,8 @@
 mod cli;
 mod config;
 mod gpu;
+mod lhm;
+mod lhm_persistence;
 mod llama;
 mod models;
 mod presets;
@@ -136,7 +138,8 @@ async fn main() -> Result<()> {
     // Llama metrics poller
     {
         let s = state.clone();
-        tokio::spawn(async move { llama::poller::llama_metrics_poller(s).await });
+        let interval = app_config.llama_poll_interval;
+        tokio::spawn(llama::poller::llama_metrics_poller(s, interval));
     }
 
     let port = app_config.port;

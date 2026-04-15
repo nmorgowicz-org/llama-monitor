@@ -1,0 +1,16 @@
+feat: add v0.4.0 features - motherboard detection, LHM integration, RAM fix, polling config
+
+This PR adds v0.4.0 features including:
+- Motherboard detection via WMI for Windows
+- RAM display fix (now shows actual GB instead of 0.0)
+- LHM (LibreHardwareMonitor) integration restored
+- Polling interval configuration in UI settings
+- All previous fixes and features from v0.3.0/v0.3.1
+
+## Files Changed
+
+- CHANGELOG.md: v0.4.0 release notes
+- src/cli.rs, src/config.rs, src/main.rs, src/state.rs, src/system.rs
+- src/web/api.rs, src/web/mod.rs, src/web/static_assets.rs, src/web/ws.rs
+- src/lhm.rs (new), src/lhm_persistence.rs (new)
+- static/app.js, static/index.html, static/lhm.js, static/style.css

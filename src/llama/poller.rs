@@ -4,75 +4,93 @@ use crate::state::AppState;
 
 use super::metrics::parse_prometheus_metrics;
 
-const LLAMA_POLL_INTERVAL: Duration = Duration::from_secs(5);
-
-pub async fn llama_metrics_poller(state: AppState) {
+pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
     let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(3))
+        .timeout(Duration::from_secs(5))
+        .pool_max_idle_per_host(0)
+        .pool_idle_timeout(Duration::from_secs(0))
         .build()
     {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("[error] Failed to build HTTP client: {e}");
+            eprintln!("[error] Failed to build HTTP client: {:?}", e);
             return;
         }
     };
 
     loop {
+        // Get active session ID
+        let active_id = { state.active_session_id.lock().unwrap().clone() };
+
+        // Skip polling if no active session
+        if active_id.is_empty() {
+            tokio::time::sleep(Duration::from_secs(poll_interval)).await;
+            continue;
+        }
+
         // Determine endpoint from active session
         let endpoint = {
-            let active_id = state.active_session_id.lock().unwrap().clone();
             let session = {
                 let sessions = state.sessions.lock().unwrap();
                 sessions.iter().find(|s| s.id == active_id).cloned()
             };
 
-            match session {
-                Some(sess) => match sess.mode {
+            if let Some(sess) = session {
+                match sess.mode {
                     crate::state::SessionMode::Spawn { port } => {
                         format!("http://127.0.0.1:{}", port)
                     }
                     crate::state::SessionMode::Attach { endpoint } => endpoint,
-                },
-                None => "http://127.0.0.1:8001".to_string(),
+                }
+            } else {
+                // No active session found, skip polling
+                tokio::time::sleep(Duration::from_secs(poll_interval)).await;
+                continue;
             }
         };
 
         let base = endpoint;
 
-        // Poll /health first to detect if any server is reachable
-        let server_reachable = if let Ok(resp) = client.get(format!("{base}/health")).send().await {
-            if let Ok(body) = resp.text().await {
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
-                    let mut m = state.llama_metrics.lock().unwrap();
-                    m.status = json
-                        .get("status")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unknown")
-                        .to_string();
-                    true
-                } else {
+        let server_reachable = match client.get(format!("{base}/health")).send().await {
+            Ok(resp) => match resp.text().await {
+                Ok(body) => {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                        let mut m = state.llama_metrics.lock().unwrap();
+                        m.status = json
+                            .get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        true
+                    } else {
+                        eprintln!("[poller] /health returned invalid JSON");
+                        false
+                    }
+                }
+                Err(_) => {
+                    eprintln!("[poller] Failed to read /health response");
                     false
                 }
-            } else {
+            },
+            Err(_) => {
+                eprintln!("[poller] Failed to reach /health at {}", base);
                 false
             }
-        } else {
-            false
         };
 
-        // Update server_running state based on whether we can reach the server
+        // Update server_running state with hysteresis (only change on state transition)
         {
             let mut running = state.server_running.lock().unwrap();
-            *running = server_reachable;
+            // Only update if state actually changed to prevent flickering
+            if server_reachable != *running {
+                *running = server_reachable;
+            }
         }
 
         if !server_reachable {
-            {
-                let mut m = state.llama_metrics.lock().unwrap();
-                *m = super::metrics::LlamaMetrics::default();
-            }
-            tokio::time::sleep(LLAMA_POLL_INTERVAL).await;
+            // Don't reset metrics when server is temporarily unavailable
+            // Just continue with the last known metrics
+            tokio::time::sleep(Duration::from_secs(poll_interval)).await;
             continue;
         }
 
@@ -138,6 +156,6 @@ pub async fn llama_metrics_poller(state: AppState) {
             }
         }
 
-        tokio::time::sleep(LLAMA_POLL_INTERVAL).await;
+        tokio::time::sleep(Duration::from_secs(poll_interval)).await;
     }
 }

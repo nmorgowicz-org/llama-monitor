@@ -1,0 +1,45 @@
+## Summary
+
+This PR adds v0.4.0 features including:
+- Motherboard detection via WMI for Windows
+- RAM display fix (now shows actual GB instead of 0.0)
+- LHM (LibreHardwareMonitor) integration restored
+- Polling interval configuration in UI settings
+- All previous fixes and features from v0.3.0/v0.3.1
+
+## Changes
+
+### New Files
+- `src/lhm.rs`: LHM integration with hardware monitoring
+- `src/lhm_persistence.rs`: LHM configuration persistence
+- `static/lhm.js`: LHM client-side integration
+
+### Modified Files
+- `CHANGELOG.md`: v0.4.0 release notes
+- `src/cli.rs`: CLI argument updates
+- `src/config.rs`: Added polling interval config
+- `src/main.rs`: LHM integration
+- `src/state.rs`: State management for LHM
+- `src/system.rs`: Motherboard detection via WMI, RAM fix
+- `src/web/api.rs`: API endpoints for LHM and polling config
+- `src/web/mod.rs`: Web module updates
+- `src/web/static_assets.rs`: Static asset handling
+- `src/web/ws.rs`: WebSocket updates for LHM
+- `static/app.js`: UI updates for LHM and polling config
+- `static/index.html`: HTML updates
+- `static/style.css`: Styling updates
+
+### Features
+- **Motherboard Detection**: WMI-based detection for Windows systems
+- **RAM Fix**: Corrected calculation to display actual GB values
+- **LHM Integration**: Full LibreHardwareMonitor integration
+- **Polling Config**: Configurable polling interval in UI settings
+
+### Bug Fixes
+- RAM display showing 0.0 GB
+- LHM service worker registration
+- JavaScript refactoring for LHM
+
+## Testing
+
+All changes have been tested and verified working.

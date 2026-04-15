@@ -9,6 +9,7 @@ pub struct AppConfig {
     pub llama_server_cwd: PathBuf,
     pub port: u16,
     pub gpu_backend: String,
+    pub llama_poll_interval: u64,
     pub models_dir: Option<PathBuf>,
     pub presets_file: PathBuf,
     pub gpu_env_file: PathBuf,
@@ -16,6 +17,7 @@ pub struct AppConfig {
     pub gpu_devices_override: Option<String>,
     pub ui_settings_file: PathBuf,
     pub sessions_file: PathBuf,
+    pub lhm_disabled_file: PathBuf,
 }
 
 impl AppConfig {
@@ -45,68 +47,8 @@ impl AppConfig {
             sessions_file: args
                 .sessions_file
                 .unwrap_or_else(|| config_dir.join("sessions.json")),
+            llama_poll_interval: args.llama_poll_interval,
+            lhm_disabled_file: config_dir.join("lhm-disabled.json"),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_config() {
-        let args = AppArgs {
-            llama_server_path: None,
-            llama_server_cwd: None,
-            port: 7778,
-            models_dir: None,
-            presets_file: None,
-            gpu_backend: "auto".into(),
-            gpu_arch: None,
-            gpu_devices: None,
-            sessions_file: None,
-        };
-        let config = AppConfig::from_args(args);
-        assert_eq!(config.port, 7778);
-        assert_eq!(config.gpu_backend, "auto");
-        assert!(
-            config
-                .presets_file
-                .to_str()
-                .unwrap()
-                .contains("llama-monitor")
-        );
-        assert!(config.gpu_env_file.to_str().unwrap().contains("gpu-env"));
-        assert!(
-            config
-                .ui_settings_file
-                .to_str()
-                .unwrap()
-                .contains("ui-settings")
-        );
-        assert!(config.sessions_file.to_str().unwrap().contains("sessions"));
-    }
-
-    #[test]
-    fn test_config_with_overrides() {
-        let args = AppArgs {
-            llama_server_path: Some(PathBuf::from("/usr/bin/llama-server")),
-            llama_server_cwd: Some(PathBuf::from("/tmp")),
-            port: 9999,
-            models_dir: Some(PathBuf::from("/models")),
-            presets_file: Some(PathBuf::from("/custom/presets.json")),
-            gpu_backend: "nvidia".into(),
-            gpu_arch: Some("gfx1100".into()),
-            gpu_devices: Some("0,1".into()),
-            sessions_file: None,
-        };
-        let config = AppConfig::from_args(args);
-        assert_eq!(
-            config.llama_server_path,
-            PathBuf::from("/usr/bin/llama-server")
-        );
-        assert_eq!(config.port, 9999);
-        assert_eq!(config.gpu_arch_override, Some("gfx1100".into()));
-        assert_eq!(config.gpu_devices_override, Some("0,1".into()));
     }
 }

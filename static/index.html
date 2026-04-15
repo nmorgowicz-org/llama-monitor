@@ -20,6 +20,7 @@
             <span class="status-dot stopped" id="status-dot"></span>
             <span class="status-text" id="status-text">Stopped</span>
             <button class="btn-config" onclick="openConfigModal()" title="Configuration">&#9881;</button>
+            <button class="btn-lhm" id="btn-lhm" onclick="showLHMNotification()" title="LibreHardwareMonitor">&#9971;</button>
         </div>
     </div>
 
@@ -37,11 +38,15 @@
                 <!-- Session items will be injected here -->
             </div>
         </div>
-        <div class="control-bar" id="controls">
-            <label class="num-sm" style="min-width:180px;">Server Endpoint (for attach)
+       <div class="server-endpoint-area">
+            <label class="num-sm">Server Endpoint (for attach)
                 <input id="server-endpoint" type="text" value="http://127.0.0.1:8001" style="width:240px;">
             </label>
-          <label class="preset-label" style="margin-left:10px;">Model Preset
+            <button class="btn btn-attach" id="btn-attach" onclick="doAttach()">Attach</button>
+            <button class="btn btn-kill" id="btn-kill" onclick="doKillLlama()">Kill llama-server</button>
+        </div>
+        <div class="control-bar" id="controls">
+           <label class="preset-label">Model Preset
                 <select id="preset-select"></select>
                 <span class="preset-actions">
                     <button class="btn-sm btn-preset" onclick="openPresetModal('new')" title="Create new preset">New</button>
@@ -51,8 +56,6 @@
                     <button class="btn-sm btn-preset-reset" onclick="resetPresets()" title="Reset all presets to built-in defaults">Reset</button>
                 </span>
             </label>
-            <button class="btn btn-attach" id="btn-attach" onclick="doAttach()">Attach</button>
-            <button class="btn btn-kill" id="btn-kill" onclick="doKillLlama()">Kill llama-server</button>
             <button class="btn btn-start" id="btn-start" onclick="doStart()">Start</button>
             <button class="btn btn-stop" id="btn-stop" onclick="doStop()" disabled>Stop</button>
         </div>
@@ -201,10 +204,10 @@
                         <option value="attach">Attach</option>
                     </select>
                 </label>
-                <label class="modal-field" title="Port for the spawned server">
-                    Port
-                    <input type="number" id="modal-session-port" placeholder="e.g. 8080">
-                </label>
+                <label class="modal-field" title="Port for spawned server or endpoint for attached server">
+                     <span id="modal-session-port-label">Port</span>
+                     <input type="number" id="modal-session-port" placeholder="e.g. 8080">
+                 </label>
             </div>
             <div class="modal-buttons">
                 <button type="button" class="btn btn-modal-cancel" onclick="closeSessionModal()">Cancel</button>
@@ -422,6 +425,7 @@
     </div>
 </div>
 
-<script src="/app.js"></script>
+    <script src="/lhm.js"></script>
+    <script src="/app.js"></script>
 </body>
 </html>

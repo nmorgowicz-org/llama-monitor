@@ -1,0 +1,6 @@
+chore(web): add LHM service worker and fix RAM display
+
+- Add lhm.js service worker route in web module
+- Update static assets to include LHM JavaScript
+- Fix RAM display calculation in app.js (remove duplicate division)
+- Refactor LHM JavaScript for better organization

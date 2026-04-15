@@ -28,6 +28,8 @@ pub struct UiSettings {
     pub models_dir: String,
     #[serde(default)]
     pub server_endpoint: String,
+    #[serde(default = "default_llama_poll_interval")]
+    pub llama_poll_interval: u64,
 }
 
 /// Session mode: either spawn a new server or attach to existing
@@ -95,6 +97,10 @@ fn default_port() -> u16 {
     8001
 }
 
+fn default_llama_poll_interval() -> u64 {
+    1
+}
+
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
@@ -104,6 +110,7 @@ impl Default for UiSettings {
             llama_server_cwd: String::new(),
             models_dir: String::new(),
             server_endpoint: String::new(),
+            llama_poll_interval: default_llama_poll_interval(),
         }
     }
 }
@@ -238,17 +245,15 @@ impl AppState {
             system_metrics: Arc::new(Mutex::new(SystemMetrics {
                 cpu_name: "Unknown CPU".to_string(),
                 cpu_temp: 0.0,
+                cpu_temp_available: false,
                 cpu_load: 0,
                 cpu_clock_mhz: 0,
                 ram_total_gb: 0.0,
                 ram_used_gb: 0.0,
+                motherboard: "Unknown".to_string(),
             })),
-            sessions: Arc::new(Mutex::new(vec![Session::new_spawn(
-                "default".to_string(),
-                "Default Session".to_string(),
-                8001,
-            )])),
-            active_session_id: Arc::new(Mutex::new("default".to_string())),
+            sessions: Arc::new(Mutex::new(Vec::new())),
+            active_session_id: Arc::new(Mutex::new("".to_string())),
             sessions_path,
         }
     }

@@ -22,24 +22,42 @@ pub fn ws_route(
                     let mut interval = tokio::time::interval(WS_PUSH_INTERVAL);
                     loop {
                         interval.tick().await;
-                        let json = {
-                            let gpu = state.gpu_metrics.lock().unwrap().clone();
-                            let llama = state.llama_metrics.lock().unwrap().clone();
-                            let system = state.system_metrics.lock().unwrap().clone();
-                            let logs: Vec<String> =
-                                state.server_logs.lock().unwrap().iter().cloned().collect();
-                            let running = *state.server_running.lock().unwrap();
-                            serde_json::json!({
-                                "gpu": gpu,
-                                "llama": llama,
-                                "system": system,
-                                "logs": logs,
-                                "server_running": running,
-                            })
-                            .to_string()
-                        };
-                        if ws_tx.send(Message::text(&json)).await.is_err() {
-                            break;
+
+                        let running = *state.server_running.lock().unwrap();
+
+                        // Only send metrics if server is running
+                        if running {
+                            let json = {
+                                let gpu = state.gpu_metrics.lock().unwrap().clone();
+                                let llama = state.llama_metrics.lock().unwrap().clone();
+                                let system = state.system_metrics.lock().unwrap().clone();
+                                let logs: Vec<String> =
+                                    state.server_logs.lock().unwrap().iter().cloned().collect();
+                                let active_session_id =
+                                    state.active_session_id.lock().unwrap().clone();
+                                let sessions = state.sessions.lock().unwrap();
+                                let session_mode = sessions
+                                    .iter()
+                                    .find(|s| s.id == active_session_id)
+                                    .map(|s| match &s.mode {
+                                        crate::state::SessionMode::Spawn { .. } => "spawn",
+                                        crate::state::SessionMode::Attach { .. } => "attach",
+                                    })
+                                    .unwrap_or("");
+                                drop(sessions);
+                                serde_json::json!({
+                                    "gpu": gpu,
+                                    "llama": llama,
+                                    "system": system,
+                                    "logs": logs,
+                                    "server_running": running,
+                                    "session_mode": session_mode,
+                                    "active_session_id": active_session_id
+                                })
+                            };
+                            if ws_tx.send(Message::text(json.to_string())).await.is_err() {
+                                break;
+                            }
                         }
                     }
                 });
