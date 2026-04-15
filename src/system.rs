@@ -139,10 +139,7 @@ fn get_cpu_temp(sys: &System) -> (f32, bool) {
     {
         use std::process::Command;
 
-        let sensors = [
-            "hw.sensors.cpu0.temp0",
-            "hw.acpi.thermal.cpu0.temperature",
-        ];
+        let sensors = ["hw.sensors.cpu0.temp0", "hw.acpi.thermal.cpu0.temperature"];
 
         for sensor in sensors {
             if let Ok(output) = Command::new("sysctl").arg("-n").arg(sensor).output()
