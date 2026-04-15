@@ -110,10 +110,10 @@ fn get_cpu_temp(sys: &System) -> (f32, bool) {
 
         let components = sysinfo::Components::new_with_refreshed_list();
 
-        if !components.is_empty() {
-            if let Some(comp) = components.iter().next() {
-                return (comp.temperature().unwrap_or(0.0), true);
-            }
+        if !components.is_empty()
+            && let Some(comp) = components.iter().next()
+        {
+            return (comp.temperature().unwrap_or(0.0), true);
         }
 
         let temp_paths = [
@@ -123,10 +123,10 @@ fn get_cpu_temp(sys: &System) -> (f32, bool) {
         ];
 
         for path in temp_paths {
-            if let Ok(content) = fs::read_to_string(path) {
-                if let Ok(temp_milli) = content.trim().parse::<i32>() {
-                    return (temp_milli as f32 / 1000.0, true);
-                }
+            if let Ok(content) = fs::read_to_string(path)
+                && let Ok(temp_milli) = content.trim().parse::<i32>()
+            {
+                return (temp_milli as f32 / 1000.0, true);
             }
         }
 
