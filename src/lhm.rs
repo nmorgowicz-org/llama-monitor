@@ -8,6 +8,7 @@ use wmi::{Variant, WMIConnection};
 use std::collections::HashMap;
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 pub async fn ensure_lhm_available() -> Result<(), String> {
     // Just check if LHM is available (running or installable)
     // Don't auto-start - let the UI handle that

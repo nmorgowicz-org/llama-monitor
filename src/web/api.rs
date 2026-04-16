@@ -289,6 +289,7 @@ pub fn api_routes(
         api_spawn_session_with_preset(state.clone(), app_config.clone());
     let attach = api_attach(state.clone());
     let check_lhm = api_check_lhm();
+    let start_lhm = api_lhm_start();
     let install_lhm = api_lhm_install();
     let uninstall_lhm = api_lhm_uninstall();
     let progress_lhm = api_lhm_progress();
@@ -319,6 +320,7 @@ pub fn api_routes(
         .or(spawn_session_with_preset)
         .or(attach)
         .or(check_lhm)
+        .or(start_lhm)
         .or(progress_lhm)
         .or(status_lhm)
        .or(install_lhm)
