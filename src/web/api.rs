@@ -38,24 +38,53 @@ fn api_check_lhm() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
             async move {
                 #[cfg(target_os = "windows")]
                 {
-                    match lhm::ensure_lhm_available().await {
-                        Ok(()) => {
-                            Ok::<_, warp::Rejection>(warp::reply::json(
-                                &serde_json::json!({"available": true}),
-                            ))
-                        }
-                        Err(_) => {
-                            Ok::<_, warp::Rejection>(warp::reply::json(
-                                &serde_json::json!({"available": false}),
-                            ))
-                        }
+                    let running = lhm::is_lhm_running();
+                    let installed = lhm::is_lhm_installed();
+                    Ok::<_, warp::Rejection>(warp::reply::json(
+                        &serde_json::json!({
+                            "running": running,
+                            "installed": installed,
+                            "available": running
+                        }),
+                    ))
+                }
+
+                #[cfg(not(target_os = "windows"))]
+                {
+                    Ok::<_, warp::Rejection>(warp::reply::json(
+                        &serde_json::json!({
+                            "running": false,
+                            "installed": false,
+                            "available": false,
+                            "error": "Not supported on this platform"
+                        }),
+                    ))
+                }
+            }
+        })
+}
+
+fn api_lhm_start() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "lhm" / "start")
+        .and(warp::post())
+        .and_then(move || {
+            async move {
+                #[cfg(target_os = "windows")]
+                {
+                    match lhm::start_lhm().await {
+                        Ok(()) => Ok::<_, warp::Rejection>(warp::reply::json(
+                            &serde_json::json!({"success": true}),
+                        )),
+                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(
+                            &serde_json::json!({"success": false, "error": e}),
+                        )),
                     }
                 }
 
                 #[cfg(not(target_os = "windows"))]
                 {
                     Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({"available": false, "error": "Not supported on this platform"}),
+                        &serde_json::json!({"success": false, "error": "Not supported on this platform"}),
                     ))
                 }
             }

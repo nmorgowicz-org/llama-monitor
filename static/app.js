@@ -2233,8 +2233,8 @@ async function showLHMNotification() {
             
             if (checkResp && checkResp.ok) {
                 const checkData = await checkResp.json();
-                lhmAvailable = checkData.available || false;
-                lhmInstalled = lhmAvailable; // If available, it's installed
+                lhmAvailable = checkData.running || false;
+                lhmInstalled = checkData.installed || false;
             }
             
             if (isDisabled) {
@@ -2258,15 +2258,58 @@ async function showLHMNotification() {
                         showToast('Failed to enable LHM: ' + err.message, 'error');
                     }
                 };
-            } else if (lhmInstalled) {
-                // LHM is installed but maybe not running
-                lhmStatusEl.textContent = 'LibreHardwareMonitor is installed and available. CPU temperature monitoring is active.';
+            } else if (lhmAvailable) {
+                // LHM is running
+                lhmStatusEl.textContent = 'LibreHardwareMonitor is running. CPU temperature monitoring is active.';
                 lhmButtonsEl.innerHTML = `
                     <button id="btn-lhm-uninstall" style="flex:1;padding:10px;background:#bf616a;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">Uninstall LHM</button>
                 `;
                 lhmButtonsEl.querySelector('#btn-lhm-uninstall').onclick = async () => {
                     overlay.remove();
                     const uninstallConfirm = confirm('Are you sure you want to uninstall LibreHardwareMonitor? This will disable CPU temperature monitoring.');
+                    if (uninstallConfirm) {
+                        try {
+                            const uninstallResp = await fetch('/api/lhm/uninstall', {
+                                method: 'POST'
+                            });
+                            if (uninstallResp.ok) {
+                                showToast('LHM uninstalled successfully', 'success');
+                                setTimeout(() => location.reload(), 1500);
+                            }
+                        } catch (err) {
+                            showToast('Failed to uninstall LHM: ' + err.message, 'error');
+                        }
+                    }
+                };
+            } else if (lhmInstalled) {
+                // LHM is installed but not running - offer to start it
+                lhmStatusEl.textContent = 'LibreHardwareMonitor is installed but not running. Start it to enable CPU temperature monitoring.';
+                lhmButtonsEl.innerHTML = `
+                    <button id="btn-lhm-start" style="flex:1;padding:10px;background:#a3be8c;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">Start LHM</button>
+                    <button id="btn-lhm-uninstall" style="flex:1;padding:10px;background:#bf616a;border:none;border-radius:4px;cursor:pointer;">Uninstall LHM</button>
+                `;
+                
+                lhmButtonsEl.querySelector('#btn-lhm-start').onclick = async () => {
+                    overlay.remove();
+                    try {
+                        const startResp = await fetch('/api/lhm/start', {
+                            method: 'POST'
+                        });
+                        if (startResp.ok) {
+                            showToast('LHM started successfully', 'success');
+                            setTimeout(() => location.reload(), 2000);
+                        } else {
+                            const data = await startResp.json();
+                            showToast('Failed to start LHM: ' + (data.error || 'Unknown error'), 'error');
+                        }
+                    } catch (err) {
+                        showToast('Failed to start LHM: ' + err.message, 'error');
+                    }
+                };
+                
+                lhmButtonsEl.querySelector('#btn-lhm-uninstall').onclick = async () => {
+                    overlay.remove();
+                    const uninstallConfirm = confirm('Are you sure you want to uninstall LibreHardwareMonitor?');
                     if (uninstallConfirm) {
                         try {
                             const uninstallResp = await fetch('/api/lhm/uninstall', {
@@ -2385,12 +2428,12 @@ async function showLHMNotification() {
                                     return;
                                 }
                                 
-                                attempts++;
-                                console.log(`[LHM UI] Checking progress (attempt ${attempts})...`);
-                                
-                                try {
-                                    const progressResp = await fetch('/api/lhm/progress');
-                                    if (progressResp.ok) {
+                                  attempts++;
+                                    console.log(`[LHM UI] Checking progress (attempt ${attempts})...`);
+                                        
+                                        try {
+                                            const progressResp = await fetch('/api/lhm/progress');
+                                            if (progressResp.ok) {
                                         const progressData = await progressResp.json();
                                         const progress = progressData.progress || '';
                                         
@@ -2432,13 +2475,11 @@ async function showLHMNotification() {
                                                     }, 2000);
                                                 }
                                             }, 1500);
-                                        } else {
-                                            setTimeout(checkProgress, 500);
+                                           } else {
+                                                setTimeout(checkProgress, 500);
+                                            }
                                         }
-                                    } else {
-                                        setTimeout(checkProgress, 500);
-                                    }
-                                } catch (err) {
+                                    } catch (err) {
                                     console.error('[LHM UI] Progress check error:', err);
                                     setTimeout(checkProgress, 500);
                                 }
@@ -2457,21 +2498,13 @@ async function showLHMNotification() {
                  showToast(`Installation error: ${err.message}`, 'error');
              }
          };
-        }
+       }
         } catch (err) {
             console.error('[LHM UI] Error checking LHM status:', err);
             lhmStatusEl.textContent = 'Error checking LHM status. Please try again.';
         }
-        
-        const btnCancel = overlay.querySelector('#btn-lhm-cancel');
-         if (btnCancel) {
-             btnCancel.onclick = () => {
-                 overlay.remove();
-                 resolve('cancel');
-             };
-         }
-     });
- }
+      });
+  }
 
 // Create the UAC warning overlay
 function createUACWarningOverlay() {

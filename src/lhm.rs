@@ -9,107 +9,43 @@ use std::collections::HashMap;
 
 #[cfg(target_os = "windows")]
 pub async fn ensure_lhm_available() -> Result<(), String> {
-    // First check if process is running (portable mode)
-    if is_lhm_running() {
-        eprintln!("[LHM] Process is already running");
+    // Just check if LHM is available (running or installable)
+    // Don't auto-start - let the UI handle that
+    if is_lhm_available() {
         return Ok(());
     }
     
+    // Check if installed but not running
+    if is_lhm_installed() {
+        eprintln!("[LHM] Installed but not running");
+        return Ok(());
+    }
+    
+    Err("No LHM installation found".to_string())
+}
+
+#[cfg(target_os = "windows")]
+pub fn is_lhm_installed() -> bool {
     // Check if binary exists at portable location
     if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
         let lhm_exe = std::path::PathBuf::from(&local_app_data)
             .join("LibreHardwareMonitor")
             .join("LibreHardwareMonitor.exe");
-        
         if lhm_exe.exists() {
-            eprintln!("[LHM] Binary found at {}, starting...", lhm_exe.display());
-            std::process::Command::new(&lhm_exe)
-                .arg("-s")  // Silent mode
-                .spawn()
-                .map_err(|e| format!("Failed to start LHM: {}", e))?;
-            
-            // Give it time to start
-            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-            
-            // Minimize if it came up
-            minimize_lhm().ok();
-            
-            return Ok(());
+            return true;
         }
     }
     
-    eprintln!("[LHM] Checking WMI Sensor class...");
-    match WMIConnection::new() {
-        Ok(wmi) => {
-            match wmi
-                .raw_query::<HashMap<String, Variant>>("SELECT * FROM Sensor")
-                .map_err(|_| "WMI query failed".to_string())
-            {
-                Ok(results) => {
-                    if !results.is_empty() {
-                        eprintln!("[LHM] WMI Sensor class available");
-                        return Ok(());
-                    }
-                    eprintln!("[LHM] WMI Sensor class not available");
-                }
-                Err(_) => {
-                    eprintln!("[LHM] WMI Sensor query failed");
-                }
-            }
-        }
-        Err(_) => {
-            eprintln!("[LHM] Failed to connect to WMI");
-        }
-    }
-
-    eprintln!("[LHM] Checking WMI Hardware class...");
-    match WMIConnection::new() {
-        Ok(wmi) => match wmi.raw_query::<HashMap<String, Variant>>("SELECT * FROM Hardware") {
-            Ok(results) => {
-                if !results.is_empty() {
-                    eprintln!("[LHM] WMI Hardware class available");
-                    return Ok(());
-                }
-                eprintln!("[LHM] WMI Hardware class not available");
-            }
-            Err(_) => {
-                eprintln!("[LHM] WMI Hardware query failed");
-            }
-        },
-        Err(_) => {
-            eprintln!("[LHM] Failed to connect to WMI");
-        }
-    }
-
-    eprintln!("[LHM] Checking LibreHardwareMonitorService...");
-    if let Ok(output) = std::process::Command::new("sc")
-        .args(["query", "LibreHardwareMonitorService"])
-        .output()
-    {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if stdout.contains("RUNNING") || stdout.contains("STARTED") {
-            eprintln!("[LHM] LibreHardwareMonitorService is running");
-            return Ok(());
-        }
-        eprintln!(
-            "[LHM] LibreHardwareMonitorService not running: {}",
-            stdout.trim()
-        );
-    }
-
-    eprintln!("[LHM] Checking registry key...");
+    // Check for service installation
     if let Ok(output) = std::process::Command::new("reg")
         .args(["query", "HKLM\\SOFTWARE\\LibreHardwareMonitor"])
         .output()
+        && output.status.success()
     {
-        if output.status.success() {
-            eprintln!("[LHM] Registry key exists");
-            return Ok(());
-        }
-        eprintln!("[LHM] Registry key not found");
+        return true;
     }
 
-    Err("No LHM installation found".to_string())
+    false
 }
 
 #[cfg(target_os = "windows")]
@@ -131,6 +67,43 @@ pub fn is_lhm_available() -> bool {
     }
 
     false
+}
+
+#[cfg(target_os = "windows")]
+pub async fn start_lhm() -> Result<(), String> {
+    if is_lhm_running() {
+        eprintln!("[LHM] Already running");
+        return Ok(());
+    }
+    
+    // Check if binary exists at portable location
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let lhm_exe = std::path::PathBuf::from(&local_app_data)
+            .join("LibreHardwareMonitor")
+            .join("LibreHardwareMonitor.exe");
+        
+        if lhm_exe.exists() {
+            eprintln!("[LHM] Starting LHM from {}", lhm_exe.display());
+            std::process::Command::new(&lhm_exe)
+                .arg("-s")  // Silent mode
+                .spawn()
+                .map_err(|e| format!("Failed to start LHM: {}", e))?;
+            
+            // Poll until process is detected (up to 5 seconds)
+            for i in 0..10 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                if is_lhm_running() {
+                    eprintln!("[LHM] Process detected after {}ms", (i + 1) * 500);
+                    minimize_lhm().ok();
+                    return Ok(());
+                }
+            }
+            eprintln!("[LHM] Process not detected after 5 seconds");
+            return Err("LHM failed to start".to_string());
+        }
+    }
+    
+    Err("LHM not installed".to_string())
 }
 
 #[cfg(target_os = "windows")]
