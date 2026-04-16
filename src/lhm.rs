@@ -9,6 +9,35 @@ use std::collections::HashMap;
 
 #[cfg(target_os = "windows")]
 pub async fn ensure_lhm_available() -> Result<(), String> {
+    // First check if process is running (portable mode)
+    if is_lhm_running() {
+        eprintln!("[LHM] Process is already running");
+        return Ok(());
+    }
+    
+    // Check if binary exists at portable location
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let lhm_exe = std::path::PathBuf::from(&local_app_data)
+            .join("LibreHardwareMonitor")
+            .join("LibreHardwareMonitor.exe");
+        
+        if lhm_exe.exists() {
+            eprintln!("[LHM] Binary found at {}, starting...", lhm_exe.display());
+            std::process::Command::new(&lhm_exe)
+                .arg("-s")  // Silent mode
+                .spawn()
+                .map_err(|e| format!("Failed to start LHM: {}", e))?;
+            
+            // Give it time to start
+            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            
+            // Minimize if it came up
+            minimize_lhm().ok();
+            
+            return Ok(());
+        }
+    }
+    
     eprintln!("[LHM] Checking WMI Sensor class...");
     match WMIConnection::new() {
         Ok(wmi) => {
@@ -85,10 +114,13 @@ pub async fn ensure_lhm_available() -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 pub fn is_lhm_available() -> bool {
+    // First check if process is running (portable mode)
     if is_lhm_running() {
+        eprintln!("[LHM] Process is running");
         return true;
     }
-
+    
+    // Check for service installation
     if let Ok(output) = std::process::Command::new("reg")
         .args(["query", "HKLM\\SOFTWARE\\LibreHardwareMonitor"])
         .output()
@@ -131,11 +163,21 @@ pub fn get_lhm_cpu_temp() -> (f32, bool) {
 
 #[cfg(target_os = "windows")]
 pub fn is_lhm_running() -> bool {
-    use std::ffi::OsStr;
     use sysinfo::System;
     
     let sys = System::new_all();
-    !sys.processes_by_name(OsStr::new("LibreHardwareMonitor")).next().is_none()
+    
+    // Try exact match first, then partial match
+    for process in sys.processes().values() {
+        if let Some(name) = process.name().to_str() {
+            let name_lower = name.to_lowercase();
+            if name_lower.contains("librehardwaremonitor") {
+                eprintln!("[LHM] Found running process: {}", name);
+                return true;
+            }
+        }
+    }
+    false
 }
 
 #[cfg(target_os = "windows")]
