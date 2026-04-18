@@ -25,7 +25,9 @@ edition = "2024"
     sysinfo = "0.38"
     tokio = { version = "1.51", features = ["full"] }
     warp = { version = "0.4", features = ["server", "websocket"] }
-    wmi = { version = "0.18.4", features = ["default"] }
     notify-rust = "4"
     webbrowser = "1"
     tray-icon = "0.22"
+
+[target.'cfg(windows)'.dependencies]
+    wmi = { version = "0.18.4", features = ["default"] }
