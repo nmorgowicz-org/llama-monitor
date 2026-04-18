@@ -42,13 +42,21 @@ jobs:
 
       - name: Build all targets
         run: |
-          cargo build --release --target x86_64-unknown-linux-gnu
+          cargo build --release --target x86_64-unknown-linux-gnu & pid1=$!
           PKG_CONFIG_ALLOW_CROSS=1 \
             PKG_CONFIG_SYSROOT_DIR=/opt/arm64-sysroot \
             PKG_CONFIG_PATH=/opt/arm64-sysroot/usr/lib/aarch64-linux-gnu/pkgconfig:/opt/arm64-sysroot/usr/share/pkgconfig \
-            cargo build --release --target aarch64-unknown-linux-gnu
-          cargo build --release --target x86_64-pc-windows-gnu
-          cargo build --release --target aarch64-apple-darwin
+            cargo build --release --target aarch64-unknown-linux-gnu & pid2=$!
+          cargo build --release --target x86_64-pc-windows-gnu & pid3=$!
+          CC_aarch64_apple_darwin=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-clang \
+            AR_aarch64_apple_darwin=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
+            cargo build --release --target aarch64-apple-darwin & pid4=$!
+          RESULT=0
+          wait $pid1 || RESULT=1
+          wait $pid2 || RESULT=1
+          wait $pid3 || RESULT=1
+          wait $pid4 || RESULT=1
+          exit $RESULT
 
       - name: Copy binaries
         run: |
