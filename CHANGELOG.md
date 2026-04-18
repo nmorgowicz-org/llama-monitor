@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.4.0...v0.5.0) (2026-04-18)
+
+
+### Features
+
+* **ci:** bump release-please-action to v4.4.1 ([#22](https://github.com/nmorgowicz-org/llama-monitor/issues/22)) ([30de47d](https://github.com/nmorgowicz-org/llama-monitor/commit/30de47dc136979c5504e864e071b00108b077ab0))
+
 ## [0.4.0](https://github.com/nickveldrin/llama-monitor/compare/v0.3.1...v0.4.0) (2026-04-15)
 
 
