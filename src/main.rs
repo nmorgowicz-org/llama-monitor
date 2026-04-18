@@ -10,6 +10,7 @@ mod models;
 mod presets;
 mod state;
 mod system;
+mod tray;
 mod web;
 
 use anyhow::Result;
@@ -146,6 +147,14 @@ async fn main() -> Result<()> {
     let routes = web::build_routes(state.clone(), app_config.clone());
 
     println!("[info] Llama Monitor running on http://0.0.0.0:{port}");
+
+    // Start system tray (blocking call, runs in separate thread)
+    thread::spawn({
+        let state = state.clone();
+        move || {
+            crate::tray::run_tray(state, port);
+        }
+    });
 
     // Start sessions persistence timer
     {
