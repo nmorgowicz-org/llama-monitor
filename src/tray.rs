@@ -6,6 +6,7 @@ use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
 use winit::window::WindowId;
 
 use crate::gpu::GpuMetrics;
@@ -20,8 +21,50 @@ type TrayMetrics = (
     Option<String>,
 );
 
+fn create_tray_icon() -> Icon {
+    let size = 64u32;
+    let mut rgba = vec![0u8; (size * size * 4) as usize];
+
+    for y in 0..size {
+        for x in 0..size {
+            let idx = ((y * size + x) * 4) as usize;
+            let cx = size / 2;
+            let cy = size / 2;
+            let dx = (x as i32 - cx as i32) as f32;
+            let dy = (y as i32 - cy as i32) as f32;
+            let dist = (dx * dx + dy * dy).sqrt();
+
+            if dist < size as f32 / 2.0 - 2.0 {
+                let t = (dist / (size as f32 / 2.0)) * 0.3;
+                rgba[idx] = (46.0 * (1.0 - t) + 136.0 * t) as u8;
+                rgba[idx + 1] = (52.0 * (1.0 - t) + 192.0 * t) as u8;
+                rgba[idx + 2] = (64.0 * (1.0 - t) + 209.0 * t) as u8;
+                rgba[idx + 3] = 255;
+            } else {
+                rgba[idx] = 0;
+                rgba[idx + 1] = 0;
+                rgba[idx + 2] = 0;
+                rgba[idx + 3] = 0;
+            }
+        }
+    }
+
+    Icon::from_rgba(rgba, size, size).unwrap_or_else(|_| {
+        let default: &[u8] = &[0, 128, 255, 255];
+        Icon::from_rgba(default.to_vec(), 1, 1).unwrap()
+    })
+}
+
 pub fn run_tray(state: AppState, port: u16) {
-    let event_loop = EventLoop::new().expect("Failed to create event loop");
+    #[cfg(target_os = "macos")]
+    {
+        let _ = mac_notification_sys::set_application("com.apple.Finder");
+    }
+
+    let event_loop = EventLoop::builder()
+        .with_activation_policy(ActivationPolicy::Accessory)
+        .build()
+        .expect("Failed to create event loop");
 
     let tray_state = TrayState {
         app_state: Arc::new(state),
@@ -53,11 +96,7 @@ pub fn run_tray(state: AppState, port: u16) {
     tray_menu.append(&sep2).unwrap();
     tray_menu.append(&quit_item).unwrap();
 
-    let icon_data: &[u8] = include_bytes!("../static/icon.svg");
-    let icon = Icon::from_rgba(icon_data.to_vec(), 64, 64).unwrap_or_else(|_| {
-        let default: &[u8] = &[0xFF, 0xFF, 0xFF, 0xFF];
-        Icon::from_rgba(default.to_vec(), 1, 1).unwrap()
-    });
+    let icon = create_tray_icon();
 
     let mut app = TrayApp {
         tray_state,
@@ -88,9 +127,6 @@ struct TrayApp {
 
 impl ApplicationHandler for TrayApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        #[cfg(target_os = "macos")]
-        event_loop.set_activation_policy(winit::application::ActivationPolicy::Regular);
-
         let tray = TrayIconBuilder::new()
             .with_menu(std::mem::replace(
                 &mut self.tray_menu,
@@ -101,10 +137,13 @@ impl ApplicationHandler for TrayApp {
                 &mut self.icon,
                 Icon::from_rgba(vec![0xFF, 0xFF, 0xFF, 0xFF], 1, 1).unwrap(),
             ))
-            .build()
-            .expect("Failed to build tray icon");
-
-        self.tray = Some(tray);
+            .build();
+        self.tray = tray.ok();
+        if self.tray.is_some() {
+            eprintln!("[tray] tray icon created successfully");
+        } else {
+            eprintln!("[tray] FAILED to create tray icon");
+        }
 
         self.tray_state
             .show_notification("Llama Monitor", "Started");
@@ -280,6 +319,10 @@ impl TrayState {
     }
 
     fn show_notification(&self, title: &str, body: &str) {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = mac_notification_sys::set_application("com.apple.Finder");
+        }
         let mut b = notify_rust::Notification::new();
         let _ = b.appname("llama-monitor").summary(title).body(body);
 
