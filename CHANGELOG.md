@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.5.0...v0.5.1) (2026-04-19)
+
+
+### Bug Fixes
+
+* **ci:** add --allow-shlib-undefined for aarch64 cross-compilation ([#27](https://github.com/nmorgowicz-org/llama-monitor/issues/27)) ([0d821d4](https://github.com/nmorgowicz-org/llama-monitor/commit/0d821d4a92088a33235a2c1632fac51979e54fdd))
+* **ci:** configure arm64 cross-compilation sysroot ([#25](https://github.com/nmorgowicz-org/llama-monitor/issues/25)) ([86bb6bd](https://github.com/nmorgowicz-org/llama-monitor/commit/86bb6bdb58ea38d0e49850e06e0cf2226c07976d))
+
 ## [0.5.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.4.0...v0.5.0) (2026-04-18)
 
 
