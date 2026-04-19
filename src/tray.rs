@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder, TrayIconEvent};
@@ -15,6 +16,11 @@ use crate::gpu::GpuMetrics;
 use crate::llama::metrics::LlamaMetrics;
 use crate::state::AppState;
 use crate::system::SystemMetrics;
+
+const POPOVER_WIDTH: f64 = 240.0;
+const POPOVER_INITIAL_HEIGHT: f64 = 220.0;
+const POPOVER_MIN_HEIGHT: f64 = 96.0;
+const POPOVER_MAX_HEIGHT: f64 = 520.0;
 
 type TrayMetrics = (
     SystemMetrics,
@@ -75,6 +81,8 @@ pub fn run_tray(state: AppState, port: u16) {
         .build()
         .expect("Failed to create event loop");
 
+    let (resize_tx, resize_rx) = mpsc::channel();
+
     let app: Box<dyn winit::application::ApplicationHandler + 'static> = Box::new(TrayApp {
         tray_state: TrayState {
             app_state: Arc::new(state),
@@ -83,6 +91,8 @@ pub fn run_tray(state: AppState, port: u16) {
         icon: create_tray_icon(),
         port,
         popover: None,
+        resize_tx,
+        resize_rx,
     });
 
     event_loop.run_app(app).expect("Event loop error");
@@ -93,7 +103,22 @@ struct TrayApp {
     tray: Option<TrayIcon>,
     icon: Icon,
     port: u16,
-    popover: Option<(std::sync::Arc<dyn winit::window::Window>, wry::WebView)>,
+    popover: Option<Popover>,
+    resize_tx: Sender<PopoverResize>,
+    resize_rx: Receiver<PopoverResize>,
+}
+
+struct Popover {
+    window: std::sync::Arc<dyn winit::window::Window>,
+    webview: wry::WebView,
+    width: f64,
+    height: f64,
+}
+
+#[derive(serde::Deserialize)]
+struct PopoverResize {
+    width: f64,
+    height: f64,
 }
 
 impl ApplicationHandler for TrayApp {
@@ -146,10 +171,10 @@ impl ApplicationHandler for TrayApp {
                 {
                     if self.popover.is_some() {
                         self.close_popover();
-                    } else if let Some(ref tray) = self.tray {
-                        if let Some(rect) = tray.rect() {
-                            self.open_popover(event_loop, rect);
-                        }
+                    } else if let Some(ref tray) = self.tray
+                        && let Some(rect) = tray.rect()
+                    {
+                        self.open_popover(event_loop, rect);
                     }
                 }
                 _ => {}
@@ -162,13 +187,24 @@ impl ApplicationHandler for TrayApp {
             Instant::now() + Duration::from_millis(500),
         ));
     }
+
+    fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {
+        let mut latest = None;
+        while let Ok(resize) = self.resize_rx.try_recv() {
+            latest = Some(resize);
+        }
+
+        if let Some(resize) = latest {
+            self.resize_popover(resize.width, resize.height);
+        }
+    }
 }
 
 impl TrayApp {
     fn open_popover(&mut self, event_loop: &dyn ActiveEventLoop, icon_rect: tray_icon::Rect) {
         let pos = icon_rect.position;
-        let width = 240.0_f64;
-        let height = 280.0_f64;
+        let width = POPOVER_WIDTH;
+        let height = POPOVER_INITIAL_HEIGHT;
         let x = pos.x + (icon_rect.size.width as f64 / 2.0) - (width / 2.0);
         let y = pos.y + icon_rect.size.height as f64 + 4.0;
 
@@ -194,7 +230,15 @@ impl TrayApp {
                 .unwrap()
                 .as_secs()
         );
+        let proxy = event_loop.create_proxy();
+        let resize_tx = self.resize_tx.clone();
         let webview = match wry::WebViewBuilder::new()
+            .with_ipc_handler(move |request| {
+                if let Ok(resize) = serde_json::from_str::<PopoverResize>(request.body()) {
+                    let _ = resize_tx.send(resize);
+                    proxy.wake_up();
+                }
+            })
             .with_url(url)
             .with_bounds(wry::Rect {
                 position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
@@ -206,11 +250,38 @@ impl TrayApp {
             Err(_) => return,
         };
 
-        self.popover = Some((window, webview));
+        self.popover = Some(Popover {
+            window,
+            webview,
+            width,
+            height,
+        });
     }
 
     fn close_popover(&mut self) {
         self.popover.take();
+    }
+
+    fn resize_popover(&mut self, _reported_width: f64, height: f64) {
+        let Some(popover) = self.popover.as_mut() else {
+            return;
+        };
+
+        let width = POPOVER_WIDTH;
+        let height = height.clamp(POPOVER_MIN_HEIGHT, POPOVER_MAX_HEIGHT);
+        if (popover.width - width).abs() < 1.0 && (popover.height - height).abs() < 1.0 {
+            return;
+        }
+
+        let _ = popover
+            .window
+            .request_surface_size(winit::dpi::LogicalSize::new(width, height).into());
+        let _ = popover.webview.set_bounds(wry::Rect {
+            position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
+            size: wry::dpi::LogicalSize::new(width, height).into(),
+        });
+        popover.width = width;
+        popover.height = height;
     }
 }
 

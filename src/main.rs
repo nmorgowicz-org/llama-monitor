@@ -113,11 +113,11 @@ fn main() -> Result<()> {
                             eprintln!("[error] Failed to acquire gpu lock");
                         }
                         // Feed CPU/SoC temp from GPU backend (Apple only)
-                        if let Some(t) = backend.cpu_temp() {
-                            if let Ok(mut sys_lock) = sys.lock() {
-                                sys_lock.cpu_temp = t;
-                                sys_lock.cpu_temp_available = true;
-                            }
+                        if let Some(t) = backend.cpu_temp()
+                            && let Ok(mut sys_lock) = sys.lock()
+                        {
+                            sys_lock.cpu_temp = t;
+                            sys_lock.cpu_temp_available = true;
                         }
                     }
                     Err(e) => eprintln!("[error] GPU metrics: {e}"),

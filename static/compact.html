@@ -105,8 +105,15 @@ body {
     padding: 1px 0;
     font-size: 10px;
 }
-.inference-label { color: #8899aa; }
-.inference-value { font-family: monospace; color: #d8dee9; }
+.inference-label {
+    color: #8899aa;
+    flex: 0 0 auto;
+}
+.inference-value {
+    font-family: monospace;
+    color: #d8dee9;
+    text-align: right;
+}
 .dash-line {
     color: #4c566a;
     font-family: monospace;
@@ -257,16 +264,31 @@ function renderGPUs(gpuEntries) {
 
 // Expose function to get content dimensions for native resize
 window.getContentDimensions = function() {
-    const body = document.body;
-    const rect = body.getBoundingClientRect();
-    const width = Math.ceil(Math.max(rect.width, body.scrollWidth));
-    const height = Math.ceil(Math.max(rect.height, body.scrollHeight));
+    let height = 0;
+    for (const child of document.body.children) {
+        const style = window.getComputedStyle(child);
+        if (style.display === 'none') continue;
+        const rect = child.getBoundingClientRect();
+        height += rect.height;
+    }
+    const bodyStyle = window.getComputedStyle(document.body);
+    height += parseFloat(bodyStyle.paddingTop) + parseFloat(bodyStyle.paddingBottom);
+    const width = Math.ceil(Math.max(document.body.getBoundingClientRect().width, document.body.scrollWidth));
+    height = Math.ceil(height);
     return { width, height };
 };
+
+function reportPopoverSize() {
+    if (!window.ipc || !window.ipc.postMessage) return;
+    requestAnimationFrame(function() {
+        window.ipc.postMessage(JSON.stringify(window.getContentDimensions()));
+    });
+}
 
 // Signal ready when content is loaded
 window.addEventListener('load', function() {
     window.__popoverReady = true;
+    reportPopoverSize();
 });
 
 function clearMetrics() {
@@ -282,12 +304,14 @@ function clearMetrics() {
     document.getElementById('inf-prompt').innerHTML = '<span class="dash-line">—</span> tok/s';
     document.getElementById('inf-generate').innerHTML = '<span class="dash-line">—</span> tok/s';
     document.getElementById('inf-context').innerHTML = '<span class="dash-line">—</span> %';
+    reportPopoverSize();
 }
 
 function clearLocalMetrics() {
     document.getElementById('cpu-section').style.display = 'none';
     document.getElementById('ram-section').style.display = 'none';
     document.getElementById('gpu-sections').innerHTML = '';
+    reportPopoverSize();
 }
 
 ws.onmessage = function(e) {
@@ -348,10 +372,11 @@ ws.onmessage = function(e) {
     }
     if (l.kv_cache_max > 0) {
         const ctxPct = ((l.kv_cache_tokens / l.kv_cache_max) * 100).toFixed(0);
-        document.getElementById('inf-context').innerHTML = ctxPct + '%';
+        document.getElementById('inf-context').innerHTML = l.kv_cache_tokens + ' / ' + l.kv_cache_max + ' (' + ctxPct + '%)';
     } else {
         document.getElementById('inf-context').innerHTML = '<span class="dash-line">—</span> %';
     }
+    reportPopoverSize();
 };
 </script>
 </body>

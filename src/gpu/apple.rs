@@ -69,10 +69,10 @@ impl GpuBackend for AppleBackend {
             .ok_or_else(|| anyhow::anyhow!("mactop returned empty JSON array"))?;
 
         // Cache CPU/SoC temperature for cpu_temp()
-        if mactop_output.soc_metrics.cpu_temp > 0.0 {
-            if let Ok(mut t) = self.last_cpu_temp.lock() {
-                *t = mactop_output.soc_metrics.cpu_temp as f32;
-            }
+        if mactop_output.soc_metrics.cpu_temp > 0.0
+            && let Ok(mut t) = self.last_cpu_temp.lock()
+        {
+            *t = mactop_output.soc_metrics.cpu_temp as f32;
         }
 
         // Convert bytes to MB
