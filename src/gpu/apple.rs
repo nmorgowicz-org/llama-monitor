@@ -14,11 +14,16 @@ struct MactopOutput {
 
 #[derive(Deserialize)]
 struct SocMetrics {
+    #[serde(default)]
     gpu_power: f64,
+    #[serde(default)]
     gpu_freq_mhz: f64,
+    #[serde(default)]
     gpu_temp: f64,
     gpu_active: f64,
+    #[serde(default)]
     dram_read_bw_gbs: f64,
+    #[serde(default)]
     dram_write_bw_gbs: f64,
 }
 

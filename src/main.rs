@@ -22,8 +22,7 @@ use std::time::Duration;
 const GPU_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SYSTEM_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let args = cli::AppArgs::parse();
     let app_config = Arc::new(config::AppConfig::from_args(args));
 
@@ -136,30 +135,29 @@ async fn main() -> Result<()> {
         });
     }
 
-    // Llama metrics poller
-    {
-        let s = state.clone();
-        let interval = app_config.llama_poll_interval;
-        tokio::spawn(llama::poller::llama_metrics_poller(s, interval));
-    }
-
     let port = app_config.port;
     let routes = web::build_routes(state.clone(), app_config.clone());
 
     println!("[info] Llama Monitor running on http://0.0.0.0:{port}");
 
-    // Start system tray (blocking call, runs in separate thread)
-    thread::spawn({
-        let state = state.clone();
-        move || {
-            crate::tray::run_tray(state, port);
-        }
-    });
+    // Build tokio runtime for async tasks (warp server, pollers, etc.)
+    // The runtime runs in background threads; the main thread is reserved
+    // for the system tray, which macOS requires to be on the main thread.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
 
-    // Start sessions persistence timer
+    // Llama metrics poller
+    {
+        let s = state.clone();
+        let interval = app_config.llama_poll_interval;
+        runtime.spawn(llama::poller::llama_metrics_poller(s, interval));
+    }
+
+    // Sessions persistence timer
     {
         let state = state.clone();
-        tokio::spawn(async move {
+        runtime.spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
                 if let Err(e) =
@@ -171,7 +169,13 @@ async fn main() -> Result<()> {
         });
     }
 
-    warp::serve(routes).run(([0, 0, 0, 0], port)).await;
+    // Warp server
+    runtime.spawn(async move {
+        warp::serve(routes).run(([0, 0, 0, 0], port)).await;
+    });
+
+    // Run tray on the main thread (required by macOS; fine on all platforms)
+    crate::tray::run_tray(state, port);
 
     Ok(())
 }

@@ -68,8 +68,10 @@ jobs:
           cp target/x86_64-unknown-linux-gnu/release/llama-monitor ./llama-monitor-linux-x86_64
           cp target/aarch64-unknown-linux-gnu/release/llama-monitor ./llama-monitor-linux-aarch64
           cp target/x86_64-pc-windows-gnu/release/llama-monitor.exe ./llama-monitor-windows-x86_64.exe
+          chmod +x ./llama-monitor-linux-x86_64 ./llama-monitor-linux-aarch64
           cp target/aarch64-apple-darwin/release/llama-monitor ./llama-monitor-macos-aarch64
-          chmod +x ./llama-monitor-linux-x86_64 ./llama-monitor-linux-aarch64 ./llama-monitor-macos-aarch64
+          chmod +x ./llama-monitor-macos-aarch64
+          tar -czf llama-monitor-macos-aarch64.tar.gz llama-monitor-macos-aarch64
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -79,7 +81,7 @@ jobs:
             llama-monitor-linux-x86_64
             llama-monitor-linux-aarch64
             llama-monitor-windows-x86_64.exe
-            llama-monitor-macos-aarch64
+            llama-monitor-macos-aarch64.tar.gz
 
   release:
     needs: build
@@ -107,6 +109,6 @@ jobs:
             llama-monitor-linux-x86_64
             llama-monitor-linux-aarch64
             llama-monitor-windows-x86_64.exe
-            llama-monitor-macos-aarch64
+            llama-monitor-macos-aarch64.tar.gz
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
