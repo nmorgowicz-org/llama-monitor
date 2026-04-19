@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Llama Monitor</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #2e3440;
+    color: #d8dee9;
+    width: 320px;
+    overflow-x: hidden;
+    font-size: 0.75rem;
+    padding: 0;
+}
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 10px;
+    background: #3b4252;
+    border-bottom: 1px solid #4c566a;
+}
+.header h1 {
+    font-size: 0.82rem;
+    color: #88c0d1;
+    font-weight: 600;
+}
+.close-btn {
+    background: none;
+    border: none;
+    color: #6a7585;
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+}
+.close-btn:hover { color: #d8dee9; }
+.status-bar {
+    padding: 4px 10px;
+    font-size: 0.68rem;
+    color: #6a7585;
+    border-bottom: 1px solid #4c566a;
+}
+.status-bar .running { color: #a3be8c; }
+.status-bar .stopped { color: #bf616a; }
+.section {
+    padding: 6px 10px;
+    border-bottom: 1px solid #4c566a;
+}
+.section-title {
+    font-size: 0.7rem;
+    color: #81a1c1;
+    font-weight: 600;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+.metric-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 3px;
+}
+.metric-label {
+    width: 60px;
+    flex-shrink: 0;
+    color: #8899aa;
+    font-size: 0.68rem;
+}
+.metric-bar-wrap {
+    flex: 1;
+    height: 8px;
+    background: #3b4252;
+    border-radius: 4px;
+    overflow: hidden;
+}
+.metric-bar {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+.metric-bar.cpu { background: #81a1c1; }
+.metric-bar.ram { background: #b48ead; }
+.metric-bar.gpu-load { background: #88c0d1; }
+.metric-bar.gpu-temp { background: #ebcb8b; }
+.metric-bar.gpu-vram { background: #a3be8c; }
+.metric-bar.prompt { background: #a3be8c; }
+.metric-bar.gen { background: #88c0d1; }
+.metric-bar.ctx { background: #b48ead; }
+.metric-value {
+    width: 70px;
+    text-align: right;
+    font-family: monospace;
+    font-size: 0.68rem;
+    flex-shrink: 0;
+}
+.gpu-section {
+    padding: 6px 10px;
+    border-bottom: 1px solid #4c566a;
+}
+.gpu-name {
+    font-size: 0.7rem;
+    color: #88c0d1;
+    font-weight: 600;
+    margin-bottom: 3px;
+}
+.inference-section {
+    padding: 6px 10px;
+}
+.inference-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 0;
+    font-size: 0.68rem;
+}
+.inference-label { color: #8899aa; }
+.inference-value { font-family: monospace; color: #d8dee9; }
+.dash-line {
+    color: #4c566a;
+    font-family: monospace;
+}
+</style>
+</head>
+<body>
+<div class="header">
+    <h1>llama-monitor</h1>
+    <button class="close-btn" onclick="window.close()">&times;</button>
+</div>
+<div class="status-bar" id="status-bar">Connecting...</div>
+
+<div class="section">
+    <div class="section-title">CPU</div>
+    <div class="metric-row">
+        <span class="metric-label">Load</span>
+        <div class="metric-bar-wrap"><div class="metric-bar cpu" id="cpu-load-bar" style="width:0%"></div></div>
+        <span class="metric-value" id="cpu-load">—</span>
+    </div>
+    <div class="metric-row">
+        <span class="metric-label">Temp</span>
+        <div class="metric-bar-wrap"><div class="metric-bar cpu" id="cpu-temp-bar" style="width:0%"></div></div>
+        <span class="metric-value" id="cpu-temp">—</span>
+    </div>
+</div>
+
+<div class="section">
+    <div class="metric-row">
+        <span class="metric-label">RAM</span>
+        <div class="metric-bar-wrap"><div class="metric-bar ram" id="ram-bar" style="width:0%"></div></div>
+        <span class="metric-value" id="ram">—</span>
+    </div>
+</div>
+
+<div id="gpu-sections"></div>
+
+<div class="inference-section">
+    <div class="section-title">Inference</div>
+    <div class="inference-row">
+        <span class="inference-label">Prompt</span>
+        <span class="inference-value"><span class="dash-line">—</span> tok/s</span>
+    </div>
+    <div class="inference-row">
+        <span class="inference-label">Generate</span>
+        <span class="inference-value"><span class="dash-line">—</span> tok/s</span>
+    </div>
+    <div class="inference-row">
+        <span class="inference-label">Context</span>
+        <span class="inference-value"><span class="dash-line">—</span> %</span>
+    </div>
+</div>
+
+<script>
+const PORT = __PORT__;
+const ws = new WebSocket('ws://127.0.0.1:' + PORT + '/ws');
+
+function setBar(id, pct, maxVal) {
+    const bar = document.getElementById(id);
+    if (!bar) return;
+    const p = Math.min(100, Math.max(0, (pct / maxVal) * 100));
+    bar.style.width = p + '%';
+}
+
+function updateStatus(running) {
+    const el = document.getElementById('status-bar');
+    if (running) {
+        el.innerHTML = '<span class="running">● Running</span>';
+    } else {
+        el.innerHTML = '<span class="stopped">● Stopped</span>';
+    }
+}
+
+function renderGPUs(gpuEntries) {
+    const container = document.getElementById('gpu-sections');
+    if (!container) return;
+    container.innerHTML = '';
+    for (const [name, m] of gpuEntries) {
+        const tempPct = m.temp / 120 * 100;
+        const loadPct = m.load;
+        const vramPct = m.vram_total > 0 ? (m.vram_used / m.vram_total * 100) : 0;
+        const vramGB = (m.vram_used / 1024).toFixed(1);
+        const vramTotalGB = (m.vram_total / 1024).toFixed(1);
+
+        const div = document.createElement('div');
+        div.className = 'gpu-section';
+        div.innerHTML =
+            '<div class="gpu-name">' + name + '</div>' +
+            '<div class="metric-row">' +
+                '<span class="metric-label">Load</span>' +
+                '<div class="metric-bar-wrap"><div class="metric-bar gpu-load" style="width:' + loadPct + '%"></div></div>' +
+                '<span class="metric-value">' + m.load + '%</span>' +
+            '</div>' +
+            '<div class="metric-row">' +
+                '<span class="metric-label">Temp</span>' +
+                '<div class="metric-bar-wrap"><div class="metric-bar gpu-temp" style="width:' + tempPct + '%"></div></div>' +
+                '<span class="metric-value">' + Math.round(m.temp) + '°C</span>' +
+            '</div>' +
+            '<div class="metric-row">' +
+                '<span class="metric-label">VRAM</span>' +
+                '<div class="metric-bar-wrap"><div class="metric-bar gpu-vram" style="width:' + vramPct + '%"></div></div>' +
+                '<span class="metric-value">' + vramGB + ' / ' + vramTotalGB + ' GB</span>' +
+            '</div>';
+        container.appendChild(div);
+    }
+}
+
+ws.onmessage = function(e) {
+    try {
+        const d = JSON.parse(e.data);
+    } catch(err) { return; }
+
+    updateStatus(d.server_running);
+
+    // CPU
+    const sys = d.system || {};
+    const cpuLoad = sys.cpu_load || 0;
+    setBar('cpu-load-bar', cpuLoad, 100);
+    document.getElementById('cpu-load').textContent = cpuLoad > 0 ? cpuLoad + '%' : '—';
+
+    if (sys.cpu_temp_available && sys.cpu_temp > 0) {
+        setBar('cpu-temp-bar', sys.cpu_temp, 120);
+        document.getElementById('cpu-temp').textContent = Math.round(sys.cpu_temp) + '°C';
+    } else {
+        setBar('cpu-temp-bar', 0, 120);
+        document.getElementById('cpu-temp').textContent = '—';
+    }
+
+    // RAM
+    if (sys.ram_total_gb > 0) {
+        const ramPct = (sys.ram_used_gb / sys.ram_total_gb) * 100;
+        setBar('ram-bar', ramPct, 100);
+        document.getElementById('ram').textContent = sys.ram_used_gb.toFixed(1) + ' / ' + sys.ram_total_gb.toFixed(1) + ' GB';
+    } else {
+        setBar('ram-bar', 0, 100);
+        document.getElementById('ram').textContent = '—';
+    }
+
+    // GPUs
+    const gpuEntries = Object.entries(d.gpu || {});
+    renderGPUs(gpuEntries);
+
+    // Inference
+    const l = d.llama || {};
+    if (l.prompt_tokens_per_sec > 0) {
+        document.querySelector('.inference-row:nth-child(1) .inference-value').innerHTML = l.prompt_tokens_per_sec.toFixed(1) + ' tok/s';
+    }
+    if (l.generation_tokens_per_sec > 0) {
+        document.querySelector('.inference-row:nth-child(2) .inference-value').innerHTML = l.generation_tokens_per_sec.toFixed(1) + ' tok/s';
+    }
+    if (l.kv_cache_max > 0) {
+        const ctxPct = ((l.kv_cache_tokens / l.kv_cache_max) * 100).toFixed(0);
+        document.querySelector('.inference-row:nth-child(3) .inference-value').innerHTML = ctxPct + '%';
+    }
+};
+
+ws.onerror = function() {};
+ws.onclose = function() {
+    document.getElementById('status-bar').innerHTML = '<span class="stopped">● Disconnected</span>';
+};
+</script>
+</body>
+</html>

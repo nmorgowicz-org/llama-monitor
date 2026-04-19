@@ -5,3 +5,4 @@ pub const LHM_JS: &str = include_str!("../../static/lhm.js");
 pub const MANIFEST_JSON: &str = include_str!("../../static/manifest.json");
 pub const SW_JS: &str = include_str!("../../static/sw.js");
 pub const ICON_SVG: &str = include_str!("../../static/icon.svg");
+pub const COMPACT_HTML: &str = include_str!("../../static/compact.html");

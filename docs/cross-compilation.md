@@ -47,6 +47,8 @@ apt install -y libfoo-dev:arm64    # arm64 (for the aarch64-unknown-linux-gnu bu
 libgtk-3-dev:arm64
 libayatana-appindicator3-dev:arm64
 libxdo-dev        # amd64 only — provides /usr/include/xdo.h and x86_64 .so symlink
+libwebkit2gtk-4.1-dev:arm64  # tray-popover feature — required by wry on Linux
+libwebkit2gtk-4.1-dev        # amd64 — same for native x86_64 build
 ```
 
 > **libxdo conflict:** `libxdo-dev` and `libxdo-dev:arm64` declare a dpkg conflict over the shared header `/usr/include/xdo.h` and cannot both be installed. Install only `libxdo-dev` (amd64), then manually create the arm64 symlink:

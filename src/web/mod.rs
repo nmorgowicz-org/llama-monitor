@@ -13,10 +13,21 @@ pub fn build_routes(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     let ws = ws::ws_route(state.clone());
-    let api = api::api_routes(state, app_config);
+    let api = api::api_routes(state, app_config.clone());
     let static_files = static_routes();
+    let compact = compact_route(app_config);
 
-    ws.or(api).or(static_files)
+    ws.or(api).or(static_files).or(compact)
+}
+
+fn compact_route(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let port = app_config.port;
+    warp::path("compact").and(warp::get()).map(move || {
+        let html = static_assets::COMPACT_HTML.replace("__PORT__", &port.to_string());
+        warp::reply::with_header(html, "content-type", "text/html")
+    })
 }
 
 fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {

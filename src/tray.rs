@@ -7,8 +7,17 @@ use tray_icon::menu::MenuId;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
 use winit::window::WindowId;
+
+#[cfg(target_os = "macos")]
+use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+
+#[cfg(feature = "tray-popover")]
+use tray_icon::TrayIconEvent;
+#[cfg(feature = "tray-popover")]
+use winit::window::{WindowAttributes, WindowLevel};
+#[cfg(feature = "tray-popover")]
+use winit::dpi::PhysicalPosition;
 
 use crate::gpu::GpuMetrics;
 use crate::llama::metrics::LlamaMetrics;
@@ -23,16 +32,6 @@ type TrayMetrics = (
 );
 
 fn create_tray_icon() -> Icon {
-    // 22x22 monitor outline icon. Used as a macOS template image so the OS
-    // renders it black on light mode and white on dark mode automatically.
-    //
-    //  2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1  (x, tens digit omitted)
-    //  . ┌─────────────────────────────────┐ .   y=3  monitor top
-    //  . │ . . . . . . . . . . . . . . . . │ .   y=4
-    //  . │ . . . . . . . . . . . . . . . . │ .   ...
-    //  . └─────────────────────────────────┘ .   y=13 monitor bottom
-    //  . . . . . . . . ┃ ┃ . . . . . . . . .   y=14-16 stand
-    //  . . . . . . ┌───────┐ . . . . . . . .   y=17 base
     let size = 22u32;
     let mut rgba = vec![0u8; (size * size * 4) as usize];
 
@@ -43,26 +42,23 @@ fn create_tray_icon() -> Icon {
         }
     };
 
-    // Monitor border (outline only, 2px thick top+sides, 1px bottom)
     for x in 2..=19 {
-        set(x, 3);  // top edge
-        set(x, 4);  // top edge thickness
-        set(x, 13); // bottom edge
+        set(x, 3);
+        set(x, 4);
+        set(x, 13);
     }
     for y in 3..=13 {
-        set(2, y);  // left edge
-        set(3, y);  // left edge thickness
-        set(18, y); // right edge
-        set(19, y); // right edge thickness
+        set(2, y);
+        set(3, y);
+        set(18, y);
+        set(19, y);
     }
 
-    // Stand (2px wide, centered)
     for y in 14..=16 {
         set(10, y);
         set(11, y);
     }
 
-    // Base (8px wide)
     for x in 7..=14 {
         set(x, 17);
         set(x, 18);
@@ -79,8 +75,14 @@ pub fn run_tray(state: AppState, port: u16) {
         let _ = mac_notification_sys::set_application("com.apple.Finder");
     }
 
+    #[cfg(target_os = "macos")]
     let event_loop = EventLoop::builder()
         .with_activation_policy(ActivationPolicy::Accessory)
+        .build()
+        .expect("Failed to create event loop");
+
+    #[cfg(not(target_os = "macos"))]
+    let event_loop = EventLoop::builder()
         .build()
         .expect("Failed to create event loop");
 
@@ -120,6 +122,8 @@ pub fn run_tray(state: AppState, port: u16) {
         poll_interval: Duration::from_secs(3),
         last_status_check: Instant::now(),
         status_check_interval: Duration::from_secs(10),
+        #[cfg(feature = "tray-popover")]
+        popover: None,
     };
 
     event_loop.run_app(&mut app).expect("Event loop error");
@@ -137,6 +141,8 @@ struct TrayApp {
     poll_interval: Duration,
     last_status_check: Instant,
     status_check_interval: Duration,
+    #[cfg(feature = "tray-popover")]
+    popover: Option<(winit::window::Window, wry::WebView)>,
 }
 
 impl ApplicationHandler for TrayApp {
@@ -178,9 +184,16 @@ impl ApplicationHandler for TrayApp {
         ));
     }
 
-    fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+    fn window_event(&mut self, _event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        #[cfg(feature = "tray-popover")]
+        if let WindowEvent::Focused(false) = event {
+            if self.popover.is_some() {
+                self.close_popover();
+            }
+        }
+    }
 
-    fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: winit::event::StartCause) {
+    fn new_events(&mut self, event_loop: &ActiveEventLoop, _cause: winit::event::StartCause) {
         while let Ok(event) = MenuEvent::receiver().try_recv() {
             match event.id.0.as_str() {
                 "open" | "stat_cpu" | "stat_gpu" => {
@@ -194,16 +207,32 @@ impl ApplicationHandler for TrayApp {
             }
         }
 
+        #[cfg(feature = "tray-popover")]
+        {
+            while let Ok(tray_event) = TrayIconEvent::receiver().try_recv() {
+                match &tray_event {
+                    TrayIconEvent::Click { button, rect, .. } if *button == tray_icon::MouseButton::Left => {
+                        if self.popover.is_some() {
+                            self.close_popover();
+                        } else if let Some(ref tray) = self.tray {
+                            if let Some(rect) = tray.rect() {
+                                self.open_popover(event_loop, rect);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         if let Some(ref tray) = self.tray {
             if self.last_poll.elapsed() >= self.poll_interval {
                 self.last_poll = Instant::now();
                 let metrics = self.tray_state.get_metrics();
 
-                // Update menu stat lines
                 self.cpu_item.set_text(self.tray_state.build_cpu_line(&metrics.0));
                 self.gpu_item.set_text(self.tray_state.build_gpu_line(&metrics.1));
 
-                // Update tooltip
                 if let Some(ref tooltip) = metrics.3 {
                     let _ = tray.set_tooltip(Some(tooltip));
                 }
@@ -221,6 +250,57 @@ impl ApplicationHandler for TrayApp {
         event_loop.set_control_flow(ControlFlow::WaitUntil(
             Instant::now() + Duration::from_millis(500),
         ));
+    }
+}
+
+#[cfg(feature = "tray-popover")]
+impl TrayApp {
+    fn open_popover(&mut self, event_loop: &ActiveEventLoop, icon_rect: tray_icon::Rect) {
+        let width = 320u32;
+        let height = 400u32;
+
+        let pos = icon_rect.position;
+        let x = pos.x + (icon_rect.size.width as f64 / 2.0) - (width as f64 / 2.0);
+        let y = pos.y + icon_rect.size.height as f64 + 4.0;
+
+        let attrs = WindowAttributes::default()
+            .with_inner_size(winit::dpi::PhysicalSize::new(width, height))
+            .with_position(PhysicalPosition::new(x as i32, y as i32))
+            .with_decorations(false)
+            .with_resizable(false)
+            .with_window_level(WindowLevel::AlwaysOnTop)
+            .with_visible(true);
+
+        let window = match event_loop.create_window(attrs) {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("[tray] Failed to create popover window: {}", e);
+                return;
+            }
+        };
+
+        let webview = match wry::WebViewBuilder::new()
+            .with_url(format!("http://127.0.0.1:{}/compact", self.port))
+            .build(&window)
+        {
+            Ok(wv) => wv,
+            Err(e) => {
+                eprintln!("[tray] Failed to create webview: {}", e);
+                return;
+            }
+        };
+
+        #[cfg(target_os = "macos")]
+        {
+            use winit::platform::macos::WindowExtMacOS;
+            window.set_accepts_mouse_moved_events(true);
+        }
+
+        self.popover = Some((window, webview));
+    }
+
+    fn close_popover(&mut self) {
+        self.popover.take();
     }
 }
 
