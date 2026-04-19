@@ -46,9 +46,14 @@ apt install -y libfoo-dev:arm64    # arm64 (for the aarch64-unknown-linux-gnu bu
 ```bash
 libgtk-3-dev:arm64
 libayatana-appindicator3-dev:arm64
-libxdo-dev:arm64
-libxdo-dev        # also needed for native x86_64 build
+libxdo-dev        # amd64 only — provides /usr/include/xdo.h and x86_64 .so symlink
 ```
+
+> **libxdo conflict:** `libxdo-dev` and `libxdo-dev:arm64` declare a dpkg conflict over the shared header `/usr/include/xdo.h` and cannot both be installed. Install only `libxdo-dev` (amd64), then manually create the arm64 symlink:
+> ```bash
+> ln -sf libxdo.so.3 /usr/lib/aarch64-linux-gnu/libxdo.so
+> ```
+> This gives the arm64 cross-linker the `.so` symlink it needs without conflicting packages. The header from the amd64 dev package is arch-neutral and works for both targets.
 
 ### pkg-config for arm64
 
