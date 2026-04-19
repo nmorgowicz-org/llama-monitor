@@ -132,8 +132,14 @@ fn main() -> Result<()> {
         let s = state.clone();
         thread::spawn(move || {
             loop {
-                let metrics = system::get_system_metrics();
+                let mut metrics = system::get_system_metrics();
                 if let Ok(mut sys_lock) = s.system_metrics.lock() {
+                    // Preserve CPU temp if the GPU backend already provided one
+                    // (e.g. Apple mactop) since get_system_metrics() can't read it.
+                    if !metrics.cpu_temp_available && sys_lock.cpu_temp_available {
+                        metrics.cpu_temp = sys_lock.cpu_temp;
+                        metrics.cpu_temp_available = true;
+                    }
                     *sys_lock = metrics;
                 } else {
                     eprintln!("[error] Failed to acquire system_metrics lock");

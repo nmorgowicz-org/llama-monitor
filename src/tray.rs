@@ -183,7 +183,7 @@ impl ApplicationHandler for TrayApp {
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: winit::event::StartCause) {
         while let Ok(event) = MenuEvent::receiver().try_recv() {
             match event.id.0.as_str() {
-                "open" => {
+                "open" | "stat_cpu" | "stat_gpu" => {
                     let url = format!("http://127.0.0.1:{}", self.port);
                     let _ = webbrowser::open(&url);
                 }
