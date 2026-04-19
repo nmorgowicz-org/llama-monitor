@@ -22,36 +22,32 @@ type TrayMetrics = (
 );
 
 fn create_tray_icon() -> Icon {
-    let size = 64u32;
+    // 22x22 white circle on transparent background.
+    // White is the macOS convention for menu bar icons — the system renders it
+    // as white on dark mode and black on light mode automatically.
+    let size = 22u32;
     let mut rgba = vec![0u8; (size * size * 4) as usize];
+    let cx = size as f32 / 2.0;
+    let cy = size as f32 / 2.0;
+    let r = size as f32 / 2.0 - 1.5;
 
     for y in 0..size {
         for x in 0..size {
             let idx = ((y * size + x) * 4) as usize;
-            let cx = size / 2;
-            let cy = size / 2;
-            let dx = (x as i32 - cx as i32) as f32;
-            let dy = (y as i32 - cy as i32) as f32;
+            let dx = x as f32 - cx;
+            let dy = y as f32 - cy;
             let dist = (dx * dx + dy * dy).sqrt();
-
-            if dist < size as f32 / 2.0 - 2.0 {
-                let t = (dist / (size as f32 / 2.0)) * 0.3;
-                rgba[idx] = (46.0 * (1.0 - t) + 136.0 * t) as u8;
-                rgba[idx + 1] = (52.0 * (1.0 - t) + 192.0 * t) as u8;
-                rgba[idx + 2] = (64.0 * (1.0 - t) + 209.0 * t) as u8;
+            if dist <= r {
+                rgba[idx] = 255;
+                rgba[idx + 1] = 255;
+                rgba[idx + 2] = 255;
                 rgba[idx + 3] = 255;
-            } else {
-                rgba[idx] = 0;
-                rgba[idx + 1] = 0;
-                rgba[idx + 2] = 0;
-                rgba[idx + 3] = 0;
             }
         }
     }
 
     Icon::from_rgba(rgba, size, size).unwrap_or_else(|_| {
-        let default: &[u8] = &[0, 128, 255, 255];
-        Icon::from_rgba(default.to_vec(), 1, 1).unwrap()
+        Icon::from_rgba(vec![255, 255, 255, 255], 1, 1).unwrap()
     })
 }
 
