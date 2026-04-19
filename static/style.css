@@ -123,6 +123,7 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
 .temp-badge { font-family: monospace; font-size: 0.7rem; color: #bf616a; margin-left: 6px; font-weight: 400; }
 .page { display: none; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; padding-bottom: 16px; }
 .page.active { display: flex; }
+#page-server { overflow-y: auto; }
 
 .title {
     display: flex;

@@ -22,25 +22,49 @@ type TrayMetrics = (
 );
 
 fn create_tray_icon() -> Icon {
-    // 22x22 black circle on transparent background.
-    // Used as a template image: macOS renders template icons black on light
-    // mode and white on dark mode automatically.
+    // 22x22 monitor outline icon. Used as a macOS template image so the OS
+    // renders it black on light mode and white on dark mode automatically.
+    //
+    //  2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1  (x, tens digit omitted)
+    //  . ┌─────────────────────────────────┐ .   y=3  monitor top
+    //  . │ . . . . . . . . . . . . . . . . │ .   y=4
+    //  . │ . . . . . . . . . . . . . . . . │ .   ...
+    //  . └─────────────────────────────────┘ .   y=13 monitor bottom
+    //  . . . . . . . . ┃ ┃ . . . . . . . . .   y=14-16 stand
+    //  . . . . . . ┌───────┐ . . . . . . . .   y=17 base
     let size = 22u32;
     let mut rgba = vec![0u8; (size * size * 4) as usize];
-    let cx = size as f32 / 2.0;
-    let cy = size as f32 / 2.0;
-    let r = size as f32 / 2.0 - 1.5;
 
-    for y in 0..size {
-        for x in 0..size {
+    let mut set = |x: u32, y: u32| {
+        if x < size && y < size {
             let idx = ((y * size + x) * 4) as usize;
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            if (dx * dx + dy * dy).sqrt() <= r {
-                // black, fully opaque
-                rgba[idx + 3] = 255;
-            }
+            rgba[idx + 3] = 255;
         }
+    };
+
+    // Monitor border (outline only, 2px thick top+sides, 1px bottom)
+    for x in 2..=19 {
+        set(x, 3);  // top edge
+        set(x, 4);  // top edge thickness
+        set(x, 13); // bottom edge
+    }
+    for y in 3..=13 {
+        set(2, y);  // left edge
+        set(3, y);  // left edge thickness
+        set(18, y); // right edge
+        set(19, y); // right edge thickness
+    }
+
+    // Stand (2px wide, centered)
+    for y in 14..=16 {
+        set(10, y);
+        set(11, y);
+    }
+
+    // Base (8px wide)
+    for x in 7..=14 {
+        set(x, 17);
+        set(x, 18);
     }
 
     Icon::from_rgba(rgba, size, size).unwrap_or_else(|_| {
