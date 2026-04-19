@@ -18,6 +18,7 @@ edition = "2024"
     notify-rust = "4"
     webbrowser = "1"
     tray-icon = "0.22"
+    winit = { version = "0.30", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
     wmi = { version = "0.18.4", features = ["default"] }

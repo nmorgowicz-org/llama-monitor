@@ -1,8 +1,12 @@
 use std::sync::{Arc, Mutex as StdMutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-use tray_icon::{Icon, TrayIconBuilder};
+use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
+use winit::application::ApplicationHandler;
+use winit::event::WindowEvent;
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::window::WindowId;
 
 use crate::gpu::GpuMetrics;
 use crate::llama::metrics::LlamaMetrics;
@@ -17,6 +21,8 @@ type TrayMetrics = (
 );
 
 pub fn run_tray(state: AppState, port: u16) {
+    let event_loop = EventLoop::new().expect("Failed to create event loop");
+
     let tray_state = TrayState {
         app_state: Arc::new(state),
         last_status: StdMutex::new(0u8),
@@ -31,20 +37,21 @@ pub fn run_tray(state: AppState, port: u16) {
         true,
         None,
     );
-    let _sep1 = PredefinedMenuItem::separator();
+    let sep1 = PredefinedMenuItem::separator();
     let metrics_item = MenuItem::with_id(
         tray_icon::menu::MenuId::new("metrics"),
         "Show Metrics",
         true,
         None,
     );
-    let _sep2 = PredefinedMenuItem::separator();
-    let quit_item = MenuItem::with_id(tray_icon::menu::MenuId::new("quit"), "Quit", true, None);
+    let sep2 = PredefinedMenuItem::separator();
+    let quit_item =
+        MenuItem::with_id(tray_icon::menu::MenuId::new("quit"), "Quit", true, None);
 
     tray_menu.append(&open_item).unwrap();
-    tray_menu.append(&_sep1).unwrap();
+    tray_menu.append(&sep1).unwrap();
     tray_menu.append(&metrics_item).unwrap();
-    tray_menu.append(&_sep2).unwrap();
+    tray_menu.append(&sep2).unwrap();
     tray_menu.append(&quit_item).unwrap();
 
     let icon_data: &[u8] = include_bytes!("../static/icon.svg");
@@ -67,44 +74,71 @@ pub fn run_tray(state: AppState, port: u16) {
         let _ = tray.set_tooltip(Some(tooltip));
     }
 
-    MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-        let id = event.id.0.clone();
-        match id.as_str() {
-            "open" => {
-                let url = format!("http://127.0.0.1:{}", port);
-                let _ = webbrowser::open(&url);
+    let mut app = TrayApp {
+        tray_state,
+        tray,
+        port,
+        last_poll: Instant::now(),
+        poll_interval: Duration::from_secs(3),
+        last_status_check: Instant::now(),
+        status_check_interval: Duration::from_secs(10),
+    };
+
+    event_loop.run_app(&mut app).expect("Event loop error");
+}
+
+struct TrayApp {
+    tray_state: TrayState,
+    tray: TrayIcon,
+    port: u16,
+    last_poll: Instant,
+    poll_interval: Duration,
+    last_status_check: Instant,
+    status_check_interval: Duration,
+}
+
+impl ApplicationHandler for TrayApp {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        event_loop.set_control_flow(ControlFlow::WaitUntil(
+            Instant::now() + Duration::from_millis(500),
+        ));
+    }
+
+    fn window_event(&mut self, _: &ActiveEventLoop, _: WindowId, _: WindowEvent) {}
+
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, _cause: winit::event::StartCause) {
+        while let Ok(event) = MenuEvent::receiver().try_recv() {
+            match event.id.0.as_str() {
+                "open" => {
+                    let url = format!("http://127.0.0.1:{}", self.port);
+                    let _ = webbrowser::open(&url);
+                }
+                "quit" => {
+                    std::process::exit(0);
+                }
+                _ => {}
             }
-            "metrics" => {
-                // Show metrics - tooltip is updated in the poll loop
-            }
-            "quit" => {
-                std::process::exit(0);
-            }
-            _ => {}
         }
-    }));
 
-    let mut last_poll = std::time::Instant::now();
-    let poll_interval = Duration::from_secs(3);
-    let mut last_status_check = std::time::Instant::now();
-    let status_check_interval = Duration::from_secs(10);
-
-    loop {
-        std::thread::sleep(Duration::from_millis(500));
-
-        if last_poll.elapsed() >= poll_interval {
-            last_poll = std::time::Instant::now();
-            let metrics = tray_state.get_metrics();
+        if self.last_poll.elapsed() >= self.poll_interval {
+            self.last_poll = Instant::now();
+            let metrics = self.tray_state.get_metrics();
             if let Some(ref tooltip) = metrics.3 {
-                let _ = tray.set_tooltip(Some(tooltip));
+                let _ = self.tray.set_tooltip(Some(tooltip));
             }
-            tray_state.check_gpu_thresholds(&metrics.1);
+            self.tray_state.check_gpu_thresholds(&metrics.1);
         }
 
-        if last_status_check.elapsed() >= status_check_interval {
-            last_status_check = std::time::Instant::now();
-            tray_state.check_session_status();
+        if self.last_status_check.elapsed() >= self.status_check_interval {
+            self.last_status_check = Instant::now();
+            self.tray_state.check_session_status();
         }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        event_loop.set_control_flow(ControlFlow::WaitUntil(
+            Instant::now() + Duration::from_millis(500),
+        ));
     }
 }
 
