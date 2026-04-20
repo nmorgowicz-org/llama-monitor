@@ -2,7 +2,7 @@
 
 **Project:** Llama Monitor UI/UX and Monitoring Improvements  
 **Plan:** docs/20260420-implementation-plan.md  
-****Last Updated:** 2026-04-20 (completed Tasks 1.1-1.8, 2.1-2.4)
+****Last Updated:** 2026-04-20 (completed Tasks 1.1-1.8, 2.1-2.6)
 
 ---
 
@@ -22,6 +22,8 @@
 | 2.2 | Main Dashboard | ✅ Complete | 2026-04-20 |
 | 2.3 | Add empty states | ✅ Complete | 2026-04-20 |
 | 2.4 | Add severity indicators | ✅ Complete | 2026-04-20 |
+| 2.5 | Context usage display | ✅ Complete | 2026-04-20 |
+| 2.6 | Add mode badge | ✅ Complete | 2026-04-20 |
 
 ---
 
@@ -29,8 +31,7 @@
 
 | Task | Phase | Status | Date Started |
 |------|-------|--------|--------------|
-| 2.5 | Context usage display | In Progress | 2026-04-20 |
-| 2.6 | Add mode badge | Pending | |
+| 3.1 | Update compact HTML | Pending | |
 
 ---
 
