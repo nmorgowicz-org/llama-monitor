@@ -19,3 +19,17 @@ jobs:
       - run: cargo clippy -- -D warnings
       - run: cargo test
       - run: cargo build --release
+
+  release-smoke:
+    if: github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-test')
+    runs-on: [self-hosted, linux, proxmox]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-pc-windows-gnu,aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Preflight release toolchain
+        run: bash scripts/release-preflight.sh
+      - name: Smoke build release targets
+        run: bash scripts/build-release-targets.sh
