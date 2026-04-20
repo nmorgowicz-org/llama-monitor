@@ -37,7 +37,7 @@ pub enum SessionKind {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-#[expect(dead_code)]
+#[allow(dead_code)]
 pub enum TrayMode {
     Desktop,
     Headless,
@@ -253,7 +253,7 @@ pub struct AppState {
     pub system_metrics: Arc<Mutex<SystemMetrics>>,
     pub sessions: Arc<Mutex<Vec<Session>>>,
     pub active_session_id: Arc<Mutex<String>>,
-    #[expect(dead_code)]
+    #[allow(dead_code)]
     pub sessions_path: PathBuf,
     pub capabilities: Arc<Mutex<MetricsCapabilities>>,
     pub endpoint_kind: Arc<Mutex<EndpointKind>>,
@@ -357,7 +357,7 @@ impl AppState {
         self.sessions.lock().unwrap().clone()
     }
 
-    #[expect(dead_code)]
+    #[allow(dead_code)]
     pub fn get_active_session(&self) -> Option<Session> {
         let sessions = self.sessions.lock().unwrap();
         let active_id = self.active_session_id.lock().unwrap();

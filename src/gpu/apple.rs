@@ -41,6 +41,13 @@ pub struct AppleBackend {
     last_cpu_temp: Mutex<f32>,
 }
 
+impl Default for AppleBackend {
+    fn default() -> Self {
+        AppleBackend {
+            last_cpu_temp: Mutex::new(0.0),
+        }
+    }
+}
 impl AppleBackend {
     pub fn new() -> Self {
         AppleBackend {

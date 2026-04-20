@@ -211,7 +211,7 @@ fn main() -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn should_start_tray(args: &cli::AppArgs) -> bool {
+pub fn should_start_tray(args: &cli::AppArgs) -> bool {
     if args.headless || args.no_tray {
         return false;
     }
@@ -219,7 +219,7 @@ fn should_start_tray(args: &cli::AppArgs) -> bool {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn should_start_tray(args: &cli::AppArgs) -> bool {
+pub fn should_start_tray(args: &cli::AppArgs) -> bool {
     if args.headless || args.no_tray {
         return false;
     }

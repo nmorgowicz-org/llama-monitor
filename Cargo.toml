@@ -27,3 +27,7 @@ edition = "2024"
 
 [target.'cfg(target_os = "linux")'.dependencies]
     gtk = "0.18"
+
+[[test]]
+name = "capabilities"
+path = "tests/integration/capabilities.rs"
