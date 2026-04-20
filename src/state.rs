@@ -443,6 +443,7 @@ impl AppState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn calculate_capabilities(&self) -> MetricsCapabilities {
         let active_id = self.active_session_id.lock().unwrap().clone();
         if active_id.is_empty() {
@@ -493,6 +494,7 @@ impl AppState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn calculate_availability_reasons(&self) -> (AvailabilityReason, AvailabilityReason, AvailabilityReason) {
         let capabilities = self.calculate_capabilities();
         
