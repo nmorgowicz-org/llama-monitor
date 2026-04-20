@@ -142,7 +142,7 @@ body {
 </div>
 <div class="status-bar" id="status-bar">Connecting...</div>
 
-<div class="section" id="cpu-section">
+<div class="section" id="cpu-section" data-capability="system">
     <div class="section-title">CPU</div>
     <div class="metric-row">
         <span class="metric-label">Load</span>
@@ -156,7 +156,7 @@ body {
     </div>
 </div>
 
-<div class="section" id="ram-section">
+<div class="section" id="ram-section" data-capability="system">
     <div class="metric-row">
         <span class="metric-label">RAM</span>
         <div class="metric-bar-wrap"><div class="metric-bar ram" id="ram-bar" style="width:0%"></div></div>
@@ -164,7 +164,7 @@ body {
     </div>
 </div>
 
-<div id="gpu-sections"></div>
+<div id="gpu-sections" data-capability="gpu"></div>
 
 <div class="inference-section">
     <div class="section-title">Inference</div>
