@@ -483,6 +483,68 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
     display: flex; flex-direction: column; gap: 8px;
     background: #3b4252; border-radius: 8px; padding: 12px; margin-bottom: 16px;
 }
+
+/* Remote Agent Status Panel */
+.remote-agent-status-panel {
+    padding: 0 12px 12px;
+}
+.remote-agent-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+.remote-agent-status-text {
+    background: #2e3440;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 0.78rem;
+    color: #d8dee9;
+    font-family: monospace;
+    line-height: 1.5;
+    min-height: 40px;
+    margin-bottom: 12px;
+}
+.remote-agent-status-text.error { color: #bf616a; }
+.remote-agent-status-text.success { color: #a3be8c; }
+.remote-agent-status-text.info { color: #88c0d1; }
+.remote-agent-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+.remote-agent-firewall {
+    margin-bottom: 12px;
+}
+.remote-agent-firewall code {
+    background: #272c35;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-family: monospace;
+}
+.remote-agent-timeline {
+    margin-top: 12px;
+}
+.remote-agent-timeline-items {
+    max-height: 120px;
+    overflow-y: auto;
+}
+.remote-agent-timeline-item {
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(76,86,106,0.3);
+    font-family: monospace;
+    font-size: 0.76rem;
+}
+.remote-agent-timeline-item:last-child { border-bottom: none; }
+.remote-agent-timeline-item.pending { color: #ebcb8b; }
+.remote-agent-timeline-item.completed { color: #a3be8c; }
+.remote-agent-timeline-item.failed { color: #bf616a; }
+.remote-agent-timeline-item .timestamp {
+    color: #6a7585;
+    font-size: 0.7rem;
+    margin-right: 8px;
+}
 .session-manager h3 {
     color: #88c0d1; font-size: 0.85rem; margin: 0 0 8px 0; font-weight: 600;
 }

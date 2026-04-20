@@ -540,13 +540,15 @@ async function remoteAgentDetect() {
 
         const archiveNote = data.matching_asset && data.matching_asset.archive ? ' (archive; extract before install)' : '';
 
+        const installPath = data.install_path || 'unknown';
+
         const lines = [
 
             '<strong>' + escapeHtml(data.os) + ' / ' + escapeHtml(data.arch) + '</strong>',
 
             'Asset: ' + escapeHtml(asset) + escapeHtml(archiveNote),
 
-            'Install: ' + escapeHtml(data.install_path || 'unknown'),
+            'Install: ' + escapeHtml(installPath),
 
             'Installed: ' + (data.installed ? 'yes' : 'no'),
 
@@ -554,9 +556,29 @@ async function remoteAgentDetect() {
 
         ];
 
+        if (data.installed_version) {
+
+            lines.push('Installed: v' + escapeHtml(data.installed_version));
+
+        }
+
+        if (data.update_available) {
+
+            const latestVer = data.latest_release?.tag_name || 'unknown';
+
+            lines.push('<strong style="color:#ebcb8b;">Update available: v' + escapeHtml(latestVer) + '</strong>');
+
+        }
+
         if (data.error) lines.push('Issue: ' + escapeHtml(data.error));
 
         setRemoteAgentStatus(lines.join('<br>'), data.ok ? 'ok' : 'error');
+
+        if (data.ok) {
+
+            updateRemoteAgentPanelState(data);
+
+        }
 
     } catch (err) {
 
@@ -566,11 +588,478 @@ async function remoteAgentDetect() {
 
 }
 
+async function remoteAgentInstall() {
 
+    const sshTarget = document.getElementById('set-remote-agent-ssh-target')?.value.trim();
 
-// --- File Browser ---
+    if (!sshTarget) {
 
+        setRemoteAgentStatus('Enter an SSH target first.', 'error');
 
+        return;
+
+    }
+
+    setRemoteAgentStatus('Installing remote agent...', 'info');
+
+    addTimelineItem('Installation started', 'pending');
+
+    try {
+
+        const detectResp = await fetch('/api/remote-agent/detect', {
+
+            method: 'POST',
+
+            headers: { 'Content-Type': 'application/json' },
+
+            body: JSON.stringify({
+
+                ssh_target: sshTarget,
+
+                agent_url: inferredAgentUrl() || null,
+
+            }),
+
+        });
+
+        const detectData = await detectResp.json();
+
+        if (!detectData.ok || !detectData.matching_asset) {
+
+            addTimelineItem('Detection failed: ' + (detectData.error || 'unknown'), 'failed');
+
+            setRemoteAgentStatus('Install failed: ' + escapeHtml(detectData.error || 'Detection failed'), 'error');
+
+            return;
+
+        }
+
+        const resp = await fetch('/api/remote-agent/install', {
+
+            method: 'POST',
+
+            headers: { 'Content-Type': 'application/json' },
+
+            body: JSON.stringify({
+
+                ssh_target: sshTarget,
+
+                asset: detectData.matching_asset,
+
+                install_path: detectData.install_path,
+
+            }),
+
+        });
+
+        const data = await resp.json();
+
+        if (!data.ok) {
+
+            addTimelineItem('Installation failed: ' + (data.error || 'unknown'), 'failed');
+
+            setRemoteAgentStatus('Install failed: ' + escapeHtml(data.error || 'unknown'), 'error');
+
+            return;
+
+        }
+
+        addTimelineItem('Installation completed', 'completed');
+
+        setRemoteAgentStatus('Agent installed successfully at ' + escapeHtml(data.install_path || 'unknown'), 'ok');
+
+        updateRemoteAgentPanelState(data);
+
+    } catch (err) {
+
+        addTimelineItem('Installation error: ' + escapeHtml(String(err)), 'failed');
+
+        setRemoteAgentStatus('Install failed: ' + escapeHtml(String(err)), 'error');
+
+    }
+
+}
+
+async function remoteAgentStart() {
+
+    const sshTarget = document.getElementById('set-remote-agent-ssh-target')?.value.trim();
+
+    if (!sshTarget) {
+
+        setRemoteAgentStatus('Enter an SSH target first.', 'error');
+
+        return;
+
+    }
+
+    setRemoteAgentStatus('Starting remote agent...', 'info');
+
+    addTimelineItem('Start command sent', 'pending');
+
+    try {
+
+        const detectResp = await fetch('/api/remote-agent/detect', {
+
+            method: 'POST',
+
+            headers: { 'Content-Type': 'application/json' },
+
+            body: JSON.stringify({
+
+                ssh_target: sshTarget,
+
+                agent_url: inferredAgentUrl() || null,
+
+            }),
+
+        });
+
+        const detectData = await detectResp.json();
+
+        if (!detectData.ok) {
+
+            addTimelineItem('Detection failed: ' + (detectData.error || 'unknown'), 'failed');
+
+            setRemoteAgentStatus('Start failed: ' + escapeHtml(detectData.error || 'Detection failed'), 'error');
+
+            return;
+
+        }
+
+        const installPath = detectData.install_path || '~/.config/llama-monitor/bin/llama-monitor';
+        const startCommand = detectData.start_command || 'nohup ' + installPath + ' --agent --agent-host 0.0.0.0 --agent-port 7779 > ~/.config/llama-monitor/agent.log 2>&1 &';
+
+        const resp = await fetch('/api/remote-agent/start', {
+
+            method: 'POST',
+
+            headers: { 'Content-Type': 'application/json' },
+
+            body: JSON.stringify({
+
+                ssh_target: sshTarget,
+
+                install_path: installPath,
+
+                start_command: startCommand,
+
+            }),
+
+        });
+
+        const data = await resp.json();
+
+        if (!data.ok) {
+
+            addTimelineItem('Start failed: ' + (data.error || 'unknown'), 'failed');
+
+            setRemoteAgentStatus('Start failed: ' + escapeHtml(data.error || 'unknown'), 'error');
+
+            return;
+
+        }
+
+        addTimelineItem('Agent started', 'completed');
+
+        let message = 'Agent started successfully';
+
+        if (data.health_reachable) {
+
+            message += ' and is reachable';
+
+        } else {
+
+            message += ', but HTTP is not reachable (check firewall)';
+
+        }
+
+        setRemoteAgentStatus(message, data.health_reachable ? 'ok' : 'warning');
+
+        if (!data.health_reachable) {
+
+            showRemoteAgentFirewall();
+
+        }
+
+        updateRemoteAgentPanelState(data);
+
+    } catch (err) {
+
+        addTimelineItem('Start error: ' + escapeHtml(String(err)), 'failed');
+
+        setRemoteAgentStatus('Start failed: ' + escapeHtml(String(err)), 'error');
+
+    }
+
+}
+
+async function remoteAgentUpdate() {
+
+    const sshTarget = document.getElementById('set-remote-agent-ssh-target')?.value.trim();
+
+    if (!sshTarget) {
+
+        setRemoteAgentStatus('Enter an SSH target first.', 'error');
+
+        return;
+
+    }
+
+    setRemoteAgentStatus('Updating remote agent...', 'info');
+
+    addTimelineItem('Update started', 'pending');
+
+    try {
+
+        const detectResp = await fetch('/api/remote-agent/detect', {
+
+            method: 'POST',
+
+            headers: { 'Content-Type': 'application/json' },
+
+            body: JSON.stringify({
+
+                ssh_target: sshTarget,
+
+                agent_url: inferredAgentUrl() || null,
+
+            }),
+
+        });
+
+        const detectData = await detectResp.json();
+
+        if (!detectData.ok || !detectData.latest_release) {
+
+            addTimelineItem('Detection failed: ' + (detectData.error || 'unknown'), 'failed');
+
+            setRemoteAgentStatus('Update failed: ' + escapeHtml(detectData.error || 'Detection failed'), 'error');
+
+            return;
+
+        }
+
+        const resp = await fetch('/api/remote-agent/update', {
+
+            method: 'POST',
+
+            headers: { 'Content-Type': 'application/json' },
+
+            body: JSON.stringify({
+
+                ssh_target: sshTarget,
+
+                agent_url: inferredAgentUrl() || null,
+
+            }),
+
+        });
+
+        const data = await resp.json();
+
+        if (!data.ok) {
+
+            addTimelineItem('Update failed: ' + (data.error || 'unknown'), 'failed');
+
+            setRemoteAgentStatus('Update failed: ' + escapeHtml(data.error || 'unknown'), 'error');
+
+            return;
+
+        }
+
+        addTimelineItem('Update completed', 'completed');
+
+        setRemoteAgentStatus('Agent updated from ' + escapeHtml(data.previous_version || 'unknown') + ' to ' + escapeHtml(data.new_version || 'unknown'), 'ok');
+
+        updateRemoteAgentPanelState(data);
+
+    } catch (err) {
+
+        addTimelineItem('Update error: ' + escapeHtml(String(err)), 'failed');
+
+        setRemoteAgentStatus('Update failed: ' + escapeHtml(String(err)), 'error');
+
+    }
+
+}
+
+async function remoteAgentStop() {
+
+    const sshTarget = document.getElementById('set-remote-agent-ssh-target')?.value.trim();
+
+    if (!sshTarget) {
+
+        setRemoteAgentStatus('Enter an SSH target first.', 'error');
+
+        return;
+
+    }
+
+    setRemoteAgentStatus('Stopping remote agent...', 'info');
+
+    addTimelineItem('Stop command sent', 'pending');
+
+    try {
+
+        const resp = await fetch('/api/remote-agent/stop', {
+
+            method: 'POST',
+
+            headers: { 'Content-Type': 'application/json' },
+
+            body: JSON.stringify({
+
+                ssh_target: sshTarget,
+
+            }),
+
+        });
+
+        const data = await resp.json();
+
+        if (!data.ok) {
+
+            addTimelineItem('Stop failed: ' + (data.error || 'unknown'), 'failed');
+
+            setRemoteAgentStatus('Stop failed: ' + escapeHtml(data.error || 'unknown'), 'error');
+
+            return;
+
+        }
+
+        addTimelineItem('Agent stopped', 'completed');
+
+        setRemoteAgentStatus('Agent stopped successfully', 'ok');
+
+        updateRemoteAgentPanelState(data);
+
+    } catch (err) {
+
+        addTimelineItem('Stop error: ' + escapeHtml(String(err)), 'failed');
+
+        setRemoteAgentStatus('Stop failed: ' + escapeHtml(String(err)), 'error');
+
+    }
+
+}
+
+async function remoteAgentRestart() {
+
+    await remoteAgentStop();
+
+    setTimeout(() => {
+
+        remoteAgentStart();
+
+    }, 1000);
+
+}
+
+function updateRemoteAgentPanelState(data) {
+
+    const versionsEl = document.getElementById('remote-agent-versions');
+
+    if (!versionsEl) return;
+
+    const latestVer = data.latest_release?.tag_name || data.release?.tag_name || 'N/A';
+
+    const installedVer = data.installed_version || 'N/A';
+
+    document.getElementById('remote-agent-latest-version').textContent = latestVer;
+
+    document.getElementById('remote-agent-installed-version').textContent = installedVer;
+
+    versionsEl.style.display = (latestVer && latestVer !== 'N/A') || (installedVer && installedVer !== 'N/A') ? '' : 'none';
+
+    const isInstalled = data.installed || false;
+
+    const isRunning = data.running || false;
+
+    const isUpdateAvailable = data.update_available || false;
+
+    const buttonsEl = document.getElementById('remote-agent-buttons');
+
+    if (buttonsEl) {
+
+        const installBtn = document.getElementById('btn-remote-agent-install');
+
+        const startBtn = document.getElementById('btn-remote-agent-start');
+
+        const updateBtn = document.getElementById('btn-remote-agent-update');
+
+        const stopBtn = document.getElementById('btn-remote-agent-stop');
+
+        const restartBtn = document.getElementById('btn-remote-agent-restart');
+
+        if (installBtn) installBtn.style.display = isInstalled ? 'none' : '';
+
+        if (startBtn) startBtn.style.display = isRunning ? 'none' : '';
+
+        if (updateBtn) updateBtn.style.display = isUpdateAvailable ? '' : 'none';
+
+        if (stopBtn) stopBtn.style.display = isRunning ? '' : 'none';
+
+        if (restartBtn) restartBtn.style.display = isRunning ? '' : 'none';
+
+    }
+
+}
+
+function showRemoteAgentFirewall() {
+
+    const firewallEl = document.getElementById('remote-agent-firewall');
+
+    if (firewallEl) {
+
+        firewallEl.style.display = '';
+
+    }
+
+}
+
+function addTimelineItem(message, status) {
+
+    const timelineEl = document.getElementById('remote-agent-timeline');
+
+    const itemsEl = document.getElementById('remote-agent-timeline-items');
+
+    if (!timelineEl || !itemsEl) return;
+
+    timelineEl.style.display = '';
+
+    const timestamp = new Date().toLocaleTimeString();
+
+    const item = document.createElement('div');
+
+    item.className = 'remote-agent-timeline-item ' + status;
+
+    item.innerHTML = '<span class="timestamp">[' + timestamp + ']</span>' + message;
+
+    itemsEl.appendChild(item);
+
+    itemsEl.scrollTop = itemsEl.scrollHeight;
+
+}
+
+function clearTimeline() {
+
+    const itemsEl = document.getElementById('remote-agent-timeline-items');
+
+    if (itemsEl) {
+
+        itemsEl.innerHTML = '';
+
+    }
+
+    const timelineEl = document.getElementById('remote-agent-timeline');
+
+    if (timelineEl) {
+
+        timelineEl.style.display = 'none';
+
+    }
+
+}
 
 let fbTargetId = '';
 

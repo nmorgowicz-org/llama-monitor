@@ -163,29 +163,94 @@
                 <div id="gpu-detected-info" style="font-size:0.72rem;color:#6a7585;margin-top:2px;"></div>
             </details>
 
-            <details class="modal-section">
-                <summary>Remote Agent</summary>
-                <div class="modal-row" style="gap:8px;align-items:center;">
-                    <button type="button" class="btn-sm btn-preset" onclick="remoteAgentDetect()">Detect Host</button>
-                    <button type="button" class="btn-sm btn-preset" onclick="remoteAgentLatestRelease()">Latest Release</button>
-                </div>
-                <div id="remote-agent-status" style="font-size:0.72rem;color:#9aa7b7;margin:8px 12px 10px 12px;line-height:1.5;"></div>
-                <label class="modal-field" title="Optional explicit remote agent URL. Empty means infer it from the attached llama-server host on port 7779.">Agent URL
-                    <input type="text" id="set-remote-agent-url" placeholder="http://192.168.2.16:7779">
-                </label>
-                <label class="modal-field" title="Optional bearer token used when polling the remote agent.">Agent Token
-                    <input type="text" id="set-remote-agent-token" placeholder="optional">
-                </label>
-                <label class="modal-field" title="Attempt SSH startup when the remote agent is unreachable.">
-                    <span><input type="checkbox" id="set-remote-agent-ssh-autostart"> Start over SSH if unreachable</span>
-                </label>
-                <label class="modal-field" title="SSH target. Empty means use the attached endpoint host.">SSH Target
-                    <input type="text" id="set-remote-agent-ssh-target" placeholder="nick@ryne">
-                </label>
-                <label class="modal-field" title="Optional command run on the remote machine. Empty uses an OS-specific default for an installed agent binary.">SSH Start Command
-                    <input type="text" id="set-remote-agent-ssh-command" placeholder='optional override, e.g. start "" /B llama-monitor.exe --agent --agent-host 0.0.0.0 --agent-port 7779'>
-                </label>
-            </details>
+            <details class="modal-section" id="remote-agent-panel" open>
+                 <summary>Remote Agent</summary>
+                 
+                 <div class="remote-agent-status-panel">
+                     <div class="remote-agent-header">
+                         <h3 style="margin:0 0 12px 0;color:#88c0d1;font-size:0.9rem;">Remote Agent Control</h3>
+                         <div class="remote-agent-actions" style="display:flex;gap:8px;flex-wrap:wrap;">
+                             <button type="button" class="btn-sm btn-preset" onclick="remoteAgentDetect()">Detect Host</button>
+                             <button type="button" class="btn-sm btn-preset" onclick="remoteAgentLatestRelease()">Latest Release</button>
+                         </div>
+                     </div>
+                     
+                     <div id="remote-agent-status" class="remote-agent-status-text"></div>
+                     
+                     <div class="remote-agent-versions" id="remote-agent-versions" style="display:none;margin:12px 0;">
+                         <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                             <div style="background:#3b4252;border-radius:6px;padding:8px 12px;">
+                                 <div style="font-size:0.68rem;color:#8899aa;text-transform:uppercase;">Latest Release</div>
+                                 <div style="font-family:monospace;font-size:0.85rem;color:#d8dee9;" id="remote-agent-latest-version">—</div>
+                             </div>
+                             <div style="background:#3b4252;border-radius:6px;padding:8px 12px;">
+                                 <div style="font-size:0.68rem;color:#8899aa;text-transform:uppercase;">Installed</div>
+                                 <div style="font-family:monospace;font-size:0.85rem;color:#d8dee9;" id="remote-agent-installed-version">—</div>
+                             </div>
+                         </div>
+                     </div>
+                     
+                     <div class="remote-agent-buttons" id="remote-agent-buttons" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+                         <button type="button" class="btn-sm btn-preset" onclick="remoteAgentInstall()" id="btn-remote-agent-install">Install Agent</button>
+                         <button type="button" class="btn-sm btn-preset" onclick="remoteAgentStart()" id="btn-remote-agent-start">Start Agent</button>
+                         <button type="button" class="btn-sm btn-preset" onclick="remoteAgentUpdate()" id="btn-remote-agent-update" style="display:none;">Update Agent</button>
+                         <button type="button" class="btn-sm btn-preset" onclick="remoteAgentStop()" id="btn-remote-agent-stop" style="display:none;">Stop Agent</button>
+                         <button type="button" class="btn-sm btn-preset" onclick="remoteAgentRestart()" id="btn-remote-agent-restart" style="display:none;">Restart Agent</button>
+                     </div>
+                     
+                     <div class="remote-agent-firewall" id="remote-agent-firewall" style="display:none;background:#3b4252;border-radius:6px;padding:12px;">
+                         <div style="display:flex;align-items:flex-start;gap:10px;">
+                             <span style="font-size:1.2rem;">⚠️</span>
+                             <div>
+                                 <div style="color:#ebcb8b;font-weight:600;margin-bottom:4px;">Firewall Detected</div>
+                                 <div style="font-size:0.82rem;color:#a0aab5;line-height:1.5;">
+                                     The agent started successfully but is not reachable from your browser. This typically means the remote machine's firewall is blocking HTTP access on port <strong>7779</strong>.
+                                 </div>
+                                 <div style="margin-top:8px;">
+                                     <strong>Quick fixes:</strong>
+                                     <ul style="margin:6px 0 0 16px;font-size:0.82rem;color:#a0aab5;">
+                                         <li>Check Windows Defender Firewall (or equivalent) and allow port 7779</li>
+                                         <li>Verify the agent is listening on <code>0.0.0.0</code> (not just <code>127.0.0.1</code>)</li>
+                                         <li>Try <code>netsh advfirewall firewall add rule name="llama-agent" dir=in action=allow protocol=TCP localport=7779</code> on Windows</li>
+                                     </ul>
+                                 </div>
+                             </div>
+                         </div>
+                     </div>
+                     
+                     <div class="remote-agent-timeline" id="remote-agent-timeline" style="display:none;">
+                         <div style="font-size:0.68rem;color:#8899aa;text-transform:uppercase;margin-bottom:8px;">Activity Timeline</div>
+                         <div id="remote-agent-timeline-items" style="font-size:0.78rem;color:#d8dee9;font-family:monospace;"></div>
+                     </div>
+                 </div>
+                 
+                 <details class="modal-section" style="border:none;margin-top:10px;">
+                     <summary style="padding:6px 0;margin:0;color:#88c0d1;">Advanced Options (collapsed)</summary>
+                     <div class="modal-row" style="gap:8px;">
+                         <label class="modal-field" style="flex:1;" title="Optional explicit remote agent URL. Empty means infer it from the attached llama-server host on port 7779.">
+                             Agent URL
+                             <input type="text" id="set-remote-agent-url" placeholder="http://192.168.2.16:7779">
+                         </label>
+                         <label class="modal-field" style="flex:1;" title="Optional bearer token used when polling the remote agent.">
+                             Agent Token
+                             <input type="text" id="set-remote-agent-token" placeholder="optional">
+                         </label>
+                     </div>
+                     <div class="modal-row" style="gap:8px;">
+                         <label class="modal-field" style="flex:1;">
+                             <span><input type="checkbox" id="set-remote-agent-ssh-autostart"> Start over SSH if unreachable</span>
+                         </label>
+                         <label class="modal-field" style="flex:1;" title="SSH target. Empty means use the attached endpoint host.">
+                             SSH Target
+                             <input type="text" id="set-remote-agent-ssh-target" placeholder="nick@ryne">
+                         </label>
+                     </div>
+                     <label class="modal-field" title="Optional command run on the remote machine. Empty uses an OS-specific default for an installed agent binary.">
+                         SSH Start Command
+                         <input type="text" id="set-remote-agent-ssh-command" placeholder='optional override, e.g. start "" /B llama-monitor.exe --agent --agent-host 0.0.0.0 --agent-port 7779'>
+                     </label>
+                 </details>
+             </details>
 
         </div>
         <div class="modal-buttons">

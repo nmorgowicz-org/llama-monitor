@@ -326,6 +326,10 @@ pub fn api_routes(
         .or(disable_lhm)
         .or(remote_agent_latest)
         .or(remote_agent_detect)
+        .or(api_remote_agent_install())
+        .or(api_remote_agent_start())
+        .or(api_remote_agent_update())
+        .or(api_remote_agent_stop())
 }
 
 fn api_remote_agent_latest_release()
@@ -353,6 +357,116 @@ fn api_remote_agent_detect()
             move |request: crate::agent::RemoteAgentDetectRequest| async move {
                 let response = crate::agent::detect_remote_agent(request).await;
                 Ok::<_, warp::Rejection>(warp::reply::json(&response))
+            },
+        )
+}
+
+fn api_remote_agent_install()
+-> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "remote-agent" / "install")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and_then(
+            move |request: crate::agent::RemoteAgentInstallRequest| async move {
+                match crate::agent::install_remote_agent(
+                    request.ssh_target.trim(),
+                    &request.asset,
+                    request.install_path.clone(),
+                    crate::agent::detect_remote_os_simple(&request.ssh_target).await,
+                )
+                .await
+                {
+                    Ok(response) => Ok::<_, warp::Rejection>(warp::reply::json(&response)),
+                    Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(
+                        &serde_json::json!({"ok": false, "error": e.to_string()}),
+                    )),
+                }
+            },
+        )
+}
+
+fn api_remote_agent_start()
+-> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "remote-agent" / "start")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and_then(
+            move |request: serde_json::Map<String, serde_json::Value>| async move {
+                let ssh_target = match request.get("ssh_target") {
+                    Some(v) => v.as_str().unwrap_or("").to_string(),
+                    None => {
+                        return Ok::<_, warp::Rejection>(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": "Missing ssh_target"}),
+                        ));
+                    }
+                };
+                let install_path = match request.get("install_path") {
+                    Some(v) => v.as_str().unwrap_or("").to_string(),
+                    None => crate::agent::default_install_path_for_target(&ssh_target).await,
+                };
+                let command = match request.get("start_command") {
+                    Some(v) => v.as_str().unwrap_or("").to_string(),
+                    None => {
+                        crate::agent::default_start_command_for_target(&ssh_target, &install_path)
+                            .await
+                    }
+                };
+                match crate::agent::start_remote_agent(&ssh_target, &install_path, &command).await {
+                    Ok(response) => Ok(warp::reply::json(&response)),
+                    Err(e) => Ok(warp::reply::json(
+                        &serde_json::json!({"ok": false, "error": e.to_string()}),
+                    )),
+                }
+            },
+        )
+}
+
+fn api_remote_agent_update()
+-> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "remote-agent" / "update")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and_then(
+            move |request: serde_json::Map<String, serde_json::Value>| async move {
+                let ssh_target = match request.get("ssh_target") {
+                    Some(v) => v.as_str().unwrap_or("").to_string(),
+                    None => {
+                        return Ok::<_, warp::Rejection>(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": "Missing ssh_target"}),
+                        ));
+                    }
+                };
+                match crate::agent::update_remote_agent(&ssh_target).await {
+                    Ok(response) => Ok(warp::reply::json(&response)),
+                    Err(e) => Ok(warp::reply::json(
+                        &serde_json::json!({"ok": false, "error": e.to_string()}),
+                    )),
+                }
+            },
+        )
+}
+
+fn api_remote_agent_stop()
+-> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "remote-agent" / "stop")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and_then(
+            move |request: serde_json::Map<String, serde_json::Value>| async move {
+                let ssh_target = match request.get("ssh_target") {
+                    Some(v) => v.as_str().unwrap_or("").to_string(),
+                    None => {
+                        return Ok::<_, warp::Rejection>(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": "Missing ssh_target"}),
+                        ));
+                    }
+                };
+                match crate::agent::stop_remote_agent(&ssh_target).await {
+                    Ok(response) => Ok(warp::reply::json(&response)),
+                    Err(e) => Ok(warp::reply::json(
+                        &serde_json::json!({"ok": false, "error": e.to_string()}),
+                    )),
+                }
             },
         )
 }

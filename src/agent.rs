@@ -14,6 +14,10 @@ use crate::gpu::{self, GpuMetrics};
 use crate::state::{AppState, EndpointKind, SessionMode};
 use crate::system::{self, SystemMetrics};
 
+thread_local! {
+    static LATEST_RELEASE_CACHE: Mutex<Option<(LatestReleaseInfo, Instant)>> = const { Mutex::new(None) };
+}
+
 const REMOTE_AGENT_DEFAULT_PORT: u16 = 7779;
 const REMOTE_AGENT_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const REMOTE_AGENT_AUTOSTART_COOLDOWN: Duration = Duration::from_secs(30);
@@ -57,10 +61,13 @@ pub struct RemoteAgentDetectResponse {
     pub os: String,
     pub arch: String,
     pub install_path: Option<String>,
+    pub start_command: Option<String>,
     pub installed: bool,
     pub reachable: bool,
+    pub installed_version: Option<String>,
     pub latest_release: Option<LatestReleaseInfo>,
     pub matching_asset: Option<ReleaseAssetInfo>,
+    pub update_available: bool,
     pub error: Option<String>,
 }
 
@@ -180,6 +187,21 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
 }
 
 pub async fn latest_release_info() -> Result<LatestReleaseInfo> {
+    let cached = LATEST_RELEASE_CACHE.with(|cache| {
+        let now = Instant::now();
+        let cached = cache.try_lock().ok()?;
+        if let Some((ref info, ref cached_at)) = *cached
+            && now.duration_since(*cached_at) < Duration::from_secs(60)
+        {
+            return Some(info.clone());
+        }
+        None
+    });
+
+    if let Some(cached) = cached {
+        return Ok(cached);
+    }
+
     let release = reqwest::Client::new()
         .get(GITHUB_LATEST_RELEASE_URL)
         .header(reqwest::header::USER_AGENT, "llama-monitor")
@@ -189,7 +211,7 @@ pub async fn latest_release_info() -> Result<LatestReleaseInfo> {
         .json::<GithubRelease>()
         .await?;
 
-    Ok(LatestReleaseInfo {
+    let release_info = LatestReleaseInfo {
         tag_name: release.tag_name,
         name: release.name,
         assets: release
@@ -197,7 +219,15 @@ pub async fn latest_release_info() -> Result<LatestReleaseInfo> {
             .into_iter()
             .filter_map(asset_info_from_github_asset)
             .collect(),
-    })
+    };
+
+    LATEST_RELEASE_CACHE.with(|cache| {
+        let _ = cache
+            .try_lock()
+            .map(|mut cached| *cached = Some((release_info.clone(), Instant::now())));
+    });
+
+    Ok(release_info)
 }
 
 pub async fn detect_remote_agent(req: RemoteAgentDetectRequest) -> RemoteAgentDetectResponse {
@@ -209,10 +239,13 @@ pub async fn detect_remote_agent(req: RemoteAgentDetectRequest) -> RemoteAgentDe
             os: "unknown".to_string(),
             arch: "unknown".to_string(),
             install_path: None,
+            start_command: None,
             installed: false,
             reachable: false,
+            installed_version: None,
             latest_release: None,
             matching_asset: None,
+            update_available: false,
             error: Some("Missing SSH target".to_string()),
         };
     }
@@ -232,14 +265,48 @@ pub async fn detect_remote_agent(req: RemoteAgentDetectRequest) -> RemoteAgentDe
         false
     };
 
+    let ssh_ok = remote_os != RemoteOs::Unknown;
+
+    let installed_version = if installed && ssh_ok {
+        install::get_remote_version(&ssh_target)
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+
     let latest_release = latest_release_info().await.ok();
     let matching_asset = latest_release
         .as_ref()
         .and_then(|release| release.matching_asset(&os, &arch).cloned());
-    let error = if remote_os == RemoteOs::Unknown {
-        Some("Could not detect remote OS over SSH".to_string())
+
+    let update_available = if let (Some(installed_ver), Some(latest)) =
+        (installed_version.as_deref(), latest_release.as_ref())
+    {
+        installed_ver != latest.tag_name
+    } else {
+        false
+    };
+
+    let start_command = if ssh_ok {
+        install::default_start_command_for_target(
+            &ssh_target,
+            install_path
+                .as_deref()
+                .unwrap_or("~/.config/llama-monitor/bin/llama-monitor"),
+        )
+        .await
+    } else {
+        String::new()
+    };
+
+    let error = if !ssh_ok {
+        Some("Could not detect remote OS over SSH. Verify SSH connectivity and that remote host allows command execution.".to_string())
     } else if matching_asset.is_none() {
-        Some(format!("No release asset for {os} {arch}"))
+        Some(format!(
+            "No release asset for {os} {arch}. Manual setup required: download the appropriate binary from the latest release and place it at {install_path:?}"
+        ))
     } else {
         None
     };
@@ -250,10 +317,17 @@ pub async fn detect_remote_agent(req: RemoteAgentDetectRequest) -> RemoteAgentDe
         os,
         arch,
         install_path,
+        start_command: if start_command.is_empty() {
+            None
+        } else {
+            Some(start_command)
+        },
         installed,
         reachable,
+        installed_version,
         latest_release,
         matching_asset,
+        update_available,
         error,
     }
 }
@@ -482,7 +556,7 @@ async fn default_remote_agent_command_for_target(target: &str) -> String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RemoteOs {
+pub enum RemoteOs {
     Windows,
     Unix,
     Macos,
@@ -646,3 +720,435 @@ async fn handle_agent_rejection(
     );
     Ok(reply)
 }
+
+pub mod install {
+    use super::*;
+    use std::fs;
+    use std::io;
+
+    const REMOTE_AGENT_INSTALL_TIMEOUT: Duration = Duration::from_secs(60);
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct RemoteAgentInstallRequest {
+        pub ssh_target: String,
+        pub asset: ReleaseAssetInfo,
+        pub install_path: Option<String>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct RemoteAgentInstallResponse {
+        pub ok: bool,
+        pub ssh_target: String,
+        pub asset_name: String,
+        pub install_path: String,
+        pub installed: bool,
+        pub error: Option<String>,
+    }
+
+    pub async fn install_remote_agent(
+        ssh_target: &str,
+        asset: &ReleaseAssetInfo,
+        install_path: Option<String>,
+        os: RemoteOs,
+    ) -> Result<RemoteAgentInstallResponse> {
+        let temp_local_path = download_asset_locally(asset).await?;
+        let temp_extracted_path = if asset.archive {
+            Some(extract_archive_with_timeout(&temp_local_path, asset).await?)
+        } else {
+            None
+        };
+        let binary_local_path = temp_extracted_path
+            .as_deref()
+            .unwrap_or(temp_local_path.as_str());
+
+        let remote_temp_path = format!("/tmp/{}", asset.name);
+        copy_to_remote(ssh_target, binary_local_path, &remote_temp_path, os).await?;
+
+        let install_path = install_path
+            .or_else(|| install_path_for_os(os).map(ToOwned::to_owned))
+            .context("Could not determine install path")?;
+
+        move_binary_to_install_path(ssh_target, &remote_temp_path, &install_path, os).await?;
+
+        if os == RemoteOs::Unix || os == RemoteOs::Macos {
+            set_executable_bit(ssh_target, &install_path, os).await?;
+        }
+
+        let installed = remote_file_exists(ssh_target, os, &install_path).await;
+
+        Ok(RemoteAgentInstallResponse {
+            ok: installed,
+            ssh_target: ssh_target.to_string(),
+            asset_name: asset.name.clone(),
+            install_path,
+            installed,
+            error: if installed {
+                None
+            } else {
+                Some("Binary not found after install".to_string())
+            },
+        })
+    }
+
+    async fn download_asset_locally(asset: &ReleaseAssetInfo) -> Result<String> {
+        let resp = reqwest::Client::new()
+            .get(&asset.url)
+            .header(reqwest::header::USER_AGENT, "llama-monitor")
+            .send()
+            .await?
+            .error_for_status()?;
+
+        let bytes = resp.bytes().await?;
+        let temp_path = std::env::temp_dir().join(&asset.name);
+        fs::write(&temp_path, &bytes)?;
+        Ok(temp_path.to_string_lossy().to_string())
+    }
+
+    async fn extract_archive_with_timeout(path: &str, asset: &ReleaseAssetInfo) -> Result<String> {
+        tokio::time::timeout(REMOTE_AGENT_INSTALL_TIMEOUT, extract_archive(path, asset))
+            .await?
+            .map_err(|e| io::Error::other(format!("Archive extraction failed: {e}")).into())
+    }
+
+    async fn extract_archive(path: &str, asset: &ReleaseAssetInfo) -> Result<String> {
+        let temp_extracted = std::env::temp_dir().join(asset.name.trim_end_matches(".tar.gz"));
+        let output = tokio::process::Command::new("tar")
+            .args(["-xzf", path, "-C", &temp_extracted.to_string_lossy()])
+            .output()
+            .await?;
+
+        if output.status.success() {
+            Ok(temp_extracted.to_string_lossy().to_string())
+        } else {
+            Err(io::Error::other("Failed to extract archive").into())
+        }
+    }
+
+    async fn copy_to_remote(
+        ssh_target: &str,
+        local_path: &str,
+        remote_path: &str,
+        _os: RemoteOs,
+    ) -> Result<()> {
+        let output = Command::new("scp")
+            .arg(local_path)
+            .arg(format!("{ssh_target}:{remote_path}"))
+            .output()
+            .await?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(io::Error::other("SCP failed").into())
+        }
+    }
+
+    async fn move_binary_to_install_path(
+        ssh_target: &str,
+        temp_path: &str,
+        install_path: &str,
+        os: RemoteOs,
+    ) -> Result<()> {
+        let output = match os {
+            RemoteOs::Windows => {
+                Command::new("ssh")
+                    .arg(ssh_target)
+                    .args(["cmd.exe", "/C", "mkdir", "%APPDATA%\\llama-monitor\\bin"])
+                    .output()
+                    .await?
+            }
+            RemoteOs::Unix | RemoteOs::Macos => {
+                Command::new("ssh")
+                    .arg(ssh_target)
+                    .args(["mkdir", "-p", "~/.config/llama-monitor/bin"])
+                    .output()
+                    .await?
+            }
+            RemoteOs::Unknown => return Err(io::Error::other("Unknown OS").into()),
+        };
+
+        if !output.status.success() {
+            return Err(io::Error::other("Failed to create install dir").into());
+        }
+
+        let output = Command::new("ssh")
+            .arg(ssh_target)
+            .args(["mv", temp_path, install_path])
+            .output()
+            .await?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(io::Error::other("Failed to move binary").into())
+        }
+    }
+
+    async fn set_executable_bit(ssh_target: &str, path: &str, os: RemoteOs) -> Result<()> {
+        let output = match os {
+            RemoteOs::Unix | RemoteOs::Macos => {
+                Command::new("ssh")
+                    .arg(ssh_target)
+                    .args(["chmod", "+x", path])
+                    .output()
+                    .await?
+            }
+            _ => return Ok(()),
+        };
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(io::Error::other("Failed to set executable bit").into())
+        }
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct RemoteAgentStartResponse {
+        pub ok: bool,
+        pub ssh_target: String,
+        pub install_path: String,
+        pub running: bool,
+        pub health_reachable: bool,
+        pub error: Option<String>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct RemoteAgentUpdateResponse {
+        pub ok: bool,
+        pub ssh_target: String,
+        pub previous_version: Option<String>,
+        pub new_version: Option<String>,
+        pub updated: bool,
+        pub error: Option<String>,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct RemoteAgentStopResponse {
+        pub ok: bool,
+        pub ssh_target: String,
+        pub stopped: bool,
+        pub error: Option<String>,
+    }
+
+    pub async fn start_remote_agent(
+        ssh_target: &str,
+        install_path: &str,
+        command: &str,
+    ) -> Result<RemoteAgentStartResponse> {
+        let output = Command::new("ssh")
+            .arg(ssh_target)
+            .arg(command)
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let error_msg = if !stderr.is_empty() {
+                format!("Start command failed: {}", stderr.trim())
+            } else {
+                format!("Start command exited with status: {}", output.status)
+            };
+            return Ok(RemoteAgentStartResponse {
+                ok: false,
+                ssh_target: ssh_target.to_string(),
+                install_path: install_path.to_string(),
+                running: false,
+                health_reachable: false,
+                error: Some(error_msg),
+            });
+        }
+
+        let health_reachable = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if agent_health_reachable(&format!(
+                    "http://{}:{}",
+                    ssh_target, REMOTE_AGENT_DEFAULT_PORT
+                ))
+                .await
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        })
+        .await;
+
+        let running = health_reachable.is_ok();
+
+        let error = if !running {
+            let health_error = match health_reachable {
+                Err(tokio::time::error::Elapsed { .. }) => Some("Agent did not start within 10 seconds. Check if the agent is listening on 0.0.0.0:7779 and if the remote firewall allows inbound connections on port 7779.".to_string()),
+                Ok(()) => None,
+            };
+            if health_error.is_some() {
+                health_error
+            } else {
+                Some("Agent started but is not reachable. Check SSH access and firewall rules on port 7779.".to_string())
+            }
+        } else {
+            None
+        };
+
+        Ok(RemoteAgentStartResponse {
+            ok: running,
+            ssh_target: ssh_target.to_string(),
+            install_path: install_path.to_string(),
+            running,
+            health_reachable: running,
+            error,
+        })
+    }
+
+    pub async fn update_remote_agent(ssh_target: &str) -> Result<RemoteAgentUpdateResponse> {
+        let latest_release = latest_release_info().await?;
+        let remote_version = get_remote_version(ssh_target).await?;
+
+        let matching_asset = latest_release
+            .matching_asset(
+                detect_remote_os(ssh_target).await.as_str(),
+                &detect_remote_arch(ssh_target, detect_remote_os(ssh_target).await).await,
+            )
+            .cloned();
+
+        if matching_asset.is_none() {
+            return Ok(RemoteAgentUpdateResponse {
+                ok: false,
+                ssh_target: ssh_target.to_string(),
+                previous_version: remote_version,
+                new_version: Some(latest_release.tag_name),
+                updated: false,
+                error: Some("No matching asset for remote platform".to_string()),
+            });
+        }
+
+        let install_path = default_install_path_for_target(ssh_target).await;
+        let install_path_clone = install_path.clone();
+        let stop_response = stop_remote_agent(ssh_target).await?;
+
+        if !stop_response.stopped {
+            return Ok(RemoteAgentUpdateResponse {
+                ok: false,
+                ssh_target: ssh_target.to_string(),
+                previous_version: remote_version,
+                new_version: Some(latest_release.tag_name),
+                updated: false,
+                error: Some("Failed to stop agent before update".to_string()),
+            });
+        }
+
+        let install_response = install_remote_agent(
+            ssh_target,
+            &matching_asset.unwrap(),
+            Some(install_path_clone),
+            detect_remote_os(ssh_target).await,
+        )
+        .await?;
+
+        if !install_response.installed {
+            return Ok(RemoteAgentUpdateResponse {
+                ok: false,
+                ssh_target: ssh_target.to_string(),
+                previous_version: remote_version,
+                new_version: Some(latest_release.tag_name),
+                updated: false,
+                error: Some("Failed to install updated agent".to_string()),
+            });
+        }
+
+        let start_response = start_remote_agent(
+            ssh_target,
+            &install_path,
+            &default_start_command_for_target(ssh_target, &install_path).await,
+        )
+        .await?;
+
+        Ok(RemoteAgentUpdateResponse {
+            ok: start_response.running,
+            ssh_target: ssh_target.to_string(),
+            previous_version: remote_version,
+            new_version: Some(latest_release.tag_name),
+            updated: start_response.running,
+            error: if start_response.running {
+                None
+            } else {
+                Some("Agent failed to start after update".to_string())
+            },
+        })
+    }
+
+    pub async fn stop_remote_agent(ssh_target: &str) -> Result<RemoteAgentStopResponse> {
+        let os = detect_remote_os(ssh_target).await;
+        let command = match os {
+            RemoteOs::Windows => "taskkill /IM llama-monitor.exe /F",
+            RemoteOs::Unix | RemoteOs::Macos => "pkill -f llama-monitor",
+            RemoteOs::Unknown => return Err(io::Error::other("Unknown OS").into()),
+        };
+
+        let output = Command::new("ssh")
+            .arg(ssh_target)
+            .arg(command)
+            .output()
+            .await?;
+
+        Ok(RemoteAgentStopResponse {
+            ok: output.status.success(),
+            ssh_target: ssh_target.to_string(),
+            stopped: output.status.success(),
+            error: if output.status.success() {
+                None
+            } else {
+                Some("Failed to stop agent".to_string())
+            },
+        })
+    }
+
+    pub async fn get_remote_version(ssh_target: &str) -> Result<Option<String>> {
+        let output = Command::new("ssh")
+            .arg(ssh_target)
+            .arg("~/.config/llama-monitor/bin/llama-monitor --version")
+            .output()
+            .await?;
+
+        if output.status.success() {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            Ok(Some(version))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub async fn default_install_path_for_target(ssh_target: &str) -> String {
+        match detect_remote_os(ssh_target).await {
+            RemoteOs::Windows => "%APPDATA%\\llama-monitor\\bin\\llama-monitor.exe".to_string(),
+            RemoteOs::Unix | RemoteOs::Macos => {
+                "~/.config/llama-monitor/bin/llama-monitor".to_string()
+            }
+            RemoteOs::Unknown => "/tmp/llama-monitor".to_string(),
+        }
+    }
+
+    pub async fn default_start_command_for_target(ssh_target: &str, install_path: &str) -> String {
+        match detect_remote_os(ssh_target).await {
+            RemoteOs::Windows => format!(
+                "schtasks /Create /TN llama-monitor-agent /TR \"\\\"%APPDATA%\\llama-monitor\\bin\\llama-monitor.exe\\\" --agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT}\" /SC ONCE /ST 23:59 /F && schtasks /Run /TN llama-monitor-agent && schtasks /Delete /TN llama-monitor-agent /F"
+            ),
+            RemoteOs::Unix | RemoteOs::Macos => format!(
+                "nohup {install_path} --agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT} > ~/.config/llama-monitor/agent.log 2>&1 &"
+            ),
+            RemoteOs::Unknown => format!(
+                "{install_path} --agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT}"
+            ),
+        }
+    }
+
+    pub async fn detect_remote_os_simple(ssh_target: &str) -> RemoteOs {
+        detect_remote_os(ssh_target).await
+    }
+}
+
+pub use install::{
+    RemoteAgentInstallRequest, default_install_path_for_target, default_start_command_for_target,
+    detect_remote_os_simple, install_remote_agent, start_remote_agent, stop_remote_agent,
+    update_remote_agent,
+};
