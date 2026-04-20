@@ -38,1088 +38,228 @@
         </div>
         <div class="nav-center">
             <div class="nav-search">
-                <input type="text" placeholder="Search sessions, presets, settings...">
+                <input type="text" id="search-input" placeholder="Search sessions, presets, settings...">
                 <button class="nav-search-btn">🔍</button>
             </div>
         </div>
-        <div class="nav-right">
-            <button class="nav-btn" onclick="openSessionModal()" title="New Session">+ New Session</button>
-            <button class="nav-btn" onclick="openSettingsModal()" title="Settings">⚙️ Settings</button>
-            <div class="nav-user">
-                <button class="nav-user-btn">👤 User</button>
-                <div class="nav-user-menu">
-                    <a href="#" class="nav-user-menu-item">Profile</a>
-                    <a href="#" class="nav-user-menu-item">Preferences</a>
-                    <a href="#" class="nav-user-menu-item" onclick="toggleTheme()">Toggle Theme</a>
-                    <a href="#" class="nav-user-menu-item">Help</a>
-                    <a href="#" class="nav-user-menu-item">Logout</a>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="sidebar-nav">
-        <button class="sidebar-btn active" onclick="switchTab('server')">
-            <span class="sidebar-icon">📊</span>
-            <span class="sidebar-label">Server</span>
-        </button>
-        <button class="sidebar-btn" onclick="switchTab('chat')">
-            <span class="sidebar-icon">💬</span>
-            <span class="sidebar-label">Chat</span>
-            <span class="sidebar-badge" id="sidebar-badge-chat"></span>
-        </button>
-        <button class="sidebar-btn" onclick="switchTab('logs')">
-            <span class="sidebar-icon">📋</span>
-            <span class="sidebar-label">Logs</span>
-            <span class="sidebar-badge" id="sidebar-badge-logs"></span>
-        </button>
-        <button class="sidebar-btn" onclick="openSessionsModal()">
-            <span class="sidebar-icon">📂</span>
-            <span class="sidebar-label">Sessions</span>
-        </button>
-        <button class="sidebar-btn" onclick="openModelsModal()">
-            <span class="sidebar-icon">🤖</span>
-            <span class="sidebar-label">Models</span>
-        </button>
-        <button class="sidebar-btn" onclick="openSettingsModal()">
-            <span class="sidebar-icon">⚙️</span>
-            <span class="sidebar-label">Settings</span>
-        </button>
-    </div>
-
-    <div class="content-area">
-        <div class="page active" id="page-server">
-            <div class="dashboard-header">
-                <h2>Server Endpoint</h2>
-                <div class="dashboard-header-actions">
-                    <label class="num-sm">Server Endpoint (for attach)
-                        <input id="server-endpoint" type="text" value="http://127.0.0.1:8001" style="width:240px;">
-                    </label>
-                    <button class="btn btn-attach" id="btn-attach" onclick="doAttach()">Attach</button>
-                    <button class="btn btn-kill" id="btn-kill" onclick="doKillLlama()">Kill llama-server</button>
-                </div>
-            </div>
-
-    <!-- Page: Server (control + monitor) -->
-    <div class="page active" id="page-server">
-  <div class="dashboard-grid">
-        <div class="dashboard-header grid grid-cols-12 gap-xl">
-            <div class="col-span-12">
-                <label class="num-sm">Server Endpoint (for attach)
-                    <input id="server-endpoint" type="text" value="http://127.0.0.1:8001" style="width:240px;">
-                </label>
-            </div>
-        </div>
-        <div class="control-bar grid grid-cols-12 gap-xl" id="controls">
-           <label class="preset-label">Model Preset
-                <select id="preset-select"></select>
-                <span class="preset-actions">
-                    <button class="btn-sm btn-preset" onclick="openPresetModal('new')" title="Create new preset">New</button>
-                    <button class="btn-sm btn-preset" onclick="openPresetModal('edit')" title="Edit selected preset">Edit</button>
-                    <button class="btn-sm btn-preset" onclick="copyPreset()" title="Duplicate selected preset">Copy</button>
-                    <button class="btn-sm btn-preset btn-preset-delete" onclick="deletePreset()" title="Delete selected preset">Delete</button>
-                    <button class="btn-sm btn-preset-reset" onclick="resetPresets()" title="Reset all presets to built-in defaults">Reset</button>
-                </span>
-            </label>
-            <button class="btn btn-start" id="btn-start" onclick="doStart()">Start</button>
-            <button class="btn btn-stop" id="btn-stop" onclick="doStop()" disabled>Stop</button>
-        </div>
-
-        <h2 class="dashboard-header">System</h2>
-        <div class="grid grid-cols-12 gap-xl widget-card">
-            <div class="col-span-12">
-                <table class="gpu-table">
-                    <colgroup>
-                        <col style="width:18%"><col style="width:10%"><col style="width:10%"><col style="width:18%"><col style="width:26%"><col style="width:18%">
-                    </colgroup>
-                    <thead><tr>
-                        <th>System</th><th>Temp</th><th>Load</th><th>Clock</th><th>RAM</th><th>Model</th>
-                    </tr></thead>
-                    <tbody id="system-rows"></tbody>
-                </table>
-            </div>
-        </div>
-
-        <h2 class="dashboard-header">Inference Metrics</h2>
-        <h2 class="dashboard-header">Inference Metrics</h2>
-        <div class="grid grid-cols-5 gap-md" id="inference">
-            <div class="col-span-1 widget-card widget-metric">
-                <div class="widget-metric-label">Prompt Speed</div>
-                <div class="widget-metric-value prompt" id="m-prompt">&mdash;</div>
-            </div>
-            <div class="col-span-1 widget-card widget-metric">
-                <div class="widget-metric-label">Generation Speed</div>
-                <div class="widget-metric-value gen" id="m-gen">&mdash;</div>
-            </div>
-            <div class="col-span-1 widget-card widget-metric">
-                <div class="widget-metric-label">Context (KV)</div>
-                <div class="widget-metric-value ctx" id="m-ctx">&mdash;</div>
-            </div>
-            <div class="col-span-1 widget-card widget-metric">
-                <div class="widget-metric-label">Slots</div>
-                <div class="widget-metric-value slots" id="m-slots">&mdash;</div>
-            </div>
-            <div class="col-span-1 widget-card widget-metric">
-                <div class="widget-metric-label">Server Status</div>
-                <div class="widget-metric-value" id="m-status">&mdash;</div>
-            </div>
-        </div>
-
-        <h2 class="dashboard-header">GPUs</h2>
-        <div class="grid grid-cols-12 gap-xl widget-card">
-            <div class="col-span-12">
-                <table class="gpu-table">
-                    <colgroup>
-                        <col style="width:14%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:24%"><col style="width:16%"><col style="width:16%">
-                    </colgroup>
-                    <thead><tr>
-                        <th>GPU</th><th>Temp</th><th>Load</th><th>VRAM</th><th>Power</th><th>SCLK</th><th>MCLK</th>
-                    </tr></thead>
-                    <tbody id="gpu-rows"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <!-- Page: Chat -->
-    <div class="page" id="page-chat">
-        <div class="chat-actions">
-            <button onclick="clearChat()">Clear</button>
-        </div>
-        <div class="chat-messages" id="chat-messages"></div>
-        <div class="chat-input-row">
-            <textarea id="chat-input" rows="2" placeholder="Send a message... (Enter to send, Shift+Enter for newline)"></textarea>
-            <button class="btn btn-start" id="btn-send" onclick="sendChat()">Send</button>
-        </div>
-    </div>
-
-    <!-- Page: Logs -->
-    <div class="page" id="page-logs">
-        <div class="log-panel" id="log-panel" style="flex:1;"></div>
-    </div>
-
-<!-- Config Modal -->
-<div class="modal-overlay" id="config-modal">
-    <div class="modal" style="width:540px;">
-        <div class="modal-header">
-            <h2>Configuration</h2>
-            <button type="button" class="modal-close" onclick="closeConfigModal()" aria-label="Close">&times;</button>
-        </div>
-        <div class="modal-body">
-
-            <details class="modal-section" open>
-                <summary>Server Paths</summary>
-                <label class="modal-field" title="Path to the llama-server binary. Leave empty to use $PATH.">llama-server binary
-                    <div style="display:flex;gap:6px;">
-                        <input type="text" id="set-server-path" placeholder="llama-server (from $PATH)" style="flex:1;">
-                        <button type="button" class="btn-sm btn-preset" onclick="openFileBrowser('set-server-path','executable')">Browse</button>
-                    </div>
-                </label>
-                <label class="modal-field" title="Working directory for llama-server process.">Working Directory
-                    <div style="display:flex;gap:6px;">
-                        <input type="text" id="set-server-cwd" placeholder=". (current dir)" style="flex:1;">
-                        <button type="button" class="btn-sm btn-preset" onclick="openFileBrowser('set-server-cwd','dir')">Browse</button>
-                    </div>
-                </label>
-            </details>
-
-            <details class="modal-section" open>
-                <summary>GPU Environment <span id="gpu-env-info" style="font-weight:400;color:#6a7585;font-size:0.72rem;"></span></summary>
-                <div class="modal-row">
-                    <label class="modal-field" title="GPU architecture for ROCm HSA_OVERRIDE_GFX_VERSION. Auto = let ROCm detect natively.">Architecture
-                        <select id="gpu-env-arch"></select>
-                    </label>
-                    <label class="modal-field" title="Comma-separated GPU device indices to use (e.g. 0,1,2,3). Empty = all GPUs.">GPU Devices
-                        <input type="text" id="gpu-env-devices" placeholder="all">
-                    </label>
-                </div>
-                <label class="modal-field" title="Path to ROCm installation directory.">ROCm Path
-                    <input type="text" id="gpu-env-rocm-path" value="/opt/rocm">
-                </label>
-                <div id="gpu-detected-info" style="font-size:0.72rem;color:#6a7585;margin-top:2px;"></div>
-            </details>
-
-            <details class="modal-section" id="remote-agent-panel" open>
-                  <summary>Remote Agent</summary>
-                  
-                  <div id="remote-agent-validation" class="remote-agent-validation" style="display:none;background:#bf6166;border-radius:6px;padding:8px 12px;margin-bottom:12px;">
-                      <div id="remote-agent-validation-message" style="font-size:0.82rem;color:#fff;"></div>
-                  </div>
-                  
-                  <div class="remote-agent-status-panel">
-                      <div class="remote-agent-header">
-                          <h3 style="margin:0 0 12px 0;color:#88c0d1;font-size:0.9rem;">Remote Agent Control</h3>
-                          <div style="font-size:0.72rem;color:#8899aa;margin-bottom:8px;">
-                              <span style="color:#a3be8b;">●</span> <span id="remote-agent-status-indicator">Ready</span>
-                          </div>
-                      </div>
-                      
-                      <div id="remote-agent-status" class="remote-agent-status-text"></div>
-                      
-                      <div class="remote-agent-versions" style="display:flex;gap:12px;flex-wrap:wrap;margin:12px 0;">
-                          <div style="background:#3b4252;border-radius:6px;padding:8px 12px;flex:1;min-width:120px;">
-                              <div style="font-size:0.68rem;color:#8899aa;text-transform:uppercase;">Latest</div>
-                              <div style="font-family:monospace;font-size:0.85rem;color:#d8dee9;" id="remote-agent-latest-version">—</div>
-                          </div>
-                          <div style="background:#3b4252;border-radius:6px;padding:8px 12px;flex:1;min-width:120px;">
-                              <div style="font-size:0.68rem;color:#8899aa;text-transform:uppercase;">Installed</div>
-                              <div style="font-family:monospace;font-size:0.85rem;color:#d8dee9;" id="remote-agent-installed-version">—</div>
-                          </div>
-                          <div id="remote-agent-update-indicator" style="font-size:0.72rem;color:#ebcb8b;padding:8px 12px;display:none;">● Update available</div>
-                      </div>
-                      
-                      <div class="remote-agent-buttons" id="remote-agent-buttons" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-                          <button type="button" class="btn-sm btn-preset" onclick="remoteAgentInstall()" id="btn-remote-agent-install">Install & Start</button>
-                          <button type="button" class="btn-sm btn-preset" onclick="remoteAgentStart()" id="btn-remote-agent-start">Start Agent</button>
-                          <button type="button" class="btn-sm btn-preset" onclick="remoteAgentUpdate()" id="btn-remote-agent-update" style="display:none;">Update Agent</button>
-                          <button type="button" class="btn-sm btn-preset" onclick="remoteAgentStop()" id="btn-remote-agent-stop" style="display:none;">Stop Agent</button>
-                          <button type="button" class="btn-sm btn-preset" onclick="remoteAgentRestart()" id="btn-remote-agent-restart" style="display:none;">Restart Agent</button>
-                      </div>
-                      
-                      <div class="remote-agent-firewall" id="remote-agent-firewall" style="display:none;background:#3b4252;border-radius:6px;padding:12px;">
-                          <div style="display:flex;align-items:flex-start;gap:10px;">
-                              <span style="font-size:1.2rem;">⚠️</span>
-                              <div style="flex:1;">
-                                  <div style="color:#ebcb8b;font-weight:600;margin-bottom:4px;">Firewall Detected</div>
-                                  <div style="font-size:0.82rem;color:#a0aab5;line-height:1.5;">
-                                      The agent started successfully but is not reachable from your browser. This typically means the remote machine's firewall is blocking HTTP access on port <strong>7779</strong>.
-                                  </div>
-                                  <div style="margin-top:8px;">
-                                      <strong>Quick fixes:</strong>
-                                      <ul style="margin:6px 0 0 16px;font-size:0.82rem;color:#a0aab5;">
-                                          <li>Check Windows Defender Firewall (or equivalent) and allow port 7779</li>
-                                          <li>Verify the agent is listening on <code>0.0.0.0</code> (not just <code>127.0.0.1</code>)</li>
-                                          <li>Try <code>netsh advfirewall firewall add rule name="llama-agent" dir=in action=allow protocol=TCP localport=7779</code> on Windows</li>
-                                      </ul>
-                                  </div>
-                                  <button type="button" class="btn-sm btn-preset" onclick="openFirewallHelp()" style="margin-top:10px;">Fix Firewall</button>
-                              </div>
-                          </div>
-                      </div>
-                      
-                      <div class="remote-agent-progress" id="remote-agent-progress" style="display:none;">
-                          <div class="remote-agent-progress-bar-container">
-                              <div class="remote-agent-progress-bar" id="remote-agent-progress-bar"></div>
-                          </div>
-                          <div class="remote-agent-progress-text" id="remote-agent-progress-text"></div>
-                      </div>
-                      
-                      <div class="remote-agent-timeline" id="remote-agent-timeline" style="display:none;">
-                          <div style="font-size:0.68rem;color:#8899aa;text-transform:uppercase;margin-bottom:8px;">Activity Timeline</div>
-                          <div id="remote-agent-timeline-items" style="font-size:0.78rem;color:#d8dee9;font-family:monospace;"></div>
-                      </div>
-                  </div>
-                 
-                 <details class="modal-section" style="border:none;margin-top:10px;">
-                     <summary style="padding:6px 0;margin:0;color:#88c0d1;">Advanced Options (collapsed)</summary>
-                     <div class="modal-row" style="gap:8px;">
-                         <label class="modal-field" style="flex:1;" title="Optional explicit remote agent URL. Empty means infer it from the attached llama-server host on port 7779.">
-                             Agent URL
-                             <input type="text" id="set-remote-agent-url" placeholder="http://192.168.2.16:7779">
-                         </label>
-                         <label class="modal-field" style="flex:1;" title="Optional bearer token used when polling the remote agent.">
-                             Agent Token
-                             <input type="text" id="set-remote-agent-token" placeholder="optional">
-                         </label>
-                     </div>
-                     <div class="modal-row" style="gap:8px;">
-                          <label class="modal-field" style="flex:1;">
-                              <span><input type="checkbox" id="set-remote-agent-ssh-autostart"> Start over SSH if unreachable</span>
-                          </label>
-                          <label class="modal-field" style="flex:1;" title="SSH target for the remote machine. Example: user@192.168.1.100. If empty, auto-inferred from attached endpoint.">
-                              Remote Host
-                              <input type="text" id="set-remote-agent-ssh-target" placeholder="user@host">
-                          </label>
-                      </div>
-                     <label class="modal-field" title="Optional command run on the remote machine. Empty uses an OS-specific default for an installed agent binary.">
-                         SSH Start Command
-                         <input type="text" id="set-remote-agent-ssh-command" placeholder='optional override, e.g. start "" /B llama-monitor.exe --agent --agent-host 0.0.0.0 --agent-port 7779'>
-                     </label>
-                 </details>
-             </details>
-
-        </div>
-        <div class="modal-buttons">
-            <button type="button" class="btn btn-modal-cancel" onclick="closeConfigModal()">Cancel</button>
-            <button type="button" class="btn btn-modal-save" onclick="saveConfig()">Save</button>
-        </div>
-        <div class="modal-buttons">
-            <button type="button" class="btn btn-modal-cancel" onclick="closeConfigModal()">Cancel</button>
-            <button type="button" class="btn btn-modal-save" onclick="saveConfig()">Save</button>
-        </div>
-    </div>
-</div>
-
-<!-- Connect Agent Modal -->
-<div class="modal-overlay" id="connect-agent-modal">
-    <div class="modal" style="width:540px;">
-        <div class="modal-header">
-            <h2>Connect Remote Agent</h2>
-            <button type="button" class="modal-close" onclick="closeConnectAgentModal()" aria-label="Close">&times;</button>
-        </div>
-        <div class="modal-body">
-            <label class="modal-field" title="URL of the remote agent endpoint">
-                Agent URL
-                <input type="text" id="agent-url" placeholder="http://127.0.0.1:7779" style="width:100%;box-sizing:border-box;">
-            </label>
-            <label class="modal-field" title="Authentication token for the agent">
-                Authentication Token
-                <input type="text" id="agent-token" placeholder="Enter token" style="width:100%;box-sizing:border-box;">
-            </label>
-            <p style="font-size:0.72rem;color:#6a7585;margin-top:8px;">
-                The remote agent must be running and accessible at the specified URL.
-                Token is required for authentication.
-            </p>
-        </div>
-        <div class="modal-buttons">
-            <button type="button" class="btn btn-modal-cancel" onclick="closeConnectAgentModal()">Cancel</button>
-            <button type="button" class="btn btn-modal-save" onclick="connectAgent()">Connect</button>
-        </div>
-    </div>
-</div>
-
-<!-- File Browser Modal (z-index above all modals) -->
-<div class="modal-overlay" id="file-browser-modal" style="z-index:1200;">
-    <div class="modal" style="width:560px;">
-        <div class="modal-header">
-            <h2>Browse</h2>
-            <button type="button" class="modal-close" onclick="closeFileBrowser()" aria-label="Close">&times;</button>
-        </div>
-        <div class="file-browser-bar">
-            <button class="btn-sm btn-preset" onclick="fileBrowserUp()" title="Parent directory">&uarr; Up</button>
-            <input type="text" id="fb-path-input" class="fb-path-input" onkeydown="if(event.key==='Enter')fileBrowserGo(this.value)">
-        </div>
-        <div class="modal-body" style="padding:0;">
-            <div id="fb-entries" class="fb-entries"></div>
-        </div>
-        <div class="modal-buttons">
-            <button type="button" class="btn btn-modal-cancel" onclick="closeFileBrowser()">Cancel</button>
-            <button type="button" class="btn btn-modal-save" onclick="fileBrowserSelect()">Select This Folder</button>
-        </div>
-    </div>
-</div>
-
-<!-- Session Modal -->
-<div class="modal-overlay" id="session-modal">
-    <div class="modal">
-        <div class="modal-header">
-            <h2 id="session-modal-title">New Session</h2>
-            <button type="button" class="modal-close" onclick="closeSessionModal()" aria-label="Close">&times;</button>
-        </div>
-        <form id="session-form" onsubmit="saveSession(event)">
-            <input type="hidden" id="modal-session-id">
-            <div class="modal-body">
-                <label class="modal-field" title="Display name for this session">
-                    Session Name
-                    <input type="text" id="modal-session-name" required>
-                    <span class="field-error-msg">Session name is required</span>
-                </label>
-                <label class="modal-field" title="Session mode">
-                    Session Mode
-                    <select id="modal-session-mode">
-                        <option value="spawn">Spawn</option>
-                        <option value="attach">Attach</option>
-                    </select>
-                </label>
-                <label class="modal-field" title="Port for spawned server or endpoint for attached server">
-                     <span id="modal-session-port-label">Port</span>
-                     <input type="number" id="modal-session-port" placeholder="e.g. 8080">
-                 </label>
-            </div>
-            <div class="modal-buttons">
-                <button type="button" class="btn btn-modal-cancel" onclick="closeSessionModal()">Cancel</button>
-                <button type="submit" class="btn btn-modal-save" id="btn-modal-save">Save</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<!-- Preset Modal -->
-<div class="modal-overlay" id="preset-modal">
-    <div class="modal">
-        <div class="modal-header">
-            <h2 id="modal-title">New Preset</h2>
-            <button type="button" class="modal-close" onclick="closePresetModal()" aria-label="Close">&times;</button>
-        </div>
-        <form id="preset-form" onsubmit="savePreset(event)">
-            <input type="hidden" id="modal-preset-id">
-            <div class="modal-body">
-
-            <!-- Model & Memory -->
-            <details class="modal-section" open>
-                <summary>Model &amp; Memory</summary>
-                <label class="modal-field" title="Display name for this preset">Name
-                    <input type="text" id="modal-name" required>
-                    <span class="field-error-msg">Name is required</span>
-                </label>
-                <label class="modal-field" title="Absolute path to the .gguf model file on disk">Model Path
-                    <div style="display:flex;gap:6px;">
-                        <input type="text" id="modal-model-path" required style="flex:1;">
-                        <button type="button" class="btn-sm btn-preset" onclick="openFileBrowser('modal-model-path','gguf')" title="Browse filesystem for .gguf files">Browse</button>
-                    </div>
-                    <span class="field-error-msg">Model path is required</span>
-                </label>
-                <div class="modal-row">
-                    <label class="modal-field" title="Number of layers to offload to GPU. 99 = all layers. Lower values keep some layers on CPU to save VRAM.">GPU Layers (-ngl)
-                        <input type="number" id="modal-gpu-layers" placeholder="99">
-                    </label>
-                </div>
-                <div class="modal-row modal-checks">
-                    <label class="chk" title="Disable memory-mapped I/O. Required for models >16GB or on network storage."><input type="checkbox" id="modal-no-mmap"> no-mmap</label>
-                    <label class="chk" title="Lock model in RAM, preventing OS from swapping it to disk. Improves performance but requires enough physical RAM."><input type="checkbox" id="modal-mlock"> mlock</label>
-                </div>
-            </details>
-
-            <!-- Context & KV Cache -->
-            <details class="modal-section" open>
-                <summary>Context &amp; KV Cache</summary>
-                <label class="modal-field" title="Maximum context length in tokens. Larger values use more VRAM. Auto-enables YaRN scaling above 262144.">Context Size (-c)
-                    <input type="number" id="modal-context-size" value="128000">
-                </label>
-                <div class="modal-row">
-                    <label class="modal-field" title="KV cache key quantization type: f16 (best quality), q8_0, turbo3 (4.6x compression, fast)">KV Key Type (-ctk)
-                        <input type="text" id="modal-ctk" value="q8_0">
-                    </label>
-                    <label class="modal-field" title="KV cache value quantization type: f16 (best quality), q8_0, turbo3 (4.6x compression, fast)">KV Value Type (-ctv)
-                        <input type="text" id="modal-ctv" value="f16">
-                    </label>
-                    <label class="modal-field" title="Flash Attention mode: auto (default), on, off. Speeds up inference when supported by model architecture.">Flash Attn (-fa)
-                        <select id="modal-flash-attn">
-                            <option value="">(default)</option>
-                            <option value="auto">auto</option>
-                            <option value="on">on</option>
-                            <option value="off">off</option>
-                        </select>
-                    </label>
-                </div>
-            </details>
-
-            <!-- Batching & Slots -->
-            <details class="modal-section" open>
-                <summary>Batching &amp; Slots</summary>
-                <div class="modal-row">
-                    <label class="modal-field" title="Logical batch size: max tokens processed in parallel during prompt evaluation. Higher = faster prompts, more VRAM.">Batch Size (-b)
-                        <input type="number" id="modal-batch-size" value="2048">
-                    </label>
-                    <label class="modal-field" title="Physical micro-batch size. Controls memory granularity. Usually same as batch_size.">Micro-batch (-ub)
-                        <input type="number" id="modal-ubatch-size" value="2048">
-                    </label>
-                    <label class="modal-field" title="Number of concurrent inference slots. Each slot reserves context_size tokens of KV cache VRAM.">Parallel Slots (-np)
-                        <input type="number" id="modal-parallel-slots" value="1">
-                    </label>
-                </div>
-            </details>
-
-            <!-- Generation -->
-            <details class="modal-section">
-                <summary>Generation</summary>
-                <div class="modal-row">
-                    <label class="modal-field" title="Temperature for sampling. Higher = more randomness.">Temperature (--temp)
-                        <input type="number" id="modal-temperature" step="any" value="1.0">
-                    </label>
-                    <label class="modal-field" title="Top-P cumulative probability threshold. Lower = more focused predictions.">Top-P (--top-p)
-                        <input type="number" id="modal-top-p" step="any" value="0.95">
-                    </label>
-                    <label class="modal-field" title="Top-K maximum number of tokens to consider. Lower = more deterministic.">Top-K (--top-k)
-                        <input type="number" id="modal-top-k" value="40">
-                    </label>
-                </div>
-                <div class="modal-row">
-                    <label class="modal-field" title="Minimum probability threshold. Filters out very low probability tokens.">Min-P (--min-p)
-                        <input type="number" id="modal-min-p" step="any" value="0.01">
-                    </label>
-                    <label class="modal-field" title="Penalty for repetition. Higher = less repetition.">Repeat Penalty (--repeat-penalty)
-                        <input type="number" id="modal-repeat-penalty" step="any" value="1.0">
-                    </label>
-                    <label class="modal-field" title="Number of CPU threads for MoE layers.">CPU MoE Threads (--n-cpu-moe)
-                        <input type="number" id="modal-n-cpu-moe" value="16">
-                    </label>
-                </div>
-            </details>
-
-            <!-- GPU Distribution -->
-            <details class="modal-section">
-                <summary>GPU Distribution</summary>
-                <label class="modal-field" title="VRAM distribution ratio across GPUs (e.g. '7,8,8,8' for 4 GPUs). Leave empty for single GPU.">Tensor Split (-ts)
-                    <input type="text" id="modal-tensor-split" placeholder="7,8,8,8">
-                </label>
-                <div class="modal-row">
-                    <label class="modal-field" title="How to split the model across GPUs: layer (default, split by layer) or row (split large tensors).">Split Mode
-                        <select id="modal-split-mode">
-                            <option value="">(default)</option>
-                            <option value="layer">layer</option>
-                            <option value="row">row</option>
-                        </select>
-                    </label>
-                    <label class="modal-field" title="Index of the GPU to use for model computation (0-based). Others used for offloading.">Main GPU (-mg)
-                        <input type="number" id="modal-main-gpu" placeholder="0">
-                    </label>
-                </div>
-            </details>
-
-            <!-- Threading -->
-            <details class="modal-section">
-                <summary>Threading</summary>
-                <div class="modal-row">
-                    <label class="modal-field" title="Number of CPU threads for token generation. Leave empty to use all available CPUs.">Threads (-t)
-                        <input type="number" id="modal-threads" placeholder="auto">
-                    </label>
-                    <label class="modal-field" title="Number of CPU threads for prompt/batch processing. Leave empty to use same as threads.">Threads Batch (-tb)
-                        <input type="number" id="modal-threads-batch" placeholder="auto">
-                    </label>
-                </div>
-            </details>
-
-            <!-- Rope Scaling -->
-            <details class="modal-section">
-                <summary>Rope Scaling</summary>
-                <p style="font-size:0.72rem;color:#6a7585;margin-bottom:8px;">Leave empty for auto-YaRN when context &gt; 262144. Set explicitly to override.</p>
-                <div class="modal-row">
-                    <label class="modal-field" title="RoPE scaling method: yarn (for extended context), linear, or none. Auto-enabled as yarn for context > 262144 if left empty.">Rope Scaling
-                        <select id="modal-rope-scaling">
-                            <option value="">(auto)</option>
-                            <option value="yarn">yarn</option>
-                            <option value="linear">linear</option>
-                            <option value="none">none</option>
-                        </select>
-                    </label>
-                    <label class="modal-field" title="RoPE base frequency. Model-specific default if not set. Higher values extend context at quality cost.">Freq Base
-                        <input type="number" id="modal-rope-freq-base" step="any" placeholder="model default">
-                    </label>
-                    <label class="modal-field" title="RoPE frequency scaling factor. Auto-calculated for YaRN if not set. Lower = more context extension.">Freq Scale
-                        <input type="number" id="modal-rope-freq-scale" step="any" placeholder="auto">
-                    </label>
-                </div>
-            </details>
-
-            <!-- Speculative Decoding -->
-            <details class="modal-section">
-                <summary>Speculative Decoding</summary>
-                <div class="modal-row modal-checks">
-                    <label class="chk" title="Enable ngram-mod speculative decoding. Boosts generation speed ~47% on compatible models (pure transformers)."><input type="checkbox" id="modal-ngram-spec"> ngram-spec</label>
-                </div>
-                <div class="modal-row">
-                    <label class="modal-field" title="N-gram size for speculative lookup table. Larger = better predictions but more memory.">N-gram Size
-                        <input type="number" id="modal-spec-ngram-size" placeholder="24">
-                    </label>
-                    <label class="modal-field" title="Minimum number of tokens to draft before verification.">Draft Min
-                        <input type="number" id="modal-draft-min" placeholder="8">
-                    </label>
-                    <label class="modal-field" title="Maximum number of tokens to draft per speculation step.">Draft Max
-                        <input type="number" id="modal-draft-max" placeholder="24">
-                    </label>
-                </div>
-                <label class="modal-field" title="Path to a smaller draft model for model-based speculative decoding (alternative to ngram).">Draft Model (-md)
-                    <input type="text" id="modal-draft-model" placeholder="/path/to/draft-model.gguf">
-                </label>
-            </details>
-
-            <!-- Advanced -->
-            <details class="modal-section">
-                <summary>Advanced</summary>
-                <div class="modal-row">
-                    <label class="modal-field" title="Random seed for reproducible generation. -1 = random.">Seed (-s)
-                        <input type="number" id="modal-seed" placeholder="random">
-                    </label>
-                    <label class="modal-field" title="Path to a text file containing the system prompt.">System Prompt File
-                        <input type="text" id="modal-system-prompt-file" placeholder="/path/to/system.txt">
-                    </label>
-                </div>
-                <label class="modal-field" title="Additional llama-server CLI flags (space-separated). Example: --log-verbosity 2 --no-perf">Extra Args
-                    <input type="text" id="modal-extra-args" placeholder="--flag1 value1 --flag2">
-                </label>
-            </details>
-
-            </div><!-- /modal-body -->
-            <div class="modal-buttons">
-                <button type="button" class="btn btn-modal-cancel" onclick="closePresetModal()">Cancel</button>
-                <button type="submit" class="btn btn-modal-save" id="btn-modal-save">Save</button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<div class="toast-container" id="toast-container"></div>
-
- </div>
-
-<!-- Sessions Management Panel -->
-<div class="page" id="page-sessions">
-    <div class="dashboard-header">
-        <h2>Session Management</h2>
-        <button class="btn btn-primary" onclick="openSessionModal()">
-            <span class="btn-icon">+</span>
-            New Session
-        </button>
     </div>
     
-    <div class="sessions-container" id="sessions-container">
-        <!-- Session cards will be rendered here -->
-    </div>
-</div>
-
-<!-- Settings Modal with Tabbed Navigation -->
-<div class="modal-overlay" id="settings-modal">
-    <div class="modal" style="width:720px;">
-        <div class="modal-header">
-            <h2>Settings</h2>
-            <button type="button" class="modal-close" onclick="closeSettingsModal()" aria-label="Close">&times;</button>
+    <div class="dashboard-grid">
+        <div class="dashboard-header">
+            <h1>Dashboard</h1>
         </div>
-        <div class="settings-modal-body">
-            <div class="settings-tabs">
-                <button class="settings-tab active" data-tab="general">General</button>
-                <button class="settings-tab" data-tab="appearance">Appearance</button>
-                <button class="settings-tab" data-tab="gpu">GPU</button>
-                <button class="settings-tab" data-tab="network">Network</button>
-            </div>
-            <div class="settings-content">
-                <div class="settings-pane active" id="settings-general">
-                    <h3>General Settings</h3>
-                    <label class="modal-field">
-                        Auto-update Check
-                        <div style="display:flex;align-items:center;gap:12px;">
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="settings-auto-update" checked>
-                                <span class="toggle-slider"></span>
-                            </label>
-                            <span class="toggle-label">Enable automatic updates</span>
-                        </div>
-                    </label>
-                    <label class="modal-field">
-                        Data Collection
-                        <div style="display:flex;align-items:center;gap:12px;">
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="settings-data-collection">
-                                <span class="toggle-slider"></span>
-                            </label>
-                            <span class="toggle-label">Send anonymous usage data</span>
-                        </div>
-                    </label>
+        
+        <div class="dashboard-metrics-grid">
+            <div class="dashboard-metrics-section">
+                <div class="dashboard-metrics-title">System</div>
+                <div class="dashboard-metrics-item cpu">
+                    <div class="dashboard-metrics-icon">💻</div>
+                    <div class="dashboard-metrics-label">CPU Usage</div>
+                    <div class="dashboard-metrics-value" id="metric-cpu-usage">0%</div>
                 </div>
-                <div class="settings-pane" id="settings-appearance">
-                    <h3>Appearance</h3>
-                    <label class="modal-field">
-                        Theme
-                        <select id="settings-theme">
-                            <option value="auto">Auto (System)</option>
-                            <option value="light">Light</option>
-                            <option value="dark">Dark</option>
-                        </select>
-                    </label>
-                    <label class="modal-field">
-                        Font Size
-                        <select id="settings-font-size">
-                            <option value="small">Small (14px)</option>
-                            <option value="medium" selected>Medium (16px)</option>
-                            <option value="large">Large (18px)</option>
-                        </select>
-                    </label>
-                    <label class="modal-field">
-                        Dashboard Widgets
-                        <div class="modal-row">
-                            <label class="chk"><input type="checkbox" id="settings-widget-cpu" checked> CPU Usage</label>
-                            <label class="chk"><input type="checkbox" id="settings-widget-gpu" checked> GPU Usage</label>
-                            <label class="chk"><input type="checkbox" id="settings-widget-memory" checked> Memory</label>
-                        </div>
-                    </label>
+                <div class="dashboard-metrics-item">
+                    <div class="dashboard-metrics-icon">🧠</div>
+                    <div class="dashboard-metrics-label">Memory</div>
+                    <div class="dashboard-metrics-value" id="metric-memory-usage">0 GB</div>
                 </div>
-                <div class="settings-pane" id="settings-gpu">
-                    <h3>GPU Configuration</h3>
-                    <label class="modal-field">
-                        Default GPU Layers
-                        <input type="number" id="settings-default-gpu-layers" value="99">
-                    </label>
-                    <label class="modal-field">
-                        GPU Memory Target
-                        <input type="number" id="settings-gpu-memory-target" placeholder="GB">
-                    </label>
-                </div>
-                <div class="settings-pane" id="settings-network">
-                    <h3>Network Settings</h3>
-                    <label class="modal-field">
-                        Server Port
-                        <input type="number" id="settings-server-port" value="8001">
-                    </label>
-                    <label class="modal-field">
-                        Agent Port
-                        <input type="number" id="settings-agent-port" value="7779">
-                    </label>
-                </div>
-            </div>
-        </div>
-        <div class="modal-buttons">
-            <button type="button" class="btn btn-modal-cancel" onclick="closeSettingsModal()">Cancel</button>
-            <button type="button" class="btn btn-modal-save" onclick="saveSettings()">Save Settings</button>
-        </div>
-    </div>
-</div>
-
-<!-- Analytics Dashboard Modal -->
-<div class="modal-overlay" id="analytics-modal">
-    <div class="modal" style="width:960px;">
-        <div class="modal-header">
-            <h2>Analytics Dashboard</h2>
-            <button type="button" class="modal-close" onclick="closeAnalyticsModal()" aria-label="Close">&times;</button>
-        </div>
-        <div class="modal-body">
-            <div class="analytics-dashboard">
-                <div class="analytics-charts">
-                    <div class="widget-card">
-                        <h3>Inference Performance</h3>
-                        <div class="chart-container">
-                            <canvas id="analytics-chart-performance"></canvas>
-                        </div>
-                    </div>
-                    <div class="widget-card">
-                        <h3>GPU Utilization</h3>
-                        <div class="chart-container">
-                            <canvas id="analytics-chart-gpu"></canvas>
-                        </div>
-                    </div>
-                    <div class="widget-card">
-                        <h3>Memory Usage</h3>
-                        <div class="chart-container">
-                            <canvas id="analytics-chart-memory"></canvas>
-                        </div>
-                    </div>
-                </div>
-                <div class="analytics-sidebar">
-                    <div class="widget-card">
-                        <h3>Key Metrics</h3>
-                        <div class="analytics-metrics">
-                            <div class="analytics-metric">
-                                <span class="analytics-metric-label">Total Inferences</span>
-                                <span class="analytics-metric-value" id="analytics-total-inferences">0</span>
-                            </div>
-                            <div class="analytics-metric">
-                                <span class="analytics-metric-label">Avg Prompt Speed</span>
-                                <span class="analytics-metric-value" id="analytics-avg-prompt-speed">0</span>
-                            </div>
-                            <div class="analytics-metric">
-                                <span class="analytics-metric-label">Avg Gen Speed</span>
-                                <span class="analytics-metric-value" id="analytics-avg-gen-speed">0</span>
-                            </div>
-                            <div class="analytics-metric">
-                                <span class="analytics-metric-label">Total Tokens</span>
-                                <span class="analytics-metric-value" id="analytics-total-tokens">0</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="widget-card">
-                        <h3>Session Statistics</h3>
-                        <div class="analytics-stats">
-                            <div class="analytics-stat-item">
-                                <span class="analytics-stat-label">Active Sessions</span>
-                                <span class="analytics-stat-value" id="analytics-active-sessions">0</span>
-                            </div>
-                            <div class="analytics-stat-item">
-                                <span class="analytics-stat-label">Total Sessions</span>
-                                <span class="analytics-stat-value" id="analytics-total-sessions">0</span>
-                            </div>
-                            <div class="analytics-stat-item">
-                                <span class="analytics-stat-label">Uptime</span>
-                                <span class="analytics-stat-value" id="analytics-uptime">0h</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Export Modal -->
-<div class="modal-overlay" id="export-modal">
-    <div class="modal" style="width:560px;">
-        <div class="modal-header">
-            <h2>Export Data</h2>
-            <button type="button" class="modal-close" onclick="closeExportModal()" aria-label="Close">&times;</button>
-        </div>
-        <div class="modal-body">
-            <div class="export-panel">
-                <h3 class="export-section-title">What to Export</h3>
-                <div class="export-options">
-                    <label class="export-option">
-                        <input type="radio" name="export-type" value="sessions" checked>
-                        <div class="export-option-content">
-                            <div class="export-option-title">Session Configurations</div>
-                            <div class="export-option-description">Export all session definitions (spawn/attach mode, ports, server configs)</div>
-                        </div>
-                    </label>
-                    <label class="export-option">
-                        <input type="radio" name="export-type" value="presets">
-                        <div class="export-option-content">
-                            <div class="export-option-title">Model Presets</div>
-                            <div class="export-option-description">Export all model presets with all llama.cpp parameters</div>
-                        </div>
-                    </label>
-                    <label class="export-option">
-                        <input type="radio" name="export-type" value="analytics">
-                        <div class="export-option-content">
-                            <div class="export-option-title">Analytics Data</div>
-                            <div class="export-option-description">Export performance metrics and usage statistics</div>
-                        </div>
-                    </label>
-                    <label class="export-option">
-                        <input type="radio" name="export-type" value="full">
-                        <div class="export-option-content">
-                            <div class="export-option-title">Full Backup</div>
-                            <div class="export-option-description">Export everything: sessions, presets, analytics, and settings</div>
-                        </div>
-                    </label>
+                <div class="dashboard-metrics-item">
+                    <div class="dashboard-metrics-icon">⏳</div>
+                    <div class="dashboard-metrics-label">Uptime</div>
+                    <div class="dashboard-metrics-value" id="metric-uptime">0h</div>
                 </div>
             </div>
             
-            <div class="export-panel" style="margin-top:24px;">
-                <h3 class="export-section-title">Export Format</h3>
-                <div class="export-options">
-                    <label class="export-option">
-                        <input type="radio" name="export-format" value="json" checked>
-                        <div class="export-option-content">
-                            <div class="export-option-title">JSON</div>
-                            <div class="export-option-description">Structured data format (recommended)</div>
-                        </div>
-                    </label>
-                    <label class="export-option">
-                        <input type="radio" name="export-format" value="csv">
-                        <div class="export-option-content">
-                            <div class="export-option-title">CSV</div>
-                            <div class="export-option-description">Spreadsheet-compatible format</div>
-                        </div>
-                    </label>
+            <div class="dashboard-metrics-section">
+                <div class="dashboard-metrics-title">GPUs</div>
+                <div class="dashboard-metrics-item gpu" id="metric-gpu-0">
+                    <div class="dashboard-metrics-icon">GPU</div>
+                    <div class="dashboard-metrics-label">GPU 0</div>
+                    <div class="dashboard-metrics-value" id="metric-gpu-0-usage">0%</div>
+                    <div class="dashboard-metrics-bar">
+                        <div class="dashboard-metrics-fill" id="gpu-0-usage-bar" style="width: 0%"></div>
+                    </div>
                 </div>
-            </div>
-            
-            <div class="export-panel" style="margin-top:24px;">
-                <h3 class="export-section-title">Export Range</h3>
-                <div class="export-options">
-                    <label class="export-option">
-                        <input type="radio" name="export-range" value="all" checked>
-                        <div class="export-option-content">
-                            <div class="export-option-title">All Data</div>
-                        </div>
-                    </label>
-                    <label class="export-option">
-                        <input type="radio" name="export-range" value="today">
-                        <div class="export-option-content">
-                            <div class="export-option-title">Today</div>
-                        </div>
-                    </label>
-                    <label class="export-option">
-                        <input type="radio" name="export-range" value="week">
-                        <div class="export-option-content">
-                            <div class="export-option-title">Last 7 Days</div>
-                        </div>
-                    </label>
-                    <label class="export-option">
-                        <input type="radio" name="export-range" value="month">
-                        <div class="export-option-content">
-                            <div class="export-option-title">Last 30 Days</div>
-                        </div>
-                    </label>
+                <div class="dashboard-metrics-item gpu" id="metric-gpu-1">
+                    <div class="dashboard-metrics-icon">GPU</div>
+                    <div class="dashboard-metrics-label">GPU 1</div>
+                    <div class="dashboard-metrics-value" id="metric-gpu-1-usage">0%</div>
+                    <div class="dashboard-metrics-bar">
+                        <div class="dashboard-metrics-fill" id="gpu-1-usage-bar" style="width: 0%"></div>
+                    </div>
                 </div>
-            </div>
-        </div>
-        <div class="modal-buttons">
-            <button type="button" class="btn btn-modal-cancel" onclick="closeExportModal()">Cancel</button>
-            <button type="button" class="btn btn-primary" onclick="exportData()">Export Data</button>
-        </div>
-    </div>
-</div>
-
-<!-- Keyboard Shortcuts Modal -->
-<div class="keyboard-shortcut-overlay" id="keyboard-shortcuts-modal">
-    <div class="shortcuts-modal">
-        <div class="shortcuts-header">
-            <h2 class="shortcuts-title">Keyboard Shortcuts</h2>
-            <button type="button" class="shortcuts-close" onclick="closeKeyboardShortcutsModal()" aria-label="Close">&times;</button>
-        </div>
-        <div class="shortcuts-body">
-            <div class="shortcuts-section">
-                <h3 class="shortcuts-section-title">Navigation</h3>
-                <div class="shortcuts-list">
-                    <div class="shortcut-item">
-                        <span class="shortcut-description">Switch to Server tab</span>
-                        <span class="shortcut-keys-combination">
-                            <span class="shortcut-key-combo">Ctrl</span>
-                            <span class="shortcut-key-combo">1</span>
-                        </span>
+                <div class="dashboard-metrics-item gpu" id="metric-gpu-2">
+                    <div class="dashboard-metrics-icon">GPU</div>
+                    <div class="dashboard-metrics-label">GPU 2</div>
+                    <div class="dashboard-metrics-value" id="metric-gpu-2-usage">0%</div>
+                    <div class="dashboard-metrics-bar">
+                        <div class="dashboard-metrics-fill" id="gpu-2-usage-bar" style="width: 0%"></div>
                     </div>
-                    <div class="shortcut-item">
-                        <span class="shortcut-description">Switch to Chat tab</span>
-                        <span class="shortcut-keys-combination">
-                            <span class="shortcut-key-combo">Ctrl</span>
-                            <span class="shortcut-key-combo">2</span>
-                        </span>
-                    </div>
-                    <div class="shortcut-item">
-                        <span class="shortcut-description">Switch to Logs tab</span>
-                        <span class="shortcut-keys-combination">
-                            <span class="shortcut-key-combo">Ctrl</span>
-                            <span class="shortcut-key-combo">3</span>
-                        </span>
-                    </div>
-                    <div class="shortcut-item">
-                        <span class="shortcut-description">Open Settings</span>
-                        <span class="shortcut-keys-combination">
-                            <span class="shortcut-key-combo">Ctrl</span>
-                            <span class="shortcut-key-combo">,</span>
-                        </span>
-                    </div>
-                    <div class="shortcut-item">
-                        <span class="shortcut-description">Open Analytics</span>
-                        <span class="shortcut-keys-combination">
-                            <span class="shortcut-key-combo">Ctrl</span>
-                            <span class="shortcut-key-combo">A</span>
-                        </span>
-                    </div>
-                    <div class="shortcut-item">
-                        <span class="shortcut-description">Open Export</span>
-                        <span class="shortcut-keys-combination">
-                            <span class="shortcut-key-combo">Ctrl</span>
-                            <span class="shortcut-key-combo">E</span>
-                        </span>
+                </div>
+                <div class="dashboard-metrics-item gpu" id="metric-gpu-3">
+                    <div class="dashboard-metrics-icon">GPU</div>
+                    <div class="dashboard-metrics-label">GPU 3</div>
+                    <div class="dashboard-metrics-value" id="metric-gpu-3-usage">0%</div>
+                    <div class="dashboard-metrics-bar">
+                        <div class="dashboard-metrics-fill" id="gpu-3-usage-bar" style="width: 0%"></div>
                     </div>
                 </div>
             </div>
             
-            <div class="shortcuts-section">
-                <h3 class="shortcuts-section-title">Session Management</h3>
-                <div class="shortcuts-list">
-                    <div class="shortcut-item">
-                        <span class="shortcut-description">Create new session</span>
-                        <span class="shortcut-keys-combination">
-                            <span class="shortcut-key-combo">Ctrl</span>
-                            <span class="shortcut-key-combo">N</span>
-                        </span>
+            <div class="dashboard-metrics-section">
+                <div class="dashboard-metrics-title">Storage</div>
+                <div class="dashboard-metrics-item storage">
+                    <div class="dashboard-metrics-icon">💾</div>
+                    <div class="dashboard-metrics-label">Disk Usage</div>
+                    <div class="dashboard-metrics-value" id="metric-disk-usage">0 GB</div>
+                    <div class="dashboard-metrics-bar">
+                        <div class="dashboard-metrics-fill" id="disk-usage-bar" style="width: 0%"></div>
                     </div>
-                    <div class="shortcut-item">
-                        <span class="shortcut-description">Save session</span>
-                        <span class="shortcut-keys-combination">
-                            <span class="shortcut-key-combo">Ctrl</span>
-                            <span class="shortcut-key-combo">S</span>
-                        </span>
-                    </div>
-                    <div class="shortcut-item">
-                        <span class="shortcut-description">Close modal</span>
-                        <span class="shortcut-keys-combination">
-                            <span class="shortcut-key-combo">Esc</span>
-                        </span>
-                    </div>
+                </div>
+                <div class="dashboard-metrics-item">
+                    <div class="dashboard-metrics-icon">📁</div>
+                    <div class="dashboard-metrics-label">Models</div>
+                    <div class="dashboard-metrics-value" id="metric-model-count">0</div>
                 </div>
             </div>
             
-            <div class="shortcuts-section">
-                <h3 class="shortcuts-section-title">Quick Actions</h3>
-                <div class="shortcuts-list">
-                    <div class="shortcut-item">
-                        <span class="shortcut-description">Start server</span>
-                        <span class="shortcut-keys-combination">
-                            <span class="shortcut-key-combo">Ctrl</span>
-                            <span class="shortcut-key-combo">Enter</span>
-                        </span>
+            <div class="dashboard-metrics-section">
+                <div class="dashboard-metrics-title">Network</div>
+                <div class="dashboard-metrics-item network">
+                    <div class="dashboard-metrics-icon">🚀</div>
+                    <div class="dashboard-metrics-label">Download</div>
+                    <div class="dashboard-metrics-value" id="metric-download-speed">0 MB/s</div>
+                </div>
+                <div class="dashboard-metrics-item network">
+                    <div class="dashboard-metrics-icon">📥</div>
+                    <div class="dashboard-metrics-label">Upload</div>
+                    <div class="dashboard-metrics-value" id="metric-upload-speed">0 MB/s</div>
+                </div>
+                <div class="dashboard-metrics-item network">
+                    <div class="dashboard-metrics-icon">🌐</div>
+                    <div class="dashboard-metrics-label">Latency</div>
+                    <div class="dashboard-metrics-value" id="metric-latency">0 ms</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="dashboard-main">
+            <div class="widget-card">
+                <h3>Sessions</h3>
+                <div id="session-list">
+                    <div class="session-card" id="session-card-0" onclick="expandSessionCard(0)">
+                        <div class="session-card-header">
+                            <div class="session-header-left">
+                                <div class="session-icon">🚀</div>
+                                <div class="session-info">
+                                    <div class="session-name">Main Model</div>
+                                    <div class="session-meta">
+                                        <span class="session-meta-item">
+                                            <span class="session-meta-dot"></span>
+                                            <span>Active</span>
+                                        </span>
+                                        <span class="session-meta-item">GPU: 4</span>
+                                        <span class="session-meta-item">Context: 8192</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="session-header-actions">
+                                <button class="btn-icon" onclick="event.stopPropagation(); openSessionMenu(event, 0)">⋮</button>
+                                <button class="btn-icon" onclick="event.stopPropagation(); openSettingsModal()">⚙️</button>
+                                <button class="btn-icon" onclick="event.stopPropagation(); goToSession(0)">➡️</button>
+                                <button class="btn-icon btn-action" onclick="event.stopPropagation(); restartSession(0)">🔄</button>
+                                <button class="btn-icon btn-danger" onclick="event.stopPropagation(); stopSession(0)">🛑</button>
+                            </div>
+                            <div class="session-status">
+                                <div class="status-dot pulse active"></div>
+                                <span class="session-status-text">Running</span>
+                            </div>
+                        </div>
+                        <div class="session-card-body">
+                            <div class="session-progress">
+                                <div class="session-progress-label">
+                                    <span class="session-progress-text">Training Progress</span>
+                                    <span class="session-progress-text" id="session-progress-text-0">45%</span>
+                                </div>
+                                <div class="session-progress-bar">
+                                    <div class="session-progress-fill" id="session-progress-0" style="width: 45%"></div>
+                                </div>
+                                <div class="session-progress-eta" id="session-eta-0">ETA: 2h 15m</div>
+                            </div>
+                           </div>
+                        </div>
+                        <div class="session-details expanded" id="session-details-0">
+                            <div class="session-details-header">
+                                <h4 class="session-details-title">GPU Details</h4>
+                            </div>
+                            <div class="session-details-grid">
+                                <div class="session-details-item">
+                                    <div class="session-details-label">GPU 0</div>
+                                    <div class="session-details-value gpu" id="session-gpu-0-usage">72%</div>
+                                </div>
+                                <div class="session-details-item">
+                                    <div class="session-details-label">GPU 1</div>
+                                    <div class="session-details-value gpu" id="session-gpu-1-usage">68%</div>
+                                </div>
+                                <div class="session-details-item">
+                                    <div class="session-details-label">GPU 2</div>
+                                    <div class="session-details-value gpu" id="session-gpu-2-usage">75%</div>
+                                </div>
+                                <div class="session-details-item">
+                                    <div class="session-details-label">GPU 3</div>
+                                    <div class="session-details-value gpu" id="session-gpu-3-usage">70%</div>
+                                </div>
+                                <div class="session-details-item">
+                                    <div class="session-details-label">VRAM</div>
+                                    <div class="session-details-value storage" id="session-vram-usage">12.5 GB</div>
+                                </div>
+                                <div class="session-details-item">
+                                    <div class="session-details-label">Temp</div>
+                                    <div class="session-details-value gpu" id="session-temp-avg">68°C</div>
+                                </div>
+                            </div>
+                            <div class="session-details-toggle" onclick="collapseSessionCard(0)">
+                                <span>Hide GPU Details</span>
+                            </div>
+                        </div>
                     </div>
-                    <div class="shortcut-item">
-                        <span class="shortcut-description">Stop server</span>
-                        <span class="shortcut-keys-combination">
-                            <span class="shortcut-key-combo">Ctrl</span>
-                            <span class="shortcut-key-combo">.</span>
-                        </span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="dashboard-sidebar">
+            <div class="widget-card">
+                <h3>Quick Actions</h3>
+                <div class="quick-actions">
+                    <button class="btn btn-primary btn-block" onclick="createNewSession()">+ New Session</button>
+                    <button class="btn btn-outline btn-block" onclick="openSettingsModal()">⚙️ Settings</button>
+                    <button class="btn btn-outline btn-block" onclick="openAnalyticsModal()">📊 Analytics</button>
+                    <button class="btn btn-outline btn-block" onclick="openExportModal()">💾 Export</button>
+                </div>
+            </div>
+            
+            <div class="widget-card">
+                <h3>System Health</h3>
+                <div class="widget-status">
+                    <div class="widget-status-item">
+                        <span class="status-dot pulse active"></span>
+                        <span class="widget-status-text">Server</span>
                     </div>
-                    <div class="shortcut-item">
-                        <span class="shortcut-description">Clear chat</span>
-                        <span class="shortcut-keys-combination">
-                            <span class="shortcut-key-combo">Ctrl</span>
-                            <span class="shortcut-key-combo">K</span>
-                        </span>
+                    <div class="widget-status-item">
+                        <span class="status-dot active"></span>
+                        <span class="widget-status-text">GPU</span>
                     </div>
-                    <div class="shortcut-item">
-                        <span class="shortcut-description">Toggle theme</span>
-                        <span class="shortcut-keys-combination">
-                            <span class="shortcut-key-combo">Ctrl</span>
-                            <span class="shortcut-key-combo">T</span>
-                        </span>
+                    <div class="widget-status-item">
+                        <span class="status-dot active"></span>
+                        <span class="widget-status-text">Storage</span>
                     </div>
-                    <div class="shortcut-item">
-                        <span class="shortcut-description">Show keyboard shortcuts</span>
-                        <span class="shortcut-keys-combination">
-                            <span class="shortcut-key-combo">?</span>
-                        </span>
+                    <div class="widget-status-item">
+                        <span class="status-dot active"></span>
+                        <span class="widget-status-text">Network</span>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
-
-<!-- User Preferences Modal -->
-<div class="modal-overlay" id="user-preferences-modal">
-    <div class="modal" style="width:640px;">
-        <div class="modal-header">
-            <h2>User Preferences</h2>
-            <button type="button" class="modal-close" onclick="closeUserPreferencesModal()" aria-label="Close">&times;</button>
-        </div>
-        <div class="modal-body">
-            <div class="personalization-panel">
-                <div class="personalization-section">
-                    <h3 class="personalization-section-title">Appearance</h3>
-                    <label class="modal-field">
-                        Theme Mode
-                        <select id="pref-theme-mode">
-                            <option value="auto">Auto (System Default)</option>
-                            <option value="light">Light Mode</option>
-                            <option value="dark">Dark Mode</option>
-                        </select>
-                    </label>
-                    <label class="modal-field">
-                        Font Scale
-                        <input type="range" id="pref-font-scale" min="0.8" max="1.4" step="0.1" value="1">
-                        <div class="range-value" id="pref-font-scale-value">1.0x</div>
-                    </label>
-                    <label class="modal-field">
-                        Spacing Scale
-                        <input type="range" id="pref-spacing-scale" min="0.8" max="1.4" step="0.1" value="1">
-                        <div class="range-value" id="pref-spacing-scale-value">1.0x</div>
-                    </label>
-                </div>
-                
-                <div class="personalization-section">
-                    <h3 class="personalization-section-title">Dashboard</h3>
-                    <div class="modal-row modal-checks">
-                        <label class="chk"><input type="checkbox" id="pref-show-cpu" checked> Show CPU metrics</label>
-                        <label class="chk"><input type="checkbox" id="pref-show-gpu" checked> Show GPU metrics</label>
-                        <label class="chk"><input type="checkbox" id="pref-show-memory" checked> Show memory metrics</label>
-                        <label class="chk"><input type="checkbox" id="pref-show-network" checked> Show network metrics</label>
-                    </div>
-                </div>
-                
-                <div class="personalization-section">
-                    <h3 class="personalization-section-title">Behavior</h3>
-                    <div class="modal-row modal-checks">
-                        <label class="chk"><input type="checkbox" id="pref-auto-update" checked> Check for updates automatically</label>
-                        <label class="chk"><input type="checkbox" id="pref-data-collection"> Send anonymous usage data</label>
-                        <label class="chk"><input type="checkbox" id="pref-show-toasts" checked> Show toast notifications</label>
-                        <label class="chk"><input type="checkbox" id="pref-save-history" checked> Save chat history</label>
-                    </div>
-                </div>
-                
-                <div class="personalization-section">
-                    <h3 class="personalization-section-title">Notifications</h3>
-                    <div class="modal-row modal-checks">
-                        <label class="chk"><input type="checkbox" id="pref-notify-start"> Notify when server starts</label>
-                        <label class="chk"><input type="checkbox" id="pref-notify-stop"> Notify when server stops</label>
-                        <label class="chk"><input type="checkbox" id="pref-notify-error"> Notify on errors</label>
-                        <label class="chk"><input type="checkbox" id="pref-notify-high-temp"> Notify on high GPU temperature</label>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="modal-buttons">
-            <button type="button" class="btn btn-modal-cancel" onclick="closeUserPreferencesModal()">Cancel</button>
-            <button type="button" class="btn btn-primary" onclick="saveUserPreferences()">Save Preferences</button>
-        </div>
-    </div>
-</div>
 
 <div class="toast-container" id="toast-container"></div>
 

@@ -3822,5 +3822,206 @@ async function checkLHMAndPrompt() {
     }
 }
 
-// Clean up LHM resolve function
-window.lhmResolve = null;
+// ============================================
+// UI NAVIGATION FUNCTIONS
+// ============================================
+
+function openAnalyticsModal() {
+    const modal = document.getElementById('analytics-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+        updateAnalyticsData();
+    }
+}
+
+function closeAnalyticsModal() {
+    const modal = document.getElementById('analytics-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function createNewSession() {
+    alert('New session creation UI not yet implemented');
+}
+
+function closeSettingsModal() {
+    const modal = document.getElementById('settings-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function closeExportModal() {
+    const modal = document.getElementById('export-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function closeKeyboardShortcutsModal() {
+    const modal = document.getElementById('keyboard-shortcuts-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// ============================================
+// DASHBOARD UPDATE FUNCTIONS
+// ============================================
+
+function updateDashboardMetrics(system, gpu, storage, network) {
+    // Update System metrics
+    if (system && system.cpu) {
+        const cpuUsage = document.getElementById('metric-cpu-usage');
+        if (cpuUsage) cpuUsage.textContent = `${system.cpu.usage}%`;
+    }
+    
+    if (system && system.memory) {
+        const memoryUsage = document.getElementById('metric-memory-usage');
+        if (memoryUsage) memoryUsage.textContent = `${system.memory.used} GB`;
+    }
+    
+    // Update GPU metrics
+    if (gpu && gpu.gpus) {
+        gpu.gpus.forEach((gpuData, index) => {
+            const gpuUsage = document.getElementById(`metric-gpu-${index}-usage`);
+            const gpuBar = document.getElementById(`gpu-${index}-usage-bar`);
+            if (gpuUsage) gpuUsage.textContent = `${gpuData.usage}%`;
+            if (gpuBar) gpuBar.style.width = `${gpuData.usage}%`;
+        });
+    }
+    
+    // Update Storage metrics
+    if (storage && storage.disk) {
+        const diskUsage = document.getElementById('metric-disk-usage');
+        const diskBar = document.getElementById('disk-usage-bar');
+        if (diskUsage) diskUsage.textContent = `${storage.disk.used} GB`;
+        if (diskBar) diskBar.style.width = `${storage.disk.usage}%`;
+    }
+    
+    // Update Network metrics
+    if (network && network.speed) {
+        const downloadSpeed = document.getElementById('metric-download-speed');
+        const uploadSpeed = document.getElementById('metric-upload-speed');
+        if (downloadSpeed) downloadSpeed.textContent = `${network.speed.download} MB/s`;
+        if (uploadSpeed) uploadSpeed.textContent = `${network.speed.upload} MB/s`;
+    }
+    
+    if (network && network.latency) {
+        const latency = document.getElementById('metric-latency');
+        if (latency) latency.textContent = `${network.latency} ms`;
+    }
+}
+
+function updateAnalyticsData() {
+    // Placeholder for analytics data updates
+    console.log('Updating analytics data...');
+}
+
+function openFirewallHelp() {
+    alert('Firewall help not yet implemented');
+}
+
+// ============================================
+// SESSION CARD FUNCTIONS
+// ============================================
+
+let sessionCards = {};
+
+function expandSessionCard(sessionId) {
+    const card = document.getElementById(`session-card-${sessionId}`);
+    if (!card) return;
+    
+    const existingCard = sessionCards[sessionId];
+    if (existingCard && existingCard.expanded) {
+        return;
+    }
+    
+    card.classList.add('expanded');
+    
+    const details = document.getElementById(`session-details-${sessionId}`);
+    if (details) {
+        details.classList.add('expanded');
+    }
+    
+    sessionCards[sessionId] = {
+        expanded: true,
+        card: card,
+        details: details
+    };
+}
+
+function collapseSessionCard(sessionId) {
+    const card = document.getElementById(`session-card-${sessionId}`);
+    if (!card) return;
+    
+    const existingCard = sessionCards[sessionId];
+    if (!existingCard || !existingCard.expanded) {
+        return;
+    }
+    
+    card.classList.remove('expanded');
+    
+    const details = document.getElementById(`session-details-${sessionId}`);
+    if (details) {
+        details.classList.remove('expanded');
+    }
+    
+    sessionCards[sessionId] = {
+        expanded: false,
+        card: card,
+        details: details
+    };
+}
+
+function updateSessionProgress(sessionId, progress, eta) {
+    const progressFill = document.getElementById(`session-progress-${sessionId}`);
+    const progressText = document.getElementById(`session-progress-text-${sessionId}`);
+    const sessionEta = document.getElementById(`session-eta-${sessionId}`);
+    const expandedCard = sessionCards[sessionId];
+    
+    if (progressFill) {
+        progressFill.style.width = `${progress}%`;
+    }
+    
+ if (progressText) {
+        progressText.textContent = `${progress}%`;
+    }
+    
+    if (sessionEta) {
+        sessionEta.textContent = eta || 'Calculating...';
+    }
+}
+
+function calculateETA(progress, totalDurationSeconds) {
+    if (progress <= 0) {
+        return formatDuration(totalDurationSeconds);
+    }
+    if (progress >= 100) {
+        return 'Completed';
+    }
+    
+    const elapsedSeconds = (progress / 100) * totalDurationSeconds;
+    const remainingSeconds = totalDurationSeconds - elapsedSeconds;
+    
+    if (remainingSeconds <= 0) {
+        return 'Almost done';
+    }
+    
+    return formatDuration(remainingSeconds) + ' remaining';
+}
+
+function formatDuration(seconds) {
+    if (seconds < 60) {
+        return `${Math.round(seconds)}s`;
+    }
+    if (seconds < 3600) {
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = Math.round(seconds % 60);
+        return `${minutes}m ${remainingSeconds}s`;
+    }
+    const hours = Math.floor(seconds / 3600);
+    const remainingMinutes = Math.floor((seconds % 3600) / 60);
+    return `${hours}h ${remainingMinutes}m`;
+}
