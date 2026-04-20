@@ -25,39 +25,45 @@ pub fn ws_route(
 
                         let running = *state.server_running.lock().unwrap();
 
-                        // Only send metrics if server is running
-                        if running {
-                            let json = {
-                                let gpu = state.gpu_metrics.lock().unwrap().clone();
-                                let llama = state.llama_metrics.lock().unwrap().clone();
-                                let system = state.system_metrics.lock().unwrap().clone();
-                                let logs: Vec<String> =
-                                    state.server_logs.lock().unwrap().iter().cloned().collect();
-                                let active_session_id =
-                                    state.active_session_id.lock().unwrap().clone();
-                                let sessions = state.sessions.lock().unwrap();
-                                let session_mode = sessions
-                                    .iter()
-                                    .find(|s| s.id == active_session_id)
-                                    .map(|s| match &s.mode {
-                                        crate::state::SessionMode::Spawn { .. } => "spawn",
-                                        crate::state::SessionMode::Attach { .. } => "attach",
-                                    })
-                                    .unwrap_or("");
-                                drop(sessions);
-                                serde_json::json!({
-                                    "gpu": gpu,
-                                    "llama": llama,
-                                    "system": system,
-                                    "logs": logs,
-                                    "server_running": running,
-                                    "session_mode": session_mode,
-                                    "active_session_id": active_session_id
-                                })
+                        let json = {
+                            let local_metrics_available = state.active_session_uses_local_metrics();
+                            let gpu = if local_metrics_available {
+                                state.gpu_metrics.lock().unwrap().clone()
+                            } else {
+                                Default::default()
                             };
-                            if ws_tx.send(Message::text(json.to_string())).await.is_err() {
-                                break;
-                            }
+                            let llama = state.llama_metrics.lock().unwrap().clone();
+                            let system = if local_metrics_available {
+                                Some(state.system_metrics.lock().unwrap().clone())
+                            } else {
+                                None
+                            };
+                            let logs: Vec<String> =
+                                state.server_logs.lock().unwrap().iter().cloned().collect();
+                            let active_session_id = state.active_session_id.lock().unwrap().clone();
+                            let sessions = state.sessions.lock().unwrap();
+                            let session_mode = sessions
+                                .iter()
+                                .find(|s| s.id == active_session_id)
+                                .map(|s| match &s.mode {
+                                    crate::state::SessionMode::Spawn { .. } => "spawn",
+                                    crate::state::SessionMode::Attach { .. } => "attach",
+                                })
+                                .unwrap_or("");
+                            drop(sessions);
+                            serde_json::json!({
+                                "gpu": gpu,
+                                "llama": llama,
+                                "system": system,
+                                "logs": logs,
+                                "server_running": running,
+                                "session_mode": session_mode,
+                                "active_session_id": active_session_id,
+                                "local_metrics_available": local_metrics_available
+                            })
+                        };
+                        if ws_tx.send(Message::text(json.to_string())).await.is_err() {
+                            break;
                         }
                     }
                 });

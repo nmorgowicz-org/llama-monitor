@@ -1741,7 +1741,9 @@ ws.onmessage = e => {
 
     const tbody = document.getElementById('gpu-rows');
 
-    tbody.innerHTML = Object.entries(d.gpu).map(([card, m]) => {
+    if (!serverRunning) {
+        tbody.innerHTML = '';
+    } else tbody.innerHTML = Object.entries(d.gpu || {}).map(([card, m]) => {
 
         const capped = m.power_consumption >= m.power_limit && m.power_limit > 0;
 
@@ -1781,12 +1783,15 @@ ws.onmessage = e => {
 
     const sysRowsEl = document.getElementById('system-rows');
 
-    if (sysRowsEl) {
-        // Only show CPU temp on Windows (LHM is Windows-only)
+    if (sysRowsEl && (!serverRunning || d.local_metrics_available === false)) {
+        sysRowsEl.innerHTML = '';
+    } else if (sysRowsEl) {
         const isWindows = navigator.platform.indexOf('Win') !== -1;
         
         let tempColumn = '';
-        if (isWindows) {
+        if (sys && sys.cpu_temp_available && sys.cpu_temp > 0) {
+            tempColumn = '<td class="value temp">' + Math.round(sys.cpu_temp) + 'C</td>';
+        } else if (isWindows) {
             const hasTemp = sys && sys.cpu_temp > 0;
             const tempValue = hasTemp ? Math.round(sys.cpu_temp) + 'C' : '—';
             const hasLHM = (sys && sys.cpu_temp_available) || false;
@@ -1850,7 +1855,7 @@ ws.onmessage = e => {
 
     if (l.generation_tokens_per_sec > 0) badgeParts.push(l.generation_tokens_per_sec.toFixed(1) + 't/s');
 
-    const gpuEntries = Object.entries(d.gpu);
+    const gpuEntries = Object.entries(d.gpu || {});
 
     if (gpuEntries.length > 0) badgeParts.push(Math.max(...gpuEntries.map(([,m]) => m.temp)).toFixed(0) + 'C');
 
@@ -2700,5 +2705,3 @@ async function checkLHMAndPrompt() {
 
 // Clean up LHM resolve function
 window.lhmResolve = null;
-
-

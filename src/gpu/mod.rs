@@ -22,6 +22,10 @@ pub struct GpuMetrics {
 
 pub trait GpuBackend: Send + Sync + 'static {
     fn read_metrics(&self) -> Result<BTreeMap<String, GpuMetrics>>;
+    /// Optional CPU/SoC temperature surfaced by the backend (Apple only for now).
+    fn cpu_temp(&self) -> Option<f32> {
+        None
+    }
     #[allow(dead_code)]
     fn name(&self) -> &str;
 }

@@ -15,9 +15,15 @@ edition = "2024"
     sysinfo = "0.38"
     tokio = { version = "1.51", features = ["full"] }
     warp = { version = "0.4", features = ["server", "websocket"] }
-    notify-rust = "4"
-    webbrowser = "1"
     tray-icon = "0.22"
+    winit = { version = "0.31.0-beta.2", default-features = false, features = ["x11", "wayland"] }
+    wry = { version = "0.48", default-features = false, features = ["os-webview"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+    mac-notification-sys = "0.6"
 
 [target.'cfg(windows)'.dependencies]
     wmi = { version = "0.18.4", features = ["default"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+    gtk = "0.18"

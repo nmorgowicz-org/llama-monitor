@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -337,5 +338,95 @@ impl AppState {
             }
         }
         false
+    }
+
+    pub fn active_session_uses_local_metrics(&self) -> bool {
+        let active_id = self.active_session_id.lock().unwrap().clone();
+        if active_id.is_empty() {
+            return true;
+        }
+
+        let session = {
+            let sessions = self.sessions.lock().unwrap();
+            sessions.iter().find(|s| s.id == active_id).cloned()
+        };
+
+        match session.map(|s| s.mode) {
+            Some(SessionMode::Spawn { .. }) => true,
+            Some(SessionMode::Attach { endpoint }) => endpoint_is_local(&endpoint),
+            None => true,
+        }
+    }
+}
+
+fn endpoint_is_local(endpoint: &str) -> bool {
+    let url = reqwest::Url::parse(endpoint)
+        .or_else(|_| reqwest::Url::parse(&format!("http://{endpoint}")));
+    let Ok(url) = url else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+
+    host_is_local(host)
+}
+
+fn host_is_local(host: &str) -> bool {
+    let host = host.trim_matches(['[', ']']);
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+
+    let Ok(ip) = host.parse::<IpAddr>() else {
+        return false;
+    };
+
+    if ip.is_loopback() {
+        return true;
+    }
+
+    local_interface_ips().contains(&ip)
+}
+
+fn local_interface_ips() -> Vec<IpAddr> {
+    let mut ips = Vec::new();
+
+    let probes = [
+        ("0.0.0.0:0", "8.8.8.8:80"),
+        ("[::]:0", "[2001:4860:4860::8888]:80"),
+    ];
+
+    for (bind_addr, connect_addr) in probes {
+        let Ok(socket) = UdpSocket::bind(bind_addr) else {
+            continue;
+        };
+        let Ok(remote) = connect_addr.parse::<SocketAddr>() else {
+            continue;
+        };
+        if socket.connect(remote).is_ok()
+            && let Ok(local_addr) = socket.local_addr()
+        {
+            ips.push(local_addr.ip());
+        }
+    }
+
+    ips
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn endpoint_locality_detects_loopback_hosts() {
+        assert!(endpoint_is_local("http://localhost:8001"));
+        assert!(endpoint_is_local("127.0.0.1:8001"));
+        assert!(endpoint_is_local("http://[::1]:8001"));
+    }
+
+    #[test]
+    fn endpoint_locality_rejects_nonlocal_ip() {
+        assert!(!endpoint_is_local("http://203.0.113.10:8001"));
     }
 }

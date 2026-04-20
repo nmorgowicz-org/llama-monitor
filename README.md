@@ -29,6 +29,41 @@ GPU backend is auto-detected at startup. Override with `--gpu-backend apple|rocm
 
 ## Installation
 
+### Pre-built Binaries
+
+Download the latest release from the [Releases page](../../releases/latest).
+
+| Platform | File |
+|----------|------|
+| Linux x86_64 | `llama-monitor-linux-x86_64` |
+| Linux aarch64 | `llama-monitor-linux-aarch64` |
+| Windows x86_64 | `llama-monitor-windows-x86_64.exe` |
+| macOS Apple Silicon | `llama-monitor-macos-aarch64.tar.gz` |
+
+#### macOS (Apple Silicon)
+
+The macOS binary is distributed as a `.tar.gz` to preserve the executable bit. macOS also applies a quarantine flag to downloaded files that must be cleared before running.
+
+```bash
+# Extract the archive
+tar -xzf llama-monitor-macos-aarch64.tar.gz
+
+# Remove the macOS quarantine flag (required for unsigned binaries)
+xattr -dr com.apple.quarantine ./llama-monitor-macos-aarch64
+
+# Run
+./llama-monitor-macos-aarch64
+```
+
+> **Note:** The quarantine flag is set by macOS on any file downloaded from the internet. Without removing it, macOS will refuse to run the binary with "cannot be opened because the developer cannot be verified".
+
+#### Linux
+
+```bash
+chmod +x llama-monitor-linux-x86_64  # or llama-monitor-linux-aarch64
+./llama-monitor-linux-x86_64
+```
+
 ### From Source
 
 ```bash

@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::process::Command;
+use std::sync::Mutex;
 
 use super::{GpuBackend, GpuMetrics};
 
@@ -14,11 +15,19 @@ struct MactopOutput {
 
 #[derive(Deserialize)]
 struct SocMetrics {
+    #[serde(default)]
     gpu_power: f64,
+    #[serde(default)]
     gpu_freq_mhz: f64,
+    #[serde(default)]
     gpu_temp: f64,
+    #[serde(default)]
     gpu_active: f64,
+    #[serde(default)]
+    cpu_temp: f64,
+    #[serde(default)]
     dram_read_bw_gbs: f64,
+    #[serde(default)]
     dram_write_bw_gbs: f64,
 }
 
@@ -28,11 +37,15 @@ struct MemoryMetrics {
     used: u64,  // bytes
 }
 
-pub struct AppleBackend;
+pub struct AppleBackend {
+    last_cpu_temp: Mutex<f32>,
+}
 
 impl AppleBackend {
     pub fn new() -> Self {
-        AppleBackend
+        AppleBackend {
+            last_cpu_temp: Mutex::new(0.0),
+        }
     }
 }
 
@@ -49,8 +62,18 @@ impl GpuBackend for AppleBackend {
             ));
         }
 
-        let mactop_output: MactopOutput = serde_json::from_slice(&output.stdout)
+        let mut mactop_vec: Vec<MactopOutput> = serde_json::from_slice(&output.stdout)
             .map_err(|e| anyhow::anyhow!("Failed to parse mactop JSON: {}", e))?;
+        let mactop_output = mactop_vec
+            .pop()
+            .ok_or_else(|| anyhow::anyhow!("mactop returned empty JSON array"))?;
+
+        // Cache CPU/SoC temperature for cpu_temp()
+        if mactop_output.soc_metrics.cpu_temp > 0.0
+            && let Ok(mut t) = self.last_cpu_temp.lock()
+        {
+            *t = mactop_output.soc_metrics.cpu_temp as f32;
+        }
 
         // Convert bytes to MB
         let vram_total_mb = mactop_output.memory.total / (1024 * 1024);
@@ -77,6 +100,11 @@ impl GpuBackend for AppleBackend {
         let mut map = BTreeMap::new();
         map.insert("GPU0 Apple M1 Pro".to_string(), metrics);
         Ok(map)
+    }
+
+    fn cpu_temp(&self) -> Option<f32> {
+        let t = *self.last_cpu_temp.lock().ok()?;
+        if t > 0.0 { Some(t) } else { None }
     }
 
     fn name(&self) -> &str {

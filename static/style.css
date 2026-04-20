@@ -1,5 +1,6 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; }
+html { height: 100%; }
+body { min-height: 100%; }
 body { font-family: system-ui, -apple-system, sans-serif; background: #2e3440; color: #d8dee9; padding: 0 16px; display: flex; flex-direction: column; }
 h1 { font-size: 1.4rem; color: #88c0d1; margin-bottom: 16px; }
 h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
@@ -50,19 +51,22 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
 .gputable th:nth-child(6), .gpu-table td:nth-child(6) { width: 70px; }
 .gputable th:nth-child(7), .gpu-table td:nth-child(7) { width: 70px; }
 .gputable th { text-align: left; padding: 8px 10px; background: #3b4252; font-weight: 600; color: #88c0d1; font-size: 0.85rem; }
-.gputable td { padding: 8px 10px; border-bottom: 1px solid #4c566a; overflow: hidden; text-overflow: ellipsis; }
+.gputable td { padding: 8px 10px; border-bottom: 1px solid #4c566a; white-space: normal; word-wrap: break-word; }
 .gputable tr:last-child td { border-bottom: none; }
 .gpu-table th { text-align: left; padding: 8px 10px; background: #3b4252; font-weight: 600; color: #88c0d1; font-size: 0.85rem; }
-.gpu-table td { padding: 8px 10px; border-bottom: 1px solid #4c566a; overflow: hidden; text-overflow: ellipsis; }
+.gpu-table td { padding: 8px 10px; border-bottom: 1px solid #4c566a; white-space: normal; word-wrap: break-word; }
 .gpu-table tr:last-child td { border-bottom: none; }
-.value { font-family: monospace; font-size: 0.9rem; white-space: nowrap; }
-.card { font-weight: 600; color: #88c0d1; }
+.value { font-family: monospace; font-size: 0.9rem; }
 .temp { color: #bf616a; }
 .load { color: #81a1c1; }
 .power { color: #d08770; }
 .vram { color: #b48ead; }
 .sclk { color: #88c0d1; }
 .mclk { color: #ebcb8b; }
+.capped { color: #bf616a; font-weight: 600; }
+
+.gpu-table .value { white-space: normal; word-wrap: break-word; }
+.card { font-weight: 600; color: #88c0d1; }
 .capped { color: #bf616a; font-weight: 600; }
 
 /* System metrics section */
@@ -120,6 +124,8 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
 .temp-badge { font-family: monospace; font-size: 0.7rem; color: #bf616a; margin-left: 6px; font-weight: 400; }
 .page { display: none; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; padding-bottom: 16px; }
 .page.active { display: flex; }
+#page-server { flex: none; overflow: visible; }
+#page-server.active { display: block; }
 
 .title {
     display: flex;
