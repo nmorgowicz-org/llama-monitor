@@ -505,7 +505,7 @@ impl TrayState {
                 })
                 .unwrap_or("")
         };
-        
+
         lines.push(format!("Mode: {}", session_mode));
 
         if local_metrics_available {

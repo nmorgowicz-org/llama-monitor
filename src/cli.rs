@@ -55,3 +55,38 @@ pub struct AppArgs {
     #[arg(long)]
     pub no_tray: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_headless_flag_parsing() {
+        let args = AppArgs::parse_from(["llama-monitor", "--headless"]);
+        assert!(args.headless);
+        assert!(!args.no_tray);
+    }
+
+    #[test]
+    fn test_no_tray_flag_parsing() {
+        let args = AppArgs::parse_from(["llama-monitor", "--no-tray"]);
+        assert!(args.no_tray);
+        assert!(!args.headless);
+    }
+
+    #[test]
+    fn test_combined_flags() {
+        let args = AppArgs::parse_from(["llama-monitor", "--headless", "--no-tray"]);
+        assert!(args.headless);
+        assert!(args.no_tray);
+    }
+
+    #[test]
+    fn test_default_values() {
+        let args = AppArgs::parse_from(["llama-monitor"]);
+        assert!(!args.headless);
+        assert!(!args.no_tray);
+        assert_eq!(args.port, 7778);
+        assert_eq!(args.gpu_backend, "auto");
+    }
+}

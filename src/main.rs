@@ -231,3 +231,117 @@ fn park_forever() -> ! {
         std::thread::park();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_start_tray_flag_combinations_disables_tray() {
+        let test_cases = [
+            (true, false, false), // headless only
+            (false, true, false), // no_tray only
+            (true, true, false),  // both flags
+        ];
+
+        for (headless, no_tray, expected) in test_cases {
+            let args = cli::AppArgs {
+                port: 7778,
+                gpu_backend: "auto".to_string(),
+                models_dir: None,
+                gpu_arch: None,
+                gpu_devices: None,
+                llama_poll_interval: 1,
+                llama_server_path: None,
+                llama_server_cwd: None,
+                presets_file: None,
+                sessions_file: None,
+                headless,
+                no_tray,
+            };
+            assert_eq!(
+                should_start_tray(&args),
+                expected,
+                "headless={headless}, no_tray={no_tray}"
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn should_start_tray_linux_display_variations() {
+        std::env::set_var("DISPLAY", ":0");
+        let args = cli::AppArgs {
+            port: 7778,
+            gpu_backend: "auto".to_string(),
+            models_dir: None,
+            gpu_arch: None,
+            gpu_devices: None,
+            llama_poll_interval: 1,
+            llama_server_path: None,
+            llama_server_cwd: None,
+            presets_file: None,
+            sessions_file: None,
+            headless: false,
+            no_tray: false,
+        };
+        assert!(should_start_tray(&args));
+        std::env::remove_var("DISPLAY");
+
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-0");
+        let args = cli::AppArgs {
+            port: 7778,
+            gpu_backend: "auto".to_string(),
+            models_dir: None,
+            gpu_arch: None,
+            gpu_devices: None,
+            llama_poll_interval: 1,
+            llama_server_path: None,
+            llama_server_cwd: None,
+            presets_file: None,
+            sessions_file: None,
+            headless: false,
+            no_tray: false,
+        };
+        assert!(should_start_tray(&args));
+        std::env::remove_var("WAYLAND_DISPLAY");
+
+        std::env::remove_var("DISPLAY");
+        std::env::remove_var("WAYLAND_DISPLAY");
+        let args = cli::AppArgs {
+            port: 7778,
+            gpu_backend: "auto".to_string(),
+            models_dir: None,
+            gpu_arch: None,
+            gpu_devices: None,
+            llama_poll_interval: 1,
+            llama_server_path: None,
+            llama_server_cwd: None,
+            presets_file: None,
+            sessions_file: None,
+            headless: false,
+            no_tray: false,
+        };
+        assert!(!should_start_tray(&args));
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn should_start_tray_non_linux_default_enabled() {
+        let args = cli::AppArgs {
+            port: 7778,
+            gpu_backend: "auto".to_string(),
+            models_dir: None,
+            gpu_arch: None,
+            gpu_devices: None,
+            llama_poll_interval: 1,
+            llama_server_path: None,
+            llama_server_cwd: None,
+            presets_file: None,
+            sessions_file: None,
+            headless: false,
+            no_tray: false,
+        };
+        assert!(should_start_tray(&args));
+    }
+}
