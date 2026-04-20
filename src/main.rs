@@ -24,7 +24,7 @@ const SYSTEM_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 fn main() -> Result<()> {
     let args = cli::AppArgs::parse();
-    let app_config = Arc::new(config::AppConfig::from_args(args));
+    let app_config = Arc::new(config::AppConfig::from_args(args.clone()));
 
     // Load presets from disk (or defaults)
     let initial_presets = presets::load_presets(&app_config.presets_file);
@@ -154,6 +154,12 @@ fn main() -> Result<()> {
 
     println!("[info] Llama Monitor running on http://0.0.0.0:{port}");
 
+    if args.headless {
+        println!("[info] Headless mode enabled (no tray, no desktop UI)");
+    } else if args.no_tray {
+        println!("[info] Tray disabled via --no-tray");
+    }
+
     // Build tokio runtime for async tasks (warp server, pollers, etc.)
     // The runtime runs in background threads; the main thread is reserved
     // for the system tray, which macOS requires to be on the main thread.
@@ -190,13 +196,14 @@ fn main() -> Result<()> {
 
     // Run tray on the main thread when a desktop session is available.
     // Headless Linux servers still keep the web UI/API running.
-    if should_start_tray() {
+    if should_start_tray(&args) {
         if let Err(e) = crate::tray::run_tray(state, port) {
-            eprintln!("[warn] Tray unavailable; continuing headless: {e}");
+            eprintln!("[warn] Tray unavailable: {e}");
+            eprintln!("[info] Continuing in headless mode with web/API server");
             park_forever();
         }
     } else {
-        println!("[info] No graphical session detected; tray disabled");
+        println!("[info] Tray disabled (no graphical session)");
         park_forever();
     }
 
@@ -204,12 +211,18 @@ fn main() -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn should_start_tray() -> bool {
+fn should_start_tray(args: &cli::AppArgs) -> bool {
+    if args.headless || args.no_tray {
+        return false;
+    }
     std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
 
 #[cfg(not(target_os = "linux"))]
-fn should_start_tray() -> bool {
+fn should_start_tray(args: &cli::AppArgs) -> bool {
+    if args.headless || args.no_tray {
+        return false;
+    }
     true
 }
 

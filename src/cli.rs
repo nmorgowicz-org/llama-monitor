@@ -1,7 +1,7 @@
 use clap::Parser;
 use std::path::PathBuf;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(
     name = "llama-monitor",
     about = "Web dashboard for llama.cpp server management and GPU monitoring"
@@ -46,4 +46,12 @@ pub struct AppArgs {
     /// Llama metrics polling interval in seconds (default: 1)
     #[arg(long, default_value_t = 1)]
     pub llama_poll_interval: u64,
+
+    /// Run in headless mode (no tray, no desktop UI)
+    #[arg(long)]
+    pub headless: bool,
+
+    /// Disable tray icon (override automatic detection)
+    #[arg(long)]
+    pub no_tray: bool,
 }
