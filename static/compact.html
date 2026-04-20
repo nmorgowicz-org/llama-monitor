@@ -165,6 +165,7 @@ body {
 </div>
 
 <div id="gpu-sections" data-capability="gpu"></div>
+<div class="status-bar" id="capability-note" style="display:none;"></div>
 
 <div class="inference-section">
     <div class="section-title">Inference</div>
@@ -234,6 +235,7 @@ function updateStatus(running) {
 function renderGPUs(gpuEntries) {
     const container = document.getElementById('gpu-sections');
     if (!container) return;
+    container.style.display = '';
     container.innerHTML = '';
     for (const [name, m] of gpuEntries) {
         const tempPct = m.temp / 120 * 100;
@@ -301,6 +303,7 @@ window.addEventListener('load', function() {
 function clearMetrics() {
     document.getElementById('cpu-section').style.display = '';
     document.getElementById('ram-section').style.display = '';
+    document.getElementById('capability-note').style.display = 'none';
     setBar('cpu-load-bar', 0, 100);
     document.getElementById('cpu-load').textContent = '—';
     setBar('cpu-temp-bar', 0, 120);
@@ -318,10 +321,10 @@ function clearLocalMetrics(reasons) {
     document.getElementById('cpu-section').style.display = 'none';
     document.getElementById('ram-section').style.display = 'none';
     document.getElementById('gpu-sections').innerHTML = '';
+    document.getElementById('gpu-sections').style.display = 'none';
     
+    const reasonEl = document.getElementById('capability-note');
     if (reasons && (reasons.system || reasons.gpu || reasons.cpu_temp)) {
-        const reasonEl = document.createElement('div');
-        reasonEl.className = 'status-bar';
         reasonEl.style.color = '#bf616a';
         reasonEl.style.textAlign = 'center';
         reasonEl.style.fontStyle = 'italic';
@@ -329,8 +332,10 @@ function clearLocalMetrics(reasons) {
         if (reasons.system) reasonList.push(getEmptyStateMessage(reasons.system));
         if (reasons.gpu) reasonList.push(getEmptyStateMessage(reasons.gpu));
         if (reasons.cpu_temp) reasonList.push(getEmptyStateMessage(reasons.cpu_temp));
-        reasonEl.textContent = reasonList.join(', ');
-        document.body.appendChild(reasonEl);
+        reasonEl.textContent = Array.from(new Set(reasonList)).join(', ');
+        reasonEl.style.display = reasonEl.textContent ? '' : 'none';
+    } else {
+        reasonEl.style.display = 'none';
     }
     
     reportPopoverSize();
@@ -398,9 +403,13 @@ ws.onmessage = function(e) {
         const reasons = d.availability || {};
         clearLocalMetrics(reasons);
     } else {
+        document.getElementById('capability-note').style.display = 'none';
         if (systemAvailable) {
             document.getElementById('cpu-section').style.display = '';
             document.getElementById('ram-section').style.display = '';
+        } else {
+            document.getElementById('cpu-section').style.display = 'none';
+            document.getElementById('ram-section').style.display = 'none';
         }
 
     const sys = d.system || {};
@@ -443,6 +452,7 @@ ws.onmessage = function(e) {
     if (gpuAvailable) {
         renderGPUs(gpuEntries);
     } else {
+        document.getElementById('gpu-sections').innerHTML = '';
         document.getElementById('gpu-sections').style.display = 'none';
     }
     }

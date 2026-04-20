@@ -290,6 +290,8 @@ pub fn api_routes(
     let progress_lhm = api_lhm_progress();
     let status_lhm = api_lhm_status(app_config.clone());
     let disable_lhm = api_disable_lhm(app_config.clone());
+    let remote_agent_latest = api_remote_agent_latest_release();
+    let remote_agent_detect = api_remote_agent_detect();
 
     start
         .or(stop)
@@ -322,6 +324,37 @@ pub fn api_routes(
         .or(install_lhm)
         .or(uninstall_lhm)
         .or(disable_lhm)
+        .or(remote_agent_latest)
+        .or(remote_agent_detect)
+}
+
+fn api_remote_agent_latest_release()
+-> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "remote-agent" / "releases" / "latest")
+        .and(warp::get())
+        .and_then(move || async move {
+            match crate::agent::latest_release_info().await {
+                Ok(release) => Ok::<_, warp::Rejection>(warp::reply::json(
+                    &serde_json::json!({"ok": true, "release": release}),
+                )),
+                Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(
+                    &serde_json::json!({"ok": false, "error": e.to_string()}),
+                )),
+            }
+        })
+}
+
+fn api_remote_agent_detect()
+-> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "remote-agent" / "detect")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and_then(
+            move |request: crate::agent::RemoteAgentDetectRequest| async move {
+                let response = crate::agent::detect_remote_agent(request).await;
+                Ok::<_, warp::Rejection>(warp::reply::json(&response))
+            },
+        )
 }
 
 fn api_start(
@@ -837,9 +870,9 @@ fn api_get_capabilities(
         .and_then(move || {
             let state = state.clone();
             async move {
-                let capabilities = state.capabilities.lock().unwrap().clone();
-                let endpoint_kind = state.endpoint_kind.lock().unwrap().clone();
-                let session_kind = state.session_kind.lock().unwrap().clone();
+                let capabilities = state.calculate_capabilities();
+                let endpoint_kind = state.current_endpoint_kind();
+                let session_kind = state.current_session_kind();
                 let tray_mode = state.tray_mode.lock().unwrap().clone();
 
                 let (system_reason, gpu_reason, cpu_temp_reason) =

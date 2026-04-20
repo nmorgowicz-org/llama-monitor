@@ -163,6 +163,30 @@
                 <div id="gpu-detected-info" style="font-size:0.72rem;color:#6a7585;margin-top:2px;"></div>
             </details>
 
+            <details class="modal-section">
+                <summary>Remote Agent</summary>
+                <div class="modal-row" style="gap:8px;align-items:center;">
+                    <button type="button" class="btn-sm btn-preset" onclick="remoteAgentDetect()">Detect Host</button>
+                    <button type="button" class="btn-sm btn-preset" onclick="remoteAgentLatestRelease()">Latest Release</button>
+                </div>
+                <div id="remote-agent-status" style="font-size:0.72rem;color:#9aa7b7;margin:8px 12px 10px 12px;line-height:1.5;"></div>
+                <label class="modal-field" title="Optional explicit remote agent URL. Empty means infer it from the attached llama-server host on port 7779.">Agent URL
+                    <input type="text" id="set-remote-agent-url" placeholder="http://192.168.2.16:7779">
+                </label>
+                <label class="modal-field" title="Optional bearer token used when polling the remote agent.">Agent Token
+                    <input type="text" id="set-remote-agent-token" placeholder="optional">
+                </label>
+                <label class="modal-field" title="Attempt SSH startup when the remote agent is unreachable.">
+                    <span><input type="checkbox" id="set-remote-agent-ssh-autostart"> Start over SSH if unreachable</span>
+                </label>
+                <label class="modal-field" title="SSH target. Empty means use the attached endpoint host.">SSH Target
+                    <input type="text" id="set-remote-agent-ssh-target" placeholder="nick@ryne">
+                </label>
+                <label class="modal-field" title="Optional command run on the remote machine. Empty uses an OS-specific default for an installed agent binary.">SSH Start Command
+                    <input type="text" id="set-remote-agent-ssh-command" placeholder='optional override, e.g. start "" /B llama-monitor.exe --agent --agent-host 0.0.0.0 --agent-port 7779'>
+                </label>
+            </details>
+
         </div>
         <div class="modal-buttons">
             <button type="button" class="btn btn-modal-cancel" onclick="closeConfigModal()">Cancel</button>

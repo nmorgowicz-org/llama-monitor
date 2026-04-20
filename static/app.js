@@ -84,6 +84,16 @@ let settingsSaveTimer = null;
 
             server_endpoint: endpoint,
 
+            remote_agent_url: document.getElementById('set-remote-agent-url')?.value.trim() || '',
+
+            remote_agent_token: document.getElementById('set-remote-agent-token')?.value.trim() || '',
+
+            remote_agent_ssh_autostart: !!document.getElementById('set-remote-agent-ssh-autostart')?.checked,
+
+            remote_agent_ssh_target: document.getElementById('set-remote-agent-ssh-target')?.value.trim() || '',
+
+            remote_agent_ssh_command: document.getElementById('set-remote-agent-ssh-command')?.value.trim() || '',
+
         };
 
     }
@@ -136,6 +146,31 @@ function saveSettings() {
         if (s.server_endpoint) {
             const endpointInput = document.getElementById('server-endpoint');
             if (endpointInput) endpointInput.value = s.server_endpoint;
+        }
+
+        if (s.remote_agent_url !== undefined) {
+            const el = document.getElementById('set-remote-agent-url');
+            if (el) el.value = s.remote_agent_url;
+        }
+
+        if (s.remote_agent_token !== undefined) {
+            const el = document.getElementById('set-remote-agent-token');
+            if (el) el.value = s.remote_agent_token;
+        }
+
+        if (s.remote_agent_ssh_autostart !== undefined) {
+            const el = document.getElementById('set-remote-agent-ssh-autostart');
+            if (el) el.checked = !!s.remote_agent_ssh_autostart;
+        }
+
+        if (s.remote_agent_ssh_target !== undefined) {
+            const el = document.getElementById('set-remote-agent-ssh-target');
+            if (el) el.value = s.remote_agent_ssh_target;
+        }
+
+        if (s.remote_agent_ssh_command !== undefined) {
+            const el = document.getElementById('set-remote-agent-ssh-command');
+            if (el) el.value = s.remote_agent_ssh_command;
         }
 
     }
@@ -382,6 +417,152 @@ function saveConfig() {
     closeConfigModal();
 
     showToast('Configuration saved', 'success');
+
+}
+
+function inferredAgentUrl() {
+
+    const explicit = document.getElementById('set-remote-agent-url')?.value.trim();
+
+    if (explicit) return explicit;
+
+    const endpoint = document.getElementById('server-endpoint')?.value.trim();
+
+    if (!endpoint) return '';
+
+    try {
+
+        const url = new URL(endpoint);
+
+        return url.protocol + '//' + url.hostname + ':7779';
+
+    } catch (_) {
+
+        return '';
+
+    }
+
+}
+
+function setRemoteAgentStatus(message, kind) {
+
+    const el = document.getElementById('remote-agent-status');
+
+    if (!el) return;
+
+    el.style.color = kind === 'error' ? '#bf616a' : kind === 'ok' ? '#a3be8c' : '#9aa7b7';
+
+    el.innerHTML = message;
+
+}
+
+function escapeHtml(value) {
+
+    return String(value)
+
+        .replace(/&/g, '&amp;')
+
+        .replace(/</g, '&lt;')
+
+        .replace(/>/g, '&gt;')
+
+        .replace(/"/g, '&quot;')
+
+        .replace(/'/g, '&#39;');
+
+}
+
+async function remoteAgentLatestRelease() {
+
+    setRemoteAgentStatus('Checking latest release...', 'info');
+
+    try {
+
+        const resp = await fetch('/api/remote-agent/releases/latest');
+
+        const data = await resp.json();
+
+        if (!data.ok) {
+
+            setRemoteAgentStatus('Release check failed: ' + escapeHtml(data.error || 'unknown error'), 'error');
+
+            return;
+
+        }
+
+        const assets = (data.release.assets || []).map(asset => escapeHtml(asset.name)).join('<br>');
+
+        setRemoteAgentStatus('<strong>' + escapeHtml(data.release.tag_name) + '</strong><br>' + assets, 'ok');
+
+    } catch (err) {
+
+        setRemoteAgentStatus('Release check failed: ' + escapeHtml(String(err)), 'error');
+
+    }
+
+}
+
+async function remoteAgentDetect() {
+
+    const sshTarget = document.getElementById('set-remote-agent-ssh-target')?.value.trim();
+
+    if (!sshTarget) {
+
+        setRemoteAgentStatus('Enter an SSH target first.', 'error');
+
+        return;
+
+    }
+
+    setRemoteAgentStatus('Detecting remote host...', 'info');
+
+    try {
+
+        const resp = await fetch('/api/remote-agent/detect', {
+
+            method: 'POST',
+
+            headers: { 'Content-Type': 'application/json' },
+
+            body: JSON.stringify({
+
+                ssh_target: sshTarget,
+
+                agent_url: inferredAgentUrl() || null,
+
+            }),
+
+        });
+
+        const data = await resp.json();
+
+        const asset = data.matching_asset ? data.matching_asset.name : 'No matching asset';
+
+        const archiveNote = data.matching_asset && data.matching_asset.archive ? ' (archive; extract before install)' : '';
+
+        const lines = [
+
+            '<strong>' + escapeHtml(data.os) + ' / ' + escapeHtml(data.arch) + '</strong>',
+
+            'Asset: ' + escapeHtml(asset) + escapeHtml(archiveNote),
+
+            'Install: ' + escapeHtml(data.install_path || 'unknown'),
+
+            'Installed: ' + (data.installed ? 'yes' : 'no'),
+
+            'Reachable: ' + (data.reachable ? 'yes' : 'no'),
+
+        ];
+
+        if (data.error) lines.push('Issue: ' + escapeHtml(data.error));
+
+        setRemoteAgentStatus(lines.join('<br>'), data.ok ? 'ok' : 'error');
+
+    } catch (err) {
+
+        setRemoteAgentStatus('Detection failed: ' + escapeHtml(String(err)), 'error');
+
+    }
 
 }
 
@@ -1662,6 +1843,24 @@ async function updateActiveSessionInfo() {
 
 setInterval(updateActiveSessionInfo, 2000);
 
+function setMetricSectionVisibility(tbodyId, visible) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+
+    const tableWrap = tbody.closest('.table-wrap');
+    if (tableWrap) {
+        tableWrap.style.display = visible ? '' : 'none';
+    }
+
+    let heading = tableWrap ? tableWrap.previousElementSibling : null;
+    while (heading && heading.tagName !== 'H2') {
+        heading = heading.previousElementSibling;
+    }
+    if (heading) {
+        heading.style.display = visible ? '' : 'none';
+    }
+}
+
 ws.onmessage = e => {
 
     const d = JSON.parse(e.data);
@@ -1670,6 +1869,8 @@ ws.onmessage = e => {
     const endpointModeEl = document.getElementById('endpoint-mode');
     const endpointUrlEl = document.getElementById('endpoint-url');
     const endpointStatusEl = document.getElementById('endpoint-status');
+    const agentStatusEl = document.getElementById('agent-status');
+    const agentLatencyEl = document.getElementById('agent-latency');
 
     if (d.capabilities && d.endpoint_kind) {
         let modeClass = 'unknown';
@@ -1696,15 +1897,33 @@ ws.onmessage = e => {
             }
         }
 
+        if (d.capabilities.inference && !d.capabilities.host_metrics) {
+            statusClass = 'warning';
+            statusText = 'Inference only';
+        }
+
         if (endpointModeEl) {
             endpointModeEl.textContent = modeText;
             endpointModeEl.className = 'endpoint-mode ' + modeClass;
         }
         if (endpointUrlEl) {
-            endpointUrlEl.textContent = d.active_session_id || 'No session';
+            endpointUrlEl.textContent = d.active_session_endpoint || d.active_session_id || 'No session';
         }
         if (endpointStatusEl) {
             endpointStatusEl.innerHTML = '<span class="status-dot ' + statusClass + '"></span>' + statusText;
+        }
+    }
+
+    if (agentStatusEl) {
+        const showAgent = d.session_mode === 'attach' && d.endpoint_kind === 'Remote';
+        agentStatusEl.style.display = showAgent ? '' : 'none';
+        agentStatusEl.className = 'agent-status ' + (d.remote_agent_connected ? 'connected' : 'disconnected');
+        const textEl = agentStatusEl.querySelector('.agent-text');
+        if (textEl) {
+            textEl.textContent = d.remote_agent_connected ? 'Remote Agent' : 'No Remote Agent';
+        }
+        if (agentLatencyEl) {
+            agentLatencyEl.textContent = d.remote_agent_url ? d.remote_agent_url : '';
         }
     }
 
@@ -1860,35 +2079,12 @@ ws.onmessage = e => {
 
     const sysRowsEl = document.getElementById('system-rows');
 
-    // Hide/unhide sections based on capabilities
-    const gpuSection = document.querySelector('.gpu-section, .gpu-table').closest('div');
-    const systemSection = document.querySelector('.system-section, h2:nth-of-type(1)').nextElementSibling;
-
     if (d.capabilities) {
-        // Hide GPU section if GPU not available
-        const gpuTable = document.getElementById('gpu-rows');
-        const gpuSectionTitle = gpuTable ? gpuTable.closest('h2') : null;
-        if (gpuSectionTitle) {
-            gpuSectionTitle.style.display = d.capabilities.gpu ? 'block' : 'none';
-            const gpuTableWrap = gpuTable ? gpuTable.closest('.table-wrap') : null;
-            if (gpuTableWrap) {
-                gpuTableWrap.style.display = d.capabilities.gpu ? 'block' : 'none';
-            }
-        }
-
-        // Hide System section if system metrics not available
-        const systemTable = document.getElementById('system-rows');
-        const systemSectionTitle = systemTable ? systemTable.closest('h2') : null;
-        if (systemSectionTitle) {
-            systemSectionTitle.style.display = d.capabilities.system ? 'block' : 'none';
-            const systemTableWrap = systemTable ? systemTable.closest('.table-wrap') : null;
-            if (systemTableWrap) {
-                systemTableWrap.style.display = d.capabilities.system ? 'block' : 'none';
-            }
-        }
+        setMetricSectionVisibility('system-rows', d.capabilities.system);
+        setMetricSectionVisibility('gpu-rows', d.capabilities.gpu);
     }
 
-    if (sysRowsEl && (!serverRunning || d.local_metrics_available === false)) {
+    if (sysRowsEl && (!serverRunning || d.host_metrics_available === false)) {
         sysRowsEl.innerHTML = '';
     } else if (sysRowsEl) {
         const isWindows = navigator.platform.indexOf('Win') !== -1;

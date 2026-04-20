@@ -78,6 +78,16 @@ pub struct UiSettings {
     pub server_endpoint: String,
     #[serde(default = "default_llama_poll_interval")]
     pub llama_poll_interval: u64,
+    #[serde(default)]
+    pub remote_agent_url: String,
+    #[serde(default)]
+    pub remote_agent_token: String,
+    #[serde(default)]
+    pub remote_agent_ssh_autostart: bool,
+    #[serde(default)]
+    pub remote_agent_ssh_target: String,
+    #[serde(default)]
+    pub remote_agent_ssh_command: String,
 }
 
 /// Session mode: either spawn a new server or attach to existing
@@ -159,6 +169,11 @@ impl Default for UiSettings {
             models_dir: String::new(),
             server_endpoint: String::new(),
             llama_poll_interval: default_llama_poll_interval(),
+            remote_agent_url: String::new(),
+            remote_agent_token: String::new(),
+            remote_agent_ssh_autostart: false,
+            remote_agent_ssh_target: String::new(),
+            remote_agent_ssh_command: String::new(),
         }
     }
 }
@@ -259,6 +274,8 @@ pub struct AppState {
     pub endpoint_kind: Arc<Mutex<EndpointKind>>,
     pub session_kind: Arc<Mutex<SessionKind>>,
     pub tray_mode: Arc<Mutex<TrayMode>>,
+    pub remote_agent_connected: Arc<Mutex<bool>>,
+    pub remote_agent_url: Arc<Mutex<Option<String>>>,
 }
 
 impl AppState {
@@ -279,6 +296,11 @@ impl AppState {
             .unwrap_or_default();
 
         let sessions = load_sessions(&sessions_path);
+        let active_session_id = sessions
+            .first()
+            .map(|session| session.id.clone())
+            .unwrap_or_default();
+
         let (endpoint_kind, session_kind) = if sessions.is_empty() {
             (EndpointKind::Unknown, SessionKind::None)
         } else {
@@ -336,12 +358,14 @@ impl AppState {
                 motherboard: "Unknown".to_string(),
             })),
             sessions: Arc::new(Mutex::new(sessions)),
-            active_session_id: Arc::new(Mutex::new("".to_string())),
+            active_session_id: Arc::new(Mutex::new(active_session_id)),
             sessions_path,
             capabilities: Arc::new(Mutex::new(initial_capabilities)),
             endpoint_kind: Arc::new(Mutex::new(endpoint_kind)),
             session_kind: Arc::new(Mutex::new(session_kind)),
             tray_mode: Arc::new(Mutex::new(TrayMode::Headless)),
+            remote_agent_connected: Arc::new(Mutex::new(false)),
+            remote_agent_url: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -365,11 +389,13 @@ impl AppState {
     }
 
     pub fn set_active_session(&self, session_id: &str) -> bool {
-        let mut active = self.active_session_id.lock().unwrap();
-        let sessions = self.sessions.lock().unwrap();
-        let exists = sessions.iter().any(|s| s.id == session_id);
+        let exists = {
+            let sessions = self.sessions.lock().unwrap();
+            sessions.iter().any(|s| s.id == session_id)
+        };
         if exists {
-            *active = session_id.to_string();
+            *self.active_session_id.lock().unwrap() = session_id.to_string();
+            self.refresh_capability_state();
         }
         exists
     }
@@ -426,6 +452,52 @@ impl AppState {
         false
     }
 
+    pub fn current_session_kind(&self) -> SessionKind {
+        let active_id = self.active_session_id.lock().unwrap().clone();
+        if active_id.is_empty() {
+            return SessionKind::None;
+        }
+
+        let session = {
+            let sessions = self.sessions.lock().unwrap();
+            sessions.iter().find(|s| s.id == active_id).cloned()
+        };
+
+        match session.map(|s| s.mode) {
+            Some(SessionMode::Spawn { .. }) => SessionKind::Spawn,
+            Some(SessionMode::Attach { .. }) => SessionKind::Attach,
+            None => SessionKind::None,
+        }
+    }
+
+    pub fn current_endpoint_kind(&self) -> EndpointKind {
+        let active_id = self.active_session_id.lock().unwrap().clone();
+        if active_id.is_empty() {
+            return EndpointKind::Unknown;
+        }
+
+        let session = {
+            let sessions = self.sessions.lock().unwrap();
+            sessions.iter().find(|s| s.id == active_id).cloned()
+        };
+
+        match session.map(|s| s.mode) {
+            Some(SessionMode::Spawn { .. }) => EndpointKind::Local,
+            Some(SessionMode::Attach { endpoint }) => endpoint_kind_from_endpoint(&endpoint),
+            None => EndpointKind::Unknown,
+        }
+    }
+
+    pub fn refresh_capability_state(&self) {
+        let capabilities = self.calculate_capabilities();
+        let endpoint_kind = self.current_endpoint_kind();
+        let session_kind = self.current_session_kind();
+
+        *self.capabilities.lock().unwrap() = capabilities;
+        *self.endpoint_kind.lock().unwrap() = endpoint_kind;
+        *self.session_kind.lock().unwrap() = session_kind;
+    }
+
     pub fn active_session_uses_local_metrics(&self) -> bool {
         let active_id = self.active_session_id.lock().unwrap().clone();
         if active_id.is_empty() {
@@ -442,6 +514,14 @@ impl AppState {
             Some(SessionMode::Attach { endpoint }) => endpoint_is_local(&endpoint),
             None => true,
         }
+    }
+
+    pub fn remote_agent_connected(&self) -> bool {
+        *self.remote_agent_connected.lock().unwrap()
+    }
+
+    pub fn host_metrics_available(&self) -> bool {
+        self.active_session_uses_local_metrics() || self.remote_agent_connected()
     }
 
     #[allow(dead_code)]
@@ -466,6 +546,15 @@ impl AppState {
 
         match session {
             Some(s) if matches!(s.mode, SessionMode::Spawn { .. }) => MetricsCapabilities {
+                inference: true,
+                system: true,
+                gpu: true,
+                cpu_temperature: true,
+                memory: true,
+                host_metrics: true,
+                tray: true,
+            },
+            Some(_) if self.remote_agent_connected() => MetricsCapabilities {
                 inference: true,
                 system: true,
                 gpu: true,

@@ -186,6 +186,15 @@ fn headless_mode_disables_tray() {
         sessions_file: None,
         headless: true,
         no_tray: false,
+        agent: false,
+        agent_host: "127.0.0.1".to_string(),
+        agent_port: 7779,
+        agent_token: None,
+        remote_agent_url: None,
+        remote_agent_token: None,
+        remote_agent_ssh_autostart: false,
+        remote_agent_ssh_target: None,
+        remote_agent_ssh_command: None,
     };
 
     assert!(
@@ -206,6 +215,15 @@ fn headless_mode_disables_tray() {
         sessions_file: None,
         headless: false,
         no_tray: true,
+        agent: false,
+        agent_host: "127.0.0.1".to_string(),
+        agent_port: 7779,
+        agent_token: None,
+        remote_agent_url: None,
+        remote_agent_token: None,
+        remote_agent_ssh_autostart: false,
+        remote_agent_ssh_target: None,
+        remote_agent_ssh_command: None,
     };
 
     assert!(
@@ -226,6 +244,15 @@ fn headless_mode_disables_tray() {
         sessions_file: None,
         headless: true,
         no_tray: true,
+        agent: false,
+        agent_host: "127.0.0.1".to_string(),
+        agent_port: 7779,
+        agent_token: None,
+        remote_agent_url: None,
+        remote_agent_token: None,
+        remote_agent_ssh_autostart: false,
+        remote_agent_ssh_target: None,
+        remote_agent_ssh_command: None,
     };
 
     assert!(

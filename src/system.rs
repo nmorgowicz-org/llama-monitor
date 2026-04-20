@@ -1,6 +1,6 @@
 use sysinfo::System;
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SystemMetrics {
     pub cpu_name: String,
     pub cpu_temp: f32,

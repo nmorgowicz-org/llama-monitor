@@ -467,7 +467,7 @@ struct TrayState {
 
 impl TrayState {
     fn get_metrics(&self) -> TrayMetrics {
-        let local_metrics_available = self.app_state.active_session_uses_local_metrics();
+        let local_metrics_available = self.app_state.host_metrics_available();
         let sys = self.app_state.system_metrics.lock().unwrap().clone();
         let gpu = if local_metrics_available {
             self.app_state.gpu_metrics.lock().unwrap().clone()
@@ -493,36 +493,11 @@ impl TrayState {
     ) -> String {
         let mut lines = Vec::new();
 
-        let active_session_id = self.app_state.active_session_id.lock().unwrap().clone();
-       let endpoint_kind = {
-            let sessions = self.app_state.sessions.lock().unwrap();
-            sessions
-                .iter()
-                .find(|s| s.id == active_session_id)
-                .map(|s| match &s.mode {
-                    crate::state::SessionMode::Spawn { .. } => crate::state::EndpointKind::Local,
-                    crate::state::SessionMode::Attach { endpoint } => {
-                        if endpoint.is_empty()
-                            || endpoint == "127.0.0.1" || endpoint == "localhost" {
-                            crate::state::EndpointKind::Local
-                        } else {
-                            crate::state::EndpointKind::Remote
-                        }
-                    }
-                })
-                .unwrap_or(crate::state::EndpointKind::Unknown)
-        };
-
-        let session_mode = {
-            let sessions = self.app_state.sessions.lock().unwrap();
-            sessions
-                .iter()
-                .find(|s| s.id == active_session_id)
-                .map(|s| match &s.mode {
-                    crate::state::SessionMode::Spawn { .. } => "Spawn",
-                    crate::state::SessionMode::Attach { .. } => "Attach",
-                })
-                .unwrap_or("")
+        let endpoint_kind = self.app_state.current_endpoint_kind();
+        let session_mode = match self.app_state.current_session_kind() {
+            crate::state::SessionKind::Spawn => "Spawn",
+            crate::state::SessionKind::Attach => "Attach",
+            crate::state::SessionKind::None => "",
         };
 
         let local_label = if endpoint_kind == crate::state::EndpointKind::Local {
