@@ -2,7 +2,7 @@
 
 **Project:** Llama Monitor UI/UX and Monitoring Improvements  
 **Plan:** docs/20260420-implementation-plan.md  
-****Last Updated:** 2026-04-20 (completed Tasks 1.1-1.8, 2.1-2.6)
+****Last Updated:** 2026-04-20 (completed Tasks 1.1-1.8, 2.1-2.6, 3.1-3.4)
 
 ---
 
@@ -24,6 +24,10 @@
 | 2.4 | Add severity indicators | ✅ Complete | 2026-04-20 |
 | 2.5 | Context usage display | ✅ Complete | 2026-04-20 |
 | 2.6 | Add mode badge | ✅ Complete | 2026-04-20 |
+| 3.1 | Update compact HTML | ✅ Complete | 2026-04-20 |
+| 3.2 | Update compact capability handling | ✅ Complete | 2026-04-20 |
+| 3.3 | Auto-height logic | ✅ Complete | 2026-04-20 |
+| 3.4 | Tray tooltip updates | ✅ Complete | 2026-04-20 |
 
 ---
 
@@ -31,7 +35,7 @@
 
 | Task | Phase | Status | Date Started |
 |------|-------|--------|--------------|
-| 3.1 | Update compact HTML | Pending | |
+| None | - | - | - |
 
 ---
 
