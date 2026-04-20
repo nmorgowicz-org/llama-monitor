@@ -44,20 +44,15 @@
 
     <!-- Page: Server (control + monitor) -->
     <div class="page active" id="page-server">
-       <div class="session-manager" id="session-manager">
-            <h3>Sessions <button class="btn-session-new" onclick="openSessionModal()">+ New</button></h3>
-            <div class="session-list" id="session-list">
-                <!-- Session items will be injected here -->
+  <div class="dashboard-grid">
+        <div class="dashboard-header grid grid-cols-12 gap-xl">
+            <div class="col-span-12">
+                <label class="num-sm">Server Endpoint (for attach)
+                    <input id="server-endpoint" type="text" value="http://127.0.0.1:8001" style="width:240px;">
+                </label>
             </div>
         </div>
-       <div class="server-endpoint-area">
-            <label class="num-sm">Server Endpoint (for attach)
-                <input id="server-endpoint" type="text" value="http://127.0.0.1:8001" style="width:240px;">
-            </label>
-            <button class="btn btn-attach" id="btn-attach" onclick="doAttach()">Attach</button>
-            <button class="btn btn-kill" id="btn-kill" onclick="doKillLlama()">Kill llama-server</button>
-        </div>
-        <div class="control-bar" id="controls">
+        <div class="control-bar grid grid-cols-12 gap-xl" id="controls">
            <label class="preset-label">Model Preset
                 <select id="preset-select"></select>
                 <span class="preset-actions">
@@ -72,38 +67,59 @@
             <button class="btn btn-stop" id="btn-stop" onclick="doStop()" disabled>Stop</button>
         </div>
 
-        <h2>System</h2>
-        <div class="table-wrap">
-        <table class="gpu-table">
-            <colgroup>
-                <col style="width:18%"><col style="width:10%"><col style="width:10%"><col style="width:18%"><col style="width:26%"><col style="width:18%">
-            </colgroup>
-            <thead><tr>
-                <th>System</th><th>Temp</th><th>Load</th><th>Clock</th><th>RAM</th><th>Model</th>
-            </tr></thead>
-            <tbody id="system-rows"></tbody>
-        </table>
+        <h2 class="dashboard-header">System</h2>
+        <div class="grid grid-cols-12 gap-xl widget-card">
+            <div class="col-span-12">
+                <table class="gpu-table">
+                    <colgroup>
+                        <col style="width:18%"><col style="width:10%"><col style="width:10%"><col style="width:18%"><col style="width:26%"><col style="width:18%">
+                    </colgroup>
+                    <thead><tr>
+                        <th>System</th><th>Temp</th><th>Load</th><th>Clock</th><th>RAM</th><th>Model</th>
+                    </tr></thead>
+                    <tbody id="system-rows"></tbody>
+                </table>
+            </div>
         </div>
 
-        <h2>Inference</h2>
-        <div class="inference-panel" id="inference">
-            <div class="metric-card"><div class="metric-label">Prompt Speed</div><div class="metric-value prompt" id="m-prompt">&mdash;</div></div>
-            <div class="metric-card"><div class="metric-label">Generation Speed</div><div class="metric-value gen" id="m-gen">&mdash;</div></div>
-            <div class="metric-card"><div class="metric-label">Context (KV Cache)</div><div class="metric-value ctx" id="m-ctx">&mdash;</div></div>
-            <div class="metric-card"><div class="metric-label">Slots</div><div class="metric-value slots" id="m-slots">&mdash;</div></div>
-            <div class="metric-card"><div class="metric-label">Server Status</div><div class="metric-value" id="m-status">&mdash;</div></div>
+        <h2 class="dashboard-header">Inference Metrics</h2>
+        <h2 class="dashboard-header">Inference Metrics</h2>
+        <div class="grid grid-cols-5 gap-md" id="inference">
+            <div class="col-span-1 widget-card widget-metric">
+                <div class="widget-metric-label">Prompt Speed</div>
+                <div class="widget-metric-value prompt" id="m-prompt">&mdash;</div>
+            </div>
+            <div class="col-span-1 widget-card widget-metric">
+                <div class="widget-metric-label">Generation Speed</div>
+                <div class="widget-metric-value gen" id="m-gen">&mdash;</div>
+            </div>
+            <div class="col-span-1 widget-card widget-metric">
+                <div class="widget-metric-label">Context (KV)</div>
+                <div class="widget-metric-value ctx" id="m-ctx">&mdash;</div>
+            </div>
+            <div class="col-span-1 widget-card widget-metric">
+                <div class="widget-metric-label">Slots</div>
+                <div class="widget-metric-value slots" id="m-slots">&mdash;</div>
+            </div>
+            <div class="col-span-1 widget-card widget-metric">
+                <div class="widget-metric-label">Server Status</div>
+                <div class="widget-metric-value" id="m-status">&mdash;</div>
+            </div>
         </div>
-        <h2>GPUs</h2>
-        <div class="table-wrap">
-        <table class="gpu-table">
-            <colgroup>
-                <col style="width:14%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:24%"><col style="width:16%"><col style="width:16%">
-            </colgroup>
-            <thead><tr>
-                <th>GPU</th><th>Temp</th><th>Load</th><th>VRAM</th><th>Power</th><th>SCLK</th><th>MCLK</th>
-            </tr></thead>
-            <tbody id="gpu-rows"></tbody>
-        </table>
+
+        <h2 class="dashboard-header">GPUs</h2>
+        <div class="grid grid-cols-12 gap-xl widget-card">
+            <div class="col-span-12">
+                <table class="gpu-table">
+                    <colgroup>
+                        <col style="width:14%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:24%"><col style="width:16%"><col style="width:16%">
+                    </colgroup>
+                    <thead><tr>
+                        <th>GPU</th><th>Temp</th><th>Load</th><th>VRAM</th><th>Power</th><th>SCLK</th><th>MCLK</th>
+                    </tr></thead>
+                    <tbody id="gpu-rows"></tbody>
+                </table>
+            </div>
         </div>
     </div>
 
@@ -359,9 +375,6 @@
         </form>
     </div>
 </div>
-
-<!-- Toast notifications -->
-<div class="toast-container" id="toast-container"></div>
 
 <!-- Preset Modal -->
 <div class="modal-overlay" id="preset-modal">
