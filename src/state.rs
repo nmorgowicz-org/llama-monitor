@@ -11,6 +11,52 @@ use crate::models::DiscoveredModel;
 use crate::presets::ModelPreset;
 use crate::system::SystemMetrics;
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MetricsCapabilities {
+    pub inference: bool,
+    pub system: bool,
+    pub gpu: bool,
+    pub cpu_temperature: bool,
+    pub memory: bool,
+    pub host_metrics: bool,
+    pub tray: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub enum EndpointKind {
+    Local,
+    Remote,
+    Unknown,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub enum SessionKind {
+    Spawn,
+    Attach,
+    None,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub enum TrayMode {
+    Desktop,
+    Headless,
+    Failed,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum AvailabilityReason {
+    Available,
+    RemoteEndpoint,
+    NoDisplay,
+    TrayUnavailable,
+    SensorUnavailable,
+    BackendUnavailable,
+    CommandMissing,
+    PermissionDenied,
+    MetricsUnreachable,
+    NotApplicable,
+}
+
 const MAX_LOG_LINES: usize = 500;
 const MAX_SESSIONS: usize = 10;
 
@@ -34,7 +80,7 @@ pub struct UiSettings {
 }
 
 /// Session mode: either spawn a new server or attach to existing
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum SessionMode {
     Spawn { port: u16 },
     Attach { endpoint: String },
@@ -208,6 +254,10 @@ pub struct AppState {
     pub active_session_id: Arc<Mutex<String>>,
     #[expect(dead_code)]
     pub sessions_path: PathBuf,
+    pub capabilities: Arc<Mutex<MetricsCapabilities>>,
+    pub endpoint_kind: Arc<Mutex<EndpointKind>>,
+    pub session_kind: Arc<Mutex<SessionKind>>,
+    pub tray_mode: Arc<Mutex<TrayMode>>,
 }
 
 impl AppState {
@@ -226,6 +276,37 @@ impl AppState {
             .as_ref()
             .and_then(|dir| crate::models::scan_models_dir(dir).ok())
             .unwrap_or_default();
+
+        let sessions = load_sessions(&sessions_path);
+        let (endpoint_kind, session_kind) = if sessions.is_empty() {
+            (EndpointKind::Unknown, SessionKind::None)
+        } else {
+            let first_session = &sessions[0];
+            let is_local = match &first_session.mode {
+                SessionMode::Spawn { .. } => true,
+                SessionMode::Attach { endpoint } => endpoint_is_local(endpoint),
+            };
+            let endpoint_kind = if is_local {
+                EndpointKind::Local
+            } else {
+                EndpointKind::Remote
+            };
+            let session_kind = match &first_session.mode {
+                SessionMode::Spawn { .. } => SessionKind::Spawn,
+                SessionMode::Attach { .. } => SessionKind::Attach,
+            };
+            (endpoint_kind, session_kind)
+        };
+
+        let initial_capabilities = MetricsCapabilities {
+            inference: true,
+            system: matches!(session_kind, SessionKind::Spawn),
+            gpu: matches!(session_kind, SessionKind::Spawn),
+            cpu_temperature: matches!(session_kind, SessionKind::Spawn),
+            memory: matches!(session_kind, SessionKind::Spawn),
+            host_metrics: matches!(session_kind, SessionKind::Spawn),
+            tray: true,
+        };
 
         Self {
             gpu_metrics: Arc::new(Mutex::new(BTreeMap::new())),
@@ -253,9 +334,13 @@ impl AppState {
                 ram_used_gb: 0.0,
                 motherboard: "Unknown".to_string(),
             })),
-            sessions: Arc::new(Mutex::new(Vec::new())),
+            sessions: Arc::new(Mutex::new(sessions)),
             active_session_id: Arc::new(Mutex::new("".to_string())),
             sessions_path,
+            capabilities: Arc::new(Mutex::new(initial_capabilities)),
+            endpoint_kind: Arc::new(Mutex::new(endpoint_kind)),
+            session_kind: Arc::new(Mutex::new(session_kind)),
+            tray_mode: Arc::new(Mutex::new(TrayMode::Headless)),
         }
     }
 
@@ -357,6 +442,80 @@ impl AppState {
             None => true,
         }
     }
+
+    pub fn calculate_capabilities(&self) -> MetricsCapabilities {
+        let active_id = self.active_session_id.lock().unwrap().clone();
+        if active_id.is_empty() {
+            return MetricsCapabilities {
+                inference: true,
+                system: false,
+                gpu: false,
+                cpu_temperature: false,
+                memory: false,
+                host_metrics: false,
+                tray: true,
+            };
+        }
+
+        let session = {
+            let sessions = self.sessions.lock().unwrap();
+            sessions.iter().find(|s| s.id == active_id).cloned()
+        };
+
+        match session {
+            Some(s) if matches!(s.mode, SessionMode::Spawn { .. }) => MetricsCapabilities {
+                inference: true,
+                system: true,
+                gpu: true,
+                cpu_temperature: true,
+                memory: true,
+                host_metrics: true,
+                tray: true,
+            },
+            Some(_) => MetricsCapabilities {
+                inference: true,
+                system: false,
+                gpu: false,
+                cpu_temperature: false,
+                memory: false,
+                host_metrics: false,
+                tray: true,
+            },
+            None => MetricsCapabilities {
+                inference: true,
+                system: false,
+                gpu: false,
+                cpu_temperature: false,
+                memory: false,
+                host_metrics: false,
+                tray: true,
+            },
+        }
+    }
+
+    pub fn calculate_availability_reasons(&self) -> (AvailabilityReason, AvailabilityReason, AvailabilityReason) {
+        let capabilities = self.calculate_capabilities();
+        
+        let system_reason = if capabilities.system {
+            AvailabilityReason::Available
+        } else {
+            AvailabilityReason::RemoteEndpoint
+        };
+        
+        let gpu_reason = if capabilities.gpu {
+            AvailabilityReason::Available
+        } else {
+            AvailabilityReason::RemoteEndpoint
+        };
+        
+        let cpu_temp_reason = if capabilities.cpu_temperature {
+            AvailabilityReason::Available
+        } else {
+            AvailabilityReason::RemoteEndpoint
+        };
+        
+        (system_reason, gpu_reason, cpu_temp_reason)
+    }
 }
 
 fn endpoint_is_local(endpoint: &str) -> bool {
@@ -428,5 +587,85 @@ mod tests {
     #[test]
     fn endpoint_locality_rejects_nonlocal_ip() {
         assert!(!endpoint_is_local("http://203.0.113.10:8001"));
+    }
+
+    #[test]
+    fn metrics_capabilities_defaults_inference() {
+        let caps = MetricsCapabilities {
+            inference: true,
+            system: false,
+            gpu: false,
+            cpu_temperature: false,
+            memory: false,
+            host_metrics: false,
+            tray: true,
+        };
+        assert!(caps.inference);
+        assert!(!caps.system);
+    }
+
+    #[test]
+    fn availability_reason_serializes() {
+        let reason = AvailabilityReason::Available;
+        let json = serde_json::to_string(&reason).unwrap();
+        assert_eq!(json, "\"Available\"");
+    }
+
+    #[test]
+    fn calculate_capabilities_for_spawn_session() {
+        let paths = AppPaths {
+            presets_path: PathBuf::new(),
+            models_dir: None,
+            gpu_env_path: PathBuf::new(),
+            ui_settings_path: PathBuf::new(),
+            sessions_path: PathBuf::new(),
+        };
+        let state = AppState::new(
+            vec![],
+            paths,
+            GpuEnv::default(),
+            UiSettings::default(),
+        );
+        let session = Session::new_spawn(
+            "test".to_string(),
+            "Test".to_string(),
+            8001,
+        );
+        state.add_session(session);
+        state.set_active_session("test");
+        
+        let caps = state.calculate_capabilities();
+        assert!(caps.inference);
+        assert!(caps.gpu);
+        assert!(caps.system);
+    }
+
+    #[test]
+    fn calculate_capabilities_for_attach_session() {
+        let paths = AppPaths {
+            presets_path: PathBuf::new(),
+            models_dir: None,
+            gpu_env_path: PathBuf::new(),
+            ui_settings_path: PathBuf::new(),
+            sessions_path: PathBuf::new(),
+        };
+        let state = AppState::new(
+            vec![],
+            paths,
+            GpuEnv::default(),
+            UiSettings::default(),
+        );
+        let session = Session::new_attach(
+            "test".to_string(),
+            "Test".to_string(),
+            "http://localhost:8001".to_string(),
+        );
+        state.add_session(session);
+        state.set_active_session("test");
+        
+        let caps = state.calculate_capabilities();
+        assert!(caps.inference);
+        assert!(!caps.gpu);
+        assert!(!caps.system);
     }
 }
