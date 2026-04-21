@@ -3475,8 +3475,7 @@ ws.onmessage = e => {
 
     const badgeParts = [];
 
-    if (serverRunning) badgeParts.push('Running');
-
+    // Skip "Running" since it's already shown in status-text
     if (l.generation_tokens_per_sec > 0) badgeParts.push(l.generation_tokens_per_sec.toFixed(1) + 't/s');
 
     const gpuEntries = Object.entries(d.gpu || {});
