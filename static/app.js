@@ -3253,34 +3253,27 @@ ws.onmessage = e => {
     // Update Attach/Detach button states and server endpoint area based on session mode
     const btnAttach = document.getElementById('btn-attach');
     const btnDetach = document.getElementById('btn-detach');
-    const btnKill = document.getElementById('btn-kill');
-    const endpointLabel = document.getElementById('server-endpoint-label');
+    const attachedIndicator = document.getElementById('attached-indicator');
     const endpointInput = document.getElementById('server-endpoint');
 
     const isAttach = d.session_mode === 'attach' && d.active_session_endpoint;
     console.log('[ws] session_mode:', d.session_mode, 'active_session_endpoint:', d.active_session_endpoint, 'isAttach:', isAttach);
 
     if (isAttach) {
-        // Attached state: show endpoint as read-only text, hide kill button
+        // Attached state: show "Attached to:" indicator, disable input
         btnAttach.style.display = 'none';
         btnDetach.style.display = 'inline-block';
-        if (btnKill) btnKill.style.display = 'none';
-        if (endpointLabel) {
-            endpointLabel.innerHTML = '<span class="attached-indicator">Attached to:</span>';
-        }
+        if (attachedIndicator) attachedIndicator.style.display = 'inline-block';
         if (endpointInput) {
             endpointInput.value = d.active_session_endpoint;
             endpointInput.disabled = true;
             endpointInput.classList.add('readonly');
         }
     } else {
-        // Not attached: show input field, show kill button
+        // Not attached: hide indicator, enable input
         btnAttach.style.display = 'inline-block';
         btnDetach.style.display = 'none';
-        if (btnKill) btnKill.style.display = 'inline-block';
-        if (endpointLabel) {
-            endpointLabel.innerHTML = '';
-        }
+        if (attachedIndicator) attachedIndicator.style.display = 'none';
         if (endpointInput) {
             endpointInput.disabled = false;
             endpointInput.classList.remove('readonly');

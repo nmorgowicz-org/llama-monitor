@@ -107,11 +107,11 @@
                     </div>
                     <div class="dashboard-header-actions">
                         <label class="num-sm" id="server-endpoint-label">
+                            <span class="attached-indicator" id="attached-indicator" style="display:none;">Attached to:</span>
                             <input id="server-endpoint" type="text" value="http://127.0.0.1:8001" placeholder="http://host:port">
                         </label>
                         <button class="btn btn-attach" id="btn-attach" onclick="doAttach()">Attach</button>
                         <button class="btn btn-detach" id="btn-detach" onclick="doDetach()" style="display:none;">Detach</button>
-                        <button class="btn btn-kill" id="btn-kill" onclick="doKillLlama()">Kill llama-server</button>
                     </div>
                 </div>
                 <div class="control-bar" id="controls">
