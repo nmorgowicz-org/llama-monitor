@@ -56,31 +56,36 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
 
         let base = endpoint;
 
-        let server_reachable = match client.get(format!("{base}/health")).send().await {
-            Ok(resp) => match resp.text().await {
-                Ok(body) => {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
-                        let mut m = state.llama_metrics.lock().unwrap();
-                        m.status = json
-                            .get("status")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("unknown")
-                            .to_string();
-                        true
-                    } else {
-                        eprintln!("[poller] /health returned invalid JSON");
-                        false
-                    }
-                }
-                Err(_) => {
-                    eprintln!("[poller] Failed to read /health response");
-                    false
-                }
-            },
-            Err(_) => {
-                eprintln!("[poller] Failed to reach /health at {}", base);
+        // First check if server is up at all
+        let server_up = match client.get(&base).send().await {
+            Ok(_) => true,
+            Err(e) => {
+                eprintln!("[poller] Server not reachable at {}: {}", base, e);
                 false
             }
+        };
+
+        let server_reachable = if server_up {
+            // Try /health for detailed status
+            match client.get(format!("{base}/health")).send().await {
+                Ok(resp) => match resp.text().await {
+                    Ok(body) => {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                            let mut m = state.llama_metrics.lock().unwrap();
+                            m.status = json
+                                .get("status")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("running")
+                                .to_string();
+                        }
+                        true
+                    }
+                    Err(_) => true, // Server up but /health returned non-JSON
+                },
+                Err(_) => true, // Server up but /health not available (metrics disabled)
+            }
+        } else {
+            false
         };
 
         // Update server_running state with hysteresis (only change on state transition)
