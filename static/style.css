@@ -750,19 +750,6 @@ svg {
   background: currentColor;
 }
 
-.attached-indicator {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(163, 190, 140, 0.15);
-  color: #a3be8c;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  margin-right: 8px;
-  vertical-align: middle;
-}
-
 .btn-detach-top {
   display: inline-flex;
   align-items: center;
@@ -787,18 +774,6 @@ svg {
 
 .btn-detach-top:active {
   transform: scale(0.98);
-}
-
-input.readonly {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--color-text-secondary);
-  cursor: default;
-  border-color: rgba(163, 190, 140, 0.3);
-}
-
-input.readonly:focus {
-  border-color: rgba(163, 190, 140, 0.3);
-  box-shadow: none;
 }
 
 .table-wrap {

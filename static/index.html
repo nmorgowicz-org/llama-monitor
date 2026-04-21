@@ -101,14 +101,12 @@
         <!-- Page: Server (control + monitor) -->
         <div class="page active" id="page-server">
             <div class="dashboard-grid">
-                <div class="dashboard-header">
+                <div class="dashboard-header" id="server-header">
                     <div>
                         <h2>Server</h2>
-                        <span class="mode-badge" id="mode-badge">Idle</span>
                     </div>
                     <div class="dashboard-header-actions">
                         <label class="num-sm" id="server-endpoint-label">
-                            <span class="attached-indicator" id="attached-indicator" style="display:none;">Attached to:</span>
                             <input id="server-endpoint" type="text" value="http://127.0.0.1:8001" placeholder="http://host:port">
                         </label>
                         <button class="btn btn-attach" id="btn-attach" onclick="doAttach()">Attach</button>

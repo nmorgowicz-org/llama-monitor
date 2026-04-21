@@ -2758,7 +2758,9 @@ async function doKillLlamaInternal() {
 
 async function doAttach() {
 
-    const endpoint = document.getElementById('server-endpoint').value.trim();
+    const endpointInput = document.getElementById('server-endpoint');
+
+    const endpoint = endpointInput.value.trim();
 
     if (!endpoint) {
 
@@ -2791,6 +2793,15 @@ async function doAttach() {
         if (data.warning) {
 
             showToast(data.warning, 'warning');
+
+        }
+
+        // Hide server header immediately
+        const serverHeader = document.getElementById('server-header');
+
+        if (serverHeader) {
+
+            serverHeader.style.display = 'none';
 
         }
 
@@ -2835,6 +2846,15 @@ async function doDetach() {
         if (btnDetachTop) {
 
             btnDetachTop.style.display = 'none';
+
+        }
+
+        // Show server header
+        const serverHeader = document.getElementById('server-header');
+
+        if (serverHeader) {
+
+            serverHeader.style.display = '';
 
         }
 
@@ -3258,43 +3278,27 @@ ws.onmessage = e => {
         }
     }
 
-    // Update session mode in dashboard header
-    const modeBadge = document.getElementById('mode-badge');
-    if (modeBadge && d.session_mode) {
-        modeBadge.textContent = d.session_mode.charAt(0).toUpperCase() + d.session_mode.slice(1);
-    }
-
-    // Update Attach/Detach button states and server endpoint area based on session mode
+    // Update Attach/Detach button states and server header visibility based on session mode
+    const serverHeader = document.getElementById('server-header');
     const btnAttach = document.getElementById('btn-attach');
     const btnDetach = document.getElementById('btn-detach');
     const btnDetachTop = document.getElementById('btn-detach-top');
-    const attachedIndicator = document.getElementById('attached-indicator');
-    const endpointInput = document.getElementById('server-endpoint');
 
     const isAttach = d.session_mode === 'attach' && d.active_session_endpoint;
     console.log('[ws] session_mode:', d.session_mode, 'active_session_endpoint:', d.active_session_endpoint, 'isAttach:', isAttach);
 
     if (isAttach) {
-        // Attached state: show detach buttons, show indicator, disable input
+        // Attached state: hide server header, show detach buttons
+        if (serverHeader) serverHeader.style.display = 'none';
         btnAttach.style.display = 'none';
         btnDetach.style.display = 'inline-block';
         if (btnDetachTop) btnDetachTop.style.display = 'inline-block';
-        if (attachedIndicator) attachedIndicator.style.display = 'inline-block';
-        if (endpointInput) {
-            endpointInput.value = d.active_session_endpoint;
-            endpointInput.disabled = true;
-            endpointInput.classList.add('readonly');
-        }
     } else {
-        // Not attached: hide detach buttons, hide indicator, enable input
+        // Not attached: show server header, hide detach buttons
+        if (serverHeader) serverHeader.style.display = '';
         btnAttach.style.display = 'inline-block';
         btnDetach.style.display = 'none';
         if (btnDetachTop) btnDetachTop.style.display = 'none';
-        if (attachedIndicator) attachedIndicator.style.display = 'none';
-        if (endpointInput) {
-            endpointInput.disabled = false;
-            endpointInput.classList.remove('readonly');
-        }
     }
 
     // Update "Historic" badge on inference metrics section
@@ -3317,9 +3321,13 @@ ws.onmessage = e => {
 
     txt.textContent = serverRunning ? 'Running' : 'Stopped';
 
-    document.getElementById('btn-start').disabled = serverRunning;
+    const btnStart = document.getElementById('btn-start');
 
-    document.getElementById('btn-stop').disabled = !serverRunning;
+    const btnStop = document.getElementById('btn-stop');
+
+    if (btnStart) btnStart.disabled = serverRunning;
+
+    if (btnStop) btnStop.disabled = !serverRunning;
 
 
 
