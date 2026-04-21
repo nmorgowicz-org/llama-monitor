@@ -137,9 +137,20 @@ svg {
   gap: var(--gap-sm);
   min-height: 42px;
   padding: 8px 24px;
-  background: rgba(15, 17, 21, 0.9);
+  background: rgba(15, 17, 21, 0.92);
   border-bottom: 1px solid var(--border-subtle);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(16px) saturate(180%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.endpoint-health-strip::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.15), transparent);
 }
 
 .endpoint-mode,
@@ -396,6 +407,59 @@ svg {
   overflow-y: auto;
   background: rgba(22, 25, 30, 0.9);
   border-right: 1px solid var(--border-subtle);
+  transition: width 250ms cubic-bezier(0.16, 1, 0.3, 1), padding 250ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sidebar-nav.collapsed {
+  width: 68px;
+  padding: 20px 6px;
+}
+
+.sidebar-nav.collapsed .sidebar-label {
+  display: none;
+}
+
+.sidebar-nav.collapsed .sidebar-btn {
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.sidebar-nav.collapsed .sidebar-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  transform: none;
+}
+
+.sidebar-collapse-btn {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px;
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-base);
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.sidebar-collapse-btn:hover {
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.sidebar-collapse-icon {
+  font-size: 14px;
+  transition: transform 200ms ease;
+}
+
+.sidebar-nav.collapsed .sidebar-collapse-icon {
+  transform: rotate(180deg);
 }
 
 .sidebar-btn {
@@ -422,7 +486,8 @@ svg {
 
 .sidebar-btn.active {
   color: var(--color-primary-light);
-  background: rgba(99, 102, 241, 0.13);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(99, 102, 241, 0.08));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .sidebar-btn.active::before {
@@ -434,6 +499,7 @@ svg {
   width: 3px;
   border-radius: 999px;
   background: var(--gradient-primary);
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.4);
 }
 
 .sidebar-icon {
@@ -583,14 +649,52 @@ svg {
 }
 
 .widget-card {
+  position: relative;
   padding: 22px;
-  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  background: linear-gradient(145deg, rgba(40, 48, 58, 0.86), rgba(30, 36, 43, 0.94));
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-card);
+  box-shadow: 
+    0 1px 3px rgba(0, 0, 0, 0.3),
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  transition: border-color 200ms ease, box-shadow 200ms ease, transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  backdrop-filter: blur(10px);
+  overflow: hidden;
+}
+
+.widget-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
 }
 
 .widget-card:hover {
-  border-color: rgba(99, 102, 241, 0.28);
-  box-shadow: var(--shadow-elevated);
-  transform: translateY(-2px);
+  border-color: rgba(99, 102, 241, 0.35);
+  box-shadow: 
+    0 4px 12px rgba(0, 0, 0, 0.4),
+    0 2px 6px rgba(0, 0, 0, 0.3),
+    0 0 20px rgba(99, 102, 241, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transform: translateY(-3px) scale(1.01);
+}
+
+.widget-card:active {
+  transform: translateY(-1px) scale(0.995);
+}
+
+/* Subtle floating animation for cards */
+@keyframes card-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1px); }
+}
+
+.widget-card:hover {
+  animation: card-float 3s ease-in-out infinite;
 }
 
 .widget-metric {
@@ -600,7 +704,10 @@ svg {
 }
 
 .widget-metric-label {
-  color: var(--color-text-muted);
+  background: linear-gradient(135deg, var(--color-text-muted), var(--color-text-secondary));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
   font-size: var(--text-xs);
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -791,6 +898,30 @@ svg {
 
 .btn-detach-top:active {
   transform: scale(0.96);
+}
+
+/* Ripple effect on buttons */
+.btn,
+.btn-sm,
+.sidebar-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(0);
+  animation: ripple-animation 0.4s ease-out;
+  pointer-events: none;
+}
+
+@keyframes ripple-animation {
+  to {
+    transform: scale(4);
+    opacity: 0;
+  }
 }
 
 .table-wrap {

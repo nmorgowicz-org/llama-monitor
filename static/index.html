@@ -70,32 +70,35 @@
         </div>
     </div>
 
-    <div class="sidebar-nav">
-        <button class="sidebar-btn active" onclick="switchTab('server')">
+    <div class="sidebar-nav" id="sidebar-nav">
+        <button class="sidebar-btn active" onclick="switchTab('server')" title="Server">
             <span class="sidebar-icon">📊</span>
             <span class="sidebar-label">Server</span>
         </button>
-        <button class="sidebar-btn" onclick="switchTab('chat')">
+        <button class="sidebar-btn" onclick="switchTab('chat')" title="Chat">
             <span class="sidebar-icon">💬</span>
             <span class="sidebar-label">Chat</span>
             <span class="sidebar-badge" id="sidebar-badge-chat"></span>
         </button>
-        <button class="sidebar-btn" onclick="switchTab('logs')">
+        <button class="sidebar-btn" onclick="switchTab('logs')" title="Logs">
             <span class="sidebar-icon">📋</span>
             <span class="sidebar-label">Logs</span>
             <span class="sidebar-badge" id="sidebar-badge-logs"></span>
         </button>
-        <button class="sidebar-btn" onclick="openSessionModal()">
+        <button class="sidebar-btn" onclick="openSessionModal()" title="Sessions">
             <span class="sidebar-icon">📂</span>
             <span class="sidebar-label">Sessions</span>
         </button>
-        <button class="sidebar-btn" onclick="openModelsModal()">
+        <button class="sidebar-btn" onclick="openModelsModal()" title="Models">
             <span class="sidebar-icon">🤖</span>
             <span class="sidebar-label">Models</span>
         </button>
-        <button class="sidebar-btn" onclick="openSettingsModal()">
+        <button class="sidebar-btn" onclick="openSettingsModal()" title="Settings">
             <span class="sidebar-icon">⚙️</span>
             <span class="sidebar-label">Settings</span>
+        </button>
+        <button class="sidebar-collapse-btn" onclick="toggleSidebarCollapse()" title="Collapse sidebar">
+            <span class="sidebar-collapse-icon">◀</span>
         </button>
     </div>
 

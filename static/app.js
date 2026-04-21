@@ -14,6 +14,66 @@ function switchTab(name) {
 
 }
 
+function toggleSidebarCollapse() {
+    const sidebar = document.getElementById('sidebar-nav');
+    const icon = document.querySelector('.sidebar-collapse-icon');
+    
+    sidebar.classList.toggle('collapsed');
+    
+    const isCollapsed = sidebar.classList.contains('collapsed');
+    localStorage.setItem('sidebarCollapsed', isCollapsed.toString());
+    
+    if (icon) {
+        icon.textContent = isCollapsed ? '▶' : '◀';
+    }
+}
+
+// Restore sidebar state on page load
+function restoreSidebarState() {
+    const sidebar = document.getElementById('sidebar-nav');
+    const icon = document.querySelector('.sidebar-collapse-icon');
+    const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+    
+    if (isCollapsed) {
+        sidebar.classList.add('collapsed');
+        if (icon) icon.textContent = '▶';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', restoreSidebarState);
+
+// Number counting animation for smooth value transitions
+function animateNumber(element, from, to, duration = 300, decimals = 1, suffix = '') {
+    if (!element) return;
+    
+    const startTime = performance.now();
+    const diff = to - from;
+    
+    function update(currentTime) {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Ease-out cubic
+        const ease = 1 - Math.pow(1 - progress, 3);
+        const current = from + (diff * ease);
+        
+        element.textContent = current.toFixed(decimals) + suffix;
+        
+        if (progress < 1) {
+            requestAnimationFrame(update);
+        }
+    }
+    
+    requestAnimationFrame(update);
+}
+
+// Store previous values for animation
+window.prevValues = {
+    prompt: 0,
+    generation: 0,
+    contextPct: 0
+};
+
 
 let remoteAgentInProgress = false;
 
@@ -3386,7 +3446,10 @@ ws.onmessage = e => {
     const genBar = document.getElementById('m-gen-bar');
 
     if (l && l.prompt_tokens_per_sec > 0) {
-        promptEl.textContent = l.prompt_tokens_per_sec.toFixed(1) + ' t/s';
+        // Animate the number transition
+        animateNumber(promptEl, window.prevValues.prompt, l.prompt_tokens_per_sec, 300, 1, ' t/s');
+        window.prevValues.prompt = l.prompt_tokens_per_sec;
+        
         // Update max if this is higher
         if (l.prompt_tokens_per_sec > window.speedMax.prompt) {
             window.speedMax.prompt = l.prompt_tokens_per_sec;
@@ -3405,7 +3468,10 @@ ws.onmessage = e => {
     }
 
     if (l && l.generation_tokens_per_sec > 0) {
-        genEl.textContent = l.generation_tokens_per_sec.toFixed(1) + ' t/s';
+        // Animate the number transition
+        animateNumber(genEl, window.prevValues.generation, l.generation_tokens_per_sec, 300, 1, ' t/s');
+        window.prevValues.generation = l.generation_tokens_per_sec;
+        
         // Update max if this is higher
         if (l.generation_tokens_per_sec > window.speedMax.generation) {
             window.speedMax.generation = l.generation_tokens_per_sec;
@@ -3432,14 +3498,15 @@ ws.onmessage = e => {
         const pct = ((l.kv_cache_tokens / l.kv_cache_max) * 100);
         const severity = pct >= 95 ? 'critical' : pct >= 80 ? 'warning' : '';
 
+        // Animate percentage transition
+        animateNumber(ctxValue, window.prevValues.contextPct, pct, 300, 1, '%');
+        window.prevValues.contextPct = pct;
+        
         // Update progress bar
         if (ctxFill) {
             ctxFill.style.width = pct + '%';
             ctxFill.className = 'context-progress-fill ' + severity;
         }
-
-        // Show percentage prominently
-        if (ctxValue) ctxValue.textContent = pct.toFixed(1) + '%';
 
         // Show raw numbers as detail
         if (ctxDetails) ctxDetails.textContent = l.kv_cache_tokens + ' / ' + l.kv_cache_max;
