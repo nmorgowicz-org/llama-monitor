@@ -23,12 +23,16 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
 
     loop {
         if !enabled {
+            println!("[poller] Waiting for notify (enabled={})", enabled);
             state.llama_poll_notify.notified().await;
+            println!("[poller] Notified! Setting enabled=true");
             enabled = true;
         }
 
         let active_id = { state.active_session_id.lock().unwrap().clone() };
+        println!("[poller] active_id='{}', enabled={}", active_id, enabled);
         if active_id.is_empty() {
+            println!("[poller] No active session, setting enabled=false and sleeping");
             enabled = false;
             last_reachable = false;
             tokio::time::sleep(Duration::from_secs(poll_interval)).await;
