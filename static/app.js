@@ -3482,7 +3482,7 @@ ws.onmessage = e => {
 
     if (gpuEntries.length > 0) badgeParts.push('GPU ' + Math.max(...gpuEntries.map(([,m]) => m.temp)).toFixed(0) + 'C');
 
-    document.getElementById('badge-server').textContent = badgeParts.length ? ' ' + badgeParts.join(' \u00b7 ') : ' Stopped';
+    document.getElementById('badge-server').textContent = badgeParts.length ? ' ' + badgeParts.join(' \u00b7 ') : '';
 
 
 
