@@ -19,8 +19,10 @@
       <div class="endpoint-health-strip" aria-label="Active endpoint status.">
         <span class="status-label">Active endpoint</span>
         <span class="endpoint-mode" id="endpoint-mode">Loading...</span>
-        <span class="endpoint-url" id="endpoint-url">...</span>
-        <button class="btn-detach-top" id="btn-detach-top" onclick="doDetach()" style="display:none;" title="Detach from endpoint">✕ Detach</button>
+        <div class="endpoint-url-container">
+            <span class="endpoint-url" id="endpoint-url">...</span>
+            <button class="btn-detach-top" id="btn-detach-top" onclick="doDetach()" style="display:none;" title="Detach from endpoint">✕ Detach</button>
+        </div>
         <span class="endpoint-status" id="endpoint-status">...</span>
         <span class="agent-status" id="agent-status" style="display:none;">
             <span class="agent-indicator">●</span>
