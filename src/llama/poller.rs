@@ -225,8 +225,10 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             }
             m.slot_generation_tokens = slots.slot_generation_tokens;
             m.slot_generation_remaining = slots.slot_generation_remaining;
+            m.slot_generation_limit = slots.slot_generation_limit;
             m.slot_generation_active = slots.slot_generation_active;
             m.slot_generation_available = slots.slot_generation_available;
+            m.slots = slots.slots;
             if !m.kv_cache_tokens_available && m.requests_processing == 0 {
                 m.kv_cache_tokens = 0;
                 m.context_live_tokens = 0;

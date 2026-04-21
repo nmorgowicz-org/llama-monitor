@@ -83,6 +83,16 @@ function formatMetricAge(unixMs) {
     return 'updated ' + ageMinutes + 'm ago';
 }
 
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    })[char]);
+}
+
 function setChipState(el, label, state) {
     if (!el) return;
     el.textContent = label;
@@ -97,7 +107,8 @@ function setCardState(card, state) {
 
 function pushSparklinePoint(name, value) {
     window.metricSeries[name].push(Number.isFinite(value) ? value : 0);
-    if (window.metricSeries[name].length > 40) {
+    const limit = name === 'liveOutput' ? 90 : 40;
+    if (window.metricSeries[name].length > limit) {
         window.metricSeries[name].shift();
     }
 }
@@ -115,6 +126,345 @@ function renderSparkline(id, points, className) {
         return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
     }).join(' ');
     svg.innerHTML = '<path class="sparkline-fill ' + className + '" d="' + path + ' L 120 28 L 0 28 Z"></path><path class="sparkline-line ' + className + '" d="' + path + '"></path>';
+}
+
+function renderLiveSparkline(id, points) {
+    const svg = document.getElementById(id);
+    if (!svg) return;
+    if (!points || points.length < 2) {
+        svg.innerHTML = '';
+        return;
+    }
+    const width = 120;
+    const height = 34;
+    const max = Math.max(...points, 1);
+    const step = width / (points.length - 1);
+    let peak = { value: -1, x: 0, y: height - 2 };
+    const path = points.map((value, index) => {
+        const x = index * step;
+        const y = height - ((value / max) * (height - 6)) - 3;
+        if (value > peak.value) peak = { value, x, y };
+        return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
+    }).join(' ');
+    svg.innerHTML = [
+        '<path class="sparkline-fill live-output" d="' + path + ' L 120 34 L 0 34 Z"></path>',
+        '<path class="sparkline-line live-output" d="' + path + '"></path>',
+        '<circle class="sparkline-peak live-output" cx="' + peak.x.toFixed(2) + '" cy="' + peak.y.toFixed(2) + '" r="2.6"></circle>'
+    ].join('');
+}
+
+function getTaskKey(taskId, active) {
+    if (taskId !== null && taskId !== undefined) return String(taskId);
+    return active ? 'active-unknown' : null;
+}
+
+function updateLiveOutputEstimate(taskId, decoded, active, nowMs) {
+    const tracker = window.liveOutputTracker;
+    const taskChanged = tracker.taskId !== taskId;
+    if (taskChanged) {
+        tracker.taskId = taskId;
+        tracker.previousDecoded = Number.isFinite(decoded) ? decoded : null;
+        tracker.previousMs = nowMs;
+        tracker.latestRate = 0;
+        tracker.rates = [];
+        window.metricSeries.liveOutput = [];
+        pushSparklinePoint('liveOutput', 0);
+        return 0;
+    }
+
+    let rate = 0;
+    if (active && Number.isFinite(decoded) && Number.isFinite(tracker.previousDecoded) && tracker.previousMs) {
+        const deltaTokens = Math.max(0, decoded - tracker.previousDecoded);
+        const deltaSeconds = (nowMs - tracker.previousMs) / 1000;
+        rate = deltaSeconds > 0 ? deltaTokens / deltaSeconds : 0;
+    }
+
+    if (active && rate > 0) {
+        tracker.rates.push(rate);
+        if (tracker.rates.length > 6) tracker.rates.shift();
+    } else if (!active) {
+        tracker.rates = [];
+    }
+
+    const smoothedRate = tracker.rates.length
+        ? tracker.rates.reduce((sum, value) => sum + value, 0) / tracker.rates.length
+        : 0;
+
+    tracker.previousDecoded = Number.isFinite(decoded) ? decoded : tracker.previousDecoded;
+    tracker.previousMs = nowMs;
+    tracker.latestRate = smoothedRate;
+    pushSparklinePoint('liveOutput', smoothedRate);
+    return smoothedRate;
+}
+
+function updateRequestActivity(taskId, active, outputTokens, nowMs) {
+    const taskKey = getTaskKey(taskId, active);
+    let openSegment = window.requestActivity.find(segment => !segment.endedAtMs);
+
+    if (active && taskKey) {
+        if (!openSegment || openSegment.taskKey !== taskKey) {
+            if (openSegment) {
+                openSegment.endedAtMs = nowMs;
+                openSegment.outputTokens = outputTokens || openSegment.outputTokens || 0;
+                window.recentTasks.unshift(openSegment);
+            }
+            window.requestActivity.push({
+                taskKey,
+                taskId,
+                startedAtMs: nowMs,
+                firstOutputAtMs: outputTokens > 0 ? nowMs : null,
+                endedAtMs: null,
+                state: 'active',
+                outputTokens: outputTokens || 0
+            });
+        } else {
+            if (!openSegment.firstOutputAtMs && outputTokens > 0) {
+                openSegment.firstOutputAtMs = nowMs;
+            }
+            openSegment.outputTokens = outputTokens || openSegment.outputTokens || 0;
+        }
+    } else if (openSegment) {
+        openSegment.endedAtMs = nowMs;
+        openSegment.state = 'complete';
+        if (!openSegment.firstOutputAtMs && outputTokens > 0) {
+            openSegment.firstOutputAtMs = nowMs;
+        }
+        openSegment.outputTokens = outputTokens || openSegment.outputTokens || 0;
+        window.recentTasks.unshift(openSegment);
+    }
+
+    const cutoff = nowMs - (10 * 60 * 1000);
+    window.requestActivity = window.requestActivity
+        .filter(segment => !segment.endedAtMs || segment.endedAtMs >= cutoff)
+        .slice(-100);
+    window.recentTasks = window.recentTasks.slice(0, 8);
+}
+
+function formatDuration(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return '~0.0s';
+    if (ms < 1000) return '~' + Math.round(ms) + 'ms';
+    return '~' + (ms / 1000).toFixed(1) + 's';
+}
+
+function renderRecentTask() {
+    const el = document.getElementById('m-recent-task');
+    if (!el) return;
+    const task = window.recentTasks[0];
+    if (!task || !task.endedAtMs) {
+        el.style.display = 'none';
+        el.textContent = '';
+        return;
+    }
+    const durationMs = task.endedAtMs - task.startedAtMs;
+    const rate = durationMs > 0 ? (task.outputTokens / (durationMs / 1000)) : 0;
+    const id = task.taskId !== null && task.taskId !== undefined ? task.taskId : 'unknown';
+    el.style.display = '';
+    el.textContent = 'Last task ' + id + ' · ' + formatMetricNumber(task.outputTokens || 0) + ' output tokens · ' + formatDuration(durationMs) + ' · ~' + rate.toFixed(1) + ' t/s estimated';
+}
+
+function renderActivityRail(active) {
+    const rail = document.getElementById('m-activity-rail');
+    if (!rail) return;
+    const now = Date.now();
+    const windowMs = 5 * 60 * 1000;
+    const segments = window.requestActivity.slice(-28);
+    if (!segments.length) {
+        rail.innerHTML = '<span class="activity-empty">No recent tasks</span>';
+        return;
+    }
+    rail.innerHTML = segments.map(segment => {
+        let start = Math.max(0, Math.min(100, ((segment.startedAtMs - (now - windowMs)) / windowMs) * 100));
+        const endMs = segment.endedAtMs || now;
+        const minWidth = segment.endedAtMs ? 3 : 8;
+        let width = Math.max(minWidth, Math.min(100 - start, ((endMs - segment.startedAtMs) / windowMs) * 100));
+        if (start + width > 100) {
+            start = Math.max(0, 100 - width);
+        }
+        const firstOutputAtMs = segment.firstOutputAtMs || (segment.outputTokens > 0 ? endMs : null);
+        const phaseTotalMs = Math.max(1, endMs - segment.startedAtMs);
+        const promptPct = firstOutputAtMs
+            ? Math.max(12, Math.min(72, ((firstOutputAtMs - segment.startedAtMs) / phaseTotalMs) * 100))
+            : 100;
+        const generationPct = firstOutputAtMs ? Math.max(18, 100 - promptPct) : 0;
+        const duration = formatDuration(endMs - segment.startedAtMs);
+        const task = segment.taskId !== null && segment.taskId !== undefined ? segment.taskId : 'unknown';
+        const cls = segment.endedAtMs ? 'complete' : active ? 'active' : 'complete';
+        const title = 'task ' + task + ' · ' + duration + ' · ' + formatMetricNumber(segment.outputTokens || 0) + ' output tokens';
+        const phases = [
+            '<span class="activity-phase prompt" style="width:' + promptPct.toFixed(2) + '%"></span>',
+            generationPct > 0 ? '<span class="activity-phase generation" style="width:' + generationPct.toFixed(2) + '%"></span>' : '',
+            segment.endedAtMs ? '<span class="activity-marker" aria-hidden="true"></span>' : ''
+        ].join('');
+        return '<span class="activity-segment ' + cls + '" style="left:' + start.toFixed(2) + '%;width:' + width.toFixed(2) + '%" tabindex="0" title="' + title + '">' + phases + '</span>';
+    }).join('');
+}
+
+function renderSlotGrid(l, hasActiveEndpoint) {
+    const grid = document.getElementById('m-slot-grid');
+    if (!grid) return;
+    if (!hasActiveEndpoint || !l) {
+        grid.innerHTML = '<div class="slot-tile idle"><div class="slot-tile-top"><span>slots</span><strong>waiting</strong></div><div class="slot-tile-task">attach endpoint</div><div class="slot-tile-meta"><span>0 output</span><span>ctx unknown</span></div></div>';
+        return;
+    }
+    const slotSnapshots = Array.isArray(l.slots) ? l.slots : [];
+    if (slotSnapshots.length > 0) {
+        grid.innerHTML = slotSnapshots.map(slot => {
+            const busy = !!slot.is_processing;
+            const task = busy && slot.id_task !== null && slot.id_task !== undefined ? 'task ' + slot.id_task : 'idle';
+            const output = slot.output_available ? formatMetricNumber(slot.output_tokens || 0) + ' output' : 'output unknown';
+            const ctx = slot.n_ctx > 0 ? formatMetricNumber(slot.n_ctx) + ' ctx' : 'ctx unknown';
+            return '<div class="slot-tile ' + (busy ? 'busy' : 'idle') + '">' +
+                '<div class="slot-tile-top"><span>slot ' + escapeHtml(slot.id ?? '?') + '</span><strong>' + (busy ? 'active' : 'idle') + '</strong></div>' +
+                '<div class="slot-tile-task">' + escapeHtml(task) + '</div>' +
+                '<div class="slot-tile-meta"><span>' + output + '</span><span>' + ctx + '</span></div>' +
+            '</div>';
+        }).join('');
+        return;
+    }
+    const processing = l?.slots_processing || 0;
+    const idle = l?.slots_idle || 0;
+    const total = Math.max(1, processing + idle);
+    const activeTask = l?.active_task_id;
+    const capacity = l?.context_capacity_tokens || l?.kv_cache_max || 0;
+    const generated = l?.slot_generation_tokens || 0;
+    const tiles = [];
+
+    for (let index = 0; index < total; index += 1) {
+        const busy = index < processing;
+        const task = busy && activeTask !== null && activeTask !== undefined ? 'task ' + activeTask : 'idle';
+        const output = busy || total === 1 ? formatMetricNumber(generated) + ' output' : '0 output';
+        const slotCapacity = capacity > 0 ? Math.round(capacity / total) : 0;
+        const ctx = slotCapacity > 0 ? formatMetricNumber(slotCapacity) + ' ctx' : 'ctx unknown';
+        tiles.push(
+            '<div class="slot-tile ' + (busy ? 'busy' : 'idle') + '">' +
+                '<div class="slot-tile-top"><span>slot ' + index + '</span><strong>' + (busy ? 'active' : 'idle') + '</strong></div>' +
+                '<div class="slot-tile-task">' + task + '</div>' +
+                '<div class="slot-tile-meta"><span>' + output + '</span><span>' + ctx + '</span></div>' +
+            '</div>'
+        );
+    }
+
+    grid.innerHTML = tiles.join('');
+}
+
+function getPrimarySlot(l) {
+    const slots = Array.isArray(l?.slots) ? l.slots : [];
+    return slots.find(slot => slot.is_processing) || slots[0] || null;
+}
+
+function renderConfigItems(id, items, emptyText) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (!items || !items.length) {
+        el.innerHTML = '<span class="config-empty">' + emptyText + '</span>';
+        return;
+    }
+    el.innerHTML = items.map(item => {
+        return '<span class="config-kv"><span>' + escapeHtml(item.label) + '</span><strong>' + escapeHtml(item.value) + '</strong></span>';
+    }).join('');
+}
+
+function renderGenerationDetailItems(el, parts) {
+    if (!el) return;
+    el.innerHTML = parts
+        .filter(Boolean)
+        .map(part => '<span class="generation-detail-chip">' + escapeHtml(part) + '</span>')
+        .join('');
+}
+
+function renderDecodingConfig(l, hasActiveEndpoint) {
+    const slot = getPrimarySlot(l);
+    const specChip = document.getElementById('m-speculative-chip');
+    const samplerStack = document.getElementById('m-sampler-stack');
+    const decodingState = document.getElementById('m-decoding-state');
+    const decodingPopover = document.getElementById('m-decoding-popover');
+    const hasConfig = !!slot && ((slot.sampler_stack || []).length > 0 || (slot.speculative_config || []).length > 0);
+
+    setChipState(decodingState, hasConfig ? 'config' : 'waiting', hasConfig ? 'live' : 'idle');
+
+    if (!hasActiveEndpoint || !slot) {
+        if (specChip) specChip.textContent = 'Attach an endpoint for decoding config';
+        if (samplerStack) samplerStack.innerHTML = '<span class="config-empty">Sampler stack unavailable</span>';
+        renderConfigItems('m-speculative-config', [], 'Speculative config unavailable');
+        renderConfigItems('m-sampler-config', [], 'Sampler params unavailable');
+        if (decodingPopover) {
+            decodingPopover.innerHTML = '<span class="config-empty">No decoding configuration is available yet.</span>';
+        }
+        return;
+    }
+
+    if (specChip) {
+        const specType = slot.speculative_type || 'configuration';
+        const nMax = (slot.speculative_config || []).find(item => item.label === 'n_max');
+        if (slot.speculative_enabled || (slot.speculative_config || []).length > 0) {
+            specChip.textContent = 'Speculative · ' + specType + (nMax ? ' · n_max ' + nMax.value : '');
+            specChip.classList.add('enabled');
+        } else {
+            specChip.textContent = 'Speculative decoding not enabled';
+            specChip.classList.remove('enabled');
+        }
+    }
+
+    renderConfigItems('m-speculative-config', slot.speculative_config || [], 'Configuration only appears when exposed');
+    renderConfigItems('m-sampler-config', slot.sampler_config || [], 'Sampler params unavailable');
+
+    if (samplerStack) {
+        const stack = slot.sampler_stack || [];
+        samplerStack.innerHTML = stack.length
+            ? stack.map((name, index) => '<span class="sampler-chip" style="--i:' + index + '">' + escapeHtml(name) + '</span>').join('')
+            : '<span class="config-empty">Sampler stack unavailable</span>';
+    }
+
+    if (decodingPopover) {
+        const specItems = slot.speculative_config || [];
+        const samplerItems = slot.sampler_config || [];
+        const stack = slot.sampler_stack || [];
+        const specRows = specItems.length
+            ? specItems.map(item => '<span><em>' + escapeHtml(item.label) + '</em><strong>' + escapeHtml(item.value) + '</strong></span>').join('')
+            : '<span><em>acceptance</em><strong>not exposed</strong></span>';
+        const samplerRows = samplerItems.length
+            ? samplerItems.map(item => '<span><em>' + escapeHtml(item.label) + '</em><strong>' + escapeHtml(item.value) + '</strong></span>').join('')
+            : '<span><em>sampler params</em><strong>unavailable</strong></span>';
+        decodingPopover.innerHTML = [
+            '<div class="decoding-popover-section"><h3>Speculative decoding</h3><div class="decoding-popover-grid">',
+            specRows,
+            '<span><em>acceptance rate</em><strong>not exposed</strong></span>',
+            '</div></div>',
+            '<div class="decoding-popover-section"><h3>Sampler pipeline</h3><p>',
+            stack.length ? escapeHtml(stack.join(' -> ')) : 'Sampler stack unavailable',
+            '</p><div class="decoding-popover-grid">',
+            samplerRows,
+            '</div></div>'
+        ].join('');
+    }
+}
+
+function renderCapabilityPopover(d, l, generationAvailable, contextLiveAvailable) {
+    const popover = document.getElementById('capability-popover');
+    if (!popover) return;
+    const hasInference = !!d.capabilities?.inference;
+    const slotsAvailable = !!l && ((l.slots_processing || 0) + (l.slots_idle || 0) > 0);
+    const metricsAvailable = !!l && (
+        (l.prompt_tokens_total || 0) > 0 ||
+        (l.generation_tokens_total || 0) > 0 ||
+        (l.context_high_water_tokens || 0) > 0 ||
+        (l.last_generation_throughput_unix_ms || 0) > 0 ||
+        (l.last_prompt_throughput_unix_ms || 0) > 0
+    );
+    const rows = [
+        ['Inference', hasInference ? 'live' : 'unavailable', hasInference],
+        ['Slots', slotsAvailable ? 'live' : 'waiting', slotsAvailable],
+        ['Metrics', metricsAvailable ? 'live' : 'waiting', metricsAvailable],
+        ['Generation progress', generationAvailable ? 'live' : 'not exposed', generationAvailable],
+        ['Throughput', metricsAvailable ? 'retained avg + live estimate' : 'waiting', metricsAvailable],
+        ['Context capacity', (l?.context_capacity_tokens || 0) > 0 ? 'live' : 'waiting', (l?.context_capacity_tokens || 0) > 0],
+        ['Context usage', contextLiveAvailable ? 'live' : 'not exposed', contextLiveAvailable],
+        ['Host metrics', d.host_metrics_available ? 'live' : 'unavailable', !!d.host_metrics_available],
+        ['Remote agent', d.remote_agent_connected ? 'connected' : 'disconnected', !!d.remote_agent_connected]
+    ];
+    popover.innerHTML = rows.map(([label, value, ok]) => {
+        return '<span class="capability-row"><span class="capability-led ' + (ok ? 'ok' : 'muted') + '"></span><span>' + label + '</span><strong>' + value + '</strong></span>';
+    }).join('');
 }
 
 function updateMetricDelta(el, previous, current, decimals = 1) {
@@ -143,7 +493,20 @@ window.prevValues = {
 
 window.metricSeries = {
     prompt: [],
-    generation: []
+    generation: [],
+    liveOutput: []
+};
+
+window.slotSnapshots = new Map();
+window.requestActivity = [];
+window.recentTasks = [];
+window.metricCapabilities = {};
+window.liveOutputTracker = {
+    taskId: null,
+    previousDecoded: null,
+    previousMs: null,
+    latestRate: 0,
+    rates: []
 };
 
 
@@ -345,6 +708,22 @@ if (sshTargetInput) {
 const sshGuideAuth = document.getElementById('ssh-guide-auth');
 if (sshGuideAuth) {
     sshGuideAuth.addEventListener('change', updateSshGuideAuthFields);
+}
+
+const endpointStatus = document.getElementById('endpoint-status');
+const endpointStatusWrap = endpointStatus?.closest('.endpoint-status-wrap');
+if (endpointStatus && endpointStatusWrap) {
+    endpointStatus.addEventListener('click', event => {
+        event.stopPropagation();
+        const open = endpointStatusWrap.classList.toggle('open');
+        endpointStatus.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    document.addEventListener('click', event => {
+        if (!event.target.closest('.endpoint-status-wrap')) {
+            endpointStatusWrap.classList.remove('open');
+            endpointStatus.setAttribute('aria-expanded', 'false');
+        }
+    });
 }
 
 
@@ -3587,32 +3966,62 @@ ws.onmessage = e => {
     // Generation progress from /slots next_token metadata
     const generationState = document.getElementById('m-generation-state');
     const generationMain = document.getElementById('m-generation-main');
+    const generationSub = document.getElementById('m-generation-sub');
     const generationDetails = document.getElementById('m-generation-details');
     const generationFill = document.getElementById('m-generation-fill');
+    const generationRing = document.getElementById('m-generation-ring');
+    const liveVelocity = document.getElementById('m-live-velocity');
+    const promptStage = document.getElementById('m-stage-prompt');
+    const outputStage = document.getElementById('m-stage-output');
     const generated = l?.slot_generation_tokens || 0;
     const remaining = l?.slot_generation_remaining || 0;
     const generationAvailable = !!l?.slot_generation_available;
     const generationActive = !!l?.slot_generation_active || (l?.slots_processing || 0) > 0;
-    const generationTotal = generated + remaining;
+    const slotLimit = getPrimarySlot(l)?.output_limit || 0;
+    const generationTotal = l?.slot_generation_limit || slotLimit || (generated + remaining);
     const generationPct = generationTotal > 0 ? Math.min(100, Math.max(2, (generated / generationTotal) * 100)) : 0;
     const taskId = generationActive ? l?.active_task_id : l?.last_task_id;
+    const nowMs = Date.now();
+    const liveOutputRate = updateLiveOutputEstimate(taskId, generated, generationActive, nowMs);
+
+    updateRequestActivity(taskId, generationActive, generated, nowMs);
+    renderActivityRail(generationActive);
+    renderRecentTask();
+    renderSlotGrid(l, hasActiveEndpoint);
+    renderDecodingConfig(l, hasActiveEndpoint);
+    renderLiveSparkline('m-live-output-spark', window.metricSeries.liveOutput);
 
     setCardState(generationCard, !hasActiveEndpoint ? 'dormant' : generationActive ? 'live' : generationAvailable ? 'idle' : 'unavailable');
     setEmptyState(document.getElementById('m-generation-empty'), !hasActiveEndpoint);
     setChipState(generationState, generationActive ? 'generating' : 'idle', generationActive ? 'live' : 'idle');
+    setChipState(document.getElementById('m-slots-state'), generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');
+    setChipState(document.getElementById('m-activity-state'), generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');
+    if (generationRing) generationRing.style.setProperty('--progress', generationPct.toFixed(2));
+    if (liveVelocity) {
+        liveVelocity.textContent = liveOutputRate > 0 ? liveOutputRate.toFixed(1) + ' t/s' : (generationActive ? 'warming' : 'retained');
+    }
+    if (promptStage && outputStage) {
+        promptStage.classList.toggle('active', generationActive && generated <= 1);
+        outputStage.classList.toggle('active', generationActive && generated > 1);
+        promptStage.classList.toggle('idle', !generationActive);
+        outputStage.classList.toggle('idle', !generationActive);
+    }
     if (generationAvailable) {
         if (generationMain) generationMain.textContent = formatMetricNumber(generated) + ' output tokens';
+        if (generationSub) generationSub.textContent = formatMetricNumber(remaining) + ' remaining';
         if (generationDetails) {
             const detailParts = [];
             if (taskId !== null && taskId !== undefined) detailParts.push('task ' + taskId);
+            if (generationTotal > 0) detailParts.push(formatMetricNumber(generationTotal) + ' output budget');
             detailParts.push(formatMetricNumber(remaining) + ' output tokens remaining');
             detailParts.push((l?.slots_processing || 0) + ' busy · ' + (l?.slots_idle || 0) + ' idle');
-            generationDetails.textContent = detailParts.join(' · ');
+            renderGenerationDetailItems(generationDetails, detailParts);
         }
         if (generationFill) generationFill.style.width = generationPct + '%';
     } else {
         if (generationMain) generationMain.textContent = generationActive ? 'working' : '\u2014';
-        if (generationDetails) generationDetails.textContent = (l?.slots_processing || 0) + ' busy · ' + (l?.slots_idle || 0) + ' idle';
+        if (generationSub) generationSub.textContent = 'output budget';
+        renderGenerationDetailItems(generationDetails, [(l?.slots_processing || 0) + ' busy · ' + (l?.slots_idle || 0) + ' idle']);
         if (generationFill) generationFill.style.width = '0%';
     }
 
@@ -3683,6 +4092,8 @@ ws.onmessage = e => {
         if (ctxValue) ctxValue.textContent = getEmptyStateMessage(systemReason, '\u2014');
         if (ctxDetails) ctxDetails.textContent = '';
     }
+
+    renderCapabilityPopover(d, l, generationAvailable, contextLiveAvailable);
 
     const hostMetricsVisible = d.host_metrics_available === true;
     const systemVisible = hostMetricsVisible && !!d.capabilities?.system;

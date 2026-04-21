@@ -34,10 +34,50 @@ pub struct LlamaMetrics {
     pub last_task_id: Option<u64>,
     pub slot_generation_tokens: u64,
     pub slot_generation_remaining: u64,
+    pub slot_generation_limit: u64,
     pub slot_generation_active: bool,
     pub slot_generation_available: bool,
+    pub slots: Vec<SlotSnapshot>,
     pub requests_processing: u32,
     pub status: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct MetricConfigItem {
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct SlotSnapshot {
+    pub id: Option<u64>,
+    pub n_ctx: u64,
+    pub is_processing: bool,
+    pub id_task: Option<u64>,
+    pub output_tokens: u64,
+    pub output_remaining: u64,
+    pub output_limit: u64,
+    pub output_active: bool,
+    pub output_available: bool,
+    pub context_live_tokens: Option<u64>,
+    pub context_live_tokens_source: Option<String>,
+    pub speculative_enabled: bool,
+    pub speculative_type: Option<String>,
+    pub speculative_config: Vec<MetricConfigItem>,
+    pub sampler_stack: Vec<String>,
+    pub sampler_config: Vec<MetricConfigItem>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SlotSnapshotInput {
+    is_processing: bool,
+    task_id: Option<u64>,
+    output_tokens: u64,
+    output_remaining: u64,
+    output_limit: u64,
+    output_active: bool,
+    output_available: bool,
+    slot_context: Option<(u64, &'static str)>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -52,7 +92,7 @@ pub struct PrometheusValues {
     pub requests_processing: u32,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct SlotValues {
     pub kv_cache_tokens: u64,
     pub kv_cache_max: u64,
@@ -64,8 +104,10 @@ pub struct SlotValues {
     pub last_task_id: Option<u64>,
     pub slot_generation_tokens: u64,
     pub slot_generation_remaining: u64,
+    pub slot_generation_limit: u64,
     pub slot_generation_active: bool,
     pub slot_generation_available: bool,
+    pub slots: Vec<SlotSnapshot>,
 }
 
 /// Parse Prometheus text format and extract the metrics we care about.
@@ -106,11 +148,12 @@ pub fn parse_slot_metrics(body: &str) -> Option<SlotValues> {
     let mut vals = SlotValues::default();
 
     for slot in &slots {
-        if slot
+        let is_processing = slot
             .get("is_processing")
             .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        {
+            .unwrap_or(false);
+
+        if is_processing {
             vals.slots_processing += 1;
         } else {
             vals.slots_idle += 1;
@@ -120,7 +163,8 @@ pub fn parse_slot_metrics(body: &str) -> Option<SlotValues> {
             vals.kv_cache_max = vals.kv_cache_max.saturating_add(n_ctx);
         }
 
-        if let Some((tokens, source)) = slot_context_tokens(slot) {
+        let slot_context = slot_context_tokens(slot);
+        if let Some((tokens, source)) = slot_context {
             vals.kv_cache_tokens = vals.kv_cache_tokens.saturating_add(tokens);
             vals.kv_cache_tokens_available = true;
             if vals.kv_cache_tokens_source.is_empty() {
@@ -132,25 +176,82 @@ pub fn parse_slot_metrics(body: &str) -> Option<SlotValues> {
         if vals.last_task_id.is_none() {
             vals.last_task_id = task_id;
         }
-        if slot
-            .get("is_processing")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-            && vals.active_task_id.is_none()
-        {
+        if is_processing && vals.active_task_id.is_none() {
             vals.active_task_id = task_id;
         }
 
+        let mut output_tokens = 0;
+        let mut output_remaining = 0;
+        let output_limit = slot_generation_limit(slot);
+        let mut output_active = false;
+        let mut output_available = false;
         if let Some((decoded, remaining, active)) = slot_generation_progress(slot) {
+            output_tokens = decoded;
+            output_remaining = remaining;
+            output_active = active;
+            output_available = true;
             vals.slot_generation_tokens = vals.slot_generation_tokens.saturating_add(decoded);
             vals.slot_generation_remaining =
                 vals.slot_generation_remaining.saturating_add(remaining);
+            vals.slot_generation_limit = vals
+                .slot_generation_limit
+                .saturating_add(output_limit.unwrap_or_else(|| decoded.saturating_add(remaining)));
             vals.slot_generation_available = true;
             vals.slot_generation_active |= active;
         }
+
+        vals.slots.push(slot_snapshot(
+            slot,
+            SlotSnapshotInput {
+                is_processing,
+                task_id,
+                output_tokens,
+                output_remaining,
+                output_limit: output_limit
+                    .unwrap_or_else(|| output_tokens.saturating_add(output_remaining)),
+                output_active,
+                output_available,
+                slot_context,
+            },
+        ));
     }
 
     Some(vals)
+}
+
+fn slot_snapshot(slot: &serde_json::Value, input: SlotSnapshotInput) -> SlotSnapshot {
+    let params = slot.get("params");
+    let speculative_enabled = slot
+        .get("speculative")
+        .and_then(|v| v.as_bool())
+        .unwrap_or_else(|| {
+            params
+                .and_then(|p| nested_value(p, &["speculative", "enabled"]))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        });
+
+    SlotSnapshot {
+        id: slot.get("id").and_then(|v| v.as_u64()),
+        n_ctx: slot
+            .get("n_ctx")
+            .and_then(|v| v.as_u64())
+            .unwrap_or_default(),
+        is_processing: input.is_processing,
+        id_task: input.task_id,
+        output_tokens: input.output_tokens,
+        output_remaining: input.output_remaining,
+        output_limit: input.output_limit,
+        output_active: input.output_active,
+        output_available: input.output_available,
+        context_live_tokens: input.slot_context.map(|(tokens, _)| tokens),
+        context_live_tokens_source: input.slot_context.map(|(_, source)| source.to_string()),
+        speculative_enabled,
+        speculative_type: metric_param_string(params, "speculative.type"),
+        speculative_config: speculative_config(params),
+        sampler_stack: sampler_stack(params),
+        sampler_config: sampler_config(params),
+    }
 }
 
 fn slot_context_tokens(slot: &serde_json::Value) -> Option<(u64, &'static str)> {
@@ -176,6 +277,95 @@ fn slot_generation_progress(slot: &serde_json::Value) -> Option<(u64, u64, bool)
         .unwrap_or(false);
 
     Some((decoded, remaining, active))
+}
+
+fn slot_generation_limit(slot: &serde_json::Value) -> Option<u64> {
+    let params = slot.get("params")?;
+    for key in ["n_predict", "max_tokens"] {
+        if let Some(value) = params.get(key).and_then(|v| v.as_u64())
+            && value > 0
+        {
+            return Some(value);
+        }
+    }
+
+    None
+}
+
+fn metric_param_string(params: Option<&serde_json::Value>, key: &str) -> Option<String> {
+    let params = params?;
+    let value = params
+        .get(key)
+        .or_else(|| nested_value(params, &key.split('.').collect::<Vec<_>>()))?;
+    match value {
+        serde_json::Value::String(s) if !s.is_empty() => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+fn metric_config_item(
+    params: Option<&serde_json::Value>,
+    key: &str,
+    label: &str,
+) -> Option<MetricConfigItem> {
+    metric_param_string(params, key).map(|value| MetricConfigItem {
+        label: label.to_string(),
+        value,
+    })
+}
+
+fn nested_value<'a>(value: &'a serde_json::Value, path: &[&str]) -> Option<&'a serde_json::Value> {
+    let mut current = value;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    Some(current)
+}
+
+fn sampler_stack(params: Option<&serde_json::Value>) -> Vec<String> {
+    params
+        .and_then(|p| p.get("samplers"))
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(ToString::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn sampler_config(params: Option<&serde_json::Value>) -> Vec<MetricConfigItem> {
+    [
+        ("top_k", "top_k"),
+        ("top_p", "top_p"),
+        ("min_p", "min_p"),
+        ("typ_p", "typ_p"),
+        ("temperature", "temp"),
+        ("dry_multiplier", "dry"),
+        ("dry_allowed_length", "dry length"),
+        ("xtc_probability", "xtc prob"),
+        ("xtc_threshold", "xtc threshold"),
+    ]
+    .into_iter()
+    .filter_map(|(key, label)| metric_config_item(params, key, label))
+    .collect()
+}
+
+fn speculative_config(params: Option<&serde_json::Value>) -> Vec<MetricConfigItem> {
+    [
+        ("speculative.type", "type"),
+        ("speculative.n_max", "n_max"),
+        ("speculative.n_min", "n_min"),
+        ("speculative.p_min", "p_min"),
+        ("speculative.ngram_size_n", "ngram n"),
+        ("speculative.ngram_size_m", "ngram m"),
+    ]
+    .into_iter()
+    .filter_map(|(key, label)| metric_config_item(params, key, label))
+    .collect()
 }
 
 #[cfg(test)]
@@ -243,14 +433,57 @@ mod tests {
 
     #[test]
     fn test_parse_slot_metrics_generation_progress() {
-        let body = r#"[{"id":0,"n_ctx":4096,"is_processing":true,"id_task":2667,"next_token":[{"has_next_token":true,"n_remain":31849,"n_decoded":151}]}]"#;
+        let body = r#"[{"id":0,"n_ctx":4096,"is_processing":true,"id_task":2667,"params":{"n_predict":32000},"next_token":[{"has_next_token":true,"n_remain":31849,"n_decoded":151}]}]"#;
         let vals = parse_slot_metrics(body).unwrap();
 
         assert_eq!(vals.active_task_id, Some(2667));
         assert_eq!(vals.last_task_id, Some(2667));
         assert_eq!(vals.slot_generation_tokens, 151);
         assert_eq!(vals.slot_generation_remaining, 31849);
+        assert_eq!(vals.slot_generation_limit, 32000);
         assert!(vals.slot_generation_active);
         assert!(vals.slot_generation_available);
+    }
+
+    #[test]
+    fn test_parse_slot_metrics_per_slot_config() {
+        let body = r#"[{
+            "id":0,
+            "n_ctx":4096,
+            "is_processing":true,
+            "id_task":2667,
+            "speculative":true,
+            "params":{
+                "samplers":["penalties","top_k","top_p","temperature"],
+                "max_tokens":120,
+                "top_k":40,
+                "top_p":0.95,
+                "temperature":0.8,
+                "speculative.type":"ngram_map_k",
+                "speculative.n_max":48,
+                "speculative.p_min":0.75
+            },
+            "next_token":[{"has_next_token":true,"n_remain":32,"n_decoded":16}]
+        }]"#;
+        let vals = parse_slot_metrics(body).unwrap();
+        let slot = vals.slots.first().unwrap();
+
+        assert_eq!(slot.id, Some(0));
+        assert_eq!(slot.id_task, Some(2667));
+        assert_eq!(slot.output_tokens, 16);
+        assert_eq!(slot.output_remaining, 32);
+        assert_eq!(slot.output_limit, 120);
+        assert!(slot.speculative_enabled);
+        assert_eq!(slot.speculative_type.as_deref(), Some("ngram_map_k"));
+        assert_eq!(
+            slot.sampler_stack,
+            vec!["penalties", "top_k", "top_p", "temperature"]
+        );
+        assert!(slot.sampler_config.iter().any(|item| item.label == "temp"));
+        assert!(
+            slot.speculative_config
+                .iter()
+                .any(|item| item.label == "n_max" && item.value == "48")
+        );
     }
 }

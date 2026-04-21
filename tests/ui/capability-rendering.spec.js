@@ -208,3 +208,131 @@ test.describe('responsive shell', () => {
     await expect(page.getByRole('button', { name: /^attach$/i })).toBeVisible();
   });
 });
+
+test.describe('inference metric rendering', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.top-nav-bar');
+  });
+
+  test('renders active slot, request, speculative, and sampler state from slot snapshots', async ({ page }) => {
+    await page.evaluate(() => {
+      const l = {
+        slots_processing: 1,
+        slots_idle: 0,
+        active_task_id: 6686,
+        slot_generation_tokens: 690,
+        slot_generation_remaining: 10,
+        slot_generation_limit: 700,
+        slot_generation_available: true,
+        slot_generation_active: true,
+        context_capacity_tokens: 212992,
+        context_high_water_tokens: 121713,
+        slots: [{
+          id: 0,
+          n_ctx: 212992,
+          is_processing: true,
+          id_task: 6686,
+          output_tokens: 690,
+          output_remaining: 10,
+          output_limit: 700,
+          output_active: true,
+          output_available: true,
+          speculative_enabled: true,
+          speculative_type: 'ngram_map_k',
+          speculative_config: [
+            { label: 'type', value: 'ngram_map_k' },
+            { label: 'n_max', value: '48' },
+            { label: 'p_min', value: '0.75' },
+          ],
+          sampler_stack: ['penalties', 'dry', 'top_n_sigma', 'top_k', 'typ_p', 'top_p', 'min_p', 'xtc', 'temperature'],
+          sampler_config: [
+            { label: 'top_k', value: '20' },
+            { label: 'top_p', value: '0.95' },
+            { label: 'temp', value: '0.6' },
+          ],
+        }],
+      };
+
+      renderSlotGrid(l, true);
+      renderDecodingConfig(l, true);
+      updateRequestActivity(6686, true, 690, Date.now());
+      renderActivityRail(true);
+      renderGenerationDetailItems(document.getElementById('m-generation-details'), [
+        'task 6686',
+        '700 output budget',
+        '10 output tokens remaining',
+        '1 busy · 0 idle',
+      ]);
+      setChipState(document.getElementById('m-slots-state'), 'active', 'live');
+      setChipState(document.getElementById('m-activity-state'), 'active', 'live');
+    });
+
+    await expect(page.locator('#m-slot-grid')).toContainText('task 6686');
+    await expect(page.locator('#m-slot-grid')).toContainText('690 output');
+    await expect(page.locator('#m-speculative-chip')).toContainText('Speculative · ngram_map_k · n_max 48');
+    await expect(page.locator('#m-sampler-stack')).toContainText('temperature');
+    await expect(page.locator('#m-sampler-config')).toContainText('top_p');
+    await expect(page.locator('#m-activity-rail .activity-segment.active')).toBeVisible();
+    await expect(page.locator('#m-activity-rail .activity-phase.prompt')).toBeVisible();
+    await expect(page.locator('#m-activity-rail .activity-phase.generation')).toBeVisible();
+    await expect(page.locator('#m-generation-details .generation-detail-chip')).toHaveCount(4);
+
+    await page.locator('.inference-config-panel').focus();
+    await expect(page.locator('#m-decoding-popover')).toContainText('acceptance rate');
+    await expect(page.locator('#m-decoding-popover')).toContainText('not exposed');
+  });
+
+  test('request rail leaves completion markers for finished tasks', async ({ page }) => {
+    await page.evaluate(() => {
+      window.requestActivity = [];
+      const now = Date.now();
+      updateRequestActivity(7001, true, 0, now - 4000);
+      updateRequestActivity(7001, true, 40, now - 2500);
+      updateRequestActivity(7001, false, 80, now - 500);
+      renderActivityRail(false);
+    });
+
+    await expect(page.locator('#m-activity-rail .activity-segment.complete')).toBeVisible();
+    await expect(page.locator('#m-activity-rail .activity-marker')).toBeVisible();
+  });
+
+  test('smooths live output estimate across recent polling samples', async ({ page }) => {
+    const rate = await page.evaluate(() => {
+      const now = Date.now();
+      window.liveOutputTracker = {
+        taskId: null,
+        previousDecoded: null,
+        previousMs: null,
+        latestRate: 0,
+        rates: [],
+      };
+      window.metricSeries.liveOutput = [];
+      updateLiveOutputEstimate(123, 0, true, now - 3000);
+      updateLiveOutputEstimate(123, 100, true, now - 2000);
+      return updateLiveOutputEstimate(123, 170, true, now - 1000);
+    });
+
+    expect(rate).toBeGreaterThan(80);
+    expect(rate).toBeLessThan(90);
+  });
+
+  test('capability popover opens by click and reports context honesty', async ({ page }) => {
+    await page.evaluate(() => {
+      renderCapabilityPopover({
+        capabilities: { inference: true },
+        host_metrics_available: false,
+        remote_agent_connected: false,
+      }, {
+        slots_processing: 1,
+        slots_idle: 0,
+        context_capacity_tokens: 212992,
+      }, true, false);
+    });
+
+    await page.locator('#endpoint-status').click();
+    await expect(page.locator('#capability-popover')).toContainText('Context usage');
+    await expect(page.locator('#capability-popover')).toContainText('not exposed');
+    await expect(page.locator('#endpoint-status')).toHaveAttribute('aria-expanded', 'true');
+  });
+});

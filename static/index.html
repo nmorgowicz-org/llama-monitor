@@ -23,7 +23,10 @@
             <span class="endpoint-url" id="endpoint-url">...</span>
             <button class="btn-detach-top" id="btn-detach-top" onclick="doDetach()" style="display:none;" title="Detach from endpoint">✕ Detach</button>
         </div>
-        <span class="endpoint-status" id="endpoint-status">...</span>
+        <span class="endpoint-status-wrap">
+            <button type="button" class="endpoint-status" id="endpoint-status" aria-expanded="false" aria-controls="capability-popover">...</button>
+            <span class="capability-popover" id="capability-popover" role="status" aria-live="polite"></span>
+        </span>
         <span class="agent-status" id="agent-status" style="display:none;">
             <span class="agent-indicator">●</span>
             <span class="agent-text">Remote Agent</span>
@@ -194,14 +197,33 @@
                                 <div class="metric-live-chip" id="m-generation-state">idle</div>
                             </div>
                             <div class="inference-empty-state visible" id="m-generation-empty">Waiting for the next completion</div>
-                            <div class="generation-main" id="m-generation-main">&mdash;</div>
-                            <div class="token-flow" id="m-token-flow" aria-hidden="true">
-                                <span></span><span></span><span></span><span></span><span></span>
+                            <div class="generation-stage" id="m-generation-stage" title="Inferred from slot activity and output token changes.">
+                                <span class="stage-segment" id="m-stage-prompt">Prompt ingest</span>
+                                <span class="stage-segment" id="m-stage-output">Output generation</span>
+                            </div>
+                            <div class="generation-layout">
+                                <div class="generation-ring" id="m-generation-ring" style="--progress: 0;">
+                                    <div class="generation-ring-core">
+                                        <div class="generation-main" id="m-generation-main">&mdash;</div>
+                                        <div class="generation-sub" id="m-generation-sub">output budget</div>
+                                    </div>
+                                </div>
+                                <div class="generation-live-panel">
+                                    <div class="velocity-row">
+                                        <span>Live generation estimate</span>
+                                        <strong id="m-live-velocity">&mdash;</strong>
+                                    </div>
+                                    <svg class="metric-sparkline live-output-sparkline" id="m-live-output-spark" viewBox="0 0 120 34" preserveAspectRatio="none" aria-hidden="true"></svg>
+                                    <div class="token-flow" id="m-token-flow" aria-hidden="true">
+                                        <span></span><span></span><span></span><span></span><span></span>
+                                    </div>
+                                </div>
                             </div>
                             <div class="generation-progress-bar">
                                 <div class="generation-progress-fill" id="m-generation-fill"></div>
                             </div>
                             <div class="generation-details" id="m-generation-details">&mdash;</div>
+                            <div class="recent-task-strip" id="m-recent-task" style="display:none;"></div>
                         </div>
 
                         <!-- Context Card -->
@@ -229,6 +251,33 @@
                             </div>
                             <div class="context-value" id="m-ctx">&mdash;</div>
                             <div class="context-details" id="m-ctx-details">&mdash;</div>
+                        </div>
+                    </div>
+                    <div class="inference-detail-grid">
+                        <div class="widget-card inference-mini-panel">
+                            <div class="metric-card-topline">
+                                <div class="widget-metric-label">SLOT ACTIVITY</div>
+                                <div class="metric-live-chip" id="m-slots-state">idle</div>
+                            </div>
+                            <div class="slot-grid" id="m-slot-grid"></div>
+                        </div>
+                        <div class="widget-card inference-mini-panel">
+                            <div class="metric-card-topline">
+                                <div class="widget-metric-label">REQUEST ACTIVITY</div>
+                                <div class="metric-live-chip" id="m-activity-state">idle</div>
+                            </div>
+                            <div class="activity-rail" id="m-activity-rail" aria-label="Recent request activity"></div>
+                        </div>
+                        <div class="widget-card inference-mini-panel inference-config-panel" tabindex="0">
+                            <div class="metric-card-topline">
+                                <div class="widget-metric-label">DECODING CONFIG</div>
+                                <div class="metric-live-chip" id="m-decoding-state">config</div>
+                            </div>
+                            <div class="speculative-chip" id="m-speculative-chip">Speculative decoding unavailable</div>
+                            <div class="config-kv-grid" id="m-speculative-config"></div>
+                            <div class="sampler-stack" id="m-sampler-stack"></div>
+                            <div class="config-kv-grid sampler-config" id="m-sampler-config"></div>
+                            <div class="decoding-popover" id="m-decoding-popover" role="status" aria-live="polite"></div>
                         </div>
                     </div>
                 </section>
