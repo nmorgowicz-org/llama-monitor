@@ -3250,26 +3250,47 @@ ws.onmessage = e => {
         modeBadge.textContent = d.session_mode.charAt(0).toUpperCase() + d.session_mode.slice(1);
     }
 
-    // Update Attach/Detach button states based on session mode
+    // Update Attach/Detach button states and server endpoint area based on session mode
     const btnAttach = document.getElementById('btn-attach');
     const btnDetach = document.getElementById('btn-detach');
-    if (btnAttach && btnDetach) {
-        const isAttach = d.session_mode === 'attach' && d.active_session_endpoint;
-        console.log('[ws] session_mode:', d.session_mode, 'active_session_endpoint:', d.active_session_endpoint, 'isAttach:', isAttach);
-        if (isAttach) {
-            btnAttach.style.display = 'none';
-            btnDetach.style.display = 'inline-block';
-        } else {
-            btnAttach.style.display = 'inline-block';
-            btnDetach.style.display = 'none';
+    const btnKill = document.getElementById('btn-kill');
+    const endpointLabel = document.getElementById('server-endpoint-label');
+    const endpointInput = document.getElementById('server-endpoint');
+
+    const isAttach = d.session_mode === 'attach' && d.active_session_endpoint;
+    console.log('[ws] session_mode:', d.session_mode, 'active_session_endpoint:', d.active_session_endpoint, 'isAttach:', isAttach);
+
+    if (isAttach) {
+        // Attached state: show endpoint as read-only text, hide kill button
+        btnAttach.style.display = 'none';
+        btnDetach.style.display = 'inline-block';
+        if (btnKill) btnKill.style.display = 'none';
+        if (endpointLabel) {
+            endpointLabel.innerHTML = '<span class="attached-indicator">Attached to:</span>';
+        }
+        if (endpointInput) {
+            endpointInput.value = d.active_session_endpoint;
+            endpointInput.disabled = true;
+            endpointInput.classList.add('readonly');
+        }
+    } else {
+        // Not attached: show input field, show kill button
+        btnAttach.style.display = 'inline-block';
+        btnDetach.style.display = 'none';
+        if (btnKill) btnKill.style.display = 'inline-block';
+        if (endpointLabel) {
+            endpointLabel.innerHTML = '';
+        }
+        if (endpointInput) {
+            endpointInput.disabled = false;
+            endpointInput.classList.remove('readonly');
         }
     }
 
     // Update "Historic" badge on inference metrics section
     const historicBadge = document.getElementById('inference-historic-badge');
     if (historicBadge) {
-        const isAttached = d.session_mode === 'attach' && d.active_session_endpoint;
-        historicBadge.style.display = isAttached ? 'none' : 'inline-block';
+        historicBadge.style.display = isAttach ? 'none' : 'inline-block';
     }
 
 
@@ -3324,45 +3345,71 @@ ws.onmessage = e => {
     const cpuTempReason = d.availability?.cpu_temp || 'Available';
     const systemReason = d.availability?.system || 'Available';
 
-    document.getElementById('m-prompt').textContent = l && l.prompt_tokens_per_sec > 0 ? l.prompt_tokens_per_sec.toFixed(1) + ' t/s' : '\u2014';
+    // Speed metrics
+    const promptEl = document.getElementById('m-prompt');
+    const genEl = document.getElementById('m-gen');
+    const promptBar = document.getElementById('m-prompt-bar');
+    const genBar = document.getElementById('m-gen-bar');
 
-    document.getElementById('m-gen').textContent = l && l.generation_tokens_per_sec > 0 ? l.generation_tokens_per_sec.toFixed(1) + ' t/s' : '\u2014';
+    if (l && l.prompt_tokens_per_sec > 0) {
+        promptEl.textContent = l.prompt_tokens_per_sec.toFixed(1) + ' t/s';
+        // Calculate relative bar width (max 5000 t/s = 100%)
+        const promptPct = Math.min((l.prompt_tokens_per_sec / 5000) * 100, 100);
+        if (promptBar) promptBar.style.width = promptPct + '%';
+    } else {
+        promptEl.textContent = '\u2014';
+        if (promptBar) promptBar.style.width = '0%';
+    }
+
+    if (l && l.generation_tokens_per_sec > 0) {
+        genEl.textContent = l.generation_tokens_per_sec.toFixed(1) + ' t/s';
+        // Calculate relative bar width (max 200 t/s = 100%)
+        const genPct = Math.min((l.generation_tokens_per_sec / 200) * 100, 100);
+        if (genBar) genBar.style.width = genPct + '%';
+    } else {
+        genEl.textContent = '\u2014';
+        if (genBar) genBar.style.width = '0%';
+    }
+
+    // Context metrics with progress bar
+    const ctxFill = document.getElementById('m-ctx-fill');
+    const ctxValue = document.getElementById('m-ctx');
+    const ctxDetails = document.getElementById('m-ctx-details');
 
     if (l && l.kv_cache_max > 0) {
-
         const pct = ((l.kv_cache_tokens / l.kv_cache_max) * 100);
+        const severity = pct >= 95 ? 'critical' : pct >= 80 ? 'warning' : '';
 
-        const severityClass = pct >= 95 ? 'severity-critical' : pct >= 80 ? 'severity-warning' : 'severity-normal';
+        // Update progress bar
+        if (ctxFill) {
+            ctxFill.style.width = pct + '%';
+            ctxFill.className = 'context-progress-fill ' + severity;
+        }
 
-        document.getElementById('m-ctx').className = 'widget-metric-value ctx ' + severityClass;
+        // Show percentage prominently
+        if (ctxValue) ctxValue.textContent = pct.toFixed(1) + '%';
 
-        document.getElementById('m-ctx').textContent = l.kv_cache_tokens + ' / ' + l.kv_cache_max + ' (' + pct.toFixed(1) + '%)';
-
-    } else {
-
-        document.getElementById('m-ctx').className = 'widget-metric-value ctx';
-
-        document.getElementById('m-ctx').textContent = getEmptyStateMessage(systemReason, '\u2014');
-
-    }
-
-    if (l) {
-
-        document.getElementById('m-slots').textContent = (l.slots_idle || 0) + (l.slots_processing || 0) > 0 ? (l.slots_idle || 0) + ' idle / ' + (l.slots_processing || 0) + ' busy' : '\u2014';
+        // Show raw numbers as detail
+        if (ctxDetails) ctxDetails.textContent = l.kv_cache_tokens + ' / ' + l.kv_cache_max;
 
     } else {
-
-        document.getElementById('m-slots').textContent = getEmptyStateMessage(systemReason, '\u2014');
-
+        if (ctxFill) {
+            ctxFill.style.width = '0%';
+            ctxFill.className = 'context-progress-fill';
+        }
+        if (ctxValue) ctxValue.textContent = getEmptyStateMessage(systemReason, '\u2014');
+        if (ctxDetails) ctxDetails.textContent = '';
     }
 
-
-
-    const statusEl = document.getElementById('m-status');
-
-    statusEl.textContent = l && l.status ? l.status : '\u2014';
-
-    statusEl.className = 'widget-metric-value ' + (l && l.status === 'ok' ? 'status-ok' : l && l.status === 'no slot available' ? 'status-busy' : 'status-err');
+    // Slots metrics with pill badges
+    const slotsEl = document.getElementById('m-slots');
+    if (l && ((l.slots_idle || 0) + (l.slots_processing || 0) > 0)) {
+        const idle = l.slots_idle || 0;
+        const busy = l.slots_processing || 0;
+        slotsEl.innerHTML = '<span class="slot-pill idle"><span class="slot-dot"></span>' + idle + ' idle</span><span class="slot-pill busy"><span class="slot-dot"></span>' + busy + ' busy</span>';
+    } else {
+        slotsEl.innerHTML = '<span class="slot-pill idle">&mdash;</span><span class="slot-pill busy">&mdash;</span>';
+    }
 
 
 

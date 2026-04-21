@@ -106,7 +106,7 @@
                         <span class="mode-badge" id="mode-badge">Idle</span>
                     </div>
                     <div class="dashboard-header-actions">
-                        <label class="num-sm">
+                        <label class="num-sm" id="server-endpoint-label">
                             <input id="server-endpoint" type="text" value="http://127.0.0.1:8001" placeholder="http://host:port">
                         </label>
                         <button class="btn btn-attach" id="btn-attach" onclick="doAttach()">Attach</button>
@@ -147,25 +147,42 @@
                 <section class="metric-section" id="inference-section">
                     <h2 class="dashboard-section-title">Inference Metrics <span class="metric-badge" id="inference-historic-badge" style="display:none;">Historic</span></h2>
                     <div class="inference-grid" id="inference">
-                        <div class="widget-card widget-metric">
-                            <div class="widget-metric-label">Prompt Speed</div>
-                            <div class="widget-metric-value prompt" id="m-prompt">&mdash;</div>
+                        <!-- Speed Card -->
+                        <div class="widget-card widget-metric widget-speed">
+                            <div class="widget-metric-label">SPEED</div>
+                            <div class="speed-values">
+                                <div class="speed-row">
+                                    <span class="speed-label">prompt</span>
+                                    <span class="speed-value" id="m-prompt">&mdash;</span>
+                                </div>
+                                <div class="speed-row">
+                                    <span class="speed-label">generation</span>
+                                    <span class="speed-value" id="m-gen">&mdash;</span>
+                                </div>
+                            </div>
+                            <div class="speed-bar-container">
+                                <div class="speed-bar prompt-bar" id="m-prompt-bar"></div>
+                                <div class="speed-bar gen-bar" id="m-gen-bar"></div>
+                            </div>
                         </div>
-                        <div class="widget-card widget-metric">
-                            <div class="widget-metric-label">Generation Speed</div>
-                            <div class="widget-metric-value gen" id="m-gen">&mdash;</div>
+
+                        <!-- Context Card -->
+                        <div class="widget-card widget-metric widget-context">
+                            <div class="widget-metric-label">CONTEXT</div>
+                            <div class="context-progress-bar" id="m-ctx-bar">
+                                <div class="context-progress-fill" id="m-ctx-fill"></div>
+                            </div>
+                            <div class="context-value" id="m-ctx">&mdash;</div>
+                            <div class="context-details" id="m-ctx-details">&mdash;</div>
                         </div>
-                        <div class="widget-card widget-metric">
-                            <div class="widget-metric-label">Context (KV)</div>
-                            <div class="widget-metric-value ctx" id="m-ctx">&mdash;</div>
-                        </div>
-                        <div class="widget-card widget-metric">
-                            <div class="widget-metric-label">Slots</div>
-                            <div class="widget-metric-value slots" id="m-slots">&mdash;</div>
-                        </div>
-                        <div class="widget-card widget-metric">
-                            <div class="widget-metric-label">Server Status</div>
-                            <div class="widget-metric-value" id="m-status">&mdash;</div>
+
+                        <!-- Slots Card -->
+                        <div class="widget-card widget-metric widget-slots">
+                            <div class="widget-metric-label">SLOTS</div>
+                            <div class="slots-values" id="m-slots">
+                                <span class="slot-pill idle">&mdash;</span>
+                                <span class="slot-pill busy">&mdash;</span>
+                            </div>
                         </div>
                     </div>
                 </section>
