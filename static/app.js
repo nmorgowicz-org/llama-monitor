@@ -2758,15 +2758,23 @@ async function doKillLlamaInternal() {
 
 async function doAttach() {
 
-    document.getElementById('btn-attach').disabled = true;
+    const attachModal = document.getElementById('config-modal');
 
-    const endpoint = document.getElementById('server-endpoint').value.trim();
+    if (attachModal) {
+
+        attachModal.classList.remove('hidden');
+
+    }
+
+}
+
+async function doAttachFromModal() {
+
+    const endpoint = document.getElementById('attach-endpoint').value.trim();
 
     if (!endpoint) {
 
         showToast('Please enter a server endpoint', 'error');
-
-        document.getElementById('btn-attach').disabled = false;
 
         return;
 
@@ -2788,8 +2796,6 @@ async function doAttach() {
 
         showToast('Attach failed: ' + (data.error || 'unknown'), 'error');
 
-        document.getElementById('btn-attach').disabled = false;
-
     } else {
 
         showToast('Attached to server', 'success');
@@ -2800,17 +2806,10 @@ async function doAttach() {
 
         }
 
-        // Toggle buttons
-        document.getElementById('btn-attach').style.display = 'none';
-
-        document.getElementById('btn-detach').style.display = 'inline-block';
-
-        // Update status display
-        document.getElementById('server-endpoint-status').textContent = endpoint;
+        closeConfigModal();
 
     }
-    
-    // Refresh active session info immediately
+
     updateActiveSessionInfo();
 
 }
@@ -2828,14 +2827,6 @@ async function doDetach() {
     } else {
 
         showToast('Detached from server', 'success');
-
-        // Toggle buttons
-        document.getElementById('btn-attach').style.display = 'inline-block';
-
-        document.getElementById('btn-detach').style.display = 'none';
-
-        // Reset status display
-        document.getElementById('server-endpoint-status').textContent = 'Server Endpoint';
 
     }
 
@@ -3092,14 +3083,14 @@ async function initAttachDetachButtons() {
     try {
         const resp = await fetch('/api/sessions/active');
         const data = await resp.json();
-        if (data && data.mode && data.mode.startsWith('Attach:')) {
-            document.getElementById('btn-attach').style.display = 'none';
-            document.getElementById('btn-detach').style.display = 'inline-block';
-            document.getElementById('server-endpoint-status').textContent = data.mode.replace('Attach:', '');
-        } else {
-            document.getElementById('btn-attach').style.display = 'inline-block';
-            document.getElementById('btn-detach').style.display = 'none';
-            document.getElementById('server-endpoint-status').textContent = 'Server Endpoint';
+        const btnAttach = document.getElementById('btn-attach');
+        const btnDetach = document.getElementById('btn-detach');
+        if (data && data.mode && data.mode.startsWith('Attach:') && btnAttach && btnDetach) {
+            btnAttach.style.display = 'none';
+            btnDetach.style.display = 'inline-block';
+        } else if (btnAttach && btnDetach) {
+            btnAttach.style.display = 'inline-block';
+            btnDetach.style.display = 'none';
         }
     } catch (err) {
         console.error('Failed to initialize attach/detach buttons:', err);
@@ -3252,14 +3243,16 @@ ws.onmessage = e => {
     }
 
     // Update Attach/Detach button states based on session mode
-    if (d.session_mode === 'attach' && d.active_session_endpoint) {
-        document.getElementById('btn-attach').style.display = 'none';
-        document.getElementById('btn-detach').style.display = 'inline-block';
-        document.getElementById('server-endpoint-status').textContent = d.active_session_endpoint;
-    } else {
-        document.getElementById('btn-attach').style.display = 'inline-block';
-        document.getElementById('btn-detach').style.display = 'none';
-        document.getElementById('server-endpoint-status').textContent = 'Server Endpoint';
+    const btnAttach = document.getElementById('btn-attach');
+    const btnDetach = document.getElementById('btn-detach');
+    if (btnAttach && btnDetach) {
+        if (d.session_mode === 'attach' && d.active_session_endpoint) {
+            btnAttach.style.display = 'none';
+            btnDetach.style.display = 'inline-block';
+        } else {
+            btnAttach.style.display = 'inline-block';
+            btnDetach.style.display = 'none';
+        }
     }
 
 
