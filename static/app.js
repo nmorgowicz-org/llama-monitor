@@ -2827,6 +2827,15 @@ async function doDetach() {
 
         }
 
+        // Show "Historic" badge on inference metrics
+        const historicBadge = document.getElementById('inference-historic-badge');
+
+        if (historicBadge) {
+
+            historicBadge.style.display = 'inline-block';
+
+        }
+
     }
 
     updateActiveSessionInfo();
@@ -3256,6 +3265,13 @@ ws.onmessage = e => {
         }
     }
 
+    // Update "Historic" badge on inference metrics section
+    const historicBadge = document.getElementById('inference-historic-badge');
+    if (historicBadge) {
+        const isAttached = d.session_mode === 'attach' && d.active_session_endpoint;
+        historicBadge.style.display = isAttached ? 'none' : 'inline-block';
+    }
+
 
 
     // Server state
@@ -3471,24 +3487,56 @@ ws.onmessage = e => {
 
 
 
-    // Tab badges
+    // Tab badges - only show live metrics when session is active
 
     const badgeParts = [];
 
-    // Skip "Running" since it's already shown in status-text
-    if (l.generation_tokens_per_sec > 0) badgeParts.push(l.generation_tokens_per_sec.toFixed(1) + 't/s');
+    const isAttached = d.session_mode === 'attach' && d.active_session_endpoint;
 
-    const gpuEntries = Object.entries(d.gpu || {});
+    if (isAttached) {
 
-    if (gpuEntries.length > 0) badgeParts.push('GPU ' + Math.max(...gpuEntries.map(([,m]) => m.temp)).toFixed(0) + 'C');
+        // Skip "Running" since it's already shown in status-text
+        if (l.generation_tokens_per_sec > 0) badgeParts.push(l.generation_tokens_per_sec.toFixed(1) + 't/s');
+
+        const gpuEntries = Object.entries(d.gpu || {});
+
+        if (gpuEntries.length > 0) badgeParts.push('GPU ' + Math.max(...gpuEntries.map(([,m]) => m.temp)).toFixed(0) + 'C');
+
+    }
 
     document.getElementById('badge-server').textContent = badgeParts.length ? ' ' + badgeParts.join(' \u00b7 ') : '';
 
+    const badgeChat = document.getElementById('badge-chat');
 
+    if (chatHistory.length > 0) {
 
-    document.getElementById('badge-chat').textContent = chatHistory.length > 0 ? ' ' + chatHistory.length + ' msg' : '';
+        badgeChat.textContent = ' ' + chatHistory.length + ' msg';
 
-    document.getElementById('badge-logs').textContent = logs.length > 0 ? ' ' + logs.length : '';
+        badgeChat.style.display = '';
+
+    } else {
+
+        badgeChat.textContent = '';
+
+        badgeChat.style.display = 'none';
+
+    }
+
+    const badgeLogs = document.getElementById('badge-logs');
+
+    if (logs.length > 0) {
+
+        badgeLogs.textContent = ' ' + logs.length;
+
+        badgeLogs.style.display = '';
+
+    } else {
+
+        badgeLogs.textContent = '';
+
+        badgeLogs.style.display = 'none';
+
+    }
 
 };
 
