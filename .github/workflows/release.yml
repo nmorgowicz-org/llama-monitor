@@ -26,6 +26,9 @@ jobs:
         with:
           targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-pc-windows-gnu,aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v0-rust"
+          shared-key: "llama-monitor-${{ hashFiles('Cargo.lock') }}"
 
       - name: Preflight release toolchain
         run: bash scripts/release-preflight.sh

@@ -15,6 +15,9 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v0-rust"
+          shared-key: "llama-monitor-${{ hashFiles('Cargo.lock') }}"
       - run: git diff --check
       - run: cargo fmt -- --check
       - run: cargo clippy -- -D warnings
@@ -91,6 +94,9 @@ jobs:
         with:
           targets: aarch64-unknown-linux-gnu,x86_64-pc-windows-gnu,aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: "v0-rust"
+          shared-key: "llama-monitor-${{ hashFiles('Cargo.lock') }}"
       - name: Preflight release toolchain
         run: bash scripts/release-preflight.sh
       - name: Smoke build cross-compilation targets
