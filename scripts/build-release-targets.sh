@@ -32,6 +32,8 @@ pid3=$!
 SDKROOT=/opt/osxcross/target/SDK/MacOSX26.1.sdk \
   CC_aarch64_apple_darwin=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-clang \
   AR_aarch64_apple_darwin=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
+  AR=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
+  RANLIB=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ranlib \
   cargo build --release --target aarch64-apple-darwin &
 pid4=$!
 
