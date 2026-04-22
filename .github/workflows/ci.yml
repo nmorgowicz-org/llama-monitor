@@ -21,7 +21,7 @@ jobs:
       - run: cargo test
       - run: cargo build --release
       - name: Upload binary for UI tests
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: llama-monitor-binary
           path: target/release/llama-monitor
@@ -33,13 +33,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Download binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: llama-monitor-binary
           path: target/release/
       - name: Make binary executable
         run: chmod +x target/release/llama-monitor
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6.3.0
         with:
           node-version: 22
           cache: npm
@@ -75,7 +75,7 @@ jobs:
           fi
       - name: Upload Playwright report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: tests/ui/playwright-report/
