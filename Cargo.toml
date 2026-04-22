@@ -28,7 +28,7 @@ webview-popover = ["dep:wry"]
     mac-notification-sys = "0.6"
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
-    wry = { version = "0.48", default-features = false, features = ["os-webview"], optional = true }
+    wry = { version = "0.55", default-features = false, features = ["os-webview"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
     wmi = { version = "0.18.4", features = ["default"] }
