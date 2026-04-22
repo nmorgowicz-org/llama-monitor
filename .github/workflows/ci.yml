@@ -20,6 +20,11 @@ jobs:
       - run: cargo clippy -- -D warnings
       - run: cargo test
       - run: cargo build --release
+      - name: Upload binary for UI tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-monitor-binary
+          path: target/release/llama-monitor
 
   ui:
     needs: check
@@ -27,6 +32,11 @@ jobs:
     runs-on: [self-hosted, linux, proxmox]
     steps:
       - uses: actions/checkout@v6
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: llama-monitor-binary
+          path: target/release/
       - uses: actions/setup-node@v4
         with:
           node-version: 22
