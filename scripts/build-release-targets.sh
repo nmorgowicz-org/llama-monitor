@@ -25,7 +25,8 @@ PKG_CONFIG_ALLOW_CROSS=1 \
   cargo build --release --target aarch64-unknown-linux-gnu &
 pid2=$!
 
-cargo build --release --target x86_64-pc-windows-gnu &
+CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-C target-feature=+crt-static" \
+  cargo build --release --target x86_64-pc-windows-gnu --no-default-features --features native-tray &
 pid3=$!
 
 SDKROOT=/opt/osxcross/target/SDK/MacOSX26.1.sdk \
@@ -40,4 +41,3 @@ wait "$pid2" || result=1
 wait "$pid3" || result=1
 wait "$pid4" || result=1
 exit "$result"
-

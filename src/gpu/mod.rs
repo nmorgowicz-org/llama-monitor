@@ -8,7 +8,7 @@ use anyhow::Result;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GpuMetrics {
     pub temp: f32,
     pub load: u32,
@@ -76,7 +76,13 @@ fn is_apple_silicon() -> bool {
 }
 
 fn command_exists(cmd: &str) -> bool {
-    std::process::Command::new("which")
+    let finder = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
+
+    std::process::Command::new(finder)
         .arg(cmd)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

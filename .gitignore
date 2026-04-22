@@ -24,6 +24,14 @@ build.log
 node_modules/
 .npm
 
+# Playwright / browser test artifacts
+test-results/
+playwright-report/
+blob-report/
+tests/ui/test-results/
+tests/ui/playwright-report/
+tests/ui/blob-report/
+
 # Special artifact files
 $null
 

@@ -2,8 +2,28 @@
 
 Web dashboard for managing [llama.cpp](https://github.com/ggerganov/llama.cpp) servers with real-time GPU monitoring.
 
+## Monitoring Modes
+
+Llama Monitor supports two modes of operation:
+
+### Local Mode (Spawn)
+- Runs llama-server on your local machine
+- Full hardware monitoring (CPU, RAM, GPU temp, VRAM, power, clocks)
+- GPU monitoring auto-detected: AMD ROCm, NVIDIA, Apple Silicon
+- Perfect for local development and testing
+
+### Remote Mode (Attach)
+- Connects to an existing llama-server instance
+- Inference metrics only (prompt/gen speed, KV cache, slots)
+- GPU/system sections auto-hidden when not available
+- Remote agent provides backend metrics via HTTP endpoint
+
 ## Features
 
+- **Capability-Aware Monitoring** -- Backend exposes metric capabilities and availability reasons
+  - Local vs. remote monitoring mode clearly displayed
+  - Unavailable metrics show concise reasons instead of empty tables
+  - GPU/system sections hidden when not available
 - **Multi-Session Support** -- Run multiple llama-server instances simultaneously with independent session management
   - Spawn new local servers on custom ports or attach to external servers
   - Session persistence across restarts (saved to `~/.config/llama-monitor/sessions.json`)
@@ -124,6 +144,15 @@ Open `http://localhost:7778` in your browser. Click the gear icon to configure s
 
 ## CLI Reference
 
+### Monitor Mode Flags
+
+| Flag | Description |
+|------|-------------|
+| `--headless` | Disable tray and desktop UI. Serve web/API only. |
+| `--no-tray` | Skip tray icon but otherwise behave normally. |
+
+### Server & Session Flags
+
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--llama-server-path` | `-s` | `llama-server` | Path to `llama-server` binary (uses `$PATH` if bare name) |
@@ -232,6 +261,42 @@ llama-server /metrics       -->  Llama Poller (1s)   --> AppState
 Sessions are stored to disk every 30 seconds and loaded on startup.
 
 ## API Reference
+
+### Capabilities Endpoint
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/capabilities` | Get metric capabilities and availability reasons |
+
+**Response Schema:**
+
+```json
+{
+  "capabilities": {
+    "inference": true,
+    "system": false,
+    "gpu": false,
+    "cpu_temperature": false,
+    "memory": false,
+    "host_metrics": false,
+    "tray": true
+  },
+  "endpoint_kind": "local",
+  "session_kind": "spawn",
+  "tray_mode": "desktop",
+  "availability": {
+    "system": "remote_endpoint",
+    "gpu": "remote_endpoint",
+    "cpu_temp": "remote_endpoint"
+  }
+}
+```
+
+- **`capabilities`**: Which metrics are available for the active session
+- **`endpoint_kind`**: `"local"` or `"remote"` (whether host metrics apply)
+- **`session_kind`**: `"spawn"`, `"attach"`, or `"none"`
+- **`tray_mode`**: `"desktop"`, `"headless"`, or `"failed"`
+- **`availability`**: Reasons for metric unavailability
 
 | Method | Path | Description |
 |--------|------|-------------|

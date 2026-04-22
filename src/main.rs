@@ -1,5 +1,6 @@
 #![recursion_limit = "256"]
 
+mod agent;
 mod cli;
 mod config;
 mod gpu;
@@ -8,8 +9,10 @@ mod lhm_persistence;
 mod llama;
 mod models;
 mod presets;
+mod remote_ssh;
 mod state;
 mod system;
+#[cfg(feature = "native-tray")]
 mod tray;
 mod web;
 
@@ -24,7 +27,14 @@ const SYSTEM_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 fn main() -> Result<()> {
     let args = cli::AppArgs::parse();
-    let app_config = Arc::new(config::AppConfig::from_args(args));
+    let app_config = Arc::new(config::AppConfig::from_args(args.clone()));
+
+    if args.agent {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?;
+        return runtime.block_on(agent::run_agent_server(app_config));
+    }
 
     // Load presets from disk (or defaults)
     let initial_presets = presets::load_presets(&app_config.presets_file);
@@ -101,26 +111,27 @@ fn main() -> Result<()> {
     // Detect and start GPU poller
     let backend = gpu::detect_backend(&app_config.gpu_backend);
     {
-        let gpu = state.gpu_metrics.clone();
-        let sys = state.system_metrics.clone();
+        let s = state.clone();
         thread::spawn(move || {
             loop {
-                match backend.read_metrics() {
-                    Ok(m) => {
-                        if let Ok(mut gpu_lock) = gpu.lock() {
-                            *gpu_lock = m;
-                        } else {
-                            eprintln!("[error] Failed to acquire gpu lock");
+                if s.active_session_uses_local_metrics() {
+                    match backend.read_metrics() {
+                        Ok(m) => {
+                            if let Ok(mut gpu_lock) = s.gpu_metrics.lock() {
+                                *gpu_lock = m;
+                            } else {
+                                eprintln!("[error] Failed to acquire gpu lock");
+                            }
+                            // Feed CPU/SoC temp from GPU backend (Apple only)
+                            if let Some(t) = backend.cpu_temp()
+                                && let Ok(mut sys_lock) = s.system_metrics.lock()
+                            {
+                                sys_lock.cpu_temp = t;
+                                sys_lock.cpu_temp_available = true;
+                            }
                         }
-                        // Feed CPU/SoC temp from GPU backend (Apple only)
-                        if let Some(t) = backend.cpu_temp()
-                            && let Ok(mut sys_lock) = sys.lock()
-                        {
-                            sys_lock.cpu_temp = t;
-                            sys_lock.cpu_temp_available = true;
-                        }
-                    }
-                    Err(e) => eprintln!("[error] GPU metrics: {e}"),
+                        Err(e) => eprintln!("[error] GPU metrics: {e}"),
+                    };
                 }
                 thread::sleep(GPU_POLL_INTERVAL);
             }
@@ -132,17 +143,19 @@ fn main() -> Result<()> {
         let s = state.clone();
         thread::spawn(move || {
             loop {
-                let mut metrics = system::get_system_metrics();
-                if let Ok(mut sys_lock) = s.system_metrics.lock() {
-                    // Preserve CPU temp if the GPU backend already provided one
-                    // (e.g. Apple mactop) since get_system_metrics() can't read it.
-                    if !metrics.cpu_temp_available && sys_lock.cpu_temp_available {
-                        metrics.cpu_temp = sys_lock.cpu_temp;
-                        metrics.cpu_temp_available = true;
+                if s.active_session_uses_local_metrics() {
+                    let mut metrics = system::get_system_metrics();
+                    if let Ok(mut sys_lock) = s.system_metrics.lock() {
+                        // Preserve CPU temp if the GPU backend already provided one
+                        // (e.g. Apple mactop) since get_system_metrics() can't read it.
+                        if !metrics.cpu_temp_available && sys_lock.cpu_temp_available {
+                            metrics.cpu_temp = sys_lock.cpu_temp;
+                            metrics.cpu_temp_available = true;
+                        }
+                        *sys_lock = metrics;
+                    } else {
+                        eprintln!("[error] Failed to acquire system_metrics lock");
                     }
-                    *sys_lock = metrics;
-                } else {
-                    eprintln!("[error] Failed to acquire system_metrics lock");
                 }
                 std::thread::sleep(SYSTEM_POLL_INTERVAL);
             }
@@ -154,6 +167,12 @@ fn main() -> Result<()> {
 
     println!("[info] Llama Monitor running on http://0.0.0.0:{port}");
 
+    if args.headless {
+        println!("[info] Headless mode enabled (no tray, no desktop UI)");
+    } else if args.no_tray {
+        println!("[info] Tray disabled via --no-tray");
+    }
+
     // Build tokio runtime for async tasks (warp server, pollers, etc.)
     // The runtime runs in background threads; the main thread is reserved
     // for the system tray, which macOS requires to be on the main thread.
@@ -161,11 +180,20 @@ fn main() -> Result<()> {
         .enable_all()
         .build()?;
 
-    // Llama metrics poller
+    // Llama metrics poller. It remains idle until the user starts a preset or
+    // explicitly attaches to an endpoint.
     {
         let s = state.clone();
         let interval = app_config.llama_poll_interval;
         runtime.spawn(llama::poller::llama_metrics_poller(s, interval));
+    }
+
+    // Remote host metrics poller. It is gated by the same user action signal,
+    // so app startup never probes saved remote endpoints automatically.
+    {
+        let s = state.clone();
+        let app_config = app_config.clone();
+        runtime.spawn(agent::remote_agent_poller(s, app_config));
     }
 
     // Sessions persistence timer
@@ -190,31 +218,240 @@ fn main() -> Result<()> {
 
     // Run tray on the main thread when a desktop session is available.
     // Headless Linux servers still keep the web UI/API running.
-    if should_start_tray() {
-        if let Err(e) = crate::tray::run_tray(state, port) {
-            eprintln!("[warn] Tray unavailable; continuing headless: {e}");
+    #[cfg(feature = "native-tray")]
+    {
+        if should_start_tray(&args) {
+            if let Err(e) = crate::tray::run_tray(state, port) {
+                eprintln!("[warn] Tray unavailable: {e}");
+                eprintln!("[info] Continuing in headless mode with web/API server");
+            }
+        } else {
+            println!("[info] Tray disabled (no graphical session)");
             park_forever();
         }
-    } else {
-        println!("[info] No graphical session detected; tray disabled");
-        park_forever();
     }
 
-    Ok(())
+    #[cfg(not(feature = "native-tray"))]
+    {
+        let _ = state;
+        println!("[info] Tray disabled in this build");
+    }
+
+    park_forever()
 }
 
 #[cfg(target_os = "linux")]
-fn should_start_tray() -> bool {
+pub fn should_start_tray(args: &cli::AppArgs) -> bool {
+    if args.headless || args.no_tray {
+        return false;
+    }
     std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
 
 #[cfg(not(target_os = "linux"))]
-fn should_start_tray() -> bool {
+#[cfg(feature = "native-tray")]
+pub fn should_start_tray(args: &cli::AppArgs) -> bool {
+    if args.headless || args.no_tray {
+        return false;
+    }
     true
+}
+
+#[cfg(not(feature = "native-tray"))]
+pub fn should_start_tray(_args: &cli::AppArgs) -> bool {
+    false
 }
 
 fn park_forever() -> ! {
     loop {
         std::thread::park();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn should_start_tray_flag_combinations_disables_tray() {
+        let test_cases = [
+            (true, false, false), // headless only
+            (false, true, false), // no_tray only
+            (true, true, false),  // both flags
+        ];
+
+        for (headless, no_tray, expected) in test_cases {
+            let args = cli::AppArgs {
+                port: 7778,
+                gpu_backend: "auto".to_string(),
+                models_dir: None,
+                gpu_arch: None,
+                gpu_devices: None,
+                llama_poll_interval: 1,
+                llama_server_path: None,
+                llama_server_cwd: None,
+                presets_file: None,
+                sessions_file: None,
+                headless,
+                no_tray,
+                agent: false,
+                agent_host: "127.0.0.1".to_string(),
+                agent_port: 7779,
+                agent_token: None,
+                remote_agent_url: None,
+                remote_agent_token: None,
+                remote_agent_ssh_autostart: false,
+                remote_agent_ssh_target: None,
+                remote_agent_ssh_command: None,
+            };
+            assert_eq!(
+                should_start_tray(&args),
+                expected,
+                "headless={headless}, no_tray={no_tray}"
+            );
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn should_start_tray_linux_display_variations() {
+        unsafe { std::env::set_var("DISPLAY", ":0") };
+        let args = cli::AppArgs {
+            port: 7778,
+            gpu_backend: "auto".to_string(),
+            models_dir: None,
+            gpu_arch: None,
+            gpu_devices: None,
+            llama_poll_interval: 1,
+            llama_server_path: None,
+            llama_server_cwd: None,
+            presets_file: None,
+            sessions_file: None,
+            headless: false,
+            no_tray: false,
+            agent: false,
+            agent_host: "127.0.0.1".to_string(),
+            agent_port: 7779,
+            agent_token: None,
+            remote_agent_url: None,
+            remote_agent_token: None,
+            remote_agent_ssh_autostart: false,
+            remote_agent_ssh_target: None,
+            remote_agent_ssh_command: None,
+        };
+        assert!(should_start_tray(&args));
+        unsafe { std::env::remove_var("DISPLAY") };
+
+        unsafe { std::env::set_var("WAYLAND_DISPLAY", "wayland-0") };
+        let args = cli::AppArgs {
+            port: 7778,
+            gpu_backend: "auto".to_string(),
+            models_dir: None,
+            gpu_arch: None,
+            gpu_devices: None,
+            llama_poll_interval: 1,
+            llama_server_path: None,
+            llama_server_cwd: None,
+            presets_file: None,
+            sessions_file: None,
+            headless: false,
+            no_tray: false,
+            agent: false,
+            agent_host: "127.0.0.1".to_string(),
+            agent_port: 7779,
+            agent_token: None,
+            remote_agent_url: None,
+            remote_agent_token: None,
+            remote_agent_ssh_autostart: false,
+            remote_agent_ssh_target: None,
+            remote_agent_ssh_command: None,
+        };
+        assert!(should_start_tray(&args));
+        unsafe { std::env::remove_var("WAYLAND_DISPLAY") };
+
+        unsafe { std::env::remove_var("DISPLAY") };
+        unsafe { std::env::remove_var("WAYLAND_DISPLAY") };
+        let args = cli::AppArgs {
+            port: 7778,
+            gpu_backend: "auto".to_string(),
+            models_dir: None,
+            gpu_arch: None,
+            gpu_devices: None,
+            llama_poll_interval: 1,
+            llama_server_path: None,
+            llama_server_cwd: None,
+            presets_file: None,
+            sessions_file: None,
+            headless: false,
+            no_tray: false,
+            agent: false,
+            agent_host: "127.0.0.1".to_string(),
+            agent_port: 7779,
+            agent_token: None,
+            remote_agent_url: None,
+            remote_agent_token: None,
+            remote_agent_ssh_autostart: false,
+            remote_agent_ssh_target: None,
+            remote_agent_ssh_command: None,
+        };
+        assert!(!should_start_tray(&args));
+    }
+
+    #[cfg(all(not(target_os = "linux"), feature = "native-tray"))]
+    #[test]
+    fn should_start_tray_non_linux_default_enabled() {
+        let args = cli::AppArgs {
+            port: 7778,
+            gpu_backend: "auto".to_string(),
+            models_dir: None,
+            gpu_arch: None,
+            gpu_devices: None,
+            llama_poll_interval: 1,
+            llama_server_path: None,
+            llama_server_cwd: None,
+            presets_file: None,
+            sessions_file: None,
+            headless: false,
+            no_tray: false,
+            agent: false,
+            agent_host: "127.0.0.1".to_string(),
+            agent_port: 7779,
+            agent_token: None,
+            remote_agent_url: None,
+            remote_agent_token: None,
+            remote_agent_ssh_autostart: false,
+            remote_agent_ssh_target: None,
+            remote_agent_ssh_command: None,
+        };
+        assert!(should_start_tray(&args));
+    }
+
+    #[cfg(not(feature = "native-tray"))]
+    #[test]
+    fn should_start_tray_without_desktop_feature_disabled() {
+        let args = cli::AppArgs {
+            port: 7778,
+            gpu_backend: "auto".to_string(),
+            models_dir: None,
+            gpu_arch: None,
+            gpu_devices: None,
+            llama_poll_interval: 1,
+            llama_server_path: None,
+            llama_server_cwd: None,
+            presets_file: None,
+            sessions_file: None,
+            headless: false,
+            no_tray: false,
+            agent: false,
+            agent_host: "127.0.0.1".to_string(),
+            agent_port: 7779,
+            agent_token: None,
+            remote_agent_url: None,
+            remote_agent_token: None,
+            remote_agent_ssh_autostart: false,
+            remote_agent_ssh_target: None,
+            remote_agent_ssh_command: None,
+        };
+        assert!(!should_start_tray(&args));
     }
 }

@@ -227,9 +227,49 @@ pub fn detect_nvidia_gpus() -> Option<DetectedGpu> {
     })
 }
 
-/// Detect GPUs (try ROCm first, then NVIDIA).
+/// Detect Apple Silicon on the local macOS host.
+#[cfg(target_os = "macos")]
+pub fn detect_apple_gpus() -> Option<DetectedGpu> {
+    let output = Command::new("sysctl")
+        .args(["-n", "machdep.cpu.brand_string"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    parse_apple_cpu_brand(stdout.trim())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn detect_apple_gpus() -> Option<DetectedGpu> {
+    None
+}
+
+#[cfg(any(target_os = "macos", test))]
+pub fn parse_apple_cpu_brand(brand: &str) -> Option<DetectedGpu> {
+    let trimmed = brand.trim();
+
+    if !trimmed.contains("Apple") {
+        return None;
+    }
+
+    Some(DetectedGpu {
+        arch: "apple".into(),
+        count: 1,
+        names: vec![trimmed.to_string()],
+    })
+}
+
+/// Detect local GPUs (try Apple Silicon, ROCm, then NVIDIA).
 pub fn detect_gpus() -> Option<DetectedGpu> {
-    detect_rocm_gpus().or_else(detect_nvidia_gpus)
+    detect_apple_gpus()
+        .or_else(detect_rocm_gpus)
+        .or_else(detect_nvidia_gpus)
 }
 
 /// Generate a device list string like "0,1,2,3" for N devices.
@@ -412,6 +452,19 @@ Agent 4
     fn test_parse_rocminfo_no_gpu() {
         let output = "ROCk module is loaded\n";
         assert!(parse_rocminfo(output).is_none());
+    }
+
+    #[test]
+    fn test_parse_apple_cpu_brand() {
+        let detected = parse_apple_cpu_brand("Apple M4 Max").unwrap();
+        assert_eq!(detected.arch, "apple");
+        assert_eq!(detected.count, 1);
+        assert_eq!(detected.names, vec!["Apple M4 Max"]);
+    }
+
+    #[test]
+    fn test_parse_apple_cpu_brand_ignores_non_apple() {
+        assert!(parse_apple_cpu_brand("Intel(R) Core(TM) i9").is_none());
     }
 
     #[test]

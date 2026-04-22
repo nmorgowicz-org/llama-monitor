@@ -1,23 +1,35 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
-use tray_icon::{Icon, TrayIcon, TrayIconBuilder, TrayIconEvent};
+#[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
+use tray_icon::TrayIconEvent;
+#[cfg(target_os = "windows")]
+use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use winit::application::ApplicationHandler;
-use winit::dpi::{PhysicalPosition, PhysicalSize};
+#[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
+use winit::dpi::PhysicalPosition;
+#[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
+use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::WindowId;
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(
+    not(target_os = "linux"),
+    not(target_os = "windows"),
+    feature = "webview-popover"
+))]
 use winit::window::{WindowAttributes, WindowLevel};
 
 #[cfg(target_os = "macos")]
 use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "webview-popover"))]
 use gtk::prelude::*;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "webview-popover"))]
 use wry::WebViewBuilderExtUnix;
 
 use crate::gpu::GpuMetrics;
@@ -25,9 +37,13 @@ use crate::llama::metrics::LlamaMetrics;
 use crate::state::AppState;
 use crate::system::SystemMetrics;
 
+#[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
 const POPOVER_WIDTH: f64 = 240.0;
+#[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
 const POPOVER_INITIAL_HEIGHT: f64 = 220.0;
+#[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
 const POPOVER_MIN_HEIGHT: f64 = 96.0;
+#[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
 const POPOVER_MAX_HEIGHT: f64 = 520.0;
 
 type TrayMetrics = (
@@ -73,6 +89,12 @@ fn create_tray_icon() -> Icon {
 }
 
 pub fn run_tray(state: AppState, port: u16) -> anyhow::Result<()> {
+    #[cfg(not(any(
+        all(feature = "webview-popover", not(target_os = "windows")),
+        target_os = "windows"
+    )))]
+    let _ = port;
+
     #[cfg(target_os = "macos")]
     {
         let _ = mac_notification_sys::set_application("com.apple.Finder");
@@ -86,7 +108,7 @@ pub fn run_tray(state: AppState, port: u16) -> anyhow::Result<()> {
     #[cfg(not(target_os = "macos"))]
     let event_loop = EventLoop::builder().build()?;
 
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "webview-popover"))]
     let gtk_ready = match gtk::init() {
         Ok(()) => true,
         Err(e) => {
@@ -95,6 +117,7 @@ pub fn run_tray(state: AppState, port: u16) -> anyhow::Result<()> {
         }
     };
 
+    #[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
     let (resize_tx, resize_rx) = mpsc::channel();
     let tray_start_failed = Arc::new(AtomicBool::new(false));
 
@@ -104,13 +127,22 @@ pub fn run_tray(state: AppState, port: u16) -> anyhow::Result<()> {
         },
         tray: None,
         icon: create_tray_icon(),
+        #[cfg(any(
+            all(feature = "webview-popover", not(target_os = "windows")),
+            target_os = "windows"
+        ))]
         port,
+        #[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
         popover: None,
+        #[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
         resize_tx,
+        #[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
         resize_rx,
         tray_start_failed: Arc::clone(&tray_start_failed),
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", feature = "webview-popover"))]
         gtk_ready,
+        #[cfg(target_os = "windows")]
+        windows_menu: None,
     });
 
     event_loop.run_app(app)?;
@@ -126,15 +158,25 @@ struct TrayApp {
     tray_state: TrayState,
     tray: Option<TrayIcon>,
     icon: Icon,
+    #[cfg(any(
+        all(feature = "webview-popover", not(target_os = "windows")),
+        target_os = "windows"
+    ))]
     port: u16,
+    #[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
     popover: Option<Popover>,
+    #[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
     resize_tx: Sender<PopoverResize>,
+    #[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
     resize_rx: Receiver<PopoverResize>,
     tray_start_failed: Arc<AtomicBool>,
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "webview-popover"))]
     gtk_ready: bool,
+    #[cfg(target_os = "windows")]
+    windows_menu: Option<WindowsTrayMenu>,
 }
 
+#[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
 struct Popover {
     #[cfg(not(target_os = "linux"))]
     window: std::sync::Arc<dyn winit::window::Window>,
@@ -145,6 +187,7 @@ struct Popover {
     height: f64,
 }
 
+#[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
 #[derive(serde::Deserialize)]
 struct PopoverResize {
     width: f64,
@@ -168,6 +211,7 @@ impl ApplicationHandler for TrayApp {
         pump_gtk_events();
 
         if self.tray.is_none() {
+            let initial_metrics = self.tray_state.get_metrics();
             let builder = TrayIconBuilder::new()
                 .with_tooltip("Llama Monitor")
                 .with_icon(std::mem::replace(
@@ -178,9 +222,25 @@ impl ApplicationHandler for TrayApp {
             #[cfg(target_os = "macos")]
             let builder = builder.with_icon_as_template(true);
 
+            #[cfg(target_os = "windows")]
+            let (builder, windows_menu) = {
+                let windows_menu = WindowsTrayMenu::new(&initial_metrics);
+                (
+                    builder
+                        .with_menu(Box::new(windows_menu.menu.clone()))
+                        .with_menu_on_left_click(true)
+                        .with_menu_on_right_click(true),
+                    Some(windows_menu),
+                )
+            };
+
             match builder.build() {
                 Ok(tray) => {
                     self.tray = Some(tray);
+                    #[cfg(target_os = "windows")]
+                    {
+                        self.windows_menu = windows_menu;
+                    }
                 }
                 Err(e) => {
                     eprintln!("[tray] Failed to create tray icon: {e}");
@@ -190,7 +250,6 @@ impl ApplicationHandler for TrayApp {
                 }
             }
 
-            let initial_metrics = self.tray_state.get_metrics();
             if let Some(ref tooltip) = initial_metrics.3
                 && let Some(ref tray) = self.tray
             {
@@ -202,6 +261,12 @@ impl ApplicationHandler for TrayApp {
             ));
         }
 
+        #[cfg(target_os = "windows")]
+        while let Ok(menu_event) = MenuEvent::receiver().try_recv() {
+            self.handle_windows_menu(menu_event, event_loop);
+        }
+
+        #[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
         while let Ok(tray_event) = TrayIconEvent::receiver().try_recv() {
             match &tray_event {
                 TrayIconEvent::Click {
@@ -227,24 +292,56 @@ impl ApplicationHandler for TrayApp {
 
     fn about_to_wait(&mut self, event_loop: &dyn ActiveEventLoop) {
         pump_gtk_events();
+        self.refresh_tray_status();
         event_loop.set_control_flow(ControlFlow::WaitUntil(
             Instant::now() + Duration::from_millis(500),
         ));
     }
 
     fn proxy_wake_up(&mut self, _event_loop: &dyn ActiveEventLoop) {
-        let mut latest = None;
-        while let Ok(resize) = self.resize_rx.try_recv() {
-            latest = Some(resize);
-        }
+        #[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
+        {
+            let mut latest = None;
+            while let Ok(resize) = self.resize_rx.try_recv() {
+                latest = Some(resize);
+            }
 
-        if let Some(resize) = latest {
-            self.resize_popover(resize.width, resize.height);
+            if let Some(resize) = latest {
+                self.resize_popover(resize.width, resize.height);
+            }
         }
     }
 }
 
 impl TrayApp {
+    fn refresh_tray_status(&mut self) {
+        let metrics = self.tray_state.get_metrics();
+        if let Some(ref tooltip) = metrics.3
+            && let Some(ref tray) = self.tray
+        {
+            let _ = tray.set_tooltip(Some(tooltip));
+        }
+
+        #[cfg(target_os = "windows")]
+        if let Some(menu) = self.windows_menu.as_ref() {
+            menu.update(&metrics);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn handle_windows_menu(&mut self, event: MenuEvent, event_loop: &dyn ActiveEventLoop) {
+        let Some(menu) = self.windows_menu.as_ref() else {
+            return;
+        };
+
+        if event.id() == menu.open_dashboard.id() {
+            open_dashboard(self.port);
+        } else if event.id() == menu.quit.id() {
+            event_loop.exit();
+        }
+    }
+
+    #[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
     fn open_popover(&mut self, event_loop: &dyn ActiveEventLoop, icon_rect: tray_icon::Rect) {
         let pos = icon_rect.position;
         let width = POPOVER_WIDTH;
@@ -311,7 +408,7 @@ impl TrayApp {
             });
         }
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(all(not(target_os = "linux"), not(target_os = "windows")))]
         let attrs = WindowAttributes::default()
             .with_surface_size(winit::dpi::LogicalSize::new(width, height))
             .with_position(PhysicalPosition::new(x as i32, y as i32))
@@ -320,14 +417,14 @@ impl TrayApp {
             .with_window_level(WindowLevel::AlwaysOnTop)
             .with_visible(true);
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(all(not(target_os = "linux"), not(target_os = "windows")))]
         let window: std::sync::Arc<dyn winit::window::Window> =
             match event_loop.create_window(attrs) {
                 Ok(w) => std::sync::Arc::from(w),
                 Err(_) => return,
             };
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(all(not(target_os = "linux"), not(target_os = "windows")))]
         let webview = match wry::WebViewBuilder::new()
             .with_ipc_handler(move |request| {
                 if let Ok(resize) = serde_json::from_str::<PopoverResize>(request.body()) {
@@ -346,7 +443,7 @@ impl TrayApp {
             Err(_) => return,
         };
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(all(not(target_os = "linux"), not(target_os = "windows")))]
         {
             self.popover = Some(Popover {
                 window,
@@ -357,18 +454,20 @@ impl TrayApp {
         }
     }
 
+    #[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
     fn close_popover(&mut self) {
         #[cfg(target_os = "linux")]
         if let Some(popover) = self.popover.take() {
             popover.window.close();
         }
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(all(not(target_os = "linux"), not(target_os = "windows")))]
         {
             self.popover.take();
         }
     }
 
+    #[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
     fn resize_popover(&mut self, _reported_width: f64, height: f64) {
         let Some(popover) = self.popover.as_mut() else {
             return;
@@ -386,7 +485,7 @@ impl TrayApp {
             popover.window.set_default_size(width as i32, height as i32);
         }
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(all(not(target_os = "linux"), not(target_os = "windows")))]
         let _ = popover
             .window
             .request_surface_size(winit::dpi::LogicalSize::new(width, height).into());
@@ -399,6 +498,7 @@ impl TrayApp {
         popover.height = height;
     }
 
+    #[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
     fn resolve_popover_anchor(
         &self,
         event_loop: &dyn ActiveEventLoop,
@@ -447,19 +547,133 @@ impl TrayApp {
     }
 }
 
+#[cfg(all(feature = "webview-popover", not(target_os = "windows")))]
 fn rect_has_position(rect: tray_icon::Rect) -> bool {
     rect.size.width > 0 || rect.size.height > 0 || rect.position.x > 0.0 || rect.position.y > 0.0
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "webview-popover"))]
 fn pump_gtk_events() {
     while gtk::events_pending() {
         gtk::main_iteration_do(false);
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(all(target_os = "linux", feature = "webview-popover")))]
 fn pump_gtk_events() {}
+
+#[cfg(target_os = "windows")]
+struct WindowsTrayMenu {
+    menu: Menu,
+    endpoint: MenuItem,
+    prompt: MenuItem,
+    generation: MenuItem,
+    requests: MenuItem,
+    host: MenuItem,
+    open_dashboard: MenuItem,
+    quit: MenuItem,
+}
+
+#[cfg(target_os = "windows")]
+impl WindowsTrayMenu {
+    fn new(metrics: &TrayMetrics) -> Self {
+        let menu = Menu::new();
+        let endpoint = MenuItem::with_id("endpoint", "Endpoint: starting", false, None);
+        let prompt = MenuItem::with_id("prompt", "Prompt: -- tok/s", false, None);
+        let generation = MenuItem::with_id("generation", "Generation: -- tok/s", false, None);
+        let requests = MenuItem::with_id("requests", "Inference: idle", false, None);
+        let host = MenuItem::with_id("host", "Host: unavailable", false, None);
+        let open_dashboard = MenuItem::with_id("open-dashboard", "Open Dashboard", true, None);
+        let quit = MenuItem::with_id("quit", "Quit", true, None);
+
+        let _ = menu.append_items(&[
+            &endpoint,
+            &prompt,
+            &generation,
+            &requests,
+            &host,
+            &PredefinedMenuItem::separator(),
+            &open_dashboard,
+            &PredefinedMenuItem::separator(),
+            &quit,
+        ]);
+
+        let windows_menu = Self {
+            menu,
+            endpoint,
+            prompt,
+            generation,
+            requests,
+            host,
+            open_dashboard,
+            quit,
+        };
+        windows_menu.update(metrics);
+        windows_menu
+    }
+
+    fn update(&self, metrics: &TrayMetrics) {
+        let (sys, _gpu, llama, tooltip) = metrics;
+        self.endpoint.set_text(
+            tooltip
+                .as_deref()
+                .and_then(|text| text.lines().next())
+                .unwrap_or("Endpoint: unknown"),
+        );
+        self.prompt.set_text(format!(
+            "Prompt: {} tok/s",
+            format_rate(llama.prompt_tokens_per_sec)
+        ));
+        self.generation.set_text(format!(
+            "Generation: {} tok/s",
+            format_rate(llama.generation_tokens_per_sec)
+        ));
+
+        let slot_text = if llama.slots_processing > 0 || llama.slots_idle > 0 {
+            format!(
+                "Inference: {} processing / {} idle",
+                llama.slots_processing, llama.slots_idle
+            )
+        } else if llama.requests_processing > 0 {
+            format!("Inference: {} request(s)", llama.requests_processing)
+        } else {
+            "Inference: idle".to_string()
+        };
+        self.requests.set_text(slot_text);
+
+        if sys.cpu_load > 0 || sys.cpu_temp_available {
+            let cpu = sys.cpu_load as f32 / 10.0;
+            if sys.cpu_temp_available {
+                self.host
+                    .set_text(format!("Host: {cpu:.1}% CPU / {:.0}C", sys.cpu_temp));
+            } else {
+                self.host.set_text(format!("Host: {cpu:.1}% CPU"));
+            }
+        } else {
+            self.host.set_text("Host: unavailable");
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn format_rate(value: f64) -> String {
+    if value > 0.0 {
+        format!("{value:.1}")
+    } else {
+        "--".to_string()
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn open_dashboard(port: u16) {
+    let url = format!("http://127.0.0.1:{port}");
+    if let Err(e) = std::process::Command::new("cmd.exe")
+        .args(["/C", "start", "", &url])
+        .spawn()
+    {
+        eprintln!("[tray] Failed to open dashboard: {e}");
+    }
+}
 
 struct TrayState {
     app_state: Arc<AppState>,
@@ -467,7 +681,7 @@ struct TrayState {
 
 impl TrayState {
     fn get_metrics(&self) -> TrayMetrics {
-        let local_metrics_available = self.app_state.active_session_uses_local_metrics();
+        let local_metrics_available = self.app_state.host_metrics_available();
         let sys = self.app_state.system_metrics.lock().unwrap().clone();
         let gpu = if local_metrics_available {
             self.app_state.gpu_metrics.lock().unwrap().clone()
@@ -493,6 +707,21 @@ impl TrayState {
     ) -> String {
         let mut lines = Vec::new();
 
+        let endpoint_kind = self.app_state.current_endpoint_kind();
+        let session_mode = match self.app_state.current_session_kind() {
+            crate::state::SessionKind::Spawn => "Spawn",
+            crate::state::SessionKind::Attach => "Attach",
+            crate::state::SessionKind::None => "",
+        };
+
+        let local_label = if endpoint_kind == crate::state::EndpointKind::Local {
+            "Local"
+        } else {
+            "Remote"
+        };
+
+        lines.push(format!("{} - {}", local_label, session_mode));
+
         if local_metrics_available {
             lines.push(format!("CPU: {}%", sys.cpu_load as f32 / 10.0));
 
@@ -510,6 +739,8 @@ impl TrayState {
                     lines.push(format!("{}: {:.0}C / {}% VRAM", name, m.temp, vram_pct));
                 }
             }
+        } else {
+            lines.push("Host metrics unavailable".to_string());
         }
 
         if llama.generation_tokens_per_sec > 0.0 {
