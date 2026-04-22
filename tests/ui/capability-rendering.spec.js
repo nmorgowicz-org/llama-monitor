@@ -97,7 +97,7 @@ test.describe('modal controls', () => {
     await page.evaluate(() => {
       document.getElementById('agent-status').style.display = '';
     });
-    await page.locator('.btn-firewall-fix').click();
+    await page.locator('.btn-agent-fix').click();
     await expect(page.locator('#config-modal')).toHaveClass(/open/);
     await expect(page.locator('#remote-agent-panel')).toBeVisible();
   });
@@ -271,8 +271,8 @@ test.describe('inference metric rendering', () => {
     await expect(page.locator('#m-slot-grid')).toContainText('task 6686');
     await expect(page.locator('#m-slot-grid')).toContainText('690 output');
     await expect(page.locator('#m-speculative-chip')).toContainText('Speculative · ngram_map_k · n_max 48');
-    await expect(page.locator('#m-sampler-stack')).toContainText('temperature');
-    await expect(page.locator('#m-sampler-config')).toContainText('top_p');
+    await expect(page.locator('#m-sampler-params-inline')).toContainText('top_k');
+    await expect(page.locator('#m-sampler-params-inline')).toContainText('top_p');
     await expect(page.locator('#m-activity-rail .activity-segment.active')).toBeVisible();
     await expect(page.locator('#m-activity-rail .activity-phase.prompt')).toBeVisible();
     await expect(page.locator('#m-activity-rail .activity-phase.generation')).toBeVisible();
