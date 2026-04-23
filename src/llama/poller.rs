@@ -21,32 +21,66 @@ struct SlotBlockTracker {
     stagnant_polls: u32,
     blocked_since: Option<Instant>,
     blocked_task_id: Option<u64>,
+    has_output_tokens: bool,
 }
 
 impl SlotBlockTracker {
+    #[allow(clippy::too_many_arguments)]
     fn update(
         &mut self,
         is_processing: bool,
         output_active: bool,
         output_tokens: u64,
+        has_output_tokens: bool,
         task_id: Option<u64>,
+        prompt_tps: f64,
+        gen_tps: f64,
     ) {
         if !is_processing {
             self.reset();
             return;
         }
-        if output_active || output_tokens != self.last_decoded || output_tokens == 0 {
-            self.stagnant_polls = 0;
-            self.blocked_since = None;
-            self.blocked_task_id = None;
-        } else if output_tokens > 0 && !output_active {
-            self.stagnant_polls += 1;
-            if self.stagnant_polls >= BLOCKED_STAGNANT_THRESHOLD && self.blocked_since.is_none() {
-                self.blocked_since = Some(Instant::now());
-                self.blocked_task_id = task_id;
+        self.has_output_tokens = has_output_tokens;
+
+        // Primary detection: n_decoded available — track stagnant output tokens
+        if has_output_tokens && output_tokens > 0 {
+            if output_active || output_tokens != self.last_decoded {
+                self.stagnant_polls = 0;
+                self.blocked_since = None;
+                self.blocked_task_id = None;
+            } else if !output_active {
+                self.stagnant_polls += 1;
+                if self.stagnant_polls >= BLOCKED_STAGNANT_THRESHOLD && self.blocked_since.is_none() {
+                    self.blocked_since = Some(Instant::now());
+                    self.blocked_task_id = task_id;
+                }
             }
+            self.last_decoded = output_tokens;
+            return;
         }
-        self.last_decoded = output_tokens;
+
+        // Fallback detection: n_decoded not available — detect from zero throughput while processing
+        if !has_output_tokens {
+            if prompt_tps > 0.0 || gen_tps > 0.0 {
+                // Throughput is non-zero — slot is actively working
+                self.stagnant_polls = 0;
+                self.blocked_since = None;
+                self.blocked_task_id = None;
+            } else {
+                // Slot is processing but throughput is zero — likely blocked on tool call
+                self.stagnant_polls += 1;
+                if self.stagnant_polls >= BLOCKED_STAGNANT_THRESHOLD && self.blocked_since.is_none() {
+                    self.blocked_since = Some(Instant::now());
+                    self.blocked_task_id = task_id;
+                }
+            }
+            return;
+        }
+
+        // output_tokens is 0 (no next_token data) — can't detect, reset
+        self.stagnant_polls = 0;
+        self.blocked_since = None;
+        self.blocked_task_id = None;
     }
 
     fn is_blocked(&self) -> bool {
@@ -64,6 +98,7 @@ impl SlotBlockTracker {
         self.stagnant_polls = 0;
         self.blocked_since = None;
         self.blocked_task_id = None;
+        self.has_output_tokens = false;
     }
 }
 
@@ -204,6 +239,8 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             continue;
         }
 
+        let (mut prompt_tps, mut gen_tps) = (0.0, 0.0);
+
         // Poll /metrics
         if let Ok(resp) = client.get(format!("{base}/metrics")).send().await
             && let Ok(body) = resp.text().await
@@ -211,7 +248,7 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             let prom = parse_prometheus_metrics(&body);
 
             let current_counters = CounterSnapshot::from_prometheus(&prom);
-            let (prompt_tps, gen_tps) = if previous_counter_session.as_deref()
+            (prompt_tps, gen_tps) = if previous_counter_session.as_deref()
                 == Some(active_id.as_str())
                 && let Some(previous) = &previous_counters
             {
@@ -270,7 +307,10 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
                     primary.is_processing,
                     primary.output_active,
                     primary.output_tokens,
+                    primary.output_available,
                     primary.id_task,
+                    prompt_tps,
+                    gen_tps,
                 );
             } else if slots.slots_processing == 0 {
                 block_tracker.reset();
