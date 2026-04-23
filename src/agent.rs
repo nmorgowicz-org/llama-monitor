@@ -706,7 +706,11 @@ pub(crate) async fn resolve_windows_appdata(connection: &SshConnection) -> Optio
         Ok(Ok(out)) if out.status == 0 => {
             let s = out.stdout.trim().to_string();
             // Guard: if %APPDATA% isn't set in the SSH env it echoes literally
-            if s.is_empty() || s.starts_with('%') { None } else { Some(s) }
+            if s.is_empty() || s.starts_with('%') {
+                None
+            } else {
+                Some(s)
+            }
         }
         _ => None,
     }
