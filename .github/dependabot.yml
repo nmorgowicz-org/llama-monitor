@@ -5,7 +5,28 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    groups:
+      # Group all minor/patch updates together
+      cargo-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Major updates get their own PRs
+      cargo-major:
+        applies-to: version-updates
+        update-types:
+          - "major"
+
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      # Group all action updates together
+      actions-all:
+        applies-to: version-updates
+        patterns:
+          - "*"

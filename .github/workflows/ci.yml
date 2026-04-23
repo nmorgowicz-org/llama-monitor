@@ -14,8 +14,10 @@ env:
 
 jobs:
   check:
-    if: github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-test')
-    runs-on: [self-hosted, linux, proxmox]
+    if: github.event.pull_request.draft == false &&
+        (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
+         startsWith(github.actor, 'dependabot'))
+    runs-on: arc-llama-monitor
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -36,8 +38,10 @@ jobs:
 
   ui:
     needs: check
-    if: github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-test')
-    runs-on: [self-hosted, linux, proxmox]
+    if: github.event.pull_request.draft == false &&
+        (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
+         startsWith(github.actor, 'dependabot'))
+    runs-on: arc-llama-monitor
     steps:
       - uses: actions/checkout@v6
       - name: Download binary
@@ -91,56 +95,26 @@ jobs:
 
   release-smoke:
     needs: check
-    if: github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-test')
-    runs-on: [self-hosted, linux, proxmox]
+    if: github.event.pull_request.draft == false &&
+        (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
+         startsWith(github.actor, 'dependabot'))
+    name: release-smoke (${{ matrix.target }})
+    runs-on: arc-llama-monitor
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - x86_64-pc-windows-gnu
+          - aarch64-apple-darwin
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-unknown-linux-gnu,x86_64-pc-windows-gnu,aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "v0-rust"
-          shared-key: "llama-monitor-${{ hashFiles('Cargo.lock') }}"
+          shared-key: "llama-monitor-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}"
       - name: Preflight release toolchain
         run: bash scripts/release-preflight.sh
-      - name: Smoke build cross-compilation targets
-        run: |
-          mkdir -p ~/.cargo
-          cat > ~/.cargo/config.toml << 'EOF'
-          [target.aarch64-unknown-linux-gnu]
-          linker = "aarch64-linux-gnu-gcc"
-          rustflags = ["-C", "link-arg=-Wl,--allow-shlib-undefined"]
-
-          [target.aarch64-apple-darwin]
-          linker = "/opt/osxcross/target/bin/aarch64-apple-darwin25.1-clang"
-          ar = "/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar"
-          rustflags = [
-            "-C", "link-arg=-fuse-ld=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ld",
-            "-C", "link-arg=-isysroot",
-            "-C", "link-arg=/opt/osxcross/target/SDK/MacOSX26.1.sdk",
-          ]
-          EOF
-
-          PKG_CONFIG_ALLOW_CROSS=1 \
-            PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig \
-            cargo build --release --target aarch64-unknown-linux-gnu &
-          pid1=$!
-
-          CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-C target-feature=+crt-static" \
-            cargo build --release --target x86_64-pc-windows-gnu --no-default-features --features native-tray &
-          pid2=$!
-
-          SDKROOT=/opt/osxcross/target/SDK/MacOSX26.1.sdk \
-            CC_aarch64_apple_darwin=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-clang \
-            AR_aarch64_apple_darwin=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
-            AR=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
-            RANLIB=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ranlib \
-            cargo build --release --target aarch64-apple-darwin &
-          pid3=$!
-
-          result=0
-          wait "$pid1" || result=1
-          wait "$pid2" || result=1
-          wait "$pid3" || result=1
-          exit "$result"
+      - name: Smoke build ${{ matrix.target }}
+        run: bash scripts/build-single-target.sh ${{ matrix.target }}
