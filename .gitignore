@@ -43,3 +43,6 @@ sensor_bridge/publish/
 
 # Test scripts
 test-*.ps1
+
+# Cargo config
+.cargo/
