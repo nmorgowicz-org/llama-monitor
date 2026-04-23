@@ -98,14 +98,23 @@ jobs:
     if: github.event.pull_request.draft == false &&
         (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
          startsWith(github.actor, 'dependabot'))
+    name: release-smoke (${{ matrix.target }})
     runs-on: arc-llama-monitor
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - x86_64-pc-windows-gnu
+          - aarch64-apple-darwin
     steps:
       - uses: actions/checkout@v6
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "v0-rust"
-          shared-key: "llama-monitor-${{ hashFiles('Cargo.lock') }}"
+          shared-key: "llama-monitor-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}"
       - name: Preflight release toolchain
         run: bash scripts/release-preflight.sh
-      - name: Smoke build cross-compilation targets
-        run: bash scripts/build-release-targets.sh
+      - name: Smoke build ${{ matrix.target }}
+        run: bash scripts/build-single-target.sh ${{ matrix.target }}
