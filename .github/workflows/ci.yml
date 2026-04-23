@@ -14,7 +14,9 @@ env:
 
 jobs:
   check:
-    if: github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-test')
+    if: github.event.pull_request.draft == false &&
+        (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
+         startsWith(github.actor, 'dependabot'))
     runs-on: [self-hosted, linux, proxmox]
     steps:
       - uses: actions/checkout@v6
@@ -36,7 +38,9 @@ jobs:
 
   ui:
     needs: check
-    if: github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-test')
+    if: github.event.pull_request.draft == false &&
+        (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
+         startsWith(github.actor, 'dependabot'))
     runs-on: [self-hosted, linux, proxmox]
     steps:
       - uses: actions/checkout@v6
@@ -91,7 +95,9 @@ jobs:
 
   release-smoke:
     needs: check
-    if: github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-test')
+    if: github.event.pull_request.draft == false &&
+        (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
+         startsWith(github.actor, 'dependabot'))
     runs-on: [self-hosted, linux, proxmox]
     steps:
       - uses: actions/checkout@v6
