@@ -697,23 +697,35 @@ async fn detect_remote_os_with(connection: &SshConnection) -> RemoteOs {
 /// user's, causing "The system cannot find the path specified" on `schtasks /Run`.
 /// Expanding the path at install/start time avoids this entirely.
 pub(crate) async fn resolve_windows_appdata(connection: &SshConnection) -> Option<String> {
-    match tokio::time::timeout(
+    // Try %APPDATA% first
+    if let Ok(Ok(out)) = tokio::time::timeout(
         Duration::from_secs(5),
         remote_ssh::exec(connection.clone(), "cmd.exe /C echo %APPDATA%".to_string()),
     )
     .await
+        && out.status == 0
     {
-        Ok(Ok(out)) if out.status == 0 => {
-            let s = out.stdout.trim().to_string();
-            // Guard: if %APPDATA% isn't set in the SSH env it echoes literally
-            if s.is_empty() || s.starts_with('%') {
-                None
-            } else {
-                Some(s)
-            }
+        let s = out.stdout.trim().to_string();
+        if !s.is_empty() && !s.starts_with('%') {
+            return Some(s);
         }
-        _ => None,
     }
+
+    // Fallback: resolve %USERPROFILE% and construct AppData\Roaming
+    if let Ok(Ok(out)) = tokio::time::timeout(
+        Duration::from_secs(5),
+        remote_ssh::exec(connection.clone(), "cmd.exe /C echo %USERPROFILE%".to_string()),
+    )
+    .await
+        && out.status == 0
+    {
+        let profile = out.stdout.trim().to_string();
+        if !profile.is_empty() && !profile.starts_with('%') {
+            return Some(format!("{}\\AppData\\Roaming", profile));
+        }
+    }
+
+    None
 }
 
 async fn detect_remote_temp_dir(connection: &SshConnection, os: RemoteOs) -> String {
