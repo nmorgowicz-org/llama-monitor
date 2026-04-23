@@ -16,24 +16,24 @@ EOF
 echo "Building release targets..."
 
 cargo build --release --target x86_64-unknown-linux-gnu \
+  --target-dir target/smoke-x86_64-linux \
   > /tmp/build-linux-x86_64.log 2>&1 &
 pid1=$!
 
 # CROSS_REMOTE=1: dind's Docker daemon can't bind-mount /opt/rustup from the
 # runner container, so cross copies the sysroot via docker cp instead.
-# CROSS_CONTAINER_ENGINE_NO_BUILDKIT=1: docker.io doesn't include the buildx
-# plugin; the Cross.toml pre-build only uses plain apt-get so this is safe.
 CROSS_REMOTE=1 \
-  CROSS_CONTAINER_ENGINE_NO_BUILDKIT=1 \
   CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-Wl,--allow-shlib-undefined" \
   cross build --release --target aarch64-unknown-linux-gnu \
+  --target-dir target/smoke-aarch64-linux \
   > /tmp/build-linux-aarch64.log 2>&1 &
 pid2=$!
 
 CROSS_REMOTE=1 \
-  CROSS_CONTAINER_ENGINE_NO_BUILDKIT=1 \
   CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-C target-feature=+crt-static" \
-  cross build --release --target x86_64-pc-windows-gnu --no-default-features --features native-tray \
+  cross build --release --target x86_64-pc-windows-gnu \
+  --target-dir target/smoke-x86_64-windows \
+  --no-default-features --features native-tray \
   > /tmp/build-windows-x86_64.log 2>&1 &
 pid3=$!
 
@@ -43,6 +43,7 @@ SDKROOT=/opt/osxcross/target/SDK/MacOSX26.1.sdk \
   AR=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
   RANLIB=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ranlib \
   cargo build --release --target aarch64-apple-darwin \
+  --target-dir target/smoke-aarch64-macos \
   > /tmp/build-macos-aarch64.log 2>&1 &
 pid4=$!
 

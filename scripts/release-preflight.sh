@@ -10,6 +10,7 @@ command -v docker >/dev/null || { echo "FAIL: docker not found"; exit 1; }
 command -v pkg-config >/dev/null || { echo "FAIL: pkg-config not found"; exit 1; }
 
 docker info >/dev/null 2>&1 || { echo "FAIL: Docker daemon not reachable"; exit 1; }
+docker buildx version >/dev/null 2>&1 || { echo "FAIL: docker buildx plugin not available"; exit 1; }
 
 test -x /opt/osxcross/target/bin/aarch64-apple-darwin25.1-clang
 test -x /opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar
