@@ -22,11 +22,19 @@ case "$TARGET" in
     cargo build --release --target x86_64-unknown-linux-gnu
     ;;
   aarch64-unknown-linux-gnu)
-    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-Wl,--allow-shlib-undefined" \
+    # CROSS_REMOTE=1: dind's Docker daemon can't bind-mount /opt/rustup from the
+    # runner container, so cross copies the sysroot via docker cp instead.
+    # CROSS_CONTAINER_ENGINE_NO_BUILDKIT=1: docker.io lacks the buildx plugin;
+    # the Cross.toml pre-build only uses plain apt-get so this is safe.
+    CROSS_REMOTE=1 \
+      CROSS_CONTAINER_ENGINE_NO_BUILDKIT=1 \
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-Wl,--allow-shlib-undefined" \
       cross build --release --target aarch64-unknown-linux-gnu
     ;;
   x86_64-pc-windows-gnu)
-    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-C target-feature=+crt-static" \
+    CROSS_REMOTE=1 \
+      CROSS_CONTAINER_ENGINE_NO_BUILDKIT=1 \
+      CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-C target-feature=+crt-static" \
       cross build --release --target x86_64-pc-windows-gnu \
       --no-default-features --features native-tray
     ;;
