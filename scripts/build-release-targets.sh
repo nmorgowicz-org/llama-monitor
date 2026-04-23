@@ -3,10 +3,6 @@ set -euo pipefail
 
 mkdir -p ~/.cargo
 cat > ~/.cargo/config.toml << 'EOF'
-[target.aarch64-unknown-linux-gnu]
-linker = "aarch64-linux-gnu-gcc"
-rustflags = ["-C", "link-arg=-Wl,--allow-shlib-undefined"]
-
 [target.aarch64-apple-darwin]
 linker = "/opt/osxcross/target/bin/aarch64-apple-darwin25.1-clang"
 ar = "/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar"
@@ -15,18 +11,37 @@ rustflags = [
   "-C", "link-arg=-isysroot",
   "-C", "link-arg=/opt/osxcross/target/SDK/MacOSX26.1.sdk",
 ]
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+rustflags = [
+  "-C", "link-arg=-Wl,--allow-shlib-undefined",
+]
 EOF
 
-cargo build --release --target x86_64-unknown-linux-gnu &
+echo "Building release targets..."
+
+cargo build --release --target x86_64-unknown-linux-gnu \
+  --target-dir target/smoke-x86_64-linux \
+  > /tmp/build-linux-x86_64.log 2>&1 &
 pid1=$!
 
 PKG_CONFIG_ALLOW_CROSS=1 \
-  PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig \
-  cargo build --release --target aarch64-unknown-linux-gnu &
+  PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig \
+  CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+  CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ \
+  AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar \
+  cargo build --release --target aarch64-unknown-linux-gnu \
+  --target-dir target/smoke-aarch64-linux \
+  > /tmp/build-linux-aarch64.log 2>&1 &
 pid2=$!
 
-CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-C target-feature=+crt-static" \
-  cargo build --release --target x86_64-pc-windows-gnu --no-default-features --features native-tray &
+CROSS_REMOTE=1 \
+  CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-C target-feature=+crt-static" \
+  cross build --release --target x86_64-pc-windows-gnu \
+  --target-dir target/smoke-x86_64-windows \
+  --no-default-features --features native-tray \
+  > /tmp/build-windows-x86_64.log 2>&1 &
 pid3=$!
 
 SDKROOT=/opt/osxcross/target/SDK/MacOSX26.1.sdk \
@@ -34,12 +49,17 @@ SDKROOT=/opt/osxcross/target/SDK/MacOSX26.1.sdk \
   AR_aarch64_apple_darwin=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
   AR=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
   RANLIB=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ranlib \
-  cargo build --release --target aarch64-apple-darwin &
+  cargo build --release --target aarch64-apple-darwin \
+  --target-dir target/smoke-aarch64-macos \
+  > /tmp/build-macos-aarch64.log 2>&1 &
 pid4=$!
 
 result=0
-wait "$pid1" || result=1
-wait "$pid2" || result=1
-wait "$pid3" || result=1
-wait "$pid4" || result=1
+
+wait "$pid1" || { echo "FAILED: x86_64-unknown-linux-gnu"; cat /tmp/build-linux-x86_64.log; result=1; }
+wait "$pid2" || { echo "FAILED: aarch64-unknown-linux-gnu"; cat /tmp/build-linux-aarch64.log; result=1; }
+wait "$pid3" || { echo "FAILED: x86_64-pc-windows-gnu"; cat /tmp/build-windows-x86_64.log; result=1; }
+wait "$pid4" || { echo "FAILED: aarch64-apple-darwin"; cat /tmp/build-macos-aarch64.log; result=1; }
+
+[ "$result" -eq 0 ] && echo "All release targets built successfully."
 exit "$result"

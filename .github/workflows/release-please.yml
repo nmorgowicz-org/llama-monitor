@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   release-please:
-    runs-on: [self-hosted, linux, proxmox]
+    runs-on: arc-llama-monitor
     steps:
       - name: Generate GitHub App token
         uses: actions/create-github-app-token@v3

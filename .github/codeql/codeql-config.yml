@@ -1,35 +1,23 @@
-# CodeQL configuration to suppress known false positives
+# CodeQL configuration
+#
+# paths-ignore excludes files from ALL analysis for that language.
+# Use this only for files where every finding would be a false positive —
+# not for silencing one specific query.
+#
+# For one-off suppressions on a specific line, prefer an inline comment:
+#   // CodeQL[rust/path-injection] safe: startup-time path, not user input
 
 paths-ignore:
-  # Config file paths set at application startup, not runtime user input
+  # Config file paths are resolved at application startup from
+  # ~/.config/llama-monitor/, not from runtime user input.
+  # All findings in these files are path-injection false positives.
   - src/config.rs
   - src/presets/mod.rs
   - src/state.rs
   - src/gpu/env.rs
   - src/agent.rs
   - src/models/mod.rs
-
-query-filters:
-  # Suppress path-injection for config file operations (startup-time paths, not runtime user input)
-  - id: rust/path-injection
-    paths:
-      - src/config.rs
-      - src/presets/mod.rs
-      - src/state.rs
-      - src/gpu/env.rs
-      - src/agent.rs
-      - src/models/mod.rs
-    reason: "Config file paths are set at application startup from ~/.config/llama-monitor/, not from runtime user input. These are safe file operations."
-
-  # Suppress XSS for data from backend API (llama.cpp), not user input
-  - id: js/xss
-    paths:
-      - static/app.js
-      - static/compact.html
-    reason: "Data comes from backend API (llama.cpp metrics), not from user input. The backend is trusted."
-
-  # Suppress path-injection for temp file operations
-  - id: cs/path-injection
-    paths:
-      - sensor_bridge/Program.cs
-    reason: "Path.GetTempPath() is a safe system call that returns the OS temp directory, not user input."
+  # XSS findings in the frontend are false positives — data comes from
+  # the backend llama.cpp API, not from user input.
+  - static/app.js
+  - static/compact.html

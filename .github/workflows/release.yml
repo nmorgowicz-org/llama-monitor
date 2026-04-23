@@ -19,46 +19,64 @@ env:
 
 jobs:
   build:
-    runs-on: [self-hosted, linux, proxmox]
+    name: Build (${{ matrix.target }})
+    runs-on: arc-llama-monitor
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            artifact: llama-monitor-linux-x86_64
+          - target: aarch64-unknown-linux-gnu
+            artifact: llama-monitor-linux-aarch64
+          - target: x86_64-pc-windows-gnu
+            artifact: llama-monitor-windows-x86_64.exe
+          - target: aarch64-apple-darwin
+            artifact: llama-monitor-macos-aarch64.tar.gz
+
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu,x86_64-pc-windows-gnu,aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "v0-rust"
-          shared-key: "llama-monitor-${{ hashFiles('Cargo.lock') }}"
+          shared-key: "llama-monitor-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}"
 
       - name: Preflight release toolchain
         run: bash scripts/release-preflight.sh
 
-      - name: Build all targets
-        run: bash scripts/build-release-targets.sh
+      - name: Build ${{ matrix.target }}
+        run: bash scripts/build-single-target.sh ${{ matrix.target }}
 
-      - name: Copy binaries
+      - name: Package artifact
         run: |
-          cp target/x86_64-unknown-linux-gnu/release/llama-monitor ./llama-monitor-linux-x86_64
-          cp target/aarch64-unknown-linux-gnu/release/llama-monitor ./llama-monitor-linux-aarch64
-          cp target/x86_64-pc-windows-gnu/release/llama-monitor.exe ./llama-monitor-windows-x86_64.exe
-          chmod +x ./llama-monitor-linux-x86_64 ./llama-monitor-linux-aarch64
-          cp target/aarch64-apple-darwin/release/llama-monitor ./llama-monitor-macos-aarch64
-          chmod +x ./llama-monitor-macos-aarch64
-          tar -czf llama-monitor-macos-aarch64.tar.gz llama-monitor-macos-aarch64
+          case "${{ matrix.target }}" in
+            x86_64-unknown-linux-gnu)
+              cp target/x86_64-unknown-linux-gnu/release/llama-monitor llama-monitor-linux-x86_64
+              chmod +x llama-monitor-linux-x86_64
+              ;;
+            aarch64-unknown-linux-gnu)
+              cp target/aarch64-unknown-linux-gnu/release/llama-monitor llama-monitor-linux-aarch64
+              chmod +x llama-monitor-linux-aarch64
+              ;;
+            x86_64-pc-windows-gnu)
+              cp target/x86_64-pc-windows-gnu/release/llama-monitor.exe llama-monitor-windows-x86_64.exe
+              ;;
+            aarch64-apple-darwin)
+              cp target/aarch64-apple-darwin/release/llama-monitor llama-monitor-macos-aarch64
+              chmod +x llama-monitor-macos-aarch64
+              tar -czf llama-monitor-macos-aarch64.tar.gz llama-monitor-macos-aarch64
+              ;;
+          esac
 
-      - name: Upload artifacts
+      - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: release-binaries
-          path: |
-            llama-monitor-linux-x86_64
-            llama-monitor-linux-aarch64
-            llama-monitor-windows-x86_64.exe
-            llama-monitor-macos-aarch64.tar.gz
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
 
   release:
     needs: build
-    runs-on: [self-hosted, linux, proxmox]
+    runs-on: arc-llama-monitor
     steps:
       - name: Generate GitHub App token
         uses: actions/create-github-app-token@v3
@@ -68,9 +86,12 @@ jobs:
           private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
 
       - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v8
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v8
         with:
-          name: release-binaries
+          pattern: llama-monitor-*
+          merge-multiple: true
           path: .
 
       - name: Create release
