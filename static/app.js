@@ -4746,10 +4746,17 @@ ws.onmessage = e => {
     const genAgeMs = l?.last_generation_throughput_unix_ms || 0;
     const latestThroughputMs = Math.max(promptAgeMs, genAgeMs);
     const throughputActive = promptRate > 0 || genRate > 0;
+    const isBlocked = l?.tool_calling_blocked || false;
+    const blockedSec = l?.blocked_duration_sec || 0;
 
-    setCardState(throughputCard, !hasActiveEndpoint ? 'dormant' : throughputActive ? 'live' : 'idle');
+    setCardState(throughputCard, !hasActiveEndpoint ? 'dormant' : isBlocked ? 'blocked' : throughputActive ? 'live' : 'idle');
     setEmptyState(document.getElementById('m-throughput-empty'), !hasActiveEndpoint);
-    setChipState(throughputState, throughputActive ? 'live' : 'idle', throughputActive ? 'live' : 'idle');
+    setChipState(throughputState, throughputActive ? 'live' : isBlocked ? 'blocked' : 'idle', throughputActive ? 'live' : isBlocked ? 'blocked' : 'idle');
+
+    const blockedEl = document.getElementById('m-throughput-blocked');
+    const blockedTimer = document.getElementById('m-blocked-timer');
+    if (blockedEl) blockedEl.classList.toggle('visible', isBlocked);
+    if (blockedTimer) blockedTimer.textContent = `${blockedSec}s`;
     if (throughputAge) {
         throughputAge.textContent = formatMetricAge(latestThroughputMs);
     }
@@ -4839,9 +4846,9 @@ ws.onmessage = e => {
     renderDecodingConfig(l, hasActiveEndpoint);
     renderLiveSparkline('m-live-output-spark', window.metricSeries.liveOutput);
 
-    setCardState(generationCard, !hasActiveEndpoint ? 'dormant' : generationActive ? 'live' : generationAvailable ? 'idle' : 'unavailable');
+    setCardState(generationCard, !hasActiveEndpoint ? 'dormant' : isBlocked ? 'blocked' : generationActive ? 'live' : generationAvailable ? 'idle' : 'unavailable');
     setEmptyState(document.getElementById('m-generation-empty'), !hasActiveEndpoint);
-    setChipState(generationState, generationActive ? 'generating' : 'idle', generationActive ? 'live' : 'idle');
+    setChipState(generationState, isBlocked ? 'blocked' : (generationActive ? 'generating' : 'idle'), isBlocked ? 'blocked' : (generationActive ? 'live' : 'idle'));
     setChipState(document.getElementById('m-slots-state'), generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');
     setChipState(document.getElementById('m-activity-state'), generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');
     if (generationRing) generationRing.style.setProperty('--progress', generationPct.toFixed(2));
@@ -4849,10 +4856,15 @@ ws.onmessage = e => {
         liveVelocity.textContent = liveOutputRate > 0 ? liveOutputRate.toFixed(1) + ' t/s' : (generationActive ? 'warming' : 'retained');
     }
     if (promptStage && outputStage) {
-        promptStage.classList.toggle('active', generationActive && generated <= 1);
-        outputStage.classList.toggle('active', generationActive && generated > 1);
-        promptStage.classList.toggle('idle', !generationActive);
-        outputStage.classList.toggle('idle', !generationActive);
+        promptStage.classList.toggle('active', generationActive && generated <= 1 && !isBlocked);
+        outputStage.classList.toggle('active', generationActive && generated > 1 && !isBlocked);
+        promptStage.classList.toggle('idle', !generationActive && !isBlocked);
+        outputStage.classList.toggle('idle', !generationActive && !isBlocked);
+    }
+    const toolCallStage = document.getElementById('m-stage-toolcall');
+    if (toolCallStage) {
+        toolCallStage.classList.toggle('toolcall', isBlocked);
+        toolCallStage.classList.toggle('idle', !isBlocked && !generationActive);
     }
     if (generationAvailable) {
         if (generationMain) generationMain.textContent = formatMetricNumber(generated) + ' output tokens';

@@ -40,6 +40,9 @@ pub struct LlamaMetrics {
     pub slots: Vec<SlotSnapshot>,
     pub requests_processing: u32,
     pub status: String,
+    pub tool_calling_blocked: bool,
+    pub blocked_duration_sec: u64,
+    pub blocked_task_id: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]

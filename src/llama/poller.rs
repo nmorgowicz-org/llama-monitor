@@ -1,5 +1,5 @@
 use std::time::Duration;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::state::AppState;
 
@@ -11,6 +11,60 @@ struct CounterSnapshot {
     prompt_seconds_total: f64,
     predicted_tokens_total: f64,
     predicted_seconds_total: f64,
+}
+
+const BLOCKED_STAGNANT_THRESHOLD: u32 = 3;
+
+#[derive(Debug, Clone, Default)]
+struct SlotBlockTracker {
+    last_decoded: u64,
+    stagnant_polls: u32,
+    blocked_since: Option<Instant>,
+    blocked_task_id: Option<u64>,
+}
+
+impl SlotBlockTracker {
+    fn update(
+        &mut self,
+        is_processing: bool,
+        output_active: bool,
+        output_tokens: u64,
+        task_id: Option<u64>,
+    ) {
+        if !is_processing {
+            self.reset();
+            return;
+        }
+        if output_active || output_tokens != self.last_decoded || output_tokens == 0 {
+            self.stagnant_polls = 0;
+            self.blocked_since = None;
+            self.blocked_task_id = None;
+        } else if output_tokens > 0 && !output_active {
+            self.stagnant_polls += 1;
+            if self.stagnant_polls >= BLOCKED_STAGNANT_THRESHOLD && self.blocked_since.is_none() {
+                self.blocked_since = Some(Instant::now());
+                self.blocked_task_id = task_id;
+            }
+        }
+        self.last_decoded = output_tokens;
+    }
+
+    fn is_blocked(&self) -> bool {
+        self.blocked_since.is_some()
+    }
+
+    fn blocked_duration_sec(&self) -> u64 {
+        self.blocked_since
+            .map(|since| since.elapsed().as_secs())
+            .unwrap_or(0)
+    }
+
+    fn reset(&mut self) {
+        self.last_decoded = 0;
+        self.stagnant_polls = 0;
+        self.blocked_since = None;
+        self.blocked_task_id = None;
+    }
 }
 
 impl CounterSnapshot {
@@ -64,6 +118,7 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
     let mut enabled = false;
     let mut previous_counters: Option<CounterSnapshot> = None;
     let mut previous_counter_session: Option<String> = None;
+    let mut block_tracker = SlotBlockTracker::default();
 
     loop {
         if !enabled {
@@ -76,6 +131,7 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             enabled = false;
             previous_counters = None;
             previous_counter_session = None;
+            block_tracker.reset();
             tokio::time::sleep(Duration::from_secs(poll_interval)).await;
             continue;
         }
@@ -208,6 +264,18 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             && let Ok(body) = resp.text().await
             && let Some(slots) = parse_slot_metrics(&body)
         {
+            // Track blocked state from primary processing slot
+            if let Some(primary) = slots.slots.iter().find(|s| s.is_processing) {
+                block_tracker.update(
+                    primary.is_processing,
+                    primary.output_active,
+                    primary.output_tokens,
+                    primary.id_task,
+                );
+            } else if slots.slots_processing == 0 {
+                block_tracker.reset();
+            }
+
             let mut m = state.llama_metrics.lock().unwrap();
             m.slots_idle = slots.slots_idle;
             m.slots_processing = slots.slots_processing;
@@ -233,6 +301,12 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
                 m.kv_cache_tokens = 0;
                 m.context_live_tokens = 0;
             }
+            // Update blocked state
+            m.tool_calling_blocked = block_tracker.is_blocked();
+            m.blocked_duration_sec = block_tracker.blocked_duration_sec();
+            m.blocked_task_id = block_tracker.blocked_task_id;
+        } else {
+            block_tracker.reset();
         }
 
         tokio::time::sleep(Duration::from_secs(poll_interval)).await;

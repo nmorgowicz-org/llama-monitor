@@ -201,6 +201,17 @@
                                     <div class="speed-bar gen-bar" id="m-gen-bar"></div>
                                 </div>
                             </div>
+                            <div class="blocked-indicator" id="m-throughput-blocked">
+                                <span class="blocked-icon" aria-hidden="true">
+                                    <svg width="14" height="14" viewBox="0 0 14 14">
+                                        <circle cx="7" cy="7" r="6" fill="none" stroke="#ebcb8b" stroke-width="1.5" stroke-dasharray="30 10" stroke-linecap="round">
+                                            <animateTransform attributeName="transform" type="rotate" from="0 7 7" to="360 7 7" dur="2.4s" repeatCount="indefinite"/>
+                                        </circle>
+                                    </svg>
+                                </span>
+                                <span class="blocked-text">tool calling — throughput suspended</span>
+                                <span class="blocked-timer" id="m-blocked-timer">0s</span>
+                            </div>
                             <div class="sparkline-pair">
                                 <svg class="metric-sparkline" id="m-prompt-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
                                 <svg class="metric-sparkline" id="m-gen-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
@@ -225,6 +236,7 @@
                             <div class="generation-stage" id="m-generation-stage" title="Inferred from slot activity and output token changes.">
                                 <span class="stage-segment" id="m-stage-prompt">Prompt ingest</span>
                                 <span class="stage-segment" id="m-stage-output">Output generation</span>
+                                <span class="stage-segment" id="m-stage-toolcall">Tool calling</span>
                             </div>
                             <div class="generation-layout">
                                 <div class="generation-ring" id="m-generation-ring" style="--progress: 0;">
