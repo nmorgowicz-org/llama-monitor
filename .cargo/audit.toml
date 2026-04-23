@@ -1,0 +1,8 @@
+[advisories]
+ignore = [
+    # RUSTSEC-2024-0429: Unsoundness in glib::VariantStrIter (glib >= 0.15.0, < 0.20.0)
+    # Blocked on upstream wry gtk4 / webkit2gtk-6.0 migration. We do not use VariantStrIter.
+    # See docs/20260423-glib-security-advisory-and-gtk4-migration.md for full context.
+    # Track: https://github.com/tauri-apps/wry (gtk4 support) and tauri-apps/tauri#11293
+    "RUSTSEC-2024-0429",
+]
