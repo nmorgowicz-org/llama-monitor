@@ -2644,15 +2644,16 @@ body.sidebar-collapsed .content-area {
    min-height: 0;
    display: flex;
    align-items: center;
-   transition: opacity 150ms ease;
  }
 
  .hw-metric-viz.viz-fade-out {
    opacity: 0;
+   transition: opacity 120ms ease;
  }
 
  .hw-metric-viz.viz-fade-in {
    opacity: 1;
+   transition: opacity 160ms ease;
  }
 
  .hw-metric-value {
@@ -2931,34 +2932,100 @@ body.sidebar-collapsed .content-area {
     content: '1920';
   }
 
- /* Hardware card severity animations */
- @keyframes hw-temp-breathe {
-   0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 12px rgba(244, 63, 94, 0.15); }
-   50% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 24px rgba(244, 63, 94, 0.35); }
- }
+/* Hardware card severity animations */
+  @keyframes hw-temp-breathe {
+    0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 24px rgba(244, 63, 94, 0.14); }
+    50% { box-shadow: inset 0 0 0 1px rgba(244, 63, 94, 0.2), 0 0 36px rgba(244, 63, 94, 0.28); }
+  }
 
- .hw-temp-gauge.is-warming {
-   animation: hw-temp-breathe 2s ease-in-out infinite;
- }
+  .hw-temp-gauge.is-warming {
+    animation: hw-temp-breathe 2.4s ease-in-out infinite;
+  }
 
- @keyframes hw-bar-shimmer {
-   0%, 100% { filter: brightness(1); }
-   50% { filter: brightness(1.3); }
- }
+  /* Bar shimmer sweep (matches inference card style) */
+  @keyframes hw-bar-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
 
- .hw-bar-fill.is-hot,
- .hw-stacked-fill.is-hot {
-   animation: hw-bar-shimmer 2s ease-in-out infinite;
- }
+  .hw-bar-bg {
+    position: relative;
+    overflow: hidden;
+  }
 
- @keyframes hw-power-pulse {
-   0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
-   50% { box-shadow: 0 0 0 6px rgba(244, 63, 94, 0.12); }
- }
+  .hw-bar-bg::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
 
- .hw-power-capped {
-   animation: hw-power-pulse 1.5s ease-in-out infinite;
- }
+  .hw-bar-bg.is-hot::after {
+    animation: hw-bar-shimmer 2s ease-in-out infinite;
+  }
+
+  .hw-stacked-bg {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hw-stacked-bg::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
+
+  .hw-stacked-bg.is-hot::after {
+    animation: hw-bar-shimmer 2s ease-in-out infinite;
+  }
+
+  /* Sparkline peak dot pulse */
+  @keyframes hw-peak-pulse {
+    0%, 100% { r: 2; opacity: 0.8; }
+    50% { r: 3; opacity: 1; }
+  }
+
+  .hw-sparkline circle:last-child {
+    animation: hw-peak-pulse 2s ease-in-out infinite;
+  }
+
+  /* Ring breathe (matches inference card) */
+  @keyframes hw-ring-breathe {
+    0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 24px rgba(136, 192, 209, 0.14); }
+    50% { box-shadow: inset 0 0 0 1px rgba(143, 188, 187, 0.2), 0 0 36px rgba(136, 192, 209, 0.22); }
+  }
+
+  .hw-ring-viz.is-warming {
+    animation: hw-ring-breathe 2.4s ease-in-out infinite;
+  }
+
+  /* Power cap pulse */
+  @keyframes hw-power-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
+    50% { box-shadow: 0 0 0 6px rgba(244, 63, 94, 0.12); }
+  }
+
+  .hw-power-capped {
+    animation: hw-power-pulse 1.5s ease-in-out infinite;
+  }
+
+  /* Metric block hover glow */
+  .hw-metric-block:hover {
+    border-color: rgba(136, 192, 209, 0.15);
+    background: rgba(136, 192, 209, 0.04);
+    box-shadow: 0 0 16px rgba(136, 192, 209, 0.06);
+  }
 
  /* Hardware card entrance animation */
  @keyframes hw-card-entrance {

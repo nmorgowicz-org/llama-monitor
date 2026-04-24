@@ -4591,8 +4591,8 @@ function swapVizContent(container, html) {
 
 function renderHwBar(container, pct, isHot) {
     if (!container) return;
-    const cls = isHot ? 'hw-bar-fill is-hot' : 'hw-bar-fill';
-    setVizContent(container, '<div class="hw-bar-bg"><div class="' + cls + '" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div></div>');
+    const bgCls = isHot ? 'hw-bar-bg is-hot' : 'hw-bar-bg';
+    setVizContent(container, '<div class="' + bgCls + '"><div class="hw-bar-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div></div>');
 }
 
 function renderHwRing(container, pct, isHot) {
@@ -4612,7 +4612,9 @@ function renderHwSparkline(container, history) {
 
 function renderHwStacked(container, pct) {
     if (!container) return;
-    setVizContent(container, '<div class="hw-stacked-bg"><div class="hw-stacked-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div><div class="hw-stacked-free" style="width:' + (100 - pct).toFixed(1) + '%"></div></div>');
+    const isHot = pct >= 90;
+    const bgCls = isHot ? 'hw-stacked-bg is-hot' : 'hw-stacked-bg';
+    setVizContent(container, '<div class="' + bgCls + '"><div class="hw-stacked-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div><div class="hw-stacked-free" style="width:' + (100 - pct).toFixed(1) + '%"></div></div>');
 }
 
 function renderHwChips(container, chips) {
