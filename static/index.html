@@ -154,21 +154,6 @@
                     <button class="btn btn-stop" id="btn-stop" onclick="doStop()" disabled>Stop</button>
                 </div>
 
-                <section class="metric-section" id="system-section" style="display:none;">
-                    <h2 class="dashboard-section-title">System</h2>
-                    <div class="table-wrap widget-card">
-                        <table class="gpu-table">
-                            <colgroup>
-                                <col style="width:18%"><col style="width:10%"><col style="width:10%"><col style="width:18%"><col style="width:26%"><col style="width:18%">
-                            </colgroup>
-                            <thead><tr>
-                                <th>System</th><th>Temp</th><th>Load</th><th>Clock</th><th>RAM</th><th>Model</th>
-                            </tr></thead>
-                            <tbody id="system-rows"></tbody>
-                        </table>
-                    </div>
-                </section>
-
                 <section class="metric-section" id="inference-section">
                     <h2 class="dashboard-section-title">Inference Metrics <span class="metric-badge" id="inference-historic-badge" style="display:none;">Historic</span></h2>
                     <div class="inference-grid" id="inference">
@@ -182,9 +167,11 @@
                             <div class="speed-item">
                                 <div class="speed-header">
                                     <span class="speed-label">prompt</span>
-                                    <span class="speed-value" id="m-prompt">&mdash;</span>
-                                    <span class="speed-max" id="m-prompt-max" title="Peak seen">&mdash;</span>
-                                    <span class="metric-delta" id="m-prompt-delta"></span>
+                                    <span class="speed-value-wrap">
+                                        <span class="speed-value" id="m-prompt">&mdash;</span>
+                                        <span class="metric-delta" id="m-prompt-delta"></span>
+                                    </span>
+                                    <span class="speed-peak-badge" id="m-prompt-max" title="Peak seen"></span>
                                 </div>
                                 <div class="speed-bar-bg">
                                     <div class="speed-bar prompt-bar" id="m-prompt-bar"></div>
@@ -193,24 +180,15 @@
                             <div class="speed-item">
                                 <div class="speed-header">
                                     <span class="speed-label">generation</span>
-                                    <span class="speed-value" id="m-gen">&mdash;</span>
-                                    <span class="speed-max" id="m-gen-max" title="Peak seen">&mdash;</span>
-                                    <span class="metric-delta" id="m-gen-delta"></span>
+                                    <span class="speed-value-wrap">
+                                        <span class="speed-value" id="m-gen">&mdash;</span>
+                                        <span class="metric-delta" id="m-gen-delta"></span>
+                                    </span>
+                                    <span class="speed-peak-badge" id="m-gen-max" title="Peak seen"></span>
                                 </div>
                                 <div class="speed-bar-bg">
                                     <div class="speed-bar gen-bar" id="m-gen-bar"></div>
                                 </div>
-                            </div>
-                            <div class="blocked-indicator" id="m-throughput-blocked">
-                                <span class="blocked-icon" aria-hidden="true">
-                                    <svg width="14" height="14" viewBox="0 0 14 14">
-                                        <circle cx="7" cy="7" r="6" fill="none" stroke="#ebcb8b" stroke-width="1.5" stroke-dasharray="30 10" stroke-linecap="round">
-                                            <animateTransform attributeName="transform" type="rotate" from="0 7 7" to="360 7 7" dur="2.4s" repeatCount="indefinite"/>
-                                        </circle>
-                                    </svg>
-                                </span>
-                                <span class="blocked-text">tool calling — throughput suspended</span>
-                                <span class="blocked-timer" id="m-blocked-timer">0s</span>
                             </div>
                             <div class="sparkline-pair">
                                 <svg class="metric-sparkline" id="m-prompt-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
@@ -236,7 +214,6 @@
                             <div class="generation-stage" id="m-generation-stage" title="Inferred from slot activity and output token changes.">
                                 <span class="stage-segment" id="m-stage-prompt">Prompt ingest</span>
                                 <span class="stage-segment" id="m-stage-output">Output generation</span>
-                                <span class="stage-segment" id="m-stage-toolcall">Tool calling</span>
                             </div>
                             <div class="generation-layout">
                                 <div class="generation-ring" id="m-generation-ring" style="--progress: 0;">
@@ -342,6 +319,21 @@
                                 <th>GPU</th><th>Temp</th><th>Load</th><th>VRAM</th><th>Power</th><th>SCLK</th><th>MCLK</th>
                             </tr></thead>
                             <tbody id="gpu-rows"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="metric-section" id="system-section" style="display:none;">
+                    <h2 class="dashboard-section-title">System</h2>
+                    <div class="table-wrap widget-card">
+                        <table class="gpu-table">
+                            <colgroup>
+                                <col style="width:18%"><col style="width:10%"><col style="width:10%"><col style="width:18%"><col style="width:26%"><col style="width:18%">
+                            </colgroup>
+                            <thead><tr>
+                                <th>System</th><th>Temp</th><th>Load</th><th>Clock</th><th>RAM</th><th>Model</th>
+                            </tr></thead>
+                            <tbody id="system-rows"></tbody>
                         </table>
                     </div>
                 </section>

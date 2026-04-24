@@ -4774,23 +4774,11 @@ ws.onmessage = e => {
     const genAgeMs = l?.last_generation_throughput_unix_ms || 0;
     const latestThroughputMs = Math.max(promptAgeMs, genAgeMs);
     const throughputActive = promptRate > 0 || genRate > 0;
-    const isBlocked = l?.tool_calling_blocked || false;
-    const blockedSec = l?.blocked_duration_sec || 0;
-    const isBlockedCritical = isBlocked && blockedSec >= 60;
 
-    setCardState(throughputCard, !hasActiveEndpoint ? 'dormant' : isBlocked ? 'blocked' : throughputActive ? 'live' : 'idle');
+    setCardState(throughputCard, !hasActiveEndpoint ? 'dormant' : throughputActive ? 'live' : 'idle');
     setEmptyState(document.getElementById('m-throughput-empty'), !hasActiveEndpoint);
-    setChipState(throughputState, throughputActive ? 'live' : isBlockedCritical ? 'critical' : isBlocked ? 'blocked' : 'idle', throughputActive ? 'live' : isBlockedCritical ? 'critical' : isBlocked ? 'blocked' : 'idle');
+    setChipState(throughputState, throughputActive ? 'live' : 'idle', throughputActive ? 'live' : 'idle');
 
-    const blockedEl = document.getElementById('m-throughput-blocked');
-    const blockedTimer = document.getElementById('m-blocked-timer');
-    if (blockedEl) {
-        blockedEl.classList.toggle('visible', isBlocked);
-        blockedEl.classList.toggle('critical', isBlockedCritical);
-    }
-    if (blockedTimer) blockedTimer.textContent = `${blockedSec}s`;
-    const blockedText = blockedEl?.querySelector('.blocked-text');
-    if (blockedText) blockedText.textContent = isBlockedCritical ? 'potential hang — throughput suspended' : 'tool calling — throughput suspended';
     if (throughputAge) {
         throughputAge.textContent = formatMetricAge(latestThroughputMs);
     }
@@ -4835,8 +4823,8 @@ ws.onmessage = e => {
 
     pushSparklinePoint('prompt', promptDisplayRate);
     pushSparklinePoint('generation', genDisplayRate);
-    renderSparkline('m-prompt-spark', window.metricSeries.prompt, 'prompt', isBlocked);
-    renderSparkline('m-gen-spark', window.metricSeries.generation, 'generation', isBlocked);
+    renderSparkline('m-prompt-spark', window.metricSeries.prompt, 'prompt', false);
+    renderSparkline('m-gen-spark', window.metricSeries.generation, 'generation', false);
 
     // Throughput ratio
     const ratioBar = document.getElementById('m-throughput-ratio-bar');
@@ -4880,14 +4868,14 @@ ws.onmessage = e => {
     renderDecodingConfig(l, hasActiveEndpoint);
     renderLiveSparkline('m-live-output-spark', window.metricSeries.liveOutput);
 
-    setCardState(generationCard, !hasActiveEndpoint ? 'dormant' : isBlocked ? 'blocked' : generationActive ? 'live' : generationAvailable ? 'idle' : 'unavailable');
+    setCardState(generationCard, !hasActiveEndpoint ? 'dormant' : generationActive ? 'live' : generationAvailable ? 'idle' : 'unavailable');
     setEmptyState(document.getElementById('m-generation-empty'), !hasActiveEndpoint);
-    setChipState(generationState, isBlockedCritical ? 'critical' : isBlocked ? 'blocked' : (generationActive ? 'generating' : 'idle'), isBlockedCritical ? 'critical' : isBlocked ? 'blocked' : (generationActive ? 'live' : 'idle'));
+    setChipState(generationState, generationActive ? 'generating' : 'idle', generationActive ? 'live' : 'idle');
     setChipState(document.getElementById('m-slots-state'), generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');
     setChipState(document.getElementById('m-activity-state'), generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');
     if (generationRing) generationRing.style.setProperty('--progress', generationPct.toFixed(2));
     if (liveVelocity) {
-        liveVelocity.textContent = liveOutputRate > 0 ? liveOutputRate.toFixed(1) + ' t/s' : (isBlockedCritical ? 'hung' : isBlocked ? 'blocked' : (generationActive ? 'warming' : 'retained'));
+        liveVelocity.textContent = liveOutputRate > 0 ? liveOutputRate.toFixed(1) + ' t/s' : (generationActive ? 'warming' : 'retained');
     }
     if (promptStage && outputStage) {
         // Use throughput as proxy for phase detection when next_token data isn't available
@@ -4898,16 +4886,10 @@ ws.onmessage = e => {
         const isOutputPhase = useThroughputFallback
             ? !!(l?.generation_throughput_active)
             : (generated > 1);
-        promptStage.classList.toggle('active', generationActive && isPromptPhase && !isBlocked);
-        outputStage.classList.toggle('active', generationActive && isOutputPhase && !isBlocked);
-        promptStage.classList.toggle('idle', !generationActive && !isBlocked && !isOutputPhase);
-        outputStage.classList.toggle('idle', !generationActive && !isBlocked && !isPromptPhase);
-    }
-    const toolCallStage = document.getElementById('m-stage-toolcall');
-    if (toolCallStage) {
-        toolCallStage.classList.toggle('toolcall-critical', isBlockedCritical);
-        toolCallStage.classList.toggle('toolcall', isBlocked && !isBlockedCritical);
-        toolCallStage.classList.toggle('idle', !isBlocked && !generationActive);
+        promptStage.classList.toggle('active', generationActive && isPromptPhase);
+        outputStage.classList.toggle('active', generationActive && isOutputPhase);
+        promptStage.classList.toggle('idle', !generationActive && !isOutputPhase);
+        outputStage.classList.toggle('idle', !generationActive && !isPromptPhase);
     }
     if (generationAvailable) {
         if (generationMain) generationMain.textContent = formatMetricNumber(generated) + ' output tokens';
