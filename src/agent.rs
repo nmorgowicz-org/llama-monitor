@@ -831,7 +831,7 @@ fn install_path_for_os(os: RemoteOs) -> Option<&'static str> {
     }
 }
 
-fn default_install_path_for_os(os: RemoteOs) -> String {
+pub(crate) fn default_install_path_for_os(os: RemoteOs) -> String {
     install_path_for_os(os)
         .unwrap_or("/tmp/llama-monitor")
         .to_string()
