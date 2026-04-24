@@ -17,27 +17,35 @@
 </head>
 <body>
       <div class="endpoint-health-strip" aria-label="Active endpoint status.">
-        <span class="status-label">Active endpoint</span>
-        <span class="endpoint-mode" id="endpoint-mode">Loading...</span>
-        <div class="endpoint-url-container">
-            <span class="endpoint-url" id="endpoint-url">...</span>
-            <button class="btn-detach-top" id="btn-detach-top" onclick="doDetach()" style="display:none;" title="Detach from endpoint">✕ Detach</button>
+        <div class="endpoint-health-strip-setup" id="endpoint-strip-setup">
+            <span class="connecting-dots" id="connecting-dots" style="display:none;">Connecting</span>
         </div>
-        <span class="endpoint-status-wrap">
-            <button type="button" class="endpoint-status" id="endpoint-status" aria-expanded="false" aria-controls="capability-popover">...</button>
-            <span class="capability-popover" id="capability-popover" role="status" aria-live="polite"></span>
-        </span>
-        <span class="agent-status" id="agent-status" style="display:none;">
-            <span class="agent-indicator">●</span>
-            <span class="agent-text">Remote Agent</span>
-            <span class="agent-latency" id="agent-latency"></span>
-            <button type="button" class="btn-agent-fix" onclick="openRemoteAgentSetup()" title="Set up remote agent">⚡ Fix</button>
-        </span>
-        <span class="status-dot" id="status-dot"></span>
-        <span class="status-text" id="status-text"></span>
-        <span class="badge-server" id="badge-server"></span>
-        <span class="badge-chat" id="badge-chat"></span>
-        <span class="badge-logs" id="badge-logs"></span>
+        <div class="endpoint-health-strip-monitor" id="endpoint-strip-monitor" style="display:none;">
+            <div class="strip-left">
+                <span class="endpoint-mode" id="endpoint-mode"></span>
+                <div class="endpoint-url-container">
+                    <span class="endpoint-url" id="endpoint-url"></span>
+                    <button class="btn-detach-top" id="btn-detach-top" onclick="doDetach()" style="display:none;" title="Detach from endpoint">✕ Detach</button>
+                </div>
+                <span class="endpoint-status-wrap">
+                    <button type="button" class="endpoint-status" id="endpoint-status" aria-expanded="false" aria-controls="capability-popover"></button>
+                    <span class="capability-popover" id="capability-popover" role="status" aria-live="polite"></span>
+                </span>
+            </div>
+            <div class="strip-right">
+                <span class="agent-status" id="agent-status" style="display:none;">
+                    <span class="agent-indicator">●</span>
+                    <span class="agent-text">Remote Agent</span>
+                    <span class="agent-latency" id="agent-latency"></span>
+                    <button type="button" class="btn-agent-fix" onclick="openRemoteAgentSetup()" title="Set up remote agent">⚡ Fix</button>
+                </span>
+                <span class="status-dot" id="status-dot"></span>
+                <span class="status-text" id="status-text"></span>
+                <span class="badge-server" id="badge-server"></span>
+                <span class="badge-chat" id="badge-chat"></span>
+                <span class="badge-logs" id="badge-logs"></span>
+            </div>
+        </div>
     </div>
     <div class="top-nav-bar">
         <div class="nav-left">
@@ -124,8 +132,77 @@
     </div>
 
     <main class="content-area">
-        <!-- Page: Server (control + monitor) -->
-        <div class="page active" id="page-server">
+        <!-- VIEW CONTAINER -->
+        <div class="view-container">
+            <!-- SETUP VIEW -->
+            <div class="view view-setup" id="view-setup">
+                <div class="setup-bg"></div>
+                <div class="setup-hero">
+                    <div class="setup-title-row">
+                        <div class="setup-logo">
+                            <svg width="40" height="40" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M16 2C8.268 2 2 8.268 2 16C2 23.732 8.268 30 16 30C23.732 30 30 23.732 30 16C30 8.268 23.732 2 16 2ZM16 26C10.477 26 6 21.523 6 16C6 10.477 10.477 6 16 6C21.523 6 26 10.477 26 16C26 21.523 21.523 26 16 26Z" fill="var(--theme-primary)"/>
+                                <path d="M16 12C14.6739 12 13.4021 12.5268 12.4645 13.4645C11.5268 14.4021 11 15.6739 11 17C11 18.3261 11.5268 19.5979 12.4645 20.5355C13.4021 21.4732 14.6739 22 16 22C17.3261 22 18.5979 21.4732 19.5355 20.5355C20.4732 19.5979 21 18.3261 21 17C21 15.6739 20.4732 14.4021 19.5355 13.4645C18.5979 12.5268 17.3261 12 16 12ZM16 20C14.9391 20 13.9217 19.5786 13.1716 18.8284C12.4214 18.0783 12 17.0609 12 16C12 14.9391 12.4214 13.9217 13.1716 13.1716C13.9217 12.4214 14.9391 12 16 12C17.0609 12 18.0783 12.4214 18.8284 13.1716C19.5786 13.9217 20 14.9391 20 16C20 17.0609 19.5786 18.0783 18.8284 18.8284C18.0783 19.5786 17.0609 20 16 20Z" fill="white"/>
+                            </svg>
+                        </div>
+                        <h1 class="setup-title">Llama Monitor</h1>
+                    </div>
+                    <p class="setup-subtitle">Real-time telemetry for your inference stack</p>
+                </div>
+                <div class="setup-actions">
+                    <div class="setup-card setup-card-attach">
+                        <div class="setup-card-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h4M18 12h4M12 2v4M12 18v4"/><circle cx="12" cy="12" r="3"/></svg>
+                        </div>
+                        <h2 class="setup-card-title">Attach to Endpoint</h2>
+                        <p class="setup-card-desc">Connect to a running llama.cpp server on any machine</p>
+                        <div class="setup-card-form">
+                            <input type="text" class="setup-input" id="setup-endpoint-url" placeholder="http://127.0.0.1:8080">
+                            <button class="setup-btn setup-btn-primary" onclick="doAttachFromSetup()">
+                                <span class="btn-icon">⚡</span> Attach
+                            </button>
+                        </div>
+                        <div class="setup-card-footer">
+                            <a class="setup-link" onclick="openSessionModal()">Browse saved sessions →</a>
+                        </div>
+                    </div>
+                    <div class="setup-card setup-card-spawn">
+                        <div class="setup-card-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M8 21V7a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v14"/><path d="M12 11h.01"/></svg>
+                        </div>
+                        <h2 class="setup-card-title">Spawn Local Server</h2>
+                        <p class="setup-card-desc">Start a llama.cpp server from a model preset</p>
+                        <div class="setup-card-form">
+                            <select class="setup-select" id="setup-preset-select"></select>
+                            <button class="setup-btn setup-btn-secondary" onclick="doStartFromSetup()">
+                                <span class="btn-icon">▶</span> Start Server
+                            </button>
+                        </div>
+                        <div class="setup-card-footer">
+                            <a class="setup-link" onclick="openPresetModal('new')">Manage presets →</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="setup-stats" id="setup-stats" style="display:none;">
+                    <div class="setup-stat-item">
+                        <span class="setup-stat-value" id="setup-last-prompt-rate">—</span>
+                        <span class="setup-stat-label">Last prompt rate</span>
+                    </div>
+                    <div class="setup-stat-item">
+                        <span class="setup-stat-value" id="setup-last-gen-rate">—</span>
+                        <span class="setup-stat-label">Last gen rate</span>
+                    </div>
+                    <div class="setup-stat-item">
+                        <span class="setup-stat-value" id="setup-last-session">—</span>
+                        <span class="setup-stat-label">Last session</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MONITOR VIEW (existing dashboard) -->
+            <div class="view view-monitor" id="view-monitor" style="display:none;">
+                <!-- Page: Server (control + monitor) -->
+                <div class="page active" id="page-server">
             <div class="dashboard-grid">
                 <div class="dashboard-header" id="server-header">
                     <div>
@@ -154,21 +231,6 @@
                     <button class="btn btn-stop" id="btn-stop" onclick="doStop()" disabled>Stop</button>
                 </div>
 
-                <section class="metric-section" id="system-section" style="display:none;">
-                    <h2 class="dashboard-section-title">System</h2>
-                    <div class="table-wrap widget-card">
-                        <table class="gpu-table">
-                            <colgroup>
-                                <col style="width:18%"><col style="width:10%"><col style="width:10%"><col style="width:18%"><col style="width:26%"><col style="width:18%">
-                            </colgroup>
-                            <thead><tr>
-                                <th>System</th><th>Temp</th><th>Load</th><th>Clock</th><th>RAM</th><th>Model</th>
-                            </tr></thead>
-                            <tbody id="system-rows"></tbody>
-                        </table>
-                    </div>
-                </section>
-
                 <section class="metric-section" id="inference-section">
                     <h2 class="dashboard-section-title">Inference Metrics <span class="metric-badge" id="inference-historic-badge" style="display:none;">Historic</span></h2>
                     <div class="inference-grid" id="inference">
@@ -180,37 +242,30 @@
                             </div>
                             <div class="inference-empty-state visible" id="m-throughput-empty">Attach an endpoint to begin telemetry</div>
                             <div class="speed-item">
+                                <span class="speed-peak-badge" id="m-prompt-max" title="Peak seen"></span>
                                 <div class="speed-header">
                                     <span class="speed-label">prompt</span>
-                                    <span class="speed-value" id="m-prompt">&mdash;</span>
-                                    <span class="speed-max" id="m-prompt-max" title="Peak seen">&mdash;</span>
-                                    <span class="metric-delta" id="m-prompt-delta"></span>
+                                    <span class="speed-value-wrap">
+                                        <span class="speed-value" id="m-prompt">&mdash;</span>
+                                        <span class="metric-delta" id="m-prompt-delta"></span>
+                                    </span>
                                 </div>
                                 <div class="speed-bar-bg">
                                     <div class="speed-bar prompt-bar" id="m-prompt-bar"></div>
                                 </div>
                             </div>
                             <div class="speed-item">
+                                <span class="speed-peak-badge" id="m-gen-max" title="Peak seen"></span>
                                 <div class="speed-header">
                                     <span class="speed-label">generation</span>
-                                    <span class="speed-value" id="m-gen">&mdash;</span>
-                                    <span class="speed-max" id="m-gen-max" title="Peak seen">&mdash;</span>
-                                    <span class="metric-delta" id="m-gen-delta"></span>
+                                    <span class="speed-value-wrap">
+                                        <span class="speed-value" id="m-gen">&mdash;</span>
+                                        <span class="metric-delta" id="m-gen-delta"></span>
+                                    </span>
                                 </div>
                                 <div class="speed-bar-bg">
                                     <div class="speed-bar gen-bar" id="m-gen-bar"></div>
                                 </div>
-                            </div>
-                            <div class="blocked-indicator" id="m-throughput-blocked">
-                                <span class="blocked-icon" aria-hidden="true">
-                                    <svg width="14" height="14" viewBox="0 0 14 14">
-                                        <circle cx="7" cy="7" r="6" fill="none" stroke="#ebcb8b" stroke-width="1.5" stroke-dasharray="30 10" stroke-linecap="round">
-                                            <animateTransform attributeName="transform" type="rotate" from="0 7 7" to="360 7 7" dur="2.4s" repeatCount="indefinite"/>
-                                        </circle>
-                                    </svg>
-                                </span>
-                                <span class="blocked-text">tool calling — throughput suspended</span>
-                                <span class="blocked-timer" id="m-blocked-timer">0s</span>
                             </div>
                             <div class="sparkline-pair">
                                 <svg class="metric-sparkline" id="m-prompt-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
@@ -236,7 +291,6 @@
                             <div class="generation-stage" id="m-generation-stage" title="Inferred from slot activity and output token changes.">
                                 <span class="stage-segment" id="m-stage-prompt">Prompt ingest</span>
                                 <span class="stage-segment" id="m-stage-output">Output generation</span>
-                                <span class="stage-segment" id="m-stage-toolcall">Tool calling</span>
                             </div>
                             <div class="generation-layout">
                                 <div class="generation-ring" id="m-generation-ring" style="--progress: 0;">
@@ -333,18 +387,157 @@
 
                 <section class="metric-section" id="gpu-section" style="display:none;">
                     <h2 class="dashboard-section-title">GPUs</h2>
-                    <div class="table-wrap widget-card">
-                        <table class="gpu-table">
-                            <colgroup>
-                                <col style="width:14%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:24%"><col style="width:16%"><col style="width:16%">
-                            </colgroup>
-                            <thead><tr>
-                                <th>GPU</th><th>Temp</th><th>Load</th><th>VRAM</th><th>Power</th><th>SCLK</th><th>MCLK</th>
-                            </tr></thead>
-                            <tbody id="gpu-rows"></tbody>
-                        </table>
+                    <div class="widget-card widget-hardware widget-gpu" id="gpu-card">
+                        <div class="metric-card-topline">
+                            <div class="widget-metric-label">GPU</div>
+                            <span class="hw-device-name" id="gpu-device-name"></span>
+                            <div class="hw-topline-right">
+                                <div class="hw-temp-gauge" id="gpu-temp-gauge" style="--pct:0;--gauge-color:#8fbcbb;">
+                                    <span class="hw-temp-value" id="gpu-temp-value"></span>
+                                </div>
+                                <div class="metric-live-chip" id="gpu-state">idle</div>
+                                <button class="viz-gear-btn" onclick="toggleVizSwitcher('gpu')" title="Customize visualization">⚙</button>
+                            </div>
+                        </div>
+                        <div class="inference-empty-state visible" id="gpu-empty">GPU metrics appear after attach</div>
+                        <div class="hw-metric-row">
+                            <div class="hw-metric-block" id="gpu-load-block">
+                                <div class="hw-metric-label">Load</div>
+                                <div class="hw-metric-viz" id="gpu-load-viz"></div>
+                                <svg class="hw-metric-sparkline" id="gpu-load-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+                                <div class="hw-metric-value" id="gpu-load-value">&mdash;</div>
+                            </div>
+                            <div class="hw-metric-block" id="gpu-power-block">
+                                <div class="hw-metric-label">Power</div>
+                                <div class="hw-metric-viz" id="gpu-power-viz"></div>
+                                <svg class="hw-metric-sparkline" id="gpu-power-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+                                <div class="hw-metric-value" id="gpu-power-value">&mdash;</div>
+                            </div>
+                            <div class="hw-metric-block" id="gpu-vram-block">
+                                <div class="hw-metric-label">VRAM</div>
+                                <div class="hw-metric-viz" id="gpu-vram-viz"></div>
+                                <svg class="hw-metric-sparkline" id="gpu-vram-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+                                <div class="hw-metric-value" id="gpu-vram-value">&mdash;</div>
+                            </div>
+                            <div class="hw-metric-block" id="gpu-clocks-block">
+                                <div class="hw-metric-label">Clocks</div>
+                                <div class="hw-metric-viz" id="gpu-clocks-viz"></div>
+                                <div class="hw-metric-value" id="gpu-clocks-value">&mdash;</div>
+                            </div>
+                        </div>
                     </div>
                 </section>
+
+                <section class="metric-section" id="system-section" style="display:none;">
+                    <h2 class="dashboard-section-title">System</h2>
+                    <div class="widget-card widget-hardware widget-system" id="system-card">
+                        <div class="metric-card-topline">
+                            <div class="widget-metric-label">SYSTEM</div>
+                            <span class="hw-device-name" id="sys-device-name"></span>
+                            <div class="hw-topline-right">
+                                <div class="hw-temp-gauge" id="sys-temp-gauge" style="--pct:0;--gauge-color:#8fbcbb;">
+                                    <span class="hw-temp-value" id="sys-temp-value"></span>
+                                </div>
+                                <div class="metric-live-chip" id="sys-state">idle</div>
+                                <button class="viz-gear-btn" onclick="toggleVizSwitcher('system')" title="Customize visualization">⚙</button>
+                            </div>
+                        </div>
+                        <div class="inference-empty-state visible" id="sys-empty">System metrics appear after attach</div>
+                        <div class="hw-metric-row">
+                            <div class="hw-metric-block" id="sys-load-block">
+                                <div class="hw-metric-label">CPU Load</div>
+                                <div class="hw-metric-viz" id="sys-load-viz"></div>
+                                <svg class="hw-metric-sparkline" id="sys-load-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+                                <div class="hw-metric-value" id="sys-load-value">&mdash;</div>
+                            </div>
+                            <div class="hw-metric-block" id="sys-ram-block">
+                                <div class="hw-metric-label">RAM</div>
+                                <div class="hw-metric-viz" id="sys-ram-viz"></div>
+                                <svg class="hw-metric-sparkline" id="sys-ram-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+                                <div class="hw-metric-value" id="sys-ram-value">&mdash;</div>
+                            </div>
+                            <div class="hw-metric-block" id="sys-clock-block">
+                                <div class="hw-metric-label">Clock</div>
+                                <div class="hw-metric-viz" id="sys-clock-viz"></div>
+                                <div class="hw-metric-value" id="sys-clock-value">&mdash;</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- GPU Visualization Switcher -->
+                <div class="viz-switcher" id="gpu-viz-switcher" style="display:none;">
+                    <div class="viz-switcher-header">
+                        <span>GPU Visualization</span>
+                        <button class="viz-reset-btn" onclick="resetVizPrefs('gpu')">Reset</button>
+                    </div>
+                    <div class="viz-switcher-row">
+                        <div class="viz-switcher-label">Load</div>
+                        <div class="viz-switcher-options" data-card="gpu" data-metric="load">
+                            <button class="viz-option active" data-style="bar" onclick="selectVizStyle('gpu','load','bar')" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" onclick="selectVizStyle('gpu','load','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" onclick="selectVizStyle('gpu','load','sparkline')" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
+                        </div>
+                    </div>
+                    <div class="viz-switcher-row">
+                        <div class="viz-switcher-label">Power</div>
+                        <div class="viz-switcher-options" data-card="gpu" data-metric="power">
+                            <button class="viz-option active" data-style="bar" onclick="selectVizStyle('gpu','power','bar')" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" onclick="selectVizStyle('gpu','power','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" onclick="selectVizStyle('gpu','power','sparkline')" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
+                        </div>
+                    </div>
+                    <div class="viz-switcher-row">
+                        <div class="viz-switcher-label">VRAM</div>
+                        <div class="viz-switcher-options" data-card="gpu" data-metric="vram">
+                            <button class="viz-option active" data-style="bar" onclick="selectVizStyle('gpu','vram','bar')" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" onclick="selectVizStyle('gpu','vram','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" onclick="selectVizStyle('gpu','vram','sparkline')" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
+                            <button class="viz-option" data-style="stacked" onclick="selectVizStyle('gpu','vram','stacked')" title="Stacked"><span class="viz-thumb viz-thumb-stack"></span>Stack</button>
+                        </div>
+                    </div>
+                    <div class="viz-switcher-row">
+                        <div class="viz-switcher-label">Clocks</div>
+                        <div class="viz-switcher-options" data-card="gpu" data-metric="clocks">
+                            <button class="viz-option active" data-style="ring" onclick="selectVizStyle('gpu','clocks','ring')" title="Dual Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="chips" onclick="selectVizStyle('gpu','clocks','chips')" title="Chips"><span class="viz-thumb viz-thumb-chips"></span>Chips</button>
+                            <button class="viz-option" data-style="numeric" onclick="selectVizStyle('gpu','clocks','numeric')" title="Numeric"><span class="viz-thumb viz-thumb-numeric"></span>Num</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Visualization Switcher -->
+                <div class="viz-switcher" id="sys-viz-switcher" style="display:none;">
+                    <div class="viz-switcher-header">
+                        <span>System Visualization</span>
+                        <button class="viz-reset-btn" onclick="resetVizPrefs('system')">Reset</button>
+                    </div>
+                    <div class="viz-switcher-row">
+                        <div class="viz-switcher-label">CPU Load</div>
+                        <div class="viz-switcher-options" data-card="system" data-metric="load">
+                            <button class="viz-option active" data-style="bar" onclick="selectVizStyle('system','load','bar')" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" onclick="selectVizStyle('system','load','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" onclick="selectVizStyle('system','load','sparkline')" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
+                        </div>
+                    </div>
+                    <div class="viz-switcher-row">
+                        <div class="viz-switcher-label">RAM</div>
+                        <div class="viz-switcher-options" data-card="system" data-metric="ram">
+                            <button class="viz-option active" data-style="bar" onclick="selectVizStyle('system','ram','bar')" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" onclick="selectVizStyle('system','ram','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" onclick="selectVizStyle('system','ram','sparkline')" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
+                            <button class="viz-option" data-style="stacked" onclick="selectVizStyle('system','ram','stacked')" title="Stacked"><span class="viz-thumb viz-thumb-stack"></span>Stack</button>
+                        </div>
+                    </div>
+                    <div class="viz-switcher-row">
+                        <div class="viz-switcher-label">Clock</div>
+                        <div class="viz-switcher-options" data-card="system" data-metric="clock">
+                            <button class="viz-option active" data-style="ring" onclick="selectVizStyle('system','clock','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="chip" onclick="selectVizStyle('system','clock','chip')" title="Chip"><span class="viz-thumb viz-thumb-chips"></span>Chip</button>
+                            <button class="viz-option" data-style="numeric" onclick="selectVizStyle('system','clock','numeric')" title="Numeric"><span class="viz-thumb viz-thumb-numeric"></span>Num</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -363,6 +556,9 @@
         <!-- Page: Logs -->
         <div class="page" id="page-logs">
             <div class="log-panel" id="log-panel" style="flex:1;"></div>
+        </div>
+                </div>
+            </div>
         </div>
     </main>
 
@@ -763,36 +959,75 @@
 
 <!-- Session Modal -->
 <div class="modal-overlay" id="session-modal">
-    <div class="modal">
+    <div class="modal" style="width: 560px;">
         <div class="modal-header">
-            <h2 id="session-modal-title">New Session</h2>
+            <h2 id="session-modal-title">Sessions</h2>
             <button type="button" class="modal-close" onclick="closeSessionModal()" aria-label="Close">&times;</button>
         </div>
-        <form id="session-form" onsubmit="saveSession(event)">
-            <input type="hidden" id="modal-session-id">
-            <div class="modal-body">
-                <label class="modal-field" title="Display name for this session">
-                    Session Name
-                    <input type="text" id="modal-session-name" required>
-                    <span class="field-error-msg">Session name is required</span>
-                </label>
-                <label class="modal-field" title="Session mode">
-                    Session Mode
-                    <select id="modal-session-mode">
-                        <option value="spawn">Spawn</option>
-                        <option value="attach">Attach</option>
-                    </select>
-                </label>
-                <label class="modal-field" title="Port for spawned server or endpoint for attached server">
-                     <span id="modal-session-port-label">Port</span>
-                     <input type="text" id="modal-session-port" placeholder="8001">
-                 </label>
+        <div class="modal-body">
+            <div class="sessions-header">
+                <button type="button" class="btn btn-sm" onclick="showNewSessionForm()" id="btn-new-session">+ New Session</button>
             </div>
-            <div class="modal-buttons">
-                <button type="button" class="btn btn-modal-cancel" onclick="closeSessionModal()">Cancel</button>
-                <button type="submit" class="btn btn-modal-save" id="btn-session-save">Save</button>
+            <div id="sessions-list-view">
+                <div id="sessions-list"></div>
+                <div id="sessions-empty" style="display:none; text-align:center; padding: 40px 20px; color: var(--color-text-muted);">
+                    <p>No saved sessions yet</p>
+                    <button type="button" class="btn btn-sm" onclick="showNewSessionForm()" style="margin-top:12px;">Create your first session</button>
+                </div>
             </div>
-        </form>
+            <div id="sessions-new-form" style="display:none;">
+                <form id="session-form" onsubmit="saveSession(event)">
+                    <input type="hidden" id="modal-session-id">
+                    <label class="modal-field" title="Display name for this session">
+                        Session Name
+                        <input type="text" id="modal-session-name" required>
+                        <span class="field-error-msg">Session name is required</span>
+                    </label>
+                    <label class="modal-field" title="Session mode">
+                        Session Mode
+                        <select id="modal-session-mode">
+                            <option value="spawn">Spawn</option>
+                            <option value="attach">Attach</option>
+                        </select>
+                    </label>
+                    <label class="modal-field" title="Port for spawned server or endpoint for attached server">
+                         <span id="modal-session-port-label">Port</span>
+                         <input type="text" id="modal-session-port" placeholder="8001">
+                     </label>
+                    <div id="spawn-session-fields" style="display:none;">
+                        <label class="modal-field" title="Choose a model preset to use for this session">
+                            Model Preset
+                            <select id="modal-session-preset"></select>
+                        </label>
+                        <label class="modal-field" title="Absolute path to the .gguf model file on disk">
+                            Model Path
+                            <div style="display:flex;gap:6px;">
+                                <input type="text" id="modal-session-model-path" style="flex:1;" placeholder="/path/to/model.gguf">
+                                <button type="button" class="btn-sm btn-preset" onclick="openFileBrowser('modal-session-model-path','gguf')">Browse</button>
+                            </div>
+                        </label>
+                        <div class="modal-row">
+                            <label class="modal-field" title="Number of layers to offload to GPU. 99 = all layers.">
+                                GPU Layers
+                                <input type="number" id="modal-session-gpu-layers" placeholder="99">
+                            </label>
+                            <label class="modal-field" title="Maximum context length in tokens.">
+                                Context Size
+                                <input type="number" id="modal-session-context-size" value="128000">
+                            </label>
+                        </div>
+                        <div class="modal-row modal-checks">
+                            <label class="chk" title="Disable memory-mapped I/O. Required for models >16GB."><input type="checkbox" id="modal-session-no-mmap"> no-mmap</label>
+                            <label class="chk" title="Lock model in RAM, preventing swap."><input type="checkbox" id="modal-session-mlock"> mlock</label>
+                        </div>
+                    </div>
+                    <div class="modal-buttons" style="margin-top:16px;">
+                        <button type="button" class="btn btn-modal-cancel" onclick="closeSessionModal()">Cancel</button>
+                        <button type="submit" class="btn btn-modal-save" id="btn-session-save">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
     </div>
 </div>
 

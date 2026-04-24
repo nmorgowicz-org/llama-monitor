@@ -110,6 +110,8 @@ pub struct Session {
     pub name: String,
     pub mode: SessionMode,
     pub status: SessionStatus,
+    #[serde(default)]
+    pub preset_id: String,
     pub created_at: u64,
     pub last_active: u64,
 }
@@ -122,13 +124,14 @@ impl Session {
             .as_secs()
     }
 
-    pub fn new_spawn(id: String, name: String, port: u16) -> Self {
+    pub fn new_spawn(id: String, name: String, port: u16, preset_id: String) -> Self {
         let now = Self::now();
         Self {
             id,
             name,
             mode: SessionMode::Spawn { port },
             status: SessionStatus::Stopped,
+            preset_id,
             created_at: now,
             last_active: now,
         }
@@ -141,6 +144,7 @@ impl Session {
             name,
             mode: SessionMode::Attach { endpoint },
             status: SessionStatus::Disconnected,
+            preset_id: String::new(),
             created_at: now,
             last_active: now,
         }
@@ -225,6 +229,7 @@ pub fn load_sessions(path: &Path) -> Vec<Session> {
         "default".to_string(),
         "Default Session".to_string(),
         8001,
+        String::new(),
     )]
 }
 
@@ -850,7 +855,7 @@ mod tests {
             let paths = test_paths(PathBuf::new());
             let state = AppState::new(vec![], paths, GpuEnv::default(), UiSettings::default());
             let session = if mode == "spawn" {
-                Session::new_spawn("test".to_string(), "Test".to_string(), 8001)
+                Session::new_spawn("test".to_string(), "Test".to_string(), 8001, String::new())
             } else {
                 Session::new_attach(
                     "test".to_string(),
@@ -921,6 +926,7 @@ mod tests {
             "existing".to_string(),
             "Existing".to_string(),
             8001,
+            String::new(),
         ));
 
         assert!(state.set_active_session("existing"));
@@ -940,6 +946,7 @@ mod tests {
             "existing".to_string(),
             "Existing".to_string(),
             8001,
+            String::new(),
         ));
 
         assert!(state.set_active_session("existing"));

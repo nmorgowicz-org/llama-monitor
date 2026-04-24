@@ -1399,7 +1399,12 @@ fn api_spawn_session_with_preset(
                 };
 
                 let session_id = app_state::generate_session_id();
-                let session = app_state::Session::new_spawn(session_id.clone(), name.clone(), port);
+                let session = app_state::Session::new_spawn(
+                    session_id.clone(),
+                    name.clone(),
+                    port,
+                    preset_id,
+                );
 
                 if !state.add_session(session) {
                     return Ok::<_, warp::Rejection>(warp::reply::json(

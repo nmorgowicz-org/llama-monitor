@@ -719,6 +719,8 @@ function saveSettings() {
 
 document.addEventListener('DOMContentLoaded', () => {
 
+loadVizPrefs();
+
 // Auto-save on any control bar change
 
 document.getElementById('controls').addEventListener('input', saveSettings);
@@ -1755,6 +1757,13 @@ async function refreshModels() {
 document.getElementById('config-modal').addEventListener('click', e => {
 
     if (e.target === e.currentTarget) closeConfigModal();
+
+});
+
+
+document.getElementById('session-modal').addEventListener('click', e => {
+
+    if (e.target === e.currentTarget) closeSessionModal();
 
 });
 
@@ -4076,7 +4085,13 @@ async function doStart() {
 
     const data = await resp.json();
 
-    if (!data.ok) showToast('Start failed: ' + (data.error || 'unknown'), 'error');
+    if (!data.ok) {
+        showToast('Start failed: ' + (data.error || 'unknown'), 'error');
+        hideConnectingState();
+    } else {
+        switchView('monitor');
+        hideConnectingState();
+    }
 
 }
 
@@ -4127,10 +4142,12 @@ async function doAttach() {
     if (!data.ok) {
 
         showToast('Attach failed: ' + (data.error || 'unknown'), 'error');
+        hideConnectingState();
 
     } else {
 
         showToast('Attached to server', 'success');
+        hideConnectingState();
 
         if (data.warning) {
 
@@ -4149,6 +4166,8 @@ async function doAttach() {
 
         // Reset speed max values for new session
         window.speedMax = { prompt: 0, generation: 0 };
+
+        switchView('monitor');
 
     }
 
@@ -4169,6 +4188,11 @@ async function doDetach() {
     } else {
 
         showToast('Detached from server', 'success');
+        saveLastSessionData({
+            promptRate: window.speedMax.prompt > 0 ? window.speedMax.prompt + ' t/s' : '—',
+            genRate: window.speedMax.generation > 0 ? window.speedMax.generation + ' t/s' : '—',
+            sessionName: currentSessionId || '—'
+        });
 
         // Immediately update button states without waiting for WebSocket
         const btnAttach = document.getElementById('btn-attach');
@@ -4211,6 +4235,8 @@ async function doDetach() {
 
         // Reset speed max values on detach
         window.speedMax = { prompt: 0, generation: 0 };
+
+        switchView('setup');
 
     }
 
@@ -4298,41 +4324,80 @@ async function loadSessions() {
 
 
 function renderSessionList() {
-
-    const list = document.getElementById('session-list');
-
+    const list = document.getElementById('sessions-list');
+    const empty = document.getElementById('sessions-empty');
     if (!list) return;
 
-    
+    if (sessions.length === 0) {
+        list.innerHTML = '';
+        if (empty) empty.style.display = 'block';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
 
     list.innerHTML = sessions.map(s => {
-
         const is_active = s.id === activeSessionId;
+        const isAttach = s.mode && s.mode.Attach;
+        const isSpawn = s.mode && s.mode.Spawn;
+        const modeText = isSpawn ? 'Spawn' : 'Attach';
+        const modeIcon = isSpawn ? '🖥' : '🔗';
+        const endpoint = isAttach ? s.mode.Attach.endpoint : '';
+        const port = isSpawn ? s.mode.Spawn.port : '';
+        const presetId = s.preset_id || '';
+        const presetObj = presets.find(p => p.id === presetId);
+        const presetName = presetObj ? presetObj.name : (isSpawn ? '(no preset)' : '');
+        const statusText = s.status === 'Running' ? 'Running' :
+                           s.status === 'Stopped' ? 'Stopped' :
+                           s.status === 'Disconnected' ? 'Disconnected' : (s.status || '');
 
-        const modeText = s.mode && s.mode.Spawn ? 'Spawn' : 'Attach';
-
-        const statusText = s.status === 'Running' ? 'Running' : 
-
-                           s.status === 'Stopped' ? 'Stopped' : 
-
-                           s.status === 'Disconnected' ? 'Disconnected' : s.status;
-
-        return '<div class="session-item ' + s.status + (is_active ? ' active' : '') + 
-
-                '" onclick="switchSession(\'' + s.id + '\')">' +
-
-                '<span class="session-item-name">' + s.name + '</span>' +
-
-                '<span class="session-item-mode">' + modeText + '</span>' +
-
-                '<span class="session-item-port">' + (s.mode.Spawn ? s.mode.Spawn.port : activeSessionPort) + '</span>' +
-
-                '<span class="session-item-status">' + statusText + '</span>' +
-
-                '</div>';
-
+        return '<div class="session-item' + (is_active ? ' active' : '') + '">' +
+            '<div class="session-item-main" onclick="switchSession(\'' + s.id + '\')">' +
+            '<span class="session-item-icon">' + modeIcon + '</span>' +
+            '<div class="session-item-info">' +
+            '<span class="session-item-name">' + s.name + '</span>' +
+            '<span class="session-item-detail">' + modeText + (port ? ' : ' + port : '') + (isSpawn && presetName ? ' · ' + presetName : '') + (endpoint ? ' · ' + endpoint : '') + '</span>' +
+            '</div>' +
+            (statusText ? '<span class="session-item-status">' + statusText + '</span>' : '') +
+            '</div>' +
+            '<div class="session-item-actions">' +
+            (isAttach ? '<button class="btn-sm btn-preset" onclick="event.stopPropagation(); quickAttachSession(\'' + endpoint + '\')">Connect</button>' : '') +
+            (isSpawn ? '<button class="btn-sm btn-preset" onclick="event.stopPropagation(); quickStartSession(\'' + s.id + '\')">Start</button>' : '') +
+            '<button class="btn-sm btn-preset btn-preset-delete" onclick="event.stopPropagation(); deleteSession(\'' + s.id + '\')">✕</button>' +
+            '</div>' +
+            '</div>';
     }).join('');
+}
 
+function quickAttachSession(endpoint) {
+    const serverEndpoint = document.getElementById('server-endpoint');
+    if (serverEndpoint) serverEndpoint.value = endpoint;
+    localStorage.setItem('llama-monitor-last-endpoint', endpoint);
+    closeSessionModal();
+    showConnectingState();
+    doAttach();
+}
+
+function quickStartSession(sessionId) {
+    closeSessionModal();
+    switchSession(sessionId);
+    showConnectingState();
+    doStart();
+}
+
+async function deleteSession(sessionId) {
+    if (!confirm('Delete this session?')) return;
+    try {
+        const resp = await fetch('/api/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' });
+        const data = await resp.json();
+        if (data.ok) {
+            showToast('Session deleted', 'success');
+            loadSessions();
+        } else {
+            showToast('Delete failed: ' + (data.error || 'unknown'), 'error');
+        }
+    } catch (e) {
+        showToast('Delete failed: ' + e.message, 'error');
+    }
 }
 
 
@@ -4384,28 +4449,64 @@ async function switchSession(sessionId) {
 function openSessionModal() {
     const modal = document.getElementById('session-modal');
     const title = document.getElementById('session-modal-title');
-    const form = document.getElementById('session-form');
-
-    form.reset();
-    title.textContent = 'New Session';
+    title.textContent = 'Sessions';
     modal.classList.add('open');
+    showSessionsList();
+}
+
+function showNewSessionForm() {
+    document.getElementById('sessions-list-view').style.display = 'none';
+    document.getElementById('sessions-new-form').style.display = 'block';
+    const newBtn = document.getElementById('btn-new-session');
+    if (newBtn) newBtn.style.display = 'none';
+    document.getElementById('session-form').reset();
+    document.getElementById('modal-session-mode').value = 'spawn';
     updateSessionModalMode();
+}
+
+function showSessionsList() {
+    document.getElementById('sessions-list-view').style.display = 'block';
+    document.getElementById('sessions-new-form').style.display = 'none';
+    const newBtn = document.getElementById('btn-new-session');
+    if (newBtn) newBtn.style.display = 'inline-block';
+    renderSessionList();
 }
 
 function updateSessionModalMode() {
     const mode = document.getElementById('modal-session-mode')?.value || 'spawn';
     const label = document.getElementById('modal-session-port-label');
     const input = document.getElementById('modal-session-port');
+    const spawnFields = document.getElementById('spawn-session-fields');
     if (!label || !input) return;
 
     if (mode === 'attach') {
         label.textContent = 'Endpoint';
         input.placeholder = 'http://127.0.0.1:8001';
         input.value = document.getElementById('server-endpoint')?.value || '';
+        if (spawnFields) spawnFields.style.display = 'none';
     } else {
         label.textContent = 'Port';
         input.placeholder = '8001';
         input.value = activeSessionPort || 8001;
+        if (spawnFields) {
+            spawnFields.style.display = 'block';
+            const presetSelect = document.getElementById('modal-session-preset');
+            if (presetSelect) {
+                presetSelect.innerHTML = '<option value="">(select a preset)</option>';
+                const mainSelect = document.getElementById('preset-select');
+                if (mainSelect) {
+                    const options = mainSelect.querySelectorAll('option');
+                    options.forEach(opt => {
+                        if (opt.value) {
+                            const clone = document.createElement('option');
+                            clone.value = opt.value;
+                            clone.textContent = opt.textContent;
+                            presetSelect.appendChild(clone);
+                        }
+                    });
+                }
+            }
+        }
     }
 }
 
@@ -4434,18 +4535,28 @@ function saveSession(event) {
 
     const target = document.getElementById('modal-session-port').value.trim();
     const presetId = document.getElementById('preset-select')?.value;
+    const modalPresetId = document.getElementById('modal-session-preset')?.value;
     const endpoint = target || document.getElementById('server-endpoint')?.value.trim();
     const url = mode === 'attach' ? '/api/attach' : '/api/sessions/spawn';
     const payload = mode === 'attach'
         ? { endpoint }
-        : { name, port: parseInt(target, 10) || 8001, preset_id: presetId };
+        : {
+            name,
+            port: parseInt(target, 10) || 8001,
+            preset_id: modalPresetId || presetId,
+            model_path: (document.getElementById('modal-session-model-path')?.value || '').trim() || undefined,
+            gpu_layers: document.getElementById('modal-session-gpu-layers')?.value ? parseInt(document.getElementById('modal-session-gpu-layers').value, 10) : undefined,
+            context_size: document.getElementById('modal-session-context-size')?.value ? parseInt(document.getElementById('modal-session-context-size').value, 10) : undefined,
+            no_mmap: document.getElementById('modal-session-no-mmap')?.checked || undefined,
+            mlock: document.getElementById('modal-session-mlock')?.checked || undefined,
+          };
 
     if (mode === 'attach' && !endpoint) {
         showToast('Please enter an endpoint', 'error');
         return;
     }
 
-    if (mode === 'spawn' && !presetId) {
+    if (mode === 'spawn' && !modalPresetId && !presetId) {
         showToast('Select a model preset before creating a spawn session', 'error');
         return;
     }
@@ -4555,11 +4666,591 @@ async function updateActiveSessionInfo() {
 
 setInterval(updateActiveSessionInfo, 2000);
 
-function setMetricSectionVisibility(tbodyId, visible) {
-    const tbody = document.getElementById(tbodyId);
-    if (!tbody) return;
+/* ===== Hardware Card Rendering ===== */
 
-    const section = tbody.closest('.metric-section');
+// Severity color helper
+function getSeverityColor(pct) {
+    if (pct >= 95) return '#f43f5e';
+    if (pct >= 80) return '#f59e0b';
+    return '#10b981';
+}
+
+function getTempSeverityColor(temp) {
+    if (temp >= 90) return '#f43f5e';
+    if (temp >= 75) return '#f59e0b';
+    return '#8fbcbb';
+}
+
+// Visualization rendering helpers
+function setVizContent(container, html) {
+    if (!container) return;
+    container.innerHTML = html;
+}
+
+function swapVizContent(container, html) {
+    if (!container) return;
+    container.classList.add('viz-fade-out');
+    setTimeout(function() {
+        container.innerHTML = html;
+        container.classList.remove('viz-fade-out');
+        container.classList.add('viz-fade-in');
+        setTimeout(function() { container.classList.remove('viz-fade-in'); }, 160);
+    }, 120);
+}
+
+function renderHwBar(container, pct, isHot) {
+    if (!container) return;
+    const bgCls = isHot ? 'hw-bar-bg is-hot' : 'hw-bar-bg';
+    setVizContent(container, '<div class="' + bgCls + '"><div class="hw-bar-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div></div>');
+}
+
+function renderHwRing(container, pct, isHot) {
+    if (!container) return;
+    const cls = isHot ? 'hw-ring-viz is-warming' : 'hw-ring-viz';
+    setVizContent(container, '<div class="' + cls + '" style="--pct:' + pct.toFixed(1) + ';--gauge-color:' + getSeverityColor(pct) + '"></div>');
+}
+
+function renderHwSparkline(container, history) {
+    if (!container || !history || history.length < 2) {
+        setVizContent(container, '');
+        return;
+    }
+    const svg = buildSparklineSVG(history, 'hw-sparkline', '#8fbcbb');
+    setVizContent(container, svg);
+}
+
+// Render inline sparkline below a bar metric (into existing SVG element)
+function renderHwMetricSparkline(svgId, history, color, show) {
+    const svg = document.getElementById(svgId);
+    if (!svg) return;
+    if (!show || !history || history.length < 2) {
+        svg.style.visibility = (show && history && history.length >= 2) ? '' : 'hidden';
+        return;
+    }
+    svg.style.visibility = '';
+    const width = 120;
+    const height = 28;
+    const max = Math.max(...history, 1);
+    const min = Math.min(...history, 0);
+    const range = Math.max(max - min, 1);
+    const step = width / (history.length - 1);
+    const peakValue = Math.max(...history);
+    const peakIndex = history.lastIndexOf(peakValue);
+    const peakX = peakIndex * step;
+    const peakY = height - (((peakValue - min) / range) * (height - 4)) - 2;
+    const path = history.map((value, index) => {
+        const x = index * step;
+        const y = height - (((value - min) / range) * (height - 4)) - 2;
+        return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
+    }).join(' ');
+    svg.innerHTML =
+        '<path class="sparkline-fill" d="' + path + ' L 120 28 L 0 28 Z" fill="' + color + '" opacity="0.16"></path>' +
+        '<path class="sparkline-line" d="' + path + '" stroke="' + color + '" fill="none" stroke-width="2.4" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" filter="drop-shadow(0 0 4px ' + color + ')"></path>' +
+        '<circle class="sparkline-peak" cx="' + peakX.toFixed(2) + '" cy="' + peakY.toFixed(2) + '" r="2.3" fill="' + color + '" opacity="0.9"></circle>';
+}
+
+function renderHwStacked(container, pct) {
+    if (!container) return;
+    const isHot = pct >= 90;
+    const bgCls = isHot ? 'hw-stacked-bg is-hot' : 'hw-stacked-bg';
+    setVizContent(container, '<div class="' + bgCls + '"><div class="hw-stacked-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div><div class="hw-stacked-free" style="width:' + (100 - pct).toFixed(1) + '%"></div></div>');
+}
+
+function renderHwChips(container, chips) {
+    if (!container) return;
+    setVizContent(container, '<div class="hw-chips">' + chips.map(function(c) { return '<span class="hw-chip">' + c + '</span>'; }).join('') + '</div>');
+}
+
+// Render dual-ring gauge (GPU clocks: SCLK inner, MCLK outer)
+function formatClockReadout(mhz) {
+    if (!Number.isFinite(mhz) || mhz <= 0) {
+        return { value: '\u2014', unit: 'MHz', detail: '\u2014' };
+    }
+    if (mhz >= 1000) {
+        var ghz = mhz >= 10000 ? (mhz / 1000).toFixed(1) : (mhz / 1000).toFixed(2);
+        return { value: ghz, unit: 'GHz', detail: mhz + ' MHz' };
+    }
+    return { value: String(mhz), unit: 'MHz', detail: mhz + ' MHz' };
+}
+
+function computeClockBand(history, current) {
+    var points = (history || []).filter(Number.isFinite);
+    if (Number.isFinite(current) && current > 0) points.push(current);
+    if (points.length === 0) {
+        return { min: 0, max: 0, pct: 0, peakPct: 0, lowPct: 0 };
+    }
+    var min = Math.min.apply(null, points);
+    var max = Math.max.apply(null, points);
+    var span = Math.max(max - min, 1);
+    var normalized = function(value) {
+        if (!Number.isFinite(value)) return 0;
+        return Math.max(0, Math.min(100, ((value - min) / span) * 100));
+    };
+    var pct = span <= 1 ? 100 : normalized(current);
+    return {
+        min: min,
+        max: max,
+        pct: pct,
+        peakPct: normalized(max),
+        lowPct: normalized(min)
+    };
+}
+
+function renderHwDualRing(container, sclk, mclk) {
+    if (!container) return;
+    var sclkBand = computeClockBand(gpuHistory.sclk, sclk);
+    var mclkBand = computeClockBand(gpuHistory.mclk, mclk);
+    var sclkColor = getSeverityColor(sclkBand.pct);
+    var mclkColor = '#60a5fa';
+    var sclkPulse = (3.4 - Math.min(sclkBand.pct, 100) * 0.014).toFixed(2) + 's';
+    var mclkPulse = (3.8 - Math.min(mclkBand.pct, 100) * 0.016).toFixed(2) + 's';
+    setVizContent(container,
+        '<div class="hw-clock-gpu-layout">' +
+          '<div class="hw-clock-cluster hw-clock-gpu">' +
+            '<div class="hw-clock-orbit outer" style="--pct:' + mclkBand.pct.toFixed(1) + ';--peak-pct:' + mclkBand.peakPct.toFixed(1) + ';--low-pct:' + mclkBand.lowPct.toFixed(1) + ';--orbit-color:' + mclkColor + ';--dot-radius:-78px;--pulse-duration:' + mclkPulse + ';">' +
+              '<div class="hw-clock-orbit-track"></div>' +
+              '<div class="hw-clock-orbit-fill"></div>' +
+              '<div class="hw-clock-orbit-peak"></div>' +
+              '<div class="hw-clock-orbit-low"></div>' +
+              '<div class="hw-clock-orbit-dot"></div>' +
+            '</div>' +
+            '<div class="hw-clock-orbit inner" style="--pct:' + sclkBand.pct.toFixed(1) + ';--peak-pct:' + sclkBand.peakPct.toFixed(1) + ';--low-pct:' + sclkBand.lowPct.toFixed(1) + ';--orbit-color:' + sclkColor + ';--dot-radius:-55px;--pulse-duration:' + sclkPulse + ';">' +
+              '<div class="hw-clock-orbit-track"></div>' +
+              '<div class="hw-clock-orbit-fill"></div>' +
+              '<div class="hw-clock-orbit-peak"></div>' +
+              '<div class="hw-clock-orbit-low"></div>' +
+              '<div class="hw-clock-orbit-dot"></div>' +
+            '</div>' +
+            '<div class="hw-clock-core">' +
+              '<div class="hw-clock-unit">GPU</div>' +
+              '<div class="hw-clock-band">Clocks</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="hw-clock-gpu-readout">' +
+            '<div class="hw-clock-meter">' +
+              '<div class="hw-clock-meter-label">SCLK</div>' +
+              '<div class="hw-clock-meter-bar" style="--pct:' + sclkBand.pct.toFixed(1) + ';--peak-pct:' + sclkBand.peakPct.toFixed(1) + ';--low-pct:' + sclkBand.lowPct.toFixed(1) + ';">' +
+                '<div class="hw-clock-meter-fill" style="--pct:' + sclkBand.pct.toFixed(1) + ';--meter-color:' + sclkColor + ';--pulse-duration:' + sclkPulse + ';"></div>' +
+                '<div class="hw-clock-meter-marker"></div>' +
+                '<div class="hw-clock-meter-marker-low"></div>' +
+              '</div>' +
+              '<div class="hw-clock-meter-value">' + sclk + '</div>' +
+              '<div class="hw-clock-meter-band">' + sclkBand.min + '-' + sclkBand.max + '</div>' +
+            '</div>' +
+            '<div class="hw-clock-meter">' +
+              '<div class="hw-clock-meter-label">MCLK</div>' +
+              '<div class="hw-clock-meter-bar" style="--pct:' + mclkBand.pct.toFixed(1) + ';--peak-pct:' + mclkBand.peakPct.toFixed(1) + ';--low-pct:' + mclkBand.lowPct.toFixed(1) + ';">' +
+                '<div class="hw-clock-meter-fill" style="--pct:' + mclkBand.pct.toFixed(1) + ';--meter-color:' + mclkColor + ';--pulse-duration:' + mclkPulse + ';"></div>' +
+                '<div class="hw-clock-meter-marker"></div>' +
+                '<div class="hw-clock-meter-marker-low"></div>' +
+              '</div>' +
+              '<div class="hw-clock-meter-value">' + mclk + '</div>' +
+              '<div class="hw-clock-meter-band">' + mclkBand.min + '-' + mclkBand.max + '</div>' +
+            '</div>' +
+          '</div>' +
+        '</div>');
+}
+
+// Render single-ring gauge (System clock)
+function renderHwClockRing(container, clock) {
+    if (!container) return;
+    var band = computeClockBand(sysHistory.cpuClock, clock);
+    var display = formatClockReadout(clock);
+    var color = getSeverityColor(band.pct);
+    var pulse = (3.6 - Math.min(band.pct, 100) * 0.016).toFixed(2) + 's';
+    var footerSpark = sysHistory.cpuClock.length > 1
+        ? '<div class="hw-clock-footer sparkline-only"><div class="hw-clock-footer-spark">' + buildSparklineSVG(sysHistory.cpuClock, 'hw-clock-footer-spark', color) + '</div></div>'
+        : '';
+    setVizContent(container,
+        '<div class="hw-clock-system-layout">' +
+          '<div class="hw-clock-cluster hw-clock-system">' +
+            '<div class="hw-clock-orbit outer" style="--pct:' + band.pct.toFixed(1) + ';--peak-pct:' + band.peakPct.toFixed(1) + ';--low-pct:' + band.lowPct.toFixed(1) + ';--orbit-color:' + color + ';--dot-radius:-61px;--pulse-duration:' + pulse + ';">' +
+              '<div class="hw-clock-orbit-track"></div>' +
+              '<div class="hw-clock-orbit-fill"></div>' +
+              '<div class="hw-clock-orbit-peak"></div>' +
+              '<div class="hw-clock-orbit-low"></div>' +
+              '<div class="hw-clock-orbit-dot"></div>' +
+            '</div>' +
+            '<div class="hw-clock-core">' +
+              '<div class="hw-clock-stack">' +
+                '<div class="hw-clock-row"><span class="hw-clock-row-value">' + display.value + '</span><span class="hw-clock-unit">' + display.unit + '</span></div>' +
+                '<div class="hw-clock-band">' + band.min + '-' + band.max + ' MHz</div>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="hw-clock-meter">' +
+            '<div class="hw-clock-meter-label">CLOCK</div>' +
+            '<div class="hw-clock-meter-bar" style="--pct:' + band.pct.toFixed(1) + ';--peak-pct:' + band.peakPct.toFixed(1) + ';--low-pct:' + band.lowPct.toFixed(1) + ';">' +
+              '<div class="hw-clock-meter-fill" style="--pct:' + band.pct.toFixed(1) + ';--meter-color:' + color + ';--pulse-duration:' + pulse + ';"></div>' +
+              '<div class="hw-clock-meter-marker"></div>' +
+              '<div class="hw-clock-meter-marker-low"></div>' +
+            '</div>' +
+            '<div class="hw-clock-meter-value">' + clock + '</div>' +
+            '<div class="hw-clock-meter-band">' + band.min + '-' + band.max + '</div>' +
+          '</div>' +
+        '</div>' +
+        footerSpark);
+}
+
+// Build sparkline SVG (reuses inference card pattern)
+function buildSparklineSVG(points, cssClass, color) {
+    var len = points.length;
+    if (len < 2) return '';
+    var w = 120, h = 24, pad = 2;
+    var max = Math.max.apply(null, points);
+    var min = Math.min.apply(null, points);
+    var range = max - min || 1;
+    var step = w / (len - 1);
+    var pts = points.map(function(v, i) { return i * step + ',' + (h - pad - ((v - min) / range) * (h - pad * 2)); });
+    var linePath = 'M' + pts.join(' L');
+    var fillPath = linePath + ' L' + (len - 1) * step + ',' + h + ' L0,' + h + ' Z';
+    var peakIdx = points.indexOf(max);
+    var peakX = peakIdx * step;
+    var peakY = h - pad - ((max - min) / range) * (h - pad * 2);
+    return '<svg class="metric-sparkline ' + cssClass + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">' +
+        '<defs><linearGradient id="hw-spark-grad-' + cssClass + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="' + color + '" stop-opacity="0.25"/><stop offset="100%" stop-color="' + color + '" stop-opacity="0.02"/></linearGradient></defs>' +
+        '<path d="' + fillPath + '" fill="url(#hw-spark-grad-' + cssClass + ')"/>' +
+        '<path d="' + linePath + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+        (len > 3 ? '<circle cx="' + peakX.toFixed(1) + '" cy="' + peakY.toFixed(1) + '" r="2" fill="' + color + '" opacity="0.8"/>' : '') +
+        '</svg>';
+}
+
+// GPU metric history ring buffers
+var gpuHistory = { load: [], power: [], vramPct: [], sclk: [], mclk: [] };
+function pushGpuHistory(key, value) {
+    if (!Number.isFinite(value)) return;
+    gpuHistory[key].push(value);
+    var limit = key === 'load' || key === 'power' || key === 'vramPct' ? 60 : 30;
+    if (gpuHistory[key].length > limit) gpuHistory[key].shift();
+}
+
+// System metric history ring buffers
+var sysHistory = { cpuLoad: [], ramPct: [], cpuClock: [] };
+function pushSysHistory(key, value) {
+    if (!Number.isFinite(value)) return;
+    sysHistory[key].push(value);
+    var limit = 60;
+    if (sysHistory[key].length > limit) sysHistory[key].shift();
+}
+
+// Visualization preferences
+var vizPrefs = {
+    gpu: { load: 'bar', power: 'bar', vram: 'bar', clocks: 'ring' },
+    system: { load: 'bar', ram: 'bar', clock: 'ring' }
+};
+
+function loadVizPrefs() {
+    try {
+        var gpuStr = localStorage.getItem('llama-monitor-gpu-viz');
+        if (gpuStr) vizPrefs.gpu = JSON.parse(gpuStr);
+        var sysStr = localStorage.getItem('llama-monitor-system-viz');
+        if (sysStr) vizPrefs.system = JSON.parse(sysStr);
+    } catch(e) {}
+}
+
+function saveVizPrefs(card) {
+    try {
+        var key = card === 'gpu' ? 'llama-monitor-gpu-viz' : 'llama-monitor-system-viz';
+        localStorage.setItem(key, JSON.stringify(vizPrefs[card]));
+    } catch(e) {}
+}
+
+function toggleVizSwitcher(card) {
+    var prefix = card === 'gpu' ? 'gpu' : 'sys';
+    var sw = document.getElementById(prefix + '-viz-switcher');
+    if (!sw) return;
+    var isOpen = sw.style.display !== 'none';
+    // Close all switchers
+    document.querySelectorAll('.viz-switcher').forEach(function(el) { el.style.display = 'none'; });
+    if (!isOpen) {
+        sw.style.display = 'flex';
+        // Position relative to card
+        var cardEl = document.getElementById(card === 'gpu' ? 'gpu-card' : 'system-card');
+        if (cardEl) {
+            var rect = cardEl.getBoundingClientRect();
+            var parentRect = cardEl.parentElement.getBoundingClientRect();
+            sw.style.top = (rect.height + 8) + 'px';
+            sw.style.right = '0';
+        }
+    }
+}
+
+function selectVizStyle(card, metric, style) {
+    vizPrefs[card][metric] = style;
+    saveVizPrefs(card);
+    // Update active state in switcher
+    var prefix = card === 'gpu' ? 'gpu' : 'sys';
+    var sw = document.getElementById(prefix + '-viz-switcher');
+    if (sw) {
+        sw.querySelectorAll('.viz-option').forEach(function(btn) {
+            btn.classList.toggle('active', btn.getAttribute('data-style') === style && btn.closest('.viz-switcher-options').getAttribute('data-metric') === metric);
+        });
+    }
+    // Fade out viz containers, then re-render
+    var cardEl = document.getElementById(card === 'gpu' ? 'gpu-card' : 'system-card');
+    if (cardEl) {
+        cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) { el.classList.add('viz-fade-out'); });
+        setTimeout(function() {
+            if (card === 'gpu') renderGpuCard(lastGpuData || {}, !!lastGpuData && Object.keys(lastGpuData).length > 0);
+            else renderSystemCard(lastSystemMetrics, !!lastSystemMetrics);
+            cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) {
+                el.classList.remove('viz-fade-out');
+                el.classList.add('viz-fade-in');
+                setTimeout(function() { el.classList.remove('viz-fade-in'); }, 160);
+            });
+        }, 120);
+    }
+}
+
+function resetVizPrefs(card) {
+    vizPrefs[card] = card === 'gpu'
+        ? { load: 'bar', power: 'bar', vram: 'bar', clocks: 'chips' }
+        : { load: 'bar', ram: 'bar', clock: 'chip' };
+    saveVizPrefs(card);
+    var prefix = card === 'gpu' ? 'gpu' : 'sys';
+    var sw = document.getElementById(prefix + '-viz-switcher');
+    if (sw) {
+        sw.querySelectorAll('.viz-option').forEach(function(btn) {
+            btn.classList.remove('active');
+        });
+        sw.querySelectorAll('.viz-option[data-style="bar"], .viz-option[data-style="chips"], .viz-option[data-style="chip"]').forEach(function(btn) {
+            btn.classList.add('active');
+        });
+    }
+    // Fade out viz containers, then re-render
+    var cardEl = document.getElementById(card === 'gpu' ? 'gpu-card' : 'system-card');
+    if (cardEl) {
+        cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) { el.classList.add('viz-fade-out'); });
+        setTimeout(function() {
+            if (card === 'gpu') renderGpuCard(lastGpuData || {}, !!lastGpuData && Object.keys(lastGpuData).length > 0);
+            else renderSystemCard(lastSystemMetrics, !!lastSystemMetrics);
+            cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) {
+                el.classList.remove('viz-fade-out');
+                el.classList.add('viz-fade-in');
+                setTimeout(function() { el.classList.remove('viz-fade-in'); }, 160);
+            });
+        }, 120);
+    }
+}
+
+// Close switchers on outside click
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.viz-switcher') && !e.target.closest('.viz-gear-btn')) {
+        document.querySelectorAll('.viz-switcher').forEach(function(el) { el.style.display = 'none'; });
+    }
+});
+
+// Persist last GPU data for re-render after style switch
+var lastGpuData = {};
+
+// Render GPU card
+function renderGpuCard(gpuMap, visible) {
+    var card = document.getElementById('gpu-card');
+    var emptyEl = document.getElementById('gpu-empty');
+    var deviceName = document.getElementById('gpu-device-name');
+    var tempGauge = document.getElementById('gpu-temp-gauge');
+    var tempValue = document.getElementById('gpu-temp-value');
+    var stateChip = document.getElementById('gpu-state');
+
+    if (!card || !visible) {
+        if (card) setCardState(card, 'dormant');
+        return;
+    }
+
+    var entries = Object.entries(gpuMap);
+    if (entries.length === 0) {
+        setCardState(card, 'unavailable');
+        setEmptyState(emptyEl, true);
+        return;
+    }
+
+    lastGpuData = gpuMap;
+    setEmptyState(emptyEl, false);
+
+    // Use first GPU (most common case)
+    var _loop = entries[0];
+    var name = _loop[0];
+    var m = _loop[1];
+
+    setCardState(card, 'live');
+    setChipState(stateChip, 'live', 'live');
+
+    // Device name
+    if (deviceName) deviceName.textContent = name;
+
+    // Temperature gauge
+    var temp = Math.round(m.temp);
+    var tempPct = Math.min(100, (temp / 100) * 100);
+    var tempColor = getTempSeverityColor(temp);
+    var isTempHot = temp >= 75;
+    if (tempGauge) {
+        tempGauge.style.setProperty('--pct', tempPct.toFixed(1));
+        tempGauge.style.setProperty('--gauge-color', tempColor);
+        tempGauge.classList.toggle('is-warming', isTempHot);
+    }
+    if (tempValue) tempValue.textContent = temp + '\u00B0';
+
+    // Push history
+    pushGpuHistory('load', m.load);
+    pushGpuHistory('power', m.power_consumption);
+    var vramPct = m.vram_total > 0 ? (m.vram_used / m.vram_total) * 100 : 0;
+    pushGpuHistory('vramPct', vramPct);
+    pushGpuHistory('sclk', m.sclk_mhz);
+    pushGpuHistory('mclk', m.mclk_mhz);
+
+    // Load
+    var loadViz = document.getElementById('gpu-load-viz');
+    var loadVal = document.getElementById('gpu-load-value');
+    var loadStyle = vizPrefs.gpu.load;
+    var loadHot = m.load >= 90;
+    var loadColor = getSeverityColor(m.load);
+    if (loadStyle === 'ring') renderHwRing(loadViz, m.load, loadHot);
+    else if (loadStyle === 'sparkline') renderHwSparkline(loadViz, gpuHistory.load);
+    else renderHwBar(loadViz, m.load, loadHot);
+    renderHwMetricSparkline('gpu-load-spark', gpuHistory.load, loadColor, loadStyle !== 'sparkline');
+    if (loadVal) loadVal.textContent = m.load + '%';
+
+    // Power
+    var powerViz = document.getElementById('gpu-power-viz');
+    var powerVal = document.getElementById('gpu-power-value');
+    var powerBlock = document.getElementById('gpu-power-block');
+    var powerPct = m.power_limit > 0 ? (m.power_consumption / m.power_limit) * 100 : 0;
+    var isCapped = m.power_consumption >= m.power_limit && m.power_limit > 0;
+    var powerStyle = vizPrefs.gpu.power;
+    var powerColor = getSeverityColor(powerPct);
+    if (powerBlock) powerBlock.classList.toggle('hw-power-capped', isCapped);
+    if (powerStyle === 'ring') renderHwRing(powerViz, powerPct, isCapped);
+    else if (powerStyle === 'sparkline') renderHwSparkline(powerViz, gpuHistory.power);
+    else renderHwBar(powerViz, powerPct, isCapped);
+    renderHwMetricSparkline('gpu-power-spark', gpuHistory.power, powerColor, powerStyle !== 'sparkline');
+    if (powerVal) powerVal.textContent = m.power_consumption.toFixed(1) + 'W' + (isCapped ? '!' : '') + ' / ' + m.power_limit + 'W';
+
+    // VRAM
+    var vramViz = document.getElementById('gpu-vram-viz');
+    var vramVal = document.getElementById('gpu-vram-value');
+    var vramStyle = vizPrefs.gpu.vram;
+    var vramGb = m.vram_total > 0 ? (m.vram_used / 1024).toFixed(1) : '0';
+    var vramTotalGb = m.vram_total > 0 ? (m.vram_total / 1024).toFixed(0) : '0';
+    var vramColor = getSeverityColor(vramPct);
+    if (vramStyle === 'ring') renderHwRing(vramViz, vramPct, vramPct >= 90);
+    else if (vramStyle === 'sparkline') renderHwSparkline(vramViz, gpuHistory.vramPct);
+    else if (vramStyle === 'stacked') renderHwStacked(vramViz, vramPct);
+    else renderHwBar(vramViz, vramPct, vramPct >= 90);
+    renderHwMetricSparkline('gpu-vram-spark', gpuHistory.vramPct, vramColor, vramStyle !== 'sparkline');
+    if (vramVal) vramVal.textContent = vramGb + ' / ' + vramTotalGb + ' GB';
+
+    // Clocks
+    var clocksViz = document.getElementById('gpu-clocks-viz');
+    var clocksVal = document.getElementById('gpu-clocks-value');
+    var clocksStyle = vizPrefs.gpu.clocks;
+    if (clocksStyle === 'ring') {
+        renderHwDualRing(clocksViz, m.sclk_mhz, m.mclk_mhz);
+        if (clocksVal) clocksVal.textContent = '';
+    } else if (clocksStyle === 'chips') {
+        renderHwChips(clocksViz, ['SCLK ' + m.sclk_mhz + 'MHz', 'MCLK ' + m.mclk_mhz + 'MHz']);
+        if (clocksVal) clocksVal.textContent = '';
+    } else {
+        if (clocksViz) clocksViz.innerHTML = '';
+        if (clocksVal) clocksVal.textContent = m.sclk_mhz + ' / ' + m.mclk_mhz + ' MHz';
+    }
+}
+
+// Render System card
+function renderSystemCard(sys, visible) {
+    var card = document.getElementById('system-card');
+    var emptyEl = document.getElementById('sys-empty');
+    var deviceName = document.getElementById('sys-device-name');
+    var tempGauge = document.getElementById('sys-temp-gauge');
+    var tempValue = document.getElementById('sys-temp-value');
+    var stateChip = document.getElementById('sys-state');
+
+    if (!card || !visible) {
+        if (card) setCardState(card, 'dormant');
+        return;
+    }
+
+    if (!sys) {
+        setCardState(card, 'unavailable');
+        setEmptyState(emptyEl, true);
+        return;
+    }
+
+    setEmptyState(emptyEl, false);
+    setCardState(card, 'live');
+    setChipState(stateChip, 'live', 'live');
+
+    // Device name: CPU model + motherboard
+    var parts = [];
+    if (sys.cpu_name) parts.push(sys.cpu_name);
+    if (sys.motherboard && sys.motherboard !== 'Unknown Motherboard') parts.push(sys.motherboard);
+    if (deviceName) deviceName.textContent = parts.join(' / ') || 'System';
+
+    // Temperature
+    var hasTemp = sys.cpu_temp_available && sys.cpu_temp > 0;
+    var sysTemp = hasTemp ? Math.round(sys.cpu_temp) : 0;
+    var tempPct = Math.min(100, (sysTemp / 100) * 100);
+    var tempColor = getTempSeverityColor(sysTemp);
+    var isTempHot = sysTemp >= 75;
+    if (tempGauge) {
+        tempGauge.style.setProperty('--pct', hasTemp ? tempPct.toFixed(1) : '0');
+        tempGauge.style.setProperty('--gauge-color', tempColor);
+        tempGauge.classList.toggle('is-warming', isTempHot);
+    }
+    if (tempValue) tempValue.textContent = hasTemp ? sysTemp + '\u00B0' : '\u2014';
+
+    // Push history
+    if (sys.cpu_load > 0) pushSysHistory('cpuLoad', sys.cpu_load);
+    var ramPct = sys.ram_total_gb > 0 ? (sys.ram_used_gb / sys.ram_total_gb) * 100 : 0;
+    if (sys.ram_total_gb > 0) pushSysHistory('ramPct', ramPct);
+
+    // CPU Load
+    var loadViz = document.getElementById('sys-load-viz');
+    var loadVal = document.getElementById('sys-load-value');
+    var loadStyle = vizPrefs.system.load;
+    var cpuLoad = sys.cpu_load || 0;
+    var loadHot = cpuLoad >= 90;
+    var loadColor = getSeverityColor(cpuLoad);
+    if (loadStyle === 'ring') renderHwRing(loadViz, cpuLoad, loadHot);
+    else if (loadStyle === 'sparkline') renderHwSparkline(loadViz, sysHistory.cpuLoad);
+    else renderHwBar(loadViz, cpuLoad, loadHot);
+    renderHwMetricSparkline('sys-load-spark', sysHistory.cpuLoad, loadColor, loadStyle !== 'sparkline');
+    if (loadVal) loadVal.textContent = cpuLoad > 0 ? cpuLoad + '%' : '\u2014';
+
+    // RAM
+    var ramViz = document.getElementById('sys-ram-viz');
+    var ramVal = document.getElementById('sys-ram-value');
+    var ramStyle = vizPrefs.system.ram;
+    var ramColor = getSeverityColor(ramPct);
+    if (ramStyle === 'ring') renderHwRing(ramViz, ramPct, ramPct >= 90);
+    else if (ramStyle === 'sparkline') renderHwSparkline(ramViz, sysHistory.ramPct);
+    else if (ramStyle === 'stacked') renderHwStacked(ramViz, ramPct);
+    else renderHwBar(ramViz, ramPct, ramPct >= 90);
+    renderHwMetricSparkline('sys-ram-spark', sysHistory.ramPct, ramColor, ramStyle !== 'sparkline');
+    if (ramVal) ramVal.textContent = sys.ram_total_gb > 0 ? sys.ram_used_gb.toFixed(1) + ' / ' + sys.ram_total_gb.toFixed(0) + ' GB' : '\u2014';
+
+    // Clock
+    var clockViz = document.getElementById('sys-clock-viz');
+    var clockVal = document.getElementById('sys-clock-value');
+    var clockStyle = vizPrefs.system.clock;
+    var clockMhz = sys.cpu_clock_mhz || 0;
+    if (clockMhz > 0) pushSysHistory('cpuClock', clockMhz);
+    if (clockStyle === 'ring') {
+        renderHwClockRing(clockViz, clockMhz);
+        if (clockVal) clockVal.textContent = '';
+    } else if (clockStyle === 'chip') {
+        var display = formatClockReadout(clockMhz);
+        renderHwChips(clockViz, [clockMhz > 0 ? display.value + ' ' + display.unit : '\u2014']);
+        if (clockVal) clockVal.textContent = '';
+    } else {
+        if (clockViz) clockViz.innerHTML = '';
+        if (clockVal) clockVal.textContent = clockMhz > 0 ? clockMhz + ' MHz' : '\u2014';
+    }
+}
+
+function setMetricSectionVisibility(cardId, visible, sectionId) {
+    const card = document.getElementById(cardId);
+    if (!card) return;
+    const section = sectionId ? document.getElementById(sectionId) : card.closest('.metric-section');
     if (section) section.style.display = visible ? '' : 'none';
 }
 
@@ -4647,7 +5338,7 @@ ws.onmessage = e => {
         }
         
         if (agentLatencyEl) {
-            agentLatencyEl.textContent = d.remote_agent_url ? d.remote_agent_url : '';
+            agentLatencyEl.textContent = '';
         }
     }
 
@@ -4665,6 +5356,12 @@ ws.onmessage = e => {
         btnAttach.style.display = 'none';
         btnDetach.style.display = 'inline-block';
         if (btnDetachTop) btnDetachTop.style.display = 'inline-block';
+
+        // Switch to monitor view if not already there
+        if (appState.view === 'setup') {
+            hideConnectingState();
+            switchView('monitor');
+        }
     } else {
         // Not attached: show server header, hide detach buttons
         if (serverHeader) serverHeader.style.display = '';
@@ -4774,23 +5471,11 @@ ws.onmessage = e => {
     const genAgeMs = l?.last_generation_throughput_unix_ms || 0;
     const latestThroughputMs = Math.max(promptAgeMs, genAgeMs);
     const throughputActive = promptRate > 0 || genRate > 0;
-    const isBlocked = l?.tool_calling_blocked || false;
-    const blockedSec = l?.blocked_duration_sec || 0;
-    const isBlockedCritical = isBlocked && blockedSec >= 60;
 
-    setCardState(throughputCard, !hasActiveEndpoint ? 'dormant' : isBlocked ? 'blocked' : throughputActive ? 'live' : 'idle');
+    setCardState(throughputCard, !hasActiveEndpoint ? 'dormant' : throughputActive ? 'live' : 'idle');
     setEmptyState(document.getElementById('m-throughput-empty'), !hasActiveEndpoint);
-    setChipState(throughputState, throughputActive ? 'live' : isBlockedCritical ? 'critical' : isBlocked ? 'blocked' : 'idle', throughputActive ? 'live' : isBlockedCritical ? 'critical' : isBlocked ? 'blocked' : 'idle');
+    setChipState(throughputState, throughputActive ? 'live' : 'idle', throughputActive ? 'live' : 'idle');
 
-    const blockedEl = document.getElementById('m-throughput-blocked');
-    const blockedTimer = document.getElementById('m-blocked-timer');
-    if (blockedEl) {
-        blockedEl.classList.toggle('visible', isBlocked);
-        blockedEl.classList.toggle('critical', isBlockedCritical);
-    }
-    if (blockedTimer) blockedTimer.textContent = `${blockedSec}s`;
-    const blockedText = blockedEl?.querySelector('.blocked-text');
-    if (blockedText) blockedText.textContent = isBlockedCritical ? 'potential hang — throughput suspended' : 'tool calling — throughput suspended';
     if (throughputAge) {
         throughputAge.textContent = formatMetricAge(latestThroughputMs);
     }
@@ -4835,8 +5520,8 @@ ws.onmessage = e => {
 
     pushSparklinePoint('prompt', promptDisplayRate);
     pushSparklinePoint('generation', genDisplayRate);
-    renderSparkline('m-prompt-spark', window.metricSeries.prompt, 'prompt', isBlocked);
-    renderSparkline('m-gen-spark', window.metricSeries.generation, 'generation', isBlocked);
+    renderSparkline('m-prompt-spark', window.metricSeries.prompt, 'prompt', false);
+    renderSparkline('m-gen-spark', window.metricSeries.generation, 'generation', false);
 
     // Throughput ratio
     const ratioBar = document.getElementById('m-throughput-ratio-bar');
@@ -4880,14 +5565,14 @@ ws.onmessage = e => {
     renderDecodingConfig(l, hasActiveEndpoint);
     renderLiveSparkline('m-live-output-spark', window.metricSeries.liveOutput);
 
-    setCardState(generationCard, !hasActiveEndpoint ? 'dormant' : isBlocked ? 'blocked' : generationActive ? 'live' : generationAvailable ? 'idle' : 'unavailable');
+    setCardState(generationCard, !hasActiveEndpoint ? 'dormant' : generationActive ? 'live' : generationAvailable ? 'idle' : 'unavailable');
     setEmptyState(document.getElementById('m-generation-empty'), !hasActiveEndpoint);
-    setChipState(generationState, isBlockedCritical ? 'critical' : isBlocked ? 'blocked' : (generationActive ? 'generating' : 'idle'), isBlockedCritical ? 'critical' : isBlocked ? 'blocked' : (generationActive ? 'live' : 'idle'));
+    setChipState(generationState, generationActive ? 'generating' : 'idle', generationActive ? 'live' : 'idle');
     setChipState(document.getElementById('m-slots-state'), generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');
     setChipState(document.getElementById('m-activity-state'), generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');
     if (generationRing) generationRing.style.setProperty('--progress', generationPct.toFixed(2));
     if (liveVelocity) {
-        liveVelocity.textContent = liveOutputRate > 0 ? liveOutputRate.toFixed(1) + ' t/s' : (isBlockedCritical ? 'hung' : isBlocked ? 'blocked' : (generationActive ? 'warming' : 'retained'));
+        liveVelocity.textContent = liveOutputRate > 0 ? liveOutputRate.toFixed(1) + ' t/s' : (generationActive ? 'warming' : 'retained');
     }
     if (promptStage && outputStage) {
         // Use throughput as proxy for phase detection when next_token data isn't available
@@ -4898,16 +5583,10 @@ ws.onmessage = e => {
         const isOutputPhase = useThroughputFallback
             ? !!(l?.generation_throughput_active)
             : (generated > 1);
-        promptStage.classList.toggle('active', generationActive && isPromptPhase && !isBlocked);
-        outputStage.classList.toggle('active', generationActive && isOutputPhase && !isBlocked);
-        promptStage.classList.toggle('idle', !generationActive && !isBlocked && !isOutputPhase);
-        outputStage.classList.toggle('idle', !generationActive && !isBlocked && !isPromptPhase);
-    }
-    const toolCallStage = document.getElementById('m-stage-toolcall');
-    if (toolCallStage) {
-        toolCallStage.classList.toggle('toolcall-critical', isBlockedCritical);
-        toolCallStage.classList.toggle('toolcall', isBlocked && !isBlockedCritical);
-        toolCallStage.classList.toggle('idle', !isBlocked && !generationActive);
+        promptStage.classList.toggle('active', generationActive && isPromptPhase);
+        outputStage.classList.toggle('active', generationActive && isOutputPhase);
+        promptStage.classList.toggle('idle', !generationActive && !isOutputPhase);
+        outputStage.classList.toggle('idle', !generationActive && !isPromptPhase);
     }
     if (generationAvailable) {
         if (generationMain) generationMain.textContent = formatMetricNumber(generated) + ' output tokens';
@@ -5001,102 +5680,14 @@ ws.onmessage = e => {
     const hostMetricsVisible = d.host_metrics_available === true;
     const systemVisible = hostMetricsVisible && !!d.capabilities?.system;
     const gpuVisible = hostMetricsVisible && !!d.capabilities?.gpu;
-    setMetricSectionVisibility('system-rows', systemVisible);
-    setMetricSectionVisibility('gpu-rows', gpuVisible);
+    setMetricSectionVisibility('gpu-card', gpuVisible, 'gpu-section');
+    setMetricSectionVisibility('system-card', systemVisible, 'system-section');
 
-    // GPU table
+    // GPU card rendering
+    renderGpuCard(d.gpu || {}, gpuVisible);
 
-    const tbody = document.getElementById('gpu-rows');
-
-    if (tbody && !gpuVisible) {
-        tbody.innerHTML = '';
-    } else if (tbody) tbody.innerHTML = Object.entries(d.gpu || {}).map(([card, m]) => {
-
-        const capped = m.power_consumption >= m.power_limit && m.power_limit > 0;
-
-        const pcls = capped ? 'value capped' : 'value power';
-
-        const ptxt = capped ? m.power_consumption.toFixed(1) + 'W!' : m.power_consumption.toFixed(1) + 'W / ' + m.power_limit + 'W';
-
-        const vpct = m.vram_total > 0 ? Math.round((m.vram_used / m.vram_total) * 100) : 0;
-
-        const vgb = m.vram_total > 0 ? (m.vram_used / 1024).toFixed(1) : 0;
-
-        const temp = Math.round(m.temp);
-        const tempSeverity = temp >= 90 ? 'severity-critical' : temp >= 80 ? 'severity-warning' : 'severity-normal';
-        const loadSeverity = m.load >= 95 ? 'severity-critical' : m.load >= 80 ? 'severity-warning' : 'severity-normal';
-        const vramSeverity = vpct >= 95 ? 'severity-critical' : vpct >= 80 ? 'severity-warning' : 'severity-normal';
-
-        return '<tr class="' + tempSeverity + '">' +
-
-            '<td class="card value">' + card + '</td>' +
-
-            '<td class="value temp ' + tempSeverity + '">' + temp + 'C</td>' +
-
-            '<td class="value load ' + loadSeverity + '">' + m.load + '%</td>' +
-
-            '<td class="value vram ' + vramSeverity + '">' + vpct + '% (' + vgb + ' GB)</td>' +
-
-            '<td class="' + pcls + '">' + ptxt + '</td>' +
-
-            '<td class="value sclk">' + m.sclk_mhz + 'MHz</td>' +
-
-            '<td class="value mclk">' + m.mclk_mhz + 'MHz</td>' +
-
-            '</tr>';
-
-    }).join('');
-
-
-
-    // System table
-
-    let sys = lastSystemMetrics;
-
-    const sysRowsEl = document.getElementById('system-rows');
-
-    if (sysRowsEl && !systemVisible) {
-        sysRowsEl.innerHTML = '';
-    } else if (sysRowsEl) {
-        const isWindows = navigator.platform.indexOf('Win') !== -1;
-        
-        let tempColumn = '';
-        if (sys && sys.cpu_temp_available && sys.cpu_temp > 0) {
-            tempColumn = '<td class="value temp">' + Math.round(sys.cpu_temp) + 'C</td>';
-        } else if (isWindows) {
-            const hasTemp = sys && sys.cpu_temp > 0;
-            const tempValue = hasTemp ? Math.round(sys.cpu_temp) + 'C' : '—';
-            const hasLHM = (sys && sys.cpu_temp_available) || false;
-            
-            if (hasLHM) {
-                // LHM is available, show temperature
-                tempColumn = '<td class="value temp">' + tempValue + '</td>';
-            } else {
-                // LHM not available, show install button
-                tempColumn = '<td class="value temp"><button class="btn-lhm-inline" onclick="showLHMNotification()" title="Install LibreHardwareMonitor for CPU temp monitoring">&#9971;</button></td>';
-            }
-        } else {
-            tempColumn = '<td class="value temp">—</td>';
-        }
-
-        sysRowsEl.innerHTML = '<tr>' +
-
-            '<td class="card value">' + (sys && sys.motherboard && sys.motherboard !== "Unknown Motherboard" ? sys.motherboard : 'System') + '</td>' +
-
-            tempColumn +
-
-            '<td class="value load">' + (sys && sys.cpu_load > 0 ? sys.cpu_load + '%' : '\u2014') + '</td>' +
-
-            '<td class="value sclk">' + (sys && sys.cpu_clock_mhz > 0 ? sys.cpu_clock_mhz + 'MHz' : '\u2014') + '</td>' +
-
-            '<td class="value vram">' + (sys && sys.ram_total_gb > 0 ? ((sys.ram_used_gb / sys.ram_total_gb) * 100).toFixed(0) + '% (' + sys.ram_used_gb.toFixed(1) + ' GB)' : '\u2014') + '</td>' +
-
-            '<td class="value">' + (sys && sys.cpu_name ? sys.cpu_name : '\u2014') + '</td>' +
-
-            '</tr>';
-
-    }
-
+    // System card rendering
+    renderSystemCard(lastSystemMetrics, systemVisible);
 
 
     // Logs
@@ -5126,9 +5717,6 @@ ws.onmessage = e => {
     const isAttached = d.session_mode === 'attach' && d.active_session_endpoint;
 
     if (isAttached) {
-
-        // Skip "Running" since it's already shown in status-text
-        if (l.generation_tokens_per_sec > 0) badgeParts.push(l.generation_tokens_per_sec.toFixed(1) + 't/s');
 
         const gpuEntries = Object.entries(d.gpu || {});
 
@@ -6035,3 +6623,210 @@ document.addEventListener('keydown', e => {
         closeKeyboardShortcutsModal();
     }
 });
+
+// ============================================
+// Setup / Monitor View Management
+// ============================================
+
+const appState = {
+    view: 'setup',
+    sessionActive: false,
+    lastSessionData: null
+};
+
+function switchView(targetView) {
+    if (appState.view === 'transitioning') return;
+    appState.view = 'transitioning';
+
+    const currentViewEl = document.getElementById('view-' + (appState.view === 'transitioning' ? 'setup' : appState.view));
+    const targetViewEl = document.getElementById('view-' + targetView);
+    const setupStrip = document.getElementById('endpoint-strip-setup');
+    const monitorStrip = document.getElementById('endpoint-strip-monitor');
+
+    if (!currentViewEl || !targetViewEl) {
+        appState.view = targetView;
+        return;
+    }
+
+    if (targetView === 'monitor') {
+        currentViewEl.classList.add('exiting');
+        setTimeout(() => {
+            currentViewEl.style.display = 'none';
+            currentViewEl.classList.remove('exiting');
+            targetViewEl.style.display = '';
+            targetViewEl.classList.add('entering');
+            showFlashOverlay();
+            animateCardsEnter();
+            if (setupStrip) setupStrip.style.display = 'none';
+            if (monitorStrip) monitorStrip.style.display = '';
+            document.body.classList.remove('setup-active');
+            setTimeout(() => {
+                targetViewEl.classList.remove('entering');
+                appState.view = 'monitor';
+            }, 500);
+        }, 400);
+    } else {
+        animateCardsExit();
+        if (setupStrip) setupStrip.style.display = '';
+        if (monitorStrip) monitorStrip.style.display = 'none';
+        document.body.classList.add('setup-active');
+        setTimeout(() => {
+            currentViewEl.style.display = 'none';
+            currentViewEl.classList.remove('exiting');
+            targetViewEl.style.display = '';
+            targetViewEl.classList.add('entering');
+            animateSetupCardsEnter();
+            setTimeout(() => {
+                targetViewEl.classList.remove('entering');
+                appState.view = 'setup';
+            }, 400);
+        }, 600);
+    }
+}
+
+function showConnectingState() {
+    const connectingDots = document.getElementById('connecting-dots');
+    if (connectingDots) connectingDots.style.display = '';
+}
+
+function hideConnectingState() {
+    const connectingDots = document.getElementById('connecting-dots');
+    if (connectingDots) connectingDots.style.display = 'none';
+}
+
+function showFlashOverlay() {
+    const existing = document.querySelector('.view-flash');
+    if (existing) existing.remove();
+    const flash = document.createElement('div');
+    flash.className = 'view-flash';
+    document.body.appendChild(flash);
+    setTimeout(() => flash.remove(), 800);
+}
+
+function animateCardsEnter() {
+    const cards = document.querySelectorAll('.view-monitor .widget-card');
+    cards.forEach((card, i) => {
+        card.classList.add('entrance');
+        setTimeout(() => card.classList.add('active'), 120 * i);
+    });
+}
+
+function animateCardsExit() {
+    const cards = [...document.querySelectorAll('.view-monitor .widget-card')].reverse();
+    cards.forEach((card, i) => {
+        card.style.transition = `opacity 0.3s ease ${60 * i}ms, transform 0.3s ease ${60 * i}ms`;
+        card.style.opacity = '0';
+        card.style.transform = 'translateY(16px)';
+    });
+}
+
+function animateSetupCardsEnter() {
+    const cards = document.querySelectorAll('.view-setup .setup-card.entrance');
+    cards.forEach((card, i) => {
+        setTimeout(() => card.classList.add('active'), 80 * i);
+    });
+}
+
+function doAttachFromSetup() {
+    const input = document.getElementById('setup-endpoint-url');
+    const url = input ? input.value.trim() : '';
+    if (url) {
+        const serverEndpoint = document.getElementById('server-endpoint');
+        if (serverEndpoint) serverEndpoint.value = url;
+        localStorage.setItem('llama-monitor-last-endpoint', url);
+    }
+    showConnectingState();
+    doAttach();
+}
+
+function doStartFromSetup() {
+    const select = document.getElementById('setup-preset-select');
+    if (select) {
+        const presetSelect = document.getElementById('preset-select');
+        if (presetSelect) presetSelect.value = select.value;
+    }
+    showConnectingState();
+    doStart();
+}
+
+function saveLastSessionData(data) {
+    const payload = { ...data, timestamp: Date.now() };
+    localStorage.setItem('llama-monitor-last-session', JSON.stringify(payload));
+    appState.lastSessionData = payload;
+}
+
+function loadLastSessionData() {
+    try {
+        const raw = localStorage.getItem('llama-monitor-last-session');
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        if (Date.now() - data.timestamp > 24 * 60 * 60 * 1000) {
+            localStorage.removeItem('llama-monitor-last-session');
+            return null;
+        }
+        return data;
+    } catch {
+        return null;
+    }
+}
+
+function renderQuickStats() {
+    const data = loadLastSessionData();
+    const statsEl = document.getElementById('setup-stats');
+    if (!statsEl) return;
+
+    if (data) {
+        const promptRate = document.getElementById('setup-last-prompt-rate');
+        const genRate = document.getElementById('setup-last-gen-rate');
+        const session = document.getElementById('setup-last-session');
+        if (promptRate) promptRate.textContent = data.promptRate || '—';
+        if (genRate) genRate.textContent = data.genRate || '—';
+        if (session) session.textContent = data.sessionName || '—';
+        statsEl.style.display = 'flex';
+    } else {
+        statsEl.style.display = 'none';
+    }
+}
+
+function syncSetupPresetSelect() {
+    const setupSelect = document.getElementById('setup-preset-select');
+    const mainSelect = document.getElementById('preset-select');
+    if (!setupSelect || !mainSelect) return;
+
+    setupSelect.innerHTML = '';
+    const options = mainSelect.querySelectorAll('option');
+    options.forEach(opt => {
+        const clone = document.createElement('option');
+        clone.value = opt.value;
+        clone.textContent = opt.textContent;
+        setupSelect.appendChild(clone);
+    });
+    setupSelect.value = mainSelect.value;
+}
+
+// Initialize view state on load
+function initViewState() {
+    renderQuickStats();
+    syncSetupPresetSelect();
+    const lastEndpoint = localStorage.getItem('llama-monitor-last-endpoint');
+    if (lastEndpoint) {
+        const input = document.getElementById('setup-endpoint-url');
+        if (input) input.value = lastEndpoint;
+    }
+    document.body.classList.add('setup-active');
+    const setupView = document.getElementById('view-setup');
+    const monitorView = document.getElementById('view-monitor');
+    if (setupView) {
+        setupView.style.display = '';
+        setupView.classList.add('entering');
+        setTimeout(() => setupView.classList.remove('entering'), 600);
+    }
+    if (monitorView) monitorView.style.display = 'none';
+}
+
+// Call init on DOM ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initViewState);
+} else {
+    initViewState();
+}

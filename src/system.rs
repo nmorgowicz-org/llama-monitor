@@ -165,13 +165,142 @@ fn get_cpu_load(sys: &System) -> u32 {
     (sys.cpus().iter().map(|cpu| cpu.cpu_usage()).sum::<f32>() / sys.cpus().len() as f32) as _
 }
 
+#[cfg(target_os = "linux")]
+fn get_cpu_clock(sys: &System) -> u32 {
+    use std::fs;
+
+    if sys.cpus().is_empty() {
+        return 0;
+    }
+
+    let mut freq_samples_mhz = Vec::new();
+
+    for cpu in 0..sys.cpus().len() {
+        let base = format!("/sys/devices/system/cpu/cpu{cpu}/cpufreq");
+        for candidate in ["scaling_cur_freq", "cpuinfo_cur_freq"] {
+            let path = format!("{base}/{candidate}");
+            if let Ok(raw) = fs::read_to_string(&path)
+                && let Ok(khz) = raw.trim().parse::<u64>()
+                && khz > 0
+            {
+                freq_samples_mhz.push((khz / 1000) as u32);
+                break;
+            }
+        }
+    }
+
+    if !freq_samples_mhz.is_empty() {
+        let sum: u64 = freq_samples_mhz.iter().map(|&v| v as u64).sum();
+        return (sum / freq_samples_mhz.len() as u64) as u32;
+    }
+
+    if let Ok(cpuinfo) = fs::read_to_string("/proc/cpuinfo") {
+        let mhz_values: Vec<u32> = cpuinfo
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .filter(|(key, _)| key.trim() == "cpu MHz")
+            .filter_map(|(_, value)| value.trim().parse::<f64>().ok())
+            .filter(|mhz| *mhz > 0.0)
+            .map(|mhz| mhz.round() as u32)
+            .collect();
+
+        if !mhz_values.is_empty() {
+            let sum: u64 = mhz_values.iter().map(|&v| v as u64).sum();
+            return (sum / mhz_values.len() as u64) as u32;
+        }
+    }
+
+    sys.cpus().iter().map(|c| c.frequency()).max().unwrap_or(0) as u32
+}
+
+#[cfg(target_os = "windows")]
+fn get_cpu_clock(sys: &System) -> u32 {
+    use std::collections::HashMap;
+    use wmi::{Variant, WMIConnection};
+
+    if sys.cpus().is_empty() {
+        return 0;
+    }
+
+    fn variant_to_u32(value: &Variant) -> Option<u32> {
+        match value {
+            Variant::UI4(v) => Some(*v),
+            Variant::I4(v) => (*v).try_into().ok(),
+            Variant::UI8(v) => (*v).try_into().ok(),
+            Variant::I8(v) => (*v).try_into().ok(),
+            Variant::R4(v) => {
+                if *v > 0.0 {
+                    Some(v.round() as u32)
+                } else {
+                    None
+                }
+            }
+            Variant::R8(v) => {
+                if *v > 0.0 {
+                    Some(v.round() as u32)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    if let Ok(wmi) = WMIConnection::new() {
+        let base_mhz = wmi
+            .raw_query::<HashMap<String, Variant>>("SELECT CurrentClockSpeed FROM Win32_Processor")
+            .ok()
+            .map(|results| {
+                results
+                    .iter()
+                    .filter_map(|row| row.get("CurrentClockSpeed").and_then(variant_to_u32))
+                    .filter(|mhz| *mhz > 0)
+                    .collect::<Vec<_>>()
+            })
+            .and_then(|mhz_values| {
+                if mhz_values.is_empty() {
+                    None
+                } else {
+                    let sum: u64 = mhz_values.iter().map(|&v| v as u64).sum();
+                    Some((sum / mhz_values.len() as u64) as u32)
+                }
+            });
+
+        let perf_pct = wmi
+            .raw_query::<HashMap<String, Variant>>(
+                "SELECT Name,PercentProcessorPerformance FROM Win32_PerfFormattedData_Counters_ProcessorInformation WHERE Name='_Total'",
+            )
+            .ok()
+            .and_then(|results| {
+                results.iter().find_map(|row| {
+                    row.get("PercentProcessorPerformance")
+                        .and_then(variant_to_u32)
+                        .filter(|pct| *pct > 0)
+                })
+            });
+
+        if let (Some(base_mhz), Some(perf_pct)) = (base_mhz, perf_pct) {
+            let effective = ((base_mhz as f64) * (perf_pct as f64 / 100.0)).round() as u32;
+            if effective > 0 {
+                return effective;
+            }
+        }
+
+        if let Some(base_mhz) = base_mhz {
+            return base_mhz;
+        }
+    }
+
+    sys.cpus().iter().map(|c| c.frequency()).max().unwrap_or(0) as u32
+}
+
+#[cfg(all(not(target_os = "linux"), not(target_os = "windows")))]
 fn get_cpu_clock(sys: &System) -> u32 {
     if sys.cpus().is_empty() {
         return 0;
     }
 
-    let max_freq = sys.cpus().iter().map(|c| c.frequency()).max().unwrap_or(0);
-    max_freq as _
+    sys.cpus().iter().map(|c| c.frequency()).max().unwrap_or(0) as u32
 }
 
 fn get_ram_info(sys: &System) -> (f64, f64) {

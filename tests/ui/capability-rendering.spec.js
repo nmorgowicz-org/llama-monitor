@@ -1,27 +1,49 @@
 import { test, expect } from '@playwright/test';
 
+async function enterMonitorView(page) {
+  await page.evaluate(() => switchView('monitor'));
+  await expect(page.locator('body')).not.toHaveClass(/setup-active/);
+  await expect(page.locator('#view-monitor')).toBeVisible();
+  await expect(page.locator('#endpoint-strip-monitor')).toBeVisible();
+}
+
+async function openNewSessionForm(page) {
+  await page.getByRole('button', { name: /sessions/i }).click();
+  await expect(page.locator('#session-modal')).toHaveClass(/open/);
+  await expect(page.locator('#session-modal-title')).toHaveText('Sessions');
+  await page.locator('#btn-new-session').click();
+  await expect(page.locator('#sessions-new-form')).toBeVisible();
+}
+
 test.describe('modern UI shell', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('.top-nav-bar');
   });
 
-  test('renders status, nav, sidebar, and dashboard shell', async ({ page }) => {
-    await expect(page.locator('.endpoint-health-strip')).toBeVisible();
-    await expect(page.locator('.status-label')).toHaveText('Active endpoint');
+  test('renders setup shell before monitor activation', async ({ page }) => {
+    await expect(page.locator('body')).toHaveClass(/setup-active/);
     await expect(page.locator('.top-nav-bar')).toBeVisible();
     await expect(page.locator('.sidebar-nav')).toBeVisible();
-    await expect(page.locator('#page-server')).toBeVisible();
-    await expect(page.locator('.dashboard-grid')).toBeVisible();
+    await expect(page.locator('#view-setup')).toBeVisible();
+    await expect(page.getByText('Attach to Endpoint')).toBeVisible();
+    await expect(page.getByText('Spawn Local Server')).toBeVisible();
   });
 
   test('top status endpoint is read-only and edit control is in dashboard', async ({ page }) => {
+    await enterMonitorView(page);
+    await page.evaluate(() => {
+      const endpointUrl = document.getElementById('endpoint-url');
+      if (endpointUrl) endpointUrl.textContent = 'http://127.0.0.1:8001';
+    });
     await expect(page.locator('.endpoint-url')).toBeVisible();
     await expect(page.locator('.endpoint-url')).not.toHaveJSProperty('tagName', 'INPUT');
     await expect(page.locator('#server-endpoint')).toBeEditable();
   });
 
   test('sidebar page tabs switch server, chat, and logs', async ({ page }) => {
+    await enterMonitorView(page);
+
     await page.getByRole('button', { name: /chat/i }).click();
     await expect(page.locator('#page-chat')).toBeVisible();
     await expect(page.locator('#page-server')).not.toBeVisible();
@@ -55,10 +77,7 @@ test.describe('modal controls', () => {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
 
-    await page.getByRole('button', { name: /sessions/i }).click();
-    await expect(page.locator('#session-modal')).toHaveClass(/open/);
-    await expect(page.locator('#session-modal-title')).toHaveText('New Session');
-
+    await openNewSessionForm(page);
     await page.locator('#modal-session-mode').selectOption('attach');
     await expect(page.locator('#modal-session-port-label')).toHaveText('Endpoint');
     expect(errors).toEqual([]);
@@ -94,6 +113,7 @@ test.describe('modal controls', () => {
   });
 
   test('remote agent fix opens runtime configuration', async ({ page }) => {
+    await enterMonitorView(page);
     await page.evaluate(() => {
       document.getElementById('agent-status').style.display = '';
     });
@@ -201,10 +221,10 @@ test.describe('responsive shell', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/');
 
-    await expect(page.locator('.endpoint-health-strip')).toBeVisible();
+    await expect(page.locator('body')).toHaveClass(/setup-active/);
     await expect(page.locator('.sidebar-nav')).toBeVisible();
-    await expect(page.locator('#server-endpoint')).toBeEditable();
-    await expect(page.getByRole('button', { name: /^attach$/i })).toBeVisible();
+    await expect(page.locator('#setup-endpoint-url')).toBeEditable();
+    await expect(page.locator('#view-setup .setup-btn-primary')).toBeVisible();
   });
 });
 
@@ -212,6 +232,7 @@ test.describe('inference metric rendering', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('.top-nav-bar');
+    await enterMonitorView(page);
   });
 
   test('renders active slot, request, speculative, and sampler state from slot snapshots', async ({ page }) => {

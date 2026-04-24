@@ -30,7 +30,7 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             artifact: llama-monitor-linux-aarch64
           - target: x86_64-pc-windows-gnu
-            artifact: llama-monitor-windows-x86_64.exe
+            artifact: llama-monitor-windows-x86_64.zip
           - target: aarch64-apple-darwin
             artifact: llama-monitor-macos-aarch64.tar.gz
 
@@ -47,6 +47,16 @@ jobs:
       - name: Build ${{ matrix.target }}
         run: bash scripts/build-single-target.sh ${{ matrix.target }}
 
+      - name: Setup .NET for Windows helper
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build sensor bridge
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        run: dotnet publish sensor_bridge/sensor_bridge.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o sensor_bridge/publish
+
       - name: Package artifact
         run: |
           case "${{ matrix.target }}" in
@@ -59,7 +69,10 @@ jobs:
               chmod +x llama-monitor-linux-aarch64
               ;;
             x86_64-pc-windows-gnu)
-              cp target/x86_64-pc-windows-gnu/release/llama-monitor.exe llama-monitor-windows-x86_64.exe
+              mkdir -p windows-bundle
+              cp target/x86_64-pc-windows-gnu/release/llama-monitor.exe windows-bundle/llama-monitor.exe
+              cp sensor_bridge/publish/sensor_bridge.exe windows-bundle/sensor_bridge.exe
+              (cd windows-bundle && zip -9 -r ../llama-monitor-windows-x86_64.zip .)
               ;;
             aarch64-apple-darwin)
               cp target/aarch64-apple-darwin/release/llama-monitor llama-monitor-macos-aarch64
@@ -102,7 +115,7 @@ jobs:
           files: |
             llama-monitor-linux-x86_64
             llama-monitor-linux-aarch64
-            llama-monitor-windows-x86_64.exe
+            llama-monitor-windows-x86_64.zip
             llama-monitor-macos-aarch64.tar.gz
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}

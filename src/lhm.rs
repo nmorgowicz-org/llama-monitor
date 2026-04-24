@@ -32,8 +32,9 @@ pub fn is_sensor_bridge_available() -> bool {
         Some(d) => d,
         None => return false,
     };
-    let bridge_path = exe_dir.join("bin").join("sensor_bridge.exe");
-    bridge_path.exists()
+    let primary = exe_dir.join("sensor_bridge.exe");
+    let legacy = exe_dir.join("bin").join("sensor_bridge.exe");
+    primary.exists() || legacy.exists()
 }
 
 #[cfg(target_os = "windows")]
@@ -64,27 +65,24 @@ pub fn get_lhm_cpu_temp() -> (f32, bool) {
         }
     };
 
-    let bridge_path = exe_dir.join("bin").join("sensor_bridge.exe");
+    let bridge_path = {
+        let primary = exe_dir.join("sensor_bridge.exe");
+        if primary.exists() {
+            primary
+        } else {
+            exe_dir.join("bin").join("sensor_bridge.exe")
+        }
+    };
 
     if !bridge_path.exists() {
         eprintln!("sensor_bridge.exe not found at {:?}", bridge_path);
         return (0.0, false);
     }
 
-    let bridge_str = bridge_path.to_string_lossy().to_string();
     let temp_file = std::env::temp_dir().join("sensor_bridge_output.json");
+    let _ = std::fs::remove_file(&temp_file);
 
-    let result = std::process::Command::new("powershell.exe")
-        .arg("-NoProfile")
-        .arg("-NonInteractive")
-        .arg("-WindowStyle")
-        .arg("Hidden")
-        .arg("-Command")
-        .arg(format!(
-            r#"Start-Process "{}" -Verb RunAs -Wait"#,
-            bridge_str
-        ))
-        .output();
+    let result = std::process::Command::new(&bridge_path).output();
 
     let Ok(output) = result else {
         eprintln!("[LHM] Failed to spawn sensor_bridge.exe");
@@ -92,7 +90,12 @@ pub fn get_lhm_cpu_temp() -> (f32, bool) {
     };
 
     if !output.status.success() {
-        eprintln!("sensor_bridge.exe failed: {:?}", output.status);
+        eprintln!(
+            "sensor_bridge.exe failed: {:?} stdout={} stderr={}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout).trim(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
         return (0.0, false);
     }
 
@@ -116,7 +119,23 @@ pub fn get_lhm_cpu_temp() -> (f32, bool) {
 
     readings
         .iter()
-        .find(|r| r.sensor_type == "Temperature" && r.name.contains("Package"))
+        .find(|r| {
+            if r.sensor_type != "Temperature" {
+                return false;
+            }
+            let name = r.name.to_ascii_lowercase();
+            let hardware = r.hardware.to_ascii_lowercase();
+            let subhardware = r.subhardware.as_deref().unwrap_or("").to_ascii_lowercase();
+            (name.contains("package")
+                || name.contains("cpu")
+                || name.contains("ccd")
+                || name.contains("tdie")
+                || name.contains("die"))
+                && (hardware.contains("cpu")
+                    || hardware.contains("ryzen")
+                    || subhardware.contains("cpu")
+                    || subhardware.contains("ryzen"))
+        })
         .and_then(|r| r.value)
         .map(|v| (v as f32, true))
         .unwrap_or((0.0, false))

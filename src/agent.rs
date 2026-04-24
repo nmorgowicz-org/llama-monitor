@@ -622,7 +622,7 @@ async fn default_remote_agent_command_for_target(target: &str) -> String {
 fn default_start_command_for_os(os: RemoteOs, install_path: &str) -> String {
     match os {
         RemoteOs::Windows => format!(
-            "cmd.exe /C schtasks /Delete /TN \"{WINDOWS_AGENT_LEGACY_TASK_NAME}\" /F >NUL 2>NUL & schtasks /Create /TN \"{WINDOWS_AGENT_TASK_NAME}\" /TR \"\\\"{install_path}\\\" --agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT}\" /SC ONLOGON /F && schtasks /Run /TN \"{WINDOWS_AGENT_TASK_NAME}\""
+            "cmd.exe /C schtasks /Delete /TN \"{WINDOWS_AGENT_LEGACY_TASK_NAME}\" /F >NUL 2>NUL & schtasks /Create /TN \"{WINDOWS_AGENT_TASK_NAME}\" /TR \"\\\"{install_path}\\\" --agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT}\" /SC ONLOGON /RL HIGHEST /F && schtasks /Run /TN \"{WINDOWS_AGENT_TASK_NAME}\""
         ),
         RemoteOs::Unix | RemoteOs::Macos => format!(
             "nohup {install_path} --agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT} > ~/.config/llama-monitor/agent.log 2>&1 &"
@@ -773,7 +773,7 @@ impl LatestReleaseInfo {
 
 fn asset_info_from_github_asset(asset: GithubAsset) -> Option<ReleaseAssetInfo> {
     let (platform, arch, archive) = match asset.name.as_str() {
-        "llama-monitor-windows-x86_64.exe" => ("windows", "x86_64", false),
+        "llama-monitor-windows-x86_64.zip" => ("windows", "x86_64", true),
         "llama-monitor-linux-x86_64" => ("linux", "x86_64", false),
         "llama-monitor-linux-aarch64" => ("linux", "aarch64", false),
         "llama-monitor-macos-aarch64.tar.gz" => ("macos", "aarch64", true),
@@ -946,7 +946,12 @@ pub mod install {
             .or_else(|| install_path_for_os(os).map(ToOwned::to_owned))
             .context("Could not determine install path")?;
 
-        move_binary_to_install_path(&connection, &remote_temp_path, &install_path, os).await?;
+        if os == RemoteOs::Windows && asset.archive {
+            extract_windows_archive_to_install_path(&connection, &remote_temp_path, &install_path)
+                .await?;
+        } else {
+            move_binary_to_install_path(&connection, &remote_temp_path, &install_path, os).await?;
+        }
 
         if os == RemoteOs::Unix || os == RemoteOs::Macos {
             set_executable_bit(&connection, &install_path, os).await?;
@@ -983,8 +988,10 @@ pub mod install {
     }
 
     fn remote_temp_name_for_asset(asset: &ReleaseAssetInfo) -> String {
-        if asset.archive {
+        if asset.name.ends_with(".tar.gz") {
             asset.name.trim_end_matches(".tar.gz").to_string()
+        } else if asset.name.ends_with(".zip") {
+            asset.name.trim_end_matches(".zip").to_string()
         } else {
             asset.name.clone()
         }
@@ -1212,6 +1219,40 @@ pub mod install {
             Ok(())
         } else {
             Err(io::Error::other(format!("Failed to move binary: {}", output.stderr.trim())).into())
+        }
+    }
+
+    async fn extract_windows_archive_to_install_path(
+        connection: &SshConnection,
+        archive_path: &str,
+        install_path: &str,
+    ) -> Result<()> {
+        let install_dir = install_path
+            .rsplit_once('\\')
+            .map(|(dir, _)| dir.to_string())
+            .ok_or_else(|| io::Error::other("no directory in install path"))?;
+
+        let command = format!(
+            "powershell.exe -NoProfile -NonInteractive -Command \"$ErrorActionPreference = 'Stop'; \
+if (!(Test-Path '{dir}')) {{ New-Item -ItemType Directory -Path '{dir}' -Force | Out-Null }}; \
+Expand-Archive -LiteralPath '{archive}' -DestinationPath '{dir}' -Force; \
+Remove-Item -LiteralPath '{archive}' -Force -ErrorAction SilentlyContinue\"",
+            dir = install_dir,
+            archive = archive_path
+        );
+
+        let output = remote_ssh::exec(connection.clone(), command)
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))?;
+
+        if output.status == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!(
+                "Failed to extract Windows archive: {}",
+                output.stderr.trim()
+            ))
+            .into())
         }
     }
 
