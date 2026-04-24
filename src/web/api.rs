@@ -629,18 +629,24 @@ fn api_remote_agent_start(
                 };
                 // Always resolve %APPDATA% for Windows targets
                 let command = if command.contains("%APPDATA%") {
+                    eprintln!("[api] Start command contains %%APPDATA%%, resolving...");
                     if let Some(ref conn) = ssh_connection {
                         if let Some(appdata) = crate::agent::resolve_windows_appdata(conn).await {
-                            command.replace("%APPDATA%", &appdata)
+                            let resolved = command.replace("%APPDATA%", &appdata);
+                            eprintln!("[api] Resolved command: {}", resolved);
+                            resolved
                         } else {
+                            eprintln!("[api] Could not resolve %%APPDATA%%, using original command");
                             command
                         }
                     } else {
+                        eprintln!("[api] No SSH connection, cannot resolve %%APPDATA%%");
                         command
                     }
                 } else {
                     command
                 };
+                eprintln!("[api] Final start command: {}", command);
                 match crate::agent::start_remote_agent(
                     &ssh_target,
                     ssh_connection,
