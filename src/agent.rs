@@ -714,7 +714,10 @@ pub(crate) async fn resolve_windows_appdata(connection: &SshConnection) -> Optio
     // Fallback: resolve %USERPROFILE% and construct AppData\Roaming
     if let Ok(Ok(out)) = tokio::time::timeout(
         Duration::from_secs(5),
-        remote_ssh::exec(connection.clone(), "cmd.exe /C echo %USERPROFILE%".to_string()),
+        remote_ssh::exec(
+            connection.clone(),
+            "cmd.exe /C echo %USERPROFILE%".to_string(),
+        ),
     )
     .await
         && out.status == 0

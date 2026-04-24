@@ -683,7 +683,9 @@ function saveSettings() {
 
         if (s.server_endpoint) {
             const endpointInput = document.getElementById('server-endpoint');
-            if (endpointInput) endpointInput.value = s.server_endpoint;
+            if (endpointInput && !endpointInput.dataset.preserved) {
+                endpointInput.value = s.server_endpoint;
+            }
         }
 
         if (s.remote_agent_url !== undefined) {
@@ -4272,6 +4274,19 @@ async function loadSessions() {
 
         renderSessionList();
 
+        const lastAttach = sessions
+            .filter(s => s.mode && s.mode.Attach)
+            .sort((a, b) => b.last_active - a.last_active)[0];
+
+        if (lastAttach) {
+            const endpointInput = document.getElementById('server-endpoint');
+            if (endpointInput) {
+                endpointInput.value = lastAttach.mode.Attach.endpoint;
+                endpointInput.dataset.preserved = '1';
+                saveSettings();
+            }
+        }
+
     } catch (err) {
 
         console.error('Failed to load sessions:', err);
@@ -4294,7 +4309,7 @@ function renderSessionList() {
 
         const is_active = s.id === activeSessionId;
 
-        const modeText = s.mode.type === 'Spawn' ? 'Spawn' : 'Attach';
+        const modeText = s.mode && s.mode.Spawn ? 'Spawn' : 'Attach';
 
         const statusText = s.status === 'Running' ? 'Running' : 
 
@@ -4310,7 +4325,7 @@ function renderSessionList() {
 
                 '<span class="session-item-mode">' + modeText + '</span>' +
 
-                '<span class="session-item-port">' + (s.mode.port || activeSessionPort) + '</span>' +
+                '<span class="session-item-port">' + (s.mode.Spawn ? s.mode.Spawn.port : activeSessionPort) + '</span>' +
 
                 '<span class="session-item-status">' + statusText + '</span>' +
 
@@ -4500,15 +4515,27 @@ async function updateActiveSessionInfo() {
 
             } else if (modeParts[0] === 'Attach') {
 
+                const endpoint = modeParts.slice(1).join(':');
+
                 try {
 
-                    const url = new URL(modeParts[1]);
+                    const url = new URL(endpoint);
 
                     activeSessionPort = parseInt(url.port) || 8080;
 
                 } catch(e) {
 
                     activeSessionPort = 8080;
+
+                }
+
+                const endpointInput = document.getElementById('server-endpoint');
+
+                if (endpointInput && endpointInput.value !== endpoint) {
+
+                    endpointInput.value = endpoint;
+
+                    saveSettings();
 
                 }
 
