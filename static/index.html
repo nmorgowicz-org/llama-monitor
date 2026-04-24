@@ -310,33 +310,150 @@
 
                 <section class="metric-section" id="gpu-section" style="display:none;">
                     <h2 class="dashboard-section-title">GPUs</h2>
-                    <div class="table-wrap widget-card">
-                        <table class="gpu-table">
-                            <colgroup>
-                                <col style="width:14%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:24%"><col style="width:16%"><col style="width:16%">
-                            </colgroup>
-                            <thead><tr>
-                                <th>GPU</th><th>Temp</th><th>Load</th><th>VRAM</th><th>Power</th><th>SCLK</th><th>MCLK</th>
-                            </tr></thead>
-                            <tbody id="gpu-rows"></tbody>
-                        </table>
+                    <div class="widget-card widget-hardware widget-gpu" id="gpu-card">
+                        <div class="metric-card-topline">
+                            <div class="widget-metric-label">GPU</div>
+                            <span class="hw-device-name" id="gpu-device-name"></span>
+                            <div class="hw-topline-right">
+                                <div class="hw-temp-gauge" id="gpu-temp-gauge" style="--pct:0;--gauge-color:#8fbcbb;">
+                                    <span class="hw-temp-value" id="gpu-temp-value"></span>
+                                </div>
+                                <div class="metric-live-chip" id="gpu-state">idle</div>
+                                <button class="viz-gear-btn" onclick="toggleVizSwitcher('gpu')" title="Customize visualization">⚙</button>
+                            </div>
+                        </div>
+                        <div class="inference-empty-state visible" id="gpu-empty">GPU metrics appear after attach</div>
+                        <div class="hw-metric-row">
+                            <div class="hw-metric-block" id="gpu-load-block">
+                                <div class="hw-metric-label">Load</div>
+                                <div class="hw-metric-viz" id="gpu-load-viz"></div>
+                                <div class="hw-metric-value" id="gpu-load-value">&mdash;</div>
+                            </div>
+                            <div class="hw-metric-block" id="gpu-power-block">
+                                <div class="hw-metric-label">Power</div>
+                                <div class="hw-metric-viz" id="gpu-power-viz"></div>
+                                <div class="hw-metric-value" id="gpu-power-value">&mdash;</div>
+                            </div>
+                            <div class="hw-metric-block" id="gpu-vram-block">
+                                <div class="hw-metric-label">VRAM</div>
+                                <div class="hw-metric-viz" id="gpu-vram-viz"></div>
+                                <div class="hw-metric-value" id="gpu-vram-value">&mdash;</div>
+                            </div>
+                            <div class="hw-metric-block" id="gpu-clocks-block">
+                                <div class="hw-metric-label">Clocks</div>
+                                <div class="hw-metric-viz" id="gpu-clocks-viz"></div>
+                                <div class="hw-metric-value" id="gpu-clocks-value">&mdash;</div>
+                            </div>
+                        </div>
                     </div>
                 </section>
 
                 <section class="metric-section" id="system-section" style="display:none;">
                     <h2 class="dashboard-section-title">System</h2>
-                    <div class="table-wrap widget-card">
-                        <table class="gpu-table">
-                            <colgroup>
-                                <col style="width:18%"><col style="width:10%"><col style="width:10%"><col style="width:18%"><col style="width:26%"><col style="width:18%">
-                            </colgroup>
-                            <thead><tr>
-                                <th>System</th><th>Temp</th><th>Load</th><th>Clock</th><th>RAM</th><th>Model</th>
-                            </tr></thead>
-                            <tbody id="system-rows"></tbody>
-                        </table>
+                    <div class="widget-card widget-hardware widget-system" id="system-card">
+                        <div class="metric-card-topline">
+                            <div class="widget-metric-label">SYSTEM</div>
+                            <span class="hw-device-name" id="sys-device-name"></span>
+                            <div class="hw-topline-right">
+                                <div class="hw-temp-gauge" id="sys-temp-gauge" style="--pct:0;--gauge-color:#8fbcbb;">
+                                    <span class="hw-temp-value" id="sys-temp-value"></span>
+                                </div>
+                                <div class="metric-live-chip" id="sys-state">idle</div>
+                                <button class="viz-gear-btn" onclick="toggleVizSwitcher('system')" title="Customize visualization">⚙</button>
+                            </div>
+                        </div>
+                        <div class="inference-empty-state visible" id="sys-empty">System metrics appear after attach</div>
+                        <div class="hw-metric-row">
+                            <div class="hw-metric-block" id="sys-load-block">
+                                <div class="hw-metric-label">CPU Load</div>
+                                <div class="hw-metric-viz" id="sys-load-viz"></div>
+                                <div class="hw-metric-value" id="sys-load-value">&mdash;</div>
+                            </div>
+                            <div class="hw-metric-block" id="sys-ram-block">
+                                <div class="hw-metric-label">RAM</div>
+                                <div class="hw-metric-viz" id="sys-ram-viz"></div>
+                                <div class="hw-metric-value" id="sys-ram-value">&mdash;</div>
+                            </div>
+                            <div class="hw-metric-block" id="sys-clock-block">
+                                <div class="hw-metric-label">Clock</div>
+                                <div class="hw-metric-viz" id="sys-clock-viz"></div>
+                                <div class="hw-metric-value" id="sys-clock-value">&mdash;</div>
+                            </div>
+                        </div>
                     </div>
                 </section>
+
+                <!-- GPU Visualization Switcher -->
+                <div class="viz-switcher" id="gpu-viz-switcher" style="display:none;">
+                    <div class="viz-switcher-header">
+                        <span>GPU Visualization</span>
+                        <button class="viz-reset-btn" onclick="resetVizPrefs('gpu')">Reset</button>
+                    </div>
+                    <div class="viz-switcher-row">
+                        <div class="viz-switcher-label">Load</div>
+                        <div class="viz-switcher-options" data-card="gpu" data-metric="load">
+                            <button class="viz-option active" data-style="bar" onclick="selectVizStyle('gpu','load','bar')" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" onclick="selectVizStyle('gpu','load','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" onclick="selectVizStyle('gpu','load','sparkline')" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
+                        </div>
+                    </div>
+                    <div class="viz-switcher-row">
+                        <div class="viz-switcher-label">Power</div>
+                        <div class="viz-switcher-options" data-card="gpu" data-metric="power">
+                            <button class="viz-option active" data-style="bar" onclick="selectVizStyle('gpu','power','bar')" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" onclick="selectVizStyle('gpu','power','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" onclick="selectVizStyle('gpu','power','sparkline')" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
+                        </div>
+                    </div>
+                    <div class="viz-switcher-row">
+                        <div class="viz-switcher-label">VRAM</div>
+                        <div class="viz-switcher-options" data-card="gpu" data-metric="vram">
+                            <button class="viz-option active" data-style="bar" onclick="selectVizStyle('gpu','vram','bar')" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" onclick="selectVizStyle('gpu','vram','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" onclick="selectVizStyle('gpu','vram','sparkline')" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
+                            <button class="viz-option" data-style="stacked" onclick="selectVizStyle('gpu','vram','stacked')" title="Stacked"><span class="viz-thumb viz-thumb-stack"></span>Stack</button>
+                        </div>
+                    </div>
+                    <div class="viz-switcher-row">
+                        <div class="viz-switcher-label">Clocks</div>
+                        <div class="viz-switcher-options" data-card="gpu" data-metric="clocks">
+                            <button class="viz-option active" data-style="chips" onclick="selectVizStyle('gpu','clocks','chips')" title="Chips"><span class="viz-thumb viz-thumb-chips"></span>Chips</button>
+                            <button class="viz-option" data-style="numeric" onclick="selectVizStyle('gpu','clocks','numeric')" title="Numeric"><span class="viz-thumb viz-thumb-numeric"></span>Num</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Visualization Switcher -->
+                <div class="viz-switcher" id="sys-viz-switcher" style="display:none;">
+                    <div class="viz-switcher-header">
+                        <span>System Visualization</span>
+                        <button class="viz-reset-btn" onclick="resetVizPrefs('system')">Reset</button>
+                    </div>
+                    <div class="viz-switcher-row">
+                        <div class="viz-switcher-label">CPU Load</div>
+                        <div class="viz-switcher-options" data-card="system" data-metric="load">
+                            <button class="viz-option active" data-style="bar" onclick="selectVizStyle('system','load','bar')" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" onclick="selectVizStyle('system','load','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" onclick="selectVizStyle('system','load','sparkline')" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
+                        </div>
+                    </div>
+                    <div class="viz-switcher-row">
+                        <div class="viz-switcher-label">RAM</div>
+                        <div class="viz-switcher-options" data-card="system" data-metric="ram">
+                            <button class="viz-option active" data-style="bar" onclick="selectVizStyle('system','ram','bar')" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" onclick="selectVizStyle('system','ram','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" onclick="selectVizStyle('system','ram','sparkline')" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
+                            <button class="viz-option" data-style="stacked" onclick="selectVizStyle('system','ram','stacked')" title="Stacked"><span class="viz-thumb viz-thumb-stack"></span>Stack</button>
+                        </div>
+                    </div>
+                    <div class="viz-switcher-row">
+                        <div class="viz-switcher-label">Clock</div>
+                        <div class="viz-switcher-options" data-card="system" data-metric="clock">
+                            <button class="viz-option active" data-style="chip" onclick="selectVizStyle('system','clock','chip')" title="Chip"><span class="viz-thumb viz-thumb-chips"></span>Chip</button>
+                            <button class="viz-option" data-style="numeric" onclick="selectVizStyle('system','clock','numeric')" title="Numeric"><span class="viz-thumb viz-thumb-numeric"></span>Num</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 

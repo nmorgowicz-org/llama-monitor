@@ -719,6 +719,8 @@ function saveSettings() {
 
 document.addEventListener('DOMContentLoaded', () => {
 
+loadVizPrefs();
+
 // Auto-save on any control bar change
 
 document.getElementById('controls').addEventListener('input', saveSettings);
@@ -4555,11 +4557,373 @@ async function updateActiveSessionInfo() {
 
 setInterval(updateActiveSessionInfo, 2000);
 
-function setMetricSectionVisibility(tbodyId, visible) {
-    const tbody = document.getElementById(tbodyId);
-    if (!tbody) return;
+/* ===== Hardware Card Rendering ===== */
 
-    const section = tbody.closest('.metric-section');
+// Severity color helper
+function getSeverityColor(pct) {
+    if (pct >= 95) return '#f43f5e';
+    if (pct >= 80) return '#f59e0b';
+    return '#10b981';
+}
+
+function getTempSeverityColor(temp) {
+    if (temp >= 90) return '#f43f5e';
+    if (temp >= 75) return '#f59e0b';
+    return '#8fbcbb';
+}
+
+// Visualization rendering helpers
+function renderHwBar(container, pct, isHot) {
+    if (!container) return;
+    const cls = isHot ? 'hw-bar-fill is-hot' : 'hw-bar-fill';
+    container.innerHTML = '<div class="hw-bar-bg"><div class="' + cls + '" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div></div>';
+}
+
+function renderHwRing(container, pct, isHot) {
+    if (!container) return;
+    const cls = isHot ? 'hw-ring-viz is-warming' : 'hw-ring-viz';
+    container.innerHTML = '<div class="' + cls + '" style="--pct:' + pct.toFixed(1) + ';--gauge-color:' + getSeverityColor(pct) + '"></div>';
+}
+
+function renderHwSparkline(container, history) {
+    if (!container || !history || history.length < 2) {
+        if (container) container.innerHTML = '';
+        return;
+    }
+    const svg = buildSparklineSVG(history, 'hw-sparkline', '#8fbcbb');
+    container.innerHTML = svg;
+}
+
+function renderHwStacked(container, pct) {
+    if (!container) return;
+    container.innerHTML = '<div class="hw-stacked-bg"><div class="hw-stacked-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div><div class="hw-stacked-free" style="width:' + (100 - pct).toFixed(1) + '%"></div></div>';
+}
+
+function renderHwChips(container, chips) {
+    if (!container) return;
+    container.innerHTML = '<div class="hw-chips">' + chips.map(function(c) { return '<span class="hw-chip">' + c + '</span>'; }).join('') + '</div>';
+}
+
+// Build sparkline SVG (reuses inference card pattern)
+function buildSparklineSVG(points, cssClass, color) {
+    var len = points.length;
+    if (len < 2) return '';
+    var w = 120, h = 24, pad = 2;
+    var max = Math.max.apply(null, points);
+    var min = Math.min.apply(null, points);
+    var range = max - min || 1;
+    var step = w / (len - 1);
+    var pts = points.map(function(v, i) { return i * step + ',' + (h - pad - ((v - min) / range) * (h - pad * 2)); });
+    var linePath = 'M' + pts.join(' L');
+    var fillPath = linePath + ' L' + (len - 1) * step + ',' + h + ' L0,' + h + ' Z';
+    var peakIdx = points.indexOf(max);
+    var peakX = peakIdx * step;
+    var peakY = h - pad - ((max - min) / range) * (h - pad * 2);
+    return '<svg class="metric-sparkline ' + cssClass + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">' +
+        '<defs><linearGradient id="hw-spark-grad-' + cssClass + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="' + color + '" stop-opacity="0.25"/><stop offset="100%" stop-color="' + color + '" stop-opacity="0.02"/></linearGradient></defs>' +
+        '<path d="' + fillPath + '" fill="url(#hw-spark-grad-' + cssClass + ')"/>' +
+        '<path d="' + linePath + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+        (len > 3 ? '<circle cx="' + peakX.toFixed(1) + '" cy="' + peakY.toFixed(1) + '" r="2" fill="' + color + '" opacity="0.8"/>' : '') +
+        '</svg>';
+}
+
+// GPU metric history ring buffers
+var gpuHistory = { load: [], power: [], vramPct: [], sclk: [], mclk: [] };
+
+function pushGpuHistory(key, value) {
+    if (!Number.isFinite(value)) return;
+    gpuHistory[key].push(value);
+    var limit = key === 'load' || key === 'power' || key === 'vramPct' ? 60 : 30;
+    if (gpuHistory[key].length > limit) gpuHistory[key].shift();
+}
+
+// System metric history ring buffers
+var sysHistory = { cpuLoad: [], ramPct: [] };
+
+function pushSysHistory(key, value) {
+    if (!Number.isFinite(value)) return;
+    sysHistory[key].push(value);
+    var limit = 60;
+    if (sysHistory[key].length > limit) sysHistory[key].shift();
+}
+
+// Visualization preferences
+var vizPrefs = {
+    gpu: { load: 'bar', power: 'bar', vram: 'bar', clocks: 'chips' },
+    system: { load: 'bar', ram: 'bar', clock: 'chip' }
+};
+
+function loadVizPrefs() {
+    try {
+        var gpuStr = localStorage.getItem('llama-monitor-gpu-viz');
+        if (gpuStr) vizPrefs.gpu = JSON.parse(gpuStr);
+        var sysStr = localStorage.getItem('llama-monitor-system-viz');
+        if (sysStr) vizPrefs.system = JSON.parse(sysStr);
+    } catch(e) {}
+}
+
+function saveVizPrefs(card) {
+    try {
+        var key = card === 'gpu' ? 'llama-monitor-gpu-viz' : 'llama-monitor-system-viz';
+        localStorage.setItem(key, JSON.stringify(vizPrefs[card]));
+    } catch(e) {}
+}
+
+function toggleVizSwitcher(card) {
+    var prefix = card === 'gpu' ? 'gpu' : 'sys';
+    var sw = document.getElementById(prefix + '-viz-switcher');
+    if (!sw) return;
+    var isOpen = sw.style.display !== 'none';
+    // Close all switchers
+    document.querySelectorAll('.viz-switcher').forEach(function(el) { el.style.display = 'none'; });
+    if (!isOpen) {
+        sw.style.display = 'flex';
+        // Position relative to card
+        var cardEl = document.getElementById(card === 'gpu' ? 'gpu-card' : 'system-card');
+        if (cardEl) {
+            var rect = cardEl.getBoundingClientRect();
+            var parentRect = cardEl.parentElement.getBoundingClientRect();
+            sw.style.top = (rect.height + 8) + 'px';
+            sw.style.right = '0';
+        }
+    }
+}
+
+function selectVizStyle(card, metric, style) {
+    vizPrefs[card][metric] = style;
+    saveVizPrefs(card);
+    // Update active state in switcher
+    var prefix = card === 'gpu' ? 'gpu' : 'sys';
+    var sw = document.getElementById(prefix + '-viz-switcher');
+    if (sw) {
+        sw.querySelectorAll('.viz-option').forEach(function(btn) {
+            btn.classList.toggle('active', btn.getAttribute('data-style') === style && btn.closest('.viz-switcher-options').getAttribute('data-metric') === metric);
+        });
+    }
+    // Re-render the card
+    if (card === 'gpu') renderGpuCard(lastGpuData || {}, !!lastGpuData && Object.keys(lastGpuData).length > 0);
+    else renderSystemCard(lastSystemMetrics, !!lastSystemMetrics);
+}
+
+function resetVizPrefs(card) {
+    vizPrefs[card] = card === 'gpu'
+        ? { load: 'bar', power: 'bar', vram: 'bar', clocks: 'chips' }
+        : { load: 'bar', ram: 'bar', clock: 'chip' };
+    saveVizPrefs(card);
+    var prefix = card === 'gpu' ? 'gpu' : 'sys';
+    var sw = document.getElementById(prefix + '-viz-switcher');
+    if (sw) {
+        sw.querySelectorAll('.viz-option').forEach(function(btn) {
+            btn.classList.remove('active');
+        });
+        sw.querySelectorAll('.viz-option[data-style="bar"], .viz-option[data-style="chips"], .viz-option[data-style="chip"]').forEach(function(btn) {
+            btn.classList.add('active');
+        });
+    }
+    if (card === 'gpu') renderGpuCard(lastGpuData || {}, !!lastGpuData && Object.keys(lastGpuData).length > 0);
+    else renderSystemCard(lastSystemMetrics, !!lastSystemMetrics);
+}
+
+// Close switchers on outside click
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.viz-switcher') && !e.target.closest('.viz-gear-btn')) {
+        document.querySelectorAll('.viz-switcher').forEach(function(el) { el.style.display = 'none'; });
+    }
+});
+
+// Persist last GPU data for re-render after style switch
+var lastGpuData = {};
+
+// Render GPU card
+function renderGpuCard(gpuMap, visible) {
+    var card = document.getElementById('gpu-card');
+    var emptyEl = document.getElementById('gpu-empty');
+    var deviceName = document.getElementById('gpu-device-name');
+    var tempGauge = document.getElementById('gpu-temp-gauge');
+    var tempValue = document.getElementById('gpu-temp-value');
+    var stateChip = document.getElementById('gpu-state');
+
+    if (!card || !visible) {
+        if (card) setCardState(card, 'dormant');
+        return;
+    }
+
+    var entries = Object.entries(gpuMap);
+    if (entries.length === 0) {
+        setCardState(card, 'unavailable');
+        setEmptyState(emptyEl, true);
+        return;
+    }
+
+    lastGpuData = gpuMap;
+    setEmptyState(emptyEl, false);
+
+    // Use first GPU (most common case)
+    var _loop = entries[0];
+    var name = _loop[0];
+    var m = _loop[1];
+
+    setCardState(card, 'live');
+    setChipState(stateChip, 'live', 'live');
+
+    // Device name
+    if (deviceName) deviceName.textContent = name;
+
+    // Temperature gauge
+    var temp = Math.round(m.temp);
+    var tempPct = Math.min(100, (temp / 100) * 100);
+    var tempColor = getTempSeverityColor(temp);
+    var isTempHot = temp >= 75;
+    if (tempGauge) {
+        tempGauge.style.setProperty('--pct', tempPct.toFixed(1));
+        tempGauge.style.setProperty('--gauge-color', tempColor);
+        tempGauge.classList.toggle('is-warming', isTempHot);
+    }
+    if (tempValue) tempValue.textContent = temp + '\u00B0';
+
+    // Push history
+    pushGpuHistory('load', m.load);
+    pushGpuHistory('power', m.power_consumption);
+    var vramPct = m.vram_total > 0 ? (m.vram_used / m.vram_total) * 100 : 0;
+    pushGpuHistory('vramPct', vramPct);
+    pushGpuHistory('sclk', m.sclk_mhz);
+    pushGpuHistory('mclk', m.mclk_mhz);
+
+    // Load
+    var loadViz = document.getElementById('gpu-load-viz');
+    var loadVal = document.getElementById('gpu-load-value');
+    var loadStyle = vizPrefs.gpu.load;
+    var loadHot = m.load >= 90;
+    if (loadStyle === 'ring') renderHwRing(loadViz, m.load, loadHot);
+    else if (loadStyle === 'sparkline') renderHwSparkline(loadViz, gpuHistory.load);
+    else renderHwBar(loadViz, m.load, loadHot);
+    if (loadVal) loadVal.textContent = m.load + '%';
+
+    // Power
+    var powerViz = document.getElementById('gpu-power-viz');
+    var powerVal = document.getElementById('gpu-power-value');
+    var powerBlock = document.getElementById('gpu-power-block');
+    var powerPct = m.power_limit > 0 ? (m.power_consumption / m.power_limit) * 100 : 0;
+    var isCapped = m.power_consumption >= m.power_limit && m.power_limit > 0;
+    var powerStyle = vizPrefs.gpu.power;
+    if (powerBlock) powerBlock.classList.toggle('hw-power-capped', isCapped);
+    if (powerStyle === 'ring') renderHwRing(powerViz, powerPct, isCapped);
+    else if (powerStyle === 'sparkline') renderHwSparkline(powerViz, gpuHistory.power);
+    else renderHwBar(powerViz, powerPct, isCapped);
+    if (powerVal) powerVal.textContent = m.power_consumption.toFixed(1) + 'W' + (isCapped ? '!' : '') + ' / ' + m.power_limit + 'W';
+
+    // VRAM
+    var vramViz = document.getElementById('gpu-vram-viz');
+    var vramVal = document.getElementById('gpu-vram-value');
+    var vramStyle = vizPrefs.gpu.vram;
+    var vramGb = m.vram_total > 0 ? (m.vram_used / 1024).toFixed(1) : '0';
+    var vramTotalGb = m.vram_total > 0 ? (m.vram_total / 1024).toFixed(0) : '0';
+    if (vramStyle === 'ring') renderHwRing(vramViz, vramPct, vramPct >= 90);
+    else if (vramStyle === 'sparkline') renderHwSparkline(vramViz, gpuHistory.vramPct);
+    else if (vramStyle === 'stacked') renderHwStacked(vramViz, vramPct);
+    else renderHwBar(vramViz, vramPct, vramPct >= 90);
+    if (vramVal) vramVal.textContent = vramGb + ' / ' + vramTotalGb + ' GB';
+
+    // Clocks
+    var clocksViz = document.getElementById('gpu-clocks-viz');
+    var clocksVal = document.getElementById('gpu-clocks-value');
+    var clocksStyle = vizPrefs.gpu.clocks;
+    if (clocksStyle === 'chips') {
+        renderHwChips(clocksViz, ['SCLK ' + m.sclk_mhz + 'MHz', 'MCLK ' + m.mclk_mhz + 'MHz']);
+        if (clocksVal) clocksVal.textContent = '';
+    } else {
+        if (clocksViz) clocksViz.innerHTML = '';
+        if (clocksVal) clocksVal.textContent = m.sclk_mhz + ' / ' + m.mclk_mhz + ' MHz';
+    }
+}
+
+// Render System card
+function renderSystemCard(sys, visible) {
+    var card = document.getElementById('system-card');
+    var emptyEl = document.getElementById('sys-empty');
+    var deviceName = document.getElementById('sys-device-name');
+    var tempGauge = document.getElementById('sys-temp-gauge');
+    var tempValue = document.getElementById('sys-temp-value');
+    var stateChip = document.getElementById('sys-state');
+
+    if (!card || !visible) {
+        if (card) setCardState(card, 'dormant');
+        return;
+    }
+
+    if (!sys) {
+        setCardState(card, 'unavailable');
+        setEmptyState(emptyEl, true);
+        return;
+    }
+
+    setEmptyState(emptyEl, false);
+    setCardState(card, 'live');
+    setChipState(stateChip, 'live', 'live');
+
+    // Device name: CPU model + motherboard
+    var parts = [];
+    if (sys.cpu_name) parts.push(sys.cpu_name);
+    if (sys.motherboard && sys.motherboard !== 'Unknown Motherboard') parts.push(sys.motherboard);
+    if (deviceName) deviceName.textContent = parts.join(' / ') || 'System';
+
+    // Temperature
+    var hasTemp = sys.cpu_temp_available && sys.cpu_temp > 0;
+    var sysTemp = hasTemp ? Math.round(sys.cpu_temp) : 0;
+    var tempPct = Math.min(100, (sysTemp / 100) * 100);
+    var tempColor = getTempSeverityColor(sysTemp);
+    var isTempHot = sysTemp >= 75;
+    if (tempGauge) {
+        tempGauge.style.setProperty('--pct', hasTemp ? tempPct.toFixed(1) : '0');
+        tempGauge.style.setProperty('--gauge-color', tempColor);
+        tempGauge.classList.toggle('is-warming', isTempHot);
+    }
+    if (tempValue) tempValue.textContent = hasTemp ? sysTemp + '\u00B0' : '\u2014';
+
+    // Push history
+    if (sys.cpu_load > 0) pushSysHistory('cpuLoad', sys.cpu_load);
+    var ramPct = sys.ram_total_gb > 0 ? (sys.ram_used_gb / sys.ram_total_gb) * 100 : 0;
+    if (sys.ram_total_gb > 0) pushSysHistory('ramPct', ramPct);
+
+    // CPU Load
+    var loadViz = document.getElementById('sys-load-viz');
+    var loadVal = document.getElementById('sys-load-value');
+    var loadStyle = vizPrefs.system.load;
+    var cpuLoad = sys.cpu_load || 0;
+    var loadHot = cpuLoad >= 90;
+    if (loadStyle === 'ring') renderHwRing(loadViz, cpuLoad, loadHot);
+    else if (loadStyle === 'sparkline') renderHwSparkline(loadViz, sysHistory.cpuLoad);
+    else renderHwBar(loadViz, cpuLoad, loadHot);
+    if (loadVal) loadVal.textContent = cpuLoad > 0 ? cpuLoad + '%' : '\u2014';
+
+    // RAM
+    var ramViz = document.getElementById('sys-ram-viz');
+    var ramVal = document.getElementById('sys-ram-value');
+    var ramStyle = vizPrefs.system.ram;
+    if (ramStyle === 'ring') renderHwRing(ramViz, ramPct, ramPct >= 90);
+    else if (ramStyle === 'sparkline') renderHwSparkline(ramViz, sysHistory.ramPct);
+    else if (ramStyle === 'stacked') renderHwStacked(ramViz, ramPct);
+    else renderHwBar(ramViz, ramPct, ramPct >= 90);
+    if (ramVal) ramVal.textContent = sys.ram_total_gb > 0 ? sys.ram_used_gb.toFixed(1) + ' / ' + sys.ram_total_gb.toFixed(0) + ' GB' : '\u2014';
+
+    // Clock
+    var clockViz = document.getElementById('sys-clock-viz');
+    var clockVal = document.getElementById('sys-clock-value');
+    var clockStyle = vizPrefs.system.clock;
+    var clockMhz = sys.cpu_clock_mhz || 0;
+    if (clockStyle === 'chip') {
+        renderHwChips(clockViz, [clockMhz > 0 ? (clockMhz / 1000).toFixed(1) + ' GHz' : '\u2014']);
+        if (clockVal) clockVal.textContent = '';
+    } else {
+        if (clockViz) clockViz.innerHTML = '';
+        if (clockVal) clockVal.textContent = clockMhz > 0 ? clockMhz + ' MHz' : '\u2014';
+    }
+}
+
+function setMetricSectionVisibility(cardId, visible, sectionId) {
+    const card = document.getElementById(cardId);
+    if (!card) return;
+    const section = sectionId ? document.getElementById(sectionId) : card.closest('.metric-section');
     if (section) section.style.display = visible ? '' : 'none';
 }
 
@@ -4983,102 +5347,14 @@ ws.onmessage = e => {
     const hostMetricsVisible = d.host_metrics_available === true;
     const systemVisible = hostMetricsVisible && !!d.capabilities?.system;
     const gpuVisible = hostMetricsVisible && !!d.capabilities?.gpu;
-    setMetricSectionVisibility('system-rows', systemVisible);
-    setMetricSectionVisibility('gpu-rows', gpuVisible);
+    setMetricSectionVisibility('gpu-card', gpuVisible, 'gpu-section');
+    setMetricSectionVisibility('system-card', systemVisible, 'system-section');
 
-    // GPU table
+    // GPU card rendering
+    renderGpuCard(d.gpu || {}, gpuVisible);
 
-    const tbody = document.getElementById('gpu-rows');
-
-    if (tbody && !gpuVisible) {
-        tbody.innerHTML = '';
-    } else if (tbody) tbody.innerHTML = Object.entries(d.gpu || {}).map(([card, m]) => {
-
-        const capped = m.power_consumption >= m.power_limit && m.power_limit > 0;
-
-        const pcls = capped ? 'value capped' : 'value power';
-
-        const ptxt = capped ? m.power_consumption.toFixed(1) + 'W!' : m.power_consumption.toFixed(1) + 'W / ' + m.power_limit + 'W';
-
-        const vpct = m.vram_total > 0 ? Math.round((m.vram_used / m.vram_total) * 100) : 0;
-
-        const vgb = m.vram_total > 0 ? (m.vram_used / 1024).toFixed(1) : 0;
-
-        const temp = Math.round(m.temp);
-        const tempSeverity = temp >= 90 ? 'severity-critical' : temp >= 80 ? 'severity-warning' : 'severity-normal';
-        const loadSeverity = m.load >= 95 ? 'severity-critical' : m.load >= 80 ? 'severity-warning' : 'severity-normal';
-        const vramSeverity = vpct >= 95 ? 'severity-critical' : vpct >= 80 ? 'severity-warning' : 'severity-normal';
-
-        return '<tr class="' + tempSeverity + '">' +
-
-            '<td class="card value">' + card + '</td>' +
-
-            '<td class="value temp ' + tempSeverity + '">' + temp + 'C</td>' +
-
-            '<td class="value load ' + loadSeverity + '">' + m.load + '%</td>' +
-
-            '<td class="value vram ' + vramSeverity + '">' + vpct + '% (' + vgb + ' GB)</td>' +
-
-            '<td class="' + pcls + '">' + ptxt + '</td>' +
-
-            '<td class="value sclk">' + m.sclk_mhz + 'MHz</td>' +
-
-            '<td class="value mclk">' + m.mclk_mhz + 'MHz</td>' +
-
-            '</tr>';
-
-    }).join('');
-
-
-
-    // System table
-
-    let sys = lastSystemMetrics;
-
-    const sysRowsEl = document.getElementById('system-rows');
-
-    if (sysRowsEl && !systemVisible) {
-        sysRowsEl.innerHTML = '';
-    } else if (sysRowsEl) {
-        const isWindows = navigator.platform.indexOf('Win') !== -1;
-        
-        let tempColumn = '';
-        if (sys && sys.cpu_temp_available && sys.cpu_temp > 0) {
-            tempColumn = '<td class="value temp">' + Math.round(sys.cpu_temp) + 'C</td>';
-        } else if (isWindows) {
-            const hasTemp = sys && sys.cpu_temp > 0;
-            const tempValue = hasTemp ? Math.round(sys.cpu_temp) + 'C' : '—';
-            const hasLHM = (sys && sys.cpu_temp_available) || false;
-            
-            if (hasLHM) {
-                // LHM is available, show temperature
-                tempColumn = '<td class="value temp">' + tempValue + '</td>';
-            } else {
-                // LHM not available, show install button
-                tempColumn = '<td class="value temp"><button class="btn-lhm-inline" onclick="showLHMNotification()" title="Install LibreHardwareMonitor for CPU temp monitoring">&#9971;</button></td>';
-            }
-        } else {
-            tempColumn = '<td class="value temp">—</td>';
-        }
-
-        sysRowsEl.innerHTML = '<tr>' +
-
-            '<td class="card value">' + (sys && sys.motherboard && sys.motherboard !== "Unknown Motherboard" ? sys.motherboard : 'System') + '</td>' +
-
-            tempColumn +
-
-            '<td class="value load">' + (sys && sys.cpu_load > 0 ? sys.cpu_load + '%' : '\u2014') + '</td>' +
-
-            '<td class="value sclk">' + (sys && sys.cpu_clock_mhz > 0 ? sys.cpu_clock_mhz + 'MHz' : '\u2014') + '</td>' +
-
-            '<td class="value vram">' + (sys && sys.ram_total_gb > 0 ? ((sys.ram_used_gb / sys.ram_total_gb) * 100).toFixed(0) + '% (' + sys.ram_used_gb.toFixed(1) + ' GB)' : '\u2014') + '</td>' +
-
-            '<td class="value">' + (sys && sys.cpu_name ? sys.cpu_name : '\u2014') + '</td>' +
-
-            '</tr>';
-
-    }
-
+    // System card rendering
+    renderSystemCard(lastSystemMetrics, systemVisible);
 
 
     // Logs
