@@ -1175,7 +1175,7 @@ body.sidebar-collapsed .content-area {
 .speed-item {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 
 .speed-header {
@@ -1223,10 +1223,11 @@ body.sidebar-collapsed .content-area {
   font-weight: 600;
   letter-spacing: 0.02em;
   white-space: nowrap;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 999px;
-  padding: 1px 7px;
+  padding: 0 5px;
+  line-height: 1.8;
   line-height: 1.6;
   flex-shrink: 0;
 }
@@ -2830,6 +2831,114 @@ body.sidebar-collapsed .content-area {
     display: flex;
     gap: 6px;
     flex-wrap: wrap;
+  }
+
+  /* Dual-ring visualization (GPU clocks) */
+  .hw-dual-ring {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: min(130px, 100%);
+    aspect-ratio: 1;
+    margin-inline: auto;
+    border-radius: 999px;
+    background:
+      radial-gradient(circle at center, rgba(15, 17, 21, 0.95) 0 38%, transparent 40%),
+      conic-gradient(from -90deg, var(--mclk-color, #88c0d1) calc(var(--mclk-pct, 0) * 1%), rgba(255, 255, 255, 0.05) 0),
+      radial-gradient(circle at center, transparent 0 48%, rgba(15, 17, 21, 0.95) 50%),
+      conic-gradient(from -90deg, var(--sclk-color, #8fbcbb) calc(var(--sclk-pct, 0) * 1%), rgba(255, 255, 255, 0.05) 0);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+      0 0 28px rgba(136, 192, 209, 0.12);
+    transition: background 360ms ease;
+    animation: hw-dual-ring-ambient 3s ease-in-out infinite;
+  }
+
+  @keyframes hw-dual-ring-ambient {
+    0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), 0 0 16px rgba(136, 192, 209, 0.08); }
+    50% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 0 32px rgba(136, 192, 209, 0.18); }
+  }
+
+  .hw-dual-ring-core {
+    display: grid;
+    place-items: center;
+    width: 55%;
+    aspect-ratio: 1;
+    padding: 6px;
+    border-radius: 999px;
+    background: rgba(15, 17, 21, 0.72);
+    text-align: center;
+    gap: 1px;
+    line-height: 1.15;
+  }
+
+  .hw-dual-ring-value {
+    color: var(--color-text-primary);
+    font-family: var(--font-mono);
+    font-size: clamp(0.62rem, 0.9vw, 0.82rem);
+    font-weight: 750;
+  }
+
+  .hw-dual-ring-label {
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-3xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  /* Single-ring visualization (System clock) */
+  .hw-clock-ring {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: min(100px, 80%);
+    aspect-ratio: 1;
+    margin-inline: auto;
+    border-radius: 999px;
+    background:
+      radial-gradient(circle at center, rgba(15, 17, 21, 0.95) 0 56%, transparent 57%),
+      conic-gradient(from -90deg, var(--gauge-color, #8fbcbb) calc(var(--pct, 0) * 1%), rgba(255, 255, 255, 0.06) 0);
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+      0 0 24px rgba(136, 192, 209, 0.12);
+    transition: background 360ms ease;
+    animation: hw-clock-ring-ambient 3s ease-in-out infinite;
+  }
+
+  @keyframes hw-clock-ring-ambient {
+    0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06), 0 0 12px rgba(136, 192, 209, 0.08); }
+    50% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 0 24px rgba(136, 192, 209, 0.18); }
+  }
+
+  .hw-clock-ring-core {
+    display: grid;
+    place-items: center;
+    width: 70%;
+    aspect-ratio: 1;
+    padding: 6px;
+    border-radius: 999px;
+    background: rgba(15, 17, 21, 0.62);
+    text-align: center;
+    gap: 1px;
+    line-height: 1.15;
+  }
+
+  .hw-clock-ring-value {
+    color: var(--color-text-primary);
+    font-family: var(--font-mono);
+    font-size: clamp(0.62rem, 0.9vw, 0.82rem);
+    font-weight: 750;
+  }
+
+  .hw-clock-ring-label {
+    color: var(--color-text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-3xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 
   .hw-chip {

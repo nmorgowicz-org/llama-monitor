@@ -164,26 +164,26 @@
                             </div>
                             <div class="inference-empty-state visible" id="m-throughput-empty">Attach an endpoint to begin telemetry</div>
                             <div class="speed-item">
+                                <span class="speed-peak-badge" id="m-prompt-max" title="Peak seen"></span>
                                 <div class="speed-header">
                                     <span class="speed-label">prompt</span>
                                     <span class="speed-value-wrap">
                                         <span class="speed-value" id="m-prompt">&mdash;</span>
                                         <span class="metric-delta" id="m-prompt-delta"></span>
                                     </span>
-                                    <span class="speed-peak-badge" id="m-prompt-max" title="Peak seen"></span>
                                 </div>
                                 <div class="speed-bar-bg">
                                     <div class="speed-bar prompt-bar" id="m-prompt-bar"></div>
                                 </div>
                             </div>
                             <div class="speed-item">
+                                <span class="speed-peak-badge" id="m-gen-max" title="Peak seen"></span>
                                 <div class="speed-header">
                                     <span class="speed-label">generation</span>
                                     <span class="speed-value-wrap">
                                         <span class="speed-value" id="m-gen">&mdash;</span>
                                         <span class="metric-delta" id="m-gen-delta"></span>
                                     </span>
-                                    <span class="speed-peak-badge" id="m-gen-max" title="Peak seen"></span>
                                 </div>
                                 <div class="speed-bar-bg">
                                     <div class="speed-bar gen-bar" id="m-gen-bar"></div>
@@ -421,7 +421,8 @@
                     <div class="viz-switcher-row">
                         <div class="viz-switcher-label">Clocks</div>
                         <div class="viz-switcher-options" data-card="gpu" data-metric="clocks">
-                            <button class="viz-option active" data-style="chips" onclick="selectVizStyle('gpu','clocks','chips')" title="Chips"><span class="viz-thumb viz-thumb-chips"></span>Chips</button>
+                            <button class="viz-option active" data-style="ring" onclick="selectVizStyle('gpu','clocks','ring')" title="Dual Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="chips" onclick="selectVizStyle('gpu','clocks','chips')" title="Chips"><span class="viz-thumb viz-thumb-chips"></span>Chips</button>
                             <button class="viz-option" data-style="numeric" onclick="selectVizStyle('gpu','clocks','numeric')" title="Numeric"><span class="viz-thumb viz-thumb-numeric"></span>Num</button>
                         </div>
                     </div>
@@ -453,7 +454,8 @@
                     <div class="viz-switcher-row">
                         <div class="viz-switcher-label">Clock</div>
                         <div class="viz-switcher-options" data-card="system" data-metric="clock">
-                            <button class="viz-option active" data-style="chip" onclick="selectVizStyle('system','clock','chip')" title="Chip"><span class="viz-thumb viz-thumb-chips"></span>Chip</button>
+                            <button class="viz-option active" data-style="ring" onclick="selectVizStyle('system','clock','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="chip" onclick="selectVizStyle('system','clock','chip')" title="Chip"><span class="viz-thumb viz-thumb-chips"></span>Chip</button>
                             <button class="viz-option" data-style="numeric" onclick="selectVizStyle('system','clock','numeric')" title="Numeric"><span class="viz-thumb viz-thumb-numeric"></span>Num</button>
                         </div>
                     </div>

@@ -4643,6 +4643,39 @@ function renderHwChips(container, chips) {
     setVizContent(container, '<div class="hw-chips">' + chips.map(function(c) { return '<span class="hw-chip">' + c + '</span>'; }).join('') + '</div>');
 }
 
+// Render dual-ring gauge (GPU clocks: SCLK inner, MCLK outer)
+function renderHwDualRing(container, sclk, mclk, sclkRange, mclkRange) {
+    if (!container) return;
+    var sclkSpan = sclkRange.max - sclkRange.min || 1;
+    var mclkSpan = mclkRange.max - mclkRange.min || 1;
+    var sclkPct = ((sclk - sclkRange.min) / sclkSpan) * 100;
+    var mclkPct = ((mclk - mclkRange.min) / mclkSpan) * 100;
+    var sclkColor = getSeverityColor(sclkPct);
+    var mclkColor = getSeverityColor(mclkPct);
+    setVizContent(container,
+        '<div class="hw-dual-ring" style="--sclk-pct:' + sclkPct.toFixed(1) + ';--mclk-pct:' + mclkPct.toFixed(1) + ';--sclk-color:' + sclkColor + ';--mclk-color:' + mclkColor + ';">' +
+        '<div class="hw-dual-ring-core">' +
+        '<div class="hw-dual-ring-value">' + sclk + '</div>' +
+        '<div class="hw-dual-ring-label">SCLK</div>' +
+        '<div class="hw-dual-ring-value">' + mclk + '</div>' +
+        '<div class="hw-dual-ring-label">MCLK</div>' +
+        '</div></div>');
+}
+
+// Render single-ring gauge (System clock)
+function renderHwClockRing(container, clock, range) {
+    if (!container) return;
+    var span = range.max - range.min || 1;
+    var pct = ((clock - range.min) / span) * 100;
+    var color = getSeverityColor(pct);
+    setVizContent(container,
+        '<div class="hw-clock-ring" style="--pct:' + pct.toFixed(1) + ';--gauge-color:' + color + ';">' +
+        '<div class="hw-clock-ring-core">' +
+        '<div class="hw-clock-ring-value">' + clock + '</div>' +
+        '<div class="hw-clock-ring-label">MHz</div>' +
+        '</div></div>');
+}
+
 // Build sparkline SVG (reuses inference card pattern)
 function buildSparklineSVG(points, cssClass, color) {
     var len = points.length;
@@ -4668,28 +4701,40 @@ function buildSparklineSVG(points, cssClass, color) {
 
 // GPU metric history ring buffers
 var gpuHistory = { load: [], power: [], vramPct: [], sclk: [], mclk: [] };
+var gpuClockRange = { sclk: { min: Infinity, max: 0 }, mclk: { min: Infinity, max: 0 } };
 
 function pushGpuHistory(key, value) {
     if (!Number.isFinite(value)) return;
     gpuHistory[key].push(value);
     var limit = key === 'load' || key === 'power' || key === 'vramPct' ? 60 : 30;
     if (gpuHistory[key].length > limit) gpuHistory[key].shift();
+    if (key === 'sclk' || key === 'mclk') {
+        var range = gpuClockRange[key];
+        if (value < range.min) range.min = value;
+        if (value > range.max) range.max = value;
+    }
 }
 
 // System metric history ring buffers
-var sysHistory = { cpuLoad: [], ramPct: [] };
+var sysHistory = { cpuLoad: [], ramPct: [], cpuClock: [] };
+var sysClockRange = { cpuClock: { min: Infinity, max: 0 } };
 
 function pushSysHistory(key, value) {
     if (!Number.isFinite(value)) return;
     sysHistory[key].push(value);
     var limit = 60;
     if (sysHistory[key].length > limit) sysHistory[key].shift();
+    if (key === 'cpuClock') {
+        var range = sysClockRange[key];
+        if (value < range.min) range.min = value;
+        if (value > range.max) range.max = value;
+    }
 }
 
 // Visualization preferences
 var vizPrefs = {
-    gpu: { load: 'bar', power: 'bar', vram: 'bar', clocks: 'chips' },
-    system: { load: 'bar', ram: 'bar', clock: 'chip' }
+    gpu: { load: 'bar', power: 'bar', vram: 'bar', clocks: 'ring' },
+    system: { load: 'bar', ram: 'bar', clock: 'ring' }
 };
 
 function loadVizPrefs() {
@@ -4896,7 +4941,10 @@ function renderGpuCard(gpuMap, visible) {
     var clocksViz = document.getElementById('gpu-clocks-viz');
     var clocksVal = document.getElementById('gpu-clocks-value');
     var clocksStyle = vizPrefs.gpu.clocks;
-    if (clocksStyle === 'chips') {
+    if (clocksStyle === 'ring') {
+        renderHwDualRing(clocksViz, m.sclk_mhz, m.mclk_mhz, gpuClockRange.sclk, gpuClockRange.mclk);
+        if (clocksVal) clocksVal.textContent = '';
+    } else if (clocksStyle === 'chips') {
         renderHwChips(clocksViz, ['SCLK ' + m.sclk_mhz + 'MHz', 'MCLK ' + m.mclk_mhz + 'MHz']);
         if (clocksVal) clocksVal.textContent = '';
     } else {
@@ -4983,7 +5031,11 @@ function renderSystemCard(sys, visible) {
     var clockVal = document.getElementById('sys-clock-value');
     var clockStyle = vizPrefs.system.clock;
     var clockMhz = sys.cpu_clock_mhz || 0;
-    if (clockStyle === 'chip') {
+    if (clockMhz > 0) pushSysHistory('cpuClock', clockMhz);
+    if (clockStyle === 'ring') {
+        renderHwClockRing(clockViz, clockMhz, sysClockRange.cpuClock);
+        if (clockVal) clockVal.textContent = '';
+    } else if (clockStyle === 'chip') {
         renderHwChips(clockViz, [clockMhz > 0 ? (clockMhz / 1000).toFixed(1) + ' GHz' : '\u2014']);
         if (clockVal) clockVal.textContent = '';
     } else {
