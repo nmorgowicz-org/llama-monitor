@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.6.3...v0.7.0) (2026-04-24)
+
+
+### Features
+
+* add tool-call blocked state detection with throughput card integration ([#56](https://github.com/nmorgowicz-org/llama-monitor/issues/56)) ([36880b4](https://github.com/nmorgowicz-org/llama-monitor/commit/36880b4b93844ce0d746b6e6f20f14bacf97b11c))
+* **agent:** resolve Windows %APPDATA% path for remote agent scheduler ([035b659](https://github.com/nmorgowicz-org/llama-monitor/commit/035b659579c896833f01ef8419eed116b99f1a54))
+
+
+### Bug Fixes
+
+* **agent:** resolve Windows %APPDATA% path for remote agent scheduler ([44ad9a9](https://github.com/nmorgowicz-org/llama-monitor/commit/44ad9a96ee51a47fde37834cdaa676c0ebee42da))
+* **agent:** wire resolve_windows_appdata into all schtasks command paths ([0d96a13](https://github.com/nmorgowicz-org/llama-monitor/commit/0d96a13f9e45f160a1ca9f3c8c53aaee209eca03))
+* **ui:** refine hardware metrics visuals and windows helper packaging ([#57](https://github.com/nmorgowicz-org/llama-monitor/issues/57)) ([44200fb](https://github.com/nmorgowicz-org/llama-monitor/commit/44200fbed630fb93991890c7fa3b19809b88f482))
+
 ## [0.6.3](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.6.2...v0.6.3) (2026-04-23)
 
 
