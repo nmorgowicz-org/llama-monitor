@@ -82,8 +82,7 @@ pub fn get_lhm_cpu_temp() -> (f32, bool) {
     let temp_file = std::env::temp_dir().join("sensor_bridge_output.json");
     let _ = std::fs::remove_file(&temp_file);
 
-    let result = std::process::Command::new(&bridge_path)
-        .output();
+    let result = std::process::Command::new(&bridge_path).output();
 
     let Ok(output) = result else {
         eprintln!("[LHM] Failed to spawn sensor_bridge.exe");

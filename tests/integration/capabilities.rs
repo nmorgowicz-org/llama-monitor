@@ -20,7 +20,12 @@ fn local_spawn_has_all_metrics() {
     };
     let state = AppState::new(vec![], paths, gpu_env, UiSettings::default());
 
-    let session = Session::new_spawn("spawn_test".to_string(), "Spawn Test".to_string(), 8001, String::new());
+    let session = Session::new_spawn(
+        "spawn_test".to_string(),
+        "Spawn Test".to_string(),
+        8001,
+        String::new(),
+    );
     state.add_session(session);
     state.set_active_session("spawn_test");
 
