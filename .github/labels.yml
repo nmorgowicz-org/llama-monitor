@@ -56,3 +56,49 @@
 - name: release
   color: f9b700
   description: Related to release preparation
+
+# ── Auto-labeler labels ──────────────────────────────────────
+
+- name: fix
+  color: d73a4a
+  description: Bug fixes
+
+- name: feat
+  color: a2ee10
+  description: New features
+
+- name: refactor
+  color: c5def5
+  description: Code refactoring
+
+- name: chore
+  color: d89b60
+  description: Maintenance tasks
+
+- name: perf
+  color: 0e8a16
+  description: Performance improvements
+
+- name: test
+  color: e99695
+  description: Tests
+
+- name: csharp
+  color: 9b4f96
+  description: Related to C# code
+
+- name: javascript
+  color: f1e05a
+  description: Related to JavaScript code
+
+- name: ui
+  color: 1d76db
+  description: Related to UI/frontend
+
+- name: shell
+  color: 6f42c1
+  description: Related to shell scripts
+
+- name: node-dependencies
+  color: fbca04
+  description: Node.js dependencies
