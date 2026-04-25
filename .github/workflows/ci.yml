@@ -18,6 +18,9 @@ concurrency:
 
 jobs:
   paths-filter:
+    if: >-
+      !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test')
     runs-on: arc-llama-monitor
     outputs:
       code: ${{ steps.filter.outputs.code }}
@@ -47,6 +50,8 @@ jobs:
   check:
     needs: paths-filter
     if: >-
+      !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
       github.event.pull_request.draft == false &&
       (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
        startsWith(github.actor, 'dependabot'))
@@ -90,6 +95,8 @@ jobs:
     needs: [paths-filter, check]
     if: >-
       always() &&
+      !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
       needs.paths-filter.outputs.ui == 'true' &&
       github.event.pull_request.draft == false &&
       (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
@@ -176,6 +183,8 @@ jobs:
   release-smoke:
     needs: paths-filter
     if: >-
+      !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
       needs.paths-filter.outputs.release == 'true' &&
       github.event.pull_request.draft == false &&
       (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||

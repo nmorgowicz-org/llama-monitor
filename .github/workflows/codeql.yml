@@ -17,6 +17,7 @@ permissions:
 
 jobs:
   paths-filter:
+    if: github.event_name == 'schedule' || !startsWith(github.event.pull_request.head.ref, 'release-please--')
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
@@ -37,6 +38,7 @@ jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
     needs: paths-filter
+    if: github.event_name == 'schedule' || !startsWith(github.event.pull_request.head.ref, 'release-please--')
     runs-on: ubuntu-latest
 
     strategy:
