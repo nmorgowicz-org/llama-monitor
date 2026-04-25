@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.5](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.7.4...v0.7.5) (2026-04-25)
+
+
+### Bug Fixes
+
+* **remote-agent:** repair Windows install follow-ups ([#75](https://github.com/nmorgowicz-org/llama-monitor/issues/75)) ([395e959](https://github.com/nmorgowicz-org/llama-monitor/commit/395e95987b0cb909a293933dc81665c5b9e21942))
+
 ## [0.7.4](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.7.3...v0.7.4) (2026-04-25)
 
 
