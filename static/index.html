@@ -1260,16 +1260,31 @@
 <div class="modal-overlay" id="settings-modal">
     <div class="modal" style="width:720px;">
         <div class="modal-header">
-            <h2>Settings</h2>
+            <h2>Settings<span class="dirty-indicator" aria-label="Unsaved changes"></span></h2>
             <button type="button" class="modal-close" onclick="closeSettingsModal()" aria-label="Close">&times;</button>
         </div>
         <div class="settings-modal-body">
             <div class="settings-tabs">
-                <button class="settings-tab active" data-tab="session">Session</button>
-                <button class="settings-tab" data-tab="gpu">GPU</button>
-                <button class="settings-tab" data-tab="models">Models</button>
-                <button class="settings-tab" data-tab="appearance">Appearance</button>
-                <button class="settings-tab" data-tab="advanced">Advanced</button>
+                <button class="settings-tab active" data-tab="session">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                    Session
+                </button>
+                <button class="settings-tab" data-tab="gpu">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="8" rx="2"/><rect x="9" y="9" width="8" height="4" rx="1"/><line x1="9" y1="16" x2="9" y2="21"/><line x1="15" y1="16" x2="15" y2="21"/><line x1="9" y1="21" x2="15" y2="21"/></svg>
+                    GPU
+                </button>
+                <button class="settings-tab" data-tab="models">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                    Models
+                </button>
+                <button class="settings-tab" data-tab="appearance">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="19" cy="13.5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><path d="M13 9.5c2 1 4 3 4 6"/><path d="M9 9.5C7 10.5 5 12.5 5 15.5"/></svg>
+                    Appearance
+                </button>
+                <button class="settings-tab" data-tab="advanced">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4"/><path d="M12 19v4"/><path d="M4.22 4.22l2.83 2.83"/><path d="M16.95 16.95l2.83 2.83"/><path d="M1 12h4"/><path d="M19 12h4"/><path d="M4.22 19.78l2.83-2.83"/><path d="M16.95 7.05l2.83-2.83"/></svg>
+                    Advanced
+                </button>
             </div>
             <div class="settings-content">
                 <div class="settings-pane active" id="settings-session">
@@ -1359,7 +1374,10 @@
                     <h3>Advanced Settings</h3>
                     <div class="modal-section">
                         <h3>Runtime Configuration</h3>
-                        <p class="settings-help">Server paths and GPU environment live in runtime configuration. Use the Agent button in the header to install, validate, repair, or remove a remote agent.</p>
+                        <p class="settings-help">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                            Configure server executable paths, working directories, GPU environment settings, and remote agent connections. Use the <strong>Agent</strong> button in the header for guided remote agent setup via SSH.
+                        </p>
                         <button type="button" class="btn btn-secondary" onclick="openConfigModal()">Open Runtime Configuration</button>
                     </div>
                     <label class="modal-field">
@@ -1382,6 +1400,9 @@
             </div>
         </div>
         <div class="modal-buttons">
+            <span class="keyboard-hint">
+                <span><kbd>Esc</kbd> close</span>
+            </span>
             <button type="button" class="btn btn-modal-cancel" onclick="closeSettingsModal()">Cancel</button>
             <button type="button" class="btn btn-modal-save" onclick="saveSettings()">Save Settings</button>
         </div>

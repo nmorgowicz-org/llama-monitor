@@ -584,6 +584,48 @@ let currentPollInterval = 5000;
 
 let settingsSaveTimer = null;
 
+// Dirty state tracking for settings modal
+let settingsIsDirty = false;
+
+function markSettingsDirty() {
+    settingsIsDirty = true;
+    const indicator = document.querySelector('#settings-modal .dirty-indicator');
+    if (indicator) indicator.classList.add('visible');
+}
+
+function clearSettingsDirty() {
+    settingsIsDirty = false;
+    const indicator = document.querySelector('#settings-modal .dirty-indicator');
+    if (indicator) indicator.classList.remove('visible');
+}
+
+// Track dirty state on settings input changes
+(function() {
+    const settingsModal = document.getElementById('settings-modal');
+    if (settingsModal) {
+        settingsModal.addEventListener('input', markSettingsDirty);
+        settingsModal.addEventListener('change', markSettingsDirty);
+    }
+})();
+
+// Keyboard shortcuts for settings modal
+document.addEventListener('keydown', (e) => {
+    const modal = document.getElementById('settings-modal');
+    if (!modal || !modal.classList.contains('open')) return;
+
+    // Escape to close
+    if (e.key === 'Escape') {
+        e.preventDefault();
+        closeSettingsModal();
+    }
+
+    // Cmd+S / Ctrl+S to save
+    if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        saveSettings();
+    }
+});
+
 
 
    function collectSettings() {
@@ -643,6 +685,31 @@ function saveSettings() {
     // Debounce: wait 400ms of inactivity before saving
 
     clearTimeout(settingsSaveTimer);
+
+    // Ripple effect on save button
+    const saveBtn = document.querySelector('#settings-modal .btn-modal-save');
+    if (saveBtn) {
+        const ripple = document.createElement('span');
+        ripple.classList.add('ripple');
+        const rect = saveBtn.getBoundingClientRect();
+        const size = Math.max(rect.width, rect.height);
+        ripple.style.width = ripple.style.height = size + 'px';
+        ripple.style.left = (rect.width / 2 - size / 2) + 'px';
+        ripple.style.top = (rect.height / 2 - size / 2) + 'px';
+        saveBtn.appendChild(ripple);
+        setTimeout(() => ripple.remove(), 500);
+
+        // Success flash
+        saveBtn.classList.add('success');
+        saveBtn.textContent = '✓ Saved';
+        setTimeout(() => {
+            saveBtn.classList.remove('success');
+            saveBtn.textContent = 'Save Settings';
+        }, 1200);
+    }
+
+    // Clear dirty indicator
+    clearSettingsDirty();
 
     settingsSaveTimer = setTimeout(() => {
 
@@ -1578,11 +1645,22 @@ async function finishRemoteAgentSetup() {
 }
 
 function openSettingsModal() {
-    document.getElementById('settings-modal')?.classList.add('open');
+    const modal = document.getElementById('settings-modal');
+    if (!modal) return;
+    modal.classList.remove('closing');
+    modal.classList.add('open');
+    // Reset dirty state on open
+    clearSettingsDirty();
 }
 
 function closeSettingsModal() {
-    document.getElementById('settings-modal')?.classList.remove('open');
+    const modal = document.getElementById('settings-modal');
+    if (!modal) return;
+    modal.classList.add('closing');
+    setTimeout(() => {
+        modal.classList.remove('open', 'closing');
+        clearSettingsDirty();
+    }, 260);
 }
 
 function toggleUserMenu(event) {
