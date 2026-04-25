@@ -1266,13 +1266,29 @@ pub mod install {
             .rsplit_once('\\')
             .map(|(dir, _)| dir.to_string())
             .ok_or_else(|| io::Error::other("no directory in install path"))?;
+        let extract_dir = format!("{install_dir}\\__llama_monitor_extract");
 
         let command = format!(
             "powershell.exe -NoProfile -NonInteractive -Command \"$ErrorActionPreference = 'Stop'; \
 if (!(Test-Path '{dir}')) {{ New-Item -ItemType Directory -Path '{dir}' -Force | Out-Null }}; \
-Expand-Archive -LiteralPath '{archive}' -DestinationPath '{dir}' -Force; \
+if (Test-Path '{extract_dir}') {{ Remove-Item -LiteralPath '{extract_dir}' -Recurse -Force -ErrorAction SilentlyContinue }}; \
+New-Item -ItemType Directory -Path '{extract_dir}' -Force | Out-Null; \
+Expand-Archive -LiteralPath '{archive}' -DestinationPath '{extract_dir}' -Force; \
+$targets = @('llama-monitor.exe', 'sensor_bridge.exe'); \
+foreach ($name in $targets) {{ \
+  $src = Join-Path '{extract_dir}' $name; \
+  $dst = Join-Path '{dir}' $name; \
+  if (Test-Path $src) {{ \
+    for ($i = 0; $i -lt 10; $i++) {{ \
+      if (Test-Path $dst) {{ Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue }}; \
+      try {{ Move-Item -LiteralPath $src -Destination $dst -Force; break }} catch {{ if ($i -eq 9) {{ throw }}; Start-Sleep -Milliseconds 500 }} \
+    }} \
+  }} \
+}}; \
+Remove-Item -LiteralPath '{extract_dir}' -Recurse -Force -ErrorAction SilentlyContinue; \
 Remove-Item -LiteralPath '{archive}' -Force -ErrorAction SilentlyContinue\"",
             dir = install_dir,
+            extract_dir = extract_dir,
             archive = archive_path
         );
 
@@ -1298,6 +1314,7 @@ schtasks /End /TN \"{WINDOWS_AGENT_TASK_NAME}\" >NUL 2>NUL & \
 schtasks /End /TN \"{WINDOWS_AGENT_LEGACY_TASK_NAME}\" >NUL 2>NUL & \
 schtasks /Delete /TN \"{WINDOWS_AGENT_TASK_NAME}\" /F >NUL 2>NUL & \
 schtasks /Delete /TN \"{WINDOWS_AGENT_LEGACY_TASK_NAME}\" /F >NUL 2>NUL & \
+ping -n 3 127.0.0.1 >NUL & \
 exit /B 0"
         );
 
