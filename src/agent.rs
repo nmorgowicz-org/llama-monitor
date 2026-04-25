@@ -351,8 +351,11 @@ pub async fn detect_remote_agent(req: RemoteAgentDetectRequest) -> RemoteAgentDe
     let error = if !ssh_ok {
         Some("Could not detect remote OS over SSH. Verify SSH connectivity and that remote host allows command execution.".to_string())
     } else if matching_asset.is_none() {
-        Some(format!(
-            "No release asset for {os} {arch}. Manual setup required: download the appropriate binary from the latest release and place it at {install_path:?}"
+        Some(remote_release_asset_error(
+            latest_release.as_ref(),
+            &os,
+            &arch,
+            install_path.as_deref(),
         ))
     } else {
         None
@@ -382,6 +385,30 @@ pub async fn detect_remote_agent(req: RemoteAgentDetectRequest) -> RemoteAgentDe
         matching_asset,
         update_available,
         error,
+    }
+}
+
+fn remote_release_asset_error(
+    latest_release: Option<&LatestReleaseInfo>,
+    os: &str,
+    arch: &str,
+    install_path: Option<&str>,
+) -> String {
+    let install_path = install_path.unwrap_or("the managed agent install path");
+
+    match latest_release {
+        Some(release) if release.assets.is_empty() => format!(
+            "Latest release {} is published but does not have any installable agent assets yet. This usually means the release build is still running or asset upload has not finished. Wait for the release artifacts to appear, then retry Install / Start. Expected asset for this host: {} {}. Target install path: {}.",
+            release.tag_name, os, arch, install_path
+        ),
+        Some(release) => format!(
+            "Latest release {} does not contain a supported agent asset for {} {}. Open the release artifacts and verify that the expected package was published for this platform, then retry. Target install path: {}.",
+            release.tag_name, os, arch, install_path
+        ),
+        None => format!(
+            "Could not determine a downloadable agent build for {} {} because release metadata was unavailable. Check GitHub release availability, then retry. Target install path: {}.",
+            os, arch, install_path
+        ),
     }
 }
 
@@ -505,17 +532,6 @@ async fn maybe_autostart_remote_agent(
         return;
     };
 
-    let command = if let Some(command) = first_non_empty([
-        app_config.remote_agent_ssh_command.as_deref(),
-        Some(settings.remote_agent_ssh_command.as_str()),
-    ]) {
-        command
-    } else {
-        default_remote_agent_command_for_target(&target).await
-    };
-
-    eprintln!("[agent] Attempting remote agent autostart via ssh {target}");
-
     let connection = match remote_ssh::with_trusted_host_key(
         SshConnection::from_target(&target),
         &app_config.ssh_known_hosts_file,
@@ -526,6 +542,26 @@ async fn maybe_autostart_remote_agent(
             return;
         }
     };
+
+    let remote_os = detect_remote_os_with(&connection).await;
+    let default_install_path = default_install_path_for_os(remote_os);
+    let default_command =
+        default_start_command_for_os_with(&connection, remote_os, &default_install_path).await;
+
+    let command = if let Some(command) = first_non_empty([
+        app_config.remote_agent_ssh_command.as_deref(),
+        Some(settings.remote_agent_ssh_command.as_str()),
+    ]) {
+        if remote_os == RemoteOs::Windows && command.contains('~') {
+            default_command
+        } else {
+            command
+        }
+    } else {
+        default_command
+    };
+
+    eprintln!("[agent] Attempting remote agent autostart via ssh {target}");
 
     match tokio::time::timeout(
         REMOTE_AGENT_AUTOSTART_TIMEOUT,
@@ -610,13 +646,6 @@ fn first_non_empty(values: [Option<&str>; 2]) -> Option<String> {
 fn remote_host_from_agent_url(agent_url: &str) -> Option<String> {
     let url = reqwest::Url::parse(agent_url).ok()?;
     url.host_str().map(ToOwned::to_owned)
-}
-
-async fn default_remote_agent_command_for_target(target: &str) -> String {
-    default_start_command_for_os(
-        detect_remote_os(target).await,
-        "~/.config/llama-monitor/bin/llama-monitor",
-    )
 }
 
 fn default_start_command_for_os(os: RemoteOs, install_path: &str) -> String {

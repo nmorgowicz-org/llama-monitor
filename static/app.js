@@ -2296,6 +2296,17 @@ function toggleAgentMenu(event) {
     document.getElementById('agent-menu-panel')?.classList.toggle('open');
 }
 
+function toggleAgentMenuFromBadge(event) {
+    toggleAgentMenu(event);
+}
+
+function openRemoteAgentSetupFromBadge(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    closeAgentMenu();
+    openRemoteAgentSetup();
+}
+
 function closeAgentMenu() {
     document.getElementById('agent-menu-panel')?.classList.remove('open');
 }
