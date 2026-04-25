@@ -2,17 +2,13 @@ name: CodeQL
 
 on:
   pull_request:
-    paths:
-      - 'src/**'
-      - 'static/**'
-      - 'sensor_bridge/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/**.yml'
-      - '.github/codeql/**'
   schedule:
     # Weekly scan on Monday at 03:00 UTC — catches new CVEs against unchanged code
     - cron: '0 3 * * 1'
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -20,8 +16,27 @@ permissions:
   packages: read
 
 jobs:
+  paths-filter:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'static/**'
+              - 'sensor_bridge/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.github/codeql/**'
+
   analyze:
     name: Analyze (${{ matrix.language }})
+    needs: paths-filter
     runs-on: ubuntu-latest
 
     strategy:
@@ -40,7 +55,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: No code changes
+        if: github.event_name != 'schedule' && needs.paths-filter.outputs.code != 'true'
+        run: echo "No code changes detected, skipping CodeQL analysis"
+
       - name: Initialize CodeQL
+        if: github.event_name == 'schedule' || needs.paths-filter.outputs.code == 'true'
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
@@ -48,6 +68,7 @@ jobs:
           config-file: .github/codeql/codeql-config.yml
 
       - name: Perform CodeQL Analysis
+        if: github.event_name == 'schedule' || needs.paths-filter.outputs.code == 'true'
         uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}
