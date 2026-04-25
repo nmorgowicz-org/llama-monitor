@@ -47,7 +47,7 @@ ci:
       - changed-files:
           - any-glob-to-any-file:
               - '.github/workflows/**'
-  - title: '^ci('
+      - title: '^ci('
 
 github-actions:
   - any:
@@ -62,7 +62,7 @@ docs:
           - any-glob-to-any-file:
               - '**/*.md'
               - 'docs/**'
-  - title: '^docs('
+      - title: '^docs('
 
 # Dependencies (Rust)
 dependencies:
@@ -88,21 +88,26 @@ test:
               - 'tests/**'
               - '**/*.spec.js'
               - '**/*.test.rs'
-  - title: '^test('
+      - title: '^test('
 
 # ── Commit message patterns (title only) ────────────────────
 
 fix:
-  - title: '^fix('
+  - any:
+      - title: '^fix('
 
 feat:
-  - title: '^feat('
+  - any:
+      - title: '^feat('
 
 refactor:
-  - title: '^refactor('
+  - any:
+      - title: '^refactor('
 
 chore:
-  - title: '^chore('
+  - any:
+      - title: '^chore('
 
 perf:
-  - title: '^perf('
+  - any:
+      - title: '^perf('
