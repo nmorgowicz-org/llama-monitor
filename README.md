@@ -11,6 +11,10 @@ Web dashboard for managing [llama.cpp](https://github.com/ggerganov/llama.cpp) s
 # Open http://localhost:7778 in your browser
 ```
 
+On first launch, you'll see the welcome screen to attach to an existing server or spawn a new one:
+
+![Welcome Screen](docs/screenshots/01-welcome.png)
+
 Configure your `llama-server` path and model directory in the web UI (gear icon), create a preset, and spawn or attach to a server.
 
 ## Modes of Operation
@@ -48,6 +52,8 @@ Sessions persist to `~/.config/llama-monitor/sessions.json` and survive restarts
 - **Inference Metrics** — Prompt/generation speed, KV cache usage, slot status via Prometheus endpoint
 - **Capability-Aware UI** — Shows available metrics with reasons for unavailability; sections hide automatically when not applicable
 
+![Inference Metrics](docs/screenshots/02-inference-metrics.gif)
+
 ### Server Management
 - **Spawn & Control** — Start/stop llama-server from the UI with configurable presets
 - **Customizable Presets** — All llama.cpp parameters grouped into collapsible sections; persisted to disk
@@ -63,7 +69,17 @@ Sessions persist to `~/.config/llama-monitor/sessions.json` and survive restarts
 
 ### Chat & Logs
 - **Integrated Chat** — Streaming chat UI with reasoning/thinking block support, proxied to the active session's server
-- **Real-Time Logs** — Live server log output in the UI
+
+![Chat Interface](docs/screenshots/03-chat.png)
+
+- **Real-Time Logs** — Live server log output in the UI (local sessions)
+
+![Logs](docs/screenshots/05-logs.png)
+
+### GPU & System Metrics
+Local sessions show real-time hardware monitoring with sparkline graphs:
+
+![GPU & System Metrics](docs/screenshots/04-gpu-metrics.gif)
 
 ### Desktop
 - **System Tray** — Native tray icon (optional, disabled with `--headless` or `--no-tray`)
