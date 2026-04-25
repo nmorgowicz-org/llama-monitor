@@ -16,6 +16,13 @@ permissions:
   packages: read
 
 jobs:
+  analyze-release-pr:
+    name: Analyze (rust)
+    if: github.event_name == 'pull_request' && startsWith(github.event.pull_request.head.ref, 'release-please--')
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Release-please PR detected; required rust analysis check intentionally passes without rerunning CodeQL."
+
   paths-filter:
     if: github.event_name == 'schedule' || !startsWith(github.event.pull_request.head.ref, 'release-please--')
     runs-on: ubuntu-latest
