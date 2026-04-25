@@ -2297,6 +2297,18 @@ function toggleAgentMenu(event) {
 }
 
 function toggleAgentMenuFromBadge(event) {
+    const agentStatus = document.getElementById('agent-status');
+    const disconnected =
+        agentStatus && agentStatus.classList.contains('disconnected');
+
+    if (disconnected) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeAgentMenu();
+        openRemoteAgentSetup();
+        return;
+    }
+
     toggleAgentMenu(event);
 }
 
