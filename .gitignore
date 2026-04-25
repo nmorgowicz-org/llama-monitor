@@ -43,3 +43,15 @@ sensor_bridge/publish/
 
 # Test scripts
 test-*.ps1
+
+# OpenClaw workspace files
+.learnings/
+.openclaw/
+CHAT_PATH_LINKS.json
+HEARTBEAT.md
+IDENTITY.md
+SOUL.md
+TOOLS.md
+USER.md
+memory/
+skills/

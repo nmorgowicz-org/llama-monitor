@@ -2,6 +2,8 @@
 
 Web dashboard for managing [llama.cpp](https://github.com/ggerganov/llama.cpp) servers with real-time GPU and system monitoring. Supports local and remote deployments, multi-session management, and a lightweight agent mode for headless machines.
 
+![Llama Monitor](docs/screenshots/01-welcome.png)
+
 ## Quick Start
 
 ```bash
@@ -63,7 +65,14 @@ Sessions persist to `~/.config/llama-monitor/sessions.json` and survive restarts
 
 ### Chat & Logs
 - **Integrated Chat** — Streaming chat UI with reasoning/thinking block support, proxied to the active session's server
-- **Real-Time Logs** — Live server log output in the UI
+- **Real-Time Logs** — Live server log output in the UI (local sessions)
+
+![Chat Interface](docs/screenshots/03-chat.png)
+
+### GPU & System Metrics
+Local sessions show real-time hardware monitoring with sparkline graphs:
+
+![GPU & System Metrics](docs/screenshots/05-gpu-metrics.png)
 
 ### Desktop
 - **System Tray** — Native tray icon (optional, disabled with `--headless` or `--no-tray`)

@@ -1,0 +1,106 @@
+import puppeteer from 'puppeteer';
+import fs from 'fs';
+
+const BASE_URL = process.env.LLAMA_MONITOR_URL || 'http://localhost:7778';
+const REMOTE_SERVER = 'http://192.168.2.16:8001';
+const OUTPUT_DIR = '../../docs/screenshots';
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+
+(async () => {
+  console.log('Launching browser...');
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  });
+
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1440, height: 900 });
+
+  try {
+    // 01. Welcome screen (clean state)
+    console.log('Taking welcome screen screenshot...');
+    await page.goto(BASE_URL, { waitUntil: 'networkidle0' });
+    await sleep(3000);
+    await page.screenshot({ path: `${OUTPUT_DIR}/01-welcome.png`, fullPage: true });
+    console.log('Done: 01-welcome.png');
+
+    // 02. Attach to remote server
+    console.log('Attaching to remote server...');
+    await page.evaluate((url) => {
+      const input = document.getElementById('setup-endpoint-url');
+      if (input) {
+        input.value = url;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }, REMOTE_SERVER);
+    await sleep(500);
+    await page.evaluate(() => document.querySelector('button[onclick="doAttachFromSetup()"]')?.click());
+    await sleep(8000);
+
+    // 03. Server metrics (inference)
+    console.log('Taking server metrics screenshot...');
+    await page.click('button[onclick="switchTab(\'server\')"]');
+    await sleep(5000);
+    await page.screenshot({ path: `${OUTPUT_DIR}/02-server-metrics.png`, fullPage: true });
+    console.log('Done: 02-server-metrics.png');
+
+    // 04. Chat
+    console.log('Taking chat screenshot...');
+    await page.click('button[onclick="switchTab(\'chat\')"]');
+    await sleep(2000);
+    
+    // Dismiss keyboard shortcuts modal
+    await page.evaluate(() => {
+      const modal = document.querySelector('.modal-content, [role="dialog"]');
+      if (modal) {
+        const closeBtn = modal.querySelector('button:last-child, .close-btn, button[aria-label="Close"]');
+        if (closeBtn) closeBtn.click();
+      }
+    });
+    await sleep(1000);
+
+    // Send a chat message
+    await page.evaluate(() => {
+      const input = document.getElementById('chat-input');
+      if (input) {
+        input.value = 'Hello, can you tell me a short joke?';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+    await sleep(500);
+    await page.evaluate(() => document.getElementById('btn-send')?.click());
+    await sleep(15000);
+
+    await page.screenshot({ path: `${OUTPUT_DIR}/03-chat.png`, fullPage: true });
+    console.log('Done: 03-chat.png');
+
+    // 05. GPU/System metrics (scroll down)
+    console.log('Taking GPU/system metrics screenshot...');
+    await page.click('button[onclick="switchTab(\'server\')"]');
+    await sleep(3000);
+    await page.evaluate(() => {
+      const gpuSection = document.getElementById('gpu-section');
+      if (gpuSection) gpuSection.scrollIntoView({ behavior: 'instant', block: 'start' });
+    });
+    await sleep(2000);
+    await page.screenshot({ path: `${OUTPUT_DIR}/04-gpu-metrics.png`, fullPage: true });
+    console.log('Done: 04-gpu-metrics.png');
+
+    // 06. Logs
+    console.log('Taking logs screenshot...');
+    await page.click('button[onclick="switchTab(\'logs\')"]');
+    await sleep(2000);
+    await page.screenshot({ path: `${OUTPUT_DIR}/05-logs.png`, fullPage: true });
+    console.log('Done: 05-logs.png');
+
+    console.log('\nAll screenshots saved to docs/screenshots/');
+  } catch (err) {
+    console.error('Error:', err.message);
+    console.error(err.stack);
+  } finally {
+    await browser.close();
+  }
+})();
