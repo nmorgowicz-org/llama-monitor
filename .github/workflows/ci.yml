@@ -47,6 +47,15 @@ jobs:
               - 'Cargo.lock'
               - 'scripts/**'
 
+  check-release-pr:
+    name: check
+    if: >-
+      startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      github.event.pull_request.draft == false
+    runs-on: arc-general
+    steps:
+      - run: echo "Release-please PR detected; required check intentionally passes without rerunning full CI."
+
   check:
     needs: paths-filter
     if: >-
