@@ -47,12 +47,6 @@ jobs:
       - name: Build ${{ matrix.target }}
         run: bash scripts/build-single-target.sh ${{ matrix.target }}
 
-      - name: Setup .NET for Windows helper
-        if: matrix.target == 'x86_64-pc-windows-gnu'
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: '8.0.x'
-
       - name: Build sensor bridge
         if: matrix.target == 'x86_64-pc-windows-gnu'
         run: dotnet publish sensor_bridge/sensor_bridge.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o sensor_bridge/publish
