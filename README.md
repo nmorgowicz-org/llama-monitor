@@ -1,41 +1,74 @@
 # Llama Monitor
 
-Web dashboard for managing [llama.cpp](https://github.com/ggerganov/llama.cpp) servers with real-time GPU monitoring.
+Web dashboard for managing [llama.cpp](https://github.com/ggerganov/llama.cpp) servers with real-time GPU and system monitoring. Supports local and remote deployments, multi-session management, and a lightweight agent mode for headless machines.
 
-## Monitoring Modes
+## Quick Start
 
-Llama Monitor supports two modes of operation:
+```bash
+# Download the latest release and run
+./llama-monitor
 
-### Local Mode (Spawn)
-- Runs llama-server on your local machine
-- Full hardware monitoring (CPU, RAM, GPU temp, VRAM, power, clocks)
-- GPU monitoring auto-detected: AMD ROCm, NVIDIA, Apple Silicon
-- Perfect for local development and testing
+# Open http://localhost:7778 in your browser
+```
 
-### Remote Mode (Attach)
-- Connects to an existing llama-server instance
-- Inference metrics only (prompt/gen speed, KV cache, slots)
-- GPU/system sections auto-hidden when not available
-- Remote agent provides backend metrics via HTTP endpoint
+Configure your `llama-server` path and model directory in the web UI (gear icon), create a preset, and spawn or attach to a server.
+
+## Modes of Operation
+
+### Dashboard Mode (default)
+Full web UI with session management, GPU/system monitoring, chat, and server controls.
+
+### Agent Mode (`--agent`)
+Lightweight remote metrics endpoint. Runs on headless machines and reports GPU + system metrics via HTTP. The dashboard polls the agent for real-time metrics on remote sessions.
+
+```bash
+# Run as a remote agent
+./llama-monitor --agent --agent-host 0.0.0.0 --agent-port 7779
+
+# With authentication
+./llama-monitor --agent --agent-token "your-secret-token"
+```
+
+## Sessions
+
+Manage multiple llama-server instances simultaneously:
+
+| Mode | Description | Metrics |
+|------|-------------|---------|
+| **Spawn** | Starts a local llama-server on a configured port | Full: inference + GPU + system |
+| **Attach** | Connects to an existing server at a URL | Inference only (or full if agent is running) |
+
+Sessions persist to `~/.config/llama-monitor/sessions.json` and survive restarts. Old inactive sessions are auto-pruned after 7 days. Maximum 10 sessions at a time.
 
 ## Features
 
-- **Capability-Aware Monitoring** -- Backend exposes metric capabilities and availability reasons
-  - Local vs. remote monitoring mode clearly displayed
-  - Unavailable metrics show concise reasons instead of empty tables
-  - GPU/system sections hidden when not available
-- **Multi-Session Support** -- Run multiple llama-server instances simultaneously with independent session management
-  - Spawn new local servers on custom ports or attach to external servers
-  - Session persistence across restarts (saved to `~/.config/llama-monitor/sessions.json`)
-  - Quick session switching with sidebar navigation
-- **Server Management** -- Start/stop llama.cpp server from configurable presets
-- **Real-time GPU Monitoring** -- Temperature, load, VRAM, power, clock speeds (AMD ROCm + NVIDIA)
-- **Inference Metrics** -- Prompt/generation speed, KV cache usage, slot status via Prometheus endpoint
-- **Customizable Presets** -- Create, edit, copy, delete model presets with all llama.cpp parameters; persisted to disk
-- **File Browser** -- Browse the filesystem to select llama-server binary and .gguf model files
-- **Integrated Chat** -- Streaming chat UI with reasoning/thinking block support, proxied to the configured port
-- **Persistent Settings** -- Selected preset, port, and server paths survive page reloads and app restarts
-- **PWA Support** -- Installable as a standalone app on mobile and desktop
+### Monitoring
+- **GPU Metrics** — Temperature, load, VRAM, power, clock speeds (AMD ROCm, NVIDIA, Apple Silicon)
+- **System Metrics** — CPU name, temperature, load, clock speed, RAM usage, motherboard model
+- **Inference Metrics** — Prompt/generation speed, KV cache usage, slot status via Prometheus endpoint
+- **Capability-Aware UI** — Shows available metrics with reasons for unavailability; sections hide automatically when not applicable
+
+### Server Management
+- **Spawn & Control** — Start/stop llama-server from the UI with configurable presets
+- **Customizable Presets** — All llama.cpp parameters grouped into collapsible sections; persisted to disk
+- **File Browser** — Browse filesystem for `llama-server` binary and `.gguf` model files
+- **Auto-Discovery** — Models in the configured directory are discovered automatically
+
+### Remote Agents
+- **SSH-Based Management** — Detect, install, start, stop, update, and remove agents on remote machines
+- **Auto-Start** — SSH autostart when a remote agent becomes unreachable
+- **Version Detection** — Compares installed version against latest release; update available indicator
+- **Windows Task Scheduler** — Managed startup via Windows scheduled tasks on remote Windows hosts
+- **Cross-Platform** — Linux, macOS, and Windows support with automatic OS/arch detection
+
+### Chat & Logs
+- **Integrated Chat** — Streaming chat UI with reasoning/thinking block support, proxied to the active session's server
+- **Real-Time Logs** — Live server log output in the UI
+
+### Desktop
+- **System Tray** — Native tray icon (optional, disabled with `--headless` or `--no-tray`)
+- **PWA Support** — Installable as a standalone app on mobile and desktop
+- **Headless Mode** — Web/API server only, no tray or desktop UI
 
 ## Supported Hardware
 
@@ -44,6 +77,7 @@ Llama Monitor supports two modes of operation:
 | AMD | `rocm-smi` | Auto-detected |
 | NVIDIA | `nvidia-smi` | Auto-detected |
 | Apple Silicon | `mactop` | Auto-detected (Apple Silicon only) |
+| Windows (CPU temp) | `sensor_bridge.exe` | Bundled with Windows release |
 
 GPU backend is auto-detected at startup. Override with `--gpu-backend apple|rocm|nvidia|none`.
 
@@ -57,177 +91,212 @@ Download the latest release from the [Releases page](../../releases/latest).
 |----------|------|
 | Linux x86_64 | `llama-monitor-linux-x86_64` |
 | Linux aarch64 | `llama-monitor-linux-aarch64` |
-| Windows x86_64 | `llama-monitor-windows-x86_64.exe` |
+| Windows x86_64 | `llama-monitor-windows-x86_64.zip` |
 | macOS Apple Silicon | `llama-monitor-macos-aarch64.tar.gz` |
 
 #### macOS (Apple Silicon)
 
-The macOS binary is distributed as a `.tar.gz` to preserve the executable bit. macOS also applies a quarantine flag to downloaded files that must be cleared before running.
-
 ```bash
-# Extract the archive
 tar -xzf llama-monitor-macos-aarch64.tar.gz
-
-# Remove the macOS quarantine flag (required for unsigned binaries)
 xattr -dr com.apple.quarantine ./llama-monitor-macos-aarch64
-
-# Run
 ./llama-monitor-macos-aarch64
 ```
-
-> **Note:** The quarantine flag is set by macOS on any file downloaded from the internet. Without removing it, macOS will refuse to run the binary with "cannot be opened because the developer cannot be verified".
 
 #### Linux
 
 ```bash
-chmod +x llama-monitor-linux-x86_64  # or llama-monitor-linux-aarch64
+chmod +x llama-monitor-linux-x86_64
 ./llama-monitor-linux-x86_64
 ```
+
+#### Windows
+
+Extract the ZIP. The bundle includes `llama-monitor.exe` and `sensor_bridge.exe` (for CPU temperature via LibreHardwareMonitor).
 
 ### From Source
 
 ```bash
-# Install Rust if needed: https://rustup.rs
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-git clone https://github.com/nickveldrin/llama-monitor.git && cd llama-monitor
+git clone https://github.com/nmorgowicz-org/llama-monitor.git && cd llama-monitor
 cargo build --release
 ```
 
-The binary is at `target/release/llama-monitor`. It's a single self-contained executable (frontend is embedded at compile time).
+The binary is at `target/release/llama-monitor` — a single self-contained executable with the frontend embedded at compile time.
 
 ### Dependencies
 
-- **llama.cpp** -- `llama-server` binary (with `--metrics` and `--jinja` support)
+- **llama.cpp** — `llama-server` binary (with `--metrics` and `--jinja` support)
 - **GPU monitoring** (optional):
   - AMD: `rocm-smi`
   - NVIDIA: `nvidia-smi`
   - Apple Silicon: `mactop` (`brew install mactop`)
 
-## Apple Silicon Support
-
-On macOS with Apple Silicon (M1/M2/M3/M4/M5 or later), install `mactop` for GPU/system metrics:
-
-```bash
-brew install mactop
-```
-
-The backend is auto-detected. Override with `--gpu-backend apple`.
-
-See [`docs/2026-04-12-apple-silicon-implementation.md`](docs/2026-04-12-apple-silicon-implementation.md) for details.
-
-## Quick Start
-
-```bash
-# Basic usage (configure paths in the web UI)
-./llama-monitor
-
-# Or specify llama-server location via CLI
-./llama-monitor \
-  --llama-server-path /usr/local/bin/llama-server \
-  --port 7778
-```
-
-Open `http://localhost:7778` in your browser. Click the gear icon to configure server paths, then create a preset to get started.
-
-## Multi-Session Workflow
-
-1. **Create a Session** -- Click `+ New Session` in the sidebar
-   - **Spawn Mode**: Creates a session with a port; server runs locally
-   - **Attach Mode**: Connects to an external server at a URL endpoint
-
-2. **Spawn a Server** -- Use the "Spawn with Preset" button to start a llama-server instance with selected preset config
-
-3. **Switch Sessions** -- Click any session in the sidebar to activate it; metrics/chat will update to show the active session's server
-
-4. **Manage Sessions** -- Delete sessions or change the active session as needed
-
 ## CLI Reference
-
-### Monitor Mode Flags
-
-| Flag | Description |
-|------|-------------|
-| `--headless` | Disable tray and desktop UI. Serve web/API only. |
-| `--no-tray` | Skip tray icon but otherwise behave normally. |
 
 ### Server & Session Flags
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--llama-server-path` | `-s` | `llama-server` | Path to `llama-server` binary (uses `$PATH` if bare name) |
+| `--llama-server-path` | `-s` | `llama-server` | Path to `llama-server` binary |
 | `--llama-server-cwd` | | `.` | Working directory for llama-server |
+| `--models-dir` | `-m` | _(none)_ | Directory containing `.gguf` models |
 | `--port` | `-p` | `7778` | Monitor web UI port |
-| `--presets-file` | | `~/.config/llama-monitor/presets.json` | Custom presets file location |
-| `--sessions-file` | | `~/.config/llama-monitor/sessions.json` | Custom sessions file location |
-| `--gpu-backend` | | `auto` | Force GPU backend: `auto`, `rocm`, `nvidia`, `none` |
-| `--gpu-arch` | | (from config) | GPU architecture for ROCm (e.g. `gfx906`, `gfx1100`, `auto`) |
-| `--gpu-devices` | | (from config) | Visible GPU device indices (e.g. `0,1,2,3`) |
+| `--presets-file` | | `~/.config/llama-monitor/presets.json` | Custom presets file path |
+| `--sessions-file` | | `~/.config/llama-monitor/sessions.json` | Custom sessions file path |
 
-All paths can also be configured from the web UI via the Configuration modal (gear icon). UI settings override CLI defaults and persist to `~/.config/llama-monitor/ui-settings.json`.
+### GPU Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--gpu-backend` | `auto` | Force GPU backend: `auto`, `rocm`, `nvidia`, `apple`, `none` |
+| `--gpu-arch` | _(auto)_ | GPU architecture for ROCm (e.g. `gfx906`, `gfx1100`, `auto`) |
+| `--gpu-devices` | _(all)_ | Visible GPU device indices (e.g. `0,1,2,3`) |
+
+### Agent Mode Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--agent` | | Run as a lightweight remote metrics agent |
+| `--agent-host` | `127.0.0.1` | Bind address for agent mode |
+| `--agent-port` | `7779` | Port for agent mode |
+| `--agent-token` | _(none)_ | Bearer token for agent authentication |
+
+### Remote Agent Flags (Dashboard)
+
+| Flag | Description |
+|------|-------------|
+| `--remote-agent-url` | Override remote agent URL for dashboard polling |
+| `--remote-agent-token` | Bearer token for polling a remote agent |
+| `--remote-agent-ssh-autostart` | Enable SSH autostart when agent is unreachable |
+| `--remote-agent-ssh-target` | SSH target for autostart (e.g. `user@host`) |
+| `--remote-agent-ssh-command` | Remote command to start the agent via SSH |
+
+### Other Flags
+
+| Flag | Description |
+|------|-------------|
+| `--headless` | Disable tray and desktop UI; serve web/API only |
+| `--no-tray` | Skip tray icon but otherwise behave normally |
+| `--llama-poll-interval` | Llama metrics polling interval in seconds (default: 1) |
 
 ## Configuration
 
-### Server Paths
+All settings can be configured from the web UI (gear icon) or via CLI flags. UI settings take precedence and persist to disk.
 
-The llama-server binary path and working directory can be set via:
-1. **Web UI** -- Click the gear icon in the header to open Configuration
-2. **CLI flags** -- `--llama-server-path` and `--llama-server-cwd`
+### Persisted Files
 
-UI settings take precedence over CLI defaults. Both are persisted across restarts.
+| File | Purpose |
+|------|---------|
+| `~/.config/llama-monitor/sessions.json` | Session definitions (spawn/attach mode, ports, endpoints) |
+| `~/.config/llama-monitor/presets.json` | Model presets with all llama.cpp parameters |
+| `~/.config/llama-monitor/ui-settings.json` | Web UI preferences (paths, ports, presets, agent settings) |
+| `~/.config/llama-monitor/gpu-env.json` | GPU environment config (architecture, device indices) |
 
-### GPU Environment
-
-GPU architecture and device selection are configurable via the **Configuration** modal (GPU Environment section), or via CLI flags. Settings are persisted to `~/.config/llama-monitor/gpu-env.json`.
-
-On startup, the monitor auto-detects GPUs via `rocminfo` (AMD) or `nvidia-smi` (NVIDIA) and pre-selects the detected architecture.
+Session data is saved every 30 seconds and on explicit save.
 
 ### Presets
 
-Presets store all llama-server parameters and are managed through the web UI (New / Edit / Copy / Delete). They are persisted to `~/.config/llama-monitor/presets.json`.
-
 The preset editor groups parameters into collapsible sections:
 
-- **Model & Memory** -- Model path (with file browser), GPU layers, no-mmap, mlock
-- **Context & KV Cache** -- Context size, KV quantization (f16/q8_0/turbo3), flash attention
-- **Batching & Slots** -- Batch size, micro-batch, parallel slots
-- **GPU Distribution** -- Tensor split, split mode, main GPU
-- **Threading** -- Generation and batch thread counts
-- **Rope Scaling** -- YaRN/linear scaling, frequency base/scale
-- **Speculative Decoding** -- ngram-mod, draft model, draft min/max
-- **Advanced** -- Seed, system prompt file, extra CLI args
+- **Model & Memory** — Model path (with file browser), GPU layers, no-mmap, mlock
+- **Context & KV Cache** — Context size, KV quantization, flash attention
+- **Batching & Slots** — Batch size, micro-batch, parallel slots
+- **GPU Distribution** — Tensor split, split mode, main GPU
+- **Threading** — Generation and batch thread counts
+- **Rope Scaling** — YaRN/linear scaling, frequency base/scale
+- **Speculative Decoding** — ngram-mod, draft model, draft min/max
+- **Advanced** — Seed, system prompt file, extra CLI args
 
 ## Web UI
 
 ### Sidebar (Session Manager)
-Lists all sessions with mode (Spawn/Attach), status (Running/Stopped/Disconnected), and port. Click to switch active session. Sessions persist to disk.
+Lists all sessions with mode (Spawn/Attach), status (Running/Stopped/Disconnected), and port. Click to switch active session.
 
 ### Server Tab
-Control bar with preset selector and port. Start/stop the server. Live inference metrics (prompt/generation speed, context usage, slot status) and GPU monitoring table (temperature, load, VRAM, power, clocks).
+Control bar with preset selector and port. Start/stop the server. Live inference metrics and GPU/system monitoring tables.
 
 ### Chat Tab
-Streaming chat interface that proxies to the running llama-server's `/v1/chat/completions` endpoint on the active session's port. Supports reasoning/thinking blocks and Markdown rendering.
+Streaming chat interface proxied to the running llama-server's `/v1/chat/completions` endpoint. Supports reasoning/thinking blocks and Markdown rendering.
 
 ### Logs Tab
 Real-time server log output.
+
+## API Reference
+
+### Capabilities
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/capabilities` | Metric capabilities and availability reasons |
+
+### Server & Sessions
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/start` | Start llama-server with preset |
+| POST | `/api/stop` | Stop running llama-server |
+| GET | `/api/sessions` | List all sessions |
+| POST | `/api/sessions` | Create a new session |
+| DELETE | `/api/sessions/{id}` | Delete a session |
+| GET | `/api/sessions/active` | Get active session |
+| POST | `/api/sessions/active` | Set active session |
+| POST | `/api/sessions/spawn` | Spawn server with preset |
+
+### Presets & Settings
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/presets` | List all presets |
+| POST | `/api/presets` | Create a preset |
+| PUT | `/api/presets/{id}` | Update a preset |
+| DELETE | `/api/presets/{id}` | Delete a preset |
+| POST | `/api/presets/reset` | Reset to defaults |
+| GET | `/api/settings` | Get UI settings |
+| PUT | `/api/settings` | Save UI settings |
+
+### GPU & System
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/gpu-env` | Get GPU environment config |
+| PUT | `/api/gpu-env` | Save GPU environment config |
+| GET | `/api/browse?path=&filter=` | Browse filesystem (`gguf`, `executable`) |
+
+### Chat
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/chat?port=` | Streaming proxy to `/v1/chat/completions` |
+
+### WebSocket
+
+| Method | Path | Description |
+|--------|------|-------------|
+| WS | `/ws` | Real-time metrics push |
 
 ## Architecture
 
 ```
 src/
-  main.rs              -- Entry point: CLI parsing, wiring, tokio::main
+  main.rs              -- Entry point: CLI, wiring, poller threads, tokio runtime
   cli.rs               -- Clap argument definitions
   config.rs            -- AppConfig resolved from CLI args
-  state.rs             -- Shared AppState (Arc<Mutex<...>>), Sessions, UiSettings persistence
+  state.rs             -- Shared AppState, Sessions, UiSettings, persistence
+  agent.rs             -- Remote metrics agent server + polling + SSH management
+  remote_ssh.rs        -- SSH connection handling, command execution, file transfer
+  lhm.rs               -- LibreHardwareMonitor sensor bridge (Windows CPU temp)
+  system.rs            -- Cross-platform system metrics (CPU, RAM, motherboard)
+  tray.rs              -- System tray (native-tray feature)
   gpu/
     mod.rs             -- GpuMetrics, GpuBackend trait, auto-detection
     rocm.rs            -- AMD ROCm via rocm-smi JSON
     nvidia.rs          -- NVIDIA via nvidia-smi CSV
+    apple.rs           -- Apple Silicon via mactop
     env.rs             -- GPU environment config, architecture table
     dummy.rs           -- No-op backend for headless/testing
   llama/
     metrics.rs         -- Prometheus text format parser
-    server.rs          -- Subprocess management (start/stop), validation
+    server.rs          -- Subprocess management (start/stop)
     poller.rs          -- Async polling loop for /health, /metrics, /slots
   presets/
     mod.rs             -- ModelPreset, CRUD, file persistence
@@ -235,115 +304,45 @@ src/
     mod.rs             -- GGUF file discovery and filename parsing
   web/
     mod.rs             -- Warp route composition
-    api.rs             -- REST API handlers, file browser, chat proxy, session management
+    api.rs             -- REST API handlers
     ws.rs              -- WebSocket real-time metrics push
-    static_assets.rs   -- Embedded frontend (include_str!)
+    static_assets.rs   -- Embedded frontend
 static/
   index.html           -- Dashboard HTML
   style.css            -- Nord-themed CSS
-  app.js               -- Frontend JavaScript with session management
+  app.js               -- Frontend JavaScript
   manifest.json        -- PWA manifest
   sw.js                -- Service worker
-  icon.svg             -- App icon
+sensor_bridge/
+  Program.cs           -- .NET sensor bridge for Windows CPU temperature
 ```
 
 ### Data Flow
 
 ```
-GPU (rocm-smi/nvidia-smi)  -->  GPU Poller (500ms)  --> AppState
-llama-server /metrics       -->  Llama Poller (1s)   --> AppState
-                                                          |
-                                                     WebSocket (500ms)
-                                                          |
-                                                       Browser
+GPU (rocm-smi/nvidia-smi/mactop)  -->  GPU Poller (500ms)  --> AppState
+System (sysinfo/sensors)           -->  System Poller (5s)  --> AppState
+llama-server /metrics              -->  Llama Poller (1s)   --> AppState
+Remote Agent /metrics              -->  Agent Poller (2s)   --> AppState
+                                                              |
+                                                         WebSocket (500ms)
+                                                              |
+                                                           Browser
 ```
-
-Sessions are stored to disk every 30 seconds and loaded on startup.
-
-## API Reference
-
-### Capabilities Endpoint
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/capabilities` | Get metric capabilities and availability reasons |
-
-**Response Schema:**
-
-```json
-{
-  "capabilities": {
-    "inference": true,
-    "system": false,
-    "gpu": false,
-    "cpu_temperature": false,
-    "memory": false,
-    "host_metrics": false,
-    "tray": true
-  },
-  "endpoint_kind": "local",
-  "session_kind": "spawn",
-  "tray_mode": "desktop",
-  "availability": {
-    "system": "remote_endpoint",
-    "gpu": "remote_endpoint",
-    "cpu_temp": "remote_endpoint"
-  }
-}
-```
-
-- **`capabilities`**: Which metrics are available for the active session
-- **`endpoint_kind`**: `"local"` or `"remote"` (whether host metrics apply)
-- **`session_kind`**: `"spawn"`, `"attach"`, or `"none"`
-- **`tray_mode`**: `"desktop"`, `"headless"`, or `"failed"`
-- **`availability`**: Reasons for metric unavailability
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/` | Dashboard HTML |
-| GET | `/ws` | WebSocket (real-time metrics push) |
-| POST | `/api/start` | Start llama-server with `ServerConfig` JSON body |
-| POST | `/api/stop` | Stop running llama-server |
-| GET | `/api/presets` | List all presets |
-| POST | `/api/presets` | Create a new preset |
-| PUT | `/api/presets/{id}` | Update a preset |
-| DELETE | `/api/presets/{id}` | Delete a preset |
-| POST | `/api/presets/reset` | Reset presets to defaults |
-| GET | `/api/settings` | Get persisted UI settings |
-| PUT | `/api/settings` | Save UI settings |
-| GET | `/api/sessions` | List all sessions |
-| POST | `/api/sessions` | Create a new session |
-| DELETE | `/api/sessions/{id}` | Delete a session |
-| GET | `/api/sessions/active` | Get active session info |
-| POST | `/api/sessions/active` | Set active session |
-| POST | `/api/sessions/spawn` | Spawn server with preset (port, name, preset_id) |
-| GET | `/api/browse?path=&filter=` | Browse filesystem (filter: `gguf`, `executable`) |
-| GET | `/api/gpu-env` | Get GPU environment config |
-| PUT | `/api/gpu-env` | Save GPU environment config |
-| POST | `/api/chat?port=` | Streaming proxy to llama-server `/v1/chat/completions` |
 
 ## Development
 
 ```bash
-# Run in debug mode
-cargo run
-
-# Run tests
-cargo test
-
-# Lint
-cargo clippy -- -D warnings
-
-# Format
-cargo fmt
+cargo run              # Debug mode
+cargo test             # Run tests
+cargo clippy -- -D warnings  # Lint
+cargo fmt              # Format
+cargo build --release  # Production binary
 ```
-
-### Project Structure
 
 - Frontend files in `static/` are embedded at compile time via `include_str!`
 - No Node.js or build tooling required
-- Single binary deployment -- no external assets needed
-- Session data persists to `~/.config/llama-monitor/sessions.json`
+- Single binary deployment — no external assets needed
 
 ## License
 
