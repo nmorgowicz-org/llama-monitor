@@ -106,9 +106,9 @@ cargo fmt
    - PR is **not a draft** (`draft == false`)
    - PR has `ready-to-test` label
 4. **Title format**: Use conventional commit format (`feat:`, `fix:`, etc.)
-5. **Auto-labeling**: GitHub labels PRs based on `src/` directory paths:
-   - `gpu/` → `gpu`, `nvidia/` or `rocm/` or `apple.rs` → related vendor labels
-   - `llama/` → `llama`, `web/` → `web`, `state.rs` → `core`
+5. **Auto-labeling**: GitHub labels PRs based on file paths and commit titles:
+    - **File paths**: `.github/workflows/**` → `ci`, `github-actions`; `**/*.rs` → `rust`; `**/*.cs` → `csharp`; `**/*.js` → `javascript`; `static/**` → `ui`; `**/*.sh` → `shell`; `**/*.md` → `docs`; `Cargo.toml`/`Cargo.lock` → `dependencies`; `package.json` → `node-dependencies`; `tests/**` → `test`
+    - **Commit titles**: `fix(` → `fix`; `feat(` → `feat`; `refactor(` → `refactor`; `chore(` → `chore`; `perf(` → `perf`; `docs(` → `docs`; `test(` → `test`; `ci(` → `ci`
 6. **CI checks**: All PRs must pass:
    - `cargo fmt -- --check`
    - `cargo clippy -- -D warnings`
