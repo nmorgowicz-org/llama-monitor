@@ -934,7 +934,7 @@ pub mod install {
     ) -> Result<RemoteAgentInstallResponse> {
         let connection = ssh_connection.unwrap_or_else(|| SshConnection::from_target(ssh_target));
         let remote_temp_dir = detect_remote_temp_dir(&connection, os).await;
-        let remote_temp_name = remote_temp_name_for_asset(asset);
+        let remote_temp_name = remote_temp_name_for_asset(asset, os);
         let remote_temp_path = match os {
             RemoteOs::Windows => format!("{}\\{}", remote_temp_dir, remote_temp_name),
             _ => format!("{}/{}", remote_temp_dir, remote_temp_name),
@@ -987,8 +987,10 @@ pub mod install {
         Ok(temp_path.to_string_lossy().to_string())
     }
 
-    fn remote_temp_name_for_asset(asset: &ReleaseAssetInfo) -> String {
-        if asset.name.ends_with(".tar.gz") {
+    fn remote_temp_name_for_asset(asset: &ReleaseAssetInfo, os: RemoteOs) -> String {
+        if os == RemoteOs::Windows && asset.archive {
+            asset.name.clone()
+        } else if asset.name.ends_with(".tar.gz") {
             asset.name.trim_end_matches(".tar.gz").to_string()
         } else if asset.name.ends_with(".zip") {
             asset.name.trim_end_matches(".zip").to_string()
@@ -1003,7 +1005,7 @@ pub mod install {
         os: RemoteOs,
         remote_temp_path: &str,
     ) -> Result<()> {
-        if os == RemoteOs::Windows && !asset.archive {
+        if os == RemoteOs::Windows {
             match download_asset_remotely(connection, asset, os, remote_temp_path).await {
                 Ok(()) => return Ok(()),
                 Err(remote_error) => {
