@@ -946,6 +946,10 @@ pub mod install {
             .or_else(|| install_path_for_os(os).map(ToOwned::to_owned))
             .context("Could not determine install path")?;
 
+        if os == RemoteOs::Windows {
+            prepare_windows_install_target(&connection).await?;
+        }
+
         if os == RemoteOs::Windows && asset.archive {
             extract_windows_archive_to_install_path(&connection, &remote_temp_path, &install_path)
                 .await?;
@@ -1252,6 +1256,31 @@ Remove-Item -LiteralPath '{archive}' -Force -ErrorAction SilentlyContinue\"",
         } else {
             Err(io::Error::other(format!(
                 "Failed to extract Windows archive: {}",
+                output.stderr.trim()
+            ))
+            .into())
+        }
+    }
+
+    async fn prepare_windows_install_target(connection: &SshConnection) -> Result<()> {
+        let command = format!(
+            "cmd.exe /C taskkill /IM llama-monitor.exe /F >NUL 2>NUL & \
+schtasks /End /TN \"{WINDOWS_AGENT_TASK_NAME}\" >NUL 2>NUL & \
+schtasks /End /TN \"{WINDOWS_AGENT_LEGACY_TASK_NAME}\" >NUL 2>NUL & \
+schtasks /Delete /TN \"{WINDOWS_AGENT_TASK_NAME}\" /F >NUL 2>NUL & \
+schtasks /Delete /TN \"{WINDOWS_AGENT_LEGACY_TASK_NAME}\" /F >NUL 2>NUL & \
+exit /B 0"
+        );
+
+        let output = remote_ssh::exec(connection.clone(), command)
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))?;
+
+        if output.status == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!(
+                "Failed to stop existing Windows agent before install: {}",
                 output.stderr.trim()
             ))
             .into())
