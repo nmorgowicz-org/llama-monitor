@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.7](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.7.6...v0.7.7) (2026-04-26)
+
+
+### Bug Fixes
+
+* **agent:** suppress autostart during install and fix Windows file lock race ([#81](https://github.com/nmorgowicz-org/llama-monitor/issues/81)) ([f331e25](https://github.com/nmorgowicz-org/llama-monitor/commit/f331e255837da7cae642bed79a4ccb199006ab53))
+
 ## [0.7.6](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.7.5...v0.7.6) (2026-04-26)
 
 
