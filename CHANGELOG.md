@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.9](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.7.8...v0.7.9) (2026-04-26)
+
+
+### Bug Fixes
+
+* **agent:** run Windows scheduled task as SYSTEM and cache system metrics ([#86](https://github.com/nmorgowicz-org/llama-monitor/issues/86)) ([dbfe6dd](https://github.com/nmorgowicz-org/llama-monitor/commit/dbfe6dd563458677314efd570e2d755c5090d1b3))
+
 ## [0.7.8](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.7.7...v0.7.8) (2026-04-26)
 
 
