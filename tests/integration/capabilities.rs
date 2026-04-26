@@ -79,8 +79,14 @@ fn local_attach_has_full_metrics() {
 
     let caps = state.calculate_capabilities();
 
-    assert!(caps.inference, "inference should be available in local attach");
-    assert!(caps.system, "system metrics should be available in local attach");
+    assert!(
+        caps.inference,
+        "inference should be available in local attach"
+    );
+    assert!(
+        caps.system,
+        "system metrics should be available in local attach"
+    );
     assert!(caps.gpu, "gpu metrics should be available in local attach");
     assert!(
         caps.cpu_temperature,
