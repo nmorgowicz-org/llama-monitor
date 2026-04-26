@@ -47,40 +47,48 @@ jobs:
               - 'Cargo.lock'
               - 'scripts/**'
 
-  check-release-pr:
-    name: check
-    if: >-
-      startsWith(github.event.pull_request.head.ref, 'release-please--') &&
-      github.event.pull_request.draft == false
-    runs-on: arc-general
-    steps:
-      - run: echo "Release-please PR detected; required check intentionally passes without rerunning full CI."
-
   check:
     needs: paths-filter
     if: >-
-      !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
-      (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
+      always() &&
       github.event.pull_request.draft == false &&
-      (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
-       startsWith(github.actor, 'dependabot'))
-    runs-on: arc-llama-monitor
+      (
+        startsWith(github.event.pull_request.head.ref, 'release-please--') ||
+        (
+          !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+          (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
+          (contains(github.event.pull_request.labels.*.name, 'ready-to-test') ||
+           startsWith(github.actor, 'dependabot'))
+        )
+      )
+    runs-on: ${{ startsWith(github.event.pull_request.head.ref, 'release-please--') && 'arc-general' || 'arc-llama-monitor' }}
     steps:
+      - name: Release PR shortcut
+        if: startsWith(github.event.pull_request.head.ref, 'release-please--')
+        run: echo "Release-please PR detected; required check intentionally passes without rerunning full CI."
+
       - uses: actions/checkout@v6
+        if: '!startsWith(github.event.pull_request.head.ref, ''release-please--'')'
 
       - name: Setup Rust
-        if: needs.paths-filter.outputs.code == 'true'
+        if: >-
+          !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+          needs.paths-filter.outputs.code == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust
-        if: needs.paths-filter.outputs.code == 'true'
+        if: >-
+          !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+          needs.paths-filter.outputs.code == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "v0-rust"
           shared-key: "llama-monitor-${{ hashFiles('Cargo.lock') }}"
 
       - name: Run checks
-        if: needs.paths-filter.outputs.code == 'true'
+        if: >-
+          !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+          needs.paths-filter.outputs.code == 'true'
         run: |
           git diff --check
           cargo fmt -- --check
@@ -89,7 +97,9 @@ jobs:
           cargo build --release
 
       - name: Upload binary for UI tests
-        if: needs.paths-filter.outputs.code == 'true'
+        if: >-
+          !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+          needs.paths-filter.outputs.code == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: llama-monitor-binary
@@ -97,7 +107,9 @@ jobs:
           retention-days: 1
 
       - name: No code changes
-        if: needs.paths-filter.outputs.code != 'true'
+        if: >-
+          !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+          needs.paths-filter.outputs.code != 'true'
         run: echo "No code changes detected, skipping Rust checks"
 
   ui:
