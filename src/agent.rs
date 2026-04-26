@@ -23,7 +23,6 @@ static REMOTE_AGENT_AUTOSTART_SUPPRESS_UNTIL: LazyLock<Mutex<Option<Instant>>> =
 
 const REMOTE_AGENT_DEFAULT_PORT: u16 = 7779;
 const REMOTE_AGENT_POLL_INTERVAL: Duration = Duration::from_secs(2);
-const REMOTE_AGENT_AUTOSTART_COOLDOWN: Duration = Duration::from_secs(30);
 const REMOTE_AGENT_AUTOSTART_TIMEOUT: Duration = Duration::from_secs(15);
 const REMOTE_AGENT_AUTOSTART_SUPPRESS_DURATION: Duration = Duration::from_secs(120);
 const GITHUB_LATEST_RELEASE_URL: &str =
@@ -428,7 +427,7 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
             return;
         }
     };
-    let mut last_autostart_attempt: Option<Instant> = None;
+    let mut autostart_attempted = false;
     let mut enabled = false;
 
     loop {
@@ -462,6 +461,7 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                         *state.remote_agent_connected.lock().unwrap() = true;
                         *state.remote_agent_url.lock().unwrap() = Some(url);
                         state.refresh_capability_state();
+                        autostart_attempted = false;
                     }
                     Err(e) => {
                         mark_disconnected(&state);
@@ -479,7 +479,7 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                         &app_config,
                         &settings,
                         &url,
-                        &mut last_autostart_attempt,
+                        &mut autostart_attempted,
                     )
                     .await;
                 }
@@ -490,7 +490,7 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                         &app_config,
                         &settings,
                         &url,
-                        &mut last_autostart_attempt,
+                        &mut autostart_attempted,
                     )
                     .await;
                 }
@@ -515,7 +515,7 @@ async fn maybe_autostart_remote_agent(
     app_config: &AppConfig,
     settings: &crate::state::UiSettings,
     agent_url: &str,
-    last_attempt: &mut Option<Instant>,
+    attempted: &mut bool,
 ) {
     let enabled = app_config.remote_agent_ssh_autostart || settings.remote_agent_ssh_autostart;
     if !enabled {
@@ -535,10 +535,10 @@ async fn maybe_autostart_remote_agent(
         return;
     }
 
-    if last_attempt.is_some_and(|instant| instant.elapsed() < REMOTE_AGENT_AUTOSTART_COOLDOWN) {
+    if *attempted {
         return;
     }
-    *last_attempt = Some(Instant::now());
+    *attempted = true;
 
     let target = first_non_empty([
         app_config.remote_agent_ssh_target.as_deref(),
