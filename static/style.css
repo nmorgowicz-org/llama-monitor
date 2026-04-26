@@ -5454,9 +5454,7 @@ body.setup-active .sidebar-nav {
   display: grid;
   grid-template-columns: 180px minmax(0, 1fr);
   gap: 0;
-  max-height: calc(86vh - 180px);
   padding: 0;
-  overflow: hidden;
   position: relative;
   z-index: 2;
 }
@@ -5543,6 +5541,7 @@ body.setup-active .sidebar-nav {
 /* --- Settings Content Area --- */
 
 #settings-modal .settings-content {
+  max-height: calc(86vh - 180px);
   padding: 24px;
   overflow-y: auto;
   position: relative;
