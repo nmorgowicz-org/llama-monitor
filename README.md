@@ -159,6 +159,8 @@ The binary is at `target/release/llama-monitor` — a single self-contained exec
 | `--llama-server-cwd` | | `.` | Working directory for llama-server |
 | `--models-dir` | `-m` | _(none)_ | Directory containing `.gguf` models |
 | `--port` | `-p` | `7778` | Monitor web UI port |
+| `--host` | | `127.0.0.1` | Bind address for web UI (use `0.0.0.0` for LAN) |
+| `--basic-auth` | | _(none)_ | Enable HTTP Basic Auth (`user:password`) |
 | `--presets-file` | | `~/.config/llama-monitor/presets.json` | Custom presets file path |
 | `--sessions-file` | | `~/.config/llama-monitor/sessions.json` | Custom sessions file path |
 

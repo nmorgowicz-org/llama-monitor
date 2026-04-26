@@ -163,9 +163,37 @@ fn main() -> Result<()> {
     }
 
     let port = app_config.port;
-    let routes = web::build_routes(state.clone(), app_config.clone());
+    let host = args.host.clone();
 
-    println!("[info] Llama Monitor running on http://0.0.0.0:{port}");
+    // Parse basic auth credentials
+    let basic_auth_enabled = match args.basic_auth.as_ref() {
+        Some(s) => {
+            let parts: Vec<&str> = s.splitn(2, ':').collect();
+            if parts.len() == 2 {
+                Some((parts[0].to_string(), parts[1].to_string()))
+            } else {
+                eprintln!("[error] Invalid --basic-auth format. Expected: user:password");
+                std::process::exit(1);
+            }
+        }
+        None => None,
+    };
+
+    let routes = web::build_routes(
+        state.clone(),
+        app_config.clone(),
+        basic_auth_enabled.clone(),
+    );
+
+    let auth_note = if basic_auth_enabled.is_some() {
+        " (Basic Auth enabled)"
+    } else {
+        ""
+    };
+    println!(
+        "[info] Llama Monitor running on http://{}:{}{}",
+        host, port, auth_note
+    );
 
     if args.headless {
         println!("[info] Headless mode enabled (no tray, no desktop UI)");
@@ -213,7 +241,10 @@ fn main() -> Result<()> {
 
     // Warp server
     runtime.spawn(async move {
-        warp::serve(routes).run(([0, 0, 0, 0], port)).await;
+        let addr: std::net::SocketAddr = format!("{}:{}", host, port)
+            .parse()
+            .expect("Invalid host:port");
+        warp::serve(routes).run(addr).await;
     });
 
     // Run tray on the main thread when a desktop session is available.
@@ -296,6 +327,8 @@ mod tests {
                 no_tray,
                 agent: false,
                 agent_host: "127.0.0.1".to_string(),
+                host: "127.0.0.1".to_string(),
+                basic_auth: None,
                 agent_port: 7779,
                 agent_token: None,
                 remote_agent_url: None,
@@ -331,6 +364,8 @@ mod tests {
             no_tray: false,
             agent: false,
             agent_host: "127.0.0.1".to_string(),
+            host: "127.0.0.1".to_string(),
+            basic_auth: None,
             agent_port: 7779,
             agent_token: None,
             remote_agent_url: None,
@@ -358,6 +393,8 @@ mod tests {
             no_tray: false,
             agent: false,
             agent_host: "127.0.0.1".to_string(),
+            host: "127.0.0.1".to_string(),
+            basic_auth: None,
             agent_port: 7779,
             agent_token: None,
             remote_agent_url: None,
@@ -386,6 +423,8 @@ mod tests {
             no_tray: false,
             agent: false,
             agent_host: "127.0.0.1".to_string(),
+            host: "127.0.0.1".to_string(),
+            basic_auth: None,
             agent_port: 7779,
             agent_token: None,
             remote_agent_url: None,
@@ -415,6 +454,8 @@ mod tests {
             no_tray: false,
             agent: false,
             agent_host: "127.0.0.1".to_string(),
+            host: "127.0.0.1".to_string(),
+            basic_auth: None,
             agent_port: 7779,
             agent_token: None,
             remote_agent_url: None,
@@ -444,6 +485,8 @@ mod tests {
             no_tray: false,
             agent: false,
             agent_host: "127.0.0.1".to_string(),
+            host: "127.0.0.1".to_string(),
+            basic_auth: None,
             agent_port: 7779,
             agent_token: None,
             remote_agent_url: None,

@@ -20,6 +20,21 @@ pub struct AppArgs {
     #[arg(short, long, default_value_t = 7778)]
     pub port: u16,
 
+    /// Host/interface for the dashboard web UI (default: 127.0.0.1)
+    ///
+    /// Use 0.0.0.0 to allow LAN access. When binding to 0.0.0.0,
+    /// consider using --basic-auth to require credentials.
+    #[arg(long, default_value = "127.0.0.1")]
+    pub host: String,
+
+    /// Enable HTTP Basic Auth (format: user:password)
+    ///
+    /// Requires --host 0.0.0.0 to be effective. When set, all API
+    /// requests must include valid credentials via browser prompt
+    /// or Authorization header.
+    #[arg(long)]
+    pub basic_auth: Option<String>,
+
     /// Directory containing .gguf model files for auto-discovery
     #[arg(short = 'm', long)]
     pub models_dir: Option<PathBuf>,
@@ -125,10 +140,25 @@ mod tests {
         assert!(!args.no_tray);
         assert!(!args.agent);
         assert_eq!(args.port, 7778);
+        assert_eq!(args.host, "127.0.0.1");
         assert_eq!(args.agent_host, "127.0.0.1");
         assert_eq!(args.agent_port, 7779);
+        assert!(args.basic_auth.is_none());
         assert!(!args.remote_agent_ssh_autostart);
         assert_eq!(args.gpu_backend, "auto");
+    }
+
+    #[test]
+    fn test_host_and_basic_auth_parsing() {
+        let args = AppArgs::parse_from([
+            "llama-monitor",
+            "--host",
+            "0.0.0.0",
+            "--basic-auth",
+            "admin:secret123",
+        ]);
+        assert_eq!(args.host, "0.0.0.0");
+        assert_eq!(args.basic_auth.as_deref(), Some("admin:secret123"));
     }
 
     #[test]

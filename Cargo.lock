@@ -1705,12 +1705,14 @@ name = "llama-monitor"
 version = "0.7.10"
 dependencies = [
  "anyhow",
+ "base64",
  "bytes",
  "clap",
  "dirs",
  "futures-util",
  "gtk",
  "mac-notification-sys",
+ "once_cell",
  "reqwest",
  "serde",
  "serde_json",
