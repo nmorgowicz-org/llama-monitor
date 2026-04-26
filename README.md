@@ -62,9 +62,9 @@ Sessions persist to `~/.config/llama-monitor/sessions.json` and survive restarts
 
 ### Remote Agents
 - **SSH-Based Management** — Detect, install, start, stop, update, and remove agents on remote machines
-- **Auto-Start** — SSH autostart when a remote agent becomes unreachable
+- **Auto-Start** — Attempts SSH autostart once when a remote agent becomes unreachable; if it fails, the header shows a Fix button to open the agent menu for manual intervention
 - **Version Detection** — Compares installed version against latest release; update available indicator
-- **Windows Task Scheduler** — Managed startup via Windows scheduled tasks on remote Windows hosts
+- **Windows Task Scheduler** — Managed startup via Windows scheduled tasks running as SYSTEM, so the agent starts at boot with full hardware access and no console window
 - **Cross-Platform** — Linux, macOS, and Windows support with automatic OS/arch detection
 
 ### Chat & Logs
@@ -128,6 +128,8 @@ chmod +x llama-monitor-linux-x86_64
 #### Windows
 
 Extract the ZIP. The bundle includes `llama-monitor.exe` and `sensor_bridge.exe` (for CPU temperature via LibreHardwareMonitor).
+
+When managed remotely via the dashboard, the agent runs as the SYSTEM account so `sensor_bridge.exe` has the kernel access needed to read CPU temperature. The SSH user performing the install must be a local administrator.
 
 ### From Source
 
