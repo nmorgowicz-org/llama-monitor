@@ -84,6 +84,7 @@ jobs:
         with:
           prefix-key: "v0-rust"
           shared-key: "llama-monitor-${{ hashFiles('Cargo.lock') }}"
+          save-if: "${{ github.ref == 'refs/heads/main' }}"
 
       - name: Run checks
         if: >-
@@ -94,17 +95,6 @@ jobs:
           cargo fmt -- --check
           cargo clippy -- -D warnings
           cargo test
-          cargo build --release
-
-      - name: Upload binary for UI tests
-        if: >-
-          !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
-          needs.paths-filter.outputs.code == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: llama-monitor-binary
-          path: target/release/llama-monitor
-          retention-days: 1
 
       - name: No code changes
         if: >-
@@ -113,9 +103,8 @@ jobs:
         run: echo "No code changes detected, skipping Rust checks"
 
   ui:
-    needs: [paths-filter, check]
+    needs: paths-filter
     if: >-
-      always() &&
       !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
       (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
       needs.paths-filter.outputs.ui == 'true' &&
@@ -126,26 +115,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Download binary from check
-        if: needs.paths-filter.outputs.code == 'true'
-        uses: actions/download-artifact@v7
-        with:
-          name: llama-monitor-binary
-          path: target/release/
-
       - name: Setup Rust
-        if: needs.paths-filter.outputs.code != 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust
-        if: needs.paths-filter.outputs.code != 'true'
         uses: Swatinem/rust-cache@v2
         with:
           prefix-key: "v0-rust"
           shared-key: "llama-monitor-${{ hashFiles('Cargo.lock') }}"
+          save-if: "${{ github.ref == 'refs/heads/main' }}"
 
       - name: Build binary
-        if: needs.paths-filter.outputs.code != 'true'
         run: cargo build --release
 
       - name: Make binary executable
@@ -226,6 +206,7 @@ jobs:
         with:
           prefix-key: "v0-rust"
           shared-key: "llama-monitor-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}"
+          save-if: "${{ github.ref == 'refs/heads/main' }}"
       - name: Preflight release toolchain
         run: bash scripts/release-preflight.sh
       - name: Smoke build ${{ matrix.target }}
