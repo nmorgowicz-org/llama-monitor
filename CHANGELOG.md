@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.10](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.7.9...v0.7.10) (2026-04-26)
+
+
+### Bug Fixes
+
+* **agent:** prevent command injection via install paths ([#88](https://github.com/nmorgowicz-org/llama-monitor/issues/88)) ([8eed884](https://github.com/nmorgowicz-org/llama-monitor/commit/8eed884f4aa758be9c322b2dc5a42abd9495b065))
+
 ## [0.7.9](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.7.8...v0.7.9) (2026-04-26)
 
 
