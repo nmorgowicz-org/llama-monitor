@@ -14,6 +14,83 @@ use crate::remote_ssh::{self, SshConnection};
 use crate::state::{AppState, EndpointKind, SessionMode};
 use crate::system::{self, SystemMetrics};
 
+/// Shell-quotes a path for safe inclusion in a command string.
+///
+/// Uses platform-appropriate quoting to prevent command injection when
+/// user-controlled paths are interpolated into shell commands executed over SSH.
+fn shell_quote_path(path: &str, os: RemoteOs) -> String {
+    match os {
+        RemoteOs::Unix | RemoteOs::Macos => {
+            // shlex quoting: wraps in single quotes, escapes embedded quotes
+            shlex::try_quote(path)
+                .map(|s| s.into_owned())
+                .unwrap_or_else(|_| path.to_string())
+        }
+        RemoteOs::Windows => {
+            // PowerShell single quotes are literal; escape embedded quotes by doubling
+            format!("'{}'", path.replace('\'', "''"))
+        }
+        RemoteOs::Unknown => {
+            // Conservative: treat as Unix
+            shlex::try_quote(path)
+                .map(|s| s.into_owned())
+                .unwrap_or_else(|_| path.to_string())
+        }
+    }
+}
+
+/// Validates an install path to ensure it does not contain shell metacharacters
+/// or target suspicious directories.
+///
+/// This is the primary defense against command injection; shell quoting is
+/// a secondary defense-in-depth measure.
+fn validate_install_path(path: &str, target_os: RemoteOs) -> Result<(), anyhow::Error> {
+    // Must not contain shell metacharacters (platform-independent check)
+    // Note: ~ is excluded — it's a valid Unix home directory prefix
+    let dangerous_chars = ";|&$`'\"(){}[]!#<>*?";
+    if path.chars().any(|c| dangerous_chars.contains(c)) {
+        return Err(anyhow::anyhow!("Install path contains invalid characters"));
+    }
+
+    match target_os {
+        RemoteOs::Unix | RemoteOs::Macos => {
+            // Must be absolute or tilde-expanded (~)
+            if !path.starts_with('/') && !path.starts_with('~') {
+                return Err(anyhow::anyhow!("Install path must be absolute"));
+            }
+            // Must not target suspicious directories
+            let forbidden = ["/tmp", "/var", "/etc"];
+            if forbidden.iter().any(|f| path.starts_with(f)) {
+                return Err(anyhow::anyhow!("Install path not allowed"));
+            }
+        }
+        RemoteOs::Windows => {
+            // Windows absolute: drive letter (C:\), UNC (\\), or env var (%APPDATA%\)
+            let is_windows_absolute = path.len() >= 3
+                && ((path.as_bytes()[1] == b':'
+                    && (path.as_bytes()[2] == b'\\' || path.as_bytes()[2] == b'/'))
+                    || path.starts_with("%")
+                    || path.starts_with("\\\\"));
+            if !is_windows_absolute {
+                return Err(anyhow::anyhow!("Install path must be absolute"));
+            }
+            // Must not target suspicious directories
+            let forbidden = ["C:\\Windows", "C:\\WINDOWS", "C:/Windows", "C:/WINDOWS"];
+            if forbidden.iter().any(|f| path.starts_with(f)) {
+                return Err(anyhow::anyhow!("Install path not allowed"));
+            }
+        }
+        RemoteOs::Unknown => {
+            // Conservative: require some form of absolute path
+            if !path.starts_with('/') && !path.starts_with('\\') {
+                return Err(anyhow::anyhow!("Install path must be absolute"));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 thread_local! {
     static LATEST_RELEASE_CACHE: Mutex<Option<(LatestReleaseInfo, Instant)>> = const { Mutex::new(None) };
 }
@@ -694,15 +771,16 @@ fn remote_host_from_agent_url(agent_url: &str) -> Option<String> {
 }
 
 fn default_start_command_for_os(os: RemoteOs, install_path: &str) -> String {
+    let quoted_path = shell_quote_path(install_path, os);
     match os {
         RemoteOs::Windows => format!(
-            "cmd.exe /C schtasks /Delete /TN \"{WINDOWS_AGENT_LEGACY_TASK_NAME}\" /F >NUL 2>NUL & schtasks /Create /TN \"{WINDOWS_AGENT_TASK_NAME}\" /TR \"\\\"{install_path}\\\" --agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT}\" /SC ONSTART /RU SYSTEM /F && schtasks /Run /TN \"{WINDOWS_AGENT_TASK_NAME}\""
+            "cmd.exe /C schtasks /Delete /TN \"{WINDOWS_AGENT_LEGACY_TASK_NAME}\" /F >NUL 2>NUL & schtasks /Create /TN \"{WINDOWS_AGENT_TASK_NAME}\" /TR \"\\\"{quoted_path}\\\" --agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT}\" /SC ONSTART /RU SYSTEM /F && schtasks /Run /TN \"{WINDOWS_AGENT_TASK_NAME}\""
         ),
         RemoteOs::Unix | RemoteOs::Macos => format!(
-            "nohup {install_path} --agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT} > ~/.config/llama-monitor/agent.log 2>&1 &"
+            "nohup {quoted_path} --agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT} > ~/.config/llama-monitor/agent.log 2>&1 &"
         ),
         RemoteOs::Unknown => format!(
-            "{install_path} --agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT}"
+            "{quoted_path} --agent --agent-host 0.0.0.0 --agent-port {REMOTE_AGENT_DEFAULT_PORT}"
         ),
     }
 }
@@ -1098,6 +1176,13 @@ pub mod install {
         install_path: Option<String>,
         os: RemoteOs,
     ) -> Result<RemoteAgentInstallResponse> {
+        let install_path = install_path
+            .or_else(|| install_path_for_os(os).map(ToOwned::to_owned))
+            .context("Could not determine install path")?;
+
+        // Validate install path before any network operations
+        validate_install_path(&install_path, os).context("Invalid install path")?;
+
         let connection = ssh_connection.unwrap_or_else(|| SshConnection::from_target(ssh_target));
         let remote_temp_dir = detect_remote_temp_dir(&connection, os).await;
         let remote_temp_name = remote_temp_name_for_asset(asset, os);
@@ -1107,10 +1192,6 @@ pub mod install {
         };
 
         transfer_asset_to_remote_temp(&connection, asset, os, &remote_temp_path).await?;
-
-        let install_path = install_path
-            .or_else(|| install_path_for_os(os).map(ToOwned::to_owned))
-            .context("Could not determine install path")?;
 
         if os == RemoteOs::Windows {
             prepare_windows_install_target(&connection).await?;
@@ -1359,12 +1440,13 @@ pub mod install {
             RemoteOs::Unknown => return Err(io::Error::other("Unknown OS").into()),
         };
 
+        let quoted_dir = shell_quote_path(&install_dir, os);
         let mkdir_command = match os {
             RemoteOs::Windows => format!(
                 "cmd.exe /C if not exist \"{}\" mkdir \"{}\"",
                 install_dir, install_dir
             ),
-            RemoteOs::Unix | RemoteOs::Macos => format!("mkdir -p {}", install_dir),
+            RemoteOs::Unix | RemoteOs::Macos => format!("mkdir -p {quoted_dir}"),
             RemoteOs::Unknown => return Err(io::Error::other("Unknown OS").into()),
         };
 
@@ -1380,9 +1462,11 @@ pub mod install {
             .into());
         }
 
+        let quoted_temp = shell_quote_path(temp_path, os);
+        let quoted_install = shell_quote_path(install_path, os);
         let command = match os {
             RemoteOs::Windows => format!("cmd.exe /C move /Y \"{temp_path}\" \"{install_path}\""),
-            RemoteOs::Unix | RemoteOs::Macos => format!("mv {temp_path} {install_path}"),
+            RemoteOs::Unix | RemoteOs::Macos => format!("mv {quoted_temp} {quoted_install}"),
             RemoteOs::Unknown => return Err(io::Error::other("Unknown OS").into()),
         };
 
@@ -1408,6 +1492,11 @@ pub mod install {
             .ok_or_else(|| io::Error::other("no directory in install path"))?;
         let extract_dir = format!("{install_dir}\\__llama_monitor_extract");
 
+        // PowerShell single-quote escaping: double any embedded single quotes
+        let ps_dir = install_dir.replace('\'', "''");
+        let ps_extract = extract_dir.replace('\'', "''");
+        let ps_archive = archive_path.replace('\'', "''");
+
         let command = format!(
             "powershell.exe -NoProfile -NonInteractive -Command \"$ErrorActionPreference = 'Stop'; \
 if (!(Test-Path '{dir}')) {{ New-Item -ItemType Directory -Path '{dir}' -Force | Out-Null }}; \
@@ -1427,9 +1516,9 @@ foreach ($name in $targets) {{ \
 }}; \
 Remove-Item -LiteralPath '{extract_dir}' -Recurse -Force -ErrorAction SilentlyContinue; \
 Remove-Item -LiteralPath '{archive}' -Force -ErrorAction SilentlyContinue\"",
-            dir = install_dir,
-            extract_dir = extract_dir,
-            archive = archive_path
+            dir = ps_dir,
+            extract_dir = ps_extract,
+            archive = ps_archive
         );
 
         let output = remote_ssh::exec(connection.clone(), command)
@@ -1480,7 +1569,8 @@ exit /B 0"
     ) -> Result<()> {
         let output = match os {
             RemoteOs::Unix | RemoteOs::Macos => {
-                remote_ssh::exec(connection.clone(), format!("chmod +x {path}"))
+                let quoted = shell_quote_path(path, os);
+                remote_ssh::exec(connection.clone(), format!("chmod +x {quoted}"))
                     .await
                     .map_err(|e| io::Error::other(e.to_string()))?
             }
@@ -1924,5 +2014,125 @@ mod tests {
         assert_eq!(normalize_version_label("llama-monitor 0.5.1"), "0.5.1");
         assert_eq!(normalize_version_label("other-agent 0.5.1"), "0.5.1");
         assert_eq!(normalize_version_label("v0.5.1"), "0.5.1");
+    }
+
+    #[test]
+    fn shell_quote_path_unix_escapes_dangerous_chars() {
+        let path = "/opt/test; rm -rf /";
+        let quoted = shell_quote_path(path, RemoteOs::Unix);
+        // shlex wraps in single quotes; the result should be a single quoted string
+        assert!(quoted.starts_with('\''));
+        assert!(quoted.ends_with('\''));
+        // The semicolon should be inside the quotes, not interpreted as command separator
+        assert!(quoted.contains(";"));
+    }
+
+    #[test]
+    fn shell_quote_path_unix_handles_single_quotes() {
+        let path = "/opt/it's a test";
+        let quoted = shell_quote_path(path, RemoteOs::Unix);
+        // shlex uses double quotes when the string contains single quotes
+        // Verify: starts and ends with a quote character, spaces are inside quotes
+        assert!(
+            (quoted.starts_with('\'') && quoted.ends_with('\''))
+                || (quoted.starts_with('"') && quoted.ends_with('"')),
+            "quoted path should be wrapped in quotes: {:?}",
+            quoted
+        );
+    }
+
+    #[test]
+    fn shell_quote_path_windows_doubles_single_quotes() {
+        let path = r#"C:\Program Files\llama-monitor"#;
+        let quoted = shell_quote_path(path, RemoteOs::Windows);
+        assert!(quoted.starts_with('\''));
+        assert!(quoted.ends_with('\''));
+    }
+
+    #[test]
+    fn shell_quote_path_windows_escapes_embedded_single_quotes() {
+        let path = r#"C:\It's a test\llama"#;
+        let quoted = shell_quote_path(path, RemoteOs::Windows);
+        // Single quotes should be doubled inside the quoted string
+        assert!(quoted.contains("''"));
+        assert!(!quoted.contains(r#"\'"#));
+    }
+
+    #[test]
+    fn validate_install_path_rejects_shell_injection() {
+        let malicious_paths = [
+            "/opt/test; rm -rf /",
+            "/opt/test|whoami",
+            "/opt/test&echo hacked",
+            "/opt/test`id`",
+            "/opt/test$(whoami)",
+            "/opt/test'break'out",
+            "/opt/test\"break\"out",
+            "/opt/test> /dev/null",
+            "/opt/test< /etc/passwd",
+            "/opt/test!command",
+            "/opt/test#comment",
+            "/opt/test*glob",
+            "/opt/test?question",
+        ];
+
+        for path in malicious_paths {
+            // Malicious paths should be rejected regardless of target OS
+            let result_unix = validate_install_path(path, RemoteOs::Unix);
+            let result_windows = validate_install_path(path, RemoteOs::Windows);
+            assert!(
+                result_unix.is_err(),
+                "Expected '{}' to be rejected (Unix)",
+                path
+            );
+            assert!(
+                result_windows.is_err(),
+                "Expected '{}' to be rejected (Windows)",
+                path
+            );
+        }
+    }
+
+    #[test]
+    fn validate_install_path_rejects_relative_paths() {
+        assert!(validate_install_path("relative/path", RemoteOs::Unix).is_err());
+        assert!(validate_install_path("./path", RemoteOs::Unix).is_err());
+        assert!(validate_install_path("../path", RemoteOs::Unix).is_err());
+    }
+
+    #[test]
+    fn validate_install_path_rejects_suspicious_directories() {
+        assert!(validate_install_path("/tmp/llama-monitor", RemoteOs::Unix).is_err());
+        assert!(validate_install_path("/var/llama-monitor", RemoteOs::Unix).is_err());
+        assert!(validate_install_path("/etc/llama-monitor", RemoteOs::Unix).is_err());
+        assert!(validate_install_path(r#"C:\Windows\llama-monitor"#, RemoteOs::Windows).is_err());
+    }
+
+    #[test]
+    fn validate_install_path_accepts_valid_paths() {
+        // Unix paths
+        let unix_paths = [
+            "/opt/llama-monitor",
+            "/usr/local/bin/llama-monitor",
+            "/home/user/.local/bin/llama-monitor",
+            "/Applications/Llama Monitor/llama-monitor",
+            "~/.config/llama-monitor/bin/llama-monitor", // default Unix/macOS path
+        ];
+
+        for path in unix_paths {
+            let result = validate_install_path(path, RemoteOs::Unix);
+            assert!(result.is_ok(), "Expected '{}' to be accepted", path);
+        }
+
+        // Windows paths — test with RemoteOs::Windows regardless of build platform
+        let windows_paths = [
+            r#"C:\Program Files\llama-monitor"#,
+            r#"C:\Users\user\.llama-monitor"#,
+            r#"%APPDATA%\llama-monitor\bin\llama-monitor.exe"#, // default Windows path
+        ];
+        for path in windows_paths {
+            let result = validate_install_path(path, RemoteOs::Windows);
+            assert!(result.is_ok(), "Expected '{}' to be accepted", path);
+        }
     }
 }

@@ -1714,6 +1714,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "shlex",
  "ssh2",
  "sysinfo",
  "tokio",

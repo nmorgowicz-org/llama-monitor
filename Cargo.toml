@@ -17,6 +17,7 @@ webview-popover = ["dep:wry"]
     reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "json"] }
     serde = { version = "1", features = ["derive"] }
     serde_json = "1"
+    shlex = "1"
     ssh2 = { version = "0.9", features = ["vendored-openssl"] }
     sysinfo = "0.38"
     tokio = { version = "1.51", features = ["full"] }
