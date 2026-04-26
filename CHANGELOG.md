@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.8.0...v0.8.1) (2026-04-26)
+
+
+### Bug Fixes
+
+* **agent:** use cmd.exe-compatible quoting for schtasks ([#92](https://github.com/nmorgowicz-org/llama-monitor/issues/92)) ([9c04aac](https://github.com/nmorgowicz-org/llama-monitor/commit/9c04aacda13b8fe93b6788c25b477b03b9305660))
+
 ## [0.8.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.7.10...v0.8.0) (2026-04-26)
 
 
