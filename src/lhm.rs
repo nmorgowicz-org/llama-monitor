@@ -190,6 +190,25 @@ Start-ScheduledTask -TaskName '{SENSOR_BRIDGE_TASK_NAME}'
         .spawn()
         .map_err(|e| format!("Failed to launch UAC prompt: {e}"))?;
 
+    // Drop a standalone uninstall script next to sensor_bridge.exe so users can
+    // remove the service without needing to open the dashboard.
+    if let Some(dir) = bridge_path.parent() {
+        let uninstall_path = dir.join("uninstall_sensor_bridge.ps1");
+        let _ = std::fs::write(
+            &uninstall_path,
+            "# Llama Monitor Sensor Bridge Uninstall\r\n\
+# Right-click this file and choose \"Run with PowerShell\" to remove the service.\r\n\
+if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] \"Administrator\")) {\r\n\
+    Start-Process powershell.exe -Verb RunAs -ArgumentList \"-NoProfile -ExecutionPolicy Bypass -File `\"$PSCommandPath`\"\"\r\n\
+    exit\r\n\
+}\r\n\
+Stop-ScheduledTask -TaskName 'LlamaMonitorSensorBridge' -ErrorAction SilentlyContinue\r\n\
+Unregister-ScheduledTask -TaskName 'LlamaMonitorSensorBridge' -Confirm:$false -ErrorAction SilentlyContinue\r\n\
+Write-Host 'Sensor Bridge service removed.'\r\n\
+Read-Host 'Press Enter to close'\r\n",
+        );
+    }
+
     Ok(())
 }
 

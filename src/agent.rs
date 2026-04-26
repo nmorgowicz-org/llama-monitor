@@ -727,6 +727,34 @@ pub(crate) async fn default_start_command_for_os_with(
 const WINDOWS_AGENT_TASK_NAME: &str = "LlamaMonitorAgent";
 const WINDOWS_AGENT_LEGACY_TASK_NAME: &str = "llama-monitor-agent";
 
+/// Batch script placed next to the Windows agent binary after install.
+/// Double-clicking it (or running from cmd) requests UAC elevation via VBScript
+/// and removes both the scheduled task and legacy task name.
+const WINDOWS_AGENT_UNINSTALL_BAT: &[u8] = br#"@echo off
+net session >nul 2>&1
+if %errorlevel% == 0 goto :elevated
+echo Set UAC = CreateObject^("Shell.Application"^) > "%temp%\lm_uac.vbs"
+echo UAC.ShellExecute "%~f0", "", "", "runas", 1 >> "%temp%\lm_uac.vbs"
+"%temp%\lm_uac.vbs"
+del "%temp%\lm_uac.vbs"
+goto :eof
+:elevated
+schtasks /End /TN "LlamaMonitorAgent" >nul 2>&1
+schtasks /Delete /TN "LlamaMonitorAgent" /F >nul 2>&1
+schtasks /End /TN "llama-monitor-agent" >nul 2>&1
+schtasks /Delete /TN "llama-monitor-agent" /F >nul 2>&1
+echo Llama Monitor agent service removed.
+echo You may delete this folder.
+pause
+"#;
+
+/// Shell script placed next to the Unix/macOS agent binary after install.
+const UNIX_AGENT_UNINSTALL_SH: &[u8] = b"#!/bin/bash\n\
+pkill -f 'llama-monitor --agent' 2>/dev/null || true\n\
+SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n\
+echo \"Llama Monitor agent stopped.\"\n\
+echo \"To fully remove, delete: $SCRIPT_DIR\"\n";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemoteOs {
     Windows,
@@ -999,6 +1027,70 @@ pub mod install {
         pub error: Option<String>,
     }
 
+    /// Write an uninstall script next to the agent binary on the remote machine.
+    /// Failure is silently ignored — the agent is already installed; the script
+    /// is a convenience for users who want to remove it without the dashboard.
+    async fn drop_uninstall_script(connection: &SshConnection, install_path: &str, os: RemoteOs) {
+        let sep = if os == RemoteOs::Windows { '\\' } else { '/' };
+        let Some(dir_end) = install_path.rfind(sep) else {
+            return;
+        };
+        let install_dir = &install_path[..dir_end];
+
+        match os {
+            RemoteOs::Windows => {
+                // Resolve %APPDATA% to an actual path so SCP can use it.
+                let resolved_dir = if let Some(appdata) = resolve_windows_appdata(connection).await
+                {
+                    install_dir.replace("%APPDATA%", &appdata)
+                } else {
+                    install_dir.to_string()
+                };
+                let remote_script = format!("{resolved_dir}\\uninstall.bat");
+
+                let local_tmp = std::env::temp_dir().join("llama_monitor_agent_uninstall.bat");
+                if std::fs::write(&local_tmp, WINDOWS_AGENT_UNINSTALL_BAT).is_err() {
+                    return;
+                }
+                let _ = remote_ssh::copy_to_remote(
+                    connection.clone(),
+                    local_tmp.to_string_lossy().to_string(),
+                    remote_script,
+                    0o644,
+                )
+                .await;
+                let _ = std::fs::remove_file(&local_tmp);
+            }
+            RemoteOs::Unix | RemoteOs::Macos => {
+                // SCP to /tmp first, then move to the install dir (handles ~ in paths).
+                let tmp_remote = "/tmp/llama_monitor_agent_uninstall.sh";
+                let final_remote = format!("{install_dir}/uninstall.sh");
+
+                let local_tmp = std::env::temp_dir().join("llama_monitor_agent_uninstall.sh");
+                if std::fs::write(&local_tmp, UNIX_AGENT_UNINSTALL_SH).is_err() {
+                    return;
+                }
+                if remote_ssh::copy_to_remote(
+                    connection.clone(),
+                    local_tmp.to_string_lossy().to_string(),
+                    tmp_remote.to_string(),
+                    0o755,
+                )
+                .await
+                .is_ok()
+                {
+                    let _ = remote_ssh::exec(
+                        connection.clone(),
+                        format!("mv {tmp_remote} {final_remote}"),
+                    )
+                    .await;
+                }
+                let _ = std::fs::remove_file(&local_tmp);
+            }
+            RemoteOs::Unknown => {}
+        }
+    }
+
     pub async fn install_remote_agent(
         ssh_target: &str,
         ssh_connection: Option<SshConnection>,
@@ -1034,6 +1126,9 @@ pub mod install {
         if os == RemoteOs::Unix || os == RemoteOs::Macos {
             set_executable_bit(&connection, &install_path, os).await?;
         }
+
+        // Drop an uninstall script next to the binary (non-fatal if it fails).
+        drop_uninstall_script(&connection, &install_path, os).await;
 
         let installed = remote_file_exists_with(&connection, os, &install_path).await;
 
