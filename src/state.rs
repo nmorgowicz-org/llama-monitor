@@ -11,6 +11,17 @@ use crate::models::DiscoveredModel;
 use crate::presets::ModelPreset;
 use crate::system::SystemMetrics;
 
+fn sensor_bridge_setup_available() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        crate::lhm::is_sensor_bridge_available()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct MetricsCapabilities {
     pub inference: bool,
@@ -20,6 +31,7 @@ pub struct MetricsCapabilities {
     pub memory: bool,
     pub host_metrics: bool,
     pub tray: bool,
+    pub sensor_bridge_setup_available: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -327,6 +339,7 @@ impl AppState {
             memory: false,
             host_metrics: false,
             tray: true,
+            sensor_bridge_setup_available: false,
         };
 
         let state = Self {
@@ -595,7 +608,7 @@ impl AppState {
 
         match session.map(|s| s.mode) {
             Some(SessionMode::Spawn { .. }) => true,
-            Some(SessionMode::Attach { .. }) => false, // Attach never uses local metrics - only inference stats
+            Some(SessionMode::Attach { endpoint }) => endpoint_is_local(&endpoint),
             None => true,
         }
     }
@@ -620,6 +633,7 @@ impl AppState {
                 memory: false,
                 host_metrics: false,
                 tray: true,
+                sensor_bridge_setup_available: sensor_bridge_setup_available(),
             };
         }
 
@@ -628,43 +642,38 @@ impl AppState {
             sessions.iter().find(|s| s.id == active_id).cloned()
         };
 
+        let full = MetricsCapabilities {
+            inference: true,
+            system: true,
+            gpu: true,
+            cpu_temperature: true,
+            memory: true,
+            host_metrics: true,
+            tray: true,
+            sensor_bridge_setup_available: sensor_bridge_setup_available(),
+        };
+        let inference_only = MetricsCapabilities {
+            inference: true,
+            system: false,
+            gpu: false,
+            cpu_temperature: false,
+            memory: false,
+            host_metrics: false,
+            tray: true,
+            sensor_bridge_setup_available: false,
+        };
+
         match session {
-            Some(s) if matches!(s.mode, SessionMode::Spawn { .. }) => MetricsCapabilities {
-                inference: true,
-                system: true,
-                gpu: true,
-                cpu_temperature: true,
-                memory: true,
-                host_metrics: true,
-                tray: true,
-            },
-            Some(_) if self.remote_agent_connected() => MetricsCapabilities {
-                inference: true,
-                system: true,
-                gpu: true,
-                cpu_temperature: true,
-                memory: true,
-                host_metrics: true,
-                tray: true,
-            },
-            Some(_) => MetricsCapabilities {
-                inference: true,
-                system: false,
-                gpu: false,
-                cpu_temperature: false,
-                memory: false,
-                host_metrics: false,
-                tray: true,
-            },
-            None => MetricsCapabilities {
-                inference: true,
-                system: false,
-                gpu: false,
-                cpu_temperature: false,
-                memory: false,
-                host_metrics: false,
-                tray: true,
-            },
+            Some(ref s) if matches!(s.mode, SessionMode::Spawn { .. }) => full,
+            Some(ref s)
+                if matches!(&s.mode, SessionMode::Attach { endpoint }
+                    if endpoint_is_local(endpoint)) =>
+            {
+                full
+            }
+            Some(_) if self.remote_agent_connected() => full,
+            Some(_) => inference_only,
+            None => inference_only,
         }
     }
 
@@ -732,6 +741,22 @@ fn host_is_local(host: &str) -> bool {
         return true;
     }
 
+    // Probe the OS routing table directly: connect a UDP socket toward the
+    // target IP (no packets are sent) and read back the local address the OS
+    // selected. If the local address equals the target, the IP belongs to one
+    // of our own interfaces — even on multi-interface machines where the
+    // outbound-to-internet probe in local_interface_ips() would miss it.
+    let bind_addr = if ip.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" };
+    let target: SocketAddr = (ip, 80).into();
+    if let Ok(socket) = UdpSocket::bind(bind_addr)
+        && socket.connect(target).is_ok()
+        && let Ok(local_addr) = socket.local_addr()
+        && local_addr.ip() == ip
+    {
+        return true;
+    }
+
+    // Fallback: check outbound IPs via probes to well-known external hosts
     local_interface_ips().contains(&ip)
 }
 
@@ -786,9 +811,11 @@ mod tests {
             assert_eq!(endpoint_kind_from_endpoint(host), EndpointKind::Local);
         }
 
+        // Use RFC 5737 documentation addresses — guaranteed never assigned to
+        // real interfaces, so these are always remote regardless of test environment.
         let remote_hosts = [
             "http://203.0.113.10:8001",
-            "http://192.168.1.100:8001",
+            "http://198.51.100.5:8001",
             "http://example.com:8001",
         ];
         for host in remote_hosts {
@@ -966,6 +993,7 @@ mod tests {
             memory: false,
             host_metrics: false,
             tray: true,
+            sensor_bridge_setup_available: false,
         };
         let json = serde_json::to_value(&caps).unwrap();
         assert_eq!(json["inference"], true);

@@ -233,6 +233,88 @@ fn api_lhm_uninstall() -> impl Filter<Extract = (impl warp::Reply,), Error = war
         })
 }
 
+fn api_sensor_bridge_status()
+-> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "sensor-bridge" / "status")
+        .and(warp::get())
+        .and_then(|| async move {
+            #[cfg(target_os = "windows")]
+            {
+                let installed = lhm::is_local_sensor_bridge_service_installed();
+                let running = lhm::is_local_sensor_bridge_running();
+                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                    "installed": installed,
+                    "running": running,
+                    "available": lhm::is_sensor_bridge_available(),
+                })))
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                    "installed": false,
+                    "running": false,
+                    "available": false,
+                })))
+            }
+        })
+}
+
+fn api_sensor_bridge_install()
+-> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "sensor-bridge" / "install")
+        .and(warp::post())
+        .and_then(|| async move {
+            #[cfg(target_os = "windows")]
+            {
+                match lhm::install_local_sensor_bridge() {
+                    Ok(()) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                        "started": true,
+                        "message": "UAC prompt launched — approve it on your desktop to install the sensor service",
+                    }))),
+                    Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                        "started": false,
+                        "error": e,
+                    }))),
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                    "started": false,
+                    "error": "Not supported on this platform",
+                })))
+            }
+        })
+}
+
+fn api_sensor_bridge_uninstall()
+-> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "sensor-bridge" / "uninstall")
+        .and(warp::post())
+        .and_then(|| async move {
+            #[cfg(target_os = "windows")]
+            {
+                match lhm::uninstall_local_sensor_bridge() {
+                    Ok(()) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                        "started": true,
+                        "message": "UAC prompt launched — approve it on your desktop to remove the sensor service",
+                    }))),
+                    Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                        "started": false,
+                        "error": e,
+                    }))),
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                    "started": false,
+                    "error": "Not supported on this platform",
+                })))
+            }
+        })
+}
+
 fn api_disable_lhm(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -298,6 +380,9 @@ pub fn api_routes(
     let remote_agent_trust_host = api_remote_agent_ssh_trust(app_config.clone());
     let remote_agent_status = api_remote_agent_status(app_config.clone());
     let remote_agent_remove = api_remote_agent_remove(app_config.clone());
+    let sensor_bridge_status = api_sensor_bridge_status();
+    let sensor_bridge_install = api_sensor_bridge_install();
+    let sensor_bridge_uninstall = api_sensor_bridge_uninstall();
 
     start
         .or(stop)
@@ -341,6 +426,9 @@ pub fn api_routes(
         .or(api_remote_agent_update(app_config.clone()))
         .or(api_remote_agent_stop(app_config))
         .or(remote_agent_remove)
+        .or(sensor_bridge_status)
+        .or(sensor_bridge_install)
+        .or(sensor_bridge_uninstall)
 }
 
 fn api_remote_agent_latest_release()

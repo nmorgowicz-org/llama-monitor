@@ -53,7 +53,7 @@ fn local_spawn_has_all_metrics() {
 }
 
 #[test]
-fn local_attach_has_inference_only() {
+fn local_attach_has_full_metrics() {
     let paths = AppPaths {
         presets_path: std::path::PathBuf::new(),
         models_dir: None,
@@ -81,29 +81,23 @@ fn local_attach_has_inference_only() {
 
     assert!(
         caps.inference,
-        "inference should be available in attach mode"
+        "inference should be available in local attach"
     );
     assert!(
-        !caps.system,
-        "system metrics should not be available in attach mode"
+        caps.system,
+        "system metrics should be available in local attach"
     );
+    assert!(caps.gpu, "gpu metrics should be available in local attach");
     assert!(
-        !caps.gpu,
-        "gpu metrics should not be available in attach mode"
+        caps.cpu_temperature,
+        "cpu_temperature should be available in local attach"
     );
+    assert!(caps.memory, "memory should be available in local attach");
     assert!(
-        !caps.cpu_temperature,
-        "cpu_temperature should not be available in attach mode"
+        caps.host_metrics,
+        "host_metrics should be available in local attach"
     );
-    assert!(
-        !caps.memory,
-        "memory should not be available in attach mode"
-    );
-    assert!(
-        !caps.host_metrics,
-        "host_metrics should not be available in attach mode"
-    );
-    assert!(caps.tray, "tray should be available in attach mode");
+    assert!(caps.tray, "tray should be available in local attach");
 }
 
 #[test]
