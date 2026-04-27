@@ -6072,6 +6072,8 @@ function renderMd(src) {
 let chatHistory = [];
 
 let chatBusy = false;
+let chatAbortController = null;
+
 document.getElementById('chat-input').addEventListener('keydown', e => {
 
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
@@ -6085,6 +6087,24 @@ function clearChat() {
     chatHistory = [];
 
     document.getElementById('chat-messages').innerHTML = '';
+
+}
+
+function stopChat() {
+
+    if (chatAbortController) {
+
+        chatAbortController.abort();
+
+        chatAbortController = null;
+
+    }
+
+    chatBusy = false;
+
+    document.getElementById('btn-send').disabled = false;
+
+    document.getElementById('btn-stop').style.display = 'none';
 
 }
 
@@ -6145,6 +6165,10 @@ async function sendChat() {
     chatBusy = true;
 
     document.getElementById('btn-send').disabled = true;
+
+    document.getElementById('btn-stop').style.display = 'flex';
+
+    chatAbortController = new AbortController();
 
 
 
@@ -6211,6 +6235,8 @@ async function sendChat() {
             method: 'POST',
 
             headers: { 'Content-Type': 'application/json' },
+
+            signal: chatAbortController.signal,
 
             body: JSON.stringify({
 
@@ -6324,9 +6350,19 @@ async function sendChat() {
 
     } catch (err) {
 
-        msgEl.textContent = '[error] ' + err.message;
+        if (err.name === 'AbortError') {
 
-        msgEl.style.color = '#bf616a';
+            msgEl.textContent = msgContent || '[stopped]';
+
+            msgEl.style.color = 'var(--text-muted)';
+
+        } else {
+
+            msgEl.textContent = '[error] ' + err.message;
+
+            msgEl.style.color = '#bf616a';
+
+        }
 
     }
 
@@ -6341,6 +6377,10 @@ async function sendChat() {
     chatBusy = false;
 
     document.getElementById('btn-send').disabled = false;
+
+    document.getElementById('btn-stop').style.display = 'none';
+
+    chatAbortController = null;
 
 }
 
@@ -6882,9 +6922,9 @@ function closeKeyboardShortcutsModal() {
     document.getElementById('keyboard-shortcuts-modal').classList.remove('open');
 }
 
-// Show modal on ? key
+// Show modal on Ctrl+/ (or Cmd+/ on Mac)
 document.addEventListener('keydown', e => {
-    if (e.key === '?' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    if (e.key === '/' && (e.ctrlKey || e.metaKey) && !e.altKey) {
         e.preventDefault();
         openKeyboardShortcutsModal();
     }
