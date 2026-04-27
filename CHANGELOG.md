@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.8.3...v0.8.4) (2026-04-27)
+
+
+### Bug Fixes
+
+* **ui:** hide Fix button by default and shrink GPU metrics ([#100](https://github.com/nmorgowicz-org/llama-monitor/issues/100)) ([7bc399f](https://github.com/nmorgowicz-org/llama-monitor/commit/7bc399fbf790d4ef65d7cfb893850b7fa61212c5))
+
 ## [0.8.3](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.8.2...v0.8.3) (2026-04-27)
 
 
