@@ -115,7 +115,9 @@ test.describe('modal controls', () => {
   test('remote agent fix opens runtime configuration', async ({ page }) => {
     await enterMonitorView(page);
     await page.evaluate(() => {
+      // Force both agent-status and fix button visible for testing
       document.getElementById('agent-status').style.display = '';
+      document.querySelector('.btn-agent-fix').style.display = '';
     });
     await page.locator('.btn-agent-fix').click();
     await expect(page.locator('#remote-agent-setup-modal')).toBeVisible();

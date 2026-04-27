@@ -783,7 +783,7 @@ svg {
 }
 
 .sidebar-badge {
-  min-width: 18px;
+  min-width: 12px;
   padding: 2px 6px;
   border-radius: 999px;
   background: rgba(244, 63, 94, 0.18);
@@ -2989,7 +2989,7 @@ body.sidebar-collapsed .content-area {
     position: relative;
     display: grid;
     place-items: center;
-    width: min(152px, 100%);
+    width: min(110px, 100%);
     aspect-ratio: 1;
     margin-inline: auto;
     border-radius: 999px;
@@ -3004,7 +3004,7 @@ body.sidebar-collapsed .content-area {
 
   .hw-clock-gpu-layout {
     display: grid;
-    grid-template-columns: minmax(126px, 150px) minmax(82px, 98px);
+    grid-template-columns: minmax(100px, 120px) minmax(82px, 98px);
     align-items: center;
     justify-content: center;
     gap: 8px;
@@ -3201,7 +3201,7 @@ body.sidebar-collapsed .content-area {
     color: var(--color-text-primary);
     font-family: var(--font-mono);
     font-size: clamp(0.78rem, 1vw, 0.98rem);
-    font-weight: 760;
+    font-weight: 600;
     line-height: 1;
   }
 
@@ -3264,7 +3264,7 @@ body.sidebar-collapsed .content-area {
     gap: 8px;
     align-items: end;
     align-self: stretch;
-    min-height: 144px;
+    min-height: 100px;
   }
 
   .hw-clock-meter {
@@ -3286,9 +3286,9 @@ body.sidebar-collapsed .content-area {
 
   .hw-clock-meter-bar {
     position: relative;
-    width: 18px;
+    width: 12px;
     flex: 1 1 auto;
-    min-height: 118px;
+    min-height: 80px;
     border-radius: 999px;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.035));
@@ -3367,8 +3367,8 @@ body.sidebar-collapsed .content-area {
   .hw-clock-meter-value {
     color: var(--color-text-primary);
     font-family: var(--font-mono);
-    font-size: 0.86rem;
-    font-weight: 760;
+    font-size: 0.72rem;
+    font-weight: 600;
     line-height: 1;
     text-shadow: 0 0 10px rgba(255, 255, 255, 0.06);
     white-space: nowrap;
@@ -3399,7 +3399,7 @@ body.sidebar-collapsed .content-area {
   }
 
   .hw-clock-system-layout .hw-clock-meter {
-    min-height: 144px;
+    min-height: 100px;
   }
 
   .hw-clock-chip {
@@ -5596,7 +5596,7 @@ body.setup-active .sidebar-nav {
 }
 
 #settings-modal .settings-tab svg {
-  width: 18px;
+  width: 12px;
   height: 18px;
   flex-shrink: 0;
   transition: all 200ms ease;
@@ -5798,7 +5798,7 @@ body.setup-active .sidebar-nav {
   position: absolute;
   top: 3px;
   left: 3px;
-  width: 18px;
+  width: 12px;
   height: 18px;
   border-radius: 50%;
   background: var(--color-text-muted);

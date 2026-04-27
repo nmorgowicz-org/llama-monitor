@@ -68,11 +68,9 @@ Examples:
 
 1. Create feature branch: `git checkout -b feature/my-feature`
 2. Make changes and commit with conventional format
-3. Push branch and create PR **as draft**
-4. When ready for review, mark PR as ready and add `ready-to-test` label
-5. CI runs only on non-draft PRs with `ready-to-test` label
-6. Merge to `main` → release-please creates release PR
-7. Merge release PR → tag created → release artifacts built
+3. Push branch and create PR
+4. Merge to `main` → release-please creates release PR
+5. Merge release PR → tag created → release artifacts built
 
 ## Project Structure
 
@@ -100,16 +98,12 @@ cargo fmt
 
 ### Pull Requests
 
-1. **Draft PRs**: Always create PRs as **draft** initially
-2. **Ready to test**: When complete, mark PR as ready and add `ready-to-test` label
-3. **CI triggers**: CI only runs when:
-   - PR is **not a draft** (`draft == false`)
-   - PR has `ready-to-test` label
-4. **Title format**: Use conventional commit format (`feat:`, `fix:`, etc.)
-5. **Auto-labeling**: GitHub labels PRs based on file paths and commit titles:
+1. **CI triggers**: CI only runs when PR has `ready-to-test` label
+2. **Title format**: Use conventional commit format (`feat:`, `fix:`, etc.)
+3. **Auto-labeling**: GitHub labels PRs based on file paths and commit titles:
     - **File paths**: `.github/workflows/**` → `ci`, `github-actions`; `**/*.rs` → `rust`; `**/*.cs` → `csharp`; `**/*.js` → `javascript`; `static/**` → `ui`; `**/*.sh` → `shell`; `**/*.md` → `docs`; `Cargo.toml`/`Cargo.lock` → `dependencies`; `package.json` → `node-dependencies`; `tests/**` → `test`
     - **Commit titles**: `fix(` → `fix`; `feat(` → `feat`; `refactor(` → `refactor`; `chore(` → `chore`; `perf(` → `perf`; `docs(` → `docs`; `test(` → `test`; `ci(` → `ci`
-6. **CI checks**: All PRs must pass:
+4. **CI checks**: All PRs must pass:
    - `cargo fmt -- --check`
    - `cargo clippy -- -D warnings`
    - `cargo test`
