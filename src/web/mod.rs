@@ -4,7 +4,7 @@ pub mod ws;
 
 use std::sync::Arc;
 use warp::Filter;
-use warp_helmet::{Helmet, HelmetFilter};
+use warp_helmet::{Helmet, HelmetFilter, ContentSecurityPolicy};
 
 use crate::config::AppConfig;
 use crate::state::AppState;
@@ -26,7 +26,15 @@ pub fn build_routes(
     let routes = routes.and(auth).map(|reply, _: ()| reply);
 
     // Apply HTTP security headers to all responses
-    let helmet: HelmetFilter = Helmet::default().try_into().unwrap();
+    // Custom CSP: allow external CDN scripts and inline handlers (app uses onclick attributes)
+    let csp = ContentSecurityPolicy::new()
+        .default_src(vec!["'self'"])
+        .script_src(vec!["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"])
+        .style_src(vec!["'self'", "'unsafe-inline'"]);
+    let helmet: HelmetFilter = Helmet::new()
+        .add(csp)
+        .try_into()
+        .unwrap();
     helmet.wrap(routes)
 }
 
