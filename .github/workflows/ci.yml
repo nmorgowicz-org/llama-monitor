@@ -97,14 +97,6 @@ jobs:
           cargo clippy -- -D warnings
           cargo test
 
-      - name: Setup .NET
-        if: >-
-          !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
-          needs.paths-filter.outputs.code == 'true'
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-
       - name: Validate sensor_bridge compiles
         if: >-
           !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
