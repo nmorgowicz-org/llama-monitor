@@ -5103,11 +5103,9 @@ function renderHwClockRing(container, clock) {
               '<div class="hw-clock-orbit-low"></div>' +
               '<div class="hw-clock-orbit-dot"></div>' +
             '</div>' +
-            '<div class="hw-clock-core">' +
-              '<div class="hw-clock-stack">' +
-                '<div class="hw-clock-row"><span class="hw-clock-row-value">' + display.value + '</span><span class="hw-clock-unit">' + display.unit + '</span></div>' +
-                '<div class="hw-clock-band">' + band.min + '-' + band.max + ' MHz</div>' +
-              '</div>' +
+            '<div class="hw-clock-core hw-clock-system-core">' +
+              '<div class="hw-clock-row-value">' + display.value + '</div>' +
+              '<div class="hw-clock-unit">' + display.unit + '</div>' +
             '</div>' +
           '</div>' +
           '<div class="hw-clock-meter">' +
@@ -5117,8 +5115,8 @@ function renderHwClockRing(container, clock) {
               '<div class="hw-clock-meter-marker"></div>' +
               '<div class="hw-clock-meter-marker-low"></div>' +
             '</div>' +
-            '<div class="hw-clock-meter-value">' + clock + '</div>' +
-            '<div class="hw-clock-meter-band">' + band.min + '-' + band.max + '</div>' +
+            '<div class="hw-clock-meter-value">' + formatClockReadout(clock).value + ' ' + formatClockReadout(clock).unit + '</div>' +
+            '<div class="hw-clock-meter-band">' + formatClockReadout(band.min).value + '-' + formatClockReadout(band.max).value + ' ' + formatClockReadout(band.max).unit + '</div>' +
             (sysHistory.cpuClock.length > 1 ? '<div class="hw-clock-footer-spark">' + buildSparklineSVG(sysHistory.cpuClock, 'hw-clock-footer-spark', color) + '</div>' : '') +
           '</div>' +
         '</div>');

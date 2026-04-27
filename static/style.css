@@ -3162,8 +3162,18 @@ body.sidebar-collapsed .content-area {
   }
 
   .hw-clock-system .hw-clock-core {
-    width: 62%;
-    gap: 5px;
+    width: 56%;
+    gap: 2px;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .hw-clock-system-core .hw-clock-row-value {
+    font-size: clamp(1.2rem, 1.5vw, 1.5rem);
+  }
+
+  .hw-clock-system-core .hw-clock-unit {
+    font-size: 0.62rem;
   }
 
   .hw-clock-gpu .hw-clock-core {
