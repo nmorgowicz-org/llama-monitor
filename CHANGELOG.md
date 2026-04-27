@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.9.0...v0.9.1) (2026-04-27)
+
+
+### Bug Fixes
+
+* **security:** migrate extract_archive to tempfile crate ([#15](https://github.com/nmorgowicz-org/llama-monitor/issues/15)) ([#107](https://github.com/nmorgowicz-org/llama-monitor/issues/107)) ([20faa38](https://github.com/nmorgowicz-org/llama-monitor/commit/20faa382ec102018164cb5c4a5b9a9d91bf0c916))
+
 ## [0.9.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.8.5...v0.9.0) (2026-04-27)
 
 
