@@ -3,7 +3,7 @@ import fs from 'fs';
 import { execSync } from 'child_process';
 
 const BASE_URL = process.env.LLAMA_MONITOR_URL || 'http://localhost:7778';
-const REMOTE_SERVER = 'http://192.168.2.16:8001';
+const REMOTE_SERVER = process.env.REMOTE_SERVER || 'http://192.168.2.16:8001';
 const FRAME_DIR = './frames';
 const FPS = 10;
 const DURATION_SEC = 5;
