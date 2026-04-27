@@ -188,7 +188,54 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     let bind_addr = format!("{}:{}", app_config.agent_host, app_config.agent_port)
         .parse::<SocketAddr>()
         .context("invalid agent bind address")?;
-    let token = app_config.agent_token.clone();
+
+    // Use explicit token, or auto-generate and persist one
+    let token = match app_config.agent_token.clone() {
+        Some(t) => t,
+        None => {
+            let config_dir = dirs::config_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("llama-monitor");
+            let token_file = config_dir.join("agent-token");
+
+            // Try to read existing token from disk
+            let existing = std::fs::read_to_string(&token_file).ok().and_then(|s| {
+                let trimmed = s.trim().to_string();
+                if !trimmed.is_empty() {
+                    Some(trimmed)
+                } else {
+                    None
+                }
+            });
+
+            existing.unwrap_or_else(|| {
+                // Generate a random token from system entropy
+                let bytes = std::fs::read("/dev/urandom")
+                    .ok()
+                    .map(|b| {
+                        b.iter()
+                            .take(16)
+                            .fold(0u128, |acc, &x| (acc << 8) | x as u128)
+                    })
+                    .unwrap_or_else(|| {
+                        // Fallback: use timestamp + process ID
+                        let ts = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_nanos();
+                        let pid = std::process::id() as u128;
+                        ts ^ pid
+                    });
+                let new_token = format!("{bytes:x}");
+                // Persist it
+                let _ = std::fs::create_dir_all(&config_dir);
+                let _ = std::fs::write(&token_file, &new_token);
+                eprintln!("[agent] Auto-generated token: {new_token}");
+                eprintln!("[agent] Token saved to {}", token_file.display());
+                new_token
+            })
+        }
+    };
 
     let backend = gpu::detect_backend(&app_config.gpu_backend);
     let gpu_metrics: Arc<Mutex<BTreeMap<String, GpuMetrics>>> =
@@ -241,15 +288,14 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
             .and_then(move |headers: HeaderMap| {
                 let token = token.clone();
                 async move {
-                    if let Some(expected) = token {
-                        let valid = headers
-                            .get("authorization")
-                            .and_then(|value| value.to_str().ok())
-                            .is_some_and(|value| value == format!("Bearer {expected}"));
+                    // Token is always present (explicit or auto-generated)
+                    let valid = headers
+                        .get("authorization")
+                        .and_then(|value| value.to_str().ok())
+                        .is_some_and(|value| value == format!("Bearer {token}"));
 
-                        if !valid {
-                            return Err(warp::reject::custom(AgentAuthError));
-                        }
+                    if !valid {
+                        return Err(warp::reject::custom(AgentAuthError));
                     }
 
                     Ok::<(), warp::Rejection>(())
@@ -325,7 +371,7 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
         .recover(handle_agent_rejection);
 
     if app_config.agent_token.is_none() {
-        eprintln!("[agent] No --agent-token configured; metrics API is unauthenticated");
+        eprintln!("[agent] Using auto-generated token (persisted to config dir)");
     }
     println!("[agent] Remote metrics agent listening on http://{bind_addr}");
 
