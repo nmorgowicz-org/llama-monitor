@@ -42,7 +42,8 @@ class Program
 
        var listener = new HttpListener();
         const int port = 7780;
-        const string prefix = $"http://127.0.0.1:{port}/";
+        const string prefix = "http://127.0.0.1:7780/";
+        const uint urlConflictError = 0x80070032;
 
         // Try to start, cleaning up stale reservations or conflicting processes
         for (int attempt = 0; attempt < 3; attempt++)
@@ -53,7 +54,7 @@ class Program
                 listener.Start();
                 break;
             }
-            catch (HttpListenerException ex) when (ex.NativeErrorCode == 0x80070032) // URL conflict
+            catch (HttpListenerException ex) when (ex.NativeErrorCode == urlConflictError) // URL conflict
             {
                 // Attempt 1: delete stale URL reservation
                 try
