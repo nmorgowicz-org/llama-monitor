@@ -3003,10 +3003,10 @@ body.sidebar-collapsed .content-area {
 
   .hw-clock-gpu-layout {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: auto 1fr;
     grid-template-rows: auto auto;
-    align-items: center;
-    justify-content: center;
+    align-items: start;
+    justify-content: stretch;
     gap: 16px;
     width: 100%;
     max-width: 100%;
@@ -3270,6 +3270,7 @@ body.sidebar-collapsed .content-area {
     align-items: start;
     align-self: stretch;
     width: 100%;
+    grid-column: 2 / -1;
   }
 
   .hw-clock-meter {
@@ -3390,13 +3391,14 @@ body.sidebar-collapsed .content-area {
 
   .hw-clock-system-layout {
     display: grid;
-    grid-template-columns: minmax(112px, 132px) minmax(34px, 48px);
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    align-items: start;
+    justify-content: stretch;
+    gap: 16px;
     width: 100%;
     max-width: 100%;
-    padding-inline: 4px;
+    padding-inline: 8px;
   }
 
   .hw-clock-system-layout .hw-clock-cluster {
@@ -3405,6 +3407,7 @@ body.sidebar-collapsed .content-area {
 
   .hw-clock-system-layout .hw-clock-meter {
     min-height: 50px;
+    grid-column: 2 / -1;
   }
 
   .hw-clock-chip {
