@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.8.2...v0.8.3) (2026-04-27)
+
+
+### Bug Fixes
+
+* **ssrf:** remove user-controlled port from chat endpoint ([#96](https://github.com/nmorgowicz-org/llama-monitor/issues/96)) ([ee5905c](https://github.com/nmorgowicz-org/llama-monitor/commit/ee5905c34a0b1f230bd34011b0a505d58b3ced82))
+
 ## [0.8.2](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.8.1...v0.8.2) (2026-04-27)
 
 
