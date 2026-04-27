@@ -275,7 +275,7 @@ svg {
 }
 
 .agent-menu-dot {
-  width: 8px;
+  width: 6px;
   height: 8px;
   border-radius: 999px;
   background: #8899aa;
@@ -473,7 +473,7 @@ svg {
 .status-dot,
 .agent-indicator {
   display: inline-block;
-  width: 8px;
+  width: 6px;
   height: 8px;
   padding: 0;
   border-radius: 999px;
@@ -783,7 +783,7 @@ svg {
 }
 
 .sidebar-badge {
-  min-width: 8px;
+  min-width: 6px;
   padding: 2px 6px;
   border-radius: 999px;
   background: rgba(244, 63, 94, 0.18);
@@ -1657,7 +1657,7 @@ body.sidebar-collapsed .content-area {
   gap: 5px;
   color: var(--color-text-muted);
   font-family: var(--font-mono);
-  font-size: 0.62rem;
+  font-size: 0.52rem;
   line-height: 1.45;
   min-height: 16px;
 }
@@ -2458,7 +2458,7 @@ body.sidebar-collapsed .content-area {
   top: 50%;
   display: flex;
   height: 16px;
-  min-width: 8px;
+  min-width: 6px;
   border-radius: 999px;
   background: rgba(143, 188, 187, 0.32);
   box-shadow: 0 0 18px rgba(143, 188, 187, 0.16);
@@ -2989,7 +2989,7 @@ body.sidebar-collapsed .content-area {
     position: relative;
     display: grid;
     place-items: center;
-    width: min(90px, 100%);
+    width: min(70px, 100%);
     aspect-ratio: 1;
     margin-inline: auto;
     border-radius: 999px;
@@ -3004,7 +3004,7 @@ body.sidebar-collapsed .content-area {
 
   .hw-clock-gpu-layout {
     display: grid;
-    grid-template-columns: minmax(80px, 100px) minmax(82px, 98px);
+    grid-template-columns: minmax(60px, 80px) minmax(82px, 98px);
     align-items: center;
     justify-content: center;
     gap: 8px;
@@ -3109,7 +3109,7 @@ body.sidebar-collapsed .content-area {
 
   .hw-clock-orbit-peak,
   .hw-clock-orbit-low {
-    width: 8px;
+    width: 6px;
     height: 8px;
     border: 1px solid rgba(255, 255, 255, 0.18);
     background: rgba(15, 17, 21, 0.95);
@@ -3264,7 +3264,7 @@ body.sidebar-collapsed .content-area {
     gap: 8px;
     align-items: end;
     align-self: stretch;
-    min-height: 70px;
+    min-height: 50px;
   }
 
   .hw-clock-meter {
@@ -3286,9 +3286,9 @@ body.sidebar-collapsed .content-area {
 
   .hw-clock-meter-bar {
     position: relative;
-    width: 8px;
+    width: 6px;
     flex: 1 1 auto;
-    min-height: 60px;
+    min-height: 40px;
     border-radius: 999px;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.035));
@@ -3367,7 +3367,7 @@ body.sidebar-collapsed .content-area {
   .hw-clock-meter-value {
     color: var(--color-text-primary);
     font-family: var(--font-mono);
-    font-size: 0.62rem;
+    font-size: 0.52rem;
     font-weight: 600;
     line-height: 1;
     text-shadow: 0 0 10px rgba(255, 255, 255, 0.06);
@@ -3399,7 +3399,7 @@ body.sidebar-collapsed .content-area {
   }
 
   .hw-clock-system-layout .hw-clock-meter {
-    min-height: 70px;
+    min-height: 50px;
   }
 
   .hw-clock-chip {
@@ -3570,7 +3570,7 @@ body.sidebar-collapsed .content-area {
 
  .viz-thumb {
    display: inline-block;
-   width: 8px;
+   width: 6px;
    height: 12px;
    border-radius: 2px;
    flex-shrink: 0;
@@ -5299,7 +5299,7 @@ body.setup-active .sidebar-nav {
 }
 
 .session-item-status {
-  font-size: 0.62rem;
+  font-size: 0.52rem;
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 999px;
@@ -5596,7 +5596,7 @@ body.setup-active .sidebar-nav {
 }
 
 #settings-modal .settings-tab svg {
-  width: 8px;
+  width: 6px;
   height: 18px;
   flex-shrink: 0;
   transition: all 200ms ease;
@@ -5798,7 +5798,7 @@ body.setup-active .sidebar-nav {
   position: absolute;
   top: 3px;
   left: 3px;
-  width: 8px;
+  width: 6px;
   height: 18px;
   border-radius: 50%;
   background: var(--color-text-muted);
