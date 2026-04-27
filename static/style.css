@@ -3003,7 +3003,8 @@ body.sidebar-collapsed .content-area {
 
   .hw-clock-gpu-layout {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
     align-items: center;
     justify-content: center;
     gap: 16px;
@@ -3013,7 +3014,8 @@ body.sidebar-collapsed .content-area {
   }
 
   .hw-clock-gpu-layout .hw-clock-cluster {
-    width: min(100px, 100%);
+    width: min(120px, 100%);
+    margin: 0 auto;
   }
 
   .hw-clock-cluster::before {
@@ -3237,7 +3239,7 @@ body.sidebar-collapsed .content-area {
 
   .hw-clock-footer-spark {
     width: 100%;
-    height: 28px;
+    height: 60px;
     border-radius: 10px;
     overflow: hidden;
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
@@ -3253,11 +3255,11 @@ body.sidebar-collapsed .content-area {
 
   .hw-clock-gpu-readout {
     display: grid;
-    grid-template-columns: repeat(2, minmax(60px, 1fr));
-    gap: 12px;
-    align-items: end;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+    align-items: start;
     align-self: stretch;
-    min-height: 80px;
+    width: 100%;
   }
 
   .hw-clock-meter {
@@ -3281,7 +3283,7 @@ body.sidebar-collapsed .content-area {
     position: relative;
     width: 100%;
     flex: 1 1 auto;
-    min-height: 8px;
+    min-height: 16px;
     border-radius: 999px;
     background:
       linear-gradient(90deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.035));
