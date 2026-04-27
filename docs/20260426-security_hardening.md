@@ -569,16 +569,24 @@ No security headers are set on any response. Specifically missing:
 
 **Correct approach:** Use `warp-helmet` crate — an actively maintained security middleware that wraps all routes and sets security headers automatically.
 
-**CSP customization required:** `Helmet::default()` sets restrictive CSP (`script-src 'self'`, `script-src-attr 'none'`) that blocks the app's inline `onclick` handlers and external CDN scripts. Customized CSP to allow `'unsafe-inline'` for scripts/styles and CDN sources while keeping other headers secure.
+**CSP customization required:** `Helmet::default()` sets restrictive CSP that blocks the app's external dependencies. The app requires:
+- Inline `onclick` handlers (100+ instances)
+- External CDN scripts (`cdn.jsdelivr.net` for marked.js)
+- External fonts/styles (`fonts.googleapis.com`, `fonts.gstatic.com`)
+- Data URIs for SVG images
+
+Customized CSP to permit all legitimate sources while keeping other security headers active.
 
 ```rust
 use warp_helmet::{Helmet, HelmetFilter, ContentSecurityPolicy};
 
 // In build_routes():
 let csp = ContentSecurityPolicy::new()
-    .default_src(vec!["'self'"])
+    .default_src(vec!["'self'", "data:"])
     .script_src(vec!["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"])
-    .style_src(vec!["'self'", "'unsafe-inline'"]);
+    .style_src(vec!["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"])
+    .font_src(vec!["'self'", "https://fonts.gstatic.com"])
+    .img_src(vec!["'self'", "data:", "https:"]);
 let helmet: HelmetFilter = Helmet::new().add(csp).try_into().unwrap();
 helmet.wrap(routes)
 ```
