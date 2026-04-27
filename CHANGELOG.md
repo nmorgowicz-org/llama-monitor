@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.8.4...v0.8.5) (2026-04-27)
+
+
+### Bug Fixes
+
+* secure temp files and GPU UI improvements ([#102](https://github.com/nmorgowicz-org/llama-monitor/issues/102)) ([52a3a04](https://github.com/nmorgowicz-org/llama-monitor/commit/52a3a04c685ff4244d78f1a081998079c66c8dc9))
+
 ## [0.8.4](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.8.3...v0.8.4) (2026-04-27)
 
 
