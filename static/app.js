@@ -5068,7 +5068,7 @@ function renderHwDualRing(container, sclk, mclk) {
                 '<div class="hw-clock-meter-marker"></div>' +
                 '<div class="hw-clock-meter-marker-low"></div>' +
               '</div>' +
-              '<div class="hw-clock-meter-value">' + sclk + '</div>' +
+              '<div class="hw-clock-meter-value">' + formatClockReadout(sclk).value + ' ' + formatClockReadout(sclk).unit + '</div>' +
               '<div class="hw-clock-meter-band">' + sclkBand.min + '-' + sclkBand.max + '</div>' +
             '</div>' +
             '<div class="hw-clock-meter">' +
@@ -5078,7 +5078,7 @@ function renderHwDualRing(container, sclk, mclk) {
                 '<div class="hw-clock-meter-marker"></div>' +
                 '<div class="hw-clock-meter-marker-low"></div>' +
               '</div>' +
-              '<div class="hw-clock-meter-value">' + mclk + '</div>' +
+              '<div class="hw-clock-meter-value">' + formatClockReadout(mclk).value + ' ' + formatClockReadout(mclk).unit + '</div>' +
               '<div class="hw-clock-meter-band">' + mclkBand.min + '-' + mclkBand.max + '</div>' +
             '</div>' +
           '</div>' +
