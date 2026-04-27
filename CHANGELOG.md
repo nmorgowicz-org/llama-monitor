@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.8.5...v0.9.0) (2026-04-27)
+
+
+### Features
+
+* **security:** add mTLS infrastructure (cert generation, CA distribution) ([#104](https://github.com/nmorgowicz-org/llama-monitor/issues/104)) ([ffefb62](https://github.com/nmorgowicz-org/llama-monitor/commit/ffefb62ae4a282255a2e918f11c7c09cc63c9bac))
+
 ## [0.8.5](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.8.4...v0.8.5) (2026-04-27)
 
 
