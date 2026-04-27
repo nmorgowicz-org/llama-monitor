@@ -552,6 +552,7 @@ fn validate_llama_endpoint(url: &str) -> Result<(), ApiError> {
 **File:** `src/web/mod.rs`
 **Severity:** Medium
 **Category:** Missing security controls
+**Status:** ✅ Fixed and released in v0.9.2
 
 ### Description
 
@@ -564,26 +565,19 @@ No security headers are set on any response. Specifically missing:
 
 ### Remediation
 
-Add a warp middleware to set security headers on all responses:
+**Initial approach (incorrect):** Adding custom middleware via warp filters. Warp lacks true response middleware, making this approach unworkable without touching every route.
+
+**Correct approach:** Use `warp-helmet` crate — an actively maintained security middleware that wraps all routes and sets 15+ security headers automatically. Added dependency and wrapped routes in `build_routes()`:
 
 ```rust
-fn security_headers() -> impl Filter<Extract = (), Rep = ()> + Clone {
-    warp::any().map(|| ())
-        .untuple_one()
-}
+use warp_helmet::{Helmet, HelmetFilter};
 
-// Apply as a before-response filter
-fn add_security_headers(
-    reply: warp::reply::Reply,
-) -> warp::reply::Reply {
-    let mut res = match reply.into_response() {
-        // ...
-    };
-    res.headers().insert("X-Content-Type-Options", "nosniff".parse().unwrap());
-    res.headers().insert("X-Frame-Options", "DENY".parse().unwrap());
-    res.headers().insert("Content-Security-Policy", "default-src 'self'".parse().unwrap());
-    res
-}
+// In build_routes():
+let helmet: HelmetFilter = Helmet::default().try_into().unwrap();
+helmet.wrap(routes)
+```
+
+This sets all security headers with sensible defaults (CSP, HSTS, X-Frame-Options, etc.) without modifying individual endpoints.
 ```
 
 ---
@@ -682,7 +676,6 @@ This ensures unique filenames per invocation and automatic cleanup when the hand
 | 15 | Insecure temp files (multiple) | **High** | Low (`tempfile` crate) |
 | 2 | No TLS — token/data in plaintext | **High** | High (TLS) or Low (VPN doc) |
 | 12 | SSRF via attach endpoint | **Medium** | Low (URL validation) |
-| 13 | Missing HTTP security headers | **Medium** | Low (middleware) |
 | 3 | TOCTOU on install script temp files | **Medium** | Low (random filename) |
 | 1 | Non-constant-time token comparison | **Low** | Low (`subtle` crate) |
 | 4 | `lastJson` data race (C#) | **Low** | Trivial (`volatile`) |
@@ -702,7 +695,7 @@ This ensures unique filenames per invocation and automatic cleanup when the hand
 - [x] **#15** Insecure temp files (multiple) — `extract_archive` migrated to `tempfile::Builder` for random names + auto-cleanup
 - [x] **#2** No TLS — token/data in plaintext — Cert infrastructure in place (certs.rs), CA distribution via install payload, dashboard accepts self-signed certs
 - [x] **#12** SSRF via attach endpoint — Validate scheme (http/https only) and restrict to private/loopback IPs
-- [ ] **#13** Missing HTTP security headers — Add warp middleware
+- [x] **#13** Missing HTTP security headers — Added `warp-helmet` crate to set 15+ security headers globally via route wrapping
 - [ ] **#3** TOCTOU on install script temp files — Use randomized filenames
 - [ ] **#1** Non-constant-time token comparison — Add `subtle` crate
 - [ ] **#4** `lastJson` data race (C#) — Add `volatile` keyword

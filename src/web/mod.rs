@@ -4,6 +4,7 @@ pub mod ws;
 
 use std::sync::Arc;
 use warp::Filter;
+use warp_helmet::{Helmet, HelmetFilter};
 
 use crate::config::AppConfig;
 use crate::state::AppState;
@@ -22,7 +23,11 @@ pub fn build_routes(
 
     // Always apply auth filter; when credentials are None it passes through
     let auth = basic_auth_guard(basic_auth);
-    routes.and(auth).map(|reply, _: ()| reply)
+    let routes = routes.and(auth).map(|reply, _: ()| reply);
+
+    // Apply HTTP security headers to all responses
+    let helmet: HelmetFilter = Helmet::default().try_into().unwrap();
+    helmet.wrap(routes)
 }
 
 /// Basic Auth guard — returns Ok(()) when credentials are valid or auth is disabled.

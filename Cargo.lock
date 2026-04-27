@@ -1156,6 +1156,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
+name = "helmet-core"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec348149a88631e06368c456a88b15a4f93d5e5fe60bfabddea6463af287b76c"
+
+[[package]]
 name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1725,6 +1731,7 @@ dependencies = [
  "tray-icon",
  "url",
  "warp",
+ "warp-helmet",
  "winit",
  "wmi",
  "wry",
@@ -3659,6 +3666,17 @@ dependencies = [
  "tokio-util",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "warp-helmet"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "434b757b0e57d9236f1f19155ef3fd05225bfaf63dae98a661cfdd76f9195a73"
+dependencies = [
+ "helmet-core",
+ "http",
+ "warp",
 ]
 
 [[package]]
