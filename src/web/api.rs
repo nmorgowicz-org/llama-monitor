@@ -1583,8 +1583,8 @@ fn api_attach(
                                     &serde_json::json!({"ok": false, "error": "Endpoint must use http:// or https://"}),
                                 ));
                             }
-                            if let Some(host) = parsed.host_str() {
-                                if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+                            if let Some(host) = parsed.host_str()
+                                && let Ok(ip) = host.parse::<std::net::IpAddr>() {
                                     // is_private() is unstable; inline the check
                                     let private = matches!(ip, std::net::IpAddr::V4(v4)
                                         if v4.octets()[0] == 10
@@ -1596,7 +1596,6 @@ fn api_attach(
                                         ));
                                     }
                                 }
-                            }
                             s.to_string()
                         } else {
                             return Ok::<_, warp::Rejection>(warp::reply::json(

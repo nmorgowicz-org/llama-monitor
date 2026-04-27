@@ -1495,7 +1495,7 @@ pub mod install {
         } else {
             let binary_path = extracted_binary_path(&temp_extracted, binary_name)?;
             // Keep directory alive beyond scope — caller will move/copy the binary
-            let _ = temp_dir.into_path();
+            let _ = temp_dir.keep();
             Ok(binary_path)
         }
     }
