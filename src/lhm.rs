@@ -241,6 +241,7 @@ Unregister-ScheduledTask -TaskName '{SENSOR_BRIDGE_TASK_NAME}' -Confirm:$false -
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 pub async fn ensure_lhm_available() -> Result<(), String> {
     if is_sensor_bridge_available() {
         return Ok(());
