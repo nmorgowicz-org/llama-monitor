@@ -6384,7 +6384,7 @@ async function sendSuggestedPrompt(text) {
     sendChat();
 }
 
-function sendChat() {
+async function sendChat() {
     if (chatBusy) return;
     const tab = activeChatTab();
     if (!tab) return;

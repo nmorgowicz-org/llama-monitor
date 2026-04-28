@@ -47,14 +47,6 @@ fs.mkdirSync(OUTPUT_DIR, { recursive: true });
     console.log('Taking chat screenshot...');
     await page.click('button[onclick="switchTab(\'chat\')"]');
     await sleep(2000);
-    await page.evaluate(() => {
-      const modal = document.querySelector('.modal-content, [role="dialog"]');
-      if (modal) {
-        const closeBtn = modal.querySelector('button:last-child, .close-btn, button[aria-label="Close"]');
-        if (closeBtn) closeBtn.click();
-      }
-    });
-    await sleep(1000);
 
     await page.evaluate(() => {
       const input = document.getElementById('chat-input');
@@ -65,7 +57,15 @@ fs.mkdirSync(OUTPUT_DIR, { recursive: true });
     });
     await sleep(500);
     await page.evaluate(() => document.getElementById('btn-send')?.click());
-    await sleep(15000);
+
+    // Wait for the LLM to finish responding (typing indicator hidden, send button re-enabled)
+    console.log('Waiting for LLM response to complete...');
+    await page.waitForFunction(() => {
+      const typing = document.getElementById('chat-typing');
+      const sendBtn = document.getElementById('btn-send');
+      return typing && typing.style.display === 'none' && sendBtn && !sendBtn.disabled;
+    }, { timeout: 90000 });
+    await sleep(500); // small buffer for final DOM settle
 
     await page.screenshot({ path: `${OUTPUT_DIR}/03-chat.png`, fullPage: true });
     console.log('Done: 03-chat.png');
