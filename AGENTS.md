@@ -63,6 +63,7 @@ Examples:
 4. **Describe what changed** - Be specific about the change
 5. **Chores don't bump version** - `chore:`, `refactor:`, `ci:`, `docs:` don't trigger version bumps
 6. **feat and fix bump versions** - Only these types trigger semantic version increments
+7. **PR titles must reflect the most significant change** - If a PR contains any `fix:` or `feat:` commits, the PR title MUST also be `fix:` or `feat:`. release-please only inspects PR titles, not individual commits. Never use `refactor:`, `chore:`, or `docs:` as a PR title if the PR includes bug fixes or features.
 
 ## Development Workflow
 
