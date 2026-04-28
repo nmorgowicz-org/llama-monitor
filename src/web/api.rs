@@ -1261,22 +1261,15 @@ fn api_chat(
                                 buf.push_str(&String::from_utf8_lossy(&bytes));
 
                                 // Process complete lines
-                                loop {
-                                    match buf.find('\n') {
-                                        Some(pos) => {
-                                            let line = buf[..pos].to_string();
-                                            buf = buf[pos + 1..].to_string();
+                                while let Some(pos) = buf.find('\n') {
+                                    let line = buf[..pos].to_string();
+                                    buf = buf[pos + 1..].to_string();
 
-                                            if let Some(data) = line.strip_prefix("data: ") {
-                                                if !data.trim().is_empty() {
-                                                    let _ = tx.send(Ok::<_, warp::Error>(
-                                                        warp::sse::Event::default()
-                                                            .data(data.to_string()),
-                                                    ));
-                                                }
-                                            }
-                                        }
-                                        None => break, // Wait for more data
+                                    if let Some(data) = line.strip_prefix("data: ") && !data.trim().is_empty() {
+                                        let _ = tx.send(Ok::<_, warp::Error>(
+                                            warp::sse::Event::default()
+                                                .data(data.to_string()),
+                                        ));
                                     }
                                 }
                             }
