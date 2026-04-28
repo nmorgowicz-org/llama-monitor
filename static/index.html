@@ -560,27 +560,110 @@
 
         <!-- Page: Chat -->
         <div class="page" id="page-chat">
+
+            <!-- Tab bar -->
+            <div class="chat-tab-bar" id="chat-tab-bar">
+                <button class="chat-tab-add" onclick="addChatTab()" title="New chat tab">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Chat header -->
+            <div class="chat-header" id="chat-header">
+                <div class="chat-header-left">
+                    <button class="chat-header-btn" id="btn-system-prompt" onclick="toggleSystemPromptPanel()" title="System prompt">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+                        </svg>
+                        <span id="system-prompt-indicator" class="chat-header-badge" style="display:none;">S</span>
+                    </button>
+                    <button class="chat-header-btn" id="btn-model-params" onclick="toggleModelParamsPanel()" title="Model parameters">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 6h16M8 12h8M11 18h2"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="chat-header-right">
+                    <button class="chat-header-btn" onclick="exportChatTab()" title="Export conversation">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- System prompt panel -->
+            <div class="chat-system-panel" id="chat-system-panel" style="display:none;">
+                <label class="chat-system-label">System Prompt</label>
+                <textarea id="chat-system-input" rows="3" placeholder="You are a helpful assistant…" oninput="onSystemPromptChange()"></textarea>
+            </div>
+
+            <!-- Model params panel -->
+            <div class="chat-params-panel" id="chat-params-panel" style="display:none;">
+                <div class="chat-params-grid">
+                    <label>Temperature
+                        <input type="range" id="param-temperature" min="0" max="2" step="0.05" oninput="onParamChange('temperature', +this.value)">
+                        <span id="param-temperature-val">1.0</span>
+                    </label>
+                    <label>Top P
+                        <input type="range" id="param-top-p" min="0" max="1" step="0.01" oninput="onParamChange('top_p', +this.value)">
+                        <span id="param-top-p-val">0.95</span>
+                    </label>
+                    <label>Top K
+                        <input type="range" id="param-top-k" min="0" max="200" step="1" oninput="onParamChange('top_k', +this.value)">
+                        <span id="param-top-k-val">40</span>
+                    </label>
+                    <label>Min P
+                        <input type="range" id="param-min-p" min="0" max="0.5" step="0.005" oninput="onParamChange('min_p', +this.value)">
+                        <span id="param-min-p-val">0.01</span>
+                    </label>
+                    <label>Repeat Penalty
+                        <input type="range" id="param-repeat-penalty" min="1" max="2" step="0.01" oninput="onParamChange('repeat_penalty', +this.value)">
+                        <span id="param-repeat-penalty-val">1.0</span>
+                    </label>
+                    <label>Max Tokens
+                        <input type="number" id="param-max-tokens" min="0" step="64" placeholder="Model default" oninput="onParamChange('max_tokens', this.value ? +this.value : null)">
+                    </label>
+                </div>
+            </div>
+
+            <!-- Message thread -->
             <div class="chat-messages" id="chat-messages"></div>
-            <div class="chat-input-row">
+
+            <!-- Typing indicator -->
+            <div class="chat-typing" id="chat-typing" style="display:none;">
+                <div class="chat-typing-avatar">AI</div>
+                <div class="chat-typing-dots">
+                    <span></span><span></span><span></span>
+                </div>
+            </div>
+
+            <!-- Input area -->
+            <div class="chat-input-row" id="chat-input-row">
                 <div class="chat-controls">
                     <button class="btn-chat-control" id="btn-clear" onclick="clearChat()" title="Clear chat">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m5 0V4a2 2 0 012-2h2a2 2 0 012 2v2"/>
                         </svg>
                     </button>
-                    <button class="btn-chat-control btn-chat-stop" id="btn-chat-stop" onclick="stopChat()" title="Stop generating" style="display:none;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <button class="btn-chat-control btn-chat-stop" id="btn-stop" onclick="stopChat()" title="Stop generating" style="display:none;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <rect x="6" y="6" width="12" height="12" rx="2"/>
                         </svg>
                     </button>
                 </div>
-                <textarea id="chat-input" rows="2" placeholder="Send a message... (Enter to send, Shift+Enter for newline)"></textarea>
+                <div class="chat-textarea-wrap">
+                    <textarea id="chat-input" rows="1" placeholder="Send a message… (Enter to send, Shift+Enter for newline)" oninput="autoResizeChatInput()"></textarea>
+                </div>
                 <button class="btn-chat-send" id="btn-send" onclick="sendChat()">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
                     </svg>
                 </button>
             </div>
+
         </div>
 
         <!-- Page: Logs -->

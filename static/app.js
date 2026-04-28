@@ -6067,321 +6067,570 @@ function renderMd(src) {
 
 
 
-// Chat
+// Chat — Multi-Tab Management
 
-let chatHistory = [];
+const CHAT_TABS_PERSIST_DEBOUNCE_MS = 1500;
 
+let chatTabs = [];
+let activeChatTabId = null;
 let chatBusy = false;
 let chatAbortController = null;
+let chatPersistTimer = null;
 
-document.getElementById('chat-input').addEventListener('keydown', e => {
+function activeChatTab() {
+    return chatTabs.find(t => t.id === activeChatTabId) ?? null;
+}
 
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+function activeChatHistory() {
+    const tab = activeChatTab();
+    if (!tab) return [];
+    return tab.messages.filter(m => m.role !== 'system');
+}
 
-});
+async function initChatTabs() {
+    try {
+        const resp = await fetch('/api/chat/tabs');
+        const data = await resp.json();
+        chatTabs = data.length ? data : [newChatTab('Chat 1')];
+    } catch {
+        chatTabs = [newChatTab('Chat 1')];
+    }
+    activeChatTabId = chatTabs[0].id;
+    renderChatTabs();
+    renderChatMessages();
+}
 
+function newChatTab(name = 'New Chat') {
+    return {
+        id: crypto.randomUUID(),
+        name,
+        system_prompt: '',
+        messages: [],
+        model_params: {
+            temperature: 1.0,
+            top_p: 0.95,
+            top_k: 40,
+            min_p: 0.01,
+            repeat_penalty: 1.0,
+            max_tokens: null,
+        },
+        created_at: Date.now(),
+        updated_at: Date.now(),
+    };
+}
 
+function scheduleChatPersist() {
+    clearTimeout(chatPersistTimer);
+    chatPersistTimer = setTimeout(persistChatTabs, CHAT_TABS_PERSIST_DEBOUNCE_MS);
+}
+
+async function persistChatTabs() {
+    try {
+        await fetch('/api/chat/tabs', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(chatTabs),
+        });
+    } catch { /* silent — next persist will retry */ }
+}
+
+function addChatTab() {
+    const tab = newChatTab(`Chat ${chatTabs.length + 1}`);
+    chatTabs.push(tab);
+    switchChatTab(tab.id);
+    scheduleChatPersist();
+}
+
+function closeChatTab(id) {
+    if (chatTabs.length === 1) return;
+    chatTabs = chatTabs.filter(t => t.id !== id);
+    if (activeChatTabId === id) {
+        activeChatTabId = chatTabs[chatTabs.length - 1].id;
+    }
+    renderChatTabs();
+    renderChatMessages();
+    scheduleChatPersist();
+}
+
+function switchChatTab(id) {
+    if (chatBusy) return;
+    activeChatTabId = id;
+    renderChatTabs();
+    renderChatMessages();
+}
+
+function renameChatTab(id, newName) {
+    const tab = chatTabs.find(t => t.id === id);
+    if (tab) {
+        tab.name = newName.trim() || tab.name;
+        renderChatTabs();
+        scheduleChatPersist();
+    }
+}
 
 function clearChat() {
-
-    chatHistory = [];
-
-    document.getElementById('chat-messages').innerHTML = '';
-
+    const tab = activeChatTab();
+    if (!tab) return;
+    tab.messages = [];
+    tab.updated_at = Date.now();
+    renderChatMessages();
+    updateChatTabBadge();
+    scheduleChatPersist();
 }
 
 function stopChat() {
-
     if (chatAbortController) {
-
         chatAbortController.abort();
-
         chatAbortController = null;
-
     }
-
     chatBusy = false;
+    setChatBusyUI(false);
+}
 
-    document.getElementById('btn-send').disabled = false;
+function setChatBusyUI(busy) {
+    document.getElementById('btn-send').disabled = busy;
+    const stopBtn = document.getElementById('btn-stop');
+    if (stopBtn) stopBtn.style.display = busy ? 'flex' : 'none';
 
-    document.getElementById('btn-chat-stop').style.display = 'none';
+    const input = document.getElementById('chat-input');
+    if (input) input.disabled = busy;
 
+    const typing = document.getElementById('chat-typing');
+    if (typing) typing.style.display = busy ? 'flex' : 'none';
 }
 
 
 
 function chatScroll() {
-
     const c = document.getElementById('chat-messages');
-
     c.scrollTop = c.scrollHeight;
-
 }
 
+function renderChatTabs() {
+    const bar = document.getElementById('chat-tab-bar');
+    const addBtn = bar.querySelector('.chat-tab-add');
+    bar.querySelectorAll('.chat-tab').forEach(el => el.remove());
 
+    for (const tab of chatTabs) {
+        const el = document.createElement('div');
+        el.className = 'chat-tab' + (tab.id === activeChatTabId ? ' active' : '');
+        el.dataset.tabId = tab.id;
+        el.innerHTML = `
+          <span class="chat-tab-name" ondblclick="startRenameTab('${tab.id}')">${escapeHtml(tab.name)}</span>
+          <span class="chat-tab-count">${tab.messages.filter(m => m.role !== 'system').length || ''}</span>
+          ${chatTabs.length > 1
+            ? `<button class="chat-tab-close" onclick="closeChatTab('${tab.id}')" title="Close tab">×</button>`
+            : ''}
+        `;
+        el.addEventListener('click', e => {
+            if (e.target.classList.contains('chat-tab-close')) return;
+            if (e.target.classList.contains('chat-tab-name') && e.detail === 2) return;
+            switchChatTab(tab.id);
+        });
+        bar.insertBefore(el, addBtn);
+    }
+}
 
-function appendMsg(role, text) {
+function renderChatMessages() {
+    const container = document.getElementById('chat-messages');
+    const tab = activeChatTab();
 
-    const el = document.createElement('div');
+    if (!tab || tab.messages.filter(m => m.role !== 'system').length === 0) {
+        container.innerHTML = `
+          <div class="chat-empty">
+            <div class="chat-empty-icon">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="1.5" opacity="0.3">
+                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+              </svg>
+            </div>
+            <p class="chat-empty-title">Start a conversation</p>
+            <p class="chat-empty-hint">Messages sent here go to the active llama-server session.</p>
+          </div>`;
+        return;
+    }
 
-    el.className = 'msg msg-' + role;
-
-    el.textContent = text;
-
-    document.getElementById('chat-messages').appendChild(el);
-
+    container.innerHTML = '';
+    for (const msg of tab.messages) {
+        if (msg.role === 'system') continue;
+        container.appendChild(buildMessageElement(msg));
+    }
     chatScroll();
-
-    return el;
-
 }
 
+function buildMessageElement(msg) {
+    const isUser = msg.role === 'user';
+    const wrapper = document.createElement('div');
+    wrapper.className = `chat-message chat-message-${msg.role}`;
 
+    const ts = msg.timestamp_ms
+        ? new Date(msg.timestamp_ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : '';
+
+    wrapper.innerHTML = `
+      <div class="chat-avatar">${isUser ? 'You' : 'AI'}</div>
+      <div class="chat-bubble">
+        <div class="chat-msg-body">${isUser ? escapeHtml(msg.content) : renderMd(msg.content)}</div>
+        <div class="chat-msg-footer">
+          <span class="chat-msg-time">${ts}</span>
+          <div class="chat-msg-actions">
+            <button class="chat-action-btn" onclick="copyMessageContent(this)" title="Copy">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+              </svg>
+            </button>
+            ${!isUser ? `<button class="chat-action-btn" onclick="regenerateFromMessage(this)" title="Regenerate">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2">
+                <path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.5 9A9 9 0 005.6 5.6L1 10m22 4l-4.6 4.4A9 9 0 013.5 15"/>
+              </svg>
+            </button>` : ''}
+          </div>
+        </div>
+      </div>`;
+
+    return wrapper;
+}
+
+function appendAssistantPlaceholder() {
+    const container = document.getElementById('chat-messages');
+    const wrapper = document.createElement('div');
+    wrapper.className = 'chat-message chat-message-assistant chat-message-streaming';
+    wrapper.innerHTML = `
+      <div class="chat-avatar">AI</div>
+      <div class="chat-bubble">
+        <div class="chat-msg-body"><span class="chat-cursor">▋</span></div>
+        <div class="chat-msg-footer">
+          <span class="chat-msg-time"></span>
+          <div class="chat-msg-actions"></div>
+        </div>
+      </div>`;
+    container.appendChild(wrapper);
+    chatScroll();
+    return wrapper;
+}
+
+function appendThinkingBlock(afterEl) {
+    const details = document.createElement('details');
+    details.className = 'chat-thinking';
+    details.innerHTML = `
+      <summary class="chat-thinking-summary">
+        <span class="chat-thinking-label">Thinking…</span>
+      </summary>
+      <div class="chat-thinking-body"></div>`;
+    afterEl.parentElement.insertBefore(details, afterEl);
+    return details;
+}
+
+function finalizeAssistantMessage(el, content) {
+    el.classList.remove('chat-message-streaming');
+    const body = el.querySelector('.chat-msg-body');
+    if (content) {
+        body.innerHTML = renderMd(content);
+    }
+    const time = el.querySelector('.chat-msg-time');
+    if (time) {
+        time.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    const actions = el.querySelector('.chat-msg-actions');
+    if (actions && content) {
+        actions.innerHTML = `
+          <button class="chat-action-btn" onclick="copyMessageContent(this)" title="Copy">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2"/>
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+            </svg>
+          </button>
+          <button class="chat-action-btn" onclick="regenerateFromMessage(this)" title="Regenerate">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2">
+              <path d="M1 4v6h6M23 20v-6h-6"/>
+              <path d="M20.5 9A9 9 0 005.6 5.6L1 10m22 4l-4.6 4.4A9 9 0 013.5 15"/>
+            </svg>
+          </button>`;
+    }
+}
 
 async function sendChat() {
-
     if (chatBusy) return;
+    const tab = activeChatTab();
+    if (!tab) return;
 
     const input = document.getElementById('chat-input');
-
     const text = input.value.trim();
-
     if (!text) return;
-
     input.value = '';
+    autoResizeChatInput();
 
+    const userMsg = {
+        role: 'user',
+        content: text,
+        timestamp_ms: Date.now(),
+    };
+    tab.messages.push(userMsg);
+    tab.updated_at = Date.now();
 
+    renderChatMessages();
 
-    chatHistory.push({ role: 'user', content: text });
-
-    appendMsg('user', text);
-
-
-
-    const url = '/api/sessions/active';
-
-
+    const params = tab.model_params;
+    const messages = [];
+    if (tab.system_prompt) {
+        messages.push({ role: 'system', content: tab.system_prompt });
+    }
+    messages.push(...tab.messages.map(m => ({ role: m.role, content: m.content })));
 
     chatBusy = true;
-
-    document.getElementById('btn-send').disabled = true;
-
-    document.getElementById('btn-chat-stop').style.display = 'flex';
-
+    setChatBusyUI(true);
     chatAbortController = new AbortController();
 
-
-
     let thinkEl = null;
-
     let thinkContent = '';
-
-    const msgEl = appendMsg('assistant', '');
-
+    const msgEl = appendAssistantPlaceholder();
     let msgContent = '';
 
-
-
     try {
-
-        const resp = await fetch(url, {
-
-            method: 'GET',
-
-            headers: { 'Content-Type': 'application/json' },
-
-        });
-
-             const sessionData = await resp.json();
-
-        if (sessionData.error) {
-
-            throw new Error(sessionData.error);
-
-        }
-
-        // Parse mode to get port (format: "Spawn:8001" or "Attach:http://...:8001")
-
-        const modeParts = sessionData.mode.split(':');
-
-        if (modeParts[0] === 'Spawn') {
-
-            activeSessionPort = parseInt(modeParts[1]) || 8080;
-
-        } else if (modeParts[0] === 'Attach') {
-
-            // Extract port from endpoint URL
-
-            try {
-
-                const url = new URL(modeParts[1]);
-
-                activeSessionPort = parseInt(url.port) || 8080;
-
-            } catch(e) {
-
-                // ignore, use default
-
-            }
-
-        }
-
-        const chatUrl = '/api/chat'; // Port derived server-side from active session
-
-        
-
-        const chatResp = await fetch(chatUrl, {
-
+        const chatResp = await fetch('/api/chat', {
             method: 'POST',
-
             headers: { 'Content-Type': 'application/json' },
-
             signal: chatAbortController.signal,
-
             body: JSON.stringify({
-
-                messages: chatHistory,
-
+                messages,
                 stream: true,
-
-                temperature: 1.0,
-
-                top_p: 0.95,
-
-                top_k: 40,
-
-                min_p: 0.01,
-
-                repeat_penalty: 1.0,
-
+                temperature: params.temperature,
+                top_p: params.top_p,
+                top_k: params.top_k,
+                min_p: params.min_p,
+                repeat_penalty: params.repeat_penalty,
+                ...(params.max_tokens ? { max_tokens: params.max_tokens } : {}),
             }),
-
         });
 
-
+        if (!chatResp.ok) {
+            throw new Error(`HTTP ${chatResp.status}`);
+        }
 
         const reader = chatResp.body.getReader();
-
         const decoder = new TextDecoder();
-
         let buf = '';
 
-
-
         while (true) {
-
             const { done, value } = await reader.read();
-
             if (done) break;
-
             buf += decoder.decode(value, { stream: true });
 
-
-
             const lines = buf.split('\n');
-
-            buf = lines.pop() || '';
-
-
+            buf = lines.pop() ?? '';
 
             for (const line of lines) {
-
-                if (!line.startsWith('data:')) continue;
-
-                const payload = line.slice(5).trim();
-
+                if (!line.startsWith('data: ')) continue;
+                const payload = line.slice(6).trim();
                 if (payload === '[DONE]') continue;
-
                 try {
-
                     const obj = JSON.parse(payload);
-
-                    const delta = obj.choices && obj.choices[0] && obj.choices[0].delta;
-
+                    const delta = obj.choices?.[0]?.delta;
                     if (!delta) continue;
 
-
-
-                    // Reasoning / thinking content
-
-                    const rc = delta.reasoning_content || '';
-
+                    const rc = delta.reasoning_content ?? '';
                     if (rc) {
-
                         thinkContent += rc;
-
                         if (!thinkEl) {
-
-                            thinkEl = document.createElement('details');
-
-                            thinkEl.className = 'msg msg-thinking';
-
-                            thinkEl.innerHTML = '<summary>thinking...</summary><span></span>';
-
-                            document.getElementById('chat-messages').insertBefore(thinkEl, msgEl);
-
+                            thinkEl = appendThinkingBlock(msgEl);
                         }
-
-                        thinkEl.querySelector('span').textContent = thinkContent;
-
+                        thinkEl.querySelector('.chat-thinking-body').textContent = thinkContent;
                     }
 
-
-
-                    // Regular content
-
-                    const c = delta.content || '';
-
+                    const c = delta.content ?? '';
                     if (c) {
-
+                        if (document.getElementById('chat-typing').style.display !== 'none') {
+                            document.getElementById('chat-typing').style.display = 'none';
+                        }
                         msgContent += c;
-
-                        msgEl.innerHTML = renderMd(msgContent);
-
+                        msgEl.querySelector('.chat-msg-body').innerHTML = renderMd(msgContent);
                     }
-
-                } catch (_) {}
-
+                } catch { /* malformed chunk — skip */ }
             }
-
             chatScroll();
-
         }
 
     } catch (err) {
-
+        const body = msgEl.querySelector('.chat-msg-body');
         if (err.name === 'AbortError') {
-
-            msgEl.textContent = msgContent || '[stopped]';
-
-            msgEl.style.color = 'var(--text-muted)';
-
+            body.innerHTML = msgContent
+                ? renderMd(msgContent)
+                : '<span class="chat-stopped">[stopped]</span>';
         } else {
-
-            msgEl.textContent = '[error] ' + err.message;
-
-            msgEl.style.color = '#bf616a';
-
+            body.innerHTML = `<span class="chat-error">[error] ${escapeHtml(err.message)}</span>`;
         }
-
     }
-
-
 
     if (msgContent) {
-
-        chatHistory.push({ role: 'assistant', content: msgContent });
-
+        tab.messages.push({
+            role: 'assistant',
+            content: msgContent,
+            timestamp_ms: Date.now(),
+        });
+        tab.updated_at = Date.now();
+        scheduleChatPersist();
+    } else if (!tab.messages.at(-1)?.content) {
+        tab.messages.pop();
     }
 
+    finalizeAssistantMessage(msgEl, msgContent);
+    setChatBusyUI(false);
     chatBusy = false;
-
-    document.getElementById('btn-send').disabled = false;
-
-    document.getElementById('btn-chat-stop').style.display = 'none';
-
     chatAbortController = null;
+    updateChatTabBadge();
+}
 
+function copyMessageContent(btn) {
+    const body = btn.closest('.chat-bubble').querySelector('.chat-msg-body');
+    navigator.clipboard.writeText(body.innerText).then(() => {
+        btn.classList.add('chat-action-btn-copied');
+        setTimeout(() => btn.classList.remove('chat-action-btn-copied'), 1500);
+    });
+}
+
+function regenerateFromMessage(btn) {
+    if (chatBusy) return;
+    const tab = activeChatTab();
+    if (!tab) return;
+
+    const msgEl = btn.closest('.chat-message');
+    const allMsgs = Array.from(document.querySelectorAll('#chat-messages .chat-message'));
+    const idx = allMsgs.indexOf(msgEl);
+
+    const firstVisibleIdx = tab.messages.findIndex(m => m.role !== 'system');
+    const cutAt = firstVisibleIdx + idx;
+    tab.messages = tab.messages.slice(0, cutAt);
+    tab.updated_at = Date.now();
+
+    renderChatMessages();
+    scheduleChatPersist();
+
+    const lastUser = [...tab.messages].reverse().find(m => m.role === 'user');
+    if (lastUser) {
+        tab.messages = tab.messages.filter(m => m !== lastUser);
+        document.getElementById('chat-input').value = lastUser.content;
+        sendChat();
+    }
+}
+
+function exportChatTab() {
+    const tab = activeChatTab();
+    if (!tab) return;
+    const md = tab.messages
+        .filter(m => m.role !== 'system')
+        .map(m => `**${m.role === 'user' ? 'You' : 'Assistant'}**\n\n${m.content}`)
+        .join('\n\n---\n\n');
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${tab.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.md`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
+function toggleSystemPromptPanel() {
+    const panel = document.getElementById('chat-system-panel');
+    const visible = panel.style.display !== 'none';
+    panel.style.display = visible ? 'none' : 'block';
+    if (!visible) {
+        const tab = activeChatTab();
+        document.getElementById('chat-system-input').value = tab?.system_prompt ?? '';
+    }
+}
+
+function onSystemPromptChange() {
+    const tab = activeChatTab();
+    if (!tab) return;
+    tab.system_prompt = document.getElementById('chat-system-input').value;
+    tab.updated_at = Date.now();
+    const indicator = document.getElementById('system-prompt-indicator');
+    indicator.style.display = tab.system_prompt ? 'inline' : 'none';
+    scheduleChatPersist();
+}
+
+function toggleModelParamsPanel() {
+    const panel = document.getElementById('chat-params-panel');
+    const visible = panel.style.display !== 'none';
+    panel.style.display = visible ? 'none' : 'block';
+    if (!visible) syncParamPanelToTab();
+}
+
+function syncParamPanelToTab() {
+    const tab = activeChatTab();
+    if (!tab) return;
+    const p = tab.model_params;
+    const set = (id, val, displayId) => {
+        const el = document.getElementById(id);
+        if (el) { el.value = val ?? ''; }
+        const disp = document.getElementById(displayId);
+        if (disp) disp.textContent = val ?? '';
+    };
+    set('param-temperature', p.temperature, 'param-temperature-val');
+    set('param-top-p', p.top_p, 'param-top-p-val');
+    set('param-top-k', p.top_k, 'param-top-k-val');
+    set('param-min-p', p.min_p, 'param-min-p-val');
+    set('param-repeat-penalty', p.repeat_penalty, 'param-repeat-penalty-val');
+    const maxTok = document.getElementById('param-max-tokens');
+    if (maxTok) maxTok.value = p.max_tokens ?? '';
+}
+
+function onParamChange(key, value) {
+    const tab = activeChatTab();
+    if (!tab) return;
+    tab.model_params[key] = value;
+    tab.updated_at = Date.now();
+    const map = {
+        temperature: 'param-temperature-val',
+        top_p: 'param-top-p-val',
+        top_k: 'param-top-k-val',
+        min_p: 'param-min-p-val',
+        repeat_penalty: 'param-repeat-penalty-val',
+    };
+    const dispId = map[key];
+    if (dispId) {
+        const el = document.getElementById(dispId);
+        if (el) el.textContent = value ?? '';
+    }
+    scheduleChatPersist();
+}
+
+function startRenameTab(id) {
+    const tabEl = document.querySelector(`.chat-tab[data-tab-id="${id}"] .chat-tab-name`);
+    if (!tabEl) return;
+    const orig = tabEl.textContent;
+    tabEl.contentEditable = 'true';
+    tabEl.focus();
+    const range = document.createRange();
+    range.selectNodeContents(tabEl);
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+    const finish = () => {
+        tabEl.contentEditable = 'false';
+        renameChatTab(id, tabEl.textContent || orig);
+    };
+    tabEl.addEventListener('blur', finish, { once: true });
+    tabEl.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); tabEl.blur(); }
+        if (e.key === 'Escape') { tabEl.textContent = orig; tabEl.blur(); }
+    }, { once: true });
+}
+
+function updateChatTabBadge() {
+    const tab = activeChatTab();
+    const count = tab ? tab.messages.filter(m => m.role !== 'system').length : 0;
+    const badge = document.getElementById('sidebar-badge-chat');
+    if (badge) badge.textContent = count > 0 ? count : '';
+}
+
+function autoResizeChatInput() {
+    const ta = document.getElementById('chat-input');
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
 }
 
 if ('serviceWorker' in navigator) {
@@ -7140,6 +7389,10 @@ function initViewState() {
 // Call init on DOM ready
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initViewState);
+    document.addEventListener('DOMContentLoaded', initChatTabs);
+    document.addEventListener('DOMContentLoaded', autoResizeChatInput);
 } else {
     initViewState();
+    initChatTabs();
+    autoResizeChatInput();
 }

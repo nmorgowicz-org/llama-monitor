@@ -31,6 +31,57 @@ use crate::presets::{self, ModelPreset};
 use crate::remote_ssh::{self, SshConnection};
 use crate::state::{self as app_state, AppState, SessionStatus, UiSettings};
 
+/// Chat message structure for persistence
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+    pub timestamp_ms: u64,
+}
+
+/// Model parameters for a chat tab
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct ChatModelParams {
+    pub temperature: f32,
+    pub top_p: f32,
+    pub top_k: u32,
+    pub min_p: f32,
+    pub repeat_penalty: f32,
+    pub max_tokens: Option<u32>,
+}
+
+impl Default for ChatModelParams {
+    fn default() -> Self {
+        Self {
+            temperature: 1.0,
+            top_p: 0.95,
+            top_k: 40,
+            min_p: 0.01,
+            repeat_penalty: 1.0,
+            max_tokens: None,
+        }
+    }
+}
+
+/// Chat tab structure for persistence
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct ChatTab {
+    pub id: String,
+    pub name: String,
+    pub system_prompt: String,
+    pub messages: Vec<ChatMessage>,
+    pub model_params: ChatModelParams,
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+fn chat_tabs_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("llama-monitor")
+        .join("chat-tabs.json")
+}
+
 fn api_check_lhm() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "lhm" / "check")
         .and(warp::get())
@@ -356,6 +407,9 @@ pub fn api_routes(
     let put_settings = api_put_settings(state.clone());
     let browse = api_browse();
     let chat = api_chat(state.clone());
+    let chat_abort = api_chat_abort(state.clone());
+    let get_chat_tabs = api_get_chat_tabs();
+    let put_chat_tabs = api_put_chat_tabs();
     let get_sessions = api_get_sessions(state.clone());
     let create_session = api_create_session(state.clone());
     let delete_session = api_delete_session(state.clone());
@@ -399,6 +453,9 @@ pub fn api_routes(
         .or(kill_llama)
         .or(browse)
         .or(chat)
+        .or(chat_abort)
+        .or(get_chat_tabs)
+        .or(put_chat_tabs)
         .or(get_sessions)
         .or(create_session)
         .or(delete_session)
@@ -1287,7 +1344,59 @@ fn api_chat(
                     }
                 });
 
-                Ok::<_, warp::Rejection>(warp::sse::reply(stream))
+               Ok::<_, warp::Rejection>(warp::sse::reply(stream))
+            }
+
+        })
+}
+
+fn api_chat_abort(
+    _state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "abort")
+        .and(warp::post())
+        .and_then(move || {
+            async move {
+                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+            }
+        })
+}
+
+fn api_get_chat_tabs() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs")
+        .and(warp::get())
+        .and_then(|| async move {
+            let path = chat_tabs_path();
+            if path.exists() {
+                match tokio::fs::read_to_string(&path).await {
+                    Ok(raw) => {
+                        match serde_json::from_str::<Vec<ChatTab>>(&raw) {
+                            Ok(tabs) => Ok::<_, warp::Rejection>(warp::reply::json(&tabs)),
+                            Err(_) => Ok::<_, warp::Rejection>(warp::reply::json(&Vec::<ChatTab>::new())),
+                        }
+                    }
+                    Err(_) => Ok::<_, warp::Rejection>(warp::reply::json(&Vec::<ChatTab>::new())),
+                }
+            } else {
+                Ok::<_, warp::Rejection>(warp::reply::json(&Vec::<ChatTab>::new()))
+            }
+        })
+}
+
+fn api_put_chat_tabs() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs")
+        .and(warp::put())
+        .and(warp::body::json::<Vec<ChatTab>>())
+        .and_then(|tabs: Vec<ChatTab>| async move {
+            let path = chat_tabs_path();
+            match serde_json::to_string_pretty(&tabs) {
+                Ok(json) => {
+                    match tokio::fs::write(&path, json).await {
+                        Ok(_) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true}))),
+                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()}))),
+                    }
+                }
+                Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()}))),
             }
         })
 }
