@@ -1728,7 +1728,19 @@ These are fully replaced by the `.chat-message-*` hierarchy.
 
 ---
 
+## Implementation Progress
+
+- [ ] **Phase 1** — Backend: Add `/api/chat/abort` and persistence endpoints
+- [ ] **Phase 2** — Frontend: Replace global chat state with tab management
+- [ ] **Phase 3** — Frontend: Full UI rebuild with tabs, system prompt, model params
+- [ ] **Phase 4** — CSS: Premium modern UI styling in `chat.css`
+- [ ] **Phase 5** — Layout: Ensure proper flex structure in `layout.css`
+- [ ] **Phase 6** — Helpers: Add utility functions
+- [ ] **Phase 7** — Initialization: Wire everything up
+
 ## Testing Checklist
+
+**Test environment:** Live llama-server at `http://192.168.2.16:8001`
 
 - [ ] App loads with one default chat tab when no `chat-tabs.json` exists
 - [ ] Sending a message streams tokens in real-time (cursor blink → token by token)
