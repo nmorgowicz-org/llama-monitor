@@ -1265,10 +1265,11 @@ fn api_chat(
                                     let line = buf[..pos].to_string();
                                     buf = buf[pos + 1..].to_string();
 
-                                    if let Some(data) = line.strip_prefix("data: ") && !data.trim().is_empty() {
+                                    if let Some(data) = line.strip_prefix("data: ")
+                                        && !data.trim().is_empty()
+                                    {
                                         let _ = tx.send(Ok::<_, warp::Error>(
-                                            warp::sse::Event::default()
-                                                .data(data.to_string()),
+                                            warp::sse::Event::default().data(data.to_string()),
                                         ));
                                     }
                                 }
