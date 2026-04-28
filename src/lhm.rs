@@ -1,4 +1,7 @@
 #[cfg(target_os = "windows")]
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+#[cfg(target_os = "windows")]
 use serde::Deserialize;
 
 #[cfg(target_os = "windows")]
@@ -171,19 +174,16 @@ Start-ScheduledTask -TaskName '{SENSOR_BRIDGE_TASK_NAME}'
 "#
     );
 
-    let script_path = tempfile::NamedTempFile::new_in(std::env::temp_dir())
-        .map(|f| f.path().to_path_buf())
-        .unwrap_or_else(|_| std::env::temp_dir().join("llama_monitor_sb_install.ps1"));
-    std::fs::write(&script_path, &script)
-        .map_err(|e| format!("Failed to write install script: {e}"))?;
-
-    let script_path_str = script_path.to_string_lossy().replace('\'', "''");
+    // Encode script as base64 and execute inline — no temp file, no TOCTOU race
+    let encoded = STANDARD.encode(script.as_bytes());
 
     std::process::Command::new("powershell")
         .args([
             "-NoProfile",
             "-Command",
-            &format!("Start-Process powershell.exe -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \"{script_path_str}\"'"),
+            &format!(
+                "Start-Process powershell.exe -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -EncodedCommand \"{encoded}\"'"
+            ),
         ])
         .spawn()
         .map_err(|e| format!("Failed to launch UAC prompt: {e}"))?;
@@ -220,19 +220,16 @@ Unregister-ScheduledTask -TaskName '{SENSOR_BRIDGE_TASK_NAME}' -Confirm:$false -
 "#
     );
 
-    let script_path = tempfile::NamedTempFile::new_in(std::env::temp_dir())
-        .map(|f| f.path().to_path_buf())
-        .unwrap_or_else(|_| std::env::temp_dir().join("llama_monitor_sb_uninstall.ps1"));
-    std::fs::write(&script_path, &script)
-        .map_err(|e| format!("Failed to write uninstall script: {e}"))?;
-
-    let script_path_str = script_path.to_string_lossy().replace('\'', "''");
+    // Encode script as base64 and execute inline — no temp file, no TOCTOU race
+    let encoded = STANDARD.encode(script.as_bytes());
 
     std::process::Command::new("powershell")
         .args([
             "-NoProfile",
             "-Command",
-            &format!("Start-Process powershell.exe -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \"{script_path_str}\"'"),
+            &format!(
+                "Start-Process powershell.exe -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -EncodedCommand \"{encoded}\"'"
+            ),
         ])
         .spawn()
         .map_err(|e| format!("Failed to launch UAC prompt: {e}"))?;

@@ -111,26 +111,34 @@ The window is narrow (milliseconds) but it is a real TOCTOU.
 
 ### Remediation
 
-Use a non-guessable filename that is unique per invocation:
+**Option 3 (implemented):** Use inline script execution via PowerShell's `-EncodedCommand` parameter. This eliminates the temp file entirely, removing the attack surface.
 
 ```rust
-use std::time::{SystemTime, UNIX_EPOCH};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 
-let unique = SystemTime::now()
-    .duration_since(UNIX_EPOCH)
-    .map(|d| d.subsec_nanos())
-    .unwrap_or(0);
-let script_path = std::env::temp_dir()
-    .join(format!("llama_monitor_sb_install_{unique}.ps1"));
+// Encode the script content as base64
+let encoded = STANDARD.encode(script.as_bytes());
+
+// Execute inline — no temp file, no race condition
+std::process::Command::new("powershell")
+    .args([
+        "-NoProfile",
+        "-Command",
+        &format!(
+            "Start-Process powershell.exe -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -EncodedCommand \"{encoded}\"'"
+        ),
+    ])
+    .spawn()
+    .map_err(|e| format!("Failed to launch UAC prompt: {e}"))?;
 ```
 
-This does not eliminate the race window but makes the target path unpredictable, removing the practical exploitability. For a more complete fix, set a restrictive ACL on the file immediately after creation so that only the current user (DACL: `GENERIC_READ | GENERIC_WRITE`, deny all others) can modify it. This requires the `windows` crate and `SetFileSecurity`.
+**Why this is better:**
+- No temp file → no TOCTOU window
+- No file permissions to manage
+- No cleanup needed
+- Script content is opaque (base64-encoded) during transit
 
-Additionally, delete the temp script after the elevated process starts:
-
-```rust
-let _ = std::fs::remove_file(&script_path); // best-effort cleanup
-```
+**Trade-off:** The script content is visible in the process list briefly, but this is acceptable for a local elevation prompt that requires user interaction.
 
 ---
 
@@ -708,7 +716,7 @@ This ensures unique filenames per invocation and automatic cleanup when the hand
 - [x] **#2** No TLS — token/data in plaintext — Cert infrastructure in place (certs.rs), CA distribution via install payload, dashboard accepts self-signed certs
 - [x] **#12** SSRF via attach endpoint — Validate scheme (http/https only) and restrict to private/loopback IPs
 - [x] **#13** Missing HTTP security headers — Added `warp-helmet` with custom CSP to allow inline handlers and CDN scripts
-- [ ] **#3** TOCTOU on install script temp files — Use randomized filenames
+- [x] **#3** TOCTOU on install script temp files — Eliminated temp file entirely via inline `-EncodedCommand`
 - [ ] **#1** Non-constant-time token comparison — Add `subtle` crate
 - [ ] **#4** `lastJson` data race (C#) — Add `volatile` keyword
 - [ ] **#6** Single-threaded sensor_bridge handler — Use thread pool
