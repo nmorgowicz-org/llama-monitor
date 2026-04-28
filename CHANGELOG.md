@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.9.2...v0.9.3) (2026-04-28)
+
+
+### Bug Fixes
+
+* **security:** eliminate TOCTOU race via inline script execution ([#112](https://github.com/nmorgowicz-org/llama-monitor/issues/112)) ([f2113ec](https://github.com/nmorgowicz-org/llama-monitor/commit/f2113ecf4af38d9f124e9b6cce8b4d2d24de747a))
+
 ## [0.9.2](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.9.1...v0.9.2) (2026-04-28)
 
 
