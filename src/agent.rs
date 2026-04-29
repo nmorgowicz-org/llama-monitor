@@ -2324,8 +2324,9 @@ Start-Sleep -Seconds 2\""
             .ok_or_else(|| anyhow::anyhow!("Binary path has no parent directory"))?;
         let staged = parent.join(format!(".llama-monitor-update-{}", std::process::id()));
 
-        fs::copy(&binary_path, &staged)
-            .map_err(|e| anyhow::anyhow!("Cannot stage update (check write permission on binary directory): {e}"))?;
+        fs::copy(&binary_path, &staged).map_err(|e| {
+            anyhow::anyhow!("Cannot stage update (check write permission on binary directory): {e}")
+        })?;
 
         #[cfg(unix)]
         {
