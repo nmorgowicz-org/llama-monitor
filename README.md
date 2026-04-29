@@ -70,11 +70,17 @@ Sessions persist to `~/.config/llama-monitor/sessions.json` and survive restarts
 - **Cross-Platform** — Linux, macOS, and Windows support with automatic OS/arch detection
 
 ### Chat & Logs
-- **Multi-Tab Chat** — Parallel conversations with per-tab persistence, rename, and close
+- **Multi-Tab Chat** — Parallel conversations with per-tab persistence, rename, and close; Ctrl+1–9 and Ctrl+Shift+Arrow keyboard tab switching
 - **System Prompts & Templates** — Customizable behavior with pre-built templates and policy management
-- **Model Parameters** — Per-tab temperature, top_p, top_k, min_p, repeat_penalty, and max_tokens controls
-- **Streaming with Reasoning** — Real-time SSE streaming with thinking/reasoning block support
+- **Model Parameters** — Per-tab temperature, top_p, top_k, min_p, repeat_penalty, and max_tokens controls; active-params dot indicator when non-defaults are set
+- **Streaming with Reasoning** — Real-time SSE streaming with thinking/reasoning block support; typing indicator while waiting for first token
 - **Explicit Mode** — Toggle for uncensored content on models that require guardrail override
+- **Syntax Highlighting** — Fenced code blocks highlighted via highlight.js (atom-one-dark theme); per-block header shows language, line count, and copy button; highlighting applied on finalized messages only (not during streaming)
+- **Smart Scroll** — Auto-scroll only when already near the bottom; scroll-to-bottom button shows unread message count badge
+- **Chat History Pagination** — Long conversations render only the most recent N messages (default 15) for performance; "Load More" button reveals older batches; limit is configurable per-tab
+- **Token Count Display** — Input character count shows approximate token estimate (`~N tok`) with warning color at 800+ tokens and error color at 1500+
+- **Personalized Empty State** — Greeting shows active AI name and loaded model name; suggested prompts grid with stagger animation
+- **Animated Panels** — System prompt and model params panels open/close with smooth max-height transitions; send button shows spinner during generation
 
 ![Chat Interface](docs/screenshots/03-chat.png)
 
@@ -91,6 +97,10 @@ Local sessions show real-time hardware monitoring with sparkline graphs:
 - **System Tray** — Native tray icon (optional, disabled with `--headless` or `--no-tray`)
 - **PWA Support** — Installable as a standalone app on mobile and desktop
 - **Headless Mode** — Web/API server only, no tray or desktop UI
+- **App Version Display** — Current version shown in the sidebar nav footer
+- **Auto-Update** — Background update check on launch; update pill appears in the top nav when a new release is available. Click to open a release notes panel with one-click update:
+  - **macOS / Linux** — Downloads the new binary, atomically replaces the running executable, and restarts the process. Browser reconnects automatically.
+  - **Windows** — Downloads and extracts the new `.exe`, writes a detached batch helper to `%TEMP%`, then exits. The helper waits for the process to stop, copies the new binary in place, and relaunches it.
 
 ## Supported Hardware
 
@@ -245,8 +255,12 @@ Control bar with preset selector and port. Start/stop the server. Live inference
 ### Chat Tab
 Multi-tab streaming chat proxied to the running llama-server's `/v1/chat/completions` endpoint. Features include:
 - Per-tab system prompts with template library
-- Model parameter controls (temperature, top_p, top_k, min_p, repeat_penalty)
-- Reasoning/thinking blocks and Markdown rendering
+- Model parameter controls (temperature, top_p, top_k, min_p, repeat_penalty); dirty-state indicator when non-defaults are active
+- Reasoning/thinking blocks, Markdown rendering, and syntax-highlighted code blocks (highlight.js)
+- Per-code-block headers: language label, line count, and copy button
+- Chat history pagination with configurable visible-message limit (default 15) — older messages load on demand
+- Token count estimate on input with color warnings at 800+ and 1500+ tokens
+- Keyboard tab switching: Ctrl+1–9 by position, Ctrl+Shift+← / → to cycle
 - Explicit mode toggle for uncensored content
 
 ### Logs Tab
@@ -299,6 +313,13 @@ Real-time server log output.
 |--------|------|-------------|
 | POST | `/api/chat` | Streaming SSE proxy to active session's `/v1/chat/completions` |
 
+### App Updates
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/remote-agent/releases/latest` | Latest GitHub release info (`tag_name`, `body`, `assets`) |
+| POST | `/api/self-update` | Download latest release and replace the running binary; returns `{ ok, tag_name, restart_required }` |
+
 ### WebSocket
 
 | Method | Path | Description |
@@ -344,7 +365,7 @@ src/
     static_assets.rs   -- Embedded frontend assets (include_str! at compile time)
 static/
   index.html           -- Dashboard HTML (single-page app)
-  app.js               -- Frontend JavaScript (~7000 lines, vanilla JS)
+  app.js               -- Frontend JavaScript (~8600 lines, vanilla JS)
   compact.html         -- Compact tray popover view
   manifest.json        -- PWA manifest
   sw.js                -- Service worker (PWA offline support)

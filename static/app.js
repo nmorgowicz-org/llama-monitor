@@ -6148,7 +6148,7 @@ function renderMdStreaming(src) {
 
     if (typeof marked !== 'undefined') {
 
-        try { return marked.parse(src, { gfm: true, breaks: true }); } catch(_) {}
+        try { return marked.parse(src, { gfm: true, breaks: true, renderer: new marked.Renderer() }); } catch(_) {}
 
     }
 
@@ -8429,12 +8429,12 @@ function initAppVersion() {
  */
 function compareVersions(a, b) {
     const parse = s => s.replace(/^v/, '').split('.').map(Number);
-    const [x, y] = [parse(a), parse(b)];
-    for (let i = 0; i < Math.max(x.length, y.length); i++) {
-        const a = x[i] || 0;
-        const b = y[i] || 0;
-        if (a > b) return 1;
-        if (a < b) return -1;
+    const [av, bv] = [parse(a), parse(b)];
+    for (let i = 0; i < Math.max(av.length, bv.length); i++) {
+        const x = av[i] || 0;
+        const y = bv[i] || 0;
+        if (x > y) return 1;
+        if (x < y) return -1;
     }
     return 0;
 }
@@ -8461,61 +8461,65 @@ async function checkForUpdate() {
     }
 }
 
-/**
- * Show the update pill if not dismissed.
- */
+// Holds the current pending release object so it doesn't need to live in a DOM attribute.
+let _pendingRelease = null;
+
 function showUpdatePill(release) {
     const dismissed = JSON.parse(localStorage.getItem('update-dismissed') || '{}');
     if (dismissed[release.tag_name] && Date.now() - dismissed[release.tag_name] < 86400000) {
-        return; // Dismissed within last 24 hours
+        return;
     }
-
+    _pendingRelease = release;
     const pill = document.getElementById('update-pill');
     const text = document.getElementById('update-pill-text');
     if (pill && text) {
         text.textContent = `${release.tag_name} available`;
         pill.style.display = 'flex';
-        pill.dataset.release = JSON.stringify(release);
     }
 }
 
-/**
- * Open the release notes panel.
- */
 function openReleaseNotes() {
-    const pill = document.getElementById('update-pill');
-    const release = JSON.parse(pill?.dataset.release || '{}');
-    if (!release.tag_name) return;
+    const release = _pendingRelease;
+    if (!release?.tag_name) return;
 
-    const panel = document.getElementById('release-notes-panel');
-    const overlay = document.getElementById('release-notes-overlay');
-    const title = document.getElementById('release-notes-title');
-    const body = document.getElementById('release-notes-body');
-    const link = document.getElementById('release-notes-link');
+    const panel    = document.getElementById('release-notes-panel');
+    const overlay  = document.getElementById('release-notes-overlay');
+    const title    = document.getElementById('release-notes-title');
+    const fromEl   = document.getElementById('release-notes-version-from');
+    const body     = document.getElementById('release-notes-body');
+    const link     = document.getElementById('release-notes-link');
+    const updateBtn = document.getElementById('release-notes-update-btn');
 
+    // Header: "v0.11.0" + "from v0.10.2"
     title.textContent = release.tag_name;
-    link.href = release.html_url || '#';
-    link.onclick = (e) => {
-        if (!release.html_url) e.preventDefault();
-    };
+    if (fromEl && typeof APP_VERSION !== 'undefined') {
+        fromEl.textContent = `from v${APP_VERSION}`;
+    }
 
-    // Render release body as Markdown
+    link.href = release.html_url || '#';
+
     body.innerHTML = release.body
         ? renderMd(release.body)
         : '<p>No release notes available.</p>';
 
+    // Platform-aware action button
+    _resetUpdateBtn(updateBtn);
+
     panel.style.display = 'flex';
     overlay.style.display = 'block';
-    // Trigger reflow before adding class for animation
-    panel.offsetHeight;
+    panel.offsetHeight; // trigger reflow for CSS transition
     panel.classList.add('open');
 }
 
-/**
- * Close the release notes panel.
- */
+function _resetUpdateBtn(btn) {
+    if (!btn) return;
+    btn.disabled = false;
+    btn.dataset.state = '';
+    btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg> Update & Restart`;
+}
+
 function closeReleaseNotes() {
-    const panel = document.getElementById('release-notes-panel');
+    const panel   = document.getElementById('release-notes-panel');
     const overlay = document.getElementById('release-notes-overlay');
     panel.classList.remove('open');
     setTimeout(() => {
@@ -8524,20 +8528,63 @@ function closeReleaseNotes() {
     }, 300);
 }
 
-/**
- * Dismiss the update notification.
- */
 function dismissUpdate() {
-    const pill = document.getElementById('update-pill');
-    const release = JSON.parse(pill?.dataset.release || '{}');
-    if (!release.tag_name) return;
-
+    if (!_pendingRelease?.tag_name) return;
     const dismissed = JSON.parse(localStorage.getItem('update-dismissed') || '{}');
-    dismissed[release.tag_name] = Date.now();
+    dismissed[_pendingRelease.tag_name] = Date.now();
     localStorage.setItem('update-dismissed', JSON.stringify(dismissed));
-
-    pill.style.display = 'none';
+    const pill = document.getElementById('update-pill');
+    if (pill) pill.style.display = 'none';
     closeReleaseNotes();
+}
+
+async function triggerSelfUpdate() {
+    const btn = document.getElementById('release-notes-update-btn');
+    if (!btn || btn.dataset.state === 'loading') return;
+
+    btn.dataset.state = 'loading';
+    btn.disabled = true;
+    btn.innerHTML = `<svg class="chat-send-spinner" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Downloading…`;
+
+    try {
+        const resp = await fetch('/api/self-update', { method: 'POST' });
+        const data = await resp.json();
+
+        if (!data.ok) {
+            throw new Error(data.error || 'Update failed');
+        }
+
+        btn.innerHTML = `<svg class="chat-send-spinner" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> Restarting…`;
+        _pollForReconnect(data.tag_name);
+
+    } catch (e) {
+        btn.dataset.state = 'error';
+        btn.disabled = false;
+        btn.innerHTML = `⚠ ${e.message} — retry?`;
+    }
+}
+
+function _pollForReconnect(newVersion) {
+    let attempts = 0;
+    const timer = setInterval(async () => {
+        attempts++;
+        try {
+            const r = await fetch('/', { method: 'HEAD', cache: 'no-store' });
+            if (r.ok) {
+                clearInterval(timer);
+                location.reload();
+            }
+        } catch (_) { /* expected while process is restarting */ }
+        if (attempts >= 30) {
+            clearInterval(timer);
+            const btn = document.getElementById('release-notes-update-btn');
+            if (btn) {
+                btn.dataset.state = '';
+                btn.disabled = false;
+                btn.innerHTML = 'Relaunch the app to finish';
+            }
+        }
+    }, 1000);
 }
 
 // Call init on DOM ready

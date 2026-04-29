@@ -1559,7 +1559,14 @@ pub mod install {
     }
 
     async fn extract_archive(path: &str, asset: &ReleaseAssetInfo) -> Result<String> {
-        let binary_name = asset.name.trim_end_matches(".tar.gz");
+        // .zip assets (Windows) need "-xf"; .tar.gz assets (macOS) need "-xzf".
+        // Windows tar.exe (libarchive, built-in since Win10 1803) auto-detects zip
+        // format but the -z flag forces gzip decompression and will fail on zip.
+        let (binary_name, tar_flag) = if asset.name.ends_with(".zip") {
+            (asset.name.trim_end_matches(".zip"), "-xf")
+        } else {
+            (asset.name.trim_end_matches(".tar.gz"), "-xzf")
+        };
         let temp_dir = tempfile::Builder::new()
             .prefix(&format!("{binary_name}-"))
             .tempdir_in(std::env::temp_dir())
@@ -1567,7 +1574,7 @@ pub mod install {
         let temp_extracted = temp_dir.path().to_path_buf();
 
         let output = tokio::process::Command::new("tar")
-            .args(["-xzf", path, "-C", &temp_extracted.to_string_lossy()])
+            .args([tar_flag, path, "-C", &temp_extracted.to_string_lossy()])
             .output()
             .await?;
 
@@ -2259,12 +2266,169 @@ Start-Sleep -Seconds 2\""
     pub async fn detect_remote_os_simple(ssh_target: &str) -> RemoteOs {
         detect_remote_os(ssh_target).await
     }
+
+    #[derive(Debug, Serialize)]
+    pub struct SelfUpdateResult {
+        pub tag_name: String,
+        /// True when running on Windows where in-place binary replacement is not possible.
+        pub windows: bool,
+        /// Direct download URL for the matching release asset (Windows only).
+        pub download_url: Option<String>,
+    }
+
+    /// Replace the running binary with the latest release from GitHub.
+    ///
+    /// On macOS/Linux: downloads the asset, extracts if needed, copies it into
+    /// the same directory as the running binary, then atomically renames it over
+    /// the current executable. The running process keeps its old inode in memory,
+    /// so the rename is safe.
+    ///
+    /// On Windows: in-place replacement of a running `.exe` is blocked by the OS.
+    /// Downloads the new binary, writes a small batch helper to %TEMP%, and spawns
+    /// it as a detached process. The batch file waits for this PID to exit, copies
+    /// the new binary over, and relaunches. `process::exit(0)` is then called by
+    /// the API handler after returning a response.
+    pub async fn self_update_binary() -> Result<SelfUpdateResult> {
+        let os = std::env::consts::OS;
+        let arch = std::env::consts::ARCH;
+
+        let release = crate::agent::latest_release_info().await?;
+
+        if os == "windows" {
+            #[cfg(windows)]
+            return self_update_binary_windows(&release, arch).await;
+            #[cfg(not(windows))]
+            return Err(anyhow::anyhow!(
+                "Windows update path is not available in this build"
+            ));
+        }
+
+        let asset = release
+            .matching_asset(os, arch)
+            .ok_or_else(|| anyhow::anyhow!("No release asset for {os}/{arch}"))?
+            .clone();
+
+        let local_path = download_asset_locally(&asset).await?;
+        let binary_path = if asset.archive {
+            extract_archive_with_timeout(&local_path, &asset).await?
+        } else {
+            local_path.clone()
+        };
+
+        let current_exe = std::env::current_exe()
+            .map_err(|e| anyhow::anyhow!("Cannot locate current binary: {e}"))?;
+
+        // Stage in the same directory so rename stays on one filesystem.
+        let parent = current_exe
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("Binary path has no parent directory"))?;
+        let staged = parent.join(format!(".llama-monitor-update-{}", std::process::id()));
+
+        fs::copy(&binary_path, &staged)
+            .map_err(|e| anyhow::anyhow!("Cannot stage update (check write permission on binary directory): {e}"))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))
+                .map_err(|e| anyhow::anyhow!("Cannot set executable permission: {e}"))?;
+        }
+
+        // Atomic rename — safe on Unix even while this process is running.
+        if let Err(e) = fs::rename(&staged, &current_exe) {
+            let _ = fs::remove_file(&staged);
+            return Err(anyhow::anyhow!(
+                "Cannot replace binary (check write permission on binary location): {e}"
+            ));
+        }
+
+        let _ = fs::remove_file(&binary_path);
+
+        Ok(SelfUpdateResult {
+            tag_name: release.tag_name,
+            windows: false,
+            download_url: None,
+        })
+    }
+
+    /// Windows-specific self-update path.
+    ///
+    /// Cannot rename over a running `.exe`, so instead:
+    /// 1. Downloads and extracts the new binary to a temp path.
+    /// 2. Writes a batch helper to %TEMP% that polls until this PID exits,
+    ///    then does `copy /Y new_exe current_exe` and relaunches.
+    /// 3. Spawns the batch helper as a DETACHED_PROCESS so it outlives us.
+    ///
+    /// The caller (`api_self_update`) schedules `process::exit(0)` after
+    /// returning the HTTP response, which unblocks the batch wait loop.
+    #[cfg(windows)]
+    async fn self_update_binary_windows(
+        release: &crate::agent::LatestReleaseInfo,
+        arch: &str,
+    ) -> Result<SelfUpdateResult> {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+
+        let asset = release
+            .matching_asset("windows", arch)
+            .ok_or_else(|| anyhow::anyhow!("No Windows release asset for arch {arch}"))?
+            .clone();
+
+        let local_path = download_asset_locally(&asset).await?;
+        let binary_path = extract_archive_with_timeout(&local_path, &asset).await?;
+
+        let current_exe = std::env::current_exe()
+            .map_err(|e| anyhow::anyhow!("Cannot locate current binary: {e}"))?;
+
+        let pid = std::process::id();
+        let batch_path = std::env::temp_dir().join(format!("lm-update-{pid}.bat"));
+
+        // Backslash-normalize paths embedded in the batch file.
+        let new_exe = binary_path.replace('/', "\\");
+        let cur_exe = current_exe.to_string_lossy().replace('/', "\\");
+
+        // The batch file:
+        //   :check  — loop until this PID disappears from tasklist
+        //   copy    — overwrite the old exe with the new one
+        //   start   — relaunch from the same path
+        //   del     — self-destruct
+        //
+        // `find /I "exe"` matches any .exe line in tasklist output for the given
+        // PID. When the process exits, tasklist returns only the header, no match.
+        let batch = format!(
+            "@echo off\r\n\
+             :check\r\n\
+             tasklist /FI \"PID eq {pid}\" 2>NUL | find /I \"exe\" >NUL\r\n\
+             if not errorlevel 1 (\r\n\
+                 timeout /t 1 /nobreak >NUL\r\n\
+                 goto check\r\n\
+             )\r\n\
+             copy /Y \"{new_exe}\" \"{cur_exe}\"\r\n\
+             start \"\" \"{cur_exe}\"\r\n\
+             (goto) 2>NUL & del \"%~f0\"\r\n"
+        );
+
+        fs::write(&batch_path, &batch)
+            .map_err(|e| anyhow::anyhow!("Cannot write update helper to temp dir: {e}"))?;
+
+        std::process::Command::new("cmd.exe")
+            .args(["/C", &batch_path.to_string_lossy().into_owned()])
+            .creation_flags(DETACHED_PROCESS)
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("Cannot launch update helper: {e}"))?;
+
+        Ok(SelfUpdateResult {
+            tag_name: release.tag_name.clone(),
+            windows: false,
+            download_url: None,
+        })
+    }
 }
 
 pub use install::{
     RemoteAgentInstallRequest, default_install_path_for_target, default_start_command_for_target,
-    detect_remote_os_simple, install_remote_agent, remove_remote_agent, start_remote_agent,
-    status_remote_agent, stop_remote_agent, update_remote_agent,
+    detect_remote_os_simple, install_remote_agent, remove_remote_agent, self_update_binary,
+    start_remote_agent, status_remote_agent, stop_remote_agent, update_remote_agent,
 };
 
 #[cfg(test)]

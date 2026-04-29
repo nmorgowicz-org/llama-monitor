@@ -4,224 +4,284 @@
 
 **llama-monitor** is a standalone Rust binary with embedded HTML/CSS/JS frontend (via `include_str!` in `src/web/static_assets.rs`). It is distributed as raw binaries on GitHub Releases for four platforms: Linux x86_64, Linux ARM64, Windows x86_64, macOS ARM64.
 
-**There is no self-update mechanism.** Users must manually download new versions from GitHub Releases. Remote agent update logic exists (`src/agent.rs`) but is for managing remote machines only — not self-update.
+**There is no Tauri/Electron wrapper.** The app uses `tray-icon` + `wry` directly for native tray/webview.
 
-**There is no Tauri/Electron wrapper.** The app uses `tray-icon` + `wry` directly for native tray/webview, not through a packaging framework that provides auto-update.
-
----
-
-## Proposed Approach
-
-### What We Can Do
-
-1. **Display current version** — always visible in bottom-left nav (below collapse button)
-2. **Check for updates** — silent background fetch of GitHub latest release on app load
-3. **Notify if behind** — subtle pill in top bar (no banners, no modals, no dark patterns)
-4. **Show release notes** — slide-out panel with GitHub release Markdown
-5. **Self-update (Unix/macOS)** — download and replace binary using `self_update` crate
-6. **Deep-link (Windows)** — open GitHub release page (cannot replace running `.exe` without helper)
-
-### What We Won't Do
-
-- Forced updates or blocking dialogs
-- Repeat nagging after dismissal
-- Background downloads without user consent
-- Auto-restart without explicit user action
+**No `self_update` crate was added.** The implementation reuses the existing download/extract infrastructure in `pub mod install` inside `src/agent.rs`, which already handles GitHub asset fetching, tar.gz extraction, and temp file management for remote agent installs.
 
 ---
 
-## UI/UX Design
+## What Was Built
 
-### Version Display
+### 1. Version Display
 
 **Location:** Bottom-left of sidebar nav, below the collapse/expand button.
 
-**Appearance:** `10px` font, `--text-muted` color, always visible. Format: `v0.10.0`.
-
-**Implementation:**
-- `Cargo.toml` version is exposed via `CARGO_PKG_VERSION` environment variable at compile time
-- Add a `<script>` tag in `static/index.html` that writes the version to a DOM element:
-  ```html
-  <span id="app-version" class="nav-version"></span>
-  ```
-- In `static/index.html`, add the version span inside the sidebar nav footer area:
-  ```html
-  <!-- Inside .sidebar-nav, after the collapse button -->
-  <span class="nav-version" id="app-version"></span>
-  ```
-- In `static/app.js`, populate on `DOMContentLoaded`:
-  ```js
-  const versionEl = document.getElementById('app-version');
-  if (versionEl) versionEl.textContent = APP_VERSION; // injected at build time
-  ```
-- In `static/index.html` `<head>`, inject version via inline script (safe — no CSP conflict since we control the server):
-  ```html
-  <script>const APP_VERSION = '{{ VERSION }}';</script>
-  ```
-- In `src/web/mod.rs`, replace `{{ VERSION }}` in the HTML before serving:
-  ```rust
-  let html = static_assets::INDEX_HTML.replace("{{ VERSION }}", env!("CARGO_PKG_VERSION"));
-  ```
-
-### Update Check
-
-**Trigger:** On app load (after `DOMContentLoaded`), fetch `/api/releases/latest`.
-
-**Backend:** Add new API endpoint in `src/web/api.rs`:
+**Template injection** in `src/web/mod.rs`:
 ```rust
-fn api_latest_release() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("api" / "releases" / "latest")
-        .and(warp::get())
-        .and_then(async || {
-            // Reuse existing logic from src/agent.rs:latest_release_info()
-            // Return JSON: { tag_name: "v0.11.0", html_url: "...", published_at: "..." }
-        })
-}
+let html = static_assets::INDEX_HTML
+    .replace("{{ VERSION }}", env!("CARGO_PKG_VERSION"))
+    .replace("{{ PLATFORM }}", std::env::consts::OS);
 ```
 
-**Frontend:** In `static/app.js`, add:
+**JS constants** injected in `static/index.html` `<head>`:
+```html
+<script>const APP_VERSION = '{{ VERSION }}'; const APP_PLATFORM = '{{ PLATFORM }}';</script>
+```
+
+`APP_PLATFORM` is one of `"linux"`, `"macos"`, `"windows"` — used by the frontend to choose the correct update CTA without any runtime API call.
+
+`initAppVersion()` in `static/app.js` writes `v${APP_VERSION}` to `#app-version` (`.nav-version` span in the sidebar).
+
+---
+
+### 2. Update Check
+
+**Trigger:** `DOMContentLoaded` via `checkForUpdate()` in `static/app.js`.
+
+**Endpoint reused:** `GET /api/remote-agent/releases/latest` — the existing endpoint that proxies GitHub's releases API and returns `{ ok, release: { tag_name, html_url, body, published_at, assets } }`. No new Rust endpoint was needed.
+
 ```js
 async function checkForUpdate() {
-    try {
-        const resp = await fetch('/api/releases/latest');
-        const latest = await resp.json();
-        const current = APP_VERSION;
-        if (compareVersions(latest.tag_name, current) > 0) {
-            showUpdatePill(latest);
-        }
-    } catch (e) {
-        console.debug('Update check failed:', e.message);
+    const resp = await fetch('/api/remote-agent/releases/latest');
+    const data = await resp.json();
+    const latest = data.release || data;
+    if (compareVersions(latest.tag_name, APP_VERSION) > 0) {
+        showUpdatePill(latest);
     }
 }
 ```
 
-**Version comparison:** Add a simple `compareVersions(a, b)` utility that parses semver strings and returns `-1`, `0`, or `1`. Handle `v` prefix.
+**`compareVersions(a, b)`** — parses semver strings (strips `v` prefix), returns `-1/0/1`. Variables in the comparison loop are named `av`/`bv`/`x`/`y` to avoid parameter shadowing.
 
-### Update Pill
+**`_pendingRelease`** — module-level variable holds the release object. Earlier design stored it as `pill.dataset.release = JSON.stringify(...)` which is fragile with large release note bodies; replaced with a plain JS variable.
 
-**Location:** Top bar, between the "Settings" button and the "User" avatar.
+---
 
-**Appearance:** Small pill (`height: 24px`), neutral background (`rgba(99, 102, 241, 0.12)`), muted text (`--text-secondary`), no red urgency. Content: `v0.11.0 available`.
+### 3. Update Pill
 
-**Behavior:**
-- Click pill → open release notes panel (slide-out from right)
-- Click outside panel → close
-- Panel includes "Dismiss" button → hides pill, stores dismissed version in `localStorage`
-- Dismissed versions reappear after 24 hours or on app restart (stored timestamp in `localStorage`)
+**Location:** Top nav bar, between Settings button and User menu.
 
-**HTML:** Add to `static/index.html` inside `.top-nav-bar`:
 ```html
 <button id="update-pill" class="top-nav-pill" style="display:none;" onclick="openReleaseNotes()">
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/>
-    </svg>
+    ...
     <span id="update-pill-text"></span>
 </button>
 ```
 
-**CSS:** Add to `static/css/layout.css`:
-```css
-.top-nav-pill {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    height: 24px;
-    padding: 0 10px;
-    border-radius: 12px;
-    background: rgba(99, 102, 241, 0.12);
-    color: var(--text-secondary);
-    border: 1px solid rgba(99, 102, 241, 0.15);
-    font-size: 11px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.2s, border-color 0.2s;
-}
-.top-nav-pill:hover {
-    background: rgba(99, 102, 241, 0.18);
-    border-color: rgba(99, 102, 241, 0.25);
-}
+**`showUpdatePill(release)`** checks `localStorage['update-dismissed']` — if the version was dismissed within the last 24 hours, the pill stays hidden. Otherwise sets `_pendingRelease`, populates `#update-pill-text` with `"v0.11.0 available"`, and shows the pill.
+
+**CSS** in `static/css/layout.css`: `.top-nav-pill` — indigo-tinted pill, `height: 24px`, `font-size: 11px`.
+
+---
+
+### 4. Release Notes Panel
+
+**Appearance:** Slide-out from right (`width: 420px`), `transform: translateX(100%)` → `.open` triggers `translateX(0)` with `cubic-bezier(0.16, 1, 0.3, 1)` transition.
+
+**HTML structure** in `static/index.html`:
+```html
+<div id="release-notes-overlay" class="modal-overlay" onclick="closeReleaseNotes()"></div>
+<div id="release-notes-panel" class="slide-panel">
+    <div class="slide-panel-header">
+        <div class="slide-panel-title-group">
+            <h3 id="release-notes-title"></h3>
+            <span id="release-notes-version-from" class="slide-panel-version-from"></span>
+        </div>
+        <button class="modal-close" onclick="closeReleaseNotes()">&times;</button>
+    </div>
+    <div class="slide-panel-body" id="release-notes-body"></div>
+    <div class="slide-panel-footer">
+        <a id="release-notes-link" href="#" target="_blank" rel="noopener">Open on GitHub ↗</a>
+        <div class="slide-panel-footer-actions">
+            <button id="release-notes-update-btn" class="btn-sm btn-update-action" onclick="triggerSelfUpdate()"></button>
+            <button class="btn-sm btn-preset" onclick="dismissUpdate()">Later</button>
+        </div>
+    </div>
+</div>
 ```
 
-### Release Notes Panel
+**`openReleaseNotes()`** populates from `_pendingRelease`:
+- `#release-notes-title` ← `release.tag_name` (e.g. `v0.11.0`)
+- `#release-notes-version-from` ← `"from v${APP_VERSION}"` (e.g. `from v0.10.2`)
+- `#release-notes-body` ← `renderMd(release.body)` using the existing Markdown renderer
+- Calls `_resetUpdateBtn()` to set the correct platform-specific label
 
-**Appearance:** Slide-out panel from right (`width: 420px`), dark background (`--color-surface`), rounded left corners. Contains:
-- Header: release version + date
-- Body: rendered Markdown from GitHub release body
-- Footer: "Open on GitHub" link + "Dismiss" button
+**`_resetUpdateBtn(btn)`** — sets button label based on `APP_PLATFORM`:
+- `"windows"` → "Download for Windows" (download icon)
+- Everything else → "Update & Restart" (upload/cloud icon)
 
-**Implementation:**
-- Add panel HTML to `static/index.html`:
-  ```html
-  <div id="release-notes-panel" class="slide-panel" style="display:none;">
-      <div class="slide-panel-header">
-          <h3 id="release-notes-title"></h3>
-          <button class="modal-close" onclick="closeReleaseNotes()">&times;</button>
-      </div>
-      <div class="slide-panel-body" id="release-notes-body"></div>
-      <div class="slide-panel-footer">
-          <a id="release-notes-link" href="#" target="_blank">Open on GitHub ↗</a>
-          <button class="btn-sm btn-preset" onclick="dismissUpdate()">Dismiss</button>
-      </div>
-  </div>
-  ```
-- Add CSS for `.slide-panel` to `static/css/layout.css` (use existing modal CSS as reference)
-- Add `openReleaseNotes()`, `closeReleaseNotes()`, `dismissUpdate()` to `static/app.js`
-- Render Markdown using existing `renderMd()` function
+**`closeReleaseNotes()`** — removes `.open` class, hides panel/overlay after 300ms transition.
 
-### Self-Update (Backend)
+**`dismissUpdate()`** — writes `{ [tag_name]: Date.now() }` to `localStorage['update-dismissed']`, hides pill, closes panel.
 
-**Dependency:** Add `self_update = "0.40"` to `Cargo.toml`.
+---
 
-**Endpoint:** Add `POST /api/self-update` in `src/web/api.rs`:
+### 5. Self-Update Backend
+
+**Location:** `pub async fn self_update_binary()` inside `pub mod install` in `src/agent.rs`.
+
+**No new crate dependency.** Uses `download_asset_locally()` and `extract_archive_with_timeout()` already present in the same module.
+
+#### macOS / Linux flow
+
+1. `latest_release_info()` fetches the release and calls `matching_asset(os, arch)` to find the right asset:
+   - Linux x86_64: `llama-monitor-linux-x86_64` (bare binary, no archive)
+   - Linux aarch64: `llama-monitor-linux-aarch64` (bare binary)
+   - macOS aarch64: `llama-monitor-macos-aarch64.tar.gz` (tar.gz, extracted to `llama-monitor-macos-aarch64`)
+2. Downloads to a temp file; extracts if `asset.archive == true`
+3. Copies the binary into the **same directory** as the running executable — this keeps the rename on one filesystem, avoiding `EXDEV` cross-device errors
+4. Sets `0o755` permissions via `std::os::unix::fs::PermissionsExt`
+5. `std::fs::rename(staged_path, current_exe)` — atomic on Unix even while the process is running; the OS keeps the old inode mapped in memory
+
 ```rust
-fn api_self_update(state: Arc<AppState>) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("api" / "self-update")
-        .and(warp::post())
-        .and(warp::any().map(move || state.clone()))
-        .and_then(|state: Arc<AppState>| async move {
-            // Use self_update::backends::github::Update::configure()
-            // to download and apply update
-            // Return JSON: { ok: true, version: "v0.11.0", restart_required: true }
-        })
+pub async fn self_update_binary() -> Result<SelfUpdateResult> {
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+    let release = crate::agent::latest_release_info().await?;
+
+    if os == "windows" {
+        // In-place replacement of a running .exe is blocked by Windows.
+        // Return the download URL so the frontend can open it directly.
+        let download_url = release.matching_asset("windows", arch).map(|a| a.url.clone());
+        return Ok(SelfUpdateResult { tag_name: release.tag_name, windows: true, download_url });
+    }
+
+    let asset = release.matching_asset(os, arch)
+        .ok_or_else(|| anyhow::anyhow!("No release asset for {os}/{arch}"))?
+        .clone();
+
+    let local_path = download_asset_locally(&asset).await?;
+    let binary_path = if asset.archive {
+        extract_archive_with_timeout(&local_path, &asset).await?
+    } else {
+        local_path.clone()
+    };
+
+    let current_exe = std::env::current_exe()?;
+    let parent = current_exe.parent().ok_or_else(|| anyhow!("no parent dir"))?;
+    let staged = parent.join(format!(".llama-monitor-update-{}", std::process::id()));
+
+    std::fs::copy(&binary_path, &staged)?;  // same filesystem as running binary
+    std::fs::set_permissions(&staged, Permissions::from_mode(0o755))?;
+    std::fs::rename(&staged, &current_exe)?;  // atomic
+
+    Ok(SelfUpdateResult { tag_name: release.tag_name, windows: false, download_url: None })
 }
 ```
 
-**Platform constraints:**
-- **macOS/Linux:** Binary replacement works. App must restart (tray icon can trigger restart).
-- **Windows:** Cannot replace running `.exe`. Return `restart_required: false` and instruct user to download manually from GitHub.
+#### Windows behavior
 
-**Frontend:** In the release notes panel, show "Update & Restart" button (Unix/macOS) or "Download from GitHub" link (Windows). Detect platform via `/api/platform` endpoint (already exists).
+In-place replacement of a running `.exe` is blocked by Windows. The implementation uses a detached batch helper:
+
+1. Downloads `llama-monitor-windows-x86_64.zip` and extracts via `tar -xf` (not `-xzf` — the `-z` flag forces gzip and fails on zip; Windows `tar.exe` auto-detects zip without it)
+2. Writes a batch file to `%TEMP%\lm-update-<pid>.bat`:
+
+```batch
+@echo off
+:check
+tasklist /FI "PID eq <pid>" 2>NUL | find /I "exe" >NUL
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >NUL
+    goto check
+)
+copy /Y "<new_exe>" "<current_exe>"
+start "" "<current_exe>"
+(goto) 2>NUL & del "%~f0"
+```
+
+3. Spawns `cmd.exe /C lm-update-<pid>.bat` with `DETACHED_PROCESS` (Win32 flag `0x00000008`) so it outlives the parent
+4. Returns `{ ok: true, restart_required: true }` — the API handler schedules `process::exit(0)` after 600ms, same as Unix
+5. The batch file's `:check` loop detects PID exit, copies the new binary over, and relaunches it
+
+The `(goto) 2>NUL & del "%~f0"` trick lets the batch script delete itself while still executing — the `goto` triggers an error (redirected to NUL), and `del` runs immediately after in the same command.
+
+**Assumption:** the `.exe` is run from a user-writable location (e.g. home directory or Downloads). If run from `Program Files`, `copy /Y` will fail silently and the old binary remains. UAC elevation is not attempted.
 
 ---
 
-## Implementation Order
+### 6. Self-Update API Endpoint
 
-1. **Version display** — expose `CARGO_PKG_VERSION` to frontend, render in nav footer
-2. **Update check endpoint** — `/api/releases/latest` (reuse `src/agent.rs` logic)
-3. **Update pill + panel** — UI components in HTML/CSS/JS
-4. **Dismissal logic** — `localStorage` for dismissed versions
-5. **Self-update endpoint** — `self_update` crate integration (Unix/macOS only)
-6. **Update button** — trigger self-update or deep-link to GitHub
+**Route:** `POST /api/self-update` in `src/web/api.rs`.
+
+On success for Unix/macOS:
+- Returns `{ ok: true, restart_required: true, tag_name: "v0.11.0" }`
+- Spawns a detached task: `sleep(600ms)` then `process::exit(0)` — gives the HTTP response time to flush before the process terminates
+
+On Windows:
+- Returns `{ ok: true, windows: true, restart_required: false, tag_name, download_url }`
+
+On error:
+- Returns `{ ok: false, error: "..." }` with a user-readable message (permission denied, no matching asset, etc.)
 
 ---
 
-## Files to Modify
+### 7. Frontend Update Flow
+
+#### Mac / Linux
+
+```
+User clicks "Update & Restart"
+  → triggerSelfUpdate()
+  → btn: "Downloading…" (spinner)
+  → POST /api/self-update
+  ← { ok: true, restart_required: true }
+  → btn: "Restarting…" (spinner)
+  → _pollForReconnect() — HEAD / every 1s, up to 30s
+  → process exits on backend (600ms delay)
+  → HEAD / succeeds once process restarts
+  → location.reload() — browser gets fresh app
+```
+
+If the process doesn't restart within 30s (e.g. not managed by a daemon), the button shows "Relaunch the app to finish".
+
+#### Windows
+
+```
+User clicks "Update & Restart"
+  → triggerSelfUpdate()
+  → btn: "Downloading…" (spinner)
+  → POST /api/self-update
+    → downloads zip, extracts .exe to temp
+    → writes lm-update-<pid>.bat to %TEMP%
+    → spawns cmd.exe /C lm-update-<pid>.bat (DETACHED_PROCESS)
+  ← { ok: true, restart_required: true }
+  → btn: "Restarting…" (spinner)
+  → process::exit(0) fires after 600ms
+  → batch :check loop detects PID gone
+  → copy /Y new_exe current_exe
+  → start "" current_exe   ← app relaunches
+  → _pollForReconnect() HEAD / every 1s
+  → location.reload()
+```
+
+---
+
+### 8. CSS
+
+**`static/css/layout.css` additions:**
+
+- `.slide-panel-title-group` — flex row aligning `h3` + version-from label
+- `.slide-panel-version-from` — `11px`, muted, `opacity: 0.6`
+- `.slide-panel-footer-actions` — flex row for the two footer buttons
+- `.btn-update-action` — indigo-tinted primary button with hover, disabled, and `[data-state="error"]` states
+
+---
+
+## Files Modified
 
 | File | Change |
-|---|---|
-| `Cargo.toml` | Add `self_update` dependency |
-| `src/web/mod.rs` | Replace `{{ VERSION }}` in HTML; add `/api/releases/latest` route |
-| `src/web/api.rs` | Add release info and self-update endpoints |
-| `static/index.html` | Add version span, update pill, release notes panel |
-| `static/css/layout.css` | Add `.top-nav-pill`, `.slide-panel`, `.nav-version` styles |
-| `static/app.js` | Add `checkForUpdate()`, `compareVersions()`, panel controls, dismissal logic |
+|------|--------|
+| `src/agent.rs` | Added `SelfUpdateResult` struct and `pub async fn self_update_binary()` inside `pub mod install`; re-exported `self_update_binary` |
+| `src/web/api.rs` | Added `fn api_self_update()` (`POST /api/self-update`); registered in `api_routes()` |
+| `src/web/mod.rs` | Added `{{ PLATFORM }}` template replacement alongside existing `{{ VERSION }}` |
+| `static/index.html` | Added `APP_PLATFORM` to inline script; restructured release notes panel (title group, version-from span, footer-actions, `#release-notes-update-btn`) |
+| `static/css/layout.css` | Added `.slide-panel-title-group`, `.slide-panel-version-from`, `.slide-panel-footer-actions`, `.btn-update-action` |
+| `static/app.js` | Fixed `compareVersions` variable shadowing; replaced `pill.dataset.release` with `_pendingRelease`; added `_resetUpdateBtn()`, `triggerSelfUpdate()`, `_pollForReconnect()`; updated `openReleaseNotes()`, `closeReleaseNotes()`, `dismissUpdate()`, `showUpdatePill()` |
 
 ---
 
-## Notes for Future Implementation
+## What Was Not Implemented
 
-- The existing `latest_release_info()` in `src/agent.rs` can be extracted to a shared utility function
-- The `warp` filter pattern used for `/api/remote-agent/releases/latest` is the template to follow
-- The `renderMd()` function already exists and can render GitHub release Markdown
-- The `tray.rs` module can be consulted for restart logic (it already handles app restart on tray close)
-- Do not block app startup on update check — it should be fire-and-forget with no UI impact on failure
+- **Dedicated `/api/releases/latest` endpoint** — the spec proposed a new endpoint separate from the remote-agent one. The implementation reuses `GET /api/remote-agent/releases/latest` which returns the same GitHub data. No functional difference.
+- **Progress percentage during download** — the download is buffered entirely before replacement. Streaming progress with `Content-Length` tracking would require a chunked download path; deferred.
+- **UAC elevation on Windows** — if the `.exe` is in a protected location (e.g. `Program Files`), `copy /Y` in the batch script will fail silently. Assumed user runs from a user-writable directory.

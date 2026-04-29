@@ -119,7 +119,9 @@ fn compact_route(
 
 fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     let index = warp::path::end().map(|| {
-        let html = static_assets::INDEX_HTML.replace("{{ VERSION }}", env!("CARGO_PKG_VERSION"));
+        let html = static_assets::INDEX_HTML
+            .replace("{{ VERSION }}", env!("CARGO_PKG_VERSION"))
+            .replace("{{ PLATFORM }}", std::env::consts::OS);
         warp::reply::html(html)
     });
 

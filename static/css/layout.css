@@ -761,10 +761,23 @@ body.sidebar-collapsed .content-area {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.slide-panel-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
 .slide-panel-header h3 {
   font-size: var(--text-base);
   font-weight: 600;
   margin: 0;
+}
+
+/* "from v0.10.2" subtitle next to the new version heading */
+.slide-panel-version-from {
+  font-size: 11px;
+  color: var(--text-muted);
+  opacity: 0.6;
 }
 
 .slide-panel-body {
@@ -777,6 +790,7 @@ body.sidebar-collapsed .content-area {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: var(--gap-md);
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -785,8 +799,48 @@ body.sidebar-collapsed .content-area {
   color: var(--color-primary-light);
   font-size: var(--text-sm);
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .slide-panel-footer a:hover {
   text-decoration: underline;
+}
+
+.slide-panel-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Primary update action button */
+.btn-update-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 7px;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: var(--color-primary-light);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+  white-space: nowrap;
+}
+
+.btn-update-action:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.28);
+  border-color: rgba(99, 102, 241, 0.45);
+}
+
+.btn-update-action:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.btn-update-action[data-state="error"] {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #f87171;
 }

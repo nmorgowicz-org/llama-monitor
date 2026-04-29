@@ -503,6 +503,7 @@ pub fn api_routes(
         .or(sensor_bridge_status)
         .or(sensor_bridge_install)
         .or(sensor_bridge_uninstall)
+        .or(api_self_update())
 }
 
 fn api_remote_agent_latest_release()
@@ -1997,6 +1998,34 @@ fn api_kill_llama(
                         &serde_json::json!({"ok": false, "error": "Unsupported platform"}),
                     ))
                 }
+            }
+        })
+}
+
+fn api_self_update(
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "self-update")
+        .and(warp::post())
+        .and_then(|| async move {
+            match crate::agent::self_update_binary().await {
+                Ok(result) => {
+                    // All platforms: schedule exit so the OS / user can relaunch with
+                    // the freshly written binary. On Windows the batch helper also
+                    // restarts automatically once this PID disappears.
+                    tokio::spawn(async {
+                        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                        std::process::exit(0);
+                    });
+                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                        "ok": true,
+                        "tag_name": result.tag_name,
+                        "restart_required": true
+                    })))
+                }
+                Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                    "ok": false,
+                    "error": e.to_string()
+                }))),
             }
         })
 }

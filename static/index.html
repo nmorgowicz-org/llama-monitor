@@ -25,7 +25,7 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/atom-one-dark.min.css">
     <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
-    <script>const APP_VERSION = '{{ VERSION }}';</script>
+    <script>const APP_VERSION = '{{ VERSION }}'; const APP_PLATFORM = '{{ PLATFORM }}';</script>
 </head>
 <body>
       <div class="endpoint-health-strip" aria-label="Active endpoint status.">
@@ -2109,13 +2109,19 @@
 <div id="release-notes-overlay" class="modal-overlay" style="z-index:1399;" onclick="closeReleaseNotes()"></div>
 <div id="release-notes-panel" class="slide-panel">
     <div class="slide-panel-header">
-        <h3 id="release-notes-title"></h3>
+        <div class="slide-panel-title-group">
+            <h3 id="release-notes-title"></h3>
+            <span id="release-notes-version-from" class="slide-panel-version-from"></span>
+        </div>
         <button type="button" class="modal-close" onclick="closeReleaseNotes()" aria-label="Close">&times;</button>
     </div>
     <div class="slide-panel-body" id="release-notes-body"></div>
     <div class="slide-panel-footer">
-        <a id="release-notes-link" href="#" target="_blank">Open on GitHub ↗</a>
-        <button type="button" class="btn-sm btn-preset" onclick="dismissUpdate()">Dismiss</button>
+        <a id="release-notes-link" href="#" target="_blank" rel="noopener">Open on GitHub ↗</a>
+        <div class="slide-panel-footer-actions">
+            <button type="button" id="release-notes-update-btn" class="btn-sm btn-update-action" onclick="triggerSelfUpdate()"></button>
+            <button type="button" class="btn-sm btn-preset" onclick="dismissUpdate()">Later</button>
+        </div>
     </div>
 </div>
 

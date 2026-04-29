@@ -16,6 +16,14 @@ test.describe('chat UI shell', () => {
     await expect(page.locator('#chat-input')).toBeEditable();
   });
 
+  test('renders personalized empty state with suggested prompts', async ({ page }) => {
+    await expect(page.locator('.chat-empty')).toBeVisible();
+    await expect(page.locator('.chat-empty-title')).toBeVisible();
+    await expect(page.locator('.chat-empty-prompts')).toBeVisible();
+    const prompts = await page.locator('.chat-empty-prompt').count();
+    expect(prompts).toBeGreaterThan(0);
+  });
+
   test('creates new tab on + button click', async ({ page }) => {
     const tabCount = await page.locator('.chat-tab').count();
     await page.locator('.chat-tab-add').click();
@@ -25,15 +33,34 @@ test.describe('chat UI shell', () => {
   test('switches between tabs', async ({ page }) => {
     await page.locator('.chat-tab-add').click();
     const tabs = await page.locator('.chat-tab').all();
-    // Click the first tab
     await tabs[0].click();
     await expect(tabs[0]).toHaveClass(/active/);
+  });
+
+  test('Ctrl+Shift+ArrowRight cycles to next tab', async ({ page }) => {
+    await page.locator('.chat-tab-add').click();
+    const tabs = page.locator('.chat-tab');
+    // First tab should be active
+    await expect(tabs.first()).toHaveClass(/active/);
+    await page.keyboard.press('Control+Shift+ArrowRight');
+    // Second tab should now be active
+    await expect(tabs.nth(1)).toHaveClass(/active/);
   });
 
   test('shows chat header controls', async ({ page }) => {
     await expect(page.locator('#btn-system-prompt')).toBeVisible();
     await expect(page.locator('#btn-model-params')).toBeVisible();
     await expect(page.locator('#chat-explicit-toggle-footer')).toBeVisible();
+  });
+
+  test('typing indicator element is present in DOM', async ({ page }) => {
+    // #chat-typing must exist (hidden by default; shown by setChatBusyUI)
+    await expect(page.locator('#chat-typing')).toBeAttached();
+  });
+
+  test('scroll-to-bottom button and badge are present', async ({ page }) => {
+    await expect(page.locator('#chat-scroll-bottom')).toBeAttached();
+    await expect(page.locator('#chat-scroll-badge')).toBeAttached();
   });
 });
 
@@ -45,12 +72,15 @@ test.describe('system prompt panel', () => {
     await page.getByRole('button', { name: /chat/i }).click();
   });
 
-  test('opens and closes on button click', async ({ page }) => {
-    await expect(page.locator('#chat-system-panel')).not.toBeVisible();
+  test('opens and closes via .open class (not display:none)', async ({ page }) => {
+    // Panel starts without .open — not visible
+    await expect(page.locator('#chat-system-panel')).not.toHaveClass(/open/);
     await page.locator('#btn-system-prompt').click();
+    // CSS transition: wait for panel to be visible
+    await expect(page.locator('#chat-system-panel')).toHaveClass(/open/);
     await expect(page.locator('#chat-system-panel')).toBeVisible();
     await page.locator('#btn-system-prompt').click();
-    await expect(page.locator('#chat-system-panel')).not.toBeVisible();
+    await expect(page.locator('#chat-system-panel')).not.toHaveClass(/open/);
   });
 
   test('allows editing system prompt', async ({ page }) => {
@@ -143,17 +173,167 @@ test.describe('model params panel', () => {
     await page.getByRole('button', { name: /chat/i }).click();
   });
 
-  test('opens and closes on button click', async ({ page }) => {
-    await expect(page.locator('#chat-params-panel')).not.toBeVisible();
+  test('opens and closes via .open class', async ({ page }) => {
+    await expect(page.locator('#chat-params-panel')).not.toHaveClass(/open/);
     await page.locator('#btn-model-params').click();
+    await expect(page.locator('#chat-params-panel')).toHaveClass(/open/);
     await expect(page.locator('#chat-params-panel')).toBeVisible();
     await page.locator('#btn-model-params').click();
-    await expect(page.locator('#chat-params-panel')).not.toBeVisible();
+    await expect(page.locator('#chat-params-panel')).not.toHaveClass(/open/);
   });
 
   test('shows temperature and top_p controls', async ({ page }) => {
     await page.locator('#btn-model-params').click();
     await expect(page.locator('#param-temperature')).toBeVisible();
     await expect(page.locator('#param-top-p')).toBeVisible();
+  });
+
+  test('dirty indicator activates on non-default temperature', async ({ page }) => {
+    await page.locator('#btn-model-params').click();
+    // Default temperature is 0.7 — button should not have dirty indicator
+    await expect(page.locator('#btn-model-params')).not.toHaveClass(/has-active-params/);
+    // Set a non-default value
+    await page.locator('#param-temperature').fill('0.4');
+    await page.locator('#param-temperature').dispatchEvent('input');
+    await expect(page.locator('#btn-model-params')).toHaveClass(/has-active-params/);
+  });
+});
+
+test.describe('token count display', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.top-nav-bar');
+    await page.evaluate(() => switchView('monitor'));
+    await page.getByRole('button', { name: /chat/i }).click();
+  });
+
+  test('shows token estimate after typing', async ({ page }) => {
+    await page.locator('#chat-input').fill('Hello world');
+    const count = page.locator('#chat-char-count');
+    await expect(count).toBeVisible();
+    // Should show ~N tok format, not raw char count
+    await expect(count).toContainText('tok');
+  });
+
+  test('count is empty when input is cleared', async ({ page }) => {
+    await page.locator('#chat-input').fill('some text');
+    await page.locator('#chat-input').fill('');
+    await page.locator('#chat-input').dispatchEvent('input');
+    const count = page.locator('#chat-char-count');
+    const text = await count.textContent();
+    expect(text?.trim()).toBe('');
+  });
+});
+
+test.describe('chat history pagination', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.top-nav-bar');
+    await page.evaluate(() => switchView('monitor'));
+    await page.getByRole('button', { name: /chat/i }).click();
+  });
+
+  test('load more button appears when messages exceed visible limit', async ({ page }) => {
+    await page.evaluate(() => {
+      const t = activeChatTab();
+      if (!t) return;
+      t.visible_message_limit = 2;
+      t.messages = Array.from({ length: 6 }, (_, i) => ({
+        role: i % 2 === 0 ? 'user' : 'assistant',
+        content: `Message ${i + 1}`,
+        timestamp_ms: Date.now() - (6 - i) * 10000,
+      }));
+      renderChatMessages();
+    });
+    await expect(page.locator('.chat-load-more')).toBeVisible();
+  });
+
+  test('load more button is absent when all messages fit', async ({ page }) => {
+    await page.evaluate(() => {
+      const t = activeChatTab();
+      if (!t) return;
+      t.visible_message_limit = 15;
+      t.messages = [
+        { role: 'user', content: 'Hi', timestamp_ms: Date.now() - 5000 },
+        { role: 'assistant', content: 'Hello!', timestamp_ms: Date.now() - 3000 },
+      ];
+      renderChatMessages();
+    });
+    await expect(page.locator('.chat-load-more')).not.toBeAttached();
+  });
+
+  test('clicking load more expands visible messages', async ({ page }) => {
+    await page.evaluate(() => {
+      const t = activeChatTab();
+      if (!t) return;
+      t.visible_message_limit = 2;
+      t.messages = Array.from({ length: 6 }, (_, i) => ({
+        role: i % 2 === 0 ? 'user' : 'assistant',
+        content: `Message ${i + 1}`,
+        timestamp_ms: Date.now() - (6 - i) * 10000,
+      }));
+      renderChatMessages();
+    });
+    const beforeCount = await page.locator('.chat-message').count();
+    await page.locator('.chat-load-more').click();
+    const afterCount = await page.locator('.chat-message').count();
+    expect(afterCount).toBeGreaterThan(beforeCount);
+  });
+});
+
+test.describe('app update UI', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.top-nav-bar');
+  });
+
+  test('update pill is present but hidden by default', async ({ page }) => {
+    await expect(page.locator('#update-pill')).toBeAttached();
+    await expect(page.locator('#update-pill')).not.toBeVisible();
+  });
+
+  test('app version is displayed in sidebar', async ({ page }) => {
+    await expect(page.locator('#app-version')).toBeAttached();
+    const version = await page.locator('#app-version').textContent();
+    // Should be non-empty (e.g. "v0.10.2")
+    expect(version?.trim().length).toBeGreaterThan(0);
+  });
+
+  test('release notes panel is present but off-screen', async ({ page }) => {
+    await expect(page.locator('#release-notes-panel')).toBeAttached();
+    await expect(page.locator('#release-notes-panel')).not.toHaveClass(/open/);
+  });
+
+  test('showUpdatePill makes pill visible', async ({ page }) => {
+    await page.evaluate(() => {
+      // Clear any dismissal state
+      localStorage.removeItem('update-dismissed');
+      showUpdatePill({ tag_name: 'v99.0.0', html_url: '#', body: 'Test release', assets: [] });
+    });
+    await expect(page.locator('#update-pill')).toBeVisible();
+    await expect(page.locator('#update-pill-text')).toContainText('v99.0.0');
+  });
+
+  test('opening release notes panel shows version diff', async ({ page }) => {
+    await page.evaluate(() => {
+      localStorage.removeItem('update-dismissed');
+      showUpdatePill({ tag_name: 'v99.0.0', html_url: '#', body: '## What is new\nGreat things.', assets: [] });
+    });
+    await page.locator('#update-pill').click();
+    await expect(page.locator('#release-notes-panel')).toHaveClass(/open/);
+    await expect(page.locator('#release-notes-title')).toContainText('v99.0.0');
+    await expect(page.locator('#release-notes-version-from')).toContainText('from v');
+  });
+
+  test('dismiss hides pill and closes panel', async ({ page }) => {
+    await page.evaluate(() => {
+      localStorage.removeItem('update-dismissed');
+      showUpdatePill({ tag_name: 'v99.0.0', html_url: '#', body: '', assets: [] });
+    });
+    await page.locator('#update-pill').click();
+    await expect(page.locator('#release-notes-panel')).toHaveClass(/open/);
+    await page.locator('button[onclick="dismissUpdate()"]').click();
+    await expect(page.locator('#update-pill')).not.toBeVisible();
+    await expect(page.locator('#release-notes-panel')).not.toHaveClass(/open/);
   });
 });
