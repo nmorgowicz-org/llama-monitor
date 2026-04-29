@@ -1068,16 +1068,28 @@ Add CSS for the load-more button:
 
 ---
 
-## Summary of Priority Order
+## Implementation Status
 
-| Priority | Fix | Effort |
-|---|---|---|
-| 1 | Wire `#chat-typing` to `setChatBusyUI` | 5 min |
-| 2 | Fix `chatScroll()` force-scroll | 5 min |
-| 3 | Panel open/close animation (class-based) | 10 min |
-| 4 | Char count → token count with color warning | 10 min |
-| 5 | Token metadata symbol tooltips | 5 min |
-| 6 | Textarea height transition + layout thrash fix | 15 min |
+| # | Fix | Status | Notes |
+|---|---|---|---|
+| 1 | Wire `#chat-typing` to `setChatBusyUI` | ✅ Done | Removed inline-dot injection |
+| 2 | Fix `chatScroll()` force-scroll | ✅ Done | Smart scroll with `distFromBottom < 80` |
+| 3 | Panel open/close animation (class-based) | ✅ Done | `.open` class replaces `display:none` |
+| 4 | Char count → token count with color warning | ✅ Done | Warning at 800+, error at 1500+ |
+| 5 | Token metadata symbol tooltips | ✅ Done | Added `title` to meta elements |
+| 6 | Textarea height transition + layout thrash fix | ✅ Done | `requestAnimationFrame` prevents jank |
+| 7 | Syntax highlighting (highlight.js) | ✅ Done | `renderMdStreaming()` skips hljs; highlighting applied in `finalizeAssistantMessage()` |
+| 8 | Per-code-block copy button | ✅ Done | DOM decoration in `finalizeAssistantMessage()` |
+| 9 | Suggested prompts layout + stagger animation | ✅ Done | 2-column grid, stagger animation, hover accent |
+| 10 | Mobile header collapse | ✅ Done | `@media (max-width: 768px)` hides name/font controls |
+| 11 | Tab bar overflow mask + keyboard shortcuts | ✅ Done | CSS mask + Ctrl+1-9 / Ctrl+Shift+Arrow |
+| 12 | Empty state personalization + icon float | ✅ Done | Uses `ai_name` + `model_name`; float animation added |
+| 13 | Send button spinner | ✅ Done | Icon swap in `setChatBusyUI()` |
+| 14 | Model params dirty indicator | ✅ Done | `.has-active-params` class + dot indicator |
+| 15 | Code block header (lang + lines + copy) | ✅ Done | Full header with lang, lines, copy |
+| 16 | Nord color palette alignment | ✅ Done | Blockquotes, avatars, streaming border updated |
+| 17 | Streaming border pulse + scroll badge + wow extras | ✅ Done | Pulse animation, unread badge, hover-reveal timestamps |
+| 18 | Chat history pagination | ✅ Done | `visible_message_limit`, "Load More" button, settings control |
 | 7 | Syntax highlighting (highlight.js) | 20 min |
 | 8 | Per-code-block copy button | 20 min |
 | 9 | Suggested prompts layout + stagger animation | 15 min |

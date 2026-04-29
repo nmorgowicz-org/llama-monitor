@@ -23,6 +23,8 @@
     <link rel="stylesheet" href="/css/settings-modal.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
     <script>const APP_VERSION = '{{ VERSION }}';</script>
 </head>
 <body>
@@ -673,7 +675,7 @@
             </div>
 
             <!-- System prompt panel -->
-            <div class="chat-system-panel" id="chat-system-panel" style="display:none;">
+            <div class="chat-system-panel" id="chat-system-panel">
                 <div class="chat-system-header">
                     <label class="chat-system-label">System Prompt</label>
                     <div class="chat-system-actions">
@@ -704,10 +706,16 @@
                     </div>
                 </div>
                 <textarea id="chat-system-input" rows="3" placeholder="You are a helpful assistant…" oninput="onSystemPromptChange()"></textarea>
+                <label class="modal-field">
+                    Visible message limit
+                    <input type="number" id="chat-msg-limit" min="5" max="200" step="5"
+                           value="15" oninput="onMessageLimitChange(+this.value)">
+                    <span class="modal-help">Show only the most recent N messages. Older messages are hidden to improve performance.</span>
+                </label>
             </div>
 
             <!-- Model params panel -->
-            <div class="chat-params-panel" id="chat-params-panel" style="display:none;">
+            <div class="chat-params-panel" id="chat-params-panel">
                 <div class="chat-params-header">
                     <span class="chat-params-title">Response Settings</span>
                     <div class="chat-params-actions">
@@ -808,7 +816,7 @@
                 </div>
                 <div class="chat-textarea-wrap">
                     <textarea id="chat-input" rows="1" placeholder="Send a message…" oninput="autoResizeChatInput()"></textarea>
-                    <span class="chat-char-count" id="chat-char-count"></span>
+                    <span class="chat-char-count" id="chat-char-count" title="Approximate token count (chars ÷ 4)"></span>
                 </div>
                 <label class="chat-enter-toggle" data-tooltip="Enter sends message" title="Toggle: Enter sends message">
                     <input type="checkbox" id="chat-enter-toggle-input" onchange="onEnterToggleChange(this.checked)">
@@ -2091,8 +2099,9 @@
 
 <div class="toast-container" id="toast-container"></div>
 
-<button class="chat-scroll-bottom" id="chat-scroll-bottom" onclick="chatScroll()" title="Scroll to bottom">
+<button class="chat-scroll-bottom" id="chat-scroll-bottom" onclick="chatScroll(true)" title="Scroll to bottom">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+    <span class="chat-scroll-badge" id="chat-scroll-badge" style="display:none;"></span>
 </button>
 
     <script src="/app.js?v=20240428"></script>

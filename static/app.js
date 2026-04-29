@@ -6110,6 +6110,26 @@ if (typeof marked !== 'undefined') {
 
     marked.setOptions({ breaks: true, gfm: true });
 
+    if (typeof hljs !== 'undefined') {
+
+        const renderer = new marked.Renderer();
+
+        renderer.code = (code, lang) => {
+
+            const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+
+            const highlighted = hljs.highlight(code, { language }).value;
+
+            const langLabel = lang ? `<span class="chat-code-lang">${escapeHtml(lang)}</span>` : '';
+
+            return `<div class="chat-code-block"><pre>${langLabel}<code class="hljs language-${language}">${highlighted}</code></pre></div>`;
+
+        };
+
+        marked.setOptions({ breaks: true, gfm: true, renderer });
+
+    }
+
 }
 
 function renderMd(src) {
@@ -6117,6 +6137,18 @@ function renderMd(src) {
     if (typeof marked !== 'undefined') {
 
         try { return marked.parse(src); } catch(_) {}
+
+    }
+
+    return src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>');
+
+}
+
+function renderMdStreaming(src) {
+
+    if (typeof marked !== 'undefined') {
+
+        try { return marked.parse(src, { gfm: true, breaks: true }); } catch(_) {}
 
     }
 
@@ -6133,6 +6165,7 @@ const CHAT_TABS_PERSIST_DEBOUNCE_MS = 500;
 let chatTabs = [];
 let activeChatTabId = null;
 let chatBusy = false;
+let unreadChatCount = 0;
 let chatAbortController = null;
 let chatPersistTimer = null;
 
@@ -6160,6 +6193,8 @@ async function initChatTabs() {
     loadChatNames();
     populateTemplatesDropdown();
     updateExplicitToggleUI();
+    updateParamsDirtyIndicator();
+    syncMessageLimitInput();
 
     // Show welcome tip on first visit
     if (!localStorage.getItem('llama-monitor-chat-welcomed')) {
@@ -6294,6 +6329,7 @@ function switchChatTab(id) {
     renderChatMessages();
     loadChatNames();
     updateExplicitToggleUI();
+    syncMessageLimitInput();
 }
 
 function loadChatNames() {
@@ -6302,6 +6338,12 @@ function loadChatNames() {
     const userInput = document.getElementById('chat-user-name');
     if (tab && aiInput) aiInput.value = tab.ai_name || '';
     if (tab && userInput) userInput.value = tab.user_name || '';
+}
+
+function syncMessageLimitInput() {
+    const tab = activeChatTab();
+    const input = document.getElementById('chat-msg-limit');
+    if (tab && input) input.value = tab.visible_message_limit || 15;
 }
 
 function renameChatTab(id, newName) {
@@ -6333,19 +6375,40 @@ function stopChat() {
 }
 
 function setChatBusyUI(busy) {
-    document.getElementById('btn-send').disabled = busy;
+    const sendBtn = document.getElementById('btn-send');
+    sendBtn.disabled = busy;
+    sendBtn.innerHTML = busy
+        ? `<svg class="chat-send-spinner" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+             <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+           </svg>`
+        : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+             <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+           </svg>`;
+
     const stopBtn = document.getElementById('btn-stop');
     if (stopBtn) stopBtn.style.display = busy ? 'flex' : 'none';
 
     const input = document.getElementById('chat-input');
     if (input) input.disabled = busy;
+
+    const typing = document.getElementById('chat-typing');
+    if (typing) typing.style.display = busy ? 'flex' : 'none';
 }
 
 
 
-function chatScroll() {
+function chatScroll(force = false) {
     const c = document.getElementById('chat-messages');
-    c.scrollTop = c.scrollHeight;
+    if (!c) return;
+    const distFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
+    if (force || distFromBottom < 80) {
+        c.scrollTop = c.scrollHeight;
+    }
+    if (force) {
+        unreadChatCount = 0;
+        const badge = document.getElementById('chat-scroll-badge');
+        if (badge) badge.style.display = 'none';
+    }
 }
 
 function initChatScrollButton() {
@@ -6363,6 +6426,20 @@ function initChatScrollButton() {
     requestAnimationFrame(() => requestAnimationFrame(checkScroll));
 }
 
+function incrementUnreadCount() {
+    const container = document.getElementById('chat-messages');
+    if (!container) return;
+    const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distFromBottom > 80) {
+        unreadChatCount++;
+        const badge = document.getElementById('chat-scroll-badge');
+        if (badge) {
+            badge.textContent = unreadChatCount;
+            badge.style.display = 'flex';
+        }
+    }
+}
+
 function renderChatTabs() {
     const bar = document.getElementById('chat-tab-bar');
     const addBtn = bar.querySelector('.chat-tab-add');
@@ -6370,8 +6447,13 @@ function renderChatTabs() {
 
     for (const tab of chatTabs) {
         const el = document.createElement('div');
-        el.className = 'chat-tab' + (tab.id === activeChatTabId ? ' active' : '');
+        const msgCount = tab.messages.filter(m => m.role !== 'system').length;
+        let extraClasses = '';
+        if (msgCount > 50) extraClasses = ' tab-hot';
+        else if (msgCount > 20) extraClasses = ' tab-warm';
+        el.className = 'chat-tab' + (tab.id === activeChatTabId ? ' active' : '') + extraClasses;
         el.dataset.tabId = tab.id;
+        el.dataset.msgCount = msgCount;
         el.innerHTML = `
           <span class="chat-tab-name" ondblclick="startRenameTab('${tab.id}')">${escapeHtml(tab.name)}</span>
           <span class="chat-tab-count">${tab.messages.filter(m => m.role !== 'system').length || ''}</span>
@@ -6386,6 +6468,13 @@ function renderChatTabs() {
         });
         bar.insertBefore(el, addBtn);
     }
+    updateTabBarOverflowMask();
+}
+
+function updateTabBarOverflowMask() {
+    const bar = document.getElementById('chat-tab-bar');
+    if (!bar) return;
+    bar.classList.toggle('no-overflow', bar.scrollWidth <= bar.clientWidth);
 }
 
 function renderChatMessages() {
@@ -6399,11 +6488,17 @@ function renderChatMessages() {
             { icon: '🔍', text: 'Compare the pros and cons of...', label: 'Analyze something' },
             { icon: '🎨', text: 'Give me creative ideas for...', label: 'Brainstorm' },
         ];
-        const promptCards = prompts.map(p => `
-            <button class="chat-empty-prompt" onclick="sendSuggestedPrompt('${escapeHtml(p.text)}')">
+        const promptCards = prompts.map((p, i) => `
+            <button class="chat-empty-prompt" style="animation-delay:${i * 60}ms"
+                    onclick="sendSuggestedPrompt('${escapeHtml(p.text)}')">
                 <span class="chat-empty-prompt-icon">${p.icon}</span>
                 <span class="chat-empty-prompt-text">${p.text}</span>
             </button>`).join('');
+
+        const aiName = tab?.ai_name || 'Assistant';
+        const modelName = lastLlamaMetrics?.model_name
+            ? ` (${lastLlamaMetrics.model_name.split('/').pop().replace(/\.gguf$/i, '')})`
+            : '';
 
         container.innerHTML = `
           <div class="chat-empty">
@@ -6413,21 +6508,64 @@ function renderChatMessages() {
                 <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
               </svg>
             </div>
-            <p class="chat-empty-title">How can I help you today?</p>
+            <p class="chat-empty-title">${escapeHtml(aiName)}${escapeHtml(modelName)} is ready</p>
             <p class="chat-empty-hint">Ask anything, or try a suggestion below</p>
             <div class="chat-empty-prompts">${promptCards}</div>
           </div>`;
         return;
     }
 
+    const allMessages = tab.messages.filter(m => m.role !== 'system');
+    const limit = tab.visible_message_limit || 15;
+    const isPaginated = allMessages.length > limit;
+    const visibleMessages = isPaginated ? allMessages.slice(-limit) : allMessages;
+
     container.innerHTML = '';
+
+    // Add "Load More" button if paginated
+    if (isPaginated) {
+        const loadMoreBtn = document.createElement('button');
+        loadMoreBtn.className = 'chat-load-more';
+        const olderCount = allMessages.length - limit;
+        loadMoreBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 5v14M5 12l7 7 7-7"/>
+            </svg>
+            Load ${Math.min(limit, olderCount)} older messages
+        `;
+        loadMoreBtn.onclick = () => loadMoreMessages(tab, limit);
+        container.appendChild(loadMoreBtn);
+    }
+
     let idx = 0;
-    for (const msg of tab.messages) {
-        if (msg.role === 'system') continue;
+    for (const msg of visibleMessages) {
         container.appendChild(buildMessageElement(msg, idx, tab.messages));
         idx++;
     }
-    chatScroll();
+    chatScroll(true);
+}
+
+/**
+ * Load more messages when pagination is active.
+ * Doubles the visible limit each time, up to total message count.
+ */
+function loadMoreMessages(tab, currentLimit) {
+    const allMessages = tab.messages.filter(m => m.role !== 'system');
+    tab.visible_message_limit = Math.min(currentLimit * 2, allMessages.length);
+    renderChatMessages();
+    // Stay at top (where load-more button was)
+    const container = document.getElementById('chat-messages');
+    if (container) container.scrollTop = 0;
+}
+
+function onMessageLimitChange(value) {
+    const tab = activeChatTab();
+    if (!tab) return;
+    const limit = Math.max(5, Math.min(200, value));
+    tab.visible_message_limit = limit;
+    tab.updated_at = Date.now();
+    renderChatMessages();
+    scheduleChatPersist();
 }
 
 function buildMessageElement(msg, idx, allMessages) {
@@ -6465,14 +6603,14 @@ function buildMessageElement(msg, idx, allMessages) {
         const modelName = msg.model_name || lastLlamaMetrics?.model_name || '';
         if (modelName) parts.push(modelName);
         if (parts.length > 0) {
-            metaHtml = `<span class="chat-msg-meta-sep">·</span><span class="chat-msg-meta-model">${parts.join(' · ')}</span>`;
+            metaHtml = `<span class="chat-msg-meta-sep">·</span><span class="chat-msg-meta-model" title="↓ = prompt tokens in · ↑ = tokens generated · R = running total · ctx = % of context window used">${parts.join(' · ')}</span>`;
         }
     }
 
     wrapper.innerHTML = `
       <div class="chat-avatar">${isUser ? userLabel : aiLabel}</div>
       <div class="chat-bubble">
-        <div class="chat-msg-body">${isUser ? escapeHtml(msg.content) : renderMd(msg.content)}</div>
+        <div class="chat-msg-body">${isUser ? escapeHtml(msg.content).replace(/\n/g, '<br>') : renderMd(msg.content)}</div>
         <div class="chat-msg-footer">
           <span class="chat-msg-time">${ts}</span>
           ${metaHtml}
@@ -6520,7 +6658,7 @@ function appendAssistantPlaceholder() {
         </div>
       </div>`;
     container.appendChild(wrapper);
-    chatScroll();
+    chatScroll(true);
     return wrapper;
 }
 
@@ -6544,6 +6682,47 @@ function finalizeAssistantMessage(el, content, usage, tab) {
     const body = el.querySelector('.chat-msg-body');
     if (content) {
         body.innerHTML = renderMd(content);
+        if (typeof hljs !== 'undefined') {
+            body.querySelectorAll('pre code:not(.hljs)').forEach(codeEl => {
+                hljs.highlightElement(codeEl);
+            });
+        }
+        body.querySelectorAll('pre').forEach(pre => {
+            if (pre.parentElement?.classList.contains('chat-code-block')) return;
+            const code = pre.querySelector('code');
+            const lang = (code?.className.match(/language-(\w+)/) || [])[1] || '';
+            const lineCount = (code?.innerText.match(/\n/g) || []).length + 1;
+
+            const wrapper = document.createElement('div');
+            wrapper.className = 'chat-code-block';
+
+            const header = document.createElement('div');
+            header.className = 'chat-code-header';
+            header.innerHTML = `
+                <span class="chat-code-lang">${lang || 'code'}</span>
+                <span class="chat-code-lines">${lineCount} line${lineCount !== 1 ? 's' : ''}</span>
+                <button class="chat-code-copy-btn" title="Copy code">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                  </svg>
+                  Copy
+                </button>`;
+
+            header.querySelector('.chat-code-copy-btn').addEventListener('click', function() {
+                navigator.clipboard.writeText(code?.innerText ?? pre.innerText).then(() => {
+                    this.classList.add('copied');
+                    this.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg> Copied';
+                    setTimeout(() => {
+                        this.classList.remove('copied');
+                        this.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg> Copy';
+                    }, 1500);
+                });
+            });
+
+            pre.parentElement.insertBefore(wrapper, pre);
+            wrapper.appendChild(header);
+            wrapper.appendChild(pre);
+        });
     }
     const time = el.querySelector('.chat-msg-time');
     if (time) {
@@ -6591,6 +6770,7 @@ function finalizeAssistantMessage(el, content, usage, tab) {
         const metaModel = footer.querySelector('.chat-msg-meta-model');
         const metaSep = footer.querySelector('.chat-msg-meta-sep');
         if (metaModel) {
+            metaModel.title = '↓ = prompt tokens in · ↑ = tokens generated · R = running total · ctx = % of context window used';
             metaModel.textContent = parts.join(' · ');
         }
         if (metaSep) metaSep.style.display = parts.length > 0 ? 'inline' : 'none';
@@ -6647,7 +6827,6 @@ async function sendChat() {
     let thinkEl = null;
     let thinkContent = '';
     const msgEl = appendAssistantPlaceholder();
-    msgEl.querySelector('.chat-msg-body').innerHTML = '<span class="chat-thinking-inline"><span class="chat-thinking-inline-dot"></span><span class="chat-thinking-inline-dot"></span><span class="chat-thinking-inline-dot"></span></span>';
     let msgContent = '';
     let tokenUsage = null;
 
@@ -6720,7 +6899,8 @@ async function sendChat() {
                     const c = delta.content ?? '';
                     if (c) {
                         msgContent += c;
-                        msgEl.querySelector('.chat-msg-body').innerHTML = renderMd(msgContent);
+                        msgEl.querySelector('.chat-msg-body').innerHTML = renderMdStreaming(msgContent);
+                        incrementUnreadCount();
                     }
                 } catch { /* malformed chunk — skip */ }
             }
@@ -7187,9 +7367,8 @@ function clearExplicitPolicy() {
 
 function toggleSystemPromptPanel() {
     const panel = document.getElementById('chat-system-panel');
-    const visible = panel.style.display !== 'none';
-    panel.style.display = visible ? 'none' : 'block';
-    if (!visible) {
+    const isOpen = panel.classList.toggle('open');
+    if (isOpen) {
         const tab = activeChatTab();
         document.getElementById('chat-system-input').value = tab?.system_prompt ?? '';
     }
@@ -7209,9 +7388,8 @@ function onSystemPromptChange() {
 
 function toggleModelParamsPanel() {
     const panel = document.getElementById('chat-params-panel');
-    const visible = panel.style.display !== 'none';
-    panel.style.display = visible ? 'none' : 'block';
-    if (!visible) syncParamPanelToTab();
+    const isOpen = panel.classList.toggle('open');
+    if (isOpen) syncParamPanelToTab();
 }
 
 function syncParamPanelToTab() {
@@ -7253,6 +7431,7 @@ function onParamChange(key, value) {
     scheduleChatPersist();
     clearTimeout(paramToastTimer);
     paramToastTimer = setTimeout(() => showToast('Parameter saved', 'success'), 2000);
+    updateParamsDirtyIndicator();
 }
 
 function toggleAdvancedParams() {
@@ -7279,7 +7458,19 @@ function resetParamsToDefaults() {
     tab.updated_at = Date.now();
     syncParamPanelToTab();
     scheduleChatPersist();
+    updateParamsDirtyIndicator();
     showToast('Parameters reset to defaults', 'success');
+}
+
+function updateParamsDirtyIndicator() {
+    const tab = activeChatTab();
+    if (!tab) return;
+    const p = tab.model_params;
+    const isDirty = p.temperature !== 0.7 || p.top_p !== 0.9
+        || p.top_k !== 40 || p.min_p !== 0.01
+        || p.repeat_penalty !== 1.0 || (p.max_tokens && p.max_tokens !== 0);
+    const btn = document.getElementById('btn-model-params');
+    if (btn) btn.classList.toggle('has-active-params', isDirty);
 }
 
 function duplicateTabSettings(sourceId) {
@@ -7291,6 +7482,7 @@ function duplicateTabSettings(sourceId) {
     target.updated_at = Date.now();
     scheduleChatPersist();
     syncParamPanelToTab();
+    updateParamsDirtyIndicator();
     const indicator = document.getElementById('system-prompt-indicator');
     indicator.style.display = target.system_prompt ? 'inline' : 'none';
     document.getElementById('chat-system-input').value = target.system_prompt;
@@ -7350,13 +7542,32 @@ function updateChatTabBadge() {
 function autoResizeChatInput() {
     const ta = document.getElementById('chat-input');
     if (!ta) return;
+    ta.style.transition = 'none';
     ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
+    const newH = Math.min(ta.scrollHeight, 200);
+    requestAnimationFrame(() => {
+        ta.style.transition = '';
+        ta.style.height = newH + 'px';
+    });
     const countEl = document.getElementById('chat-char-count');
     if (countEl) {
         const len = ta.value.length;
-        countEl.textContent = len > 0 ? `${len} chars` : '';
-        countEl.style.opacity = len > 0 ? '1' : '0';
+        const approxTokens = Math.round(len / 4);
+        if (len === 0) {
+            countEl.textContent = '';
+            countEl.style.opacity = '0';
+            countEl.style.color = '';
+        } else {
+            countEl.textContent = approxTokens >= 1000
+                ? `~${(approxTokens / 1000).toFixed(1)}k tok`
+                : `~${approxTokens} tok`;
+            countEl.style.opacity = '1';
+            countEl.style.color = approxTokens > 1500
+                ? 'var(--color-error)'
+                : approxTokens > 800
+                    ? 'var(--color-warning)'
+                    : '';
+        }
     }
 }
 
@@ -8341,6 +8552,7 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initEnterToggle);
     document.addEventListener('DOMContentLoaded', initChatStyle);
     document.addEventListener('DOMContentLoaded', applyChatFontSize);
+    document.addEventListener('DOMContentLoaded', initChatKeyboardShortcuts);
 } else {
     initAppVersion();
     checkForUpdate();
@@ -8352,4 +8564,31 @@ if (document.readyState === 'loading') {
     initEnterToggle();
     initChatStyle();
     applyChatFontSize();
+    initChatKeyboardShortcuts();
+}
+
+function initChatKeyboardShortcuts() {
+    document.addEventListener('keydown', e => {
+        if (!document.getElementById('page-chat')?.classList.contains('active')) return;
+        if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9') {
+            e.preventDefault();
+            const idx = parseInt(e.key) - 1;
+            if (chatTabs[idx]) switchChatTab(chatTabs[idx].id);
+        }
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'ArrowRight') {
+            e.preventDefault();
+            const idx = chatTabs.findIndex(t => t.id === activeChatTabId);
+            const next = chatTabs[(idx + 1) % chatTabs.length];
+            if (next) switchChatTab(next.id);
+        }
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'ArrowLeft') {
+            e.preventDefault();
+            const idx = chatTabs.findIndex(t => t.id === activeChatTabId);
+            const prev = chatTabs[(idx - 1 + chatTabs.length) % chatTabs.length];
+            if (prev) switchChatTab(prev.id);
+        }
+    });
+    window.addEventListener('resize', () => {
+        updateTabBarOverflowMask();
+    });
 }
