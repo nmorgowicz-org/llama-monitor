@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.9.4...v0.10.0) (2026-04-29)
+
+
+### Features
+
+* **chat:** overhaul UX with labels, suggested prompts, safe defaults, and advanced toggle ([#117](https://github.com/nmorgowicz-org/llama-monitor/issues/117)) ([07a4d63](https://github.com/nmorgowicz-org/llama-monitor/commit/07a4d6340010b6fb69dfa905d283fb54844b05f1))
+
 ## [0.9.4](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.9.3...v0.9.4) (2026-04-28)
 
 
