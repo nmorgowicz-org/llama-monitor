@@ -138,6 +138,12 @@ pub struct ReleaseAssetInfo {
 pub struct LatestReleaseInfo {
     pub tag_name: String,
     pub name: Option<String>,
+    #[serde(default)]
+    pub html_url: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub published_at: Option<String>,
     pub assets: Vec<ReleaseAssetInfo>,
 }
 
@@ -175,6 +181,12 @@ pub struct RemoteAgentDetectResponse {
 struct GithubRelease {
     tag_name: String,
     name: Option<String>,
+    #[serde(default)]
+    html_url: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    published_at: Option<String>,
     assets: Vec<GithubAsset>,
 }
 
@@ -409,6 +421,9 @@ pub async fn latest_release_info() -> Result<LatestReleaseInfo> {
     let release_info = LatestReleaseInfo {
         tag_name: release.tag_name,
         name: release.name,
+        html_url: release.html_url,
+        body: release.body,
+        published_at: release.published_at,
         assets: release
             .assets
             .into_iter()

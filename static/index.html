@@ -23,6 +23,7 @@
     <link rel="stylesheet" href="/css/settings-modal.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>const APP_VERSION = '{{ VERSION }}';</script>
 </head>
 <body>
       <div class="endpoint-health-strip" aria-label="Active endpoint status.">
@@ -95,6 +96,12 @@
                 </div>
             </div>
             <button id="settings-btn" class="nav-btn" onclick="openSettingsModal()" title="Settings">⚙️ Settings</button>
+            <button id="update-pill" class="top-nav-pill" style="display:none;" onclick="openReleaseNotes()">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/>
+                </svg>
+                <span id="update-pill-text"></span>
+            </button>
             <div class="nav-user" id="user-menu">
                 <button class="nav-user-btn" onclick="toggleUserMenu(event)">👤 User</button>
                 <div class="nav-user-menu">
@@ -138,6 +145,7 @@
         <button class="sidebar-collapse-btn" onclick="toggleSidebarCollapse()" title="Collapse sidebar">
             <span class="sidebar-collapse-icon">◀</span>
         </button>
+        <span class="nav-version" id="app-version"></span>
     </div>
 
     <main class="content-area">
@@ -2088,5 +2096,19 @@
 </button>
 
     <script src="/app.js?v=20240428"></script>
+<!-- Release Notes Panel -->
+<div id="release-notes-overlay" class="modal-overlay" style="z-index:1399;" onclick="closeReleaseNotes()"></div>
+<div id="release-notes-panel" class="slide-panel">
+    <div class="slide-panel-header">
+        <h3 id="release-notes-title"></h3>
+        <button type="button" class="modal-close" onclick="closeReleaseNotes()" aria-label="Close">&times;</button>
+    </div>
+    <div class="slide-panel-body" id="release-notes-body"></div>
+    <div class="slide-panel-footer">
+        <a id="release-notes-link" href="#" target="_blank">Open on GitHub ↗</a>
+        <button type="button" class="btn-sm btn-preset" onclick="dismissUpdate()">Dismiss</button>
+    </div>
+</div>
+
 </body>
 </html>

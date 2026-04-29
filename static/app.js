@@ -8200,8 +8200,139 @@ function initChatInputHandler() {
     });
 }
 
+// ── App Version & Update Check ─────────────────────────────────────────────
+
+/**
+ * Display the app version in the nav footer.
+ */
+function initAppVersion() {
+    const el = document.getElementById('app-version');
+    if (el && typeof APP_VERSION !== 'undefined') {
+        el.textContent = `v${APP_VERSION}`;
+    }
+}
+
+/**
+ * Compare two semver strings. Returns -1, 0, or 1.
+ * Handles 'v' prefix.
+ */
+function compareVersions(a, b) {
+    const parse = s => s.replace(/^v/, '').split('.').map(Number);
+    const [x, y] = [parse(a), parse(b)];
+    for (let i = 0; i < Math.max(x.length, y.length); i++) {
+        const a = x[i] || 0;
+        const b = y[i] || 0;
+        if (a > b) return 1;
+        if (a < b) return -1;
+    }
+    return 0;
+}
+
+/**
+ * Check for updates on app load.
+ */
+async function checkForUpdate() {
+    try {
+        const resp = await fetch('/api/remote-agent/releases/latest');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const latest = data.release || data; // Handle wrapped or direct response
+        if (typeof APP_VERSION === 'undefined') return;
+
+        const current = APP_VERSION.replace(/^v/, '');
+        const available = latest.tag_name.replace(/^v/, '');
+
+        if (compareVersions(available, current) > 0) {
+            showUpdatePill(latest);
+        }
+    } catch (e) {
+        console.debug('Update check failed:', e.message);
+    }
+}
+
+/**
+ * Show the update pill if not dismissed.
+ */
+function showUpdatePill(release) {
+    const dismissed = JSON.parse(localStorage.getItem('update-dismissed') || '{}');
+    if (dismissed[release.tag_name] && Date.now() - dismissed[release.tag_name] < 86400000) {
+        return; // Dismissed within last 24 hours
+    }
+
+    const pill = document.getElementById('update-pill');
+    const text = document.getElementById('update-pill-text');
+    if (pill && text) {
+        text.textContent = `${release.tag_name} available`;
+        pill.style.display = 'flex';
+        pill.dataset.release = JSON.stringify(release);
+    }
+}
+
+/**
+ * Open the release notes panel.
+ */
+function openReleaseNotes() {
+    const pill = document.getElementById('update-pill');
+    const release = JSON.parse(pill?.dataset.release || '{}');
+    if (!release.tag_name) return;
+
+    const panel = document.getElementById('release-notes-panel');
+    const overlay = document.getElementById('release-notes-overlay');
+    const title = document.getElementById('release-notes-title');
+    const body = document.getElementById('release-notes-body');
+    const link = document.getElementById('release-notes-link');
+
+    title.textContent = release.tag_name;
+    link.href = release.html_url || '#';
+    link.onclick = (e) => {
+        if (!release.html_url) e.preventDefault();
+    };
+
+    // Render release body as Markdown
+    body.innerHTML = release.body
+        ? renderMd(release.body)
+        : '<p>No release notes available.</p>';
+
+    panel.style.display = 'flex';
+    overlay.style.display = 'block';
+    // Trigger reflow before adding class for animation
+    panel.offsetHeight;
+    panel.classList.add('open');
+}
+
+/**
+ * Close the release notes panel.
+ */
+function closeReleaseNotes() {
+    const panel = document.getElementById('release-notes-panel');
+    const overlay = document.getElementById('release-notes-overlay');
+    panel.classList.remove('open');
+    setTimeout(() => {
+        panel.style.display = 'none';
+        overlay.style.display = 'none';
+    }, 300);
+}
+
+/**
+ * Dismiss the update notification.
+ */
+function dismissUpdate() {
+    const pill = document.getElementById('update-pill');
+    const release = JSON.parse(pill?.dataset.release || '{}');
+    if (!release.tag_name) return;
+
+    const dismissed = JSON.parse(localStorage.getItem('update-dismissed') || '{}');
+    dismissed[release.tag_name] = Date.now();
+    localStorage.setItem('update-dismissed', JSON.stringify(dismissed));
+
+    pill.style.display = 'none';
+    closeReleaseNotes();
+}
+
 // Call init on DOM ready
 if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAppVersion);
+    document.addEventListener('DOMContentLoaded', checkForUpdate);
     document.addEventListener('DOMContentLoaded', initViewState);
     document.addEventListener('DOMContentLoaded', initChatTabs);
     document.addEventListener('DOMContentLoaded', autoResizeChatInput);
@@ -8211,6 +8342,8 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initChatStyle);
     document.addEventListener('DOMContentLoaded', applyChatFontSize);
 } else {
+    initAppVersion();
+    checkForUpdate();
     initViewState();
     initChatTabs();
     autoResizeChatInput();
