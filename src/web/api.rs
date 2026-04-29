@@ -45,6 +45,8 @@ pub struct ChatMessage {
     pub cumulative_input_tokens: Option<u64>,
     #[serde(default, alias = "cumulativeOutputTokens")]
     pub cumulative_output_tokens: Option<u64>,
+    #[serde(default)]
+    pub compaction_marker: Option<bool>,
 }
 
 /// Model parameters for a chat tab
@@ -91,6 +93,10 @@ pub struct ChatTab {
     pub model_params: ChatModelParams,
     pub created_at: u64,
     pub updated_at: u64,
+    #[serde(default)]
+    pub auto_compact: Option<bool>,
+    #[serde(default)]
+    pub compact_threshold: Option<f32>,
 }
 
 fn chat_tabs_path() -> PathBuf {

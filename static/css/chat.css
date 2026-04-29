@@ -525,6 +525,45 @@
   align-self: flex-start;
 }
 
+/* ── Compaction Tombstone ─────────────────────────── */
+.chat-compact-marker {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  padding: 8px 0;
+}
+.compact-marker-content {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 12px;
+}
+.compact-marker-content::before,
+.compact-marker-content::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.compact-marker-text {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+/* ── Button Busy State ────────────────────────────── */
+.chat-btn-busy .chat-compact-icon {
+  animation: compact-spin 1s linear infinite;
+  transform-origin: center;
+}
+@keyframes compact-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 /* ── Chat Style Variables (default: rounded) ─────────── */
 .chat-page {
   overflow: hidden;

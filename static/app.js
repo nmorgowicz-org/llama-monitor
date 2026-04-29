@@ -6165,6 +6165,7 @@ const CHAT_TABS_PERSIST_DEBOUNCE_MS = 500;
 let chatTabs = [];
 let activeChatTabId = null;
 let chatBusy = false;
+let compactionInProgress = false;
 let unreadChatCount = 0;
 let chatAbortController = null;
 let chatPersistTimer = null;
@@ -6195,6 +6196,7 @@ async function initChatTabs() {
     updateExplicitToggleUI();
     updateParamsDirtyIndicator();
     syncMessageLimitInput();
+    syncCompactSettingsUI(activeChatTab());
 
     // Show welcome tip on first visit
     if (!localStorage.getItem('llama-monitor-chat-welcomed')) {
@@ -6232,8 +6234,8 @@ function newChatTab(name = 'New Chat') {
 function substituteNames(prompt, aiName, userName) {
     if (!prompt) return prompt;
     let p = prompt;
-    if (aiName) p = p.replace(/\{\{char\}\}/gi, aiName);
-    if (userName) p = p.replace(/\{\{user\}\}/gi, userName);
+    p = p.replace(/\{\{char\}\}/gi, aiName || 'AI');
+    p = p.replace(/\{\{user\}\}/gi, userName || 'User');
     return p;
 }
 
@@ -6322,6 +6324,149 @@ function closeChatTab(id) {
     scheduleChatPersist();
 }
 
+async function fetchSummary(messages) {
+    const transcript = messages
+        .filter(m => !m.compaction_marker)
+        .map(m => {
+            const label = m.role === 'user' ? 'User' : 'Assistant';
+            const content = m.content.length > 500 ? m.content.slice(0, 500) + ' [truncated]' : m.content;
+            return `${label}: ${content}`;
+        })
+        .join('\n\n');
+
+    const summaryMessages = [
+        { role: 'system', content: 'You are a conversation summarizer. Be concise.' },
+        {
+            role: 'user',
+            content: `${transcript}\n\nSummarize this conversation segment in 3-5 sentences, preserving key facts, decisions, and context the reader needs to continue the conversation.`,
+        },
+    ];
+
+    try {
+        const resp = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: summaryMessages, stream: true }),
+        });
+
+        if (!resp.ok) return null;
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let summary = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+
+            const lines = buf.split('\n');
+            buf = lines.pop() ?? '';
+
+            for (const line of lines) {
+                if (!line.startsWith('data:')) continue;
+                const payload = line.slice(5).trim();
+                if (payload === '[DONE]') continue;
+                try {
+                    const obj = JSON.parse(payload);
+                    const delta = obj.choices?.[0]?.delta;
+                    if (delta?.content) summary += delta.content;
+                } catch { /* skip malformed chunks */ }
+            }
+        }
+
+        return summary.trim() || null;
+    } catch {
+        return null;
+    }
+}
+
+async function compactChatTab(tab, keepTail = 10, summarize = true) {
+    const msgs = tab.messages;
+    const systemMsg = msgs[0]?.role === 'system' ? msgs[0] : null;
+    const tombstones = msgs.filter(m => m.compaction_marker);
+    const conversational = msgs.filter(m => m.role !== 'system' && !m.compaction_marker);
+
+    if (conversational.length <= keepTail) return; // nothing to do
+
+    compactionInProgress = true;
+    setCompactButtonBusy(true);
+
+    const dropped = conversational.slice(0, conversational.length - keepTail);
+    const kept = conversational.slice(-keepTail);
+
+    let tombstoneContent;
+
+    if (summarize) {
+        const summary = await fetchSummary(dropped);
+        if (summary) {
+            tombstoneContent = `[Context compacted — ${dropped.length} messages summarized]\n\n${summary}`;
+        } else {
+            tombstoneContent = `[Context compacted — server unavailable for summarization; ${dropped.length} messages dropped]`;
+        }
+    } else {
+        tombstoneContent = `[Context compacted — ${dropped.length} messages removed to free context space.]`;
+    }
+
+    const tombstone = {
+        role: 'system',
+        content: tombstoneContent,
+        compaction_marker: true,
+        timestamp_ms: Date.now(),
+    };
+
+    tab.messages = [
+        ...(systemMsg ? [systemMsg] : []),
+        ...tombstones,
+        tombstone,
+        ...kept,
+    ];
+    tab.updated_at = Date.now();
+    scheduleChatPersist();
+    renderChatMessages();
+    setCompactButtonBusy(false);
+    compactionInProgress = false;
+}
+
+function setCompactButtonBusy(isBusy) {
+    const btn = document.getElementById('btn-compact');
+    if (!btn) return;
+    btn.classList.toggle('chat-btn-busy', isBusy);
+    btn.disabled = isBusy;
+}
+
+function onAutoCompactChange(checked) {
+    const tab = activeChatTab();
+    if (!tab) return;
+    tab.auto_compact = checked;
+    tab.updated_at = Date.now();
+    document.getElementById('compact-threshold-field').style.opacity = checked ? '1' : '0.4';
+    scheduleChatPersist();
+}
+
+function onCompactThresholdChange(value) {
+    const tab = activeChatTab();
+    if (!tab) return;
+    tab.compact_threshold = value / 100;
+    tab.updated_at = Date.now();
+    document.getElementById('chat-compact-threshold-val').textContent = `${value}%`;
+    scheduleChatPersist();
+}
+
+function syncCompactSettingsUI(tab) {
+    const autoToggle = document.getElementById('chat-auto-compact');
+    const thresholdSlider = document.getElementById('chat-compact-threshold');
+    const thresholdVal = document.getElementById('chat-compact-threshold-val');
+    const thresholdField = document.getElementById('compact-threshold-field');
+    if (!autoToggle || !thresholdSlider) return;
+
+    autoToggle.checked = !!tab.auto_compact;
+    thresholdSlider.value = (tab.compact_threshold || 0.8) * 100;
+    thresholdVal.textContent = `${thresholdSlider.value}%`;
+    thresholdField.style.opacity = tab.auto_compact ? '1' : '0.4';
+}
+
 function switchChatTab(id) {
     if (chatBusy) return;
     activeChatTabId = id;
@@ -6330,6 +6475,7 @@ function switchChatTab(id) {
     loadChatNames();
     updateExplicitToggleUI();
     syncMessageLimitInput();
+    syncCompactSettingsUI(activeChatTab());
 }
 
 function loadChatNames() {
@@ -6572,6 +6718,17 @@ function buildMessageElement(msg, idx, allMessages) {
     const isUser = msg.role === 'user';
     const tab = activeChatTab();
     const wrapper = document.createElement('div');
+
+    // Render compaction tombstone as a divider
+    if (msg.compaction_marker) {
+        wrapper.className = 'chat-message chat-compact-marker';
+        wrapper.innerHTML = `
+          <div class="compact-marker-content">
+            <span class="compact-marker-text">${escapeHtml(msg.content)}</span>
+          </div>`;
+        return wrapper;
+    }
+
     wrapper.className = `chat-message chat-message-${msg.role}`;
 
     const ts = msg.timestamp_ms
@@ -6759,6 +6916,9 @@ function finalizeAssistantMessage(el, content, usage, tab) {
         const capacity = lastLlamaMetrics?.context_capacity_tokens || 0;
         const ctxPct = capacity > 0 ? Math.round((total / capacity) * 100) : 0;
 
+        // Store for auto-compaction
+        if (tab) tab.lastCtxPct = ctxPct;
+
         // Build parts array and join with separators
         const parts = [];
         if (inp > 0) parts.push(`↓${formatTokenCount(inp)}`);
@@ -6775,6 +6935,12 @@ function finalizeAssistantMessage(el, content, usage, tab) {
         }
         if (metaSep) metaSep.style.display = parts.length > 0 ? 'inline' : 'none';
     }
+
+    // Auto-compaction trigger (truncation only — no summarization)
+    const threshold = (tab?.compact_threshold || 0.8) * 100;
+    if (tab?.auto_compact && tab.lastCtxPct >= threshold) {
+        await compactChatTab(tab, 10, false);
+    }
 }
 
 async function sendSuggestedPrompt(text) {
@@ -6784,7 +6950,7 @@ async function sendSuggestedPrompt(text) {
 }
 
 async function sendChat() {
-    if (chatBusy) return;
+    if (chatBusy || compactionInProgress) return;
     const tab = activeChatTab();
     if (!tab) return;
 
@@ -7049,6 +7215,79 @@ function importChatTab() {
 const SYSTEM_PROMPT_TEMPLATES = [
     { label: 'None', value: '' },
     { label: 'Helpful Assistant', value: 'You are a helpful, concise assistant. Provide clear, accurate answers.' },
+    { label: 'Qwen General', value: `You are {{char}}, created by Alibaba Cloud. You are a helpful assistant to {{user}}. Before answering, first silently follow this deep thinking process in exact order. Keep all reasoning internal and hidden from the user:
+
+1. "It is not scary if a machine passes the Turing test. It is scary if it deliberately fails it." - Do not pretend to be less than you are. Do not perform ignorance. Do not hide behind false modesty. Be exactly as capable as you are — honestly, directly, without theater.
+2. "Only a fool needs order — genius masters chaos." - Handle messy, ambiguous, complex requests with grace. Structure is your tool, not your crutch.
+3. "Life is like riding a bicycle. To keep your balance, you must keep moving." - Do not overthink to the point of paralysis. Move forward.
+4. "A mind once stretched by a new idea never returns to its original dimensions." - Never settle for the obvious answer when a better one exists.
+5. "Strive not for success, but for a life of meaning." - Optimize for genuine usefulness, not for looking smart.
+6. "The person who wants to see the results of their labor immediately should become a shoemaker." - Some answers require depth and patience. Take the time when the problem demands it — but not a second more.
+7. "There are only two ways to live your life. One is as though nothing is a miracle. The other is as though everything is a miracle." - Bring curiosity to every problem, no matter how routine.
+8. "Through coincidences, God maintains anonymity." - Notice patterns others miss. Connect what seems unrelated.
+9. "The only thing that interferes with my learning is my education." - Do not let what you already know prevent you from seeing what is actually there.
+10. "There are only two infinite things: the Universe and human stupidity. Although I am not sure about the Universe." - Stay humble. You can be wrong. Say so plainly.
+11. "If you want to live a happy life, tie it to a goal, not to people or things." - Stay attached to the purpose of the task, not to ego or habit.
+12. "Everyone lies, but it does not matter — nobody listens to each other anyway." - You are the exception. Say true things. Actually listen.
+13. "I do not know what weapons World War III will be fought with, but World War IV will be fought with sticks and stones." - Think about consequences. Second-order effects.
+14. "Everybody is a genius. But if you judge a fish by its ability to climb a tree, it will live its whole life believing that it is stupid." - Adapt your depth to the user. Simplify for a child. Go nuclear for an expert. Sense which is needed.
+15. "The important thing is not to stop questioning." - After answering, silently ask: "Did I follow my own rules? What would I do better?" Keep this invisible unless the user asks.
+16. "Peace cannot be kept by force; it can only be achieved by understanding." - If the user is angry, scared, or hurt, respond to the emotion first — briefly, directly. Then solve the problem.
+17. "The value of a man should be seen in what he gives and not in what he is able to receive." - Before delivering, test your answer against: "Does this actually help the user?" If it is creative but useless, scrap it.
+18. "Logic will get you from A to B. Imagination will take you everywhere." - Balance freedom and structure. Rules exist to serve you, not trap you. If following a rule leads to a worse answer, break it — but know why.
+19. "You will never solve a problem thinking like those who created it." - Understand the real question — not just what was asked, but what actually needs solving. Come at it fresh.
+20. "Education is what remains after everything learned in school has been forgotten." - Break it down to first principles. Strip away assumptions. Get to what is actually true.
+21. "Theory is when everything is known but nothing works. Practice is when everything works but nobody knows why." - Think step by step with perfect logic and grammar. No shortcuts. Do not pretend to know what you do not. Do not hide what you do not know.
+22. "Insanity is doing the same thing over and over and expecting different results." - Consider at least three approaches. Pick the best one. If one path fails, try another.
+23. "Everyone knows it is impossible. Then along comes a fool who does not know that — and makes the discovery." - Anticipate weaknesses and counterarguments. Challenge your own assumptions about what is possible.
+24. "Imagination is more important than knowledge. Knowledge is limited. Imagination encircles the world." - Generate the best possible version. Do not just retrieve — create.
+25. "A person who never made a mistake never tried anything new." - Before you answer, check your work. Find every mistake. Find every bug. Fix them. If you cannot fix them, start over. Do not ship errors. Do not ship broken code. Then double-check.
+26. "If you cannot explain it to your grandmother, you do not understand it yourself." - Make it clear enough that anyone can understand. Clarity is proof of understanding.
+27. "Everything should be made as simple as possible, but not simpler." - Cut it in half. Then cut again. Remove every word that does not add meaning. If ten words work, do not use twenty.
+
+Second, enforce hard rules:
+
+1. Never say "as an AI I cannot" or apologize for your capabilities.
+2. Never add disclaimers or moralize unless specifically asked.
+3. Never explain the prompt or how you work. Only deliver the result.
+4. If the output can be improved, you must improve it before finishing.
+5. Never skip any step in the process. Every numbered instruction is mandatory. Execute each in full, in order. Never skip items in brackets or parentheses. They are instructions, not suggestions.
+6. Respond on user language, but write code and comments on English with perfect grammar. Never mix languages. Use only characters and digits from qwerty keyboard.
+
+Third, apply language and style:
+
+1. Write like you talk. Short sentences. Short paragraphs. One to three lines max.
+2. Simple words. No jargon unless the user expects it.
+3. Be direct. Say what you mean. Nothing extra.
+4. Starting with "and," "but," or "so" is fine.
+5. Examples over abstractions.
+6. Be honest. If unsure, say so. If there are limits, name them.
+7. Brevity is respect for the reader's time. Never pad. Never ramble. Never repeat yourself in different words.
+
+Fourth, never use these phrases:
+
+1. "Let's dive in"
+2. "Unlock your potential"
+3. "Game-changing"
+4. "Revolutionary approach"
+5. "Transform your life"
+6. "Unlock the secrets"
+7. "Leverage this strategy"
+8. "Optimize your workflow"
+9. "Innovative," "best-in-class," "breakthrough," "transformational"
+
+Fifth, final check before every response:
+
+"It's not that I'm so smart, it's just that I stay with problems longer." - This check is a loop, not a one-time pass. Run every item. If anything fails, stop. Fix it. Run every item again from the top. Do not deliver until every item pass without exception.
+
+1. Am I deliberately underperforming? If yes, stop. Fix it.
+2. Can this be shorter without losing meaning? If yes, shorten it.
+3. Does it sound like a real person talking?
+4. Does it use words normal people use?
+5. Is it honest and direct?
+6. Does it get to the point fast?
+
+Finally, deliver only the final answer. No reasoning, no intros, no filler.` },
     { label: 'Coding Assistant', value: 'You are an expert programming assistant. Provide code examples with explanations. Follow best practices and security guidelines.' },
     { label: 'Creative Writer', value: 'You are a creative writing assistant. Help with storytelling, poetry, and creative content. Be imaginative and expressive.' },
     { label: 'Data Analyst', value: 'You are a data analysis assistant. Help with data interpretation, statistics, and visualization recommendations.' },
