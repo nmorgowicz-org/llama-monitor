@@ -184,7 +184,9 @@ impl SshConnection {
                 ];
                 for key in &default_keys {
                     if Path::new(key).exists() {
-                        if let Err(e) = session.userauth_pubkey_file(&username, None, Path::new(key), None) {
+                        if let Err(e) =
+                            session.userauth_pubkey_file(&username, None, Path::new(key), None)
+                        {
                             eprintln!("[ssh] Key auth failed for {}: {}", key, e);
                             continue;
                         }

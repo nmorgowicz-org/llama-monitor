@@ -1166,9 +1166,7 @@ async fn read_remote_agent_token(connection: &SshConnection, os: RemoteOs) -> Op
             r#"cmd.exe /C "type "C:\Windows\System32\config\systemprofile\AppData\Roaming\llama-monitor\agent-token" 2>NUL""#
                 .to_string()
         }
-        RemoteOs::Unix | RemoteOs::Macos => {
-            "cat ~/.config/llama-monitor/agent-token".to_string()
-        }
+        RemoteOs::Unix | RemoteOs::Macos => "cat ~/.config/llama-monitor/agent-token".to_string(),
         RemoteOs::Unknown => return None,
     };
     match tokio::time::timeout(
@@ -1822,7 +1820,11 @@ Start-Sleep -Seconds 2\""
         command: &str,
     ) -> Result<RemoteAgentStartResponse> {
         let connection = ssh_connection.unwrap_or_else(|| SshConnection::from_target(ssh_target));
-        eprintln!("[agent] Starting remote agent on {} with command: {}", connection.target_label(), command);
+        eprintln!(
+            "[agent] Starting remote agent on {} with command: {}",
+            connection.target_label(),
+            command
+        );
         eprintln!("[agent] Install path: {}", install_path);
         let start_warning = match tokio::time::timeout(
             Duration::from_secs(15),

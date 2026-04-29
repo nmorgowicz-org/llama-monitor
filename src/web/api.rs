@@ -1430,19 +1430,19 @@ fn api_put_chat_tabs() -> impl Filter<Extract = (impl warp::Reply,), Error = war
             let path = chat_tabs_path();
             // Protect against overwriting with fewer messages (stale frontend data)
             let new_msg_count = tabs.iter().map(|t| t.messages.len()).sum::<usize>();
-            if let Ok(existing) = tokio::fs::read_to_string(&path).await {
-                if let Ok(existing_tabs) = serde_json::from_str::<Vec<ChatTab>>(&existing) {
-                    let existing_msg_count = existing_tabs.iter().map(|t| t.messages.len()).sum::<usize>();
-                    if new_msg_count < existing_msg_count && new_msg_count < 10 {
-                        eprintln!("Chat tabs: rejecting PUT - would lose {} messages ({} -> {})",
-                                 existing_msg_count - new_msg_count, existing_msg_count, new_msg_count);
-                        return Ok::<Box<dyn warp::reply::Reply + Send + Sync>, warp::Rejection>(Box::new(
-                            warp::reply::with_status(
-                                warp::reply::json(&serde_json::json!({"ok": false, "error": "Would lose messages - rejecting stale data"})),
-                                warp::http::StatusCode::CONFLICT,
-                            )
-                        ));
-                    }
+            if let Ok(existing) = tokio::fs::read_to_string(&path).await
+                && let Ok(existing_tabs) = serde_json::from_str::<Vec<ChatTab>>(&existing)
+            {
+                let existing_msg_count = existing_tabs.iter().map(|t| t.messages.len()).sum::<usize>();
+                if new_msg_count < existing_msg_count && new_msg_count < 10 {
+                    eprintln!("Chat tabs: rejecting PUT - would lose {} messages ({} -> {})",
+                             existing_msg_count - new_msg_count, existing_msg_count, new_msg_count);
+                    return Ok::<Box<dyn warp::reply::Reply + Send + Sync>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({"ok": false, "error": "Would lose messages - rejecting stale data"})),
+                            warp::http::StatusCode::CONFLICT,
+                        )
+                    ));
                 }
             }
             match serde_json::to_string_pretty(&tabs) {
