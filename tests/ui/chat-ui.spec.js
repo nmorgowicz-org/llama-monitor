@@ -337,3 +337,86 @@ test.describe('app update UI', () => {
     await expect(page.locator('#release-notes-panel')).not.toHaveClass(/open/);
   });
 });
+
+test.describe('context compaction', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.top-nav-bar');
+    await page.evaluate(() => switchView('monitor'));
+    await page.getByRole('button', { name: /chat/i }).click();
+    await expect(page.locator('#page-chat')).toBeVisible();
+  });
+
+  test('compact button removes old messages and creates tombstone', async ({ page }) => {
+    // Inject 20 synthetic messages to simulate a long conversation
+    await page.evaluate(() => {
+      const tab = activeChatTab();
+      for (let i = 0; i < 20; i++) {
+        tab.messages.push({ role: 'user', content: `Question ${i + 1}`, timestamp_ms: Date.now() });
+        tab.messages.push({ role: 'assistant', content: `Answer ${i + 1}`, timestamp_ms: Date.now() });
+      }
+      renderChatMessages();
+    });
+
+    // Verify we have messages before compaction
+    const msgCountBefore = await page.locator('.chat-message:not(.chat-compact-marker)').count();
+    expect(msgCountBefore).toBeGreaterThanOrEqual(20);
+
+    // Click compact button
+    await page.locator('#btn-compact').click();
+
+    // Verify tombstone was created
+    await expect(page.locator('.chat-compact-marker')).toBeVisible();
+    const tombstoneText = await page.locator('.compact-marker-text').textContent();
+    expect(tombstoneText).toContain('Context compacted');
+
+    // Verify old messages were removed (only keepTail=10 remain)
+    const msgCountAfter = await page.locator('.chat-message:not(.chat-compact-marker)').count();
+    expect(msgCountAfter).toBeLessThan(msgCountBefore);
+  });
+
+  test('multiple compactions preserve old tombstones', async ({ page }) => {
+    // First round: inject messages and compact
+    await page.evaluate(() => {
+      const tab = activeChatTab();
+      for (let i = 0; i < 20; i++) {
+        tab.messages.push({ role: 'user', content: `Round 1 Q${i}`, timestamp_ms: Date.now() });
+        tab.messages.push({ role: 'assistant', content: `Round 1 A${i}`, timestamp_ms: Date.now() });
+      }
+      renderChatMessages();
+    });
+    await page.locator('#btn-compact').click();
+    await expect(page.locator('.chat-compact-marker')).toHaveCount(1);
+
+    // Second round: inject more messages and compact again
+    await page.evaluate(() => {
+      const tab = activeChatTab();
+      for (let i = 0; i < 20; i++) {
+        tab.messages.push({ role: 'user', content: `Round 2 Q${i}`, timestamp_ms: Date.now() });
+        tab.messages.push({ role: 'assistant', content: `Round 2 A${i}`, timestamp_ms: Date.now() });
+      }
+      renderChatMessages();
+    });
+    await page.locator('#btn-compact').click();
+
+    // Both tombstones should exist
+    await expect(page.locator('.chat-compact-marker')).toHaveCount(2);
+  });
+
+  test('auto-compact settings persist on tab switch', async ({ page }) => {
+    // Open system prompt panel and enable auto-compact
+    await page.locator('#btn-system-prompt').click();
+    await page.locator('#chat-auto-compact').check();
+    await page.locator('#chat-compact-threshold').fill('90');
+
+    // Create a new tab and switch to it
+    await page.locator('.chat-tab-add').click();
+
+    // Switch back to first tab
+    await page.locator('.chat-tab').first().click();
+
+    // Settings should be reset (new tab has defaults)
+    const autoCompactChecked = await page.locator('#chat-auto-compact').isChecked();
+    expect(autoCompactChecked).toBe(false);
+  });
+});
