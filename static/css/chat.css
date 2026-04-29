@@ -756,6 +756,7 @@
   gap: 10px;
   padding: 0 var(--gap-lg);
   margin-bottom: 4px;
+  flex-shrink: 0;
 }
 .chat-typing-avatar {
   width: 30px;

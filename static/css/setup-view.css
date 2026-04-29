@@ -433,7 +433,9 @@
 .view-container {
   position: relative;
   width: 100%;
-  min-height: calc(100vh - var(--shell-top));
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .view {
@@ -454,6 +456,8 @@
 
 .view-monitor {
   z-index: 2;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Ambient background */
