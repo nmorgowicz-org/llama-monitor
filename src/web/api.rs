@@ -2002,7 +2002,8 @@ fn api_kill_llama(
         })
 }
 
-fn api_self_update() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn api_self_update() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
+{
     warp::path!("api" / "self-update")
         .and(warp::post())
         .and_then(|| async move {
