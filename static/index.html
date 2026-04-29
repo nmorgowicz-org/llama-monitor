@@ -840,6 +840,17 @@
                 <div class="template-preview-empty">Select a template to preview</div>
             </div>
         </div>
+        <div class="modal-footer explicit-policy-section">
+            <details class="modal-section">
+                <summary>Explicit Mode Policy <span class="modal-help">(appended when 🔓 is active)</span></summary>
+                <p class="modal-help">This policy is appended to the system prompt when explicit mode is enabled. Edit it to customize guardrail behavior for censored models. Leave blank to disable.</p>
+                <textarea id="explicit-policy-input" rows="5" placeholder="Custom explicit mode policy…" oninput="saveExplicitPolicy()"></textarea>
+                <div style="display:flex; gap:6px; margin-top:6px;">
+                    <button type="button" class="btn-sm btn-preset" onclick="resetExplicitPolicy()">Reset to Default</button>
+                    <button type="button" class="btn-sm btn-preset" onclick="clearExplicitPolicy()">Clear</button>
+                </div>
+            </details>
+        </div>
     </div>
 </div>
 

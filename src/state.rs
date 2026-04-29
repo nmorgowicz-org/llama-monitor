@@ -100,6 +100,10 @@ pub struct UiSettings {
     pub remote_agent_ssh_target: String,
     #[serde(default)]
     pub remote_agent_ssh_command: String,
+    /// Policy appended when explicit mode (🔓) is enabled.
+    /// Stored in `ui-settings.json` so it persists across restarts.
+    #[serde(default)]
+    pub explicit_mode_policy: String,
 }
 
 /// Session mode: either spawn a new server or attach to existing
@@ -203,6 +207,7 @@ impl Default for UiSettings {
             remote_agent_ssh_autostart: false,
             remote_agent_ssh_target: String::new(),
             remote_agent_ssh_command: String::new(),
+            explicit_mode_policy: String::new(),
         }
     }
 }
