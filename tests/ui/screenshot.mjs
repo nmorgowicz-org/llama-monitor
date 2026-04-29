@@ -82,7 +82,61 @@ async function captureChatOnly(page, baseUrl, remoteServer) {
   await page.click('button[onclick="switchTab(\'chat\')"]');
   await sleep(2000);
 
-  await captureChat(page, 'chat-overhaul.png');
+  // Create a second tab to demonstrate multi-tab
+  console.log('[CHAT ONLY] Creating second tab...');
+  await page.evaluate(() => {
+    const addBtn = document.querySelector('.chat-tab-add');
+    if (addBtn) addBtn.click();
+  });
+  await sleep(500);
+
+  // Inject sample conversation into first tab (no LLM needed)
+  console.log('[CHAT ONLY] Injecting sample messages...');
+  await page.evaluate(() => {
+    const tab = activeChatTab();
+    if (!tab) return;
+    // Switch to first tab if there are multiple
+    if (window.chatTabs && window.chatTabs.length > 1) {
+      switchChatTab(window.chatTabs[0].id);
+    }
+    const t = activeChatTab();
+    if (!t) return;
+    t.messages = [
+      { role: 'user', content: 'What are the key differences between Rust and Go for systems programming?', timestamp_ms: Date.now() - 60000 },
+      { role: 'assistant', content: 'Great question. Here are the main differences:\n\n**Memory Safety**\nRust uses ownership and borrowing with compile-time guarantees. Go relies on a garbage collector.\n\n**Concurrency**\n```rust\n// Rust uses fear-free concurrency with ownership\nlet handle = thread::spawn(|| {\n    println!("Hello from thread!");\n});\n```\n\nGo uses goroutines and channels with a simpler mental model but less compile-time safety.\n\n**Performance**\nRust generally has zero-cost abstractions and no GC pauses. Go trades some performance for developer productivity.\n\nWould you like me to dive deeper into any of these areas?', timestamp_ms: Date.now() - 30000 },
+    ];
+    t.ai_name = 'Qwen3.6';
+    t.user_name = 'Nick';
+    renderChatMessages();
+    renderChatTabs();
+  });
+  await sleep(800);
+
+  // Open system prompt panel to show it
+  console.log('[CHAT ONLY] Opening system prompt panel...');
+  await page.evaluate(() => {
+    const btn = document.getElementById('btn-system-prompt');
+    if (btn) btn.click();
+  });
+  await sleep(500);
+
+  // Enable explicit mode to show the toggle active
+  console.log('[CHAT ONLY] Enabling explicit mode toggle...');
+  await page.evaluate(() => {
+    const tab = activeChatTab();
+    if (tab && !tab.explicit_mode) toggleExplicitMode();
+  });
+  await sleep(300);
+
+  // Open model params panel
+  console.log('[CHAT ONLY] Opening model params panel...');
+  await page.evaluate(() => {
+    const btn = document.getElementById('btn-model-params');
+    if (btn) btn.click();
+  });
+  await sleep(500);
+
+  await page.screenshot({ path: `${OUTPUT_DIR}/chat-overhaul.png`, fullPage: true });
   console.log('\nChat-only screenshot saved to docs/screenshots/chat-overhaul.png');
 }
 
@@ -101,25 +155,19 @@ async function attachToServer(page, remoteServer) {
 }
 
 async function captureChat(page, filename) {
-  const message = process.env.CHAT_MESSAGE || 'Hello, can you tell me a short joke?';
-
-  await page.evaluate((msg) => {
-    const input = document.getElementById('chat-input');
-    if (input) {
-      input.value = msg;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-  }, message);
-  await sleep(500);
-  await page.evaluate(() => document.getElementById('btn-send')?.click());
-
-  console.log('Waiting for LLM response to complete...');
-  await page.waitForFunction(() => {
-    const typing = document.getElementById('chat-typing');
-    const sendBtn = document.getElementById('btn-send');
-    return typing && typing.style.display === 'none' && sendBtn && !sendBtn.disabled;
-  }, { timeout: 90000 });
-  await sleep(500);
+  // Inject sample messages directly (no LLM dependency — faster and reliable)
+  console.log('Injecting sample messages for screenshot...');
+  await page.evaluate(() => {
+    const tab = activeChatTab();
+    if (!tab) return;
+    tab.messages = [
+      { role: 'user', content: 'Explain how llama.cpp offloads layers to GPU.', timestamp_ms: Date.now() - 60000 },
+      { role: 'assistant', content: 'llama.cpp uses the `-ngl` (number GPU layers) flag to split the model between CPU and GPU.\n\n```bash\nllama-server -m model.gguf -ngl 32\n```\n\nThis offloads 32 transformer layers to the GPU while keeping the rest on CPU. The split happens at the layer boundary — you can\'t split individual layers.\n\n**What stays on CPU:**\n- Token embedding lookup\n- Output softmax + sampling\n- Any layers beyond `-ngl`\n\nThe GPU handles the heavy matrix multiplications in the offloaded layers, which is where most compute happens.', timestamp_ms: Date.now() - 30000 },
+    ];
+    tab.ai_name = 'Assistant';
+    renderChatMessages();
+  });
+  await sleep(800);
 
   await page.screenshot({ path: `${OUTPUT_DIR}/${filename}`, fullPage: true });
   console.log(`Done: ${filename}`);
