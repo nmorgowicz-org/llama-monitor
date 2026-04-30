@@ -525,35 +525,6 @@
   align-self: flex-start;
 }
 
-/* ── Compaction Tombstone ─────────────────────────── */
-.chat-compact-marker {
-  align-self: stretch;
-  display: flex;
-  align-items: center;
-  padding: 8px 0;
-}
-.compact-marker-content {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  gap: 12px;
-}
-.compact-marker-content::before,
-.compact-marker-content::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: rgba(255, 255, 255, 0.08);
-}
-.compact-marker-text {
-  font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.3);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  white-space: nowrap;
-  font-weight: 500;
-}
-
 /* ── Button Busy State ────────────────────────────── */
 .chat-btn-busy .chat-compact-icon {
   animation: compact-spin 1s linear infinite;
@@ -562,6 +533,256 @@
 @keyframes compact-spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
+}
+
+/* ── Context Pressure Bar ────────────────────────── */
+.ctx-pressure-bar {
+  height: 2px;
+  width: 100%;
+  background: transparent;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.ctx-pressure-fill {
+  height: 100%;
+  width: 0%;
+  background: rgba(136, 192, 208, 0.5);
+  transition: width 0.6s ease, background-color 0.6s ease;
+  border-radius: 0 1px 1px 0;
+}
+.ctx-pressure-fill.ctx-pressure-medium {
+  background: rgba(234, 179, 8, 0.6);
+}
+.ctx-pressure-fill.ctx-pressure-high {
+  background: rgba(234, 179, 8, 0.9);
+}
+.ctx-pressure-fill.ctx-pressure-critical {
+  background: rgba(239, 68, 68, 0.9);
+  animation: ctx-pressure-pulse 1.5s ease-in-out infinite;
+}
+@keyframes ctx-pressure-pulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}
+
+/* ── Compact Mode Pills ──────────────────────────── */
+.compact-mode-pills {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+.compact-mode-pill {
+  flex: 1;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+.compact-mode-pill:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.7);
+}
+.compact-mode-pill-active {
+  border-color: rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.12);
+  color: #a5b4fc;
+}
+.compact-mode-pill-active:hover {
+  background: rgba(99, 102, 241, 0.18);
+  color: #c4b5fd;
+}
+
+/* ── Compact Marker (revised) ────────────────────── */
+.chat-compact-marker {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 0 4px;
+  animation: compact-marker-in 0.35s ease both;
+}
+@keyframes compact-marker-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.compact-marker-content {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 10px;
+}
+.compact-marker-rule {
+  flex: 1;
+  height: 1px;
+}
+.compact-marker-summarized .compact-marker-rule {
+  background: linear-gradient(to right, transparent, rgba(99, 102, 241, 0.25), transparent);
+}
+.compact-marker-truncated .compact-marker-rule {
+  background: rgba(255, 255, 255, 0.07);
+}
+.compact-marker-rule-left {
+  background: rgba(255, 255, 255, 0.07);
+}
+.compact-marker-rule-right {
+  background: rgba(255, 255, 255, 0.07);
+}
+.compact-marker-summarized .compact-marker-rule-left {
+  background: linear-gradient(to right, transparent, rgba(99, 102, 241, 0.2));
+}
+.compact-marker-summarized .compact-marker-rule-right {
+  background: linear-gradient(to left, transparent, rgba(99, 102, 241, 0.2));
+}
+.compact-marker-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  transition: all 0.15s;
+  user-select: none;
+}
+.compact-marker-truncated .compact-marker-pill {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.35);
+}
+.compact-marker-truncated .compact-marker-pill:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.55);
+}
+.compact-marker-summarized .compact-marker-pill {
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  background: rgba(99, 102, 241, 0.07);
+  color: rgba(139, 148, 233, 0.85);
+}
+.compact-marker-summarized .compact-marker-pill:hover {
+  background: rgba(99, 102, 241, 0.12);
+  color: rgba(139, 148, 233, 1);
+}
+.compact-marker-icon {
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+.compact-marker-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.compact-marker-stats {
+  font-size: 0.65rem;
+  opacity: 0.6;
+  padding-left: 4px;
+  border-left: 1px solid currentColor;
+  margin-left: 2px;
+}
+.compact-marker-chevron {
+  opacity: 0.5;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+[data-expanded="true"] .compact-marker-chevron {
+  transform: rotate(180deg);
+}
+.compact-marker-body {
+  padding: 12px 16px;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.55);
+  border-radius: 8px;
+  margin: 6px 0 4px;
+}
+.compact-marker-summarized .compact-marker-body {
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.1);
+  color: rgba(180, 184, 240, 0.8);
+}
+.compact-marker-truncated .compact-marker-body {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.compact-marker-body p { margin: 0 0 8px; }
+.compact-marker-body p:last-child { margin-bottom: 0; }
+.compact-marker-body ul, .compact-marker-body ol { padding-left: 18px; margin: 4px 0 8px; }
+.compact-marker-body li { margin-bottom: 3px; }
+
+/* ── Peek list (truncated tombstone) ─────────────── */
+.compact-peek-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.compact-peek-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+.compact-peek-role {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.45;
+  flex-shrink: 0;
+  min-width: 24px;
+}
+.compact-peek-snippet {
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Summarizing skeleton ────────────────────────── */
+.compact-marker-summarizing .compact-marker-pill {
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  background: rgba(99, 102, 241, 0.05);
+  color: rgba(139, 148, 233, 0.7);
+  cursor: default;
+}
+.compact-summarizing-dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+.compact-summarizing-dots span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: summarizing-bounce 1.2s ease-in-out infinite;
+}
+.compact-summarizing-dots span:nth-child(2) { animation-delay: 0.15s; }
+.compact-summarizing-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes summarizing-bounce {
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+/* ── Context pressure glow on chat input ─────────── */
+.chat-input-row textarea.ctx-pressure-low { }
+.chat-input-row textarea.ctx-pressure-medium {
+  border-color: rgba(234, 179, 8, 0.3);
+}
+.chat-input-row textarea.ctx-pressure-high {
+  border-color: rgba(234, 179, 8, 0.5);
+  box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.07);
+}
+.chat-input-row textarea.ctx-pressure-critical {
+  border-color: rgba(239, 68, 68, 0.55);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.08);
 }
 
 /* ── Chat Style Variables (default: rounded) ─────────── */

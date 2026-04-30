@@ -6174,12 +6174,6 @@ function activeChatTab() {
     return chatTabs.find(t => t.id === activeChatTabId) ?? null;
 }
 
-function activeChatHistory() {
-    const tab = activeChatTab();
-    if (!tab) return [];
-    return tab.messages.filter(m => m.role !== 'system');
-}
-
 async function initChatTabs() {
     try {
         const resp = await fetch('/api/chat/tabs');
@@ -6325,20 +6319,26 @@ function closeChatTab(id) {
 }
 
 async function fetchSummary(messages) {
-    const transcript = messages
+    const MAX_TRANSCRIPT_CHARS = 100_000;
+    let transcript = messages
         .filter(m => !m.compaction_marker)
         .map(m => {
             const label = m.role === 'user' ? 'User' : 'Assistant';
-            const content = m.content.length > 500 ? m.content.slice(0, 500) + ' [truncated]' : m.content;
-            return `${label}: ${content}`;
+            return `${label}: ${m.content}`;
         })
         .join('\n\n');
+    if (transcript.length > MAX_TRANSCRIPT_CHARS) {
+        transcript = transcript.slice(0, MAX_TRANSCRIPT_CHARS) + '\n\n[transcript truncated for length]';
+    }
 
     const summaryMessages = [
-        { role: 'system', content: 'You are a conversation summarizer. Be concise.' },
+        {
+            role: 'system',
+            content: 'Your task is to create a detailed summary of the conversation so far, paying close attention to the user\'s explicit requests and your previous responses. You will be given the conversation to summarize, and you should output your response directly without any preamble.',
+        },
         {
             role: 'user',
-            content: `${transcript}\n\nSummarize this conversation segment in 3-5 sentences, preserving key facts, decisions, and context the reader needs to continue the conversation.`,
+            content: `${transcript}\n\nPlease provide a detailed summary of our conversation above. The summary will be used to restore context when the conversation continues, so it must capture everything needed to pick up exactly where we left off.\n\nInclude:\n- The main topics discussed and the purpose of the conversation\n- Key facts, figures, decisions, or conclusions established\n- Specific requests made and whether/how they were fulfilled\n- Any open questions, unresolved issues, or next steps mentioned\n- Important context, constraints, or preferences expressed by either party\n- The current state of any ongoing task or project\n\nWrite in past tense. Be thorough — omit nothing that would affect how the conversation continues.`,
         },
     ];
 
@@ -6384,29 +6384,55 @@ async function fetchSummary(messages) {
 
 async function compactChatTab(tab, keepTail = 10, summarize = true) {
     const msgs = tab.messages;
-    const systemMsg = msgs[0]?.role === 'system' ? msgs[0] : null;
+    const systemMsg = msgs[0]?.role === 'system' && !msgs[0]?.compaction_marker ? msgs[0] : null;
     const tombstones = msgs.filter(m => m.compaction_marker);
     const conversational = msgs.filter(m => m.role !== 'system' && !m.compaction_marker);
 
     if (conversational.length <= keepTail) return; // nothing to do
 
-    compactionInProgress = true;
+   compactionInProgress = true;
     setCompactButtonBusy(true);
 
     const dropped = conversational.slice(0, conversational.length - keepTail);
     const kept = conversational.slice(-keepTail);
+    console.log('[COMPACT] starting — dropped:', dropped.length, 'kept:', kept.length, 'oldTombstones:', tombstones.length);
+
+    // Show a temporary "Summarizing..." placeholder in the message list
+    let placeholderEl = null;
+    if (summarize) {
+        const chatMsgs = document.getElementById('chat-messages');
+        if (chatMsgs) {
+            placeholderEl = document.createElement('div');
+            placeholderEl.className = 'chat-message chat-compact-marker compact-marker-summarizing';
+            placeholderEl.innerHTML = `
+              <div class="compact-marker-content">
+                <div class="compact-marker-rule compact-marker-rule-left"></div>
+                <div class="compact-marker-pill">
+                  <span class="compact-summarizing-dots"><span></span><span></span><span></span></span>
+                  <span class="compact-marker-label">Summarizing conversation…</span>
+                </div>
+                <div class="compact-marker-rule compact-marker-rule-right"></div>
+              </div>`;
+            chatMsgs.appendChild(placeholderEl);
+            chatMsgs.scrollTop = chatMsgs.scrollHeight;
+        }
+    }
 
     let tombstoneContent;
+    let isSummarized = false;
 
     if (summarize) {
         const summary = await fetchSummary(dropped);
         if (summary) {
-            tombstoneContent = `[Context compacted — ${dropped.length} messages summarized]\n\n${summary}`;
+            const ctxNote = tab.lastCtxPct > 0 ? ` · was ${tab.lastCtxPct}% ctx` : '';
+            tombstoneContent = `[Context compacted — ${dropped.length} messages summarized${ctxNote}]\n\n${summary}`;
+            isSummarized = true;
         } else {
             tombstoneContent = `[Context compacted — server unavailable for summarization; ${dropped.length} messages dropped]`;
         }
     } else {
-        tombstoneContent = `[Context compacted — ${dropped.length} messages removed to free context space.]`;
+        const ctxNote = tab.lastCtxPct > 0 ? ` · was ${tab.lastCtxPct}% ctx` : '';
+        tombstoneContent = `[Context compacted — ${dropped.length} messages removed${ctxNote}]`;
     }
 
     const tombstone = {
@@ -6414,7 +6440,14 @@ async function compactChatTab(tab, keepTail = 10, summarize = true) {
         content: tombstoneContent,
         compaction_marker: true,
         timestamp_ms: Date.now(),
+        summarized: isSummarized,
+        dropped_count: dropped.length,
+        dropped_preview: dropped.slice(0, 8).map(m => ({ role: m.role, snippet: m.content.slice(0, 80) })),
+        tokens_freed_estimate: dropped.reduce((sum, m) => sum + Math.round((m.input_tokens || 0) + (m.output_tokens || 0)), 0),
+        ctx_pct_before: tab.lastCtxPct || 0,
     };
+
+    if (placeholderEl) placeholderEl.remove();
 
     tab.messages = [
         ...(systemMsg ? [systemMsg] : []),
@@ -6422,11 +6455,25 @@ async function compactChatTab(tab, keepTail = 10, summarize = true) {
         tombstone,
         ...kept,
     ];
+    const finalTombstones = tab.messages.filter(m => m.compaction_marker);
+    console.log('[COMPACT] done — final:', tab.messages.length, 'tombstones:', finalTombstones.length);
+    if (finalTombstones.length !== tombstones.length + 1) {
+        console.warn('[COMPACT] MISMATCH — expected', tombstones.length + 1, 'got', finalTombstones.length);
+        console.warn('[COMPACT] kept markers:', kept.filter(m => m.compaction_marker).length);
+    }
     tab.updated_at = Date.now();
     scheduleChatPersist();
     renderChatMessages();
     setCompactButtonBusy(false);
     compactionInProgress = false;
+
+    // Scroll to the new tombstone
+    setTimeout(() => {
+        const markers = document.querySelectorAll('.chat-compact-marker');
+        if (markers.length > 0) {
+            markers[markers.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }, 80);
 }
 
 function setCompactButtonBusy(isBusy) {
@@ -6436,13 +6483,38 @@ function setCompactButtonBusy(isBusy) {
     btn.disabled = isBusy;
 }
 
+function onManualCompact() {
+    const tab = activeChatTab();
+    if (!tab) return;
+    compactChatTab(tab);
+}
+
 function onAutoCompactChange(checked) {
     const tab = activeChatTab();
     if (!tab) return;
     tab.auto_compact = checked;
     tab.updated_at = Date.now();
     document.getElementById('compact-threshold-field').style.opacity = checked ? '1' : '0.4';
+    const summarizeField = document.getElementById('compact-summarize-field');
+    if (summarizeField) summarizeField.style.opacity = checked ? '1' : '0.4';
     scheduleChatPersist();
+}
+
+function onAutoCompactSummarizeChange(checked) {
+    const tab = activeChatTab();
+    if (!tab) return;
+    tab.auto_compact_summarize = checked;
+    tab.updated_at = Date.now();
+    scheduleChatPersist();
+}
+
+function onCompactModeChange(mode) {
+    const tab = activeChatTab();
+    if (!tab) return;
+    tab.compact_mode = mode;
+    tab.updated_at = Date.now();
+    scheduleChatPersist();
+    syncCompactSettingsUI(tab);
 }
 
 function onCompactThresholdChange(value) {
@@ -6454,6 +6526,27 @@ function onCompactThresholdChange(value) {
     scheduleChatPersist();
 }
 
+function updateCtxPressureBar(pct) {
+    const bar = document.getElementById('ctx-pressure-bar');
+    const fill = document.getElementById('ctx-pressure-fill');
+    if (!bar || !fill) return;
+    if (!pct || pct <= 0) { bar.style.display = 'none'; return; }
+    bar.style.display = 'block';
+    fill.style.width = Math.min(pct, 100) + '%';
+    fill.className = 'ctx-pressure-fill' +
+        (pct >= 90 ? ' ctx-pressure-critical' :
+         pct >= 75 ? ' ctx-pressure-high' :
+         pct >= 50 ? ' ctx-pressure-medium' : '');
+
+    const textarea = document.getElementById('chat-input');
+    if (textarea) {
+        textarea.classList.remove('ctx-pressure-medium', 'ctx-pressure-high', 'ctx-pressure-critical');
+        if (pct >= 90) textarea.classList.add('ctx-pressure-critical');
+        else if (pct >= 75) textarea.classList.add('ctx-pressure-high');
+        else if (pct >= 50) textarea.classList.add('ctx-pressure-medium');
+    }
+}
+
 function syncCompactSettingsUI(tab) {
     const autoToggle = document.getElementById('chat-auto-compact');
     const thresholdSlider = document.getElementById('chat-compact-threshold');
@@ -6461,10 +6554,39 @@ function syncCompactSettingsUI(tab) {
     const thresholdField = document.getElementById('compact-threshold-field');
     if (!autoToggle || !thresholdSlider) return;
 
-    autoToggle.checked = !!tab.auto_compact;
-    thresholdSlider.value = (tab.compact_threshold || 0.8) * 100;
+    const isOn = !!tab?.auto_compact;
+    const mode = tab?.compact_mode || 'percent';
+    const isOptimized = mode === 'optimized';
+
+    autoToggle.checked = isOn;
+
+    // Mode pills
+    document.getElementById('compact-mode-percent')?.classList.toggle('compact-mode-pill-active', !isOptimized);
+    document.getElementById('compact-mode-optimized')?.classList.toggle('compact-mode-pill-active', isOptimized);
+    document.getElementById('compact-mode-help-percent').style.display = isOptimized ? 'none' : '';
+    document.getElementById('compact-mode-help-optimized').style.display = isOptimized ? '' : 'none';
+
+    // Percentage threshold row — only relevant in percent mode
+    const modeField = document.getElementById('compact-mode-field');
+    if (modeField) modeField.style.opacity = isOn ? '1' : '0.4';
+    thresholdField.style.display = isOptimized ? 'none' : '';
+    thresholdField.style.opacity = isOn ? '1' : '0.4';
+    thresholdSlider.value = (tab?.compact_threshold || 0.8) * 100;
     thresholdVal.textContent = `${thresholdSlider.value}%`;
-    thresholdField.style.opacity = tab.auto_compact ? '1' : '0.4';
+
+    const summarizeToggle = document.getElementById('chat-auto-compact-summarize');
+    const summarizeField = document.getElementById('compact-summarize-field');
+    if (summarizeToggle) summarizeToggle.checked = !!tab?.auto_compact_summarize;
+    if (summarizeField) summarizeField.style.opacity = isOn ? '1' : '0.4';
+
+    const btn = document.getElementById('btn-compact');
+    if (btn && tab) {
+        const conversational = tab.messages.filter(m => m.role !== 'system' && !m.compaction_marker);
+        const willDrop = Math.max(0, conversational.length - 10);
+        btn.title = willDrop > 0
+            ? `Trim context — will remove ${willDrop} oldest messages`
+            : 'Trim context — nothing to remove yet';
+    }
 }
 
 function switchChatTab(id) {
@@ -6476,6 +6598,7 @@ function switchChatTab(id) {
     updateExplicitToggleUI();
     syncMessageLimitInput();
     syncCompactSettingsUI(activeChatTab());
+    updateCtxPressureBar(0);
 }
 
 function loadChatNames() {
@@ -6689,6 +6812,7 @@ function renderChatMessages() {
         idx++;
     }
     chatScroll(true);
+    syncCompactSettingsUI(activeChatTab());
 }
 
 /**
@@ -6721,11 +6845,49 @@ function buildMessageElement(msg, idx, allMessages) {
 
     // Render compaction tombstone as a divider
     if (msg.compaction_marker) {
-        wrapper.className = 'chat-message chat-compact-marker';
+        wrapper.className = 'chat-message chat-compact-marker' + (msg.summarized ? ' compact-marker-summarized' : ' compact-marker-truncated');
+        wrapper.dataset.expanded = 'false';
+
+        const isSummarized = !!msg.summarized;
+        const droppedCount = msg.dropped_count || 0;
+        const ctxBefore = msg.ctx_pct_before || 0;
+
+        // Stats line
+        let statsHtml = `${droppedCount} messages removed`;
+        if (ctxBefore > 0) statsHtml += ` · was ${ctxBefore}% ctx`;
+
+        // Header label
+        const labelText = isSummarized ? 'Context summarized' : 'Context trimmed';
+        const iconPath = isSummarized
+            ? '<path d="M9 12h6M9 16h6M9 8h6M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/>'
+            : '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>';
+
+        // Body: for summarized, render the summary as markdown; for truncated, show preview snippets
+        let bodyHtml = '';
+        if (isSummarized) {
+            const summaryText = msg.content.replace(/^\[Context compacted[^\]]*\]\s*/i, '').trim();
+            bodyHtml = summaryText ? renderMd(summaryText) : '';
+        } else if (msg.dropped_preview && msg.dropped_preview.length > 0) {
+            const rows = msg.dropped_preview.map(p => {
+                const label = p.role === 'user' ? 'You' : 'AI';
+                return `<div class="compact-peek-row"><span class="compact-peek-role">${label}</span><span class="compact-peek-snippet">${escapeHtml(p.snippet)}${p.snippet.length >= 80 ? '…' : ''}</span></div>`;
+            }).join('');
+            bodyHtml = `<div class="compact-peek-list">${rows}</div>`;
+        }
+
         wrapper.innerHTML = `
           <div class="compact-marker-content">
-            <span class="compact-marker-text">${escapeHtml(msg.content)}</span>
-          </div>`;
+            <div class="compact-marker-rule compact-marker-rule-left"></div>
+            <div class="compact-marker-pill" onclick="this.closest('.chat-compact-marker').querySelector('.compact-marker-body').style.display === '' || this.closest('.chat-compact-marker').querySelector('.compact-marker-body').style.display === 'none' ? (this.closest('.chat-compact-marker').querySelector('.compact-marker-body').style.display='block', this.closest('.chat-compact-marker').dataset.expanded='true') : (this.closest('.chat-compact-marker').querySelector('.compact-marker-body').style.display='none', this.closest('.chat-compact-marker').dataset.expanded='false')">
+              <svg class="compact-marker-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${iconPath}</svg>
+              <span class="compact-marker-label">${labelText}</span>
+              <span class="compact-marker-stats">${statsHtml}</span>
+              <svg class="compact-marker-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+            <div class="compact-marker-rule compact-marker-rule-right"></div>
+          </div>
+          <div class="compact-marker-body" style="display:none;">${bodyHtml}</div>`;
+
         return wrapper;
     }
 
@@ -6918,6 +7080,7 @@ function finalizeAssistantMessage(el, content, usage, tab) {
 
         // Store for auto-compaction
         if (tab) tab.lastCtxPct = ctxPct;
+        updateCtxPressureBar(ctxPct);
 
         // Build parts array and join with separators
         const parts = [];
@@ -6936,10 +7099,26 @@ function finalizeAssistantMessage(el, content, usage, tab) {
         if (metaSep) metaSep.style.display = parts.length > 0 ? 'inline' : 'none';
     }
 
-    // Auto-compaction trigger (truncation only — no summarization)
-    const threshold = (tab?.compact_threshold || 0.8) * 100;
-    if (tab?.auto_compact && tab.lastCtxPct >= threshold) {
-        await compactChatTab(tab, 10, false);
+    // Auto-compaction trigger
+    if (tab?.auto_compact) {
+        const mode = tab.compact_mode || 'percent';
+        const useSummarize = !!tab.auto_compact_summarize;
+        let shouldCompact = false;
+        if (mode === 'optimized') {
+            const capacity = lastLlamaMetrics?.context_capacity_tokens || 0;
+            const totalInput = tab.totalInputTokens || 0;
+            const totalOutput = tab.totalOutputTokens || 0;
+            const remaining = capacity - (totalInput + totalOutput);
+            shouldCompact = capacity > 0 && remaining < 25000;
+        } else {
+            const threshold = (tab.compact_threshold || 0.8) * 100;
+            shouldCompact = tab.lastCtxPct >= threshold;
+        }
+        if (shouldCompact) {
+            compactChatTab(tab, 10, useSummarize).then(() =>
+                showToast('Context auto-compacted' + (useSummarize ? ' with summary' : ' — oldest messages removed'), 'info')
+            );
+        }
     }
 }
 
