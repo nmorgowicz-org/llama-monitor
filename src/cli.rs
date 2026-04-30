@@ -47,6 +47,10 @@ pub struct AppArgs {
     #[arg(long)]
     pub sessions_file: Option<PathBuf>,
 
+    /// Override the config directory (default: ~/.config/llama-monitor)
+    #[arg(long)]
+    pub config_dir: Option<PathBuf>,
+
     /// GPU monitoring backend: auto, rocm, nvidia, none
     #[arg(long, default_value = "auto")]
     pub gpu_backend: String,

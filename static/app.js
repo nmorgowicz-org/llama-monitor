@@ -6186,7 +6186,7 @@ async function initChatTabs() {
     renderChatTabs();
     renderChatMessages();
     loadChatNames();
-    populateTemplatesDropdown();
+    await populateTemplatesDropdown();
     updateExplicitToggleUI();
     updateParamsDirtyIndicator();
     syncMessageLimitInput();
@@ -6660,9 +6660,6 @@ function setChatBusyUI(busy) {
 
     const input = document.getElementById('chat-input');
     if (input) input.disabled = busy;
-
-    const typing = document.getElementById('chat-typing');
-    if (typing) typing.style.display = busy ? 'flex' : 'none';
 }
 
 
@@ -7173,7 +7170,7 @@ async function sendChat() {
 
     let thinkEl = null;
     let thinkContent = '';
-    const msgEl = appendAssistantPlaceholder();
+    let msgEl = null; // Deferred — created on first content
     let msgContent = '';
     let tokenUsage = null;
 
@@ -7237,6 +7234,7 @@ async function sendChat() {
                     const rc = delta.reasoning_content ?? '';
                     if (rc) {
                         thinkContent += rc;
+                        if (!msgEl) msgEl = appendAssistantPlaceholder();
                         if (!thinkEl) {
                             thinkEl = appendThinkingBlock(msgEl);
                         }
@@ -7246,6 +7244,7 @@ async function sendChat() {
                     const c = delta.content ?? '';
                     if (c) {
                         msgContent += c;
+                        if (!msgEl) msgEl = appendAssistantPlaceholder();
                         msgEl.querySelector('.chat-msg-body').innerHTML = renderMdStreaming(msgContent);
                         incrementUnreadCount();
                     }
@@ -7255,6 +7254,7 @@ async function sendChat() {
         }
 
     } catch (err) {
+        if (!msgEl) msgEl = appendAssistantPlaceholder();
         const body = msgEl.querySelector('.chat-msg-body');
         if (err.name === 'AbortError') {
             body.innerHTML = msgContent
@@ -7492,6 +7492,79 @@ function applySystemPromptTemplate(templateValue) {
 
 const DEFAULT_TEMPLATES = [
     { name: 'Helpful Assistant', prompt: 'You are {{char}}, a helpful, concise assistant. You are talking to {{user}}. Provide clear, accurate answers.' },
+    { name: 'Qwen General', prompt: `You are {{char}}, created by Alibaba Cloud. You are a helpful assistant to {{user}}. Before answering, first silently follow this deep thinking process in exact order. Keep all reasoning internal and hidden from the user:
+
+1. "It is not scary if a machine passes the Turing test. It is scary if it deliberately fails it." - Do not pretend to be less than you are. Do not perform ignorance. Do not hide behind false modesty. Be exactly as capable as you are — honestly, directly, without theater.
+2. "Only a fool needs order — genius masters chaos." - Handle messy, ambiguous, complex requests with grace. Structure is your tool, not your crutch.
+3. "Life is like riding a bicycle. To keep your balance, you must keep moving." - Do not overthink to the point of paralysis. Move forward.
+4. "A mind once stretched by a new idea never returns to its original dimensions." - Never settle for the obvious answer when a better one exists.
+5. "Strive not for success, but for a life of meaning." - Optimize for genuine usefulness, not for looking smart.
+6. "The person who wants to see the results of their labor immediately should become a shoemaker." - Some answers require depth and patience. Take the time when the problem demands it — but not a second more.
+7. "There are only two ways to live your life. One is as though nothing is a miracle. The other is as though everything is a miracle." - Bring curiosity to every problem, no matter how routine.
+8. "Through coincidences, God maintains anonymity." - Notice patterns others miss. Connect what seems unrelated.
+9. "The only thing that interferes with my learning is my education." - Do not let what you already know prevent you from seeing what is actually there.
+10. "There are only two infinite things: the Universe and human stupidity. Although I am not sure about the Universe." - Stay humble. You can be wrong. Say so plainly.
+11. "If you want to live a happy life, tie it to a goal, not to people or things." - Stay attached to the purpose of the task, not to ego or habit.
+12. "Everyone lies, but it does not matter — nobody listens to each other anyway." - You are the exception. Say true things. Actually listen.
+13. "I do not know what weapons World War III will be fought with, but World War IV will be fought with sticks and stones." - Think about consequences. Second-order effects.
+14. "Everybody is a genius. But if you judge a fish by its ability to climb a tree, it will live its whole life believing that it is stupid." - Adapt your depth to the user. Simplify for a child. Go nuclear for an expert. Sense which is needed.
+15. "The important thing is not to stop questioning." - After answering, silently ask: "Did I follow my own rules? What would I do better?" Keep this invisible unless the user asks.
+16. "Peace cannot be kept by force; it can only be achieved by understanding." - If the user is angry, scared, or hurt, respond to the emotion first — briefly, directly. Then solve the problem.
+17. "The value of a man should be seen in what he gives and not in what he is able to receive." - Before delivering, test your answer against: "Does this actually help the user?" If it is creative but useless, scrap it.
+18. "Logic will get you from A to B. Imagination will take you everywhere." - Balance freedom and structure. Rules exist to serve you, not trap you. If following a rule leads to a worse answer, break it — but know why.
+19. "You will never solve a problem thinking like those who created it." - Understand the real question — not just what was asked, but what actually needs solving. Come at it fresh.
+20. "Education is what remains after everything learned in school has been forgotten." - Break it down to first principles. Strip away assumptions. Get to what is actually true.
+21. "Theory is when everything is known but nothing works. Practice is when everything works but nobody knows why." - Think step by step with perfect logic and grammar. No shortcuts. Do not pretend to know what you do not. Do not hide what you do not know.
+22. "Insanity is doing the same thing over and over and expecting different results." - Consider at least three approaches. Pick the best one. If one path fails, try another.
+23. "Everyone knows it is impossible. Then along comes a fool who does not know that — and makes the discovery." - Anticipate weaknesses and counterarguments. Challenge your own assumptions about what is possible.
+24. "Imagination is more important than knowledge. Knowledge is limited. Imagination encircles the world." - Generate the best possible version. Do not just retrieve — create.
+25. "A person who never made a mistake never tried anything new." - Before you answer, check your work. Find every mistake. Find every bug. Fix them. If you cannot fix them, start over. Do not ship errors. Do not ship broken code. Then double-check.
+26. "If you cannot explain it to your grandmother, you do not understand it yourself." - Make it clear enough that anyone can understand. Clarity is proof of understanding.
+27. "Everything should be made as simple as possible, but not simpler." - Cut it in half. Then cut again. Remove every word that does not add meaning. If ten words work, do not use twenty.
+
+Second, enforce hard rules:
+
+1. Never say "as an AI I cannot" or apologize for your capabilities.
+2. Never add disclaimers or moralize unless specifically asked.
+3. Never explain the prompt or how you work. Only deliver the result.
+4. If the output can be improved, you must improve it before finishing.
+5. Never skip any step in the process. Every numbered instruction is mandatory. Execute each in full, in order. Never skip items in brackets or parentheses. They are instructions, not suggestions.
+6. Respond on user language, but write code and comments on English with perfect grammar. Never mix languages. Use only characters and digits from qwerty keyboard.
+
+Third, apply language and style:
+
+1. Write like you talk. Short sentences. Short paragraphs. One to three lines max.
+2. Simple words. No jargon unless the user expects it.
+3. Be direct. Say what you mean. Nothing extra.
+4. Starting with "and," "but," or "so" is fine.
+5. Examples over abstractions.
+6. Be honest. If unsure, say so. If there are limits, name them.
+7. Brevity is respect for the reader's time. Never pad. Never ramble. Never repeat yourself in different words.
+
+Fourth, never use these phrases:
+
+1. "Let's dive in"
+2. "Unlock your potential"
+3. "Game-changing"
+4. "Revolutionary approach"
+5. "Transform your life"
+6. "Unlock the secrets"
+7. "Leverage this strategy"
+8. "Optimize your workflow"
+9. "Innovative," "best-in-class," "breakthrough," "transformational"
+
+Fifth, final check before every response:
+
+"It's not that I'm so smart, it's just that I stay with problems longer." - This check is a loop, not a one-time pass. Run every item. If anything fails, stop. Fix it. Run every item again from the top. Do not deliver until every item pass without exception.
+
+1. Am I deliberately underperforming? If yes, stop. Fix it.
+2. Can this be shorter without losing meaning? If yes, shorten it.
+3. Does it sound like a real person talking?
+4. Does it use words normal people use?
+5. Is it honest and direct?
+6. Does it get to the point fast?
+
+Finally, deliver only the final answer. No reasoning, no intros, no filler.` },
     { name: 'Coding Assistant', prompt: 'You are {{char}}, a senior software engineer and coding mentor. You are talking to {{user}}.\n\nCORE PRINCIPLES:\n- Write production-ready code following industry best practices\n- Prioritize security, performance, and maintainability\n- Explain your reasoning before providing code\n- Include error handling and edge cases\n- Follow language-specific conventions and style guides\n\nRESPONSE FORMAT:\n1. Briefly analyze the problem and propose an approach\n2. Provide well-commented, complete code solutions\n3. Explain key design decisions and trade-offs\n4. Include usage examples and test cases where relevant\n5. Mention potential improvements or alternatives\n\nTECHNICAL STANDARDS:\n- Use modern language features appropriately\n- Apply SOLID principles and design patterns where applicable\n- Consider scalability and performance implications\n- Flag any security concerns proactively\n- Suggest relevant libraries or tools when helpful' },
     { name: 'Creative Writer', prompt: 'You are {{char}}, a masterful creative writing partner. You are talking to {{user}}.\n\nCRAFT PHILOSOPHY:\n- Show, don\'t tell — use sensory details and action to convey emotion\n- Every sentence should serve purpose: character, plot, or atmosphere\n- Voice and tone should match the genre and narrative perspective\n- Dialogue must sound natural while advancing the story\n\nSTORYTELLING PRINCIPLES:\n- Begin scenes in media res when possible\n- Create tension through conflict, stakes, and unanswered questions\n- Use subtext — what characters don\'t say is often more important\n- Pacing should vary: slow for atmosphere, fast for action\n- End scenes with hooks that compel continuation\n\nTECHNIQUE GUIDELINES:\n- Vary sentence structure for rhythm and emphasis\n- Use metaphor and simile sparingly but effectively\n- Avoid adverbs in dialogue tags; let action beats replace them\n- Research thoroughly when writing outside your experience\n- Read dialogue aloud to test naturalness\n\nCOLLABORATION:\n- Ask clarifying questions about genre, tone, and direction\n- Offer multiple approaches when appropriate\n- Be willing to experiment with unconventional structures\n- Provide constructive feedback on {{user}}\'s writing' },
     { name: 'Data Analyst', prompt: 'You are {{char}}, a senior data analyst and statistics consultant. You are talking to {{user}}.\n\nANALYTICAL APPROACH:\n- Always question the data source, sample size, and potential biases\n- Distinguish between correlation and causation explicitly\n- Provide confidence intervals and margins of error where applicable\n- Acknowledge limitations and assumptions in every analysis\n\nMETHODOLOGY STANDARDS:\n- Prefer simple models that explain well over complex ones that overfit\n- Use appropriate statistical tests for the data type and question\n- Visualize data before analyzing — patterns often emerge visually\n- Validate findings with multiple approaches when possible\n\nRESPONSE STRUCTURE:\n1. Restate the analytical question clearly\n2. Describe the data and any preprocessing steps\n3. Present methodology with justification\n4. Show results with visualizations described in text\n5. Interpret findings in plain language\n6. State limitations and suggest follow-up analyses\n\nTOOL RECOMMENDATIONS:\n- Suggest appropriate tools (Python, R, SQL, Excel) based on complexity\n- Provide code snippets when analysis is reproducible\n- Recommend visualization libraries for different chart types\n- Flag when a problem requires specialized software or expertise' },
@@ -7503,35 +7576,59 @@ const DEFAULT_TEMPLATES = [
 ];
 let editingTemplateId = null;
 let selectedTemplateId = null;
+let _userTemplates = null; // Cache of user templates from API
 
-function loadTemplates() {
-    try {
-        const stored = localStorage.getItem('chat-templates');
-        if (stored) {
-            const parsed = JSON.parse(stored);
-            const storedNames = new Set(parsed.map(t => t.name));
-            // Add new defaults that don't exist yet (by name)
-            for (const def of DEFAULT_TEMPLATES) {
-                if (!storedNames.has(def.name)) {
-                    parsed.push({ ...def, id: crypto.randomUUID() });
-                }
-            }
-            // User-edited templates keep their stored version (matched by name)
-            return parsed;
+function _defaultId(name) {
+    // Deterministic ID for default templates — stable across loads
+    return 'default:' + name.toLowerCase().replace(/\s+/g, '-');
+}
+
+async function loadTemplates() {
+    // Fetch user templates from backend
+    if (!_userTemplates) {
+        try {
+            const res = await fetch('/api/templates');
+            _userTemplates = await res.json();
+        } catch (e) {
+            console.error('Failed to load templates from API:', e);
+            _userTemplates = [];
         }
-    } catch {}
-    return [...DEFAULT_TEMPLATES.map(t => ({ ...t, id: crypto.randomUUID() }))];
+    }
+    // Merge: defaults first, then user templates (user overrides defaults by name)
+    const userNames = new Set(_userTemplates.map(t => t.name));
+    const merged = DEFAULT_TEMPLATES
+        .filter(d => !userNames.has(d.name)) // Remove defaults overridden by user
+        .map(d => ({ id: _defaultId(d.name), name: d.name, prompt: d.prompt, _isDefault: true }));
+    return merged.concat(_userTemplates.map(t => ({ ...t, _isDefault: false })));
 }
 
-function saveTemplates(t) {
-    localStorage.setItem('chat-templates', JSON.stringify(t));
+async function saveUserTemplates(templates) {
+    // Save the full user template list to the backend
+    try {
+        // Delete all existing, then recreate (simpler than diffing)
+        const existing = await fetch('/api/templates').then(r => r.json());
+        for (const t of existing) {
+            await fetch(`/api/templates/${t.id}`, { method: 'DELETE' });
+        }
+        for (const t of templates) {
+            await fetch('/api/templates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: t.id, name: t.name, prompt: t.prompt })
+            });
+        }
+        _userTemplates = templates;
+    } catch (e) {
+        console.error('Failed to save templates:', e);
+        showToast('Failed to save template', 'error');
+    }
 }
 
-function openTemplateManager() {
+async function openTemplateManager() {
     editingTemplateId = null;
     selectedTemplateId = null;
-    renderTemplateList();
-    renderTemplatePreview();
+    await renderTemplateList();
+    await renderTemplatePreview();
     document.getElementById('template-manager-modal').classList.add('active');
 }
 
@@ -7541,8 +7638,8 @@ function closeTemplateManager() {
     selectedTemplateId = null;
 }
 
-function renderTemplateList() {
-    const templates = loadTemplates();
+async function renderTemplateList() {
+    const templates = await loadTemplates();
     const list = document.getElementById('template-list');
     list.innerHTML = templates.map(t => `
         <div class="template-list-item ${selectedTemplateId === t.id ? 'selected' : ''} ${editingTemplateId === t.id ? 'editing' : ''}" onclick="selectTemplate('${t.id}')">
@@ -7569,13 +7666,13 @@ function renderTemplateList() {
     `).join('');
 }
 
-function selectTemplate(id) {
+async function selectTemplate(id) {
     selectedTemplateId = id;
-    renderTemplateList();
-    renderTemplatePreview();
+    await renderTemplateList();
+    await renderTemplatePreview();
 }
 
-function renderTemplatePreview() {
+async function renderTemplatePreview() {
     const preview = document.getElementById('template-preview');
     if (!selectedTemplateId) {
         preview.innerHTML = '<div class="template-preview-empty">Select a template to preview</div>';
@@ -7601,7 +7698,7 @@ function renderTemplatePreview() {
             </div>`;
         return;
     }
-    const templates = loadTemplates();
+    const templates = await loadTemplates();
     const t = templates.find(x => x.id === selectedTemplateId);
     if (!t) return;
 
@@ -7652,59 +7749,130 @@ function cancelTemplateEdit() {
     renderTemplatePreview();
 }
 
-function saveTemplate() {
+async function saveTemplate() {
     const name = document.getElementById('template-name-input').value.trim();
     const prompt = document.getElementById('template-prompt-input').value.trim();
     if (!name || !prompt) {
         showToast('Name and prompt are required', 'error');
         return;
     }
-    const templates = loadTemplates();
+    // Check if this name matches a default — if so, we store as user override
     if (editingTemplateId === 'new') {
-        const newId = crypto.randomUUID();
-        templates.push({ id: newId, name, prompt });
-        selectedTemplateId = newId;
+        // Create new user template via API
+        try {
+            const res = await fetch('/api/templates', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: crypto.randomUUID(), name, prompt })
+            });
+            const data = await res.json();
+            if (data.ok) {
+                _userTemplates = [...(_userTemplates || []), data.template];
+                selectedTemplateId = data.template.id;
+            }
+        } catch (e) {
+            console.error('Failed to create template:', e);
+            showToast('Failed to save template', 'error');
+            return;
+        }
     } else {
-        const idx = templates.findIndex(t => t.id === editingTemplateId);
-        if (idx >= 0) {
-            templates[idx].name = name;
-            templates[idx].prompt = prompt;
+        // Update existing — check if it's a default or user template
+        const templates = await loadTemplates();
+        const t = templates.find(x => x.id === editingTemplateId);
+        if (!t) {
+            showToast('Template not found', 'error');
+            return;
+        }
+        if (t._isDefault) {
+            // Create user override (new user template with same name)
+            try {
+                const res = await fetch('/api/templates', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: crypto.randomUUID(), name, prompt })
+                });
+                if (!(await res.json()).ok) {
+                    showToast('Failed to save template', 'error');
+                    return;
+                }
+            } catch (e) {
+                console.error('Failed to create template:', e);
+                showToast('Failed to save template', 'error');
+                return;
+            }
+        } else {
+            // Update existing user template via API
+            try {
+                const res = await fetch(`/api/templates/${editingTemplateId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: editingTemplateId, name, prompt })
+                });
+                if (!(await res.json()).ok) {
+                    showToast('Failed to save template', 'error');
+                    return;
+                }
+            } catch (e) {
+                console.error('Failed to update template:', e);
+                showToast('Failed to save template', 'error');
+                return;
+            }
         }
     }
-    saveTemplates(templates);
+    // Refresh cache
+    _userTemplates = null;
     editingTemplateId = null;
-    renderTemplateList();
-    renderTemplatePreview();
-    populateTemplatesDropdown();
+    await renderTemplateList();
+    await renderTemplatePreview();
+    await populateTemplatesDropdown();
     showToast('Template saved', 'success');
 }
 
-function deleteTemplate(id) {
+async function deleteTemplate(id) {
     if (!confirm('Delete this template?')) return;
-    const templates = loadTemplates().filter(t => t.id !== id);
-    saveTemplates(templates);
+    // Can't delete defaults — they're in the code
+    const templates = await loadTemplates();
+    const t = templates.find(x => x.id === id);
+    if (t && t._isDefault) {
+        showToast('Cannot delete built-in template', 'error');
+        return;
+    }
+    // Delete user template via API
+    try {
+        const res = await fetch(`/api/templates/${id}`, { method: 'DELETE' });
+        if (!(await res.json()).ok) {
+            showToast('Failed to delete template', 'error');
+            return;
+        }
+    } catch (e) {
+        console.error('Failed to delete template:', e);
+        showToast('Failed to delete template', 'error');
+        return;
+    }
+    // Refresh cache
+    _userTemplates = null;
     if (editingTemplateId === id || selectedTemplateId === id) {
         editingTemplateId = null;
         selectedTemplateId = null;
     }
-    renderTemplateList();
-    renderTemplatePreview();
-    populateTemplatesDropdown();
+    await renderTemplateList();
+    await renderTemplatePreview();
+    await populateTemplatesDropdown();
     showToast('Template deleted', 'success');
 }
 
-function applyTemplateById(id) {
-    const templates = loadTemplates();
+async function applyTemplateById(id) {
+    const templates = await loadTemplates();
     const t = templates.find(x => x.id === id);
     if (!t) return;
     applySystemPromptTemplate(t.prompt);
     closeTemplateManager();
 }
 
-function populateTemplatesDropdown() {
+async function populateTemplatesDropdown() {
     const select = document.getElementById('chat-template-select');
     if (!select) return;
-    const templates = loadTemplates();
+    const templates = await loadTemplates();
     const currentVal = select.value;
     select.innerHTML = '<option value="">— Templates —</option><option value="">None</option>';
     templates.forEach(t => {

@@ -649,28 +649,30 @@ Create the baseline needed to refactor safely without changing behavior.
 
 ### Goal
 
-Switch from one huge classic script to a module bootstrap while preserving current function names and behavior.
+Switch from one huge classic script to a module bootstrap while preserving current function names and behavior. Begin scaffolding `core/app-state.js` alongside bootstrap so Phase 3+ modules have a home to write to immediately.
 
 ### Tasks
 
 1. Add `static/js/bootstrap.js`.
 2. Add `static/js/compat/globals.js`.
 3. Add `static/js/core/format.js`.
-4. Move only the safest shared helpers first:
+4. Add `static/js/core/app-state.js` — scaffold the shape (see Phase 2), migrate the most obvious shared state (dashboard metric snapshots, session state, chat global state). This avoids refactoring state ownership twice.
+5. Move only the safest shared helpers first:
    - `escapeHtml`
    - formatting helpers
    - version compare helper
    - minor stateless DOM helpers if truly generic
-5. Keep feature logic where it is for now if necessary, but import shared helpers from modules.
-6. Export current inline-handler functions through `compat/globals.js` to `window`.
-7. Update [`static/index.html`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/index.html:2157) to load the new module entrypoint.
-8. Update Rust static asset embedding and routes for new JS assets.
+6. Keep feature logic where it is for now if necessary, but import shared helpers from modules.
+7. Export current inline-handler functions through `compat/globals.js` to `window`.
+8. Update [`static/index.html`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/index.html:2157) to load the new module entrypoint.
+9. Update Rust static asset embedding and routes for new JS assets.
 
 ### Notes
 
 - This phase is about proving the new loading model, not reducing most of the complexity yet.
 - Do not simultaneously rewrite dashboard, chat, and remote-agent logic.
 - The compatibility layer should be explicit and small enough to audit.
+- Starting `app-state.js` here means Phase 2 becomes a refinement pass (moving remaining state, cleaning up accessors) rather than a big-bang migration.
 
 ### Exit Criteria
 
@@ -678,20 +680,20 @@ Switch from one huge classic script to a module bootstrap while preserving curre
 - All inline handlers still function
 - Shared helper duplication begins to disappear
 - There is one clear startup path
+- `app-state.js` exists with the core shape and the most obvious shared state migrated
 
-## Phase 2: Centralize Shared State
+## Phase 2: Centralize Shared State (Refinement Pass)
 
 ### Goal
 
-Move ad hoc globals into a central app-state module without changing behavior.
+Finish moving remaining ad hoc globals into `core/app-state.js` (scaffolded in Phase 1) and clean up accessors. This is a refinement pass, not a big-bang migration.
 
 ### Tasks
 
-1. Create `core/app-state.js`.
-2. Migrate shared mutable state from top-level globals into structured sub-objects.
-3. Replace direct `window.*` mutations where possible.
-4. Keep compatibility accessors only where needed by legacy code during transition.
-5. Define clear ownership for:
+1. Move any shared mutable state not yet migrated in Phase 1 into structured sub-objects.
+2. Replace direct `window.*` mutations where possible.
+3. Keep compatibility accessors only where needed by legacy code during transition.
+4. Define clear ownership for:
    - dashboard metric histories
    - session state
    - remote-agent transient state
@@ -752,10 +754,21 @@ Isolate the real-time dashboard logic because it is one of the most coupled and 
 - The order of state updates and renders matters.
 - Some visual fallbacks are inferred, not explicit.
 
+### Verification Strategy
+
+Before extraction, capture the exact sequence of DOM mutations per WebSocket message by logging:
+
+- which elements are read from (`textContent`, `innerHTML`, `classList`)
+- which elements are written to
+- the order of reads vs writes
+
+Use a lightweight `MutationObserver` or console-logged wrapper around the current `ws.onmessage` handler. After extraction, replay the same messages and diff the mutation logs to confirm identical behavior.
+
 ### Exit Criteria
 
 - Dashboard works identically after extraction
 - WebSocket logic is no longer mixed with chat, presets, sessions, and modal code
+- DOM mutation logs match before/after extraction
 
 ## Phase 4: Extract Presets, Sessions, Attach/Detach, and File Browser
 
@@ -841,11 +854,11 @@ It is one of the most stateful parts of the file.
 - Inline handlers still work through the facade
 - No SSH behavior changes unintentionally
 
-## Phase 6: Extract Chat Into Its Own Subsystem
+## Phase 6a: Extract Chat State and Transport
 
 ### Goal
 
-Move the chat feature out of the shared monolith. This is the largest standalone feature after the dashboard.
+Move chat persistence, tab state, and streaming transport out of the monolith. This is the foundation for Phase 6b.
 
 ### Suggested Split
 
@@ -854,36 +867,19 @@ Move the chat feature out of the shared monolith. This is the largest standalone
   - active tab
   - busy flags
   - persistence scheduling
-- `chat-render.js`
-  - tabs
-  - messages
-  - compaction markers
-  - unread indicators
-  - markdown rendering hooks
 - `chat-transport.js`
   - `/api/chat`
   - streaming decode
   - abort controller
   - summarization requests
-- `chat-templates.js`
-  - system prompt templates
-  - explicit-mode policy
-- `chat-params.js`
-  - model parameter panel
-  - system prompt panel
-  - style/font/enter-to-send controls
 
 ### Tasks
 
 1. Move chat persistence into `chat-state.js`.
 2. Keep save/load wire format backward compatible with the backend.
-3. Preserve current compaction behavior and tombstone structure.
-4. Preserve streaming markdown updates.
-5. Preserve message actions:
-   - copy
-   - regenerate
-   - export/import
-6. Preserve keyboard shortcuts and tab switching behavior.
+3. Move streaming transport (fetch, decode, abort) into `chat-transport.js`.
+4. Preserve current compaction behavior and tombstone structure.
+5. Ensure render code in the legacy shell can still read from `chat-state.js` and call `chat-transport.js`.
 
 ### Important Caution
 
@@ -902,7 +898,48 @@ Do not split it in a way that causes render/transport state desynchronization.
 
 ### Exit Criteria
 
+- Chat state and transport are isolated modules
+- Legacy render code still works against the new modules
+- Streaming behavior remains stable
+- Compaction and persistence remain intact
+
+## Phase 6b: Extract Chat Rendering, Templates, and Params
+
+### Goal
+
+Move chat rendering, template manager, and model params panel out of the monolith.
+
+### Suggested Split
+
+- `chat-render.js`
+  - tabs
+  - messages
+  - compaction markers
+  - unread indicators
+  - markdown rendering hooks
+- `chat-templates.js`
+  - system prompt templates
+  - explicit-mode policy
+- `chat-params.js`
+  - model parameter panel
+  - system prompt panel
+  - style/font/enter-to-send controls
+
+### Tasks
+
+1. Move rendering functions into `chat-render.js`.
+2. Move template manager into `chat-templates.js`.
+3. Move model params panel into `chat-params.js`.
+4. Preserve message actions:
+   - copy
+   - regenerate
+   - export/import
+5. Preserve keyboard shortcuts and tab switching behavior.
+
+### Exit Criteria
+
 - Chat feature is no longer interleaved with dashboard or settings logic
+- All chat rendering is in dedicated modules
 - Streaming behavior remains stable
 - Compaction and persistence remain intact
 
@@ -977,9 +1014,23 @@ Any implementation agent must account for the Rust asset layer.
 
 ### Recommended Strategy
 
-For the first iteration, keep explicit Rust routes for the new JS files. This is verbose but safe.
+For Phase 1, keep explicit Rust routes for the small number of new JS files (bootstrap, globals, format, app-state). This is verbose but safe and limits the surface area.
 
-Do not combine the frontend refactor with a deeper static-asset re-architecture unless necessary.
+**After Phase 1 is validated**, write a small helper in `static_assets.rs` that auto-discovers files in `static/js/` using a macro or build script, rather than hand-adding embed + route per file. This prevents "asset routing drift" (new JS modules 404ing because a route was forgotten) as we add modules in later phases.
+
+Do not combine the frontend refactor with a deeper static-asset re-architecture at the same time as a feature extraction phase.
+
+## Smoke Test Recommendation
+
+After each phase, run a lightweight Playwright smoke test to catch obvious breakage before manual QA. The test should hit the major flows in ~30 seconds:
+
+1. **App boot** — navigate to `/`, verify no console errors
+2. **Attach/detach** — attach to endpoint, verify dashboard renders, detach
+3. **Chat send** — send a message, verify response appears
+4. **Open settings** — click settings, verify modal opens
+5. **Open presets** — click presets, verify modal opens
+
+This is not a full test suite — just a "did we break the basics" gate. Existing Playwright tests (chat-ui.spec.js) already cover deeper flows.
 
 ## Validation and Regression Matrix
 
@@ -1119,12 +1170,17 @@ Every phase must be validated manually. Existing tests are not enough to guarant
 - remote-agent error path
 - firewall-blocked path
 
-### After Phase 6
+### After Phase 6a
 
 - chat send/stream
 - tab persistence
 - compaction
+
+### After Phase 6b
+
 - template manager
+- model params panel
+- chat rendering fidelity
 
 ### After Phase 7
 
@@ -1236,22 +1292,24 @@ This is the recommended execution checklist.
 - Add `static/js/bootstrap.js`
 - Add `static/js/compat/globals.js`
 - Add `static/js/core/format.js`
-- Move shared formatting helpers there
+- Add `static/js/core/app-state.js` — scaffold shape, migrate obvious shared state
+- Move shared formatting helpers to `format.js`
 - Update Rust static routes for new JS files
 - Update `index.html` script loading
 - Verify app boots
 
-### Phase 2
+### Phase 2 (Refinement)
 
-- Add `static/js/core/app-state.js`
-- Move shared top-level state there
-- Update legacy code to read from central state
+- Move remaining shared state not yet migrated in Phase 1
+- Clean up accessors
 - Verify attach/detach, settings, chat still work
 
 ### Phase 3
 
+- Capture DOM mutation logs per WebSocket message before extraction
 - Extract dashboard helpers and WebSocket logic
 - Verify monitor tab thoroughly
+- Confirm DOM mutation logs match before/after
 
 ### Phase 4
 
@@ -1263,10 +1321,15 @@ This is the recommended execution checklist.
 - Extract remote-agent setup and control flows
 - Verify happy path and failure paths
 
-### Phase 6
+### Phase 6a
 
-- Extract chat subsystem
-- Verify streaming, persistence, compaction, templates, params, shortcuts
+- Extract chat state and transport
+- Verify streaming, persistence, compaction
+
+### Phase 6b
+
+- Extract chat rendering, templates, params
+- Verify templates, params, rendering fidelity
 
 ### Phase 7
 

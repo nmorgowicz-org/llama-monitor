@@ -2,6 +2,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use warp::Filter;
 use warp::reject::Reject;
 
@@ -99,11 +100,22 @@ pub struct ChatTab {
     pub compact_threshold: Option<f32>,
 }
 
+static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Set the config directory (called once at startup from AppConfig).
+pub fn set_config_dir(path: PathBuf) {
+    CONFIG_DIR.set(path).ok();
+}
+
 fn chat_tabs_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("llama-monitor")
-        .join("chat-tabs.json")
+    if let Some(dir) = CONFIG_DIR.get() {
+        dir.join("chat-tabs.json")
+    } else {
+        dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("llama-monitor")
+            .join("chat-tabs.json")
+    }
 }
 
 fn api_check_lhm() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -423,6 +435,10 @@ pub fn api_routes(
     let update_preset = api_update_preset(state.clone());
     let delete_preset = api_delete_preset(state.clone());
     let reset_presets = api_reset_presets(state.clone());
+    let get_templates = api_get_templates(state.clone());
+    let create_template = api_create_template(state.clone());
+    let update_template = api_update_template(state.clone());
+    let delete_template = api_delete_template(state.clone());
     let get_models = api_get_models(state.clone());
     let refresh_models = api_refresh_models(state.clone());
     let get_gpu_env = api_get_gpu_env(state.clone());
@@ -461,42 +477,42 @@ pub fn api_routes(
     let sensor_bridge_install = api_sensor_bridge_install();
     let sensor_bridge_uninstall = api_sensor_bridge_uninstall();
 
-    start
-        .or(stop)
+    // Group routes to avoid compiler overflow on long .or() chains
+    let server_routes = start.or(stop).or(kill_llama).or(attach).or(detach);
+    let preset_routes = get_presets
         .or(create_preset)
         .or(update_preset)
         .or(delete_preset)
-        .or(reset_presets)
-        .or(get_presets)
-        .or(get_models)
-        .or(refresh_models)
+        .or(reset_presets);
+    let template_routes = get_templates
+        .or(create_template)
+        .or(update_template)
+        .or(delete_template);
+    let model_routes = get_models.or(refresh_models);
+    let config_routes = get_gpu_env
         .or(put_gpu_env)
-        .or(get_gpu_env)
-        .or(put_settings)
         .or(get_settings)
-        .or(kill_llama)
-        .or(browse)
+        .or(put_settings);
+    let chat_routes = browse
         .or(chat)
         .or(chat_abort)
         .or(get_chat_tabs)
-        .or(put_chat_tabs)
-        .or(get_sessions)
+        .or(put_chat_tabs);
+    let session_routes = get_sessions
         .or(create_session)
         .or(delete_session)
         .or(get_active_session)
         .or(set_active_session)
         .or(get_capabilities)
-        .or(spawn_session_with_preset)
-        .or(attach)
-        .or(detach)
-        .or(check_lhm)
+        .or(spawn_session_with_preset);
+    let lhm_routes = check_lhm
         .or(start_lhm)
         .or(progress_lhm)
         .or(status_lhm)
         .or(install_lhm)
         .or(uninstall_lhm)
-        .or(disable_lhm)
-        .or(remote_agent_latest)
+        .or(disable_lhm);
+    let agent_routes = remote_agent_latest
         .or(remote_agent_detect)
         .or(remote_agent_host_key)
         .or(remote_agent_trust_host)
@@ -504,11 +520,22 @@ pub fn api_routes(
         .or(api_remote_agent_install(app_config.clone()))
         .or(api_remote_agent_start(app_config.clone()))
         .or(api_remote_agent_update(app_config.clone()))
-        .or(api_remote_agent_stop(app_config))
-        .or(remote_agent_remove)
+        .or(api_remote_agent_stop(app_config));
+    let bridge_routes = remote_agent_remove
         .or(sensor_bridge_status)
         .or(sensor_bridge_install)
-        .or(sensor_bridge_uninstall)
+        .or(sensor_bridge_uninstall);
+
+    server_routes
+        .or(preset_routes)
+        .or(template_routes)
+        .or(model_routes)
+        .or(config_routes)
+        .or(chat_routes)
+        .or(session_routes)
+        .or(lhm_routes)
+        .or(agent_routes)
+        .or(bridge_routes)
         .or(api_self_update())
 }
 
@@ -1069,6 +1096,69 @@ fn api_reset_presets(
             *presets = defaults;
             let _ = presets::save_presets(&state.presets_path, &presets);
             warp::reply::json(&serde_json::json!({"ok": true}))
+        })
+}
+
+// ── Template API ───────────────────────────────────────────────────────
+
+fn api_get_templates(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "templates")
+        .and(warp::get())
+        .map(move || {
+            let templates = state.templates.lock().unwrap().clone();
+            warp::reply::json(&templates)
+        })
+}
+
+fn api_create_template(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "templates")
+        .and(warp::post())
+        .and(warp::body::json())
+        .map(move |template: presets::SystemPromptTemplate| {
+            let mut templates = state.templates.lock().unwrap();
+            templates.push(template.clone());
+            let _ = presets::save_templates(&state.templates_path, &templates);
+            warp::reply::json(&serde_json::json!({"ok": true, "template": template}))
+        })
+}
+
+fn api_update_template(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "templates" / String)
+        .and(warp::put())
+        .and(warp::body::json())
+        .map(move |id: String, updated: presets::SystemPromptTemplate| {
+            let mut templates = state.templates.lock().unwrap();
+            if let Some(existing) = templates.iter_mut().find(|t| t.id == id) {
+                *existing = updated.clone();
+                let _ = presets::save_templates(&state.templates_path, &templates);
+                warp::reply::json(&serde_json::json!({"ok": true, "template": updated}))
+            } else {
+                warp::reply::json(&serde_json::json!({"ok": false, "error": "template not found"}))
+            }
+        })
+}
+
+fn api_delete_template(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "templates" / String)
+        .and(warp::delete())
+        .map(move |id: String| {
+            let mut templates = state.templates.lock().unwrap();
+            let before = templates.len();
+            templates.retain(|t| t.id != id);
+            if templates.len() < before {
+                let _ = presets::save_templates(&state.templates_path, &templates);
+                warp::reply::json(&serde_json::json!({"ok": true}))
+            } else {
+                warp::reply::json(&serde_json::json!({"ok": false, "error": "template not found"}))
+            }
         })
 }
 

@@ -7,6 +7,7 @@ use llama_monitor::{
 fn local_spawn_has_all_metrics() {
     let paths = AppPaths {
         presets_path: std::path::PathBuf::new(),
+        templates_path: std::path::PathBuf::new(),
         models_dir: None,
         gpu_env_path: std::path::PathBuf::new(),
         ui_settings_path: std::path::PathBuf::new(),
@@ -56,6 +57,7 @@ fn local_spawn_has_all_metrics() {
 fn local_attach_has_full_metrics() {
     let paths = AppPaths {
         presets_path: std::path::PathBuf::new(),
+        templates_path: std::path::PathBuf::new(),
         models_dir: None,
         gpu_env_path: std::path::PathBuf::new(),
         ui_settings_path: std::path::PathBuf::new(),
@@ -104,6 +106,7 @@ fn local_attach_has_full_metrics() {
 fn remote_attach_has_inference_only() {
     let paths = AppPaths {
         presets_path: std::path::PathBuf::new(),
+        templates_path: std::path::PathBuf::new(),
         models_dir: None,
         gpu_env_path: std::path::PathBuf::new(),
         ui_settings_path: std::path::PathBuf::new(),
@@ -183,6 +186,7 @@ fn headless_mode_disables_tray() {
         llama_server_cwd: None,
         presets_file: None,
         sessions_file: None,
+        config_dir: None,
         headless: true,
         no_tray: false,
         agent: false,
@@ -214,6 +218,7 @@ fn headless_mode_disables_tray() {
         llama_server_cwd: None,
         presets_file: None,
         sessions_file: None,
+        config_dir: None,
         headless: false,
         no_tray: true,
         agent: false,
@@ -245,6 +250,7 @@ fn headless_mode_disables_tray() {
         llama_server_cwd: None,
         presets_file: None,
         sessions_file: None,
+        config_dir: None,
         headless: true,
         no_tray: true,
         agent: false,

@@ -8,6 +8,7 @@ use crate::gpu::env::GpuEnv;
 use crate::llama::metrics::LlamaMetrics;
 use crate::llama::server::ServerConfig;
 use crate::models::DiscoveredModel;
+use crate::presets;
 use crate::presets::ModelPreset;
 use crate::system::SystemMetrics;
 
@@ -266,6 +267,7 @@ pub fn save_sessions(path: &Path, sessions: &[Session]) -> anyhow::Result<()> {
 #[derive(Clone)]
 pub struct AppPaths {
     pub presets_path: PathBuf,
+    pub templates_path: PathBuf,
     pub models_dir: Option<PathBuf>,
     pub gpu_env_path: PathBuf,
     pub ui_settings_path: PathBuf,
@@ -296,6 +298,8 @@ pub struct AppState {
     pub agent_poll_notify: Arc<tokio::sync::Notify>,
     pub presets: Arc<Mutex<Vec<ModelPreset>>>,
     pub presets_path: PathBuf,
+    pub templates: Arc<Mutex<Vec<presets::SystemPromptTemplate>>>,
+    pub templates_path: PathBuf,
     pub discovered_models: Arc<Mutex<Vec<DiscoveredModel>>>,
     pub models_dir: Option<PathBuf>,
     pub gpu_env: Arc<Mutex<GpuEnv>>,
@@ -323,6 +327,7 @@ impl AppState {
         ui_settings: UiSettings,
     ) -> Self {
         let presets_path = paths.presets_path;
+        let templates_path = paths.templates_path;
         let models_dir = paths.models_dir;
         let gpu_env_path = paths.gpu_env_path;
         let ui_settings_path = paths.ui_settings_path;
@@ -333,6 +338,7 @@ impl AppState {
             .unwrap_or_default();
 
         let sessions = load_sessions(&sessions_path);
+        let templates = presets::load_templates(&templates_path);
         let active_session_id = String::new();
         let endpoint_kind = EndpointKind::Unknown;
         let session_kind = SessionKind::None;
@@ -360,6 +366,8 @@ impl AppState {
             agent_poll_notify: Arc::new(tokio::sync::Notify::new()),
             presets: Arc::new(Mutex::new(presets)),
             presets_path,
+            templates: Arc::new(Mutex::new(templates)),
+            templates_path,
             discovered_models: Arc::new(Mutex::new(discovered)),
             models_dir,
             gpu_env: Arc::new(Mutex::new(gpu_env)),
@@ -799,6 +807,7 @@ mod tests {
     fn test_paths(sessions_path: PathBuf) -> AppPaths {
         AppPaths {
             presets_path: PathBuf::new(),
+            templates_path: PathBuf::new(),
             models_dir: None,
             gpu_env_path: PathBuf::new(),
             ui_settings_path: PathBuf::new(),

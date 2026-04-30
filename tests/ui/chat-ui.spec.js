@@ -339,12 +339,62 @@ test.describe('app update UI', () => {
 });
 
 test.describe('context compaction', () => {
+  // Isolate test data from user's real chat tabs.
+  // All compaction tests use a dedicated tab prefixed with "[TEST]" so it can
+  // be identified and cleaned up. The beforeAll creates the test tab; afterAll
+  // removes it, leaving the user's chat history untouched.
+  const TEST_TAB_PREFIX = '[TEST]';
+
+  test.beforeAll(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.top-nav-bar');
+    await page.evaluate(() => switchView('monitor'));
+    await page.getByRole('button', { name: /chat/i }).click();
+    await expect(page.locator('#page-chat')).toBeVisible();
+
+    // Clean up any leftover test tabs from a previous run
+    await page.evaluate(() => {
+      chatTabs = chatTabs.filter(t => !t.name.startsWith('${TEST_TAB_PREFIX}'));
+      if (!chatTabs.length) chatTabs = [newChatTab('Chat 1')];
+    });
+
+    // Create a fresh test tab
+    await page.evaluate(() => {
+      const tab = newChatTab('Test Compaction');
+      tab.name = '[TEST] Compaction';
+      tab.visible_message_limit = 100;
+      chatTabs.push(tab);
+      switchChatTab(tab.id);
+      renderChatMessages();
+    });
+  });
+
+  test.afterAll(async ({ page }) => {
+    // Remove all test-created tabs
+    await page.evaluate(() => {
+      chatTabs = chatTabs.filter(t => !t.name.startsWith('${TEST_TAB_PREFIX}'));
+      if (!chatTabs.length) chatTabs = [newChatTab('Chat 1')];
+      renderChatTabs();
+      renderChatMessages();
+    });
+  });
+
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('.top-nav-bar');
     await page.evaluate(() => switchView('monitor'));
     await page.getByRole('button', { name: /chat/i }).click();
     await expect(page.locator('#page-chat')).toBeVisible();
+    // Switch to the test tab and clear it for a clean slate
+    await page.evaluate(() => {
+      const testTab = chatTabs.find(t => t.name.startsWith('${TEST_TAB_PREFIX}'));
+      if (testTab) {
+        testTab.messages = [];
+        testTab.visible_message_limit = 100;
+        switchChatTab(testTab.id);
+      }
+      renderChatMessages();
+    });
     // Short-circuit the summarization fetch so compaction completes immediately
     // regardless of whether a llama server is running in CI.
     await page.route('**/api/chat', route => route.fulfill({ status: 503 }));
@@ -387,16 +437,7 @@ test.describe('context compaction', () => {
   });
 
   test('multiple compactions preserve old tombstones', async ({ page }) => {
-    // Use a fresh tab so persisted chat state from earlier tests does not affect
-    // tombstone counts in this scenario.
-    await page.evaluate(() => {
-      const tab = newChatTab('Compaction Isolation');
-      tab.visible_message_limit = 100;
-      chatTabs.push(tab);
-      switchChatTab(tab.id);
-      renderChatMessages();
-    });
-
+    // Uses the shared test tab (cleared by beforeEach).
     // First round: inject messages and compact
     await page.evaluate(() => {
       const tab = activeChatTab();
@@ -431,7 +472,7 @@ test.describe('context compaction', () => {
   });
 
   test('auto-compact settings persist on tab switch', async ({ page }) => {
-    // Open system prompt panel and enable auto-compact
+    // Open system prompt panel and enable auto-compact on the test tab
     await page.locator('#btn-system-prompt').click();
     await page.locator('#chat-auto-compact').check();
     await page.locator('#chat-compact-threshold').fill('90');
@@ -443,9 +484,18 @@ test.describe('context compaction', () => {
     const newTabAutoCompact = await page.locator('#chat-auto-compact').isChecked();
     expect(newTabAutoCompact).toBe(false);
 
-    // Switch back to first tab — settings should still be on (per-tab persistence)
-    await page.locator('.chat-tab').first().click();
+    // Switch back to the test tab — settings should still be on (per-tab persistence)
+    await page.evaluate(() => {
+      const testTab = chatTabs.find(t => t.name.startsWith('${TEST_TAB_PREFIX}'));
+      if (testTab) switchChatTab(testTab.id);
+    });
     const firstTabAutoCompact = await page.locator('#chat-auto-compact').isChecked();
     expect(firstTabAutoCompact).toBe(true);
+
+    // Clean up the extra tab created by this test
+    await page.evaluate(() => {
+      chatTabs = chatTabs.filter(t => t.name.startsWith('${TEST_TAB_PREFIX}') || t.name === 'Chat 1');
+      if (!chatTabs.length) chatTabs = [newChatTab('Chat 1')];
+    });
   });
 });

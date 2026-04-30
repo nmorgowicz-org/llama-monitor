@@ -746,9 +746,11 @@
                     </label>
                     <label class="modal-field" id="compact-threshold-field">
                         Threshold
-                        <input type="range" id="chat-compact-threshold" min="50" max="95" step="5"
-                               value="80" oninput="onCompactThresholdChange(+this.value)">
-                        <span id="chat-compact-threshold-val">80%</span>
+                        <div class="threshold-row">
+                            <input type="range" id="chat-compact-threshold" min="50" max="95" step="5"
+                                   value="80" oninput="onCompactThresholdChange(+this.value)">
+                            <span id="chat-compact-threshold-val">80%</span>
+                        </div>
                         <span class="modal-help">Compact when context usage reaches this percentage. Lower = more aggressive.</span>
                     </label>
                     <label class="modal-field" id="compact-summarize-field">
@@ -841,14 +843,6 @@
 
             <!-- Message thread -->
             <div class="chat-messages" id="chat-messages"></div>
-
-            <!-- Typing indicator -->
-            <div class="chat-typing" id="chat-typing" style="display:none;">
-                <div class="chat-typing-avatar">AI</div>
-                <div class="chat-typing-dots">
-                    <span></span><span></span><span></span>
-                </div>
-            </div>
 
             <!-- Input area -->
             <div class="chat-input-row" id="chat-input-row">

@@ -12,6 +12,7 @@ pub struct AppConfig {
     pub llama_poll_interval: u64,
     pub models_dir: Option<PathBuf>,
     pub presets_file: PathBuf,
+    pub templates_file: PathBuf,
     pub gpu_env_file: PathBuf,
     pub gpu_arch_override: Option<String>,
     pub gpu_devices_override: Option<String>,
@@ -34,9 +35,16 @@ impl AppConfig {
         let default_server_path = PathBuf::from("llama-server");
         let default_server_cwd = PathBuf::from(".");
 
-        let config_dir = dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("llama-monitor");
+        let config_dir = args
+            .config_dir
+            .unwrap_or_else(|| {
+                dirs::config_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("llama-monitor")
+            });
+
+        // Register config dir for chat_tabs_path()
+        crate::web::api::set_config_dir(config_dir.clone());
 
         let presets_file = args
             .presets_file
@@ -49,6 +57,7 @@ impl AppConfig {
             gpu_backend: args.gpu_backend,
             models_dir: args.models_dir,
             presets_file,
+            templates_file: config_dir.join("templates.json"),
             gpu_env_file: config_dir.join("gpu-env.json"),
             gpu_arch_override: args.gpu_arch,
             gpu_devices_override: args.gpu_devices,

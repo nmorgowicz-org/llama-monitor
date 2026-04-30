@@ -112,6 +112,53 @@ pub fn save_presets(path: &Path, presets: &[ModelPreset]) -> Result<()> {
     Ok(())
 }
 
+// ── System Prompt Templates ────────────────────────────────────────────────────
+
+/// User-created or user-modified system prompt templates.
+/// Stored on disk; merged with frontend defaults at runtime.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SystemPromptTemplate {
+    #[serde(default = "template_next_id")]
+    pub id: String,
+    pub name: String,
+    pub prompt: String,
+}
+
+fn template_next_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    format!("t{ts}")
+}
+
+/// Load user templates from disk. Returns empty vec on any error (defaults are in the frontend).
+pub fn load_templates(path: &Path) -> Vec<SystemPromptTemplate> {
+    if path.exists() {
+        match std::fs::read_to_string(path) {
+            Ok(contents) => match serde_json::from_str::<Vec<SystemPromptTemplate>>(&contents) {
+                Ok(templates) => return templates,
+                Err(e) => eprintln!("[warn] Failed to parse templates file: {e}"),
+            },
+            Err(e) => eprintln!("[warn] Failed to read templates file: {e}"),
+        }
+    }
+    vec![]
+}
+
+/// Save user templates to disk atomically.
+pub fn save_templates(path: &Path, templates: &[SystemPromptTemplate]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    let json = serde_json::to_string_pretty(templates)?;
+    std::fs::write(&tmp, json)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 pub fn default_presets() -> Vec<ModelPreset> {
     vec![
         ModelPreset {

@@ -565,6 +565,24 @@
   50% { opacity: 1; }
 }
 
+/* ── Threshold Row ─────────────────────────────── */
+.threshold-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.threshold-row input[type="range"] {
+  flex: 1;
+}
+#chat-compact-threshold-val {
+  color: var(--color-accent);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  font-family: var(--font-mono);
+  min-width: 32px;
+  text-align: right;
+}
+
 /* ── Compact Mode Pills ──────────────────────────── */
 .compact-mode-pills {
   display: flex;
@@ -573,16 +591,17 @@
 }
 .compact-mode-pill {
   flex: 1;
-  padding: 5px 10px;
-  border-radius: 6px;
+  padding: 3px 8px;
+  border-radius: 5px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
   color: rgba(255, 255, 255, 0.4);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s;
   text-align: center;
+  line-height: 1.3;
 }
 .compact-mode-pill:hover {
   background: rgba(255, 255, 255, 0.07);
@@ -942,11 +961,10 @@
 .chat-msg-time {
   font-size: 11px;
   color: var(--text-muted);
-  opacity: 0;
-  transition: opacity 0.2s;
+  opacity: 0.5;
 }
 .chat-message:hover .chat-msg-time {
-  opacity: 0.6;
+  opacity: 0.8;
 }
 .chat-msg-actions { display: flex; gap: 4px; }
 
@@ -1763,7 +1781,8 @@
 }
 .chat-system-panel.open,
 .chat-params-panel.open {
-  max-height: 500px;
+  max-height: 800px;
+  overflow-y: auto;
   opacity: 1;
   padding: var(--gap-sm) var(--gap-md);
 }
@@ -2086,6 +2105,7 @@
 .template-manager-modal {
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 .template-manager-body {
   display: flex;
