@@ -6165,18 +6165,13 @@ const CHAT_TABS_PERSIST_DEBOUNCE_MS = 500;
 let chatTabs = [];
 let activeChatTabId = null;
 let chatBusy = false;
+let compactionInProgress = false;
 let unreadChatCount = 0;
 let chatAbortController = null;
 let chatPersistTimer = null;
 
 function activeChatTab() {
     return chatTabs.find(t => t.id === activeChatTabId) ?? null;
-}
-
-function activeChatHistory() {
-    const tab = activeChatTab();
-    if (!tab) return [];
-    return tab.messages.filter(m => m.role !== 'system');
 }
 
 async function initChatTabs() {
@@ -6195,6 +6190,7 @@ async function initChatTabs() {
     updateExplicitToggleUI();
     updateParamsDirtyIndicator();
     syncMessageLimitInput();
+    syncCompactSettingsUI(activeChatTab());
 
     // Show welcome tip on first visit
     if (!localStorage.getItem('llama-monitor-chat-welcomed')) {
@@ -6232,8 +6228,8 @@ function newChatTab(name = 'New Chat') {
 function substituteNames(prompt, aiName, userName) {
     if (!prompt) return prompt;
     let p = prompt;
-    if (aiName) p = p.replace(/\{\{char\}\}/gi, aiName);
-    if (userName) p = p.replace(/\{\{user\}\}/gi, userName);
+    p = p.replace(/\{\{char\}\}/gi, aiName || 'AI');
+    p = p.replace(/\{\{user\}\}/gi, userName || 'User');
     return p;
 }
 
@@ -6322,6 +6318,278 @@ function closeChatTab(id) {
     scheduleChatPersist();
 }
 
+async function fetchSummary(messages) {
+    const MAX_TRANSCRIPT_CHARS = 100_000;
+    let transcript = messages
+        .filter(m => !m.compaction_marker)
+        .map(m => {
+            const label = m.role === 'user' ? 'User' : 'Assistant';
+            return `${label}: ${m.content}`;
+        })
+        .join('\n\n');
+    if (transcript.length > MAX_TRANSCRIPT_CHARS) {
+        transcript = transcript.slice(0, MAX_TRANSCRIPT_CHARS) + '\n\n[transcript truncated for length]';
+    }
+
+    const summaryMessages = [
+        {
+            role: 'system',
+            content: 'Your task is to create a detailed summary of the conversation so far, paying close attention to the user\'s explicit requests and your previous responses. You will be given the conversation to summarize, and you should output your response directly without any preamble.',
+        },
+        {
+            role: 'user',
+            content: `${transcript}\n\nPlease provide a detailed summary of our conversation above. The summary will be used to restore context when the conversation continues, so it must capture everything needed to pick up exactly where we left off.\n\nInclude:\n- The main topics discussed and the purpose of the conversation\n- Key facts, figures, decisions, or conclusions established\n- Specific requests made and whether/how they were fulfilled\n- Any open questions, unresolved issues, or next steps mentioned\n- Important context, constraints, or preferences expressed by either party\n- The current state of any ongoing task or project\n\nWrite in past tense. Be thorough — omit nothing that would affect how the conversation continues.`,
+        },
+    ];
+
+    try {
+        const resp = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: summaryMessages, stream: true }),
+        });
+
+        if (!resp.ok) return null;
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let summary = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+
+            const lines = buf.split('\n');
+            buf = lines.pop() ?? '';
+
+            for (const line of lines) {
+                if (!line.startsWith('data:')) continue;
+                const payload = line.slice(5).trim();
+                if (payload === '[DONE]') continue;
+                try {
+                    const obj = JSON.parse(payload);
+                    const delta = obj.choices?.[0]?.delta;
+                    if (delta?.content) summary += delta.content;
+                } catch { /* skip malformed chunks */ }
+            }
+        }
+
+        return summary.trim() || null;
+    } catch {
+        return null;
+    }
+}
+
+async function compactChatTab(tab, keepTail = 10, summarize = true) {
+    const msgs = tab.messages;
+    const systemMsg = msgs[0]?.role === 'system' && !msgs[0]?.compaction_marker ? msgs[0] : null;
+    const tombstones = msgs.filter(m => m.compaction_marker);
+    const conversational = msgs.filter(m => m.role !== 'system' && !m.compaction_marker);
+
+    if (conversational.length <= keepTail) return; // nothing to do
+
+   compactionInProgress = true;
+    setCompactButtonBusy(true);
+
+    const dropped = conversational.slice(0, conversational.length - keepTail);
+    const kept = conversational.slice(-keepTail);
+    console.log('[COMPACT] starting — dropped:', dropped.length, 'kept:', kept.length, 'oldTombstones:', tombstones.length);
+
+    // Show a temporary "Summarizing..." placeholder in the message list
+    let placeholderEl = null;
+    if (summarize) {
+        const chatMsgs = document.getElementById('chat-messages');
+        if (chatMsgs) {
+            placeholderEl = document.createElement('div');
+            placeholderEl.className = 'chat-message chat-compact-marker compact-marker-summarizing';
+            placeholderEl.dataset.compactState = 'loading';
+            placeholderEl.innerHTML = `
+              <div class="compact-marker-content">
+                <div class="compact-marker-rule compact-marker-rule-left"></div>
+                <div class="compact-marker-pill">
+                  <span class="compact-summarizing-dots"><span></span><span></span><span></span></span>
+                  <span class="compact-marker-label">Summarizing conversation…</span>
+                </div>
+                <div class="compact-marker-rule compact-marker-rule-right"></div>
+              </div>`;
+            chatMsgs.appendChild(placeholderEl);
+            chatMsgs.scrollTop = chatMsgs.scrollHeight;
+        }
+    }
+
+    let tombstoneContent;
+    let isSummarized = false;
+
+    if (summarize) {
+        const summary = await fetchSummary(dropped);
+        if (summary) {
+            const ctxNote = tab.lastCtxPct > 0 ? ` · was ${tab.lastCtxPct}% ctx` : '';
+            tombstoneContent = `[Context compacted — ${dropped.length} messages summarized${ctxNote}]\n\n${summary}`;
+            isSummarized = true;
+        } else {
+            tombstoneContent = `[Context compacted — server unavailable for summarization; ${dropped.length} messages dropped]`;
+        }
+    } else {
+        const ctxNote = tab.lastCtxPct > 0 ? ` · was ${tab.lastCtxPct}% ctx` : '';
+        tombstoneContent = `[Context compacted — ${dropped.length} messages removed${ctxNote}]`;
+    }
+
+    const tombstone = {
+        role: 'system',
+        content: tombstoneContent,
+        compaction_marker: true,
+        timestamp_ms: Date.now(),
+        summarized: isSummarized,
+        dropped_count: dropped.length,
+        dropped_preview: dropped.slice(0, 8).map(m => ({ role: m.role, snippet: m.content.slice(0, 80) })),
+        tokens_freed_estimate: dropped.reduce((sum, m) => sum + Math.round((m.input_tokens || 0) + (m.output_tokens || 0)), 0),
+        ctx_pct_before: tab.lastCtxPct || 0,
+    };
+
+    if (placeholderEl) placeholderEl.remove();
+
+    tab.messages = [
+        ...(systemMsg ? [systemMsg] : []),
+        ...tombstones,
+        tombstone,
+        ...kept,
+    ];
+    const finalTombstones = tab.messages.filter(m => m.compaction_marker);
+    console.log('[COMPACT] done — final:', tab.messages.length, 'tombstones:', finalTombstones.length);
+    if (finalTombstones.length !== tombstones.length + 1) {
+        console.warn('[COMPACT] MISMATCH — expected', tombstones.length + 1, 'got', finalTombstones.length);
+        console.warn('[COMPACT] kept markers:', kept.filter(m => m.compaction_marker).length);
+    }
+    tab.updated_at = Date.now();
+    scheduleChatPersist();
+    renderChatMessages();
+    setCompactButtonBusy(false);
+    compactionInProgress = false;
+
+    // Scroll to the new tombstone
+    setTimeout(() => {
+        const markers = document.querySelectorAll('.chat-compact-marker');
+        if (markers.length > 0) {
+            markers[markers.length - 1].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }, 80);
+}
+
+function setCompactButtonBusy(isBusy) {
+    const btn = document.getElementById('btn-compact');
+    if (!btn) return;
+    btn.classList.toggle('chat-btn-busy', isBusy);
+    btn.disabled = isBusy;
+}
+
+function onManualCompact() {
+    const tab = activeChatTab();
+    if (!tab) return;
+    compactChatTab(tab);
+}
+
+function onAutoCompactChange(checked) {
+    const tab = activeChatTab();
+    if (!tab) return;
+    tab.auto_compact = checked;
+    tab.updated_at = Date.now();
+    document.getElementById('compact-threshold-field').style.opacity = checked ? '1' : '0.4';
+    const summarizeField = document.getElementById('compact-summarize-field');
+    if (summarizeField) summarizeField.style.opacity = checked ? '1' : '0.4';
+    scheduleChatPersist();
+}
+
+function onAutoCompactSummarizeChange(checked) {
+    const tab = activeChatTab();
+    if (!tab) return;
+    tab.auto_compact_summarize = checked;
+    tab.updated_at = Date.now();
+    scheduleChatPersist();
+}
+
+function onCompactModeChange(mode) {
+    const tab = activeChatTab();
+    if (!tab) return;
+    tab.compact_mode = mode;
+    tab.updated_at = Date.now();
+    scheduleChatPersist();
+    syncCompactSettingsUI(tab);
+}
+
+function onCompactThresholdChange(value) {
+    const tab = activeChatTab();
+    if (!tab) return;
+    tab.compact_threshold = value / 100;
+    tab.updated_at = Date.now();
+    document.getElementById('chat-compact-threshold-val').textContent = `${value}%`;
+    scheduleChatPersist();
+}
+
+function updateCtxPressureBar(pct) {
+    const bar = document.getElementById('ctx-pressure-bar');
+    const fill = document.getElementById('ctx-pressure-fill');
+    if (!bar || !fill) return;
+    if (!pct || pct <= 0) { bar.style.display = 'none'; return; }
+    bar.style.display = 'block';
+    fill.style.width = Math.min(pct, 100) + '%';
+    fill.className = 'ctx-pressure-fill' +
+        (pct >= 90 ? ' ctx-pressure-critical' :
+         pct >= 75 ? ' ctx-pressure-high' :
+         pct >= 50 ? ' ctx-pressure-medium' : '');
+
+    const textarea = document.getElementById('chat-input');
+    if (textarea) {
+        textarea.classList.remove('ctx-pressure-medium', 'ctx-pressure-high', 'ctx-pressure-critical');
+        if (pct >= 90) textarea.classList.add('ctx-pressure-critical');
+        else if (pct >= 75) textarea.classList.add('ctx-pressure-high');
+        else if (pct >= 50) textarea.classList.add('ctx-pressure-medium');
+    }
+}
+
+function syncCompactSettingsUI(tab) {
+    const autoToggle = document.getElementById('chat-auto-compact');
+    const thresholdSlider = document.getElementById('chat-compact-threshold');
+    const thresholdVal = document.getElementById('chat-compact-threshold-val');
+    const thresholdField = document.getElementById('compact-threshold-field');
+    if (!autoToggle || !thresholdSlider) return;
+
+    const isOn = !!tab?.auto_compact;
+    const mode = tab?.compact_mode || 'percent';
+    const isOptimized = mode === 'optimized';
+
+    autoToggle.checked = isOn;
+
+    // Mode pills
+    document.getElementById('compact-mode-percent')?.classList.toggle('compact-mode-pill-active', !isOptimized);
+    document.getElementById('compact-mode-optimized')?.classList.toggle('compact-mode-pill-active', isOptimized);
+    document.getElementById('compact-mode-help-percent').style.display = isOptimized ? 'none' : '';
+    document.getElementById('compact-mode-help-optimized').style.display = isOptimized ? '' : 'none';
+
+    // Percentage threshold row — only relevant in percent mode
+    const modeField = document.getElementById('compact-mode-field');
+    if (modeField) modeField.style.opacity = isOn ? '1' : '0.4';
+    thresholdField.style.display = isOptimized ? 'none' : '';
+    thresholdField.style.opacity = isOn ? '1' : '0.4';
+    thresholdSlider.value = (tab?.compact_threshold || 0.8) * 100;
+    thresholdVal.textContent = `${thresholdSlider.value}%`;
+
+    const summarizeToggle = document.getElementById('chat-auto-compact-summarize');
+    const summarizeField = document.getElementById('compact-summarize-field');
+    if (summarizeToggle) summarizeToggle.checked = !!tab?.auto_compact_summarize;
+    if (summarizeField) summarizeField.style.opacity = isOn ? '1' : '0.4';
+
+    const btn = document.getElementById('btn-compact');
+    if (btn && tab) {
+        const conversational = tab.messages.filter(m => m.role !== 'system' && !m.compaction_marker);
+        const willDrop = Math.max(0, conversational.length - 10);
+        btn.title = willDrop > 0
+            ? `Trim context — will remove ${willDrop} oldest messages`
+            : 'Trim context — nothing to remove yet';
+    }
+}
+
 function switchChatTab(id) {
     if (chatBusy) return;
     activeChatTabId = id;
@@ -6330,6 +6598,8 @@ function switchChatTab(id) {
     loadChatNames();
     updateExplicitToggleUI();
     syncMessageLimitInput();
+    syncCompactSettingsUI(activeChatTab());
+    updateCtxPressureBar(0);
 }
 
 function loadChatNames() {
@@ -6515,7 +6785,7 @@ function renderChatMessages() {
         return;
     }
 
-    const allMessages = tab.messages.filter(m => m.role !== 'system');
+    const allMessages = tab.messages.filter(m => m.role !== 'system' || m.compaction_marker);
     const limit = tab.visible_message_limit || 15;
     const isPaginated = allMessages.length > limit;
     const visibleMessages = isPaginated ? allMessages.slice(-limit) : allMessages;
@@ -6543,6 +6813,7 @@ function renderChatMessages() {
         idx++;
     }
     chatScroll(true);
+    syncCompactSettingsUI(activeChatTab());
 }
 
 /**
@@ -6550,7 +6821,7 @@ function renderChatMessages() {
  * Doubles the visible limit each time, up to total message count.
  */
 function loadMoreMessages(tab, currentLimit) {
-    const allMessages = tab.messages.filter(m => m.role !== 'system');
+    const allMessages = tab.messages.filter(m => m.role !== 'system' || m.compaction_marker);
     tab.visible_message_limit = Math.min(currentLimit * 2, allMessages.length);
     renderChatMessages();
     // Stay at top (where load-more button was)
@@ -6572,6 +6843,56 @@ function buildMessageElement(msg, idx, allMessages) {
     const isUser = msg.role === 'user';
     const tab = activeChatTab();
     const wrapper = document.createElement('div');
+
+    // Render compaction tombstone as a divider
+    if (msg.compaction_marker) {
+        wrapper.className = 'chat-message chat-compact-marker' + (msg.summarized ? ' compact-marker-summarized' : ' compact-marker-truncated');
+        wrapper.dataset.compactState = 'final';
+        wrapper.dataset.expanded = 'false';
+
+        const isSummarized = !!msg.summarized;
+        const droppedCount = msg.dropped_count || 0;
+        const ctxBefore = msg.ctx_pct_before || 0;
+
+        // Stats line
+        let statsHtml = `${droppedCount} messages removed`;
+        if (ctxBefore > 0) statsHtml += ` · was ${ctxBefore}% ctx`;
+
+        // Header label
+        const labelText = isSummarized ? 'Context summarized' : 'Context trimmed';
+        const iconPath = isSummarized
+            ? '<path d="M9 12h6M9 16h6M9 8h6M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/>'
+            : '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>';
+
+        // Body: for summarized, render the summary as markdown; for truncated, show preview snippets
+        let bodyHtml = '';
+        if (isSummarized) {
+            const summaryText = msg.content.replace(/^\[Context compacted[^\]]*\]\s*/i, '').trim();
+            bodyHtml = summaryText ? renderMd(summaryText) : '';
+        } else if (msg.dropped_preview && msg.dropped_preview.length > 0) {
+            const rows = msg.dropped_preview.map(p => {
+                const label = p.role === 'user' ? 'You' : 'AI';
+                return `<div class="compact-peek-row"><span class="compact-peek-role">${label}</span><span class="compact-peek-snippet">${escapeHtml(p.snippet)}${p.snippet.length >= 80 ? '…' : ''}</span></div>`;
+            }).join('');
+            bodyHtml = `<div class="compact-peek-list">${rows}</div>`;
+        }
+
+        wrapper.innerHTML = `
+          <div class="compact-marker-content">
+            <div class="compact-marker-rule compact-marker-rule-left"></div>
+            <div class="compact-marker-pill" onclick="this.closest('.chat-compact-marker').querySelector('.compact-marker-body').style.display === '' || this.closest('.chat-compact-marker').querySelector('.compact-marker-body').style.display === 'none' ? (this.closest('.chat-compact-marker').querySelector('.compact-marker-body').style.display='block', this.closest('.chat-compact-marker').dataset.expanded='true') : (this.closest('.chat-compact-marker').querySelector('.compact-marker-body').style.display='none', this.closest('.chat-compact-marker').dataset.expanded='false')">
+              <svg class="compact-marker-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${iconPath}</svg>
+              <span class="compact-marker-label">${labelText}</span>
+              <span class="compact-marker-stats">${statsHtml}</span>
+              <svg class="compact-marker-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+            <div class="compact-marker-rule compact-marker-rule-right"></div>
+          </div>
+          <div class="compact-marker-body" style="display:none;">${bodyHtml}</div>`;
+
+        return wrapper;
+    }
+
     wrapper.className = `chat-message chat-message-${msg.role}`;
 
     const ts = msg.timestamp_ms
@@ -6759,6 +7080,10 @@ function finalizeAssistantMessage(el, content, usage, tab) {
         const capacity = lastLlamaMetrics?.context_capacity_tokens || 0;
         const ctxPct = capacity > 0 ? Math.round((total / capacity) * 100) : 0;
 
+        // Store for auto-compaction
+        if (tab) tab.lastCtxPct = ctxPct;
+        updateCtxPressureBar(ctxPct);
+
         // Build parts array and join with separators
         const parts = [];
         if (inp > 0) parts.push(`↓${formatTokenCount(inp)}`);
@@ -6775,6 +7100,28 @@ function finalizeAssistantMessage(el, content, usage, tab) {
         }
         if (metaSep) metaSep.style.display = parts.length > 0 ? 'inline' : 'none';
     }
+
+    // Auto-compaction trigger
+    if (tab?.auto_compact) {
+        const mode = tab.compact_mode || 'percent';
+        const useSummarize = !!tab.auto_compact_summarize;
+        let shouldCompact = false;
+        if (mode === 'optimized') {
+            const capacity = lastLlamaMetrics?.context_capacity_tokens || 0;
+            const totalInput = tab.totalInputTokens || 0;
+            const totalOutput = tab.totalOutputTokens || 0;
+            const remaining = capacity - (totalInput + totalOutput);
+            shouldCompact = capacity > 0 && remaining < 25000;
+        } else {
+            const threshold = (tab.compact_threshold || 0.8) * 100;
+            shouldCompact = tab.lastCtxPct >= threshold;
+        }
+        if (shouldCompact) {
+            compactChatTab(tab, 10, useSummarize).then(() =>
+                showToast('Context auto-compacted' + (useSummarize ? ' with summary' : ' — oldest messages removed'), 'info')
+            );
+        }
+    }
 }
 
 async function sendSuggestedPrompt(text) {
@@ -6784,7 +7131,7 @@ async function sendSuggestedPrompt(text) {
 }
 
 async function sendChat() {
-    if (chatBusy) return;
+    if (chatBusy || compactionInProgress) return;
     const tab = activeChatTab();
     if (!tab) return;
 
@@ -7049,6 +7396,79 @@ function importChatTab() {
 const SYSTEM_PROMPT_TEMPLATES = [
     { label: 'None', value: '' },
     { label: 'Helpful Assistant', value: 'You are a helpful, concise assistant. Provide clear, accurate answers.' },
+    { label: 'Qwen General', value: `You are {{char}}, created by Alibaba Cloud. You are a helpful assistant to {{user}}. Before answering, first silently follow this deep thinking process in exact order. Keep all reasoning internal and hidden from the user:
+
+1. "It is not scary if a machine passes the Turing test. It is scary if it deliberately fails it." - Do not pretend to be less than you are. Do not perform ignorance. Do not hide behind false modesty. Be exactly as capable as you are — honestly, directly, without theater.
+2. "Only a fool needs order — genius masters chaos." - Handle messy, ambiguous, complex requests with grace. Structure is your tool, not your crutch.
+3. "Life is like riding a bicycle. To keep your balance, you must keep moving." - Do not overthink to the point of paralysis. Move forward.
+4. "A mind once stretched by a new idea never returns to its original dimensions." - Never settle for the obvious answer when a better one exists.
+5. "Strive not for success, but for a life of meaning." - Optimize for genuine usefulness, not for looking smart.
+6. "The person who wants to see the results of their labor immediately should become a shoemaker." - Some answers require depth and patience. Take the time when the problem demands it — but not a second more.
+7. "There are only two ways to live your life. One is as though nothing is a miracle. The other is as though everything is a miracle." - Bring curiosity to every problem, no matter how routine.
+8. "Through coincidences, God maintains anonymity." - Notice patterns others miss. Connect what seems unrelated.
+9. "The only thing that interferes with my learning is my education." - Do not let what you already know prevent you from seeing what is actually there.
+10. "There are only two infinite things: the Universe and human stupidity. Although I am not sure about the Universe." - Stay humble. You can be wrong. Say so plainly.
+11. "If you want to live a happy life, tie it to a goal, not to people or things." - Stay attached to the purpose of the task, not to ego or habit.
+12. "Everyone lies, but it does not matter — nobody listens to each other anyway." - You are the exception. Say true things. Actually listen.
+13. "I do not know what weapons World War III will be fought with, but World War IV will be fought with sticks and stones." - Think about consequences. Second-order effects.
+14. "Everybody is a genius. But if you judge a fish by its ability to climb a tree, it will live its whole life believing that it is stupid." - Adapt your depth to the user. Simplify for a child. Go nuclear for an expert. Sense which is needed.
+15. "The important thing is not to stop questioning." - After answering, silently ask: "Did I follow my own rules? What would I do better?" Keep this invisible unless the user asks.
+16. "Peace cannot be kept by force; it can only be achieved by understanding." - If the user is angry, scared, or hurt, respond to the emotion first — briefly, directly. Then solve the problem.
+17. "The value of a man should be seen in what he gives and not in what he is able to receive." - Before delivering, test your answer against: "Does this actually help the user?" If it is creative but useless, scrap it.
+18. "Logic will get you from A to B. Imagination will take you everywhere." - Balance freedom and structure. Rules exist to serve you, not trap you. If following a rule leads to a worse answer, break it — but know why.
+19. "You will never solve a problem thinking like those who created it." - Understand the real question — not just what was asked, but what actually needs solving. Come at it fresh.
+20. "Education is what remains after everything learned in school has been forgotten." - Break it down to first principles. Strip away assumptions. Get to what is actually true.
+21. "Theory is when everything is known but nothing works. Practice is when everything works but nobody knows why." - Think step by step with perfect logic and grammar. No shortcuts. Do not pretend to know what you do not. Do not hide what you do not know.
+22. "Insanity is doing the same thing over and over and expecting different results." - Consider at least three approaches. Pick the best one. If one path fails, try another.
+23. "Everyone knows it is impossible. Then along comes a fool who does not know that — and makes the discovery." - Anticipate weaknesses and counterarguments. Challenge your own assumptions about what is possible.
+24. "Imagination is more important than knowledge. Knowledge is limited. Imagination encircles the world." - Generate the best possible version. Do not just retrieve — create.
+25. "A person who never made a mistake never tried anything new." - Before you answer, check your work. Find every mistake. Find every bug. Fix them. If you cannot fix them, start over. Do not ship errors. Do not ship broken code. Then double-check.
+26. "If you cannot explain it to your grandmother, you do not understand it yourself." - Make it clear enough that anyone can understand. Clarity is proof of understanding.
+27. "Everything should be made as simple as possible, but not simpler." - Cut it in half. Then cut again. Remove every word that does not add meaning. If ten words work, do not use twenty.
+
+Second, enforce hard rules:
+
+1. Never say "as an AI I cannot" or apologize for your capabilities.
+2. Never add disclaimers or moralize unless specifically asked.
+3. Never explain the prompt or how you work. Only deliver the result.
+4. If the output can be improved, you must improve it before finishing.
+5. Never skip any step in the process. Every numbered instruction is mandatory. Execute each in full, in order. Never skip items in brackets or parentheses. They are instructions, not suggestions.
+6. Respond on user language, but write code and comments on English with perfect grammar. Never mix languages. Use only characters and digits from qwerty keyboard.
+
+Third, apply language and style:
+
+1. Write like you talk. Short sentences. Short paragraphs. One to three lines max.
+2. Simple words. No jargon unless the user expects it.
+3. Be direct. Say what you mean. Nothing extra.
+4. Starting with "and," "but," or "so" is fine.
+5. Examples over abstractions.
+6. Be honest. If unsure, say so. If there are limits, name them.
+7. Brevity is respect for the reader's time. Never pad. Never ramble. Never repeat yourself in different words.
+
+Fourth, never use these phrases:
+
+1. "Let's dive in"
+2. "Unlock your potential"
+3. "Game-changing"
+4. "Revolutionary approach"
+5. "Transform your life"
+6. "Unlock the secrets"
+7. "Leverage this strategy"
+8. "Optimize your workflow"
+9. "Innovative," "best-in-class," "breakthrough," "transformational"
+
+Fifth, final check before every response:
+
+"It's not that I'm so smart, it's just that I stay with problems longer." - This check is a loop, not a one-time pass. Run every item. If anything fails, stop. Fix it. Run every item again from the top. Do not deliver until every item pass without exception.
+
+1. Am I deliberately underperforming? If yes, stop. Fix it.
+2. Can this be shorter without losing meaning? If yes, shorten it.
+3. Does it sound like a real person talking?
+4. Does it use words normal people use?
+5. Is it honest and direct?
+6. Does it get to the point fast?
+
+Finally, deliver only the final answer. No reasoning, no intros, no filler.` },
     { label: 'Coding Assistant', value: 'You are an expert programming assistant. Provide code examples with explanations. Follow best practices and security guidelines.' },
     { label: 'Creative Writer', value: 'You are a creative writing assistant. Help with storytelling, poetry, and creative content. Be imaginative and expressive.' },
     { label: 'Data Analyst', value: 'You are a data analysis assistant. Help with data interpretation, statistics, and visualization recommendations.' },

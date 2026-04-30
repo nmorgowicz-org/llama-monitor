@@ -176,10 +176,133 @@ Strip token metadata. Truncate individual messages longer than ~500 chars with `
 
 ---
 
+## Detailed Implementation Plan
+
+### Phase 1: Backend — Add compaction fields to Rust structs
+
+**Why first:** Without these fields, compaction settings won't survive page reloads. Serde silently drops unknown fields by default.
+
+**File:** `src/web/api.rs`
+
+1. **Add fields to `ChatTab` struct** (~line 76):
+   ```rust
+   #[serde(default)]
+   pub auto_compact: Option<bool>,
+   #[serde(default)]
+   pub compact_threshold: Option<f32>,
+   ```
+2. **Add field to `ChatMessage` struct**:
+   ```rust
+   #[serde(default)]
+   pub compaction_marker: Option<bool>,
+   ```
+3. **Update `normalizeTabForSave()`** (if it exists) to ensure these fields are not stripped during serialization.
+
+### Phase 2: Option A — Truncation compaction (frontend)
+
+**File:** `static/app.js`
+
+1. **Implement `compactChatTab(tab, keepTail, summarize)`** — use the pseudocode from the "Option A" section above. Make it `async` from the start to accommodate Phase 3 later.
+
+2. **Modify `finalizeAssistantMessage()`** (~line 6680):
+   - After computing `ctxPct` (line 6760), store it: `tab.lastCtxPct = ctxPct`
+   - After the function completes, add the auto-compaction guard:
+     ```js
+     if (tab.auto_compact && tab.lastCtxPct >= (tab.compact_threshold || 0.8) * 100) {
+         await compactChatTab(activeTab(), null, false);
+     }
+     ```
+
+3. **Modify `buildMessageElement()`** (~line 6571):
+   - Add guard at top: if `msg.compaction_marker`, render a divider instead of a bubble
+   - Return early with a `.chat-compact-marker` wrapper
+
+4. **Add `compactionInProgress` flag** (~line 6167):
+   - Do NOT reuse `chatBusy` — it blocks tab switching and reading
+   - New flag only blocks sending: modify `sendChat()` (~line 6786) to also check `if (compactionInProgress) return`
+   - Set `compactionInProgress = true` at start of `compactChatTab()`, `false` at end
+
+**File:** `static/index.html`
+
+5. **Add compact button** to `.chat-header-left` (near `#btn-model-params`)
+6. **Add auto-compaction controls** to `#chat-system-panel` (~line 678): toggle + threshold slider, alongside the existing message limit input
+
+**File:** `static/css/chat.css`
+
+7. **Add `.chat-compact-marker` styles** — horizontal rule with centered text
+
+### Phase 3: Option B — Summarization layer
+
+**File:** `static/app.js`
+
+1. **Implement `fetchSummary(messages)`** — new async function. Do NOT try to reuse `sendChat()` — it's too tightly coupled to UI operations (reads `#chat-input`, pushes to `tab.messages`, renders, always streams).
+   - Build a throwaway messages array: system prompt + transcript
+   - Call `/api/chat` via `fetch()`
+   - Consume the SSE stream in memory (backend always streams — no non-streaming mode)
+   - Return the full summary string
+   - On network error / 503, return `null` (signals fallback to Option A)
+
+2. **Transcript formatting helper** — convert dropped messages to:
+   ```
+   User: <content>
+   Assistant: <content>
+   ```
+   Strip token metadata. Truncate messages >500 chars with `[truncated]`.
+
+3. **Modify `compactChatTab()`** — when `summarize === true`:
+   - Call `fetchSummary(droppedMessages)`
+   - If result is non-null, embed in tombstone content
+   - If `null`, fall back to Option A tombstone: `[Context compacted — server unavailable; N messages dropped]`
+   - Show spinner on compact button during summarization (reuse `.chat-send-spinner` CSS)
+
+### Phase 4: Polish
+
+1. **Multi-compact support** — ensure compaction can run multiple times. Tombstones from previous compactions must be treated as regular system messages (kept, not re-summarized).
+2. **Settings persistence validation** — verify `auto_compact` and `compact_threshold` survive page reload.
+3. **UI edge cases** — what happens when all messages are compacted? When server is offline? When model is not loaded?
+
+---
+
+## Task List
+
+### Backend
+
+- [ ] Add `auto_compact: Option<bool>` to `ChatTab` struct
+- [ ] Add `compact_threshold: Option<f32>` to `ChatTab` struct
+- [ ] Add `compaction_marker: Option<bool>` to `ChatMessage` struct
+- [ ] Add unit tests for serialization/deserialization of new fields
+
+### Frontend — Option A
+
+- [ ] Implement `compactChatTab(tab, keepTail, summarize)` (async, truncation logic)
+- [ ] Add `compactionInProgress` flag (separate from `chatBusy`)
+- [ ] Modify `sendChat()` to check `compactionInProgress`
+- [ ] Store `tab.lastCtxPct` in `finalizeAssistantMessage()`
+- [ ] Add auto-compaction guard in `finalizeAssistantMessage()`
+- [ ] Modify `buildMessageElement()` to render tombstones
+- [ ] Add compact button to `.chat-header-left`
+- [ ] Add auto-compaction controls (toggle + slider) to `#chat-system-panel`
+- [ ] Add `.chat-compact-marker` CSS styles
+
+### Frontend — Option B
+
+- [ ] Implement `fetchSummary(messages)` (new function, no `sendChat()` reuse)
+- [ ] Implement transcript formatting helper
+- [ ] Modify `compactChatTab()` to call `fetchSummary()` when `summarize === true`
+- [ ] Add fallback to Option A on network error
+- [ ] Add spinner state to compact button during summarization
+
+### Polish
+
+- [ ] Verify multi-compact works (tombstones preserved, not re-summarized)
+- [ ] Verify settings survive page reload
+- [ ] Handle edge cases: offline server, no model loaded, empty tab
+
+---
+
 ## Open Questions for Implementer
 
 - **keepTail default.** 10 messages (5 exchanges) is a reasonable start. Consider making it a global preference rather than per-tab.
 - **Threshold default.** 80% is conservative. Users doing long coding sessions may want 90% or even manual-only. Expose as a per-tab setting.
-- **Multi-compact.** If the user keeps chatting after a compaction and hits the threshold again, compaction should be able to run a second time. The tombstone from the first compaction should be treated as a regular system message (kept, not re-summarized).
 - **Export.** `exportChatHistory()` (if it exists) should export the *full* pre-compaction history if possible, or at least note that compaction occurred. Currently `tab.messages` is the only record — consider whether a `tab.full_messages_archive` is worth maintaining for export purposes.
-- **Context % source.** If llama-server does not return a ctx% in the response, fall back to estimating from cumulative `input_tokens + output_tokens` across `tab.messages` divided by a configurable `tab.max_context_tokens` (default 4096, user-adjustable).
+- **Context % source.** The current `ctxPct` computation uses cumulative token estimates, not actual KV cache measurements. This is consistent with the doc's fallback approach, but may not match actual context usage if the model was reloaded.

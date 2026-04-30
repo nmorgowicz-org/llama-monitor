@@ -38,6 +38,7 @@ pub fn build_routes(
             "'self'",
             "'unsafe-inline'",
             "https://fonts.googleapis.com",
+            "https://cdn.jsdelivr.net",
         ])
         .font_src(vec!["'self'", "https://fonts.gstatic.com"])
         .img_src(vec!["'self'", "data:", "https:"]);

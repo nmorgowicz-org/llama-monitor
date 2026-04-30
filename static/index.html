@@ -603,6 +603,13 @@
                         <span class="chat-header-label" id="chat-style-label">Rounded</span>
                         <span class="chat-style-dot"></span>
                     </button>
+                    <button class="chat-header-btn" id="btn-compact" onclick="onManualCompact()" title="Trim context — nothing to remove yet">
+                        <svg class="chat-compact-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+                            <line x1="15" y1="9" x2="21" y2="3"/><line x1="3" y1="21" x2="9" y2="15"/>
+                        </svg>
+                        <span class="chat-header-label">Trim</span>
+                    </button>
                     <div class="chat-name-inputs">
                         <div class="chat-name-pill"><span class="chat-name-label">AI</span><input type="text" class="chat-name-input" id="chat-ai-name" placeholder="Name" oninput="updateChatName('ai_name', this.value)" /></div>
                         <div class="chat-name-pill"><span class="chat-name-label">You</span><input type="text" class="chat-name-input" id="chat-user-name" placeholder="Name" oninput="updateChatName('user_name', this.value)" /></div>
@@ -633,6 +640,11 @@
                         <span class="chat-header-label">Export</span>
                     </button>
                 </div>
+            </div>
+
+            <!-- Context pressure bar -->
+            <div class="ctx-pressure-bar" id="ctx-pressure-bar" style="display:none;">
+                <div class="ctx-pressure-fill" id="ctx-pressure-fill"></div>
             </div>
 
             <!-- Style panel -->
@@ -712,6 +724,44 @@
                            value="15" oninput="onMessageLimitChange(+this.value)">
                     <span class="modal-help">Show only the most recent N messages. Older messages are hidden to improve performance.</span>
                 </label>
+                <div class="chat-compact-settings">
+                    <label class="modal-field">
+                        <span class="modal-label-row">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="chat-auto-compact" onchange="onAutoCompactChange(this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            Auto-compact context
+                        </span>
+                        <span class="modal-help">Automatically drop old messages when context usage exceeds a threshold.</span>
+                    </label>
+                    <label class="modal-field" id="compact-mode-field">
+                        Trigger mode
+                        <div class="compact-mode-pills">
+                            <button class="compact-mode-pill compact-mode-pill-active" id="compact-mode-percent" onclick="onCompactModeChange('percent')" type="button">Percentage</button>
+                            <button class="compact-mode-pill" id="compact-mode-optimized" onclick="onCompactModeChange('optimized')" type="button">Optimized</button>
+                        </div>
+                        <span class="modal-help compact-mode-help" id="compact-mode-help-percent">Compact when context usage reaches a percentage you choose.</span>
+                        <span class="modal-help compact-mode-help" id="compact-mode-help-optimized" style="display:none;">Compact automatically when fewer than 25,000 tokens remain — adapts to any model's context size.</span>
+                    </label>
+                    <label class="modal-field" id="compact-threshold-field">
+                        Threshold
+                        <input type="range" id="chat-compact-threshold" min="50" max="95" step="5"
+                               value="80" oninput="onCompactThresholdChange(+this.value)">
+                        <span id="chat-compact-threshold-val">80%</span>
+                        <span class="modal-help">Compact when context usage reaches this percentage. Lower = more aggressive.</span>
+                    </label>
+                    <label class="modal-field" id="compact-summarize-field">
+                        <span class="modal-label-row">
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="chat-auto-compact-summarize" onchange="onAutoCompactSummarizeChange(this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            Summarize when auto-compacting
+                        </span>
+                        <span class="modal-help">Use the model to generate a summary when auto-compacting. Slower but preserves more context. Requires an active model connection.</span>
+                    </label>
+                </div>
             </div>
 
             <!-- Model params panel -->
