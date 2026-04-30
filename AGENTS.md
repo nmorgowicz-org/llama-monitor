@@ -64,6 +64,17 @@ Examples:
 5. **Chores don't bump version** - `chore:`, `refactor:`, `ci:`, `docs:` don't trigger version bumps
 6. **feat and fix bump versions** - Only these types trigger semantic version increments
 7. **PR titles must reflect the most significant change** - If a PR contains any `fix:` or `feat:` commits, the PR title MUST also be `fix:` or `feat:`. release-please only inspects PR titles, not individual commits. Never use `refactor:`, `chore:`, or `docs:` as a PR title if the PR includes bug fixes or features.
+8. **When one PR contains multiple releasable user-facing changes, provide release-please overrides** - If a PR includes more than one distinct `feat`, `fix`, or `perf` item that should appear separately in release notes, the agent MUST add a `BEGIN_COMMIT_OVERRIDE` / `END_COMMIT_OVERRIDE` block to the PR body before merge. Inside that block, include one conventional-commit line per release note entry, for example:
+
+```text
+BEGIN_COMMIT_OVERRIDE
+feat(chat): add context compaction controls
+fix(chat): preserve previous compaction tombstones across retries
+perf(ui): reduce chat render work during compaction
+END_COMMIT_OVERRIDE
+```
+
+9. **Do not rely on intermediate commit messages for release notes** - Because PRs are typically squash-merged, release-please usually sees the merged PR title/body, not every branch commit. If multiple entries are needed in the changelog, use the PR body override block above.
 
 ## Development Workflow
 
@@ -115,6 +126,8 @@ cargo fmt
 - **Automated**: release-please creates release PRs when `feat:` or `fix:` commits merge to `main`
 - **Release type**: Rust (semantic versioning based on commit types)
 - **Version bump**: `feat:` → MINOR, `fix:` → PATCH, others → no bump
+- **Published release notes source**: GitHub Releases should preserve the `release-please` body generated from `CHANGELOG.md`; do not replace it with GitHub auto-generated notes for normal tagged releases.
+- **Multi-entry release notes**: If one PR contains several distinct releasable changes that should appear as separate bullets, update the PR body with a `BEGIN_COMMIT_OVERRIDE` / `END_COMMIT_OVERRIDE` block before merge.
 
 ## File Persistence
 
