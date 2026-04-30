@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.11.0...v0.12.0) (2026-04-30)
+
+
+### Features
+
+* **chat:** context compaction with summarization, polish, and smart trigger ([#125](https://github.com/nmorgowicz-org/llama-monitor/issues/125)) ([ba018a7](https://github.com/nmorgowicz-org/llama-monitor/commit/ba018a7b4e27740417120109f0ff1b8675a53bdb))
+
 ## [0.11.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.10.2...v0.11.0) (2026-04-29)
 
 
