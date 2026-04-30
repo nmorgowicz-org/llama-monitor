@@ -6646,17 +6646,23 @@ function stopChat() {
 
 function setChatBusyUI(busy) {
     const sendBtn = document.getElementById('btn-send');
-    sendBtn.disabled = busy;
-    sendBtn.innerHTML = busy
-        ? `<svg class="chat-send-spinner" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-             <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-           </svg>`
-        : `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    if (busy) {
+        // Transform send button into stop button
+        sendBtn.onclick = stopChat;
+        sendBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+             <rect x="6" y="6" width="12" height="12" rx="2"/>
+           </svg>`;
+        sendBtn.classList.add('btn-chat-send-stop');
+        sendBtn.title = 'Stop generating';
+    } else {
+        // Restore send button
+        sendBtn.onclick = sendChat;
+        sendBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
              <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
            </svg>`;
-
-    const stopBtn = document.getElementById('btn-stop');
-    if (stopBtn) stopBtn.style.display = busy ? 'flex' : 'none';
+        sendBtn.classList.remove('btn-chat-send-stop');
+        sendBtn.title = 'Send message';
+    }
 
     const input = document.getElementById('chat-input');
     if (input) input.disabled = busy;

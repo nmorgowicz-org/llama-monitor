@@ -1245,6 +1245,14 @@
   box-shadow: none;
   animation: none;
 }
+.btn-chat-send-stop {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  box-shadow: 0 2px 12px rgba(239, 68, 68, 0.4);
+  animation: none;
+}
+.btn-chat-send-stop:hover {
+  box-shadow: 0 6px 20px rgba(239, 68, 68, 0.55);
+}
 
 /* ── Light Theme Overrides ──────────────────────────── */
 [data-theme="light"] .chat-message-user .chat-msg-body {
