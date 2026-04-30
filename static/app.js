@@ -6784,7 +6784,7 @@ function renderChatMessages() {
         return;
     }
 
-    const allMessages = tab.messages.filter(m => m.role !== 'system');
+    const allMessages = tab.messages.filter(m => m.role !== 'system' || m.compaction_marker);
     const limit = tab.visible_message_limit || 15;
     const isPaginated = allMessages.length > limit;
     const visibleMessages = isPaginated ? allMessages.slice(-limit) : allMessages;
@@ -6820,7 +6820,7 @@ function renderChatMessages() {
  * Doubles the visible limit each time, up to total message count.
  */
 function loadMoreMessages(tab, currentLimit) {
-    const allMessages = tab.messages.filter(m => m.role !== 'system');
+    const allMessages = tab.messages.filter(m => m.role !== 'system' || m.compaction_marker);
     tab.visible_message_limit = Math.min(currentLimit * 2, allMessages.length);
     renderChatMessages();
     // Stay at top (where load-more button was)

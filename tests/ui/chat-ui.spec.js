@@ -345,12 +345,17 @@ test.describe('context compaction', () => {
     await page.evaluate(() => switchView('monitor'));
     await page.getByRole('button', { name: /chat/i }).click();
     await expect(page.locator('#page-chat')).toBeVisible();
+    // Short-circuit the summarization fetch so compaction completes immediately
+    // regardless of whether a llama server is running in CI.
+    await page.route('**/api/chat', route => route.fulfill({ status: 503 }));
   });
 
   test('compact button removes old messages and creates tombstone', async ({ page }) => {
-    // Inject 20 synthetic messages to simulate a long conversation
+    // Inject 20 synthetic messages to simulate a long conversation.
+    // Set visible_message_limit high so pagination doesn't hide messages from DOM counts.
     await page.evaluate(() => {
       const tab = activeChatTab();
+      tab.visible_message_limit = 100;
       for (let i = 0; i < 20; i++) {
         tab.messages.push({ role: 'user', content: `Question ${i + 1}`, timestamp_ms: Date.now() });
         tab.messages.push({ role: 'assistant', content: `Answer ${i + 1}`, timestamp_ms: Date.now() });
@@ -367,8 +372,8 @@ test.describe('context compaction', () => {
 
     // Verify tombstone was created
     await expect(page.locator('.chat-compact-marker')).toBeVisible();
-    const tombstoneText = await page.locator('.compact-marker-text').textContent();
-    expect(tombstoneText).toContain('Context compacted');
+    const tombstoneText = await page.locator('.compact-marker-label').textContent();
+    expect(tombstoneText).toMatch(/context (summarized|trimmed)/i);
 
     // Verify old messages were removed (only keepTail=10 remain)
     const msgCountAfter = await page.locator('.chat-message:not(.chat-compact-marker)').count();
@@ -379,6 +384,7 @@ test.describe('context compaction', () => {
     // First round: inject messages and compact
     await page.evaluate(() => {
       const tab = activeChatTab();
+      tab.visible_message_limit = 100;
       for (let i = 0; i < 20; i++) {
         tab.messages.push({ role: 'user', content: `Round 1 Q${i}`, timestamp_ms: Date.now() });
         tab.messages.push({ role: 'assistant', content: `Round 1 A${i}`, timestamp_ms: Date.now() });
@@ -391,6 +397,7 @@ test.describe('context compaction', () => {
     // Second round: inject more messages and compact again
     await page.evaluate(() => {
       const tab = activeChatTab();
+      tab.visible_message_limit = 100;
       for (let i = 0; i < 20; i++) {
         tab.messages.push({ role: 'user', content: `Round 2 Q${i}`, timestamp_ms: Date.now() });
         tab.messages.push({ role: 'assistant', content: `Round 2 A${i}`, timestamp_ms: Date.now() });
@@ -412,11 +419,13 @@ test.describe('context compaction', () => {
     // Create a new tab and switch to it
     await page.locator('.chat-tab-add').click();
 
-    // Switch back to first tab
-    await page.locator('.chat-tab').first().click();
+    // New tab should have auto-compact off by default
+    const newTabAutoCompact = await page.locator('#chat-auto-compact').isChecked();
+    expect(newTabAutoCompact).toBe(false);
 
-    // Settings should be reset (new tab has defaults)
-    const autoCompactChecked = await page.locator('#chat-auto-compact').isChecked();
-    expect(autoCompactChecked).toBe(false);
+    // Switch back to first tab — settings should still be on (per-tab persistence)
+    await page.locator('.chat-tab').first().click();
+    const firstTabAutoCompact = await page.locator('#chat-auto-compact').isChecked();
+    expect(firstTabAutoCompact).toBe(true);
   });
 });
