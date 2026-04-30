@@ -549,13 +549,13 @@ let systemPromptToastTimer = null;
 let paramToastTimer = null;
 
 function markSettingsDirty() {
-    window.window.window.settingsIsDirty = true;
+    window.settingsIsDirty = true;
     const indicator = document.querySelector('#settings-modal .dirty-indicator');
     if (indicator) indicator.classList.add('visible');
 }
 
 function clearSettingsDirty() {
-    window.window.window.settingsIsDirty = false;
+    window.settingsIsDirty = false;
     const indicator = document.querySelector('#settings-modal .dirty-indicator');
     if (indicator) indicator.classList.remove('visible');
 }
@@ -674,7 +674,7 @@ function saveSettings() {
     // Clear dirty indicator
     clearSettingsDirty();
 
-    window.window.settingsSaveTimer = setTimeout(() => {
+    window.settingsSaveTimer = setTimeout(() => {
 
         fetch('/api/settings', {
 
@@ -769,7 +769,7 @@ if (sshTargetInput) {
 
     sshTargetInput.addEventListener('input', () => {
 
-        window.window.remoteAgentSshConnection = null;
+        window.remoteAgentSshConnection = null;
         clearRemoteAgentValidation();
         setRemoteAgentStatus('SSH target set. Click <strong>Check Host</strong>, <strong>Install & Start</strong>, or <strong>Start Agent</strong> when you are ready.', 'info');
 
@@ -812,7 +812,7 @@ async function loadPresets(selectId) {
 
     ]);
 
-    window.window.presets = await presetsResp.json();
+    window.presets = await presetsResp.json();
 
     const saved = settingsResp ? await settingsResp.json() : null;
 
@@ -1811,7 +1811,7 @@ function saveUserPreferences() {
     applyChatStyle(chatStyle);
     localStorage.setItem('llama-monitor-chat-style', chatStyle);
 
-    window.window.enterToSend = enterToSendChecked;
+    window.enterToSend = enterToSendChecked;
     localStorage.setItem('llama-monitor-enter-to-send', window.enterToSend ? 'true' : 'false');
 
     localStorage.setItem('llama-monitor-preferences', JSON.stringify({
@@ -2184,12 +2184,12 @@ async function scanSshHostKey() {
         });
         const data = await resp.json();
         if (!data.ok) {
-            window.window.latestSshHostKey = null;
+            window.latestSshHostKey = null;
             if (hostKeyEl) hostKeyEl.textContent = 'Host-key scan failed: ' + (data.error || 'unknown error');
             return;
         }
 
-        window.window.latestSshHostKey = data.host_key;
+        window.latestSshHostKey = data.host_key;
         if (hostKeyEl) {
             hostKeyEl.innerHTML = [
                 '<strong>Host key:</strong> ' + escapeHtml(data.host_key.key_type),
@@ -2200,7 +2200,7 @@ async function scanSshHostKey() {
         }
         if (trustBtn) trustBtn.style.display = data.host_key.trusted ? 'none' : '';
     } catch (err) {
-        window.window.latestSshHostKey = null;
+        window.latestSshHostKey = null;
         if (hostKeyEl) hostKeyEl.textContent = 'Host-key scan failed: ' + err.message;
     }
 }
@@ -2254,7 +2254,7 @@ function applySshSetupGuide() {
         agentUrlInput.value = 'http://' + connection.host + ':7779';
     }
 
-    window.window.remoteAgentSshConnection = connection;
+    window.remoteAgentSshConnection = connection;
     clearRemoteAgentValidation();
     setRemoteAgentStatus('Guided SSH settings are ready. Click <strong>Check Host</strong>, <strong>Install & Start</strong>, or <strong>Start Agent</strong> when you want to contact the remote machine.', 'info');
     saveSettings();
@@ -2354,7 +2354,7 @@ function setRemoteAgentButtonsDisabled(disabled) {
     if (restartBtn) restartBtn.disabled = disabled;
     if (removeBtn) removeBtn.disabled = disabled;
 
-    window.window.remoteAgentInProgress = disabled;
+    window.remoteAgentInProgress = disabled;
 
 }
 
@@ -4542,7 +4542,7 @@ async function loadSessions() {
 
         const resp = await fetch('/api/window.sessions');
 
-        window.window.sessions = await resp.json();
+        window.sessions = await resp.json();
 
         renderSessionList();
 
@@ -4666,7 +4666,7 @@ async function switchSession(sessionId) {
 
         if (data.ok) {
 
-            window.window.activeSessionId = sessionId;
+            window.activeSessionId = sessionId;
 
             renderSessionList();
 
@@ -4830,7 +4830,6 @@ function saveSession(event) {
 
 // WebSocket
 
-const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
 
 // Initialize button states on page load
 async function initAttachDetachButtons() {
@@ -4868,7 +4867,7 @@ async function updateActiveSessionInfo() {
 
             if (modeParts[0] === 'Spawn') {
 
-                window.window.activeSessionPort = parseInt(modeParts[1]) || 8080;
+                window.activeSessionPort = parseInt(modeParts[1]) || 8080;
 
             } else if (modeParts[0] === 'Attach') {
 
@@ -4878,11 +4877,11 @@ async function updateActiveSessionInfo() {
 
                     const url = new URL(endpoint);
 
-                    window.window.activeSessionPort = parseInt(url.port) || 8080;
+                    window.activeSessionPort = parseInt(url.port) || 8080;
 
                 } catch(e) {
 
-                    window.window.activeSessionPort = 8080;
+                    window.activeSessionPort = 8080;
 
                 }
 
@@ -5519,546 +5518,6 @@ function setMetricSectionVisibility(cardId, visible, sectionId) {
     if (section) section.style.display = visible ? '' : 'none';
 }
 
-ws.onmessage = e => {
-
-    const d = JSON.parse(e.data);
-    appState.wsData = d; // Store for use by status alert and other components
-
-    // Update endpoint health strip
-    const endpointModeEl = document.getElementById('endpoint-mode');
-    const endpointUrlEl = document.getElementById('endpoint-url');
-    const endpointStatusEl = document.getElementById('endpoint-status');
-    const agentStatusEl = document.getElementById('agent-status');
-    const agentLatencyEl = document.getElementById('agent-latency');
-
-    if (d.capabilities && d.endpoint_kind) {
-        let modeClass = 'unknown';
-        let modeText = 'Unknown';
-        let statusClass = 'ok';
-        let statusText = 'OK';
-
-        if (d.endpoint_kind === 'Local') {
-            modeClass = 'local';
-            modeText = 'Local';
-            if (!d.capabilities.system || !d.capabilities.gpu) {
-                statusClass = 'warning';
-                statusText = 'Limited';
-            }
-        } else if (d.endpoint_kind === 'Remote') {
-            modeClass = 'remote';
-            modeText = 'Remote';
-            if (!d.capabilities.inference) {
-                statusClass = 'error';
-                statusText = 'Error';
-            } else {
-                statusClass = 'warning';
-                statusText = 'Inference only';
-            }
-        }
-
-        if (d.capabilities.inference && !d.capabilities.host_metrics) {
-            statusClass = 'warning';
-            statusText = 'Inference only';
-        }
-
-        if (endpointModeEl) {
-            endpointModeEl.textContent = modeText;
-            endpointModeEl.className = 'endpoint-mode ' + modeClass;
-        }
-        if (endpointUrlEl) {
-            endpointUrlEl.textContent = d.active_session_endpoint || d.active_session_id || 'No session';
-        }
-        if (endpointStatusEl) {
-            endpointStatusEl.innerHTML = '<span class="status-dot ' + statusClass + '"></span>' + statusText;
-        }
-    }
-
-    if (agentStatusEl) {
-        const showAgent = d.session_mode === 'attach' && d.endpoint_kind === 'Remote';
-        agentStatusEl.style.display = showAgent ? '' : 'none';
-        
-        const agentStatus = d.remote_agent_connected ? 'connected' : 'disconnected';
-        const remoteAgentHealthReachable = d.remote_agent_health_reachable !== false;
-        const firewallBlocked = d.remote_agent_connected && !remoteAgentHealthReachable;
-        
-        agentStatusEl.className = 'agent-status ' + (firewallBlocked ? 'firewall-blocked' : agentStatus);
-        
-        const textEl = agentStatusEl.querySelector('.agent-text');
-        const fixBtn = agentStatusEl.querySelector('.btn-agent-fix');
-        if (textEl) {
-            if (firewallBlocked) {
-                textEl.textContent = 'Firewall blocked';
-            } else if (d.remote_agent_connected) {
-                textEl.textContent = 'Remote Agent';
-            } else {
-                textEl.textContent = 'No Remote Agent';
-            }
-        }
-        if (fixBtn) {
-            // Only show Fix button when agent is NOT connected AND we have a remote endpoint configured
-            // (i.e., there's something to fix). Don't show it when everything is working.
-            const hasRemoteEndpoint = d.session_mode === 'attach' && d.endpoint_kind === 'Remote';
-            const needsFix = hasRemoteEndpoint && (!d.remote_agent_connected || firewallBlocked);
-            fixBtn.style.display = needsFix ? '' : 'none';
-            fixBtn.title = firewallBlocked ? 'Repair remote agent connectivity' : 'Set up remote agent';
-            // DEBUG: log Fix button state changes
-            if (needsFix) {
-                console.log('[Agent] Fix button SHOWN:', {
-                    session_mode: d.session_mode,
-                    endpoint_kind: d.endpoint_kind,
-                    remote_agent_connected: d.remote_agent_connected,
-                    remote_agent_health_reachable: d.remote_agent_health_reachable,
-                    firewallBlocked,
-                    hasRemoteEndpoint,
-                    needsFix,
-                    cpu_temp_available: d.system ? d.system.cpu_temp_available : 'N/A',
-                });
-            }
-        }
-        
-        if (d.remote_agent_connected && !remoteAgentHealthReachable) {
-            setRemoteAgentStatus('Agent connected but HTTP is not reachable (firewall blocked)', 'warning');
-        }
-        
-        if (agentLatencyEl) {
-            agentLatencyEl.textContent = '';
-        }
-    }
-
-    // Update Attach/Detach button states and server header visibility based on session mode
-    const serverHeader = document.getElementById('server-header');
-    const btnAttach = document.getElementById('btn-attach');
-    const btnDetach = document.getElementById('btn-detach');
-    const btnDetachTop = document.getElementById('btn-detach-top');
-
-    const isAttach = d.session_mode === 'attach' && d.active_session_endpoint;
-
-    if (isAttach) {
-        // Attached state: hide server header, show detach buttons
-        if (serverHeader) serverHeader.style.display = 'none';
-        btnAttach.style.display = 'none';
-        btnDetach.style.display = 'inline-block';
-        if (btnDetachTop) btnDetachTop.style.display = 'inline-block';
-
-        // Switch to monitor view if not already there
-        if (appState.view === 'setup') {
-            hideConnectingState();
-            switchView('monitor');
-        }
-    } else {
-        // Not attached: show server header, hide detach buttons
-        if (serverHeader) serverHeader.style.display = '';
-        btnAttach.style.display = 'inline-block';
-        btnDetach.style.display = 'none';
-        if (btnDetachTop) btnDetachTop.style.display = 'none';
-    }
-
-    // Update "Historic" badge on inference metrics section
-    const historicBadge = document.getElementById('inference-historic-badge');
-    if (historicBadge) {
-        historicBadge.style.display = isAttach ? 'none' : 'inline-block';
-    }
-
-
-
-    // Server state
-
-    window.window.serverRunning = d.server_running;
-
-    const dot = document.getElementById('status-dot');
-
-    const txt = document.getElementById('status-text');
-
-    dot.className = 'status-dot ' + (window.serverRunning ? 'running' : 'stopped');
-
-    txt.textContent = window.serverRunning ? 'Running' : 'Stopped';
-
-    const btnStart = document.getElementById('btn-start');
-
-    const btnStop = document.getElementById('btn-stop');
-
-    // Use local_server_running for Start/Stop buttons (independent of remote endpoint)
-    const localRunning = d.local_server_running || false;
-
-    if (btnStart) {
-
-        btnStart.disabled = localRunning;
-
-    }
-
-    if (btnStop) {
-
-        btnStop.disabled = !localRunning;
-
-    }
-
-
-
-    window.window.lastServerState = d.server_running;
-
-    window.window.lastLlamaMetrics = d.llama;
-
-    window.window.lastSystemMetrics = d.system || null;
-
-    window.window.lastCapabilities = d.capabilities || null;
-
-    window.window.lastGpuMetrics = d.gpu || {};
-
-
-
-    // Inference metrics
-
-    const l = window.lastLlamaMetrics;
-
-    // Helper for availability-aware empty state
-    function getEmptyStateMessage(reason, fallback) {
-        if (reason === 'RemoteEndpoint') {
-            return 'Host metrics unavailable for remote endpoint';
-        }
-        if (reason === 'SensorUnavailable') {
-            return 'Temperature sensor unavailable';
-        }
-        if (reason === 'BackendUnavailable') {
-            return 'GPU metrics unavailable';
-        }
-        return fallback || '\u2014';
-    }
-
-    const gpuReason = d.availability?.gpu || 'Available';
-    const cpuTempReason = d.availability?.cpu_temp || 'Available';
-    const systemReason = d.availability?.system || 'Available';
-
-    // Speed metrics with adaptive bars (track max values seen)
-    if (!window.speedMax) {
-        window.speedMax = { prompt: 0, generation: 0 };
-    }
-
-    const promptEl = document.getElementById('m-prompt');
-    const genEl = document.getElementById('m-gen');
-    const promptMaxEl = document.getElementById('m-prompt-max');
-    const genMaxEl = document.getElementById('m-gen-max');
-    const promptBar = document.getElementById('m-prompt-bar');
-    const genBar = document.getElementById('m-gen-bar');
-    const throughputState = document.getElementById('m-throughput-state');
-    const throughputAge = document.getElementById('m-throughput-age');
-    const throughputCard = document.querySelector('.widget-speed');
-    const generationCard = document.querySelector('.widget-generation');
-    const contextCard = document.querySelector('.widget-context');
-    const promptDeltaEl = document.getElementById('m-prompt-delta');
-    const genDeltaEl = document.getElementById('m-gen-delta');
-    const hasActiveEndpoint = !!d.active_session_id;
-
-    const promptRate = l?.prompt_tokens_per_sec || 0;
-    const genRate = l?.generation_tokens_per_sec || 0;
-    const promptDisplayRate = promptRate > 0 ? promptRate : (l?.last_prompt_tokens_per_sec || 0);
-    const genDisplayRate = genRate > 0 ? genRate : (l?.last_generation_tokens_per_sec || 0);
-    const promptAgeMs = l?.last_prompt_throughput_unix_ms || 0;
-    const genAgeMs = l?.last_generation_throughput_unix_ms || 0;
-    const latestThroughputMs = Math.max(promptAgeMs, genAgeMs);
-    const throughputActive = promptRate > 0 || genRate > 0;
-
-    setCardState(throughputCard, !hasActiveEndpoint ? 'dormant' : throughputActive ? 'live' : 'idle');
-    setEmptyState(document.getElementById('m-throughput-empty'), !hasActiveEndpoint);
-    setChipState(throughputState, throughputActive ? 'live' : 'idle', throughputActive ? 'live' : 'idle');
-
-    if (throughputAge) {
-        throughputAge.textContent = formatMetricAge(latestThroughputMs);
-    }
-
-    if (promptDisplayRate > 0) {
-        updateMetricDelta(promptDeltaEl, window.prevValues.prompt, promptDisplayRate, 1);
-        animateNumber(promptEl, window.prevValues.prompt, promptDisplayRate, 300, 1, ' t/s');
-        window.prevValues.prompt = promptDisplayRate;
-        
-        if (promptDisplayRate > window.speedMax.prompt) {
-            window.speedMax.prompt = promptDisplayRate;
-        }
-        if (promptMaxEl && window.speedMax.prompt > 0) {
-            promptMaxEl.textContent = 'peak ' + window.speedMax.prompt.toFixed(0);
-        }
-        const promptPct = Math.max((promptDisplayRate / window.speedMax.prompt) * 100, 4);
-        if (promptBar) promptBar.style.width = promptPct + '%';
-    } else {
-        promptEl.textContent = '\u2014';
-        if (promptMaxEl) promptMaxEl.textContent = '';
-        if (promptBar) promptBar.style.width = '0%';
-    }
-
-    if (genDisplayRate > 0) {
-        updateMetricDelta(genDeltaEl, window.prevValues.generation, genDisplayRate, 1);
-        animateNumber(genEl, window.prevValues.generation, genDisplayRate, 300, 1, ' t/s');
-        window.prevValues.generation = genDisplayRate;
-        
-        if (genDisplayRate > window.speedMax.generation) {
-            window.speedMax.generation = genDisplayRate;
-        }
-        if (genMaxEl && window.speedMax.generation > 0) {
-            genMaxEl.textContent = 'peak ' + window.speedMax.generation.toFixed(0);
-        }
-        const genPct = Math.max((genDisplayRate / window.speedMax.generation) * 100, 4);
-        if (genBar) genBar.style.width = genPct + '%';
-    } else {
-        genEl.textContent = '\u2014';
-        if (genMaxEl) genMaxEl.textContent = '';
-        if (genBar) genBar.style.width = '0%';
-    }
-
-    pushSparklinePoint('prompt', promptDisplayRate);
-    pushSparklinePoint('generation', genDisplayRate);
-    renderSparkline('m-prompt-spark', window.metricSeries.prompt, 'prompt', false);
-    renderSparkline('m-gen-spark', window.metricSeries.generation, 'generation', false);
-
-    // Throughput ratio
-    const ratioBar = document.getElementById('m-throughput-ratio-bar');
-    const ratioValue = document.getElementById('m-throughput-ratio');
-    if (promptDisplayRate > 0 && genDisplayRate > 0) {
-        const ratio = promptDisplayRate / genDisplayRate;
-        const ratioPct = Math.min((ratio / 50) * 100, 100);
-        if (ratioBar) ratioBar.style.width = ratioPct + '%';
-        if (ratioValue) ratioValue.textContent = ratio.toFixed(1) + ':1';
-    } else {
-        if (ratioBar) ratioBar.style.width = '0%';
-        if (ratioValue) ratioValue.textContent = '\u2014';
-    }
-
-    // Generation progress from /slots next_token metadata
-    const generationState = document.getElementById('m-generation-state');
-    const generationMain = document.getElementById('m-generation-main');
-    const generationSub = document.getElementById('m-generation-sub');
-    const generationDetails = document.getElementById('m-generation-details');
-    const generationRing = document.getElementById('m-generation-ring');
-    const liveVelocity = document.getElementById('m-live-velocity');
-    const promptStage = document.getElementById('m-stage-prompt');
-    const outputStage = document.getElementById('m-stage-output');
-    const generated = l?.slot_generation_tokens || 0;
-    const remaining = l?.slot_generation_remaining || 0;
-    const generationAvailable = !!l?.slot_generation_available;
-    const generationActive = !!l?.slot_generation_active || (l?.slots_processing || 0) > 0;
-    const slotLimit = getPrimarySlot(l)?.output_limit || 0;
-    const generationTotal = l?.slot_generation_limit || slotLimit || (generated + remaining);
-    const generationPct = generationTotal > 0 ? Math.min(100, Math.max(2, (generated / generationTotal) * 100)) : 0;
-    const taskId = generationActive ? l?.active_task_id : l?.last_task_id;
-    const nowMs = Date.now();
-    const liveOutputRate = updateLiveOutputEstimate(taskId, generated, generationActive, nowMs);
-
-    updateRequestActivity(taskId, generationActive, generated, nowMs);
-    renderActivityRail(generationActive);
-    renderRecentTask();
-    renderSlotGrid(l, hasActiveEndpoint);
-    renderSlotUtilization(l);
-    renderRequestStats();
-    renderDecodingConfig(l, hasActiveEndpoint);
-    renderLiveSparkline('m-live-output-spark', window.metricSeries.liveOutput);
-
-    setCardState(generationCard, !hasActiveEndpoint ? 'dormant' : generationActive ? 'live' : generationAvailable ? 'idle' : 'unavailable');
-    setEmptyState(document.getElementById('m-generation-empty'), !hasActiveEndpoint);
-    setChipState(generationState, generationActive ? 'generating' : 'idle', generationActive ? 'live' : 'idle');
-    setChipState(document.getElementById('m-slots-state'), generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');
-    setChipState(document.getElementById('m-activity-state'), generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');
-    if (generationRing) generationRing.style.setProperty('--progress', generationPct.toFixed(2));
-    if (liveVelocity) {
-        liveVelocity.textContent = liveOutputRate > 0 ? liveOutputRate.toFixed(1) + ' t/s' : (generationActive ? 'warming' : 'retained');
-    }
-    if (promptStage && outputStage) {
-        // Use throughput as proxy for phase detection when next_token data isn't available
-        const useThroughputFallback = !generationAvailable;
-        const isPromptPhase = useThroughputFallback
-            ? !!(l?.prompt_throughput_active && !l?.generation_throughput_active)
-            : (generated <= 1);
-        const isOutputPhase = useThroughputFallback
-            ? !!(l?.generation_throughput_active)
-            : (generated > 1);
-        promptStage.classList.toggle('active', generationActive && isPromptPhase);
-        outputStage.classList.toggle('active', generationActive && isOutputPhase);
-        promptStage.classList.toggle('idle', !generationActive && !isOutputPhase);
-        outputStage.classList.toggle('idle', !generationActive && !isPromptPhase);
-    }
-    if (generationAvailable) {
-        if (generationMain) generationMain.textContent = formatMetricNumber(generated) + ' output tokens';
-        if (generationSub) generationSub.textContent = formatMetricNumber(remaining) + ' remaining';
-        if (generationDetails) {
-            const detailParts = [];
-            if (taskId !== null && taskId !== undefined) detailParts.push('task ' + taskId);
-            if (generationTotal > 0) {
-                const maxStr = generationTotal >= 1000 ? Math.round(generationTotal / 1000) + 'k' : formatMetricNumber(generationTotal);
-                detailParts.push('max ' + maxStr);
-            }
-            detailParts.push(formatMetricNumber(remaining) + ' left');
-            renderGenerationDetailItems(generationDetails, detailParts);
-        }
-    } else {
-        if (generationMain) generationMain.textContent = generationActive ? 'working' : '\u2014';
-        if (generationSub) generationSub.textContent = 'output budget';
-        renderGenerationDetailItems(generationDetails, []);
-    }
-
-    // Context metrics with progress bar
-    const ctxFill = document.getElementById('m-ctx-fill');
-    const ctxValue = document.getElementById('m-ctx');
-    const ctxDetails = document.getElementById('m-ctx-details');
-    const ctxState = document.getElementById('m-context-state');
-    const ctxPeakFill = document.getElementById('m-ctx-peak-fill');
-    const ctxLiveLabel = document.getElementById('m-ctx-live-label');
-    const ctxLiveDetail = document.getElementById('m-ctx-live-detail');
-    const ctxPeakDetail = document.getElementById('m-ctx-peak-detail');
-    const contextCapacity = l?.context_capacity_tokens || l?.kv_cache_max || 0;
-    const contextLive = l?.context_live_tokens || l?.kv_cache_tokens || 0;
-    const contextPeak = l?.context_high_water_tokens || l?.kv_cache_high_water || 0;
-    const contextLiveAvailable = !!(l?.context_live_tokens_available || l?.kv_cache_tokens_available);
-    const peakPct = contextCapacity > 0 && contextPeak > 0 ? Math.min(100, Math.max(2, (contextPeak / contextCapacity) * 100)) : 0;
-
-    setEmptyState(document.getElementById('m-context-empty'), !hasActiveEndpoint);
-    if (ctxPeakFill) ctxPeakFill.style.width = peakPct + '%';
-    if (ctxPeakDetail) ctxPeakDetail.textContent = contextPeak > 0 ? formatMetricNumber(contextPeak) + ' peak' : '\u2014';
-
-    if (l && contextCapacity > 0 && contextLiveAvailable) {
-        const pct = ((contextLive / contextCapacity) * 100);
-        const severity = pct >= 95 ? 'critical' : pct >= 80 ? 'warning' : '';
-        setCardState(contextCard, severity === 'critical' ? 'live' : 'idle');
-        setChipState(ctxState, 'live', severity || 'live');
-        if (ctxLiveLabel) ctxLiveLabel.textContent = 'Live usage';
-        if (ctxLiveDetail) ctxLiveDetail.textContent = formatMetricNumber(contextLive) + ' live';
-
-        animateNumber(ctxValue, window.prevValues.contextPct, pct, 300, 1, '%');
-        window.prevValues.contextPct = pct;
-        
-        if (ctxFill) {
-            ctxFill.style.width = pct + '%';
-            ctxFill.className = 'context-progress-fill ' + severity;
-        }
-
-        if (ctxDetails) ctxDetails.textContent = formatMetricNumber(contextLive) + ' / ' + formatMetricNumber(contextCapacity);
-
-    } else if (l && contextCapacity > 0) {
-        setCardState(contextCard, 'unavailable');
-        setChipState(ctxState, 'capacity', 'idle');
-        if (ctxFill) {
-            ctxFill.style.width = '0%';
-            ctxFill.className = 'context-progress-fill unavailable';
-        }
-        if (ctxLiveLabel) ctxLiveLabel.textContent = 'Live usage';
-        if (ctxLiveDetail) ctxLiveDetail.textContent = 'not exposed by llama-server';
-        if (ctxValue) ctxValue.textContent = 'peak observed only';
-        if (ctxDetails) {
-            const detailParts = ['capacity ' + formatMetricNumber(contextCapacity)];
-            if (contextPeak > 0) {
-                detailParts.push('peak ' + formatMetricNumber(contextPeak));
-            }
-            ctxDetails.textContent = detailParts.join(' · ');
-        }
-    } else {
-        setCardState(contextCard, !hasActiveEndpoint ? 'dormant' : 'unavailable');
-        setChipState(ctxState, 'unknown', 'idle');
-        if (ctxLiveDetail) ctxLiveDetail.textContent = '\u2014';
-        if (ctxPeakDetail) ctxPeakDetail.textContent = '\u2014';
-        if (ctxFill) {
-            ctxFill.style.width = '0%';
-            ctxFill.className = 'context-progress-fill';
-        }
-        if (ctxPeakFill) ctxPeakFill.style.width = '0%';
-        if (ctxValue) ctxValue.textContent = getEmptyStateMessage(systemReason, '\u2014');
-        if (ctxDetails) ctxDetails.textContent = '';
-    }
-
-    renderCapabilityPopover(d, l, generationAvailable, contextLiveAvailable);
-
-    const hostMetricsVisible = d.host_metrics_available === true;
-    const systemVisible = hostMetricsVisible && !!d.capabilities?.system;
-    const gpuVisible = hostMetricsVisible && !!d.capabilities?.gpu;
-    setMetricSectionVisibility('gpu-card', gpuVisible, 'gpu-section');
-    setMetricSectionVisibility('system-card', systemVisible, 'system-section');
-
-    // GPU card rendering
-    renderGpuCard(d.gpu || {}, gpuVisible);
-
-    // System card rendering
-    renderSystemCard(window.lastSystemMetrics, systemVisible);
-
-
-    // Logs
-
-    const logs = d.logs || [];
-
-    if (logs.length !== window.prevLogLen) {
-
-        const el = document.getElementById('log-panel');
-
-        const wasAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-
-        el.textContent = logs.join('\n');
-
-        if (wasAtBottom) el.scrollTop = el.scrollHeight;
-
-        window.window.prevLogLen = logs.length;
-
-    }
-
-
-
-    // Tab badges - only show live metrics when session is active
-
-    const badgeParts = [];
-
-    const isAttached = d.session_mode === 'attach' && d.active_session_endpoint;
-
-    if (isAttached) {
-
-        const gpuEntries = Object.entries(d.gpu || {});
-
-        if (gpuEntries.length > 0) badgeParts.push('GPU ' + Math.max(...gpuEntries.map(([,m]) => m.temp)).toFixed(0) + 'C');
-
-    }
-
-    document.getElementById('badge-server').textContent = badgeParts.length ? ' ' + badgeParts.join(' \u00b7 ') : '';
-
-    const badgeChat = document.getElementById('badge-chat');
-
-    const tab = activeChatTab();
-
-    const msgCount = tab ? tab.messages.filter(m => m.role !== 'system').length : 0;
-
-    if (msgCount > 0) {
-
-        badgeChat.textContent = ' ' + msgCount + ' msg';
-
-        badgeChat.style.display = '';
-
-    } else {
-
-        badgeChat.textContent = '';
-
-        badgeChat.style.display = 'none';
-
-    }
-
-    const badgeLogs = document.getElementById('badge-logs');
-
-    if (logs.length > 0) {
-
-        badgeLogs.textContent = ' ' + logs.length;
-
-        badgeLogs.style.display = '';
-
-    } else {
-
-        badgeLogs.textContent = '';
-
-        badgeLogs.style.display = 'none';
-
-    }
-
-};
-
-ws.onerror = e => console.error('WebSocket error:', e);
-
-ws.onclose = () => { 
-
-    document.getElementById('status-text').textContent = 'Disconnected'; 
-
-    window.window.prevLogLen = 0;
-
-};
-
 
 
 // Markdown
@@ -6127,11 +5586,11 @@ async function initChatTabs() {
     try {
         const resp = await fetch('/api/chat/tabs');
         const data = await resp.json();
-        window.window.chatTabs = data.length ? data : [newChatTab('Chat 1')];
+        window.chatTabs = data.length ? data : [newChatTab('Chat 1')];
     } catch {
-        window.window.chatTabs = [newChatTab('Chat 1')];
+        window.chatTabs = [newChatTab('Chat 1')];
     }
-    window.window.activeChatTabId = window.chatTabs[0].id;
+    window.activeChatTabId = window.chatTabs[0].id;
     renderChatTabs();
     renderChatMessages();
     loadChatNames();
@@ -6193,9 +5652,9 @@ function updateChatName(field, value) {
 }
 
 function scheduleChatPersist() {
-    window.window.chatTabsDirty = true;
+    window.chatTabsDirty = true;
     clearTimeout(window.chatPersistTimer);
-    window.window.chatPersistTimer = setTimeout(persistChatTabs, CHAT_TABS_PERSIST_DEBOUNCE_MS);
+    window.chatPersistTimer = setTimeout(persistChatTabs, CHAT_TABS_PERSIST_DEBOUNCE_MS);
 }
 
 function normalizeTabForSave(tab) {
@@ -6231,7 +5690,7 @@ async function persistChatTabs() {
 }
 
 function markChatTabsDirty() {
-    window.window.chatTabsDirty = true;
+    window.chatTabsDirty = true;
 }
 
 function flushChatPersist() {
@@ -6257,9 +5716,9 @@ function addChatTab() {
 
 function closeChatTab(id) {
     if (window.chatTabs.length === 1) return;
-    window.window.chatTabs = window.chatTabs.filter(t => t.id !== id);
-    if (window.window.activeChatTabId === id) {
-        window.window.activeChatTabId = window.chatTabs[window.chatTabs.length - 1].id;
+    window.chatTabs = window.chatTabs.filter(t => t.id !== id);
+    if (window.activeChatTabId === id) {
+        window.activeChatTabId = window.chatTabs[window.chatTabs.length - 1].id;
     }
     renderChatTabs();
     renderChatMessages();
@@ -6338,7 +5797,7 @@ async function compactChatTab(tab, keepTail = 10, summarize = true) {
 
     if (conversational.length <= keepTail) return; // nothing to do
 
-   window.window.compactionInProgress = true;
+   window.compactionInProgress = true;
     setCompactButtonBusy(true);
 
     const dropped = conversational.slice(0, conversational.length - keepTail);
@@ -6414,7 +5873,7 @@ async function compactChatTab(tab, keepTail = 10, summarize = true) {
     scheduleChatPersist();
     renderChatMessages();
     setCompactButtonBusy(false);
-    window.window.compactionInProgress = false;
+    window.compactionInProgress = false;
 
     // Scroll to the new tombstone
     setTimeout(() => {
@@ -6540,7 +5999,7 @@ function syncCompactSettingsUI(tab) {
 
 function switchChatTab(id) {
     if (window.chatBusy) return;
-    window.window.activeChatTabId = id;
+    window.activeChatTabId = id;
     renderChatTabs();
     renderChatMessages();
     loadChatNames();
@@ -6586,9 +6045,9 @@ function clearChat() {
 function stopChat() {
     if (window.chatAbortController) {
         window.chatAbortController.abort();
-        window.window.chatAbortController = null;
+        window.chatAbortController = null;
     }
-    window.window.chatBusy = false;
+    window.chatBusy = false;
     setChatBusyUI(false);
 }
 
@@ -6626,7 +6085,7 @@ function chatScroll(force = false) {
         c.scrollTop = c.scrollHeight;
     }
     if (force) {
-        window.window.unreadChatCount = 0;
+        window.unreadChatCount = 0;
         const badge = document.getElementById('chat-scroll-badge');
         if (badge) badge.style.display = 'none';
     }
@@ -7199,9 +6658,9 @@ async function sendChat() {
     }
     messages.push(...tab.messages.map(m => ({ role: m.role, content: m.content })));
 
-    window.window.chatBusy = true;
+    window.chatBusy = true;
     setChatBusyUI(true);
-    window.window.chatAbortController = new AbortController();
+    window.chatAbortController = new AbortController();
 
     let thinkEl = null;
     let thinkContent = '';
@@ -7337,8 +6796,8 @@ async function sendChat() {
     msgEl.dataset.msgIdx = tab.messages.length - 1;
     finalizeAssistantMessage(msgEl, msgContent, tokenUsage, tab);
     setChatBusyUI(false);
-    window.window.chatBusy = false;
-    window.window.chatAbortController = null;
+    window.chatBusy = false;
+    window.chatAbortController = null;
     updateChatTabBadge();
 }
 
@@ -9057,7 +8516,7 @@ function initViewState() {
 const savedChatStyle = localStorage.getItem('llama-monitor-chat-style') || 'rounded';
 
 function onEnterToggleChange(checked) {
-    window.window.enterToSend = checked;
+    window.enterToSend = checked;
     localStorage.setItem('llama-monitor-enter-to-send', checked ? 'true' : 'false');
     const prefCheckbox = document.getElementById('pref-enter-to-send');
     if (prefCheckbox) prefCheckbox.checked = checked;
@@ -9078,7 +8537,7 @@ function initChatStyle() {
 // Chat font size (independent of global font scale)
 
 function adjustChatFont(delta) {
-    window.window.chatFontSize = Math.max(70, Math.min(150, window.chatFontSize + delta * 10));
+    window.chatFontSize = Math.max(70, Math.min(150, window.chatFontSize + delta * 10));
     localStorage.setItem('llama-monitor-chat-font', window.chatFontSize);
     applyChatFontSize();
 }

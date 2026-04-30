@@ -15,6 +15,7 @@ pub const COMPAT_GLOBALS_JS: &str = include_str!("../../static/js/compat/globals
 pub const CORE_FORMAT_JS: &str = include_str!("../../static/js/core/format.js");
 pub const CORE_APP_STATE_JS: &str = include_str!("../../static/js/core/app-state.js");
 pub const CORE_INIT_STATE_JS: &str = include_str!("../../static/js/core/init-state.js");
+pub const FEATURES_DASHBOARD_WS_JS: &str = include_str!("../../static/js/features/dashboard-ws.js");
 pub const LHM_JS: &str = include_str!("../../static/lhm.js");
 pub const MANIFEST_JSON: &str = include_str!("../../static/manifest.json");
 pub const SW_JS: &str = include_str!("../../static/sw.js");

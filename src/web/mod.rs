@@ -254,6 +254,17 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
                 "application/javascript",
             )
         });
+    let js_features_dashboard_ws = warp::path("js")
+        .and(warp::path("features"))
+        .and(warp::path("dashboard-ws.js"))
+        .and(warp::get())
+        .map(|| {
+            warp::reply::with_header(
+                static_assets::FEATURES_DASHBOARD_WS_JS,
+                "content-type",
+                "application/javascript",
+            )
+        });
 
     let manifest = warp::path("manifest.json").and(warp::get()).map(|| {
         warp::reply::with_header(
@@ -300,6 +311,7 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .or(js_core_format)
         .or(js_core_app_state)
         .or(js_core_init_state)
+        .or(js_features_dashboard_ws)
         .or(lhm_js)
         .or(manifest)
         .or(sw)
