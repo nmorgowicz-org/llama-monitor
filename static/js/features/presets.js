@@ -304,14 +304,27 @@ export async function resetPresets() {
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 export function initPresets() {
-    // Put on window for inline handlers
-    window.loadPresets = loadPresets;
-    window.openPresetModal = openPresetModal;
-    window.closePresetModal = closePresetModal;
-    window.savePreset = savePreset;
-    window.copyPreset = copyPreset;
-    window.deletePreset = deletePreset;
-    window.resetPresets = resetPresets;
+    // Bind preset action buttons
+    document.getElementById('preset-new-btn')?.addEventListener('click', () => openPresetModal('new'));
+    document.getElementById('preset-edit-btn')?.addEventListener('click', () => openPresetModal('edit'));
+    document.getElementById('preset-copy-btn')?.addEventListener('click', copyPreset);
+    document.getElementById('preset-delete-btn')?.addEventListener('click', deletePreset);
+    document.getElementById('preset-reset-btn')?.addEventListener('click', resetPresets);
+
+    // Bind preset modal buttons
+    document.getElementById('preset-modal-close')?.addEventListener('click', closePresetModal);
+    document.getElementById('preset-modal-cancel')?.addEventListener('click', closePresetModal);
+    document.getElementById('preset-browse-model-btn')?.addEventListener('click', () => window.openFileBrowser('modal-model-path', 'gguf'));
+
+    // Bind preset form submit
+    const presetForm = document.getElementById('preset-form');
+    if (presetForm) presetForm.addEventListener('submit', savePreset);
+
+    // Bind setup view link
+    document.getElementById('setup-manage-presets-link')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        openPresetModal('new');
+    });
 
     // Modal overlay click
     const modal = document.getElementById('preset-modal');
@@ -330,6 +343,9 @@ export function initPresets() {
             });
         }
     });
+
+    // Keep on window for cross-module calls
+    window.loadPresets = loadPresets;
 
     // Initial load
     loadPresets();

@@ -9,7 +9,6 @@ pub const CSS_COMPONENTS: &str = include_str!("../../static/css/components.css")
 pub const CSS_CHAT: &str = include_str!("../../static/css/chat.css");
 pub const CSS_SETUP_VIEW: &str = include_str!("../../static/css/setup-view.css");
 pub const CSS_SETTINGS_MODAL: &str = include_str!("../../static/css/settings-modal.css");
-pub const APP_JS: &str = include_str!("../../static/app.js");
 pub const BOOTSTRAP_JS: &str = include_str!("../../static/js/bootstrap.js");
 pub const COMPAT_GLOBALS_JS: &str = include_str!("../../static/js/compat/globals.js");
 pub const CORE_FORMAT_JS: &str = include_str!("../../static/js/core/format.js");

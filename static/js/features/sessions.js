@@ -55,19 +55,30 @@ export function renderSessionList() {
                            s.status === 'Stopped' ? 'Stopped' :
                            s.status === 'Disconnected' ? 'Disconnected' : (s.status || '');
 
-        return '<div class="session-item' + (is_active ? ' active' : '') + '">' +
-            '<div class="session-item-main" onclick="switchSession(\'' + s.id + '\')">' +
+        const name = window.escapeHtml(s.name);
+        const detailText = modeText + (port ? ' : ' + port : '') + (isSpawn && presetName ? ' · ' + window.escapeHtml(presetName) : '') + (endpoint ? ' · ' + window.escapeHtml(endpoint) : '');
+        const statusHtml = statusText ? '<span class="session-item-status">' + window.escapeHtml(statusText) + '</span>' : '';
+
+        let actionsHtml = '';
+        if (isAttach) {
+            actionsHtml += `<button class="btn-sm btn-preset" data-action="connect" data-endpoint="${window.escapeHtml(endpoint)}">Connect</button>`;
+        }
+        if (isSpawn) {
+            actionsHtml += `<button class="btn-sm btn-preset" data-action="start" data-session-id="${window.escapeHtml(s.id)}">Start</button>`;
+        }
+        actionsHtml += `<button class="btn-sm btn-preset btn-preset-delete" data-action="delete" data-session-id="${window.escapeHtml(s.id)}">✕</button>`;
+
+        return `<div class="session-item${is_active ? ' active' : ''}">` +
+            `<div class="session-item-main" data-session-id="${window.escapeHtml(s.id)}">` +
             '<span class="session-item-icon">' + modeIcon + '</span>' +
             '<div class="session-item-info">' +
-            '<span class="session-item-name">' + s.name + '</span>' +
-            '<span class="session-item-detail">' + modeText + (port ? ' : ' + port : '') + (isSpawn && presetName ? ' · ' + presetName : '') + (endpoint ? ' · ' + endpoint : '') + '</span>' +
+            '<span class="session-item-name">' + name + '</span>' +
+            '<span class="session-item-detail">' + detailText + '</span>' +
             '</div>' +
-            (statusText ? '<span class="session-item-status">' + statusText + '</span>' : '') +
+            statusHtml +
             '</div>' +
             '<div class="session-item-actions">' +
-            (isAttach ? '<button class="btn-sm btn-preset" onclick="event.stopPropagation(); quickAttachSession(\'' + endpoint + '\')">Connect</button>' : '') +
-            (isSpawn ? '<button class="btn-sm btn-preset" onclick="event.stopPropagation(); quickStartSession(\'' + s.id + '\')">Start</button>' : '') +
-            '<button class="btn-sm btn-preset btn-preset-delete" onclick="event.stopPropagation(); deleteSession(\'' + s.id + '\')">✕</button>' +
+            actionsHtml +
             '</div>' +
             '</div>';
     }).join('');
@@ -291,26 +302,63 @@ export async function updateActiveSessionInfo() {
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 export function initSessions() {
-    // Put on window for inline handlers
-    window.loadSessions = loadSessions;
-    window.renderSessionList = renderSessionList;
-    window.deleteSession = deleteSession;
-    window.switchSession = switchSession;
-    window.openSessionModal = openSessionModal;
-    window.showNewSessionForm = showNewSessionForm;
-    window.showSessionsList = showSessionsList;
-    window.updateSessionModalMode = updateSessionModalMode;
-    window.closeSessionModal = closeSessionModal;
-    window.saveSession = saveSession;
-    window.quickAttachSession = quickAttachSession;
-    window.quickStartSession = quickStartSession;
-    window.updateActiveSessionInfo = updateActiveSessionInfo;
+    // Bind session modal buttons
+    document.getElementById('session-modal-close')?.addEventListener('click', closeSessionModal);
+    document.getElementById('session-modal-cancel')?.addEventListener('click', closeSessionModal);
+    document.getElementById('btn-new-session')?.addEventListener('click', showNewSessionForm);
+    document.getElementById('session-create-first')?.addEventListener('click', showNewSessionForm);
+    document.getElementById('session-browse-model-btn')?.addEventListener('click', () => window.openFileBrowser('modal-session-model-path', 'gguf'));
+
+    // Bind session form submit
+    const sessionForm = document.getElementById('session-form');
+    if (sessionForm) sessionForm.addEventListener('submit', saveSession);
+
+    // Bind sidebar sessions button
+    document.getElementById('sidebar-btn-sessions')?.addEventListener('click', openSessionModal);
+
+    // Bind nav new session button
+    document.getElementById('nav-new-session-btn')?.addEventListener('click', openSessionModal);
+
+    // Bind setup view link
+    document.getElementById('setup-browse-sessions-link')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        openSessionModal();
+    });
+
+    // Event delegation for dynamically generated session list
+    const sessionsList = document.getElementById('sessions-list');
+    if (sessionsList) {
+        sessionsList.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-action]');
+            if (btn) {
+                e.stopPropagation();
+                const action = btn.dataset.action;
+                if (action === 'connect') {
+                    quickAttachSession(btn.dataset.endpoint);
+                } else if (action === 'start') {
+                    quickStartSession(btn.dataset.sessionId);
+                } else if (action === 'delete') {
+                    deleteSession(btn.dataset.sessionId);
+                }
+                return;
+            }
+
+            const itemMain = e.target.closest('.session-item-main');
+            if (itemMain) {
+                switchSession(itemMain.dataset.sessionId);
+                return;
+            }
+        });
+    }
 
     // Mode change listener
     const modeSelect = document.getElementById('modal-session-mode');
     if (modeSelect) {
         modeSelect.addEventListener('change', updateSessionModalMode);
     }
+
+    // Keep on window for cross-module calls
+    window.updateActiveSessionInfo = updateActiveSessionInfo;
 
     // Initial load
     loadSessions();

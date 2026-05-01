@@ -40,7 +40,7 @@ function showToast(title, type = 'error', message = '') {
                 ${title ? '<div class="toast-title">' + escapeHtml(title) + '</div>' : ''}
                 ${message ? '<div class="toast-message">' + escapeHtml(message) + '</div>' : ''}
             </div>
-            <button class="toast-close" onclick="this.parentElement.remove()">&times;</button>
+            <button class="toast-close" data-toast-close="">&times;</button>
         `;
     }
 
@@ -100,7 +100,7 @@ function showToastWithActions(title, type, message, actions = []) {
             ${message ? '<div class="toast-message">' + escapeHtml(message) + '</div>' : ''}
         </div>
         ${actionsHtml}
-        <button class="toast-close" onclick="this.parentElement.remove()">&times;</button>
+        <button class="toast-close" data-toast-close="">&times;</button>
     `;
 
     if (actions.length > 0) {
@@ -144,8 +144,14 @@ function showToastProgress(title, type = 'info') {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initToast() {
+    // Event delegation for toast close buttons
+    document.getElementById('toast-container')?.addEventListener('click', (e) => {
+        const closeBtn = e.target.closest('[data-toast-close]');
+        if (closeBtn) {
+            closeBtn.closest('.toast')?.remove();
+        }
+    });
+
     window.showToast = showToast;
     window.showToastWithActions = showToastWithActions;
-    window.showToastProgress = showToastProgress;
-    window.updateToastProgress = updateToastProgress;
 }

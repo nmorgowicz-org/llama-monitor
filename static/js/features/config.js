@@ -92,9 +92,31 @@ function usePathServerBinary() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initConfig() {
+    // Bind config modal buttons
+    const configClose = document.getElementById('config-modal-close');
+    if (configClose) configClose.addEventListener('click', closeConfigModal);
+
+    const configCancel = document.getElementById('config-modal-cancel');
+    if (configCancel) configCancel.addEventListener('click', closeConfigModal);
+
+    const configSave = document.getElementById('config-modal-save');
+    if (configSave) configSave.addEventListener('click', saveConfig);
+
+    // Bind Browse buttons in config modal
+    const browseServerPath = document.getElementById('config-browse-server-path');
+    if (browseServerPath) browseServerPath.addEventListener('click', () => openFileBrowser('set-server-path', 'executable'));
+
+    const usePathBtn = document.getElementById('config-use-path-btn');
+    if (usePathBtn) usePathBtn.addEventListener('click', usePathServerBinary);
+
+    const browseCwd = document.getElementById('config-browse-cwd');
+    if (browseCwd) browseCwd.addEventListener('click', () => openFileBrowser('set-server-cwd', 'dir'));
+
+    // Bind "Open Runtime Configuration" in settings modal
+    const openConfigBtn = document.getElementById('settings-open-config-btn');
+    if (openConfigBtn) openConfigBtn.addEventListener('click', openConfigModal);
+
+    // Keep on window for cross-module calls
     window.openConfigModal = openConfigModal;
     window.closeConfigModal = closeConfigModal;
-    window.loadGpuEnv = loadGpuEnv;
-    window.saveConfig = saveConfig;
-    window.usePathServerBinary = usePathServerBinary;
 }

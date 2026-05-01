@@ -100,6 +100,15 @@ export async function sendChatWithContent(text) {
     _doSendChat(tab);
 }
 
+// Send a message that is already in tab.messages (for resend/regenerate — no duplicate push)
+export async function sendChatResend(tab) {
+    if (window.chatBusy || window.compactionInProgress) return;
+
+    if (typeof window.renderChatMessages === 'function') window.renderChatMessages();
+
+    _doSendChat(tab);
+}
+
 export async function sendChat() {
     if (window.chatBusy || window.compactionInProgress) return;
     const tab = activeChatTab();
@@ -317,9 +326,9 @@ export function stopChat() {
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 export function initChatTransport() {
-    // Put on window for inline handlers
+    // Put on window for cross-module calls
     window.sendChat = sendChat;
-    window.sendChatWithContent = sendChatWithContent;
+    window.sendChatResend = sendChatResend;
     window.sendSuggestedPrompt = sendSuggestedPrompt;
     window.stopChat = stopChat;
     window.fetchSummary = fetchSummary;

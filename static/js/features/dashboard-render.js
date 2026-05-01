@@ -986,12 +986,31 @@ function setMetricSectionVisibility(cardId, visible, sectionId) {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initDashboardRender() {
+    // Bind viz gear buttons
+    document.getElementById('viz-gear-gpu')?.addEventListener('click', () => toggleVizSwitcher('gpu'));
+    document.getElementById('viz-gear-system')?.addEventListener('click', () => toggleVizSwitcher('system'));
+
+    // Bind viz reset buttons
+    document.getElementById('viz-reset-gpu')?.addEventListener('click', () => resetVizPrefs('gpu'));
+    document.getElementById('viz-reset-system')?.addEventListener('click', () => resetVizPrefs('system'));
+
+    // Event delegation for viz style options
+    document.querySelectorAll('.viz-switcher-options').forEach(container => {
+        container.addEventListener('click', (e) => {
+            const opt = e.target.closest('.viz-option');
+            if (!opt) return;
+            const card = container.dataset.card;
+            const metric = container.dataset.metric;
+            const style = opt.dataset.style;
+            selectVizStyle(card, metric, style);
+        });
+    });
+
     window.setChipState = setChipState;
     window.setCardState = setCardState;
     window.pushSparklinePoint = pushSparklinePoint;
     window.renderSparkline = renderSparkline;
     window.renderLiveSparkline = renderLiveSparkline;
-    window.getTaskKey = getTaskKey;
     window.updateLiveOutputEstimate = updateLiveOutputEstimate;
     window.updateRequestActivity = updateRequestActivity;
     window.renderRecentTask = renderRecentTask;
@@ -1005,24 +1024,6 @@ export function initDashboardRender() {
     window.renderCapabilityPopover = renderCapabilityPopover;
     window.updateMetricDelta = updateMetricDelta;
     window.setEmptyState = setEmptyState;
-    window.getSeverityColor = getSeverityColor;
-    window.getTempSeverityColor = getTempSeverityColor;
-    window.renderHwBar = renderHwBar;
-    window.renderHwRing = renderHwRing;
-    window.renderHwSparkline = renderHwSparkline;
-    window.renderHwMetricSparkline = renderHwMetricSparkline;
-    window.renderHwStacked = renderHwStacked;
-    window.renderHwChips = renderHwChips;
-    window.renderHwDualRing = renderHwDualRing;
-    window.renderHwClockRing = renderHwClockRing;
-    window.buildSparklineSVG = buildSparklineSVG;
-    window.pushGpuHistory = pushGpuHistory;
-    window.pushSysHistory = pushSysHistory;
-    window.loadVizPrefs = loadVizPrefs;
-    window.saveVizPrefs = saveVizPrefs;
-    window.toggleVizSwitcher = toggleVizSwitcher;
-    window.selectVizStyle = selectVizStyle;
-    window.resetVizPrefs = resetVizPrefs;
     window.renderGpuCard = renderGpuCard;
     window.renderSystemCard = renderSystemCard;
     window.setMetricSectionVisibility = setMetricSectionVisibility;

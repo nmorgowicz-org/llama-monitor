@@ -164,13 +164,17 @@ function _pollForReconnect(newVersion) {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initUpdates() {
-    window.initAppVersion = initAppVersion;
-    window.checkForUpdate = checkForUpdate;
-    window.showUpdatePill = showUpdatePill;
-    window.openReleaseNotes = openReleaseNotes;
-    window._resetUpdateBtn = _resetUpdateBtn;
-    window.closeReleaseNotes = closeReleaseNotes;
-    window.dismissUpdate = dismissUpdate;
-    window.triggerSelfUpdate = triggerSelfUpdate;
-    window._pollForReconnect = _pollForReconnect;
+    // Call setup functions
+    initAppVersion();
+    checkForUpdate();
+
+    // Bind update pill click
+    const updatePill = document.getElementById('update-pill');
+    if (updatePill) updatePill.addEventListener('click', openReleaseNotes);
+
+    // Bind release notes panel buttons
+    document.getElementById('release-notes-close')?.addEventListener('click', closeReleaseNotes);
+    document.getElementById('release-notes-overlay')?.addEventListener('click', closeReleaseNotes);
+    document.getElementById('release-notes-dismiss')?.addEventListener('click', dismissUpdate);
+    document.getElementById('release-notes-update-btn')?.addEventListener('click', triggerSelfUpdate);
 }

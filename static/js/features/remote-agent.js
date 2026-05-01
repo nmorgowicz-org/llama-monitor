@@ -1751,52 +1751,61 @@ function clearTimeline() {
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 export function initRemoteAgent() {
-    // Put on window for inline handlers
-    window.openRemoteAgentSetup = openRemoteAgentSetup;
-    window.closeRemoteAgentSetup = closeRemoteAgentSetup;
-    window.updateAgentSetupStatusAlert = updateAgentSetupStatusAlert;
-    window.updateSshSetupAuthFields = updateSshSetupAuthFields;
-    window.scanRemoteAgentHostKey = scanRemoteAgentHostKey;
-    window.trustRemoteAgentHostKey = trustRemoteAgentHostKey;
-    window.checkRemoteAgentVersions = checkRemoteAgentVersions;
-    window.checkManagedRemoteAgent = checkManagedRemoteAgent;
-    window.installRemoteAgent = installRemoteAgent;
-    window.startRemoteAgent = startRemoteAgent;
-    window.stopManagedRemoteAgent = stopManagedRemoteAgent;
-    window.removeManagedRemoteAgent = removeManagedRemoteAgent;
-    window.finishRemoteAgentSetup = finishRemoteAgentSetup;
-    window.openSshSetupGuide = openSshSetupGuide;
-    window.closeSshSetupGuide = closeSshSetupGuide;
-    window.previewSshSetupGuide = previewSshSetupGuide;
-    window.updateSshGuideAuthFields = updateSshGuideAuthFields;
-    window.scanSshHostKey = scanSshHostKey;
-    window.trustSshHostKey = trustSshHostKey;
-    window.applySshSetupGuide = applySshSetupGuide;
+    // Bind agent menu toggle
+    document.getElementById('nav-agent-btn')?.addEventListener('click', (e) => toggleAgentMenu(e));
+
+    // Bind agent menu items
+    document.getElementById('agent-menu-check')?.addEventListener('click', agentMenuCheck);
+    document.getElementById('agent-menu-manage')?.addEventListener('click', openRemoteAgentSetup);
+    document.getElementById('agent-menu-install')?.addEventListener('click', agentMenuInstallRepair);
+    document.getElementById('agent-menu-start')?.addEventListener('click', agentMenuStart);
+    document.getElementById('agent-menu-stop')?.addEventListener('click', agentMenuStop);
+    document.getElementById('agent-menu-remove')?.addEventListener('click', agentMenuRemove);
+
+    // Bind agent status badge
+    document.getElementById('agent-status')?.addEventListener('click', (e) => {
+        if (!e.target.closest('.btn-agent-fix')) toggleAgentMenuFromBadge(e);
+    });
+
+    // Bind agent fix button
+    document.getElementById('agent-fix-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openRemoteAgentSetupFromBadge(e);
+    });
+
+    // Bind remote agent setup modal buttons
+    document.getElementById('remote-agent-close')?.addEventListener('click', closeRemoteAgentSetup);
+    document.getElementById('remote-agent-cancel')?.addEventListener('click', closeRemoteAgentSetup);
+    document.getElementById('btn-agent-setup-done')?.addEventListener('click', finishRemoteAgentSetup);
+    document.getElementById('btn-agent-setup-scan')?.addEventListener('click', scanRemoteAgentHostKey);
+    document.getElementById('btn-agent-setup-trust')?.addEventListener('click', trustRemoteAgentHostKey);
+    document.getElementById('btn-agent-setup-status')?.addEventListener('click', checkManagedRemoteAgent);
+    document.getElementById('btn-agent-setup-install')?.addEventListener('click', installRemoteAgent);
+    document.getElementById('btn-agent-setup-start')?.addEventListener('click', startRemoteAgent);
+    document.getElementById('btn-agent-setup-stop')?.addEventListener('click', stopManagedRemoteAgent);
+    document.getElementById('btn-agent-setup-remove')?.addEventListener('click', removeManagedRemoteAgent);
+
+    // Bind remote agent buttons in config modal
+    document.getElementById('btn-remote-agent-guide')?.addEventListener('click', openSshSetupGuide);
+    document.getElementById('btn-remote-agent-detect')?.addEventListener('click', () => remoteAgentDetect(true));
+    document.getElementById('btn-remote-agent-latest')?.addEventListener('click', remoteAgentLatestRelease);
+    document.getElementById('btn-remote-agent-install')?.addEventListener('click', remoteAgentInstall);
+    document.getElementById('btn-remote-agent-start')?.addEventListener('click', remoteAgentStart);
+    document.getElementById('btn-remote-agent-update')?.addEventListener('click', remoteAgentUpdate);
+    document.getElementById('btn-remote-agent-stop')?.addEventListener('click', remoteAgentStop);
+    document.getElementById('btn-remote-agent-restart')?.addEventListener('click', remoteAgentRestart);
+    document.getElementById('btn-remote-agent-remove')?.addEventListener('click', remoteAgentRemove);
+    document.getElementById('btn-firewall-help')?.addEventListener('click', openFirewallHelp);
+
+    // Bind SSH guide buttons
+    document.getElementById('ssh-guide-close')?.addEventListener('click', closeSshSetupGuide);
+    document.getElementById('ssh-guide-preview')?.addEventListener('click', previewSshSetupGuide);
+    document.getElementById('ssh-guide-scan')?.addEventListener('click', scanSshHostKey);
+    document.getElementById('btn-ssh-guide-trust')?.addEventListener('click', trustSshHostKey);
+    document.getElementById('ssh-guide-apply')?.addEventListener('click', applySshSetupGuide);
+
+    // Keep on window for cross-module calls
     window.setRemoteAgentStatus = setRemoteAgentStatus;
-    window.toggleAgentMenu = toggleAgentMenu;
-    window.toggleAgentMenuFromBadge = toggleAgentMenuFromBadge;
-    window.openRemoteAgentSetupFromBadge = openRemoteAgentSetupFromBadge;
-    window.closeAgentMenu = closeAgentMenu;
-    window.agentMenuCheck = agentMenuCheck;
-    window.agentMenuInstallRepair = agentMenuInstallRepair;
-    window.agentMenuStart = agentMenuStart;
-    window.agentMenuStop = agentMenuStop;
-    window.agentMenuRemove = agentMenuRemove;
-    window.remoteAgentLatestRelease = remoteAgentLatestRelease;
-    window.remoteAgentDetect = remoteAgentDetect;
-    window.remoteAgentInstall = remoteAgentInstall;
-    window.remoteAgentStart = remoteAgentStart;
-    window.remoteAgentUpdate = remoteAgentUpdate;
-    window.remoteAgentStop = remoteAgentStop;
-    window.remoteAgentRestart = remoteAgentRestart;
-    window.remoteAgentRemove = remoteAgentRemove;
-    window.updateRemoteAgentPanelState = updateRemoteAgentPanelState;
-    window.showRemoteAgentFirewall = showRemoteAgentFirewall;
-    window.openFirewallHelp = openFirewallHelp;
-    window.addTimelineItem = addTimelineItem;
-    window.clearTimeline = clearTimeline;
-    window.setRemoteAgentButtonsDisabled = setRemoteAgentButtonsDisabled;
-    window.updateAgentStatusIndicator = updateAgentStatusIndicator;
 
     // Agent setup modal overlay click
     const modal = document.getElementById('remote-agent-setup-modal');

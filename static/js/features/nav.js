@@ -10,8 +10,7 @@ function switchTab(name) {
 
     page.classList.add('active');
 
-    const sidebarButton = Array.from(document.querySelectorAll('.sidebar-btn'))
-        .find(button => button.getAttribute('onclick') === "switchTab('" + name + "')");
+    const sidebarButton = document.querySelector(`.sidebar-btn[data-tab="${name}"]`);
     if (sidebarButton) sidebarButton.classList.add('active');
 }
 
@@ -66,8 +65,23 @@ function initEndpointStatus() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initNav() {
-    window.switchTab = switchTab;
-    window.toggleSidebarCollapse = toggleSidebarCollapse;
-    restoreSidebarState(); // runs immediately on import
+    // Bind sidebar tab switching
+    document.querySelectorAll('.sidebar-btn[data-tab]').forEach(btn => {
+        btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    });
+
+    // Bind sidebar collapse
+    const collapseBtn = document.getElementById('sidebar-collapse-btn');
+    if (collapseBtn) {
+        collapseBtn.addEventListener('click', toggleSidebarCollapse);
+    }
+
+    // Bind nav logo (prevent default link navigation)
+    const navLogo = document.getElementById('nav-logo');
+    if (navLogo) {
+        navLogo.addEventListener('click', event => event.preventDefault());
+    }
+
+    restoreSidebarState();
     initEndpointStatus();
 }

@@ -8,6 +8,11 @@
 
 import { escapeHtml } from './core/format.js';
 import './compat/globals.js'; // Set window.escapeHtml, window.formatMetricNumber
+
+// Stub functions for dead HTML references (analytics/export modals not yet implemented)
+window.closeAnalyticsModal = () => {};
+window.closeExportModal = () => {};
+window.exportData = () => {};
 import { initDashboardRender } from './features/dashboard-render.js';
 import { initWebSocket } from './features/dashboard-ws.js';
 import { initFileBrowser } from './features/file-browser.js';
@@ -15,7 +20,7 @@ import { initPresets } from './features/presets.js';
 import { initSessions } from './features/sessions.js';
 import { initAttachDetach } from './features/attach-detach.js';
 import { initRemoteAgent } from './features/remote-agent.js';
-import { initChatState } from './features/chat-state.js';
+import { initChatState, initChatTabs, autoResizeChatInput } from './features/chat-state.js';
 import { initChatTransport } from './features/chat-transport.js';
 import { initChatRender } from './features/chat-render.js';
 import { initChatTemplates } from './features/chat-templates.js';
@@ -60,8 +65,17 @@ initChatTransport();
 
 // Phase 6b: Chat rendering, templates, and params (after state/transport)
 initChatRender();
+
+// Bind chat scroll button
+document.getElementById('chat-scroll-bottom')?.addEventListener('click', () => window.chatScroll(true));
+
+// Bind chat tab add button
+document.getElementById('chat-tab-add-btn')?.addEventListener('click', () => window.addChatTab());
 initChatTemplates();
 initChatParams();
+
+// Resize chat input to fit content
+autoResizeChatInput();
 
 // Phase 7: LHM, setup view, updates, shortcuts
 initLHM();
@@ -84,3 +98,6 @@ navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 // Signal that all modules are loaded and initialized
 document.documentElement.classList.add('modules-ready');
+
+// Initialize chat tabs (async — fetches tabs from API)
+initChatTabs().catch(err => console.error('[bootstrap] initChatTabs failed:', err));

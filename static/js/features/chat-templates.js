@@ -237,29 +237,31 @@ function closeTemplateManager() {
 async function renderTemplateList() {
     const templates = await loadTemplates();
     const list = document.getElementById('template-list');
-    list.innerHTML = templates.map(t => `
-        <div class="template-list-item ${selectedTemplateId === t.id ? 'selected' : ''} ${editingTemplateId === t.id ? 'editing' : ''}" onclick="selectTemplate('${t.id}')">
-            <span class="template-list-name">${window.escapeHtml(t.name)}</span>
+    list.innerHTML = templates.map(t => {
+        const name = window.escapeHtml(t.name);
+        const id = window.escapeHtml(t.id);
+        return `<div class="template-list-item ${selectedTemplateId === t.id ? 'selected' : ''} ${editingTemplateId === t.id ? 'editing' : ''}" data-template-id="${id}">
+            <span class="template-list-name">${name}</span>
             <div class="template-list-actions">
-                <button class="template-list-btn" onclick="event.stopPropagation(); applyTemplateById('${t.id}')" title="Apply to current chat">
+                <button class="template-list-btn" data-template-action="apply" data-template-id="${id}" title="Apply to current chat">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M20 6L9 17l-5-5"/>
                     </svg>
                 </button>
-                <button class="template-list-btn" onclick="event.stopPropagation(); editTemplate('${t.id}')" title="Edit">
+                <button class="template-list-btn" data-template-action="edit" data-template-id="${id}" title="Edit">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
                         <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
                     </svg>
                 </button>
-                <button class="template-list-btn delete" onclick="event.stopPropagation(); deleteTemplate('${t.id}')" title="Delete">
+                <button class="template-list-btn delete" data-template-action="delete" data-template-id="${id}" title="Delete">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
                     </svg>
                 </button>
             </div>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
 }
 
 async function selectTemplate(id) {
@@ -288,8 +290,8 @@ async function renderTemplatePreview() {
                 <textarea class="template-editor-textarea" id="template-prompt-input" rows="8" placeholder="You are {{char}}..."></textarea>
             </div>
             <div class="template-editor-actions">
-                <button class="template-save-btn" onclick="saveTemplate()">Save</button>
-                <button class="template-cancel-btn" onclick="cancelTemplateEdit()">Cancel</button>
+                <button class="template-save-btn" data-template-editor="save">Save</button>
+                <button class="template-cancel-btn" data-template-editor="cancel">Cancel</button>
             </div>`;
         return;
     }
@@ -311,16 +313,16 @@ async function renderTemplatePreview() {
                 <textarea class="template-editor-textarea" id="template-prompt-input" rows="8" placeholder="You are {{char}}...">${window.escapeHtml(t.prompt)}</textarea>
             </div>
             <div class="template-editor-actions">
-                <button class="template-save-btn" onclick="saveTemplate()">Save</button>
-                <button class="template-cancel-btn" onclick="cancelTemplateEdit()">Cancel</button>
+                <button class="template-save-btn" data-template-editor="save">Save</button>
+                <button class="template-cancel-btn" data-template-editor="cancel">Cancel</button>
             </div>`;
     } else {
         preview.innerHTML = `
             <div class="template-preview-header">
                 <h3>${window.escapeHtml(t.name)}</h3>
                 <div class="template-preview-actions">
-                    <button class="template-preview-btn" onclick="editTemplate('${t.id}')">Edit</button>
-                    <button class="template-preview-btn apply" onclick="applyTemplateById('${t.id}')">Apply</button>
+                    <button class="template-preview-btn" data-template-id="${window.escapeHtml(t.id)}" data-template-preview-action="edit">Edit</button>
+                    <button class="template-preview-btn apply" data-template-id="${window.escapeHtml(t.id)}" data-template-preview-action="apply">Apply</button>
                 </div>
             </div>
             <div class="template-preview-content">${window.escapeHtml(t.prompt)}</div>`;
@@ -556,31 +558,61 @@ function onSystemPromptChange() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initChatTemplates() {
-    // Register functions on window for inline handlers
-    window.SYSTEM_PROMPT_TEMPLATES = SYSTEM_PROMPT_TEMPLATES;
-    window.DEFAULT_TEMPLATES = DEFAULT_TEMPLATES;
-    window._defaultId = _defaultId;
-    window.loadTemplates = loadTemplates;
-    window.saveUserTemplates = saveUserTemplates;
+    // Bind template manager buttons
+    document.getElementById('template-manager-close')?.addEventListener('click', closeTemplateManager);
+    document.getElementById('template-new-btn')?.addEventListener('click', newTemplate);
+
+    // Bind explicit policy buttons
+    document.getElementById('explicit-policy-input')?.addEventListener('input', () => saveExplicitPolicy());
+    document.getElementById('explicit-policy-reset')?.addEventListener('click', resetExplicitPolicy);
+    document.getElementById('explicit-policy-clear')?.addEventListener('click', clearExplicitPolicy);
+
+    // Event delegation for template list
+    const templateList = document.getElementById('template-list');
+    if (templateList) {
+        templateList.addEventListener('click', (e) => {
+            const actionBtn = e.target.closest('[data-template-action]');
+            if (actionBtn) {
+                e.stopPropagation();
+                const action = actionBtn.dataset.templateAction;
+                const id = actionBtn.dataset.templateId;
+                if (action === 'apply') applyTemplateById(id);
+                else if (action === 'edit') editTemplate(id);
+                else if (action === 'delete') deleteTemplate(id);
+                return;
+            }
+            const listItem = e.target.closest('.template-list-item');
+            if (listItem) selectTemplate(listItem.dataset.templateId);
+        });
+    }
+
+    // Event delegation for template editor actions
+    const templatePreview = document.getElementById('template-preview');
+    if (templatePreview) {
+        templatePreview.addEventListener('click', (e) => {
+            const editorBtn = e.target.closest('[data-template-editor]');
+            if (editorBtn) {
+                if (editorBtn.dataset.templateEditor === 'save') saveTemplate();
+                else if (editorBtn.dataset.templateEditor === 'cancel') cancelTemplateEdit();
+                return;
+            }
+            const previewBtn = e.target.closest('[data-template-preview-action]');
+            if (previewBtn) {
+                const action = previewBtn.dataset.templatePreviewAction;
+                const id = previewBtn.dataset.templateId;
+                if (action === 'edit') editTemplate(id);
+                else if (action === 'apply') applyTemplateById(id);
+            }
+        });
+    }
+
+    // Register functions on window for cross-module calls
     window.openTemplateManager = openTemplateManager;
-    window.closeTemplateManager = closeTemplateManager;
-    window.renderTemplateList = renderTemplateList;
-    window.selectTemplate = selectTemplate;
-    window.renderTemplatePreview = renderTemplatePreview;
-    window.editTemplate = editTemplate;
-    window.newTemplate = newTemplate;
-    window.cancelTemplateEdit = cancelTemplateEdit;
-    window.saveTemplate = saveTemplate;
-    window.deleteTemplate = deleteTemplate;
-    window.applyTemplateById = applyTemplateById;
     window.populateTemplatesDropdown = populateTemplatesDropdown;
     window.applySystemPromptTemplate = applySystemPromptTemplate;
     window.toggleExplicitMode = toggleExplicitMode;
     window.updateExplicitToggleUI = updateExplicitToggleUI;
     window.getExplicitModePolicy = getExplicitModePolicy;
-    window.saveExplicitPolicy = saveExplicitPolicy;
-    window.resetExplicitPolicy = resetExplicitPolicy;
-    window.clearExplicitPolicy = clearExplicitPolicy;
     window.toggleSystemPromptPanel = toggleSystemPromptPanel;
     window.onSystemPromptChange = onSystemPromptChange;
 }

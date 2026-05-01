@@ -26,13 +26,19 @@ async function showLHMNotification() {
         overlay.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;">
                 <h3 style="margin:0 0 10px 0;color:#ebcb8b;">LibreHardwareMonitor Status</h3>
-                <button onclick="this.closest('.notification-container').remove(); window.lhmResolve('cancel');" style="background:none;border:none;color:#d8dee9;cursor:pointer;font-size:20px;">&times;</button>
+                <button id="lhm-cancel-btn" style="background:none;border:none;color:#d8dee9;cursor:pointer;font-size:20px;">&times;</button>
             </div>
             <p id="lhm-status-text" style="margin:0 0 15px 0;line-height:1.5;">Checking status...</p>
             <div id="lhm-buttons" style="display:flex;gap:10px;flex-direction:column;"></div>
         `;
 
         document.body.appendChild(overlay);
+
+        // Bind cancel button
+        document.getElementById('lhm-cancel-btn')?.addEventListener('click', () => {
+            overlay.remove();
+            window.lhmResolve('cancel');
+        });
 
         const lhmStatusEl = document.getElementById('lhm-status-text');
         const lhmButtonsEl = document.getElementById('lhm-buttons');
@@ -418,9 +424,9 @@ async function checkLHMAndPrompt() {
             if (lhmAvailable) {
                 tempColumn = '<td class="value temp" id="lhm-temp-col">—</td>';
             } else if (isDisabled) {
-                tempColumn = '<td class="value temp" id="lhm-temp-col"><button class="btn-lhm-inline need-attention" onclick="showLHMNotification()" title="Install LibreHardwareMonitor for CPU temp monitoring">&#9971;</button></td>';
+                tempColumn = '<td class="value temp" id="lhm-temp-col"><button class="btn-lhm-inline need-attention" data-lhm-action="show" title="Install LibreHardwareMonitor for CPU temp monitoring">&#9971;</button></td>';
             } else {
-                tempColumn = '<td class="value temp" id="lhm-temp-col"><button class="btn-lhm-inline" onclick="showLHMNotification()" title="Install LibreHardwareMonitor for CPU temp monitoring">&#9971;</button></td>';
+                tempColumn = '<td class="value temp" id="lhm-temp-col"><button class="btn-lhm-inline" data-lhm-action="show" title="Install LibreHardwareMonitor for CPU temp monitoring">&#9971;</button></td>';
             }
         } else {
             tempColumn = '<td class="value temp">—</td>';
@@ -439,8 +445,11 @@ async function checkLHMAndPrompt() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initLHM() {
-    window.showLHMNotification = showLHMNotification;
-    window.createUACWarningOverlay = createUACWarningOverlay;
-    window.showWarningModal = showWarningModal;
-    window.checkLHMAndPrompt = checkLHMAndPrompt;
+    // Event delegation for dynamically generated LHM buttons
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-lhm-action]');
+        if (btn && btn.dataset.lhmAction === 'show') {
+            showLHMNotification();
+        }
+    });
 }

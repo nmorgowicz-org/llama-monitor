@@ -239,15 +239,29 @@ export async function initAttachDetachButtons() {
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 export function initAttachDetach() {
-    // Put on window for inline handlers
-    window.doStart = doStart;
-    window.doStop = doStop;
-    window.doKillLlama = doKillLlama;
-    window.doAttach = doAttach;
-    window.doDetach = doDetach;
-    window.doAttachFromSetup = doAttachFromSetup;
-    window.doStartFromSetup = doStartFromSetup;
-    window.getConfig = getConfig;
+    // Bind top detach button
+    const detachTop = document.getElementById('btn-detach-top');
+    if (detachTop) detachTop.addEventListener('click', doDetach);
+
+    // Bind setup page buttons
+    const setupAttach = document.getElementById('setup-attach-btn');
+    if (setupAttach) setupAttach.addEventListener('click', doAttachFromSetup);
+
+    const setupStart = document.getElementById('setup-start-btn');
+    if (setupStart) setupStart.addEventListener('click', doStartFromSetup);
+
+    // Bind monitor view buttons
+    const btnAttach = document.getElementById('btn-attach');
+    if (btnAttach) btnAttach.addEventListener('click', doAttach);
+
+    const btnDetach = document.getElementById('btn-detach');
+    if (btnDetach) btnDetach.addEventListener('click', doDetach);
+
+    const btnStart = document.getElementById('btn-start');
+    if (btnStart) btnStart.addEventListener('click', doStart);
+
+    const btnStop = document.getElementById('btn-stop');
+    if (btnStop) btnStop.addEventListener('click', doStop);
 
     // Initialize button states
     initAttachDetachButtons();

@@ -57,7 +57,12 @@ function initChatKeyboardShortcuts() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initShortcuts() {
-    window.openKeyboardShortcutsModal = openKeyboardShortcutsModal;
-    window.closeKeyboardShortcutsModal = closeKeyboardShortcutsModal;
-    window.initChatKeyboardShortcuts = initChatKeyboardShortcuts;
+    // Call setup functions that bind DOM event listeners
+    initChatKeyboardShortcuts();
+
+    // Bind shortcuts modal close button
+    const closeBtn = document.getElementById('shortcuts-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeKeyboardShortcutsModal);
+    }
 }

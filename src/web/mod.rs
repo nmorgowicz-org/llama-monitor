@@ -196,14 +196,6 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
             )
         });
 
-    let js = warp::path("app.js").and(warp::get()).map(|| {
-        warp::reply::with_header(
-            static_assets::APP_JS,
-            "content-type",
-            "application/javascript",
-        )
-    });
-
     // Module bootstrap and supporting files (Phase 1 of app.js refactor)
     let js_bootstrap = warp::path("js")
         .and(warp::path("bootstrap.js"))
@@ -563,7 +555,6 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .or(css_chat)
         .or(css_setup_view)
         .or(css_settings_modal)
-        .or(js)
         .or(js_bootstrap)
         .or(js_compat_globals)
         .or(js_core_format)

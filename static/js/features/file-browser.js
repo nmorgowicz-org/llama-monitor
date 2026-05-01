@@ -53,16 +53,17 @@ export async function fileBrowserGo(path) {
         }
 
         entriesEl.innerHTML = data.entries.map(e => {
-            const escapeJsString = (s) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const name = window.escapeHtml(e.name);
+            const size = window.escapeHtml(e.size_display || '');
             if (e.is_dir) {
-                return '<div class="fb-entry fb-entry-dir" onclick="openFileBrowser(\'' + escapeJsString(e.path) + '\')">' +
+                return `<div class="fb-entry fb-entry-dir" data-path="${window.escapeHtml(e.path)}">` +
                     '<span class="fb-entry-icon">\u{1F4C1}</span>' +
-                    '<span class="fb-entry-name">' + e.name + '</span></div>';
+                    '<span class="fb-entry-name">' + name + '</span></div>';
             } else {
-                return '<div class="fb-entry fb-entry-file fb-match" onclick="fileBrowserSelect(\'' + escapeJsString(e.path) + '\')">' +
+                return `<div class="fb-entry fb-entry-file fb-match" data-path="${window.escapeHtml(e.path)}">` +
                     '<span class="fb-entry-icon">\u{1F4C4}</span>' +
-                    '<span class="fb-entry-name">' + e.name + '</span>' +
-                    '<span class="fb-entry-size">' + e.size_display + '</span></div>';
+                    '<span class="fb-entry-name">' + name + '</span>' +
+                    '<span class="fb-entry-size">' + size + '</span></div>';
             }
         }).join('');
     } catch (err) {
@@ -87,12 +88,41 @@ export function fileBrowserSelect(path) {
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 export function initFileBrowser() {
-    // Put on window for inline handlers
-    window.openFileBrowser = openFileBrowser;
-    window.closeFileBrowser = closeFileBrowser;
-    window.fileBrowserGo = fileBrowserGo;
-    window.fileBrowserUp = fileBrowserUp;
-    window.fileBrowserSelect = fileBrowserSelect;
+    // Bind file browser buttons
+    const fbClose = document.getElementById('filebrowser-close');
+    if (fbClose) fbClose.addEventListener('click', closeFileBrowser);
+
+    const fbCancel = document.getElementById('filebrowser-cancel');
+    if (fbCancel) fbCancel.addEventListener('click', closeFileBrowser);
+
+    const fbSelect = document.getElementById('filebrowser-select');
+    if (fbSelect) fbSelect.addEventListener('click', () => fileBrowserSelect());
+
+    const fbUp = document.getElementById('filebrowser-up');
+    if (fbUp) fbUp.addEventListener('click', fileBrowserUp);
+
+    // Bind path input Enter key
+    const fbPathInput = document.getElementById('fb-path-input');
+    if (fbPathInput) {
+        fbPathInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') fileBrowserGo(fbPathInput.value);
+        });
+    }
+
+    // Event delegation for dynamically generated entries
+    const entriesEl = document.getElementById('fb-entries');
+    if (entriesEl) {
+        entriesEl.addEventListener('click', (e) => {
+            const entry = e.target.closest('.fb-entry');
+            if (!entry) return;
+            const path = entry.dataset.path;
+            if (entry.classList.contains('fb-entry-dir')) {
+                openFileBrowser(path);
+            } else {
+                fileBrowserSelect(path);
+            }
+        });
+    }
 
     // Modal overlay click
     const modal = document.getElementById('file-browser-modal');
@@ -109,4 +139,7 @@ export function initFileBrowser() {
             e.stopImmediatePropagation();
         }
     }, true);
+
+    // Keep on window for cross-module calls
+    window.openFileBrowser = openFileBrowser;
 }

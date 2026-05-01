@@ -138,7 +138,7 @@ body {
 <body>
 <div class="header">
     <h1>llama-monitor</h1>
-    <button class="close-btn" onclick="window.close()">&times;</button>
+    <button class="close-btn" id="compact-close">&times;</button>
 </div>
 <div class="status-bar" id="status-bar">Connecting...</div>
 
@@ -184,6 +184,8 @@ body {
 </div>
 
 <script>
+document.getElementById('compact-close').addEventListener('click', () => window.close());
+
 const PORT = __PORT__;
 let ws = null;
 let reconnectTimer = null;

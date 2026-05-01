@@ -79,14 +79,15 @@ function renderChatTabs() {
         el.dataset.tabId = tab.id;
         el.dataset.msgCount = msgCount;
         el.innerHTML = `
-          <span class="chat-tab-name" ondblclick="startRenameTab('${tab.id}')">${window.escapeHtml(tab.name)}</span>
+          <span class="chat-tab-name" data-chat-tab-rename="${tab.id}">${window.escapeHtml(tab.name)}</span>
           <span class="chat-tab-count">${tab.messages.filter(m => m.role !== 'system').length || ''}</span>
           ${window.chatTabs.length > 1
-            ? `<button class="chat-tab-close" onclick="closeChatTab('${tab.id}')" title="Close tab">×</button>`
+            ? `<button class="chat-tab-close" data-chat-tab-close="${tab.id}" title="Close tab">×</button>`
             : ''}
         `;
         el.addEventListener('click', e => {
-            if (e.target.classList.contains('chat-tab-close')) return;
+            const closeBtn = e.target.closest('.chat-tab-close');
+            if (closeBtn) return;
             if (e.target.classList.contains('chat-tab-name') && e.detail === 2) return;
             window.switchChatTab(tab.id);
         });
@@ -116,7 +117,7 @@ function renderChatMessages() {
         ];
         const promptCards = prompts.map((p, i) => `
             <button class="chat-empty-prompt" style="animation-delay:${i * 60}ms"
-                    onclick="window.sendSuggestedPrompt('${window.escapeHtml(p.text)}')">
+                    data-prompt-text="${window.escapeHtml(p.text)}">
                 <span class="chat-empty-prompt-icon">${p.icon}</span>
                 <span class="chat-empty-prompt-text">${p.text}</span>
             </button>`).join('');
@@ -221,7 +222,7 @@ function buildMessageElement(msg, idx, allMessages) {
         wrapper.innerHTML = `
           <div class="compact-marker-content">
             <div class="compact-marker-rule compact-marker-rule-left"></div>
-            <div class="compact-marker-pill" onclick="this.closest('.chat-compact-marker').querySelector('.compact-marker-body').style.display === '' || this.closest('.chat-compact-marker').querySelector('.compact-marker-body').style.display === 'none' ? (this.closest('.chat-compact-marker').querySelector('.compact-marker-body').style.display='block', this.closest('.chat-compact-marker').dataset.expanded='true') : (this.closest('.chat-compact-marker').querySelector('.compact-marker-body').style.display='none', this.closest('.chat-compact-marker').dataset.expanded='false')">
+            <div class="compact-marker-pill" data-compact-toggle="true">
               <svg class="compact-marker-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${iconPath}</svg>
               <span class="compact-marker-label">${labelText}</span>
               <span class="compact-marker-stats">${statsHtml}</span>
@@ -275,7 +276,7 @@ function buildMessageElement(msg, idx, allMessages) {
           <span class="chat-msg-time">${ts}</span>
           ${metaHtml}
           <div class="chat-msg-actions">
-            <button class="chat-action-btn" onclick="copyMessageContent(this)" title="Copy">
+            <button class="chat-action-btn" data-chat-action="copy" title="Copy">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                    stroke="currentColor" stroke-width="2">
                 <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
@@ -288,26 +289,26 @@ function buildMessageElement(msg, idx, allMessages) {
                 const canGoLeft = variants.length > 1 && curIdx > 0;
                 const canGoRight = variants.length > 1 ? curIdx < variants.length - 1 : true;
                 return `
-            <button class="chat-action-btn" onclick="navigateVariant(this,-1)" title="Previous response" ${canGoLeft ? '' : 'disabled'}>
+            <button class="chat-action-btn" data-chat-action="nav-variant" data-variant-dir="-1" title="Previous response" ${canGoLeft ? '' : 'disabled'}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M15 18l-6-6 6-6"/>
               </svg>
             </button>
             <span class="chat-variant-badge">${curIdx+1}/${total}</span>
-            <button class="chat-action-btn" onclick="navigateVariant(this,1)" title="${canGoRight && variants.length <= 1 ? 'Regenerate' : 'Next response'}" ${canGoRight ? '' : 'disabled'}>
+            <button class="chat-action-btn" data-chat-action="nav-variant" data-variant-dir="1" title="${canGoRight && variants.length <= 1 ? 'Regenerate' : 'Next response'}" ${canGoRight ? '' : 'disabled'}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M9 18l6-6-6-6"/>
               </svg>
             </button>`;
             })() : ''}
-            <button class="chat-action-btn" onclick="editMessageContent(this)" title="Edit">
+            <button class="chat-action-btn" data-chat-action="edit" title="Edit">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                    stroke="currentColor" stroke-width="2">
                 <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
                 <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
               </svg>
             </button>
-            <button class="chat-action-btn chat-action-btn-delete" onclick="deleteMessage(this)" title="Delete">
+            <button class="chat-action-btn chat-action-btn-delete" data-chat-action="delete" title="Delete">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                    stroke="currentColor" stroke-width="2">
                 <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
@@ -443,14 +444,14 @@ function finalizeAssistantMessage(el, content, usage, tab) {
         const variantIdx = msg?._variantIndex || 0;
 
         actions.innerHTML = `
-          <button class="chat-action-btn" onclick="copyMessageContent(this)" title="Copy">
+          <button class="chat-action-btn" data-chat-action="copy" title="Copy">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                   stroke="currentColor" stroke-width="2">
               <rect x="9" y="9" width="13" height="13" rx="2"/>
               <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
             </svg>
           </button>
-          <button class="chat-action-btn" onclick="regenerateFromMessage(this)" title="Regenerate">
+          <button class="chat-action-btn" data-chat-action="regenerate" title="Regenerate">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                   stroke="currentColor" stroke-width="2">
               <path d="M1 4v6h6M23 20v-6h-6"/>
@@ -458,25 +459,25 @@ function finalizeAssistantMessage(el, content, usage, tab) {
             </svg>
           </button>
           ${hasVariants ? `
-          <button class="chat-action-btn" onclick="navigateVariant(this,-1)" title="Previous variant" ${variantIdx <= 0 ? 'disabled' : ''}>
+          <button class="chat-action-btn" data-chat-action="nav-variant" data-variant-dir="-1" title="Previous variant" ${variantIdx <= 0 ? 'disabled' : ''}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M15 18l-6-6 6-6"/>
             </svg>
           </button>
           <span class="chat-variant-badge">${variantIdx+1}/${msg._variants.length}</span>
-          <button class="chat-action-btn" onclick="navigateVariant(this,1)" title="Next variant" ${variantIdx >= msg._variants.length-1 ? 'disabled' : ''}>
+          <button class="chat-action-btn" data-chat-action="nav-variant" data-variant-dir="1" title="Next variant" ${variantIdx >= msg._variants.length-1 ? 'disabled' : ''}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M9 18l6-6-6-6"/>
             </svg>
           </button>` : ''}
-          <button class="chat-action-btn" onclick="editMessageContent(this)" title="Edit">
+          <button class="chat-action-btn" data-chat-action="edit" title="Edit">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                  stroke="currentColor" stroke-width="2">
               <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
               <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
             </svg>
           </button>
-          <button class="chat-action-btn chat-action-btn-delete" onclick="deleteMessage(this)" title="Delete">
+          <button class="chat-action-btn chat-action-btn-delete" data-chat-action="delete" title="Delete">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                  stroke="currentColor" stroke-width="2">
               <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
@@ -543,20 +544,20 @@ function navigateVariant(btn, direction) {
 
         let newVariants = variants.length > 0 ? [...variants, msg.content] : [msg.content];
 
-        tab.messages = tab.messages.slice(0, msgIdx);
+        // Find the last user message before this assistant message
+        const lastUser = [...tab.messages].reverse().find(m => m.role === 'user');
+        if (!lastUser) return;
+        const userMsgIdx = tab.messages.indexOf(lastUser);
+
+        // Truncate to include the user message, remove all subsequent
+        tab.messages = tab.messages.slice(0, userMsgIdx + 1);
         tab.updated_at = Date.now();
 
-        renderChatMessages();
+        tab._pendingVariants = newVariants;
         window.scheduleChatPersist();
 
-        tab._pendingVariants = newVariants;
-
-        const lastUser = [...tab.messages].reverse().find(m => m.role === 'user');
-        if (lastUser) {
-            tab.messages = tab.messages.filter(m => m !== lastUser);
-            window.scheduleChatPersist();
-            window.sendChatWithContent(lastUser.content);
-        }
+        // User message is already in tab.messages — use sendChatResend
+        window.sendChatResend(tab);
         return;
     }
 
@@ -568,6 +569,29 @@ function navigateVariant(btn, direction) {
 
     renderChatMessages();
     window.scheduleChatPersist();
+}
+
+function regenerateFromMessage(btn) {
+    const msgEl = btn.closest('.chat-message');
+    const msgIdx = parseInt(msgEl.dataset.msgIdx);
+    const tab = window.activeChatTab();
+    if (!tab || isNaN(msgIdx)) return;
+
+    const msg = tab.messages[msgIdx];
+    if (!msg || msg.role !== 'assistant') return;
+
+    // Find the last user message before this assistant message
+    const lastUser = [...tab.messages].reverse().find(m => m.role === 'user');
+    if (!lastUser) return;
+    const userMsgIdx = tab.messages.indexOf(lastUser);
+
+    // Truncate to include the user message, remove all subsequent
+    tab.messages = tab.messages.slice(0, userMsgIdx + 1);
+    tab.updated_at = Date.now();
+    window.scheduleChatPersist();
+
+    // User message is already in tab.messages — use sendChatResend
+    window.sendChatResend(tab);
 }
 
 function editMessageContent(btn) {
@@ -584,13 +608,13 @@ function editMessageContent(btn) {
         tab.messages.slice(msgIdx + 1).every(m => m.role !== 'user');
 
     const resendBtn = isLastUserMsg
-        ? `<button class="chat-edit-btn chat-edit-btn-resend" onclick="resendMessageEdit(this)">Resend</button>`
+        ? `<button class="chat-edit-btn chat-edit-btn-resend" data-chat-edit="resend">Resend</button>`
         : '';
     body.innerHTML = `<textarea class="chat-msg-edit-area" rows="6">${window.escapeHtml(msg.content)}</textarea>
       <div class="chat-msg-edit-actions">
         ${resendBtn}
-        <button class="chat-edit-btn chat-edit-btn-save" onclick="saveMessageEdit(this)">Save</button>
-        <button class="chat-edit-btn chat-edit-btn-cancel" onclick="cancelMessageEdit(this)">Cancel</button>
+        <button class="chat-edit-btn chat-edit-btn-save" data-chat-edit="save">Save</button>
+        <button class="chat-edit-btn chat-edit-btn-cancel" data-chat-edit="cancel">Cancel</button>
       </div>`;
     const textarea = body.querySelector('.chat-msg-edit-area');
     textarea.focus();
@@ -614,11 +638,12 @@ function resendMessageEdit(btn) {
     msg.content = newContent;
     tab.updated_at = Date.now();
 
+    // Truncate to include the user message, remove all subsequent messages
     tab.messages = tab.messages.slice(0, msgIdx + 1);
     window.scheduleChatPersist();
-    renderChatMessages();
 
-    window.sendChatWithContent(newContent);
+    // Use sendChatResend — the user message is already in tab.messages
+    window.sendChatResend(tab);
 }
 
 function saveMessageEdit(btn) {
@@ -763,30 +788,79 @@ function updateChatTabBadge() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initChatRender() {
-    // Register functions on window for inline handlers
+    // Call setup functions that bind DOM event listeners
+    initChatScrollButton();
+
+    // Event delegation for chat tab close buttons
+    document.getElementById('chat-tab-bar')?.addEventListener('click', (e) => {
+        const closeBtn = e.target.closest('.chat-tab-close');
+        if (closeBtn) {
+            window.closeChatTab(closeBtn.dataset.chatTabClose);
+        }
+    });
+
+    // Event delegation for chat tab rename (dblclick)
+    document.getElementById('chat-tab-bar')?.addEventListener('dblclick', (e) => {
+        const renameEl = e.target.closest('[data-chat-tab-rename]');
+        if (renameEl) {
+            window.startRenameTab(renameEl.dataset.chatTabRename);
+        }
+    });
+
+    // Event delegation for chat message action buttons
+    document.getElementById('chat-messages')?.addEventListener('click', (e) => {
+        const actionBtn = e.target.closest('[data-chat-action]');
+        if (!actionBtn) return;
+        const action = actionBtn.dataset.chatAction;
+        if (action === 'copy') copyMessageContent(actionBtn);
+        else if (action === 'regenerate') regenerateFromMessage(actionBtn);
+        else if (action === 'nav-variant') navigateVariant(actionBtn, +actionBtn.dataset.variantDir);
+        else if (action === 'edit') editMessageContent(actionBtn);
+        else if (action === 'delete') deleteMessage(actionBtn);
+    });
+
+    // Event delegation for chat message edit buttons
+    document.getElementById('chat-messages')?.addEventListener('click', (e) => {
+        const editBtn = e.target.closest('[data-chat-edit]');
+        if (!editBtn) return;
+        const editAction = editBtn.dataset.chatEdit;
+        if (editAction === 'resend') resendMessageEdit(editBtn);
+        else if (editAction === 'save') saveMessageEdit(editBtn);
+        else if (editAction === 'cancel') cancelMessageEdit(editBtn);
+    });
+
+    // Event delegation for suggested prompt buttons
+    document.getElementById('chat-messages')?.addEventListener('click', (e) => {
+        const promptBtn = e.target.closest('[data-prompt-text]');
+        if (promptBtn) {
+            window.sendSuggestedPrompt(promptBtn.dataset.promptText);
+        }
+    });
+
+    // Event delegation for compact marker toggle
+    document.getElementById('chat-messages')?.addEventListener('click', (e) => {
+        const pill = e.target.closest('[data-compact-toggle]');
+        if (!pill) return;
+        const marker = pill.closest('.chat-compact-marker');
+        if (!marker) return;
+        const body = marker.querySelector('.compact-marker-body');
+        if (!body) return;
+        const isExpanded = marker.dataset.expanded === 'true';
+        body.style.display = isExpanded ? 'none' : 'block';
+        marker.dataset.expanded = isExpanded ? 'false' : 'true';
+    });
+
+    // Register functions on window for cross-module calls
     window.renderMd = renderMd;
     window.renderMdStreaming = renderMdStreaming;
     window.chatScroll = chatScroll;
-    window.initChatScrollButton = initChatScrollButton;
     window.incrementUnreadCount = incrementUnreadCount;
     window.renderChatTabs = renderChatTabs;
     window.updateTabBarOverflowMask = updateTabBarOverflowMask;
     window.renderChatMessages = renderChatMessages;
-    window.loadMoreMessages = loadMoreMessages;
-    window.buildMessageElement = buildMessageElement;
-    window.formatTokenCount = formatTokenCount;
     window.appendAssistantPlaceholder = appendAssistantPlaceholder;
     window.appendThinkingBlock = appendThinkingBlock;
     window.finalizeAssistantMessage = finalizeAssistantMessage;
-    window.copyMessageContent = copyMessageContent;
-    window.navigateVariant = navigateVariant;
-    window.editMessageContent = editMessageContent;
-    window.resendMessageEdit = resendMessageEdit;
-    window.saveMessageEdit = saveMessageEdit;
-    window.cancelMessageEdit = cancelMessageEdit;
-    window.deleteMessage = deleteMessage;
     window.exportChatTab = exportChatTab;
-    window.importChatTab = importChatTab;
-    window.startRenameTab = startRenameTab;
     window.updateChatTabBadge = updateChatTabBadge;
 }

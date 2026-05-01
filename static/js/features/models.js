@@ -57,8 +57,17 @@ async function refreshModels() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initModels() {
-    window.openModelsModal = openModelsModal;
-    window.closeModelsModal = closeModelsModal;
-    window.loadModels = loadModels;
-    window.refreshModels = refreshModels;
+    // Bind sidebar button
+    const sidebarBtn = document.getElementById('sidebar-btn-models');
+    if (sidebarBtn) sidebarBtn.addEventListener('click', openModelsModal);
+
+    // Bind modal buttons
+    const closeBtn = document.getElementById('models-modal-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeModelsModal);
+
+    const cancelBtn = document.getElementById('models-modal-cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', closeModelsModal);
+
+    const refreshBtn = document.getElementById('models-refresh-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', refreshModels);
 }

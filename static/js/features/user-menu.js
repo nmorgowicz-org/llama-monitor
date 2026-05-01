@@ -125,15 +125,37 @@ function _loadSavedPreferences() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initUserMenu() {
-    window.toggleUserMenu = toggleUserMenu;
-    window.closeUserMenu = closeUserMenu;
-    window.openUserProfile = openUserProfile;
-    window.openUserPreferencesModal = openUserPreferencesModal;
-    window.closeUserPreferencesModal = closeUserPreferencesModal;
-    window.saveUserPreferences = saveUserPreferences;
-    window.applyThemePreference = applyThemePreference;
-    window.toggleTheme = toggleTheme;
-    window.openUserHelp = openUserHelp;
-    window.logoutUser = logoutUser;
+    // Bind user menu toggle
+    const userBtn = document.getElementById('nav-user-btn');
+    if (userBtn) {
+        userBtn.addEventListener('click', (e) => toggleUserMenu(e));
+    }
+
+    // Bind user menu items
+    const profileBtn = document.getElementById('user-menu-profile');
+    if (profileBtn) profileBtn.addEventListener('click', (e) => openUserProfile(e));
+
+    const prefsBtn = document.getElementById('user-menu-preferences');
+    if (prefsBtn) prefsBtn.addEventListener('click', (e) => openUserPreferencesModal(e));
+
+    const themeBtn = document.getElementById('user-menu-theme');
+    if (themeBtn) themeBtn.addEventListener('click', (e) => toggleTheme(e));
+
+    const helpBtn = document.getElementById('user-menu-help');
+    if (helpBtn) helpBtn.addEventListener('click', (e) => openUserHelp(e));
+
+    const logoutBtn = document.getElementById('user-menu-logout');
+    if (logoutBtn) logoutBtn.addEventListener('click', (e) => logoutUser(e));
+
+    // Bind user preferences modal buttons
+    const prefsClose = document.getElementById('user-prefs-close');
+    if (prefsClose) prefsClose.addEventListener('click', closeUserPreferencesModal);
+
+    const prefsCancel = document.getElementById('user-prefs-cancel');
+    if (prefsCancel) prefsCancel.addEventListener('click', closeUserPreferencesModal);
+
+    const prefsSave = document.getElementById('user-prefs-save');
+    if (prefsSave) prefsSave.addEventListener('click', saveUserPreferences);
+
     _loadSavedPreferences();
 }

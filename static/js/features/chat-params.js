@@ -448,37 +448,95 @@ function initChatInputHandler() {
     });
 }
 
+// ── Chat names ────────────────────────────────────────────────────────────────
+
+function loadChatNames() {
+    const tab = activeChatTab();
+    if (!tab) return;
+
+    const aiInput = document.getElementById('chat-ai-name');
+    const userInput = document.getElementById('chat-user-name');
+
+    if (aiInput) aiInput.value = tab.ai_name || '';
+    if (userInput) userInput.value = tab.user_name || '';
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initChatParams() {
-    // Register functions on window for inline handlers
+    // Call setup functions that bind DOM event listeners
+    applyChatFontSize();
+    initEnterToggle();
+    initChatStyle();
+    initChatInputHandler();
+
+    // Bind chat header buttons
+    document.getElementById('btn-system-prompt')?.addEventListener('click', () => window.toggleSystemPromptPanel());
+    document.getElementById('btn-model-params')?.addEventListener('click', toggleModelParamsPanel);
+    document.getElementById('btn-chat-style')?.addEventListener('click', toggleStylePanel);
+    document.getElementById('btn-compact')?.addEventListener('click', onManualCompact);
+
+    // Bind chat name inputs
+    document.getElementById('chat-ai-name')?.addEventListener('input', (e) => window.updateChatName('ai_name', e.target.value));
+    document.getElementById('chat-user-name')?.addEventListener('input', (e) => window.updateChatName('user_name', e.target.value));
+
+    // Bind explicit toggle (footer)
+    document.getElementById('chat-explicit-toggle-footer')?.addEventListener('click', () => window.toggleExplicitMode());
+
+    // Bind font controls
+    document.getElementById('chat-font-decrease')?.addEventListener('click', () => adjustChatFont(-1));
+    document.getElementById('chat-font-increase')?.addEventListener('click', () => adjustChatFont(1));
+
+    // Bind export button
+    document.getElementById('chat-export-btn')?.addEventListener('click', () => window.exportChatTab());
+
+    // Bind chat style cards (event delegation)
+    const styleGrid = document.getElementById('chat-style-grid');
+    if (styleGrid) {
+        styleGrid.addEventListener('click', (e) => {
+            const card = e.target.closest('.chat-style-card');
+            if (card) selectChatStyle(card.dataset.style);
+        });
+    }
+
+    // Bind system prompt panel
+    document.getElementById('chat-copy-settings-btn')?.addEventListener('click', showCopySettingsDropdown);
+    document.getElementById('chat-template-select')?.addEventListener('change', (e) => window.applySystemPromptTemplate(e.target.value));
+    document.getElementById('chat-template-mgmt-btn')?.addEventListener('click', () => window.openTemplateManager());
+    document.getElementById('chat-explicit-toggle-settings')?.addEventListener('click', () => window.toggleExplicitMode());
+    document.getElementById('chat-system-input')?.addEventListener('input', () => window.onSystemPromptChange());
+    document.getElementById('chat-msg-limit')?.addEventListener('input', (e) => onMessageLimitChange(+e.target.value));
+    document.getElementById('chat-auto-compact')?.addEventListener('change', (e) => onAutoCompactChange(e.target.checked));
+    document.getElementById('compact-mode-percent')?.addEventListener('click', () => onCompactModeChange('percent'));
+    document.getElementById('compact-mode-optimized')?.addEventListener('click', () => onCompactModeChange('optimized'));
+    document.getElementById('chat-compact-threshold')?.addEventListener('input', (e) => onCompactThresholdChange(+e.target.value));
+    document.getElementById('chat-auto-compact-summarize')?.addEventListener('change', (e) => onAutoCompactSummarizeChange(e.target.checked));
+
+    // Bind model params panel
+    document.getElementById('chat-advanced-toggle')?.addEventListener('click', toggleAdvancedParams);
+    document.getElementById('chat-reset-params-btn')?.addEventListener('click', resetParamsToDefaults);
+
+    // Bind param sliders
+    document.getElementById('param-temperature')?.addEventListener('input', (e) => onParamChange('temperature', +e.target.value));
+    document.getElementById('param-top-p')?.addEventListener('input', (e) => onParamChange('top_p', +e.target.value));
+    document.getElementById('param-top-k')?.addEventListener('input', (e) => onParamChange('top_k', +e.target.value));
+    document.getElementById('param-min-p')?.addEventListener('input', (e) => onParamChange('min_p', +e.target.value));
+    document.getElementById('param-repeat-penalty')?.addEventListener('input', (e) => onParamChange('repeat_penalty', +e.target.value));
+    document.getElementById('param-max-tokens')?.addEventListener('input', (e) => onParamChange('max_tokens', e.target.value ? +e.target.value : null));
+    document.getElementById('param-stream-timeout')?.addEventListener('input', (e) => onParamChange('stream_timeout', +e.target.value));
+
+    // Bind enter toggle
+    document.getElementById('chat-enter-toggle-input')?.addEventListener('change', (e) => onEnterToggleChange(e.target.checked));
+
+    // Keep on window for cross-module calls
     window.applyChatStyle = applyChatStyle;
-    window.toggleModelParamsPanel = toggleModelParamsPanel;
-    window.syncParamPanelToTab = syncParamPanelToTab;
-    window.onParamChange = onParamChange;
-    window.toggleAdvancedParams = toggleAdvancedParams;
-    window.resetParamsToDefaults = resetParamsToDefaults;
     window.updateParamsDirtyIndicator = updateParamsDirtyIndicator;
-    window.duplicateTabSettings = duplicateTabSettings;
-    window.showCopySettingsDropdown = showCopySettingsDropdown;
-    window.onMessageLimitChange = onMessageLimitChange;
     window.syncMessageLimitInput = syncMessageLimitInput;
-    window.compactChatTab = compactChatTab;
-    window.setCompactButtonBusy = setCompactButtonBusy;
-    window.onManualCompact = onManualCompact;
-    window.onAutoCompactChange = onAutoCompactChange;
-    window.onAutoCompactSummarizeChange = onAutoCompactSummarizeChange;
-    window.onCompactModeChange = onCompactModeChange;
-    window.onCompactThresholdChange = onCompactThresholdChange;
     window.updateCtxPressureBar = updateCtxPressureBar;
     window.syncCompactSettingsUI = syncCompactSettingsUI;
-    window.toggleStylePanel = toggleStylePanel;
-    window.selectChatStyle = selectChatStyle;
-    window.updateChatStyleLabel = updateChatStyleLabel;
-    window.adjustChatFont = adjustChatFont;
-    window.applyChatFontSize = applyChatFontSize;
-    window.onEnterToggleChange = onEnterToggleChange;
-    window.initEnterToggle = initEnterToggle;
-    window.initChatStyle = initChatStyle;
-    window.initChatInputHandler = initChatInputHandler;
+    window.loadChatNames = loadChatNames;
+    window.updateChatName = updateChatName;
+    window.toggleSystemPromptPanel = toggleSystemPromptPanel;
+    window.onSystemPromptChange = onSystemPromptChange;
+    window.toggleExplicitMode = toggleExplicitMode;
 }

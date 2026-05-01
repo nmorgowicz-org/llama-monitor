@@ -37,7 +37,7 @@
                 <span class="endpoint-mode" id="endpoint-mode"></span>
                 <div class="endpoint-url-container">
                     <span class="endpoint-url" id="endpoint-url"></span>
-                    <button class="btn-detach-top" id="btn-detach-top" onclick="doDetach()" style="display:none;" title="Detach from endpoint">✕ Detach</button>
+                    <button class="btn-detach-top" id="btn-detach-top" style="display:none;" title="Detach from endpoint">✕ Detach</button>
                 </div>
                 <span class="endpoint-status-wrap">
                     <button type="button" class="endpoint-status" id="endpoint-status" aria-expanded="false" aria-controls="capability-popover"></button>
@@ -45,11 +45,11 @@
                 </span>
             </div>
             <div class="strip-right">
-                <button type="button" class="agent-status" id="agent-status" style="display:none;" onclick="toggleAgentMenuFromBadge(event)" title="Remote agent actions">
+                <button type="button" class="agent-status" id="agent-status" style="display:none;" title="Remote agent actions">
                     <span class="agent-indicator">●</span>
                     <span class="agent-text">Remote Agent</span>
                     <span class="agent-latency" id="agent-latency"></span>
-                    <button type="button" class="btn-agent-fix" style="display:none;" onclick="openRemoteAgentSetupFromBadge(event)" title="Set up remote agent">⚡ Fix</button>
+                    <button type="button" class="btn-agent-fix" style="display:none;" id="agent-fix-btn" title="Set up remote agent">⚡ Fix</button>
                 </button>
                 <span class="status-dot" id="status-dot"></span>
                 <span class="status-text" id="status-text"></span>
@@ -61,7 +61,7 @@
     </div>
     <div class="top-nav-bar">
         <div class="nav-left">
-            <a href="#" class="nav-logo" onclick="event.preventDefault();">
+            <a href="#" class="nav-logo" id="nav-logo">
                 <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M16 2C8.268 2 2 8.268 2 16C2 23.732 8.268 30 16 30C23.732 30 30 23.732 30 16C30 8.268 23.732 2 16 2ZM16 26C10.477 26 6 21.523 6 16C6 10.477 10.477 6 16 6C21.523 6 26 10.477 26 16C26 21.523 21.523 26 16 26Z" fill="var(--theme-primary)"/>
                     <path d="M16 12C14.6739 12 13.4021 12.5268 12.4645 13.4645C11.5268 14.4021 11 15.6739 11 17C11 18.3261 11.5268 19.5979 12.4645 20.5355C13.4021 21.4732 14.6739 22 16 22C17.3261 22 18.5979 21.4732 19.5355 20.5355C20.4732 19.5979 21 18.3261 21 17C21 15.6739 20.4732 14.4021 19.5355 13.4645C18.5979 12.5268 17.3261 12 16 12ZM16 20C14.9391 20 13.9217 19.5786 13.1716 18.8284C12.4214 18.0783 12 17.0609 12 16C12 14.9391 12.4214 13.9217 13.1716 13.1716C13.9217 12.4214 14.9391 12 16 12C17.0609 12 18.0783 12.4214 18.8284 13.1716C19.5786 13.9217 20 14.9391 20 16C20 17.0609 19.5786 18.0783 18.8284 18.8284C18.0783 19.5786 17.0609 20 16 20Z" fill="white"/>
@@ -77,10 +77,10 @@
         </div>
         <div class="nav-right">
             <div id="session-controls">
-                <button class="nav-btn" onclick="openSessionModal()" title="New Session">+ New Session</button>
+                <button class="nav-btn" id="nav-new-session-btn" title="New Session">+ New Session</button>
             </div>
             <div class="agent-menu" id="agent-menu">
-                <button type="button" class="nav-btn agent-menu-btn" onclick="toggleAgentMenu(event)" title="Remote agent">
+                <button type="button" class="nav-btn agent-menu-btn" id="nav-agent-btn" title="Remote agent">
                     <span class="agent-menu-dot" id="agent-menu-dot"></span>
                     Agent
                 </button>
@@ -89,62 +89,62 @@
                         <div class="agent-menu-title">Remote Agent</div>
                         <div class="agent-menu-subtitle" id="agent-menu-subtitle">No remote endpoint attached</div>
                     </div>
-                    <button type="button" class="agent-menu-item" onclick="agentMenuCheck()">Check agent</button>
-                    <button type="button" class="agent-menu-item" onclick="openRemoteAgentSetup()">Manage agent</button>
-                    <button type="button" class="agent-menu-item" onclick="agentMenuInstallRepair()">Install / repair</button>
-                    <button type="button" class="agent-menu-item" onclick="agentMenuStart()">Start</button>
-                    <button type="button" class="agent-menu-item" onclick="agentMenuStop()">Stop</button>
-                    <button type="button" class="agent-menu-item danger" onclick="agentMenuRemove()">Remove managed agent</button>
+                    <button type="button" class="agent-menu-item" id="agent-menu-check">Check agent</button>
+                    <button type="button" class="agent-menu-item" id="agent-menu-manage">Manage agent</button>
+                    <button type="button" class="agent-menu-item" id="agent-menu-install">Install / repair</button>
+                    <button type="button" class="agent-menu-item" id="agent-menu-start">Start</button>
+                    <button type="button" class="agent-menu-item" id="agent-menu-stop">Stop</button>
+                    <button type="button" class="agent-menu-item danger" id="agent-menu-remove">Remove managed agent</button>
                 </div>
             </div>
-            <button id="settings-btn" class="nav-btn" onclick="openSettingsModal()" title="Settings">⚙️ Settings</button>
-            <button id="update-pill" class="top-nav-pill" style="display:none;" onclick="openReleaseNotes()">
+            <button id="settings-btn" class="nav-btn" title="Settings">⚙️ Settings</button>
+            <button id="update-pill" class="top-nav-pill" style="display:none;">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/>
                 </svg>
                 <span id="update-pill-text"></span>
             </button>
             <div class="nav-user" id="user-menu">
-                <button class="nav-user-btn" onclick="toggleUserMenu(event)">👤 User</button>
-                <div class="nav-user-menu">
-                    <a href="#" class="nav-user-menu-item" onclick="openUserProfile(event)">Profile</a>
-                    <a href="#" class="nav-user-menu-item" onclick="openUserPreferencesModal(event)">Preferences</a>
-                    <a href="#" class="nav-user-menu-item" onclick="toggleTheme(event)">Toggle Theme</a>
-                    <a href="#" class="nav-user-menu-item" onclick="openUserHelp(event)">Help</a>
-                    <a href="#" class="nav-user-menu-item" onclick="logoutUser(event)">Logout</a>
+                <button class="nav-user-btn" id="nav-user-btn">👤 User</button>
+                <div class="nav-user-menu" id="nav-user-menu-items">
+                    <a href="#" class="nav-user-menu-item" id="user-menu-profile">Profile</a>
+                    <a href="#" class="nav-user-menu-item" id="user-menu-preferences">Preferences</a>
+                    <a href="#" class="nav-user-menu-item" id="user-menu-theme">Toggle Theme</a>
+                    <a href="#" class="nav-user-menu-item" id="user-menu-help">Help</a>
+                    <a href="#" class="nav-user-menu-item" id="user-menu-logout">Logout</a>
                 </div>
             </div>
         </div>
     </div>
 
     <div class="sidebar-nav" id="sidebar-nav">
-        <button class="sidebar-btn active" onclick="switchTab('server')" title="Server">
+        <button class="sidebar-btn active" data-tab="server" title="Server">
             <span class="sidebar-icon">📊</span>
             <span class="sidebar-label">Server</span>
         </button>
-        <button class="sidebar-btn" onclick="switchTab('chat')" title="Chat">
+        <button class="sidebar-btn" data-tab="chat" title="Chat">
             <span class="sidebar-icon">💬</span>
             <span class="sidebar-label">Chat</span>
             <span class="sidebar-badge" id="sidebar-badge-chat"></span>
         </button>
-        <button class="sidebar-btn" onclick="switchTab('logs')" title="Logs">
+        <button class="sidebar-btn" data-tab="logs" title="Logs">
             <span class="sidebar-icon">📋</span>
             <span class="sidebar-label">Logs</span>
             <span class="sidebar-badge" id="sidebar-badge-logs"></span>
         </button>
-        <button class="sidebar-btn" onclick="openSessionModal()" title="Sessions">
+        <button class="sidebar-btn" id="sidebar-btn-sessions" title="Sessions">
             <span class="sidebar-icon">📂</span>
             <span class="sidebar-label">Sessions</span>
         </button>
-        <button class="sidebar-btn" onclick="openModelsModal()" title="Models">
+        <button class="sidebar-btn" id="sidebar-btn-models" title="Models">
             <span class="sidebar-icon">🤖</span>
             <span class="sidebar-label">Models</span>
         </button>
-        <button class="sidebar-btn" onclick="openSettingsModal()" title="Settings">
+        <button class="sidebar-btn" id="sidebar-btn-settings" title="Settings">
             <span class="sidebar-icon">⚙️</span>
             <span class="sidebar-label">Settings</span>
         </button>
-        <button class="sidebar-collapse-btn" onclick="toggleSidebarCollapse()" title="Collapse sidebar">
+        <button class="sidebar-collapse-btn" id="sidebar-collapse-btn" title="Collapse sidebar">
             <span class="sidebar-collapse-icon">◀</span>
         </button>
         <span class="nav-version" id="app-version"></span>
@@ -177,12 +177,12 @@
                         <p class="setup-card-desc">Connect to a running llama.cpp server on any machine</p>
                         <div class="setup-card-form">
                             <input type="text" class="setup-input" id="setup-endpoint-url" placeholder="http://127.0.0.1:8080">
-                            <button class="setup-btn setup-btn-primary" onclick="doAttachFromSetup()">
+                            <button class="setup-btn setup-btn-primary" id="setup-attach-btn">
                                 <span class="btn-icon">⚡</span> Attach
                             </button>
                         </div>
                         <div class="setup-card-footer">
-                            <a class="setup-link" onclick="openSessionModal()">Browse saved sessions →</a>
+                            <a class="setup-link" id="setup-browse-sessions-link">Browse saved sessions →</a>
                         </div>
                     </div>
                     <div class="setup-card setup-card-spawn">
@@ -193,12 +193,12 @@
                         <p class="setup-card-desc">Start a llama.cpp server from a model preset</p>
                         <div class="setup-card-form">
                             <select class="setup-select" id="setup-preset-select"></select>
-                            <button class="setup-btn setup-btn-secondary" onclick="doStartFromSetup()">
+                            <button class="setup-btn setup-btn-secondary" id="setup-start-btn">
                                 <span class="btn-icon">▶</span> Start Server
                             </button>
                         </div>
                         <div class="setup-card-footer">
-                            <a class="setup-link" onclick="openPresetModal('new')">Manage presets →</a>
+                            <a class="setup-link" id="setup-manage-presets-link">Manage presets →</a>
                         </div>
                     </div>
                 </div>
@@ -231,8 +231,8 @@
                         <label class="num-sm" id="server-endpoint-label">
                             <input id="server-endpoint" type="text" value="http://127.0.0.1:8001" placeholder="http://host:port">
                         </label>
-                        <button class="btn btn-attach" id="btn-attach" onclick="doAttach()">Attach</button>
-                        <button class="btn btn-detach" id="btn-detach" onclick="doDetach()" style="display:none;">Detach</button>
+                        <button class="btn btn-attach" id="btn-attach">Attach</button>
+                        <button class="btn btn-detach" id="btn-detach" style="display:none;">Detach</button>
                     </div>
                 </div>
                 <div class="control-bar" id="controls">
@@ -240,14 +240,14 @@
                         <select id="preset-select"></select>
                     </label>
                     <span class="preset-actions">
-                        <button class="btn-sm btn-preset" onclick="openPresetModal('new')" title="Create new preset">➕ New</button>
-                        <button class="btn-sm btn-preset" onclick="openPresetModal('edit')" title="Edit selected preset">✎ Edit</button>
-                        <button class="btn-sm btn-preset" onclick="copyPreset()" title="Duplicate selected preset">⧉ Copy</button>
-                        <button class="btn-sm btn-preset btn-preset-delete" onclick="deletePreset()" title="Delete selected preset">✕ Delete</button>
-                        <button class="btn-sm btn-preset-reset" onclick="resetPresets()" title="Reset all presets to built-in defaults">↺ Reset</button>
+                        <button class="btn-sm btn-preset" id="preset-new-btn" title="Create new preset">➕ New</button>
+                        <button class="btn-sm btn-preset" id="preset-edit-btn" title="Edit selected preset">✎ Edit</button>
+                        <button class="btn-sm btn-preset" id="preset-copy-btn" title="Duplicate selected preset">⧉ Copy</button>
+                        <button class="btn-sm btn-preset btn-preset-delete" id="preset-delete-btn" title="Delete selected preset">✕ Delete</button>
+                        <button class="btn-sm btn-preset-reset" id="preset-reset-btn" title="Reset all presets to built-in defaults">↺ Reset</button>
                     </span>
-                    <button class="btn btn-start" id="btn-start" onclick="doStart()">Start</button>
-                    <button class="btn btn-stop" id="btn-stop" onclick="doStop()" disabled>Stop</button>
+                    <button class="btn btn-start" id="btn-start">Start</button>
+                    <button class="btn btn-stop" id="btn-stop" disabled>Stop</button>
                 </div>
 
                 <section class="metric-section" id="inference-section">
@@ -415,7 +415,7 @@
                                     <span class="hw-temp-value" id="gpu-temp-value"></span>
                                 </div>
                                 <div class="metric-live-chip" id="gpu-state">idle</div>
-                                <button class="viz-gear-btn" onclick="toggleVizSwitcher('gpu')" title="Customize visualization">⚙</button>
+                                <button class="viz-gear-btn" id="viz-gear-gpu" title="Customize visualization">⚙</button>
                             </div>
                         </div>
                         <div class="inference-empty-state visible" id="gpu-empty">GPU metrics appear after attach</div>
@@ -466,7 +466,7 @@
                                   <button id="btn-sensor-bridge-setup" style="margin-left:8px; padding:3px 10px; background:#5e81ac; border:none; border-radius:4px; color:#eceff4; cursor:pointer; font-size:12px;">Setup</button>
                                 </div>
                                 <div class="metric-live-chip" id="sys-state">idle</div>
-                                <button class="viz-gear-btn" onclick="toggleVizSwitcher('system')" title="Customize visualization">⚙</button>
+                                <button class="viz-gear-btn" id="viz-gear-system" title="Customize visualization">⚙</button>
                             </div>
                         </div>
                         <div class="inference-empty-state visible" id="sys-empty">System metrics appear after attach</div>
@@ -496,39 +496,39 @@
                 <div class="viz-switcher" id="gpu-viz-switcher" style="display:none;">
                     <div class="viz-switcher-header">
                         <span>GPU Visualization</span>
-                        <button class="viz-reset-btn" onclick="resetVizPrefs('gpu')">Reset</button>
+                        <button class="viz-reset-btn" id="viz-reset-gpu">Reset</button>
                     </div>
                     <div class="viz-switcher-row">
                         <div class="viz-switcher-label">Load</div>
                         <div class="viz-switcher-options" data-card="gpu" data-metric="load">
-                            <button class="viz-option active" data-style="bar" onclick="selectVizStyle('gpu','load','bar')" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
-                            <button class="viz-option" data-style="ring" onclick="selectVizStyle('gpu','load','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
-                            <button class="viz-option" data-style="sparkline" onclick="selectVizStyle('gpu','load','sparkline')" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
+                            <button class="viz-option active" data-style="bar" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
                         </div>
                     </div>
                     <div class="viz-switcher-row">
                         <div class="viz-switcher-label">Power</div>
                         <div class="viz-switcher-options" data-card="gpu" data-metric="power">
-                            <button class="viz-option active" data-style="bar" onclick="selectVizStyle('gpu','power','bar')" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
-                            <button class="viz-option" data-style="ring" onclick="selectVizStyle('gpu','power','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
-                            <button class="viz-option" data-style="sparkline" onclick="selectVizStyle('gpu','power','sparkline')" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
+                            <button class="viz-option active" data-style="bar" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
                         </div>
                     </div>
                     <div class="viz-switcher-row">
                         <div class="viz-switcher-label">VRAM</div>
                         <div class="viz-switcher-options" data-card="gpu" data-metric="vram">
-                            <button class="viz-option active" data-style="bar" onclick="selectVizStyle('gpu','vram','bar')" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
-                            <button class="viz-option" data-style="ring" onclick="selectVizStyle('gpu','vram','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
-                            <button class="viz-option" data-style="sparkline" onclick="selectVizStyle('gpu','vram','sparkline')" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
-                            <button class="viz-option" data-style="stacked" onclick="selectVizStyle('gpu','vram','stacked')" title="Stacked"><span class="viz-thumb viz-thumb-stack"></span>Stack</button>
+                            <button class="viz-option active" data-style="bar" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
+                            <button class="viz-option" data-style="stacked" title="Stacked"><span class="viz-thumb viz-thumb-stack"></span>Stack</button>
                         </div>
                     </div>
                     <div class="viz-switcher-row">
                         <div class="viz-switcher-label">Clocks</div>
                         <div class="viz-switcher-options" data-card="gpu" data-metric="clocks">
-                            <button class="viz-option active" data-style="ring" onclick="selectVizStyle('gpu','clocks','ring')" title="Dual Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
-                            <button class="viz-option" data-style="chips" onclick="selectVizStyle('gpu','clocks','chips')" title="Chips"><span class="viz-thumb viz-thumb-chips"></span>Chips</button>
-                            <button class="viz-option" data-style="numeric" onclick="selectVizStyle('gpu','clocks','numeric')" title="Numeric"><span class="viz-thumb viz-thumb-numeric"></span>Num</button>
+                            <button class="viz-option active" data-style="ring" title="Dual Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="chips" title="Chips"><span class="viz-thumb viz-thumb-chips"></span>Chips</button>
+                            <button class="viz-option" data-style="numeric" title="Numeric"><span class="viz-thumb viz-thumb-numeric"></span>Num</button>
                         </div>
                     </div>
                 </div>
@@ -537,31 +537,31 @@
                 <div class="viz-switcher" id="sys-viz-switcher" style="display:none;">
                     <div class="viz-switcher-header">
                         <span>System Visualization</span>
-                        <button class="viz-reset-btn" onclick="resetVizPrefs('system')">Reset</button>
+                        <button class="viz-reset-btn" id="viz-reset-system">Reset</button>
                     </div>
                     <div class="viz-switcher-row">
                         <div class="viz-switcher-label">CPU Load</div>
                         <div class="viz-switcher-options" data-card="system" data-metric="load">
-                            <button class="viz-option active" data-style="bar" onclick="selectVizStyle('system','load','bar')" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
-                            <button class="viz-option" data-style="ring" onclick="selectVizStyle('system','load','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
-                            <button class="viz-option" data-style="sparkline" onclick="selectVizStyle('system','load','sparkline')" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
+                            <button class="viz-option active" data-style="bar" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
                         </div>
                     </div>
                     <div class="viz-switcher-row">
                         <div class="viz-switcher-label">RAM</div>
                         <div class="viz-switcher-options" data-card="system" data-metric="ram">
-                            <button class="viz-option active" data-style="bar" onclick="selectVizStyle('system','ram','bar')" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
-                            <button class="viz-option" data-style="ring" onclick="selectVizStyle('system','ram','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
-                            <button class="viz-option" data-style="sparkline" onclick="selectVizStyle('system','ram','sparkline')" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
-                            <button class="viz-option" data-style="stacked" onclick="selectVizStyle('system','ram','stacked')" title="Stacked"><span class="viz-thumb viz-thumb-stack"></span>Stack</button>
+                            <button class="viz-option active" data-style="bar" title="Bar"><span class="viz-thumb viz-thumb-bar"></span>Bar</button>
+                            <button class="viz-option" data-style="ring" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="sparkline" title="Sparkline"><span class="viz-thumb viz-thumb-spark"></span>Spark</button>
+                            <button class="viz-option" data-style="stacked" title="Stacked"><span class="viz-thumb viz-thumb-stack"></span>Stack</button>
                         </div>
                     </div>
                     <div class="viz-switcher-row">
                         <div class="viz-switcher-label">Clock</div>
                         <div class="viz-switcher-options" data-card="system" data-metric="clock">
-                            <button class="viz-option active" data-style="ring" onclick="selectVizStyle('system','clock','ring')" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
-                            <button class="viz-option" data-style="chip" onclick="selectVizStyle('system','clock','chip')" title="Chip"><span class="viz-thumb viz-thumb-chips"></span>Chip</button>
-                            <button class="viz-option" data-style="numeric" onclick="selectVizStyle('system','clock','numeric')" title="Numeric"><span class="viz-thumb viz-thumb-numeric"></span>Num</button>
+                            <button class="viz-option active" data-style="ring" title="Ring"><span class="viz-thumb viz-thumb-ring"></span>Ring</button>
+                            <button class="viz-option" data-style="chip" title="Chip"><span class="viz-thumb viz-thumb-chips"></span>Chip</button>
+                            <button class="viz-option" data-style="numeric" title="Numeric"><span class="viz-thumb viz-thumb-numeric"></span>Num</button>
                         </div>
                     </div>
                 </div>
@@ -573,7 +573,7 @@
 
             <!-- Tab bar -->
             <div class="chat-tab-bar" id="chat-tab-bar">
-                <button class="chat-tab-add" onclick="addChatTab()" title="New chat tab">
+                <button class="chat-tab-add" id="chat-tab-add-btn" title="New chat tab">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                         <path d="M12 5v14M5 12h14"/>
                     </svg>
@@ -583,27 +583,27 @@
             <!-- Chat header -->
             <div class="chat-header" id="chat-header">
                 <div class="chat-header-left">
-                    <button class="chat-header-btn" id="btn-system-prompt" onclick="toggleSystemPromptPanel()" title="Change assistant behavior">
+                    <button class="chat-header-btn" id="btn-system-prompt" title="Change assistant behavior">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
                         </svg>
                         <span class="chat-header-label">Behavior</span>
                         <span id="system-prompt-indicator" class="chat-header-badge" style="display:none;">S</span>
                     </button>
-                    <button class="chat-header-btn" id="btn-model-params" onclick="toggleModelParamsPanel()" title="Adjust creativity and precision">
+                    <button class="chat-header-btn" id="btn-model-params" title="Adjust creativity and precision">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M4 6h16M8 12h8M11 18h2"/>
                         </svg>
                         <span class="chat-header-label">Settings</span>
                     </button>
-                    <button class="chat-header-btn chat-style-btn" id="btn-chat-style" onclick="toggleStylePanel()" title="Chat style">
+                    <button class="chat-header-btn chat-style-btn" id="btn-chat-style" title="Chat style">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
                         </svg>
                         <span class="chat-header-label" id="chat-style-label">Rounded</span>
                         <span class="chat-style-dot"></span>
                     </button>
-                    <button class="chat-header-btn" id="btn-compact" onclick="onManualCompact()" title="Trim context — nothing to remove yet">
+                    <button class="chat-header-btn" id="btn-compact" title="Trim context — nothing to remove yet">
                         <svg class="chat-compact-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
                             <line x1="15" y1="9" x2="21" y2="3"/><line x1="3" y1="21" x2="9" y2="15"/>
@@ -611,9 +611,9 @@
                         <span class="chat-header-label">Trim</span>
                     </button>
                     <div class="chat-name-inputs">
-                        <div class="chat-name-pill"><span class="chat-name-label">AI</span><input type="text" class="chat-name-input" id="chat-ai-name" placeholder="Name" oninput="updateChatName('ai_name', this.value)" /></div>
-                        <div class="chat-name-pill"><span class="chat-name-label">You</span><input type="text" class="chat-name-input" id="chat-user-name" placeholder="Name" oninput="updateChatName('user_name', this.value)" /></div>
-                        <button class="chat-explicit-toggle" id="chat-explicit-toggle-footer" onclick="toggleExplicitMode()" title="Allow explicit content">
+                        <div class="chat-name-pill"><span class="chat-name-label">AI</span><input type="text" class="chat-name-input" id="chat-ai-name" placeholder="Name" /></div>
+                        <div class="chat-name-pill"><span class="chat-name-label">You</span><input type="text" class="chat-name-input" id="chat-user-name" placeholder="Name" /></div>
+                        <button class="chat-explicit-toggle" id="chat-explicit-toggle-footer" title="Allow explicit content">
                             <svg class="chat-explicit-icon-locked" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
                             </svg>
@@ -625,15 +625,15 @@
                 </div>
                 <div class="chat-header-right">
                     <div class="chat-font-controls">
-                        <button class="chat-font-btn" onclick="adjustChatFont(-1)" title="Decrease font size">
+                        <button class="chat-font-btn" id="chat-font-decrease" title="Decrease font size">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M5 12h14"/></svg>
                         </button>
                         <span class="chat-font-value" id="chat-font-value">100%</span>
-                        <button class="chat-font-btn" onclick="adjustChatFont(1)" title="Increase font size">
+                        <button class="chat-font-btn" id="chat-font-increase" title="Increase font size">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
                         </button>
                     </div>
-                    <button class="chat-header-btn" onclick="exportChatTab()" title="Save conversation as file">
+                    <button class="chat-header-btn" id="chat-export-btn" title="Save conversation as file">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
                         </svg>
@@ -650,8 +650,8 @@
             <!-- Style panel -->
             <div class="chat-style-panel" id="chat-style-panel" style="display:none;">
                 <div class="chat-style-panel-header">Chat Style</div>
-                <div class="chat-style-grid">
-                    <div class="chat-style-card" data-style="rounded" onclick="selectChatStyle('rounded')">
+                <div class="chat-style-grid" id="chat-style-grid">
+                    <div class="chat-style-card" data-style="rounded">
                         <div class="chat-style-preview chat-style-preview-rounded">
                             <div class="chat-style-bubble-user">Hello there!</div>
                             <div class="chat-style-bubble-ai">Nice to meet you.</div>
@@ -659,7 +659,7 @@
                         <div class="chat-style-name">Rounded</div>
                         <div class="chat-style-desc">Classic bubbles with avatars</div>
                     </div>
-                    <div class="chat-style-card" data-style="compact" onclick="selectChatStyle('compact')">
+                    <div class="chat-style-card" data-style="compact">
                         <div class="chat-style-preview chat-style-preview-compact">
                             <div class="chat-style-bubble-user">Hello there!</div>
                             <div class="chat-style-bubble-ai">Nice to meet you.</div>
@@ -667,7 +667,7 @@
                         <div class="chat-style-name">Compact</div>
                         <div class="chat-style-desc">Tight, no avatars</div>
                     </div>
-                    <div class="chat-style-card" data-style="minimal" onclick="selectChatStyle('minimal')">
+                    <div class="chat-style-card" data-style="minimal">
                         <div class="chat-style-preview chat-style-preview-minimal">
                             <div class="chat-style-bubble-user">Hello there!</div>
                             <div class="chat-style-bubble-ai">Nice to meet you.</div>
@@ -675,7 +675,7 @@
                         <div class="chat-style-name">Minimal</div>
                         <div class="chat-style-desc">Clean text, no bubbles</div>
                     </div>
-                    <div class="chat-style-card" data-style="bubbly" onclick="selectChatStyle('bubbly')">
+                    <div class="chat-style-card" data-style="bubbly">
                         <div class="chat-style-preview chat-style-preview-bubbly">
                             <div class="chat-style-bubble-user">Hello there!</div>
                             <div class="chat-style-bubble-ai">Nice to meet you.</div>
@@ -691,23 +691,23 @@
                 <div class="chat-system-header">
                     <label class="chat-system-label">System Prompt</label>
                     <div class="chat-system-actions">
-                        <button class="chat-copy-settings-btn" onclick="showCopySettingsDropdown()" title="Copy settings from another tab">
+                        <button class="chat-copy-settings-btn" id="chat-copy-settings-btn" title="Copy settings from another tab">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
                             </svg>
                             Copy Settings
                         </button>
-                        <select class="chat-template-select" id="chat-template-select" onchange="applySystemPromptTemplate(this.value)">
+                        <select class="chat-template-select" id="chat-template-select">
                             <option value="">— Templates —</option>
                             <option value="">None</option>
                         </select>
-                        <button class="chat-template-mgmt-btn" onclick="openTemplateManager()" title="Manage templates">
+                        <button class="chat-template-mgmt-btn" id="chat-template-mgmt-btn" title="Manage templates">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M12 5v14M5 12h14"/>
                             </svg>
                             Manage
                         </button>
-                        <button class="chat-explicit-toggle" id="chat-explicit-toggle-settings" onclick="toggleExplicitMode()" title="Allow explicit content">
+                        <button class="chat-explicit-toggle" id="chat-explicit-toggle-settings" title="Allow explicit content">
                             <svg class="chat-explicit-icon-locked" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
                             </svg>
@@ -717,18 +717,18 @@
                         </button>
                     </div>
                 </div>
-                <textarea id="chat-system-input" rows="3" placeholder="You are a helpful assistant…" oninput="onSystemPromptChange()"></textarea>
+                <textarea id="chat-system-input" rows="3" placeholder="You are a helpful assistant…"></textarea>
                 <label class="modal-field">
                     Visible message limit
                     <input type="number" id="chat-msg-limit" min="5" max="200" step="5"
-                           value="15" oninput="onMessageLimitChange(+this.value)">
+                           value="15">
                     <span class="modal-help">Show only the most recent N messages. Older messages are hidden to improve performance.</span>
                 </label>
                 <div class="chat-compact-settings">
                     <label class="modal-field">
                         <span class="modal-label-row">
                             <label class="toggle-switch">
-                                <input type="checkbox" id="chat-auto-compact" onchange="onAutoCompactChange(this.checked)">
+                                <input type="checkbox" id="chat-auto-compact">
                                 <span class="toggle-slider"></span>
                             </label>
                             Auto-compact context
@@ -738,8 +738,8 @@
                     <label class="modal-field" id="compact-mode-field">
                         Trigger mode
                         <div class="compact-mode-pills">
-                            <button class="compact-mode-pill compact-mode-pill-active" id="compact-mode-percent" onclick="onCompactModeChange('percent')" type="button">Percentage</button>
-                            <button class="compact-mode-pill" id="compact-mode-optimized" onclick="onCompactModeChange('optimized')" type="button">Optimized</button>
+                            <button class="compact-mode-pill compact-mode-pill-active" id="compact-mode-percent" type="button">Percentage</button>
+                            <button class="compact-mode-pill" id="compact-mode-optimized" type="button">Optimized</button>
                         </div>
                         <span class="modal-help compact-mode-help" id="compact-mode-help-percent">Compact when context usage reaches a percentage you choose.</span>
                         <span class="modal-help compact-mode-help" id="compact-mode-help-optimized" style="display:none;">Compact automatically when fewer than 25,000 tokens remain — adapts to any model's context size.</span>
@@ -748,7 +748,7 @@
                         Threshold
                         <div class="threshold-row">
                             <input type="range" id="chat-compact-threshold" min="50" max="95" step="5"
-                                   value="80" oninput="onCompactThresholdChange(+this.value)">
+                                   value="80">
                             <span id="chat-compact-threshold-val">80%</span>
                         </div>
                         <span class="modal-help">Compact when context usage reaches this percentage. Lower = more aggressive.</span>
@@ -756,7 +756,7 @@
                     <label class="modal-field" id="compact-summarize-field">
                         <span class="modal-label-row">
                             <label class="toggle-switch">
-                                <input type="checkbox" id="chat-auto-compact-summarize" onchange="onAutoCompactSummarizeChange(this.checked)">
+                                <input type="checkbox" id="chat-auto-compact-summarize">
                                 <span class="toggle-slider"></span>
                             </label>
                             Summarize when auto-compacting
@@ -771,13 +771,13 @@
                 <div class="chat-params-header">
                     <span class="chat-params-title">Response Settings</span>
                     <div class="chat-params-actions">
-                        <button class="chat-advanced-toggle" onclick="toggleAdvancedParams()" title="Show advanced options">
+                        <button class="chat-advanced-toggle" id="chat-advanced-toggle" title="Show advanced options">
                             Advanced
                             <svg class="chat-advanced-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M9 18l6-6-6-6"/>
                             </svg>
                         </button>
-                        <button class="chat-reset-btn" onclick="resetParamsToDefaults()" title="Reset to defaults">
+                        <button class="chat-reset-btn" id="chat-reset-params-btn" title="Reset to defaults">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.5 9A9 9 0 005.6 5.6L1 10m22 4l-4.6 4.4A9 9 0 013.5 15"/>
                             </svg>
@@ -791,7 +791,7 @@
                             Creativity <span class="chat-param-technical">temperature</span>
                             <span class="chat-param-tooltip" title="How random or focused the responses are (0 = focused, 2 = creative)">?</span>
                         </span>
-                        <input type="range" id="param-temperature" min="0" max="2" step="0.05" oninput="onParamChange('temperature', +this.value)">
+                        <input type="range" id="param-temperature" min="0" max="2" step="0.05">
                         <span id="param-temperature-val">0.7</span>
                     </label>
                     <label>
@@ -799,7 +799,7 @@
                             Variety <span class="chat-param-technical">top_p</span>
                             <span class="chat-param-tooltip" title="Controls the range of words the model considers (0.9 = good balance)">?</span>
                         </span>
-                        <input type="range" id="param-top-p" min="0" max="1" step="0.01" oninput="onParamChange('top_p', +this.value)">
+                        <input type="range" id="param-top-p" min="0" max="1" step="0.01">
                         <span id="param-top-p-val">0.9</span>
                     </label>
                 </div>
@@ -811,7 +811,7 @@
                                 Top K
                                 <span class="chat-param-tooltip" title="Maximum number of tokens to consider at each step">?</span>
                             </span>
-                            <input type="range" id="param-top-k" min="0" max="200" step="1" oninput="onParamChange('top_k', +this.value)">
+                            <input type="range" id="param-top-k" min="0" max="200" step="1">
                             <span id="param-top-k-val">40</span>
                         </label>
                         <label>
@@ -819,7 +819,7 @@
                                 Min P
                                 <span class="chat-param-tooltip" title="Minimum probability threshold for token selection">?</span>
                             </span>
-                            <input type="range" id="param-min-p" min="0" max="0.5" step="0.005" oninput="onParamChange('min_p', +this.value)">
+                            <input type="range" id="param-min-p" min="0" max="0.5" step="0.005">
                             <span id="param-min-p-val">0.01</span>
                         </label>
                         <label>
@@ -827,7 +827,7 @@
                                 Repeat Penalty
                                 <span class="chat-param-tooltip" title="Discourages repeated phrases (1.0 = no penalty)">?</span>
                             </span>
-                            <input type="range" id="param-repeat-penalty" min="1" max="2" step="0.01" oninput="onParamChange('repeat_penalty', +this.value)">
+                            <input type="range" id="param-repeat-penalty" min="1" max="2" step="0.01">
                             <span id="param-repeat-penalty-val">1.0</span>
                         </label>
                         <label>
@@ -835,14 +835,14 @@
                                 Max Length
                                 <span class="chat-param-tooltip" title="Maximum response length in tokens (leave empty for unlimited)">?</span>
                             </span>
-                            <input type="number" id="param-max-tokens" min="0" step="64" placeholder="Unlimited" oninput="onParamChange('max_tokens', this.value ? +this.value : null)">
+                            <input type="number" id="param-max-tokens" min="0" step="64" placeholder="Unlimited">
                         </label>
                         <label class="chat-param-label">
                             <span>
                                 Stream Timeout
                                 <span class="chat-param-tooltip" title="Auto-stop if no visible response for this many seconds (0 = disabled). Catches models stuck in thinking loops.">?</span>
                             </span>
-                            <input type="number" id="param-stream-timeout" min="0" step="10" placeholder="120" oninput="onParamChange('stream_timeout', +this.value)">
+                            <input type="number" id="param-stream-timeout" min="0" step="10" placeholder="120">
                         </label>
                     </div>
                 </div>
@@ -854,21 +854,21 @@
             <!-- Input area -->
             <div class="chat-input-row" id="chat-input-row">
                 <div class="chat-controls">
-                    <button class="btn-chat-control" id="btn-clear" onclick="clearChat()" title="Clear chat">
+                    <button class="btn-chat-control" id="btn-clear" title="Clear chat">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m5 0V4a2 2 0 012-2h2a2 2 0 012 2v2"/>
                         </svg>
                     </button>
                 </div>
                 <div class="chat-textarea-wrap">
-                    <textarea id="chat-input" rows="1" placeholder="Send a message…" oninput="autoResizeChatInput()"></textarea>
+                    <textarea id="chat-input" rows="1" placeholder="Send a message…"></textarea>
                     <span class="chat-char-count" id="chat-char-count" title="Approximate token count (chars ÷ 4)"></span>
                 </div>
                 <label class="chat-enter-toggle" data-tooltip="Enter sends message" title="Toggle: Enter sends message">
-                    <input type="checkbox" id="chat-enter-toggle-input" onchange="onEnterToggleChange(this.checked)">
+                    <input type="checkbox" id="chat-enter-toggle-input">
                     <span class="chat-enter-toggle-label">↵</span>
                 </label>
-                <button class="btn-chat-send" id="btn-send" onclick="sendChat()">
+                <button class="btn-chat-send" id="btn-send">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
                     </svg>
@@ -891,12 +891,12 @@
     <div class="modal template-manager-modal" style="width:720px;">
         <div class="modal-header">
             <h2>System Prompt Templates</h2>
-            <button type="button" class="modal-close" onclick="closeTemplateManager()" aria-label="Close">&times;</button>
+            <button type="button" class="modal-close" id="template-manager-close" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body template-manager-body">
             <div class="template-manager-sidebar">
                 <div class="template-manager-list" id="template-list"></div>
-                <button class="template-new-btn" onclick="newTemplate()">+ New Template</button>
+                <button class="template-new-btn" id="template-new-btn">+ New Template</button>
             </div>
             <div class="template-manager-preview" id="template-preview">
                 <div class="template-preview-empty">Select a template to preview</div>
@@ -906,10 +906,10 @@
             <details class="modal-section">
                 <summary>Explicit Mode Policy <span class="modal-help">(appended when 🔓 is active)</span></summary>
                 <p class="modal-help">This policy is appended to the system prompt when explicit mode is enabled. Edit it to customize guardrail behavior for censored models. Leave blank to disable.</p>
-                <textarea id="explicit-policy-input" rows="5" placeholder="Custom explicit mode policy…" oninput="saveExplicitPolicy()"></textarea>
+                <textarea id="explicit-policy-input" rows="5" placeholder="Custom explicit mode policy…"></textarea>
                 <div style="display:flex; gap:6px; margin-top:6px;">
-                    <button type="button" class="btn-sm btn-preset" onclick="resetExplicitPolicy()">Reset to Default</button>
-                    <button type="button" class="btn-sm btn-preset" onclick="clearExplicitPolicy()">Clear</button>
+                    <button type="button" class="btn-sm btn-preset" id="explicit-policy-reset">Reset to Default</button>
+                    <button type="button" class="btn-sm btn-preset" id="explicit-policy-clear">Clear</button>
                 </div>
             </details>
         </div>
@@ -921,7 +921,7 @@
     <div class="modal" style="width:540px;">
         <div class="modal-header">
             <h2>Configuration</h2>
-            <button type="button" class="modal-close" onclick="closeConfigModal()" aria-label="Close">&times;</button>
+            <button type="button" class="modal-close" id="config-modal-close" aria-label="Close">&times;</button>
         </div>
        <div class="modal-body">
 
@@ -931,14 +931,14 @@
                 <label class="modal-field" title="Path to the llama-server executable file. Leave empty to use PATH.">llama-server executable file
                     <div style="display:flex;gap:6px;">
                         <input type="text" id="set-server-path" placeholder="llama-server (from $PATH)" style="flex:1;">
-                        <button type="button" class="btn-sm btn-preset" onclick="openFileBrowser('set-server-path','executable')">Browse</button>
-                        <button type="button" class="btn-sm btn-preset" onclick="usePathServerBinary()">Use PATH</button>
+                        <button type="button" class="btn-sm btn-preset" id="config-browse-server-path">Browse</button>
+                        <button type="button" class="btn-sm btn-preset" id="config-use-path-btn">Use PATH</button>
                     </div>
                 </label>
                 <label class="modal-field" title="Optional process working directory. This is usually left blank.">Process working directory (optional)
                     <div style="display:flex;gap:6px;">
                         <input type="text" id="set-server-cwd" placeholder="leave blank unless presets use relative paths" style="flex:1;">
-                        <button type="button" class="btn-sm btn-preset" onclick="openFileBrowser('set-server-cwd','dir')">Browse</button>
+                        <button type="button" class="btn-sm btn-preset" id="config-browse-cwd">Browse</button>
                     </div>
                     <span class="modal-help">This is not normally the executable's folder. It only changes where the server process runs from, which matters for relative model paths or config files.</span>
                 </label>
@@ -992,15 +992,15 @@
                       </div>
                       
                       <div class="remote-agent-buttons" id="remote-agent-buttons" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-                          <button type="button" class="btn-sm btn-preset" onclick="openSshSetupGuide()" id="btn-remote-agent-guide">Guided SSH Setup</button>
-                          <button type="button" class="btn-sm btn-preset" onclick="remoteAgentDetect(true)" id="btn-remote-agent-detect">Check Host</button>
-                          <button type="button" class="btn-sm btn-preset" onclick="remoteAgentLatestRelease()" id="btn-remote-agent-latest">Check Release</button>
-                          <button type="button" class="btn-sm btn-preset" onclick="remoteAgentInstall()" id="btn-remote-agent-install">Install & Start</button>
-                          <button type="button" class="btn-sm btn-preset" onclick="remoteAgentStart()" id="btn-remote-agent-start">Start Agent</button>
-                          <button type="button" class="btn-sm btn-preset" onclick="remoteAgentUpdate()" id="btn-remote-agent-update" style="display:none;">Update Agent</button>
-                          <button type="button" class="btn-sm btn-preset" onclick="remoteAgentStop()" id="btn-remote-agent-stop" style="display:none;">Stop Agent</button>
-                          <button type="button" class="btn-sm btn-preset" onclick="remoteAgentRestart()" id="btn-remote-agent-restart" style="display:none;">Restart Agent</button>
-                          <button type="button" class="btn-sm btn-preset" onclick="remoteAgentRemove()" id="btn-remote-agent-remove" style="display:none;">Remove Agent</button>
+                          <button type="button" class="btn-sm btn-preset" id="btn-remote-agent-guide">Guided SSH Setup</button>
+                          <button type="button" class="btn-sm btn-preset" id="btn-remote-agent-detect">Check Host</button>
+                          <button type="button" class="btn-sm btn-preset" id="btn-remote-agent-latest">Check Release</button>
+                          <button type="button" class="btn-sm btn-preset" id="btn-remote-agent-install">Install & Start</button>
+                          <button type="button" class="btn-sm btn-preset" id="btn-remote-agent-start">Start Agent</button>
+                          <button type="button" class="btn-sm btn-preset" id="btn-remote-agent-update" style="display:none;">Update Agent</button>
+                          <button type="button" class="btn-sm btn-preset" id="btn-remote-agent-stop" style="display:none;">Stop Agent</button>
+                          <button type="button" class="btn-sm btn-preset" id="btn-remote-agent-restart" style="display:none;">Restart Agent</button>
+                          <button type="button" class="btn-sm btn-preset" id="btn-remote-agent-remove" style="display:none;">Remove Agent</button>
                       </div>
                       
                       <div class="remote-agent-firewall" id="remote-agent-firewall" style="display:none;background:#3b4252;border-radius:6px;padding:12px;">
@@ -1019,7 +1019,7 @@
                                           <li>Try <code>netsh advfirewall firewall add rule name="llama-agent" dir=in action=allow protocol=TCP localport=7779</code> on Windows</li>
                                       </ul>
                                   </div>
-                                  <button type="button" class="btn-sm btn-preset" onclick="openFirewallHelp()" style="margin-top:10px;">Show Firewall Steps</button>
+                                  <button type="button" class="btn-sm btn-preset" id="btn-firewall-help" style="margin-top:10px;">Show Firewall Steps</button>
                               </div>
                           </div>
                       </div>
@@ -1043,7 +1043,7 @@
                               <h3>Guided SSH Setup</h3>
                               <p class="modal-help">Enter the remote machine login details, review the plan, then explicitly choose Check, Install, or Start. No SSH connection is made from this guide by itself.</p>
                           </div>
-                          <button type="button" class="modal-close" onclick="closeSshSetupGuide()" aria-label="Close">&times;</button>
+                          <button type="button" class="modal-close" id="ssh-guide-close" aria-label="Close">&times;</button>
                       </div>
                       <div class="modal-row" style="gap:8px;">
                           <label class="modal-field" title="Remote machine running llama-server or intended remote agent host.">
@@ -1086,10 +1086,10 @@
                       </div>
                       <div class="remote-agent-plan" id="ssh-guide-host-key" style="display:none;"></div>
                       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
-                          <button type="button" class="btn-sm btn-preset" onclick="previewSshSetupGuide()">Preview Plan</button>
-                          <button type="button" class="btn-sm btn-preset" onclick="scanSshHostKey()">Scan Host Key</button>
-                          <button type="button" class="btn-sm btn-preset" onclick="trustSshHostKey()" id="btn-ssh-guide-trust" style="display:none;">Trust Host Key</button>
-                          <button type="button" class="btn-sm btn-preset" onclick="applySshSetupGuide()">Use These Settings</button>
+                          <button type="button" class="btn-sm btn-preset" id="ssh-guide-preview">Preview Plan</button>
+                          <button type="button" class="btn-sm btn-preset" id="ssh-guide-scan">Scan Host Key</button>
+                          <button type="button" class="btn-sm btn-preset" id="btn-ssh-guide-trust" style="display:none;">Trust Host Key</button>
+                          <button type="button" class="btn-sm btn-preset" id="ssh-guide-apply">Use These Settings</button>
                       </div>
                   </div>
                  
@@ -1126,8 +1126,8 @@
 
         </div>
         <div class="modal-buttons">
-            <button type="button" class="btn btn-modal-cancel" onclick="closeConfigModal()">Cancel</button>
-            <button type="button" class="btn btn-modal-save" onclick="saveConfig()">Save</button>
+            <button type="button" class="btn btn-modal-cancel" id="config-modal-cancel">Cancel</button>
+            <button type="button" class="btn btn-modal-save" id="config-modal-save">Save</button>
         </div>
     </div>
 </div>
@@ -1140,7 +1140,7 @@
                 <span class="agent-setup-icon">🔌</span>
                 Set Up Remote Agent
             </h2>
-            <button type="button" class="modal-close" onclick="closeRemoteAgentSetup()" aria-label="Close">&times;</button>
+            <button type="button" class="modal-close" id="remote-agent-close" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body remote-agent-setup-body">
             <!-- Status Alert (shown when there's an issue to fix) -->
@@ -1209,11 +1209,11 @@
                     Verify Host Key
                 </h4>
                 <div class="agent-setup-actions">
-                    <button type="button" class="btn btn-agent-scan" id="btn-agent-setup-scan" onclick="scanRemoteAgentHostKey()">
+                    <button type="button" class="btn btn-agent-scan" id="btn-agent-setup-scan">
                         <span class="btn-icon">🔍</span>
                         Scan Host Key
                     </button>
-                    <button type="button" class="btn btn-agent-trust" id="btn-agent-setup-trust" onclick="trustRemoteAgentHostKey()" style="display:none;">
+                    <button type="button" class="btn btn-agent-trust" id="btn-agent-setup-trust" style="display:none;">
                         <span class="btn-icon">✓</span>
                         Trust & Continue
                     </button>
@@ -1256,23 +1256,23 @@
                     </div>
                 </div>
                 <div class="agent-setup-actions">
-                    <button type="button" class="btn btn-agent-scan" id="btn-agent-setup-status" onclick="checkManagedRemoteAgent()">
+                    <button type="button" class="btn btn-agent-scan" id="btn-agent-setup-status">
                         <span class="btn-icon">✓</span>
                         Check Status
                     </button>
-                    <button type="button" class="btn btn-agent-install" id="btn-agent-setup-install" onclick="installRemoteAgent()">
+                    <button type="button" class="btn btn-agent-install" id="btn-agent-setup-install">
                         <span class="btn-icon">⬇</span>
                         Install / Repair
                     </button>
-                    <button type="button" class="btn btn-agent-start" id="btn-agent-setup-start" onclick="startRemoteAgent()" style="display:none;">
+                    <button type="button" class="btn btn-agent-start" id="btn-agent-setup-start" style="display:none;">
                         <span class="btn-icon">▶</span>
                         Start Agent
                     </button>
-                    <button type="button" class="btn btn-agent-start" id="btn-agent-setup-stop" onclick="stopManagedRemoteAgent()" style="display:none;">
+                    <button type="button" class="btn btn-agent-start" id="btn-agent-setup-stop" style="display:none;">
                         <span class="btn-icon">■</span>
                         Stop Agent
                     </button>
-                    <button type="button" class="btn btn-agent-trust" id="btn-agent-setup-remove" onclick="removeManagedRemoteAgent()" style="display:none;">
+                    <button type="button" class="btn btn-agent-trust" id="btn-agent-setup-remove" style="display:none;">
                         <span class="btn-icon">✕</span>
                         Remove
                     </button>
@@ -1291,8 +1291,8 @@
             <div class="agent-setup-status" id="agent-setup-status" style="display:none;"></div>
         </div>
         <div class="modal-buttons">
-            <button type="button" class="btn btn-modal-cancel" onclick="closeRemoteAgentSetup()">Cancel</button>
-            <button type="button" class="btn btn-agent-done" id="btn-agent-setup-done" onclick="finishRemoteAgentSetup()" style="display:none;">
+            <button type="button" class="btn btn-modal-cancel" id="remote-agent-cancel">Cancel</button>
+            <button type="button" class="btn btn-agent-done" id="btn-agent-setup-done" style="display:none;">
                 Done
             </button>
         </div>
@@ -1304,18 +1304,18 @@
     <div class="modal" style="width:560px;">
         <div class="modal-header">
             <h2>Browse</h2>
-            <button type="button" class="modal-close" onclick="closeFileBrowser()" aria-label="Close">&times;</button>
+            <button type="button" class="modal-close" id="filebrowser-close" aria-label="Close">&times;</button>
         </div>
         <div class="file-browser-bar">
-            <button class="btn-sm btn-preset" onclick="fileBrowserUp()" title="Parent directory">&uarr; Up</button>
-            <input type="text" id="fb-path-input" class="fb-path-input" onkeydown="if(event.key==='Enter')fileBrowserGo(this.value)">
+            <button class="btn-sm btn-preset" id="filebrowser-up" title="Parent directory">&uarr; Up</button>
+            <input type="text" id="fb-path-input" class="fb-path-input" placeholder="Enter path and press Enter">
         </div>
         <div class="modal-body" style="padding:0;">
             <div id="fb-entries" class="fb-entries"></div>
         </div>
         <div class="modal-buttons">
-            <button type="button" class="btn btn-modal-cancel" onclick="closeFileBrowser()">Cancel</button>
-            <button type="button" class="btn btn-modal-save" onclick="fileBrowserSelect()">Select This Folder</button>
+            <button type="button" class="btn btn-modal-cancel" id="filebrowser-cancel">Cancel</button>
+            <button type="button" class="btn btn-modal-save" id="filebrowser-select">Select This Folder</button>
         </div>
     </div>
 </div>
@@ -1325,21 +1325,21 @@
     <div class="modal" style="width: 560px;">
         <div class="modal-header">
             <h2 id="session-modal-title">Sessions</h2>
-            <button type="button" class="modal-close" onclick="closeSessionModal()" aria-label="Close">&times;</button>
+            <button type="button" class="modal-close" id="session-modal-close" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body">
             <div class="sessions-header">
-                <button type="button" class="btn btn-sm" onclick="showNewSessionForm()" id="btn-new-session">+ New Session</button>
+                <button type="button" class="btn btn-sm" id="btn-new-session">+ New Session</button>
             </div>
             <div id="sessions-list-view">
                 <div id="sessions-list"></div>
                 <div id="sessions-empty" style="display:none; text-align:center; padding: 40px 20px; color: var(--color-text-muted);">
                     <p>No saved sessions yet</p>
-                    <button type="button" class="btn btn-sm" onclick="showNewSessionForm()" style="margin-top:12px;">Create your first session</button>
+                    <button type="button" class="btn btn-sm" id="session-create-first">Create your first session</button>
                 </div>
             </div>
             <div id="sessions-new-form" style="display:none;">
-                <form id="session-form" onsubmit="saveSession(event)">
+                <form id="session-form">
                     <input type="hidden" id="modal-session-id">
                     <label class="modal-field" title="Display name for this session">
                         Session Name
@@ -1366,7 +1366,7 @@
                             Model Path
                             <div style="display:flex;gap:6px;">
                                 <input type="text" id="modal-session-model-path" style="flex:1;" placeholder="/path/to/model.gguf">
-                                <button type="button" class="btn-sm btn-preset" onclick="openFileBrowser('modal-session-model-path','gguf')">Browse</button>
+                                <button type="button" class="btn-sm btn-preset" id="session-browse-model-btn">Browse</button>
                             </div>
                         </label>
                         <div class="modal-row">
@@ -1385,7 +1385,7 @@
                         </div>
                     </div>
                     <div class="modal-buttons" style="margin-top:16px;">
-                        <button type="button" class="btn btn-modal-cancel" onclick="closeSessionModal()">Cancel</button>
+                        <button type="button" class="btn btn-modal-cancel" id="session-modal-cancel">Cancel</button>
                         <button type="submit" class="btn btn-modal-save" id="btn-session-save">Save</button>
                     </div>
                 </form>
@@ -1399,9 +1399,9 @@
     <div class="modal">
         <div class="modal-header">
             <h2 id="modal-title">New Preset</h2>
-            <button type="button" class="modal-close" onclick="closePresetModal()" aria-label="Close">&times;</button>
+            <button type="button" class="modal-close" id="preset-modal-close" aria-label="Close">&times;</button>
         </div>
-        <form id="preset-form" onsubmit="savePreset(event)">
+        <form id="preset-form">
             <input type="hidden" id="modal-preset-id">
             <div class="modal-body">
 
@@ -1415,7 +1415,7 @@
                 <label class="modal-field" title="Absolute path to the .gguf model file on disk">Model Path
                     <div style="display:flex;gap:6px;">
                         <input type="text" id="modal-model-path" required style="flex:1;">
-                        <button type="button" class="btn-sm btn-preset" onclick="openFileBrowser('modal-model-path','gguf')" title="Browse filesystem for .gguf files">Browse</button>
+                        <button type="button" class="btn-sm btn-preset" id="preset-browse-model-btn" title="Browse filesystem for .gguf files">Browse</button>
                     </div>
                     <span class="field-error-msg">Model path is required</span>
                 </label>
@@ -1592,7 +1592,7 @@
 
             </div><!-- /modal-body -->
             <div class="modal-buttons">
-                <button type="button" class="btn btn-modal-cancel" onclick="closePresetModal()">Cancel</button>
+                <button type="button" class="btn btn-modal-cancel" id="preset-modal-cancel">Cancel</button>
                 <button type="submit" class="btn btn-modal-save" id="btn-modal-save">Save</button>
             </div>
         </form>
@@ -1604,17 +1604,17 @@
     <div class="modal" style="width:760px;">
         <div class="modal-header">
             <h2>Models</h2>
-            <button type="button" class="modal-close" onclick="closeModelsModal()" aria-label="Close">&times;</button>
+            <button type="button" class="modal-close" id="models-modal-close" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body">
             <div class="models-toolbar">
-                <button type="button" class="btn btn-secondary" onclick="refreshModels()">Refresh</button>
+                <button type="button" class="btn btn-secondary" id="models-refresh-btn">Refresh</button>
                 <span class="models-summary" id="models-summary">Loading models...</span>
             </div>
             <div class="models-list" id="models-list"></div>
         </div>
         <div class="modal-buttons">
-            <button type="button" class="btn btn-modal-cancel" onclick="closeModelsModal()">Close</button>
+            <button type="button" class="btn btn-modal-cancel" id="models-modal-cancel">Close</button>
         </div>
     </div>
 </div>
@@ -1624,7 +1624,7 @@
     <div class="modal" style="width:720px;">
         <div class="modal-header">
             <h2>Settings<span class="dirty-indicator" aria-label="Unsaved changes"></span></h2>
-            <button type="button" class="modal-close" onclick="closeSettingsModal()" aria-label="Close">&times;</button>
+            <button type="button" class="modal-close" id="settings-modal-close" aria-label="Close">&times;</button>
         </div>
         <div class="settings-modal-body">
             <div class="settings-tabs">
@@ -1741,7 +1741,7 @@
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                             Configure server executable paths, working directories, GPU environment settings, and remote agent connections. Use the <strong>Agent</strong> button in the header for guided remote agent setup via SSH.
                         </p>
-                        <button type="button" class="btn btn-secondary" onclick="openConfigModal()">Open Runtime Configuration</button>
+                        <button type="button" class="btn btn-secondary" id="settings-open-config-btn">Open Runtime Configuration</button>
                     </div>
                     <label class="modal-field">
                         Server Binary Path
@@ -1766,8 +1766,8 @@
             <span class="keyboard-hint">
                 <span><kbd>Esc</kbd> close</span>
             </span>
-            <button type="button" class="btn btn-modal-cancel" onclick="closeSettingsModal()">Cancel</button>
-            <button type="button" class="btn btn-modal-save" onclick="saveSettings()">Save Settings</button>
+            <button type="button" class="btn btn-modal-cancel" id="settings-modal-cancel">Cancel</button>
+            <button type="button" class="btn btn-modal-save" id="settings-modal-save">Save Settings</button>
         </div>
     </div>
 </div>
@@ -1777,7 +1777,7 @@
     <div class="modal" style="width:960px;">
         <div class="modal-header">
             <h2>Analytics Dashboard</h2>
-            <button type="button" class="modal-close" onclick="closeAnalyticsModal()" aria-label="Close">&times;</button>
+            <button type="button" class="modal-close" id="analytics-modal-close" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body">
             <div class="analytics-dashboard">
@@ -1851,7 +1851,7 @@
     <div class="modal" style="width:560px;">
         <div class="modal-header">
             <h2>Export Data</h2>
-            <button type="button" class="modal-close" onclick="closeExportModal()" aria-label="Close">&times;</button>
+            <button type="button" class="modal-close" id="export-modal-close" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body">
             <div class="export-panel">
@@ -1939,8 +1939,8 @@
             </div>
         </div>
         <div class="modal-buttons">
-            <button type="button" class="btn btn-modal-cancel" onclick="closeExportModal()">Cancel</button>
-            <button type="button" class="btn btn-primary" onclick="exportData()">Export Data</button>
+            <button type="button" class="btn btn-modal-cancel" id="export-modal-cancel">Cancel</button>
+            <button type="button" class="btn btn-primary" id="export-modal-save">Export Data</button>
         </div>
     </div>
 </div>
@@ -1950,7 +1950,7 @@
     <div class="shortcuts-modal">
         <div class="shortcuts-header">
             <h2 class="shortcuts-title">Keyboard Shortcuts</h2>
-            <button type="button" class="shortcuts-close" onclick="closeKeyboardShortcutsModal()" aria-label="Close">&times;</button>
+            <button type="button" class="shortcuts-close" id="shortcuts-close-btn" aria-label="Close">&times;</button>
         </div>
         <div class="shortcuts-body">
             <div class="shortcuts-section">
@@ -2069,7 +2069,7 @@
     <div class="modal" style="width:640px;">
         <div class="modal-header">
             <h2>User Preferences</h2>
-            <button type="button" class="modal-close" onclick="closeUserPreferencesModal()" aria-label="Close">&times;</button>
+            <button type="button" class="modal-close" id="user-prefs-close" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body">
             <div class="personalization-panel">
@@ -2137,38 +2137,37 @@
             </div>
         </div>
         <div class="modal-buttons">
-            <button type="button" class="btn btn-modal-cancel" onclick="closeUserPreferencesModal()">Cancel</button>
-            <button type="button" class="btn btn-primary" onclick="saveUserPreferences()">Save Preferences</button>
+            <button type="button" class="btn btn-modal-cancel" id="user-prefs-cancel">Cancel</button>
+            <button type="button" class="btn btn-primary" id="user-prefs-save">Save Preferences</button>
         </div>
     </div>
 </div>
 
 <div class="toast-container" id="toast-container"></div>
 
-<button class="chat-scroll-bottom" id="chat-scroll-bottom" onclick="chatScroll(true)" title="Scroll to bottom">
+<button class="chat-scroll-bottom" id="chat-scroll-bottom" title="Scroll to bottom">
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 9l6 6 6-6"/></svg>
     <span class="chat-scroll-badge" id="chat-scroll-badge" style="display:none;"></span>
 </button>
 
     <script src="/js/core/init-state.js"></script>
-    <script src="/app.js"></script>
     <script type="module" src="/js/bootstrap.js"></script>
 <!-- Release Notes Panel -->
-<div id="release-notes-overlay" class="modal-overlay" style="z-index:1399;" onclick="closeReleaseNotes()"></div>
+<div id="release-notes-overlay" class="modal-overlay" style="z-index:1399;"></div>
 <div id="release-notes-panel" class="slide-panel">
     <div class="slide-panel-header">
         <div class="slide-panel-title-group">
             <h3 id="release-notes-title"></h3>
             <span id="release-notes-version-from" class="slide-panel-version-from"></span>
         </div>
-        <button type="button" class="modal-close" onclick="closeReleaseNotes()" aria-label="Close">&times;</button>
+        <button type="button" class="modal-close" id="release-notes-close" aria-label="Close">&times;</button>
     </div>
     <div class="slide-panel-body" id="release-notes-body"></div>
     <div class="slide-panel-footer">
         <a id="release-notes-link" href="#" target="_blank" rel="noopener">Open on GitHub ↗</a>
         <div class="slide-panel-footer-actions">
-            <button type="button" id="release-notes-update-btn" class="btn-sm btn-update-action" onclick="triggerSelfUpdate()"></button>
-            <button type="button" class="btn-sm btn-preset" onclick="dismissUpdate()">Later</button>
+            <button type="button" id="release-notes-update-btn" class="btn-sm btn-update-action"></button>
+            <button type="button" class="btn-sm btn-preset" id="release-notes-dismiss">Later</button>
         </div>
     </div>
 </div>
