@@ -7,6 +7,7 @@
 // replace the legacy script as features are extracted.
 
 import { escapeHtml } from './core/format.js';
+import './compat/globals.js'; // Set window.escapeHtml, window.formatMetricNumber
 import { initDashboardRender } from './features/dashboard-render.js';
 import { initWebSocket } from './features/dashboard-ws.js';
 import { initFileBrowser } from './features/file-browser.js';
