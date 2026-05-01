@@ -1,14 +1,4 @@
-// ── Dashboard Render ─────────────────────────────────────────────────────────
-// Rendering functions extracted from legacy app.js for dashboard-ws.js.
-// State variables are on window.* (from compat-globals.js / app-state.js).
-
-const escapeHtml = window.escapeHtml;
-const metricSeries = window.metricSeries;
-const recentTasks = window.recentTasks;
-const requestActivity = window.requestActivity;
-const prevValues = window.prevValues;
-const lastSystemMetrics = window.lastSystemMetrics;
-const lastCapabilities = window.lastCapabilities;
+import { metricSeries, recentTasks, requestActivity, liveOutputTracker } from '../core/app-state.js';
 
 function setChipState(el, label, state) {
     if (!el) return;
@@ -23,10 +13,10 @@ function setCardState(card, state) {
 }
 
 function pushSparklinePoint(name, value) {
-    window.metricSeries[name].push(Number.isFinite(value) ? value : 0);
+    metricSeries[name].push(Number.isFinite(value) ? value : 0);
     const limit = name === 'liveOutput' ? 90 : 40;
-    if (window.metricSeries[name].length > limit) {
-        window.metricSeries[name].shift();
+    if (metricSeries[name].length > limit) {
+        metricSeries[name].shift();
     }
 }
 
@@ -71,13 +61,8 @@ function renderLiveSparkline(id, points) {
     ].join('');
 }
 
-function getTaskKey(taskId, active) {
-    if (taskId !== null && taskId !== undefined) return String(taskId);
-    return active ? 'active-unknown' : null;
-}
-
 function updateLiveOutputEstimate(taskId, decoded, active, nowMs) {
-    const tracker = window.liveOutputTracker;
+    const tracker = liveOutputTracker;
     const taskChanged = tracker.taskId !== taskId;
     if (taskChanged) {
         tracker.taskId = taskId;
@@ -85,7 +70,7 @@ function updateLiveOutputEstimate(taskId, decoded, active, nowMs) {
         tracker.previousMs = nowMs;
         tracker.latestRate = 0;
         tracker.rates = [];
-        window.metricSeries.liveOutput = [];
+        metricSeries.liveOutput = [];
         pushSparklinePoint('liveOutput', 0);
         return 0;
     }
@@ -117,16 +102,16 @@ function updateLiveOutputEstimate(taskId, decoded, active, nowMs) {
 
 function updateRequestActivity(taskId, active, outputTokens, nowMs) {
     const taskKey = getTaskKey(taskId, active);
-    let openSegment = window.requestActivity.find(segment => !segment.endedAtMs);
+    let openSegment = requestActivity.find(segment => !segment.endedAtMs);
 
     if (active && taskKey) {
         if (!openSegment || openSegment.taskKey !== taskKey) {
             if (openSegment) {
                 openSegment.endedAtMs = nowMs;
                 openSegment.outputTokens = outputTokens || openSegment.outputTokens || 0;
-                window.recentTasks.unshift(openSegment);
+                recentTasks.unshift(openSegment);
             }
-            window.requestActivity.push({
+            requestActivity.push({
                 taskKey,
                 taskId,
                 startedAtMs: nowMs,
@@ -148,26 +133,20 @@ function updateRequestActivity(taskId, active, outputTokens, nowMs) {
             openSegment.firstOutputAtMs = nowMs;
         }
         openSegment.outputTokens = outputTokens || openSegment.outputTokens || 0;
-        window.recentTasks.unshift(openSegment);
+        recentTasks.unshift(openSegment);
     }
 
     const cutoff = nowMs - (10 * 60 * 1000);
-    window.requestActivity = window.requestActivity
+    requestActivity = requestActivity
         .filter(segment => !segment.endedAtMs || segment.endedAtMs >= cutoff)
         .slice(-100);
-    window.recentTasks = window.recentTasks.slice(0, 8);
-}
-
-function formatDuration(ms) {
-    if (!Number.isFinite(ms) || ms <= 0) return '~0.0s';
-    if (ms < 1000) return '~' + Math.round(ms) + 'ms';
-    return '~' + (ms / 1000).toFixed(1) + 's';
+    recentTasks = recentTasks.slice(0, 8);
 }
 
 function renderRecentTask() {
     const el = document.getElementById('m-recent-task');
     if (!el) return;
-    const task = window.recentTasks[0];
+    const task = recentTasks[0];
     if (!task || !task.endedAtMs) {
         el.style.display = 'none';
         el.textContent = '';
@@ -185,7 +164,7 @@ function renderActivityRail(active) {
     if (!rail) return;
     const now = Date.now();
     const windowMs = 5 * 60 * 1000;
-    const segments = window.requestActivity.slice(-28);
+    const segments = requestActivity.slice(-28);
     if (!segments.length) {
         rail.innerHTML = '<span class="activity-empty">No recent tasks</span>';
         return;
@@ -296,7 +275,7 @@ function renderRequestStats() {
     const reqAvg = document.getElementById('m-req-avg');
     const now = Date.now();
     const windowMs = 10 * 60 * 1000;
-    const segments = window.requestActivity.filter(s => (s.endedAtMs || now) >= now - windowMs);
+    const segments = requestActivity.filter(s => (s.endedAtMs || now) >= now - windowMs);
     const completed = segments.filter(s => s.endedAtMs);
     if (reqCount) reqCount.textContent = formatMetricNumber(completed.length);
     if (reqAvg && completed.length > 0) {
@@ -306,47 +285,6 @@ function renderRequestStats() {
     } else if (reqAvg) {
         reqAvg.textContent = '\u2014';
     }
-}
-
-function renderSamplerParamsInline(slot) {
-    const el = document.getElementById('m-sampler-params-inline');
-    if (!el || !slot || !slot.sampler_config) {
-        el.innerHTML = '';
-        return;
-    }
-    const samplerItems = slot.sampler_config || [];
-    const priorityKeys = ['top_k', 'top_p', 'min_p', 'temperature', 'dry', 'xtc'];
-    const priorityItems = samplerItems.filter(item => priorityKeys.includes(item.label));
-    if (priorityItems.length === 0) {
-        el.innerHTML = '';
-        return;
-    }
-    el.innerHTML = priorityItems.slice(0, 4).map(item => {
-        const displayValue = formatConfigValue(item.value);
-        return '<span class="config-kv"><span>' + escapeHtml(item.label) + '</span><strong>' + escapeHtml(displayValue) + '</strong></span>';
-    }).join('');
-}
-
-function formatConfigValue(value) {
-    const num = parseFloat(value);
-    if (!Number.isNaN(num) && Number.isFinite(num)) {
-        const rounded = Math.round(num * 100) / 100;
-        return String(rounded);
-    }
-    return String(value);
-}
-
-function renderConfigItems(id, items, emptyText) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (!items || !items.length) {
-        el.innerHTML = '<span class="config-empty">' + emptyText + '</span>';
-        return;
-    }
-    el.innerHTML = items.map(item => {
-        const displayValue = formatConfigValue(item.value);
-        return '<span class="config-kv"><span>' + escapeHtml(item.label) + '</span><strong>' + escapeHtml(displayValue) + '</strong></span>';
-    }).join('');
 }
 
 function renderGenerationDetailItems(el, parts) {
@@ -434,19 +372,6 @@ function setEmptyState(el, show) {
     el.classList.toggle('visible', !!show);
 }
 
-// Store previous values for animation
-window.prevValues = {
-    prompt: 0,
-    generation: 0,
-    contextPct: 0
-};
-
-window.metricSeries = {
-    prompt: [],
-    generation: [],
-    liveOutput: []
-};
-
 function getSeverityColor(pct) {
     if (pct >= 95) return '#f43f5e';
     if (pct >= 80) return '#f59e0b';
@@ -459,21 +384,9 @@ function getTempSeverityColor(temp) {
     return '#8fbcbb';
 }
 
-// Visualization rendering helpers
 function setVizContent(container, html) {
     if (!container) return;
     container.innerHTML = html;
-}
-
-function swapVizContent(container, html) {
-    if (!container) return;
-    container.classList.add('viz-fade-out');
-    setTimeout(function() {
-        container.innerHTML = html;
-        container.classList.remove('viz-fade-out');
-        container.classList.add('viz-fade-in');
-        setTimeout(function() { container.classList.remove('viz-fade-in'); }, 160);
-    }, 120);
 }
 
 function renderHwBar(container, pct, isHot) {
@@ -497,7 +410,6 @@ function renderHwSparkline(container, history) {
     setVizContent(container, svg);
 }
 
-// Render inline sparkline below a bar metric (into existing SVG element)
 function renderHwMetricSparkline(svgId, history, color, show) {
     const svg = document.getElementById(svgId);
     if (!svg) return;
@@ -537,18 +449,6 @@ function renderHwStacked(container, pct) {
 function renderHwChips(container, chips) {
     if (!container) return;
     setVizContent(container, '<div class="hw-chips">' + chips.map(function(c) { return '<span class="hw-chip">' + c + '</span>'; }).join('') + '</div>');
-}
-
-// Render dual-ring gauge (GPU clocks: SCLK inner, MCLK outer)
-function formatClockReadout(mhz) {
-    if (!Number.isFinite(mhz) || mhz <= 0) {
-        return { value: '\u2014', unit: 'MHz', detail: '\u2014' };
-    }
-    if (mhz >= 1000) {
-        var ghz = mhz >= 10000 ? (mhz / 1000).toFixed(1) : (mhz / 1000).toFixed(2);
-        return { value: ghz, unit: 'GHz', detail: mhz + ' MHz' };
-    }
-    return { value: String(mhz), unit: 'MHz', detail: mhz + ' MHz' };
 }
 
 function computeClockBand(history, current) {
@@ -627,7 +527,6 @@ function renderHwDualRing(container, sclk, mclk) {
         '</div>');
 }
 
-// Render single-ring gauge (System clock)
 function renderHwClockRing(container, clock) {
     if (!container) return;
     var band = computeClockBand(sysHistory.cpuClock, clock);
@@ -666,7 +565,6 @@ function renderHwClockRing(container, clock) {
         '</div>');
 }
 
-// Build sparkline SVG (reuses inference card pattern)
 function buildSparklineSVG(points, cssClass, color) {
     var len = points.length;
     if (len < 2) return '';
@@ -689,7 +587,6 @@ function buildSparklineSVG(points, cssClass, color) {
         '</svg>';
 }
 
-// GPU metric history ring buffers
 var gpuHistory = { load: [], power: [], vramPct: [], sclk: [], mclk: [] };
 function pushGpuHistory(key, value) {
     if (!Number.isFinite(value)) return;
@@ -698,7 +595,6 @@ function pushGpuHistory(key, value) {
     if (gpuHistory[key].length > limit) gpuHistory[key].shift();
 }
 
-// System metric history ring buffers
 var sysHistory = { cpuLoad: [], ramPct: [], cpuClock: [] };
 function pushSysHistory(key, value) {
     if (!Number.isFinite(value)) return;
@@ -706,12 +602,6 @@ function pushSysHistory(key, value) {
     var limit = 60;
     if (sysHistory[key].length > limit) sysHistory[key].shift();
 }
-
-// Visualization preferences
-var vizPrefs = {
-    gpu: { load: 'bar', power: 'bar', vram: 'bar', clocks: 'ring' },
-    system: { load: 'bar', ram: 'bar', clock: 'ring' }
-};
 
 function loadVizPrefs() {
     try {
@@ -807,17 +697,6 @@ function resetVizPrefs(card) {
     }
 }
 
-// Close switchers on outside click
-document.addEventListener('click', function(e) {
-    if (!e.target.closest('.viz-switcher') && !e.target.closest('.viz-gear-btn')) {
-        document.querySelectorAll('.viz-switcher').forEach(function(el) { el.style.display = 'none'; });
-    }
-});
-
-// Persist last GPU data for re-render after style switch
-var lastGpuData = {};
-
-// Render GPU card
 function renderGpuCard(gpuMap, visible) {
     var card = document.getElementById('gpu-card');
     var emptyEl = document.getElementById('gpu-empty');
@@ -929,7 +808,6 @@ function renderGpuCard(gpuMap, visible) {
     }
 }
 
-// Render System card
 function renderSystemCard(sys, visible) {
     var card = document.getElementById('system-card');
     var emptyEl = document.getElementById('sys-empty');
@@ -1050,18 +928,6 @@ function setMetricSectionVisibility(cardId, visible, sectionId) {
     const section = sectionId ? document.getElementById(sectionId) : card.closest('.metric-section');
     if (section) section.style.display = visible ? '' : 'none';
 }
-
-ws.onmessage = e => {
-
-    const d = JSON.parse(e.data);
-    appState.wsData = d; // Store for use by status alert and other components
-
-    // Update endpoint health strip
-    const endpointModeEl = document.getElementById('endpoint-mode');
-    const endpointUrlEl = document.getElementById('endpoint-url');
-    const endpointStatusEl = document.getElementById('endpoint-status');
-    const agentStatusEl = document.getElementById('agent-status');
-    const agentLatencyEl = document.getElementById('agent-latency');
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
