@@ -10,10 +10,11 @@
 // inline handlers, then remove inline handlers entirely and delete this file.
 
 // Import the authoritative escapeHtml from format.js (replaces 3 duplicates in app.js)
-import { escapeHtml } from '../core/format.js';
+import { escapeHtml, formatMetricNumber } from '../core/format.js';
 
 // Attach to window — this is the ONLY place window assignments should happen
 window.escapeHtml = escapeHtml;
+window.formatMetricNumber = formatMetricNumber;
 
 // ── Functions to be migrated as features are extracted ─────────────────────────
 // Each function below is referenced from an inline handler in index.html.
