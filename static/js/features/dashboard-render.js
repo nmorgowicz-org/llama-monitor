@@ -1,11 +1,14 @@
 // ── Dashboard Render ─────────────────────────────────────────────────────────
 // Rendering functions extracted from legacy app.js for dashboard-ws.js.
+// State variables are on window.* (from compat-globals.js / app-state.js).
 
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;'
-    })[char]);
-}
+const escapeHtml = window.escapeHtml;
+const metricSeries = window.metricSeries;
+const recentTasks = window.recentTasks;
+const requestActivity = window.requestActivity;
+const prevValues = window.prevValues;
+const lastSystemMetrics = window.lastSystemMetrics;
+const lastCapabilities = window.lastCapabilities;
 
 function setChipState(el, label, state) {
     if (!el) return;
@@ -444,480 +447,375 @@ window.metricSeries = {
     liveOutput: []
 };
 
-window.slotSnapshots = new Map();
-window.requestActivity = [];
-window.recentTasks = [];
-window.metricCapabilities = {};
-window.liveOutputTracker = {
-    taskId: null,
-    previousDecoded: null,
-    previousMs: null,
-    latestRate: 0,
-    rates: []
+function getSeverityColor(pct) {
+    if (pct >= 95) return '#f43f5e';
+    if (pct >= 80) return '#f59e0b';
+    return '#10b981';
+}
+
+function getTempSeverityColor(temp) {
+    if (temp >= 90) return '#f43f5e';
+    if (temp >= 75) return '#f59e0b';
+    return '#8fbcbb';
+}
+
+// Visualization rendering helpers
+function setVizContent(container, html) {
+    if (!container) return;
+    container.innerHTML = html;
+}
+
+function swapVizContent(container, html) {
+    if (!container) return;
+    container.classList.add('viz-fade-out');
+    setTimeout(function() {
+        container.innerHTML = html;
+        container.classList.remove('viz-fade-out');
+        container.classList.add('viz-fade-in');
+        setTimeout(function() { container.classList.remove('viz-fade-in'); }, 160);
+    }, 120);
+}
+
+function renderHwBar(container, pct, isHot) {
+    if (!container) return;
+    const bgCls = isHot ? 'hw-bar-bg is-hot' : 'hw-bar-bg';
+    setVizContent(container, '<div class="' + bgCls + '"><div class="hw-bar-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div></div>');
+}
+
+function renderHwRing(container, pct, isHot) {
+    if (!container) return;
+    const cls = isHot ? 'hw-ring-viz is-warming' : 'hw-ring-viz';
+    setVizContent(container, '<div class="' + cls + '" style="--pct:' + pct.toFixed(1) + ';--gauge-color:' + getSeverityColor(pct) + '"></div>');
+}
+
+function renderHwSparkline(container, history) {
+    if (!container || !history || history.length < 2) {
+        setVizContent(container, '');
+        return;
+    }
+    const svg = buildSparklineSVG(history, 'hw-sparkline', '#8fbcbb');
+    setVizContent(container, svg);
+}
+
+// Render inline sparkline below a bar metric (into existing SVG element)
+function renderHwMetricSparkline(svgId, history, color, show) {
+    const svg = document.getElementById(svgId);
+    if (!svg) return;
+    if (!show || !history || history.length < 2) {
+        svg.style.visibility = (show && history && history.length >= 2) ? '' : 'hidden';
+        return;
+    }
+    svg.style.visibility = '';
+    const width = 120;
+    const height = 28;
+    const max = Math.max(...history, 1);
+    const min = Math.min(...history, 0);
+    const range = Math.max(max - min, 1);
+    const step = width / (history.length - 1);
+    const peakValue = Math.max(...history);
+    const peakIndex = history.lastIndexOf(peakValue);
+    const peakX = peakIndex * step;
+    const peakY = height - (((peakValue - min) / range) * (height - 4)) - 2;
+    const path = history.map((value, index) => {
+        const x = index * step;
+        const y = height - (((value - min) / range) * (height - 4)) - 2;
+        return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
+    }).join(' ');
+    svg.innerHTML =
+        '<path class="sparkline-fill" d="' + path + ' L 120 28 L 0 28 Z" fill="' + color + '" opacity="0.16"></path>' +
+        '<path class="sparkline-line" d="' + path + '" stroke="' + color + '" fill="none" stroke-width="2.4" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" filter="drop-shadow(0 0 4px ' + color + ')"></path>' +
+        '<circle class="sparkline-peak" cx="' + peakX.toFixed(2) + '" cy="' + peakY.toFixed(2) + '" r="2.3" fill="' + color + '" opacity="0.9"></circle>';
+}
+
+function renderHwStacked(container, pct) {
+    if (!container) return;
+    const isHot = pct >= 90;
+    const bgCls = isHot ? 'hw-stacked-bg is-hot' : 'hw-stacked-bg';
+    setVizContent(container, '<div class="' + bgCls + '"><div class="hw-stacked-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div><div class="hw-stacked-free" style="width:' + (100 - pct).toFixed(1) + '%"></div></div>');
+}
+
+function renderHwChips(container, chips) {
+    if (!container) return;
+    setVizContent(container, '<div class="hw-chips">' + chips.map(function(c) { return '<span class="hw-chip">' + c + '</span>'; }).join('') + '</div>');
+}
+
+// Render dual-ring gauge (GPU clocks: SCLK inner, MCLK outer)
+function formatClockReadout(mhz) {
+    if (!Number.isFinite(mhz) || mhz <= 0) {
+        return { value: '\u2014', unit: 'MHz', detail: '\u2014' };
+    }
+    if (mhz >= 1000) {
+        var ghz = mhz >= 10000 ? (mhz / 1000).toFixed(1) : (mhz / 1000).toFixed(2);
+        return { value: ghz, unit: 'GHz', detail: mhz + ' MHz' };
+    }
+    return { value: String(mhz), unit: 'MHz', detail: mhz + ' MHz' };
+}
+
+function computeClockBand(history, current) {
+    var points = (history || []).filter(Number.isFinite);
+    if (Number.isFinite(current) && current > 0) points.push(current);
+    if (points.length === 0) {
+        return { min: 0, max: 0, pct: 0, peakPct: 0, lowPct: 0 };
+    }
+    var min = Math.min.apply(null, points);
+    var max = Math.max.apply(null, points);
+    var span = Math.max(max - min, 1);
+    var normalized = function(value) {
+        if (!Number.isFinite(value)) return 0;
+        return Math.max(0, Math.min(100, ((value - min) / span) * 100));
+    };
+    var pct = span <= 1 ? 100 : normalized(current);
+    return {
+        min: min,
+        max: max,
+        pct: pct,
+        peakPct: normalized(max),
+        lowPct: normalized(min)
+    };
+}
+
+function renderHwDualRing(container, sclk, mclk) {
+    if (!container) return;
+    var sclkBand = computeClockBand(gpuHistory.sclk, sclk);
+    var mclkBand = computeClockBand(gpuHistory.mclk, mclk);
+    var sclkColor = getSeverityColor(sclkBand.pct);
+    var mclkColor = '#60a5fa';
+    var sclkPulse = (3.4 - Math.min(sclkBand.pct, 100) * 0.014).toFixed(2) + 's';
+    var mclkPulse = (3.8 - Math.min(mclkBand.pct, 100) * 0.016).toFixed(2) + 's';
+    setVizContent(container,
+        '<div class="hw-clock-gpu-layout">' +
+          '<div class="hw-clock-cluster hw-clock-gpu" style="--dot-radius:-47px;">' +
+            '<div class="hw-clock-orbit outer" style="--pct:' + mclkBand.pct.toFixed(1) + ';--peak-pct:' + mclkBand.peakPct.toFixed(1) + ';--low-pct:' + mclkBand.lowPct.toFixed(1) + ';--orbit-color:' + mclkColor + ';--dot-radius:-47px;--pulse-duration:' + mclkPulse + ';">' +
+              '<div class="hw-clock-orbit-track"></div>' +
+              '<div class="hw-clock-orbit-fill"></div>' +
+              '<div class="hw-clock-orbit-peak"></div>' +
+              '<div class="hw-clock-orbit-low"></div>' +
+              '<div class="hw-clock-orbit-dot"></div>' +
+            '</div>' +
+            '<div class="hw-clock-orbit inner" style="--pct:' + sclkBand.pct.toFixed(1) + ';--peak-pct:' + sclkBand.peakPct.toFixed(1) + ';--low-pct:' + sclkBand.lowPct.toFixed(1) + ';--orbit-color:' + sclkColor + ';--dot-radius:-45px;--pulse-duration:' + sclkPulse + ';">' +
+              '<div class="hw-clock-orbit-track"></div>' +
+              '<div class="hw-clock-orbit-fill"></div>' +
+              '<div class="hw-clock-orbit-peak"></div>' +
+              '<div class="hw-clock-orbit-low"></div>' +
+              '<div class="hw-clock-orbit-dot"></div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="hw-clock-gpu-readout">' +
+            '<div class="hw-clock-meter">' +
+              '<div class="hw-clock-meter-label">SCLK</div>' +
+              '<div class="hw-clock-meter-bar" style="--pct:' + sclkBand.pct.toFixed(1) + ';--peak-pct:' + sclkBand.peakPct.toFixed(1) + ';--low-pct:' + sclkBand.lowPct.toFixed(1) + ';">' +
+                '<div class="hw-clock-meter-fill" style="--pct:' + sclkBand.pct.toFixed(1) + ';--meter-color:' + sclkColor + ';--pulse-duration:' + sclkPulse + ';"></div>' +
+                '<div class="hw-clock-meter-marker"></div>' +
+                '<div class="hw-clock-meter-marker-low"></div>' +
+              '</div>' +
+              '<div class="hw-clock-meter-value">' + formatClockReadout(sclk).value + ' ' + formatClockReadout(sclk).unit + '</div>' +
+              '<div class="hw-clock-meter-band">' + sclkBand.min + '-' + sclkBand.max + '</div>' +
+              (gpuHistory.sclk.length > 1 ? '<div class="hw-clock-footer-spark">' + buildSparklineSVG(gpuHistory.sclk, 'hw-clock-footer-spark', sclkColor) + '</div>' : '') +
+            '</div>' +
+            '<div class="hw-clock-meter">' +
+              '<div class="hw-clock-meter-label">MCLK</div>' +
+              '<div class="hw-clock-meter-bar" style="--pct:' + mclkBand.pct.toFixed(1) + ';--peak-pct:' + mclkBand.peakPct.toFixed(1) + ';--low-pct:' + mclkBand.lowPct.toFixed(1) + ';">' +
+                '<div class="hw-clock-meter-fill" style="--pct:' + mclkBand.pct.toFixed(1) + ';--meter-color:' + mclkColor + ';--pulse-duration:' + mclkPulse + ';"></div>' +
+                '<div class="hw-clock-meter-marker"></div>' +
+                '<div class="hw-clock-meter-marker-low"></div>' +
+              '</div>' +
+              '<div class="hw-clock-meter-value">' + formatClockReadout(mclk).value + ' ' + formatClockReadout(mclk).unit + '</div>' +
+              '<div class="hw-clock-meter-band">' + formatClockReadout(mclkBand.min).value + '-' + formatClockReadout(mclkBand.max).value + ' ' + formatClockReadout(mclkBand.max).unit + '</div>' +
+              (gpuHistory.mclk.length > 1 ? '<div class="hw-clock-footer-spark">' + buildSparklineSVG(gpuHistory.mclk, 'hw-clock-footer-spark', mclkColor) + '</div>' : '') +
+            '</div>' +
+          '</div>' +
+        '</div>');
+}
+
+// Render single-ring gauge (System clock)
+function renderHwClockRing(container, clock) {
+    if (!container) return;
+    var band = computeClockBand(sysHistory.cpuClock, clock);
+    var display = formatClockReadout(clock);
+    var color = getSeverityColor(band.pct);
+    var pulse = (3.6 - Math.min(band.pct, 100) * 0.016).toFixed(2) + 's';
+    var footerSpark = sysHistory.cpuClock.length > 1
+        ? '<div class="hw-clock-footer sparkline-only"><div class="hw-clock-footer-spark">' + buildSparklineSVG(sysHistory.cpuClock, 'hw-clock-footer-spark', color) + '</div></div>'
+        : '';
+    setVizContent(container,
+        '<div class="hw-clock-system-layout">' +
+          '<div class="hw-clock-cluster hw-clock-system">' +
+            '<div class="hw-clock-orbit outer" style="--pct:' + band.pct.toFixed(1) + ';--peak-pct:' + band.peakPct.toFixed(1) + ';--low-pct:' + band.lowPct.toFixed(1) + ';--orbit-color:' + color + ';--dot-radius:-61px;--pulse-duration:' + pulse + ';">' +
+              '<div class="hw-clock-orbit-track"></div>' +
+              '<div class="hw-clock-orbit-fill"></div>' +
+              '<div class="hw-clock-orbit-peak"></div>' +
+              '<div class="hw-clock-orbit-low"></div>' +
+              '<div class="hw-clock-orbit-dot"></div>' +
+            '</div>' +
+            '<div class="hw-clock-core hw-clock-system-core">' +
+              '<div class="hw-clock-row-value">' + display.value + '</div>' +
+              '<div class="hw-clock-unit">' + display.unit + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="hw-clock-meter">' +
+            '<div class="hw-clock-meter-label">CLOCK</div>' +
+            '<div class="hw-clock-meter-bar" style="--pct:' + band.pct.toFixed(1) + ';--peak-pct:' + band.peakPct.toFixed(1) + ';--low-pct:' + band.lowPct.toFixed(1) + ';">' +
+              '<div class="hw-clock-meter-fill" style="--pct:' + band.pct.toFixed(1) + ';--meter-color:' + color + ';--pulse-duration:' + pulse + ';"></div>' +
+              '<div class="hw-clock-meter-marker"></div>' +
+              '<div class="hw-clock-meter-marker-low"></div>' +
+            '</div>' +
+            '<div class="hw-clock-meter-value">' + formatClockReadout(clock).value + ' ' + formatClockReadout(clock).unit + '</div>' +
+            '<div class="hw-clock-meter-band">' + formatClockReadout(band.min).value + '-' + formatClockReadout(band.max).value + ' ' + formatClockReadout(band.max).unit + '</div>' +
+            (sysHistory.cpuClock.length > 1 ? '<div class="hw-clock-footer-spark">' + buildSparklineSVG(sysHistory.cpuClock, 'hw-clock-footer-spark', color) + '</div>' : '') +
+          '</div>' +
+        '</div>');
+}
+
+// Build sparkline SVG (reuses inference card pattern)
+function buildSparklineSVG(points, cssClass, color) {
+    var len = points.length;
+    if (len < 2) return '';
+    var w = 120, h = 24, pad = 2;
+    var max = Math.max.apply(null, points);
+    var min = Math.min.apply(null, points);
+    var range = max - min || 1;
+    var step = w / (len - 1);
+    var pts = points.map(function(v, i) { return i * step + ',' + (h - pad - ((v - min) / range) * (h - pad * 2)); });
+    var linePath = 'M' + pts.join(' L');
+    var fillPath = linePath + ' L' + (len - 1) * step + ',' + h + ' L0,' + h + ' Z';
+    var peakIdx = points.indexOf(max);
+    var peakX = peakIdx * step;
+    var peakY = h - pad - ((max - min) / range) * (h - pad * 2);
+    return '<svg class="metric-sparkline ' + cssClass + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">' +
+        '<defs><linearGradient id="hw-spark-grad-' + cssClass + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="' + color + '" stop-opacity="0.25"/><stop offset="100%" stop-color="' + color + '" stop-opacity="0.02"/></linearGradient></defs>' +
+        '<path d="' + fillPath + '" fill="url(#hw-spark-grad-' + cssClass + ')"/>' +
+        '<path d="' + linePath + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+        (len > 3 ? '<circle cx="' + peakX.toFixed(1) + '" cy="' + peakY.toFixed(1) + '" r="2" fill="' + color + '" opacity="0.8"/>' : '') +
+        '</svg>';
+}
+
+// GPU metric history ring buffers
+var gpuHistory = { load: [], power: [], vramPct: [], sclk: [], mclk: [] };
+function pushGpuHistory(key, value) {
+    if (!Number.isFinite(value)) return;
+    gpuHistory[key].push(value);
+    var limit = key === 'load' || key === 'power' || key === 'vramPct' ? 60 : 30;
+    if (gpuHistory[key].length > limit) gpuHistory[key].shift();
+}
+
+// System metric history ring buffers
+var sysHistory = { cpuLoad: [], ramPct: [], cpuClock: [] };
+function pushSysHistory(key, value) {
+    if (!Number.isFinite(value)) return;
+    sysHistory[key].push(value);
+    var limit = 60;
+    if (sysHistory[key].length > limit) sysHistory[key].shift();
+}
+
+// Visualization preferences
+var vizPrefs = {
+    gpu: { load: 'bar', power: 'bar', vram: 'bar', clocks: 'ring' },
+    system: { load: 'bar', ram: 'bar', clock: 'ring' }
 };
 
+function loadVizPrefs() {
+    try {
+        var gpuStr = localStorage.getItem('llama-monitor-gpu-viz');
+        if (gpuStr) vizPrefs.gpu = JSON.parse(gpuStr);
+        var sysStr = localStorage.getItem('llama-monitor-system-viz');
+        if (sysStr) vizPrefs.system = JSON.parse(sysStr);
+    } catch(e) {}
+}
 
-let remoteAgentInProgress = false;
+function saveVizPrefs(card) {
+    try {
+        var key = card === 'gpu' ? 'llama-monitor-gpu-viz' : 'llama-monitor-system-viz';
+        localStorage.setItem(key, JSON.stringify(vizPrefs[card]));
+    } catch(e) {}
+}
 
-let remoteAgentSshConnection = null;
-let latestSshHostKey = null;
-
-
-
-let lastServerState = null;
-
-let lastLlamaMetrics = null;
-
-let lastSystemMetrics = null;
-
-let lastGpuMetrics = null;
-
-let lastCapabilities = null;
-
-let currentPollInterval = 5000;
-
-
-
-   let presets = [];
-
-    let serverRunning = false;
-
-    let prevLogLen = 0;
-
-    
-
-    let sessions = [];
-
-    const latestVer = data.latest_release?.tag_name || data.release?.tag_name || 'Not checked';
-
-    const installedVer = data.installed_version || (data.installed ? 'Unknown' : 'Not installed');
-
-    document.getElementById('remote-agent-latest-version').textContent = latestVer;
-
-    document.getElementById('remote-agent-installed-version').textContent = installedVer;
-
-    versionsEl.style.display = '';
-
-    const isInstalled = data.installed || false;
-
-    const isRunning = data.running || false;
-
-    const isUpdateAvailable = data.update_available || false;
-
-    const updateIndicator = document.getElementById('remote-agent-update-indicator');
-
-    if (updateIndicator) {
-        updateIndicator.style.display = isUpdateAvailable ? 'inline' : 'none';
-        updateIndicator.textContent = '● Update available';
-        updateIndicator.style.color = '#ebcb8b';
-    }
-
-    const buttonsEl = document.getElementById('remote-agent-buttons');
-
-    if (buttonsEl) {
-
-        const installBtn = document.getElementById('btn-remote-agent-install');
-
-        const startBtn = document.getElementById('btn-remote-agent-start');
-
-        const updateBtn = document.getElementById('btn-remote-agent-update');
-
-        const stopBtn = document.getElementById('btn-remote-agent-stop');
-
-        const restartBtn = document.getElementById('btn-remote-agent-restart');
-
-        const removeBtn = document.getElementById('btn-remote-agent-remove');
-
-        if (installBtn) installBtn.style.display = isInstalled ? 'none' : '';
-
-        if (startBtn) startBtn.style.display = isRunning ? 'none' : '';
-
-        if (updateBtn) {
-            if (isUpdateAvailable) {
-                updateBtn.style.display = '';
-                updateBtn.textContent = 'Update Agent';
-            } else if (isRunning) {
-                updateBtn.textContent = 'Restart';
-                updateBtn.style.display = '';
-            } else {
-                updateBtn.style.display = 'none';
-            }
+function toggleVizSwitcher(card) {
+    var prefix = card === 'gpu' ? 'gpu' : 'sys';
+    var sw = document.getElementById(prefix + '-viz-switcher');
+    if (!sw) return;
+    var isOpen = sw.style.display !== 'none';
+    // Close all switchers
+    document.querySelectorAll('.viz-switcher').forEach(function(el) { el.style.display = 'none'; });
+    if (!isOpen) {
+        sw.style.display = 'flex';
+        // Position relative to card
+        var cardEl = document.getElementById(card === 'gpu' ? 'gpu-card' : 'system-card');
+        if (cardEl) {
+            var rect = cardEl.getBoundingClientRect();
+            var parentRect = cardEl.parentElement.getBoundingClientRect();
+            sw.style.top = (rect.height + 8) + 'px';
+            sw.style.right = '0';
         }
-
-        if (stopBtn) stopBtn.style.display = isRunning ? '' : 'none';
-
-        if (restartBtn) restartBtn.style.display = isRunning ? '' : 'none';
-
-        if (removeBtn) removeBtn.style.display = (isInstalled || data.managed_task_installed) ? '' : 'none';
-
-        if (isRunning && isUpdateAvailable) {
-            document.getElementById('remote-agent-status-indicator').textContent = '● Update available';
-            document.getElementById('remote-agent-status-indicator').style.color = '#ebcb8b';
-        } else if (isRunning) {
-            document.getElementById('remote-agent-status-indicator').textContent = '● Ready';
-            document.getElementById('remote-agent-status-indicator').style.color = '#a3be8b';
-        } else {
-            document.getElementById('remote-agent-status-indicator').textContent = '● Not running';
-            document.getElementById('remote-agent-status-indicator').style.color = '#8899aa';
-        }
-
     }
-
 }
 
-function showRemoteAgentFirewall(showAlert = true) {
-
-    const firewallEl = document.getElementById('remote-agent-firewall');
-
-    if (firewallEl) {
-
-        firewallEl.style.display = '';
-
+function selectVizStyle(card, metric, style) {
+    vizPrefs[card][metric] = style;
+    saveVizPrefs(card);
+    // Update active state in switcher
+    var prefix = card === 'gpu' ? 'gpu' : 'sys';
+    var sw = document.getElementById(prefix + '-viz-switcher');
+    if (sw) {
+        sw.querySelectorAll('.viz-option').forEach(function(btn) {
+            btn.classList.toggle('active', btn.getAttribute('data-style') === style && btn.closest('.viz-switcher-options').getAttribute('data-metric') === metric);
+        });
     }
-
-    if (showAlert) {
-        showToast('Firewall blocked - Agent HTTP access is not reachable', 'error');
+    // Fade out viz containers, then re-render
+    var cardEl = document.getElementById(card === 'gpu' ? 'gpu-card' : 'system-card');
+    if (cardEl) {
+        cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) { el.classList.add('viz-fade-out'); });
+        setTimeout(function() {
+            if (card === 'gpu') renderGpuCard(lastGpuData || {}, !!lastGpuData && Object.keys(lastGpuData).length > 0);
+            else renderSystemCard(lastSystemMetrics, !!lastSystemMetrics);
+            cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) {
+                el.classList.remove('viz-fade-out');
+                el.classList.add('viz-fade-in');
+                setTimeout(function() { el.classList.remove('viz-fade-in'); }, 160);
+            });
+        }, 120);
     }
-
 }
 
-function openFirewallHelp() {
-    openConfigModal();
-
-    const panel = document.getElementById('remote-agent-panel');
-    if (panel) panel.open = true;
-
-    const agentUrlInput = document.getElementById('set-remote-agent-url');
-    if (agentUrlInput && !agentUrlInput.value.trim()) {
-        agentUrlInput.value = inferredAgentUrl();
+function resetVizPrefs(card) {
+    vizPrefs[card] = card === 'gpu'
+        ? { load: 'bar', power: 'bar', vram: 'bar', clocks: 'chips' }
+        : { load: 'bar', ram: 'bar', clock: 'chip' };
+    saveVizPrefs(card);
+    var prefix = card === 'gpu' ? 'gpu' : 'sys';
+    var sw = document.getElementById(prefix + '-viz-switcher');
+    if (sw) {
+        sw.querySelectorAll('.viz-option').forEach(function(btn) {
+            btn.classList.remove('active');
+        });
+        sw.querySelectorAll('.viz-option[data-style="bar"], .viz-option[data-style="chips"], .viz-option[data-style="chip"]').forEach(function(btn) {
+            btn.classList.add('active');
+        });
     }
-
-    const sshTargetInput = document.getElementById('set-remote-agent-ssh-target');
-    if (sshTargetInput && !sshTargetInput.value.trim()) {
-        sshTargetInput.value = remoteEndpointHost();
+    // Fade out viz containers, then re-render
+    var cardEl = document.getElementById(card === 'gpu' ? 'gpu-card' : 'system-card');
+    if (cardEl) {
+        cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) { el.classList.add('viz-fade-out'); });
+        setTimeout(function() {
+            if (card === 'gpu') renderGpuCard(lastGpuData || {}, !!lastGpuData && Object.keys(lastGpuData).length > 0);
+            else renderSystemCard(lastSystemMetrics, !!lastSystemMetrics);
+            cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) {
+                el.classList.remove('viz-fade-out');
+                el.classList.add('viz-fade-in');
+                setTimeout(function() { el.classList.remove('viz-fade-in'); }, 160);
+            });
+        }, 120);
     }
-
-    const firewallEl = document.getElementById('remote-agent-firewall');
-
-    if (firewallEl && firewallEl.style.display === 'none') {
-        firewallEl.style.display = '';
-    }
-
-    setRemoteAgentStatus(
-        'Configure the remote agent for this host, then use <strong>Install & Start</strong> or <strong>Start Agent</strong>. If the agent starts but remains unreachable, open TCP port <strong>7779</strong> on the remote machine.',
-        'info'
-    );
-
-    setTimeout(() => {
-        if (firewallEl) firewallEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        sshTargetInput?.focus();
-        sshTargetInput?.select();
-    }, 50);
-
 }
 
-function addTimelineItem(message, status) {
-
-    const timelineEl = document.getElementById('remote-agent-timeline');
-
-    const itemsEl = document.getElementById('remote-agent-timeline-items');
-
-    if (!timelineEl || !itemsEl) return;
-
-    timelineEl.style.display = '';
-
-    const timestamp = new Date().toLocaleTimeString();
-
-    const item = document.createElement('div');
-
-    item.className = 'remote-agent-timeline-item ' + status;
-
-    item.innerHTML = '<span class="timestamp">[' + timestamp + ']</span>' + message;
-
-    itemsEl.appendChild(item);
-
-    itemsEl.scrollTop = itemsEl.scrollHeight;
-
-}
-
-function clearTimeline() {
-
-    const itemsEl = document.getElementById('remote-agent-timeline-items');
-
-    if (itemsEl) {
-
-        itemsEl.innerHTML = '';
-
+// Close switchers on outside click
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.viz-switcher') && !e.target.closest('.viz-gear-btn')) {
+        document.querySelectorAll('.viz-switcher').forEach(function(el) { el.style.display = 'none'; });
     }
-
-    const timelineEl = document.getElementById('remote-agent-timeline');
-
-    if (timelineEl) {
-
-        timelineEl.style.display = 'none';
-
-    }
-
-}
-
-let fbTargetId = '';
-
-let fbFilter = '';
-
-let fbCurrentPath = '';
-
-
-
-function openFileBrowser(targetId, filter) {
-
-    fbTargetId = targetId;
-
-    fbFilter = filter === 'dir' ? '' : (filter || '');
-
-    const modal = document.getElementById('file-browser-modal');
-
-    // If target already has a path, start there; otherwise home
-
-    const current = document.getElementById(targetId).value;
-
-    let startPath = '';
-
-    if (current) {
-
-        // Use parent directory of current value
-
-        const parts = current.split('/');
-
-        parts.pop();
-
-        startPath = parts.join('/') || '/';
-
-    }
-
-    // Show/hide "Select This Folder" for dir-mode
-
-    const selectBtn = modal.querySelector('.btn-modal-save');
-
-    selectBtn.style.display = filter === 'dir' ? '' : 'none';
-
-    modal.classList.add('open');
-
-    fileBrowserGo(startPath);
-
-}
-
-
-
-function closeFileBrowser() {
-
-    document.getElementById('file-browser-modal').classList.remove('open');
-
-}
-
-
-
-document.getElementById('file-browser-modal').addEventListener('click', e => {
-
-    if (e.target === e.currentTarget) closeFileBrowser();
-
 });
 
-
-
-async function fileBrowserGo(path) {
-
-    const entriesEl = document.getElementById('fb-entries');
-
-    entriesEl.innerHTML = '<div class="fb-empty">Loading...</div>';
-
-    const params = new URLSearchParams();
-
-    if (path) params.set('path', path);
-
-    if (fbFilter) params.set('filter', fbFilter);
-
-    try {
-
-        const resp = await fetch('/api/browse?' + params);
-
-        const data = await resp.json();
-
-        if (data.error) {
-
-            entriesEl.innerHTML = '<div class="fb-empty">' + data.error + '</div>';
-
-            return;
-
-        }
-
-        fbCurrentPath = data.path;
-
-        document.getElementById('fb-path-input').value = data.path;
-
-        if (data.entries.length === 0) {
-
-            entriesEl.innerHTML = '<div class="fb-empty">Empty directory</div>';
-
-            return;
-
-        }
-
-        entriesEl.innerHTML = data.entries.map(e => {
-
-            const escapeJsString = (s) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-
-            if (e.is_dir) {
-
-                return '<div class="fb-entry fb-entry-dir" onclick="fileBrowserGo(\'' + escapeJsString(e.path) + '\')">' +
-
-                    '<span class="fb-entry-icon">\u{1F4C1}</span>' +
-
-                    '<span class="fb-entry-name">' + e.name + '</span></div>';
-
-            } else {
-
-                return '<div class="fb-entry fb-entry-file fb-match" onclick="fileBrowserSelect(\'' + escapeJsString(e.path) + '\')">' +
-
-                    '<span class="fb-entry-icon">\u{1F4C4}</span>' +
-
-                    '<span class="fb-entry-name">' + e.name + '</span>' +
-
-                    '<span class="fb-entry-size">' + e.size_display + '</span></div>';
-
-            }
-
-        }).join('');
-
-    } catch (err) {
-
-        entriesEl.innerHTML = '<div class="fb-empty">Error: ' + err.message + '</div>';
-
-    }
-
-}
-
-
-
-function fileBrowserUp() {
-
-    if (fbCurrentPath && fbCurrentPath !== '/') {
-
-        const parts = fbCurrentPath.split('/');
-
-        parts.pop();
-
-        fileBrowserGo(parts.join('/') || '/');
-
-    }
-
-}
-
-
-
-function fileBrowserSelect(path) {
-
-    document.getElementById(fbTargetId).value = path || fbCurrentPath;
-
-    document.getElementById(fbTargetId).dispatchEvent(new Event('input', { bubbles: true }));
-
-    closeFileBrowser();
-
-}
-
-
-
-// Close file browser on Escape
-
-document.addEventListener('keydown', e => {
-
-    if (e.key === 'Escape' && document.getElementById('file-browser-modal').classList.contains('open')) {
-
-        closeFileBrowser();
-
-        e.stopImmediatePropagation();
-
-    }
-
-}, true);
-
-
-
-// --- Preset Selection ---
-
-
-
-document.getElementById('preset-select').addEventListener('change', () => saveSettings());
-
-
-
-// --- Toast Notifications ---
-
-const TOAST_AUTO_DISMISS = 3500;
-
-function showToast(title, type = 'error', message = '') {
-
-    const container = document.getElementById('toast-container');
-
-    const toast = document.createElement('div');
-
-    toast.className = 'toast toast-' + type;
-
-    let content = '';
-
-    if (type === 'progress') {
-
-        content = '<div class="toast-content"><div class="toast-progress-bar"><div class="toast-progress-fill" style="width:0%"></div></div></div>';
-
-    } else {
-
-        const iconMap = {
-            success: 'success',
-            error: 'error',
-            warning: 'warning',
-            info: 'info'
-        };
-
-        const iconType = iconMap[type] || 'info';
-
-        content = `
-            <div class="toast-icon ${type}">${getToastIcon(iconType)}</div>
-            <div class="toast-content">
-                ${title ? '<div class="toast-title">' + escapeHtml(title) + '</div>' : ''}
-                ${message ? '<div class="toast-message">' + escapeHtml(message) + '</div>' : ''}
-            </div>
-            <button class="toast-close" onclick="this.parentElement.remove()">&times;</button>
-        `;
-
-    }
-
-    toast.innerHTML = content;
-
-    container.appendChild(toast);
-
-    requestAnimationFrame(() => { toast.classList.add('show'); });
-
-    if (type === 'progress') {
-
-        return toast;
-
-    } else {
-
-        setTimeout(() => {
-
-            toast.classList.remove('show');
-
-            setTimeout(() => toast.remove(), 300);
-
-        }, TOAST_AUTO_DISMISS);
-
-        return null;
-
-    }
-
-}
-
-function getToastIcon(type) {
-
+// Persist last GPU data for re-render after style switch
+var lastGpuData = {};
 
 // Render GPU card
 function renderGpuCard(gpuMap, visible) {
@@ -1165,38 +1063,14 @@ ws.onmessage = e => {
     const agentStatusEl = document.getElementById('agent-status');
     const agentLatencyEl = document.getElementById('agent-latency');
 
-    if (d.capabilities && d.endpoint_kind) {
-        let modeClass = 'unknown';
-        let modeText = 'Unknown';
-        let statusClass = 'ok';
-        let statusText = 'OK';
-
-        if (d.endpoint_kind === 'Local') {
-            modeClass = 'local';
-            modeText = 'Local';
-            if (!d.capabilities.system || !d.capabilities.gpu) {
-                statusClass = 'warning';
-                statusText = 'Limited';
-            }
-        } else if (d.endpoint_kind === 'Remote') {
-            modeClass = 'remote';
-            modeText = 'Remote';
-            if (!d.capabilities.inference) {
-                statusClass = 'error';
-                statusText = 'Error';
-            } else {
-                statusClass = 'warning';
-                statusText = 'Inference only';
-            }
-        }
-
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initDashboardRender() {
-    // Put rendering functions on window for dashboard-ws.js
     window.setChipState = setChipState;
     window.setCardState = setCardState;
     window.pushSparklinePoint = pushSparklinePoint;
+    window.renderSparkline = renderSparkline;
+    window.renderLiveSparkline = renderLiveSparkline;
     window.updateLiveOutputEstimate = updateLiveOutputEstimate;
     window.updateRequestActivity = updateRequestActivity;
     window.renderRecentTask = renderRecentTask;
@@ -1210,9 +1084,8 @@ export function initDashboardRender() {
     window.renderCapabilityPopover = renderCapabilityPopover;
     window.updateMetricDelta = updateMetricDelta;
     window.setEmptyState = setEmptyState;
-    window.renderGpuCard = renderGpuCard;
-    window.renderSystemCard = renderSystemCard;
-    window.setMetricSectionVisibility = setMetricSectionVisibility;
+    window.getSeverityColor = getSeverityColor;
+    window.getTempSeverityColor = getTempSeverityColor;
     window.renderHwBar = renderHwBar;
     window.renderHwRing = renderHwRing;
     window.renderHwSparkline = renderHwSparkline;
@@ -1229,6 +1102,7 @@ export function initDashboardRender() {
     window.toggleVizSwitcher = toggleVizSwitcher;
     window.selectVizStyle = selectVizStyle;
     window.resetVizPrefs = resetVizPrefs;
-    window.getSeverityColor = getSeverityColor;
-    window.getTempSeverityColor = getTempSeverityColor;
+    window.renderGpuCard = renderGpuCard;
+    window.renderSystemCard = renderSystemCard;
+    window.setMetricSectionVisibility = setMetricSectionVisibility;
 }
