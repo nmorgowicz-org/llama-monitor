@@ -143,10 +143,10 @@ function updateRequestActivity(taskId, active, outputTokens, nowMs) {
     }
 
     const cutoff = nowMs - (10 * 60 * 1000);
-    requestActivity = requestActivity
+    window.requestActivity = requestActivity
         .filter(segment => !segment.endedAtMs || segment.endedAtMs >= cutoff)
         .slice(-100);
-    recentTasks = recentTasks.slice(0, 8);
+    window.recentTasks = recentTasks.slice(0, 8);
 }
 
 function renderRecentTask() {
