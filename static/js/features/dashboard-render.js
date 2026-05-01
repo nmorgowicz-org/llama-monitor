@@ -651,6 +651,12 @@ function pushSysHistory(key, value) {
     if (sysHistory[key].length > limit) sysHistory[key].shift();
 }
 
+var vizPrefs = {
+    gpu: { load: 'bar', power: 'bar', vram: 'bar', clocks: 'ring' },
+    system: { load: 'bar', ram: 'bar', clock: 'ring' }
+};
+
+
 function loadVizPrefs() {
     try {
         var gpuStr = localStorage.getItem('llama-monitor-gpu-viz');
