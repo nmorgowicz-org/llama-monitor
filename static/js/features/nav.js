@@ -42,10 +42,32 @@ function restoreSidebarState() {
     }
 }
 
+// ── Endpoint status popover ──────────────────────────────────────────────────
+
+function initEndpointStatus() {
+    const endpointStatus = document.getElementById('endpoint-status');
+    const endpointStatusWrap = endpointStatus?.closest('.endpoint-status-wrap');
+    if (!endpointStatus || !endpointStatusWrap) return;
+
+    endpointStatus.addEventListener('click', event => {
+        event.stopPropagation();
+        const open = endpointStatusWrap.classList.toggle('open');
+        endpointStatus.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+
+    document.addEventListener('click', event => {
+        if (!event.target.closest('.endpoint-status-wrap')) {
+            endpointStatusWrap.classList.remove('open');
+            endpointStatus.setAttribute('aria-expanded', 'false');
+        }
+    });
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initNav() {
     window.switchTab = switchTab;
     window.toggleSidebarCollapse = toggleSidebarCollapse;
     restoreSidebarState(); // runs immediately on import
+    initEndpointStatus();
 }

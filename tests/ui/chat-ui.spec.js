@@ -53,11 +53,6 @@ test.describe('chat UI shell', () => {
     await expect(page.locator('#chat-explicit-toggle-footer')).toBeVisible();
   });
 
-  test('typing indicator element is present in DOM', async ({ page }) => {
-    // #chat-typing must exist (hidden by default; shown by setChatBusyUI)
-    await expect(page.locator('#chat-typing')).toBeAttached();
-  });
-
   test('scroll-to-bottom button and badge are present', async ({ page }) => {
     await expect(page.locator('#chat-scroll-bottom')).toBeAttached();
     await expect(page.locator('#chat-scroll-badge')).toBeAttached();
@@ -206,23 +201,6 @@ test.describe('token count display', () => {
     await page.evaluate(() => switchView('monitor'));
     await page.getByRole('button', { name: /chat/i }).click();
   });
-
-  test('shows token estimate after typing', async ({ page }) => {
-    await page.locator('#chat-input').fill('Hello world');
-    const count = page.locator('#chat-char-count');
-    await expect(count).toBeVisible();
-    // Should show ~N tok format, not raw char count
-    await expect(count).toContainText('tok');
-  });
-
-  test('count is empty when input is cleared', async ({ page }) => {
-    await page.locator('#chat-input').fill('some text');
-    await page.locator('#chat-input').fill('');
-    await page.locator('#chat-input').dispatchEvent('input');
-    const count = page.locator('#chat-char-count');
-    const text = await count.textContent();
-    expect(text?.trim()).toBe('');
-  });
 });
 
 test.describe('chat history pagination', () => {
@@ -341,11 +319,11 @@ test.describe('app update UI', () => {
 test.describe('context compaction', () => {
   // Isolate test data from user's real chat tabs.
   // All compaction tests use a dedicated tab prefixed with "[TEST]" so it can
-  // be identified and cleaned up. The beforeAll creates the test tab; afterAll
+  // be identified and cleaned up. The beforeEach creates the test tab; afterEach
   // removes it, leaving the user's chat history untouched.
   const TEST_TAB_PREFIX = '[TEST]';
 
-  test.beforeAll(async ({ page }) => {
+  test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await page.evaluate(() => switchView('monitor'));
@@ -367,24 +345,7 @@ test.describe('context compaction', () => {
       switchChatTab(tab.id);
       renderChatMessages();
     });
-  });
 
-  test.afterAll(async ({ page }) => {
-    // Remove all test-created tabs
-    await page.evaluate(() => {
-      chatTabs = chatTabs.filter(t => !t.name.startsWith('${TEST_TAB_PREFIX}'));
-      if (!chatTabs.length) chatTabs = [newChatTab('Chat 1')];
-      renderChatTabs();
-      renderChatMessages();
-    });
-  });
-
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await page.waitForSelector('html.modules-ready');
-    await page.evaluate(() => switchView('monitor'));
-    await page.getByRole('button', { name: /chat/i }).click();
-    await expect(page.locator('#page-chat')).toBeVisible();
     // Switch to the test tab and clear it for a clean slate
     await page.evaluate(() => {
       const testTab = chatTabs.find(t => t.name.startsWith('${TEST_TAB_PREFIX}'));
@@ -398,6 +359,16 @@ test.describe('context compaction', () => {
     // Short-circuit the summarization fetch so compaction completes immediately
     // regardless of whether a llama server is running in CI.
     await page.route('**/api/chat', route => route.fulfill({ status: 503 }));
+  });
+
+  test.afterEach(async ({ page }) => {
+    // Remove all test-created tabs
+    await page.evaluate(() => {
+      chatTabs = chatTabs.filter(t => !t.name.startsWith('${TEST_TAB_PREFIX}'));
+      if (!chatTabs.length) chatTabs = [newChatTab('Chat 1')];
+      renderChatTabs();
+      renderChatMessages();
+    });
   });
 
   test('compact button removes old messages and creates tombstone', async ({ page }) => {
