@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.12.0...v0.13.0) (2026-05-01)
+
+
+### Features
+
+* **ui:** refactor monolithic app.js into 22 ES modules ([005fe0f](https://github.com/nmorgowicz-org/llama-monitor/commit/005fe0f983bbcf4f9c588d53cae57ba889cbdf94))
+
+
+### Bug Fixes
+
+* **chat:** default auto-compaction on restored tabs ([005fe0f](https://github.com/nmorgowicz-org/llama-monitor/commit/005fe0f983bbcf4f9c588d53cae57ba889cbdf94))
+
 ## [0.12.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.11.0...v0.12.0) (2026-04-30)
 
 
