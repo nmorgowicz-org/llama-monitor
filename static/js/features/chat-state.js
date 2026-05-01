@@ -19,6 +19,7 @@ export function newChatTab(name = 'New Chat') {
         ai_name: '',
         user_name: '',
         explicit_mode: false,
+        auto_compact: true,
         messages: [],
         totalInputTokens: 0,
         totalOutputTokens: 0,

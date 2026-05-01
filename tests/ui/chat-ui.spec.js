@@ -443,27 +443,31 @@ test.describe('context compaction', () => {
   });
 
   test('auto-compact settings persist on tab switch', async ({ page }) => {
-    // Enable auto-compact on the test tab directly (bypass UI event issues)
+    // New tabs have auto_compact on by default
+    const newTabAutoCompact = await page.evaluate(() => !!activeChatTab().auto_compact);
+    expect(newTabAutoCompact).toBe(true);
+
+    // Disable auto-compact on the test tab
     await page.evaluate(() => {
       const tab = activeChatTab();
-      tab.auto_compact = true;
+      tab.auto_compact = false;
       tab.updated_at = Date.now();
     });
 
     // Create a new tab and switch to it
     await page.locator('.chat-tab-add').click();
 
-    // New tab should have auto-compact off by default (undefined coerces to false)
-    const newTabAutoCompact = await page.evaluate(() => !!activeChatTab().auto_compact);
-    expect(newTabAutoCompact).toBe(false);
+    // New tab should have auto-compact on by default
+    const newTabAutoCompact2 = await page.evaluate(() => !!activeChatTab().auto_compact);
+    expect(newTabAutoCompact2).toBe(true);
 
-    // Switch back to the test tab — settings should still be on (per-tab persistence)
+    // Switch back to the test tab — settings should still be off (per-tab persistence)
     await page.evaluate(() => {
       const testTab = chatTabs.find(t => t.name.startsWith('${TEST_TAB_PREFIX}'));
       if (testTab) switchChatTab(testTab.id);
     });
     const firstTabAutoCompact = await page.evaluate(() => !!activeChatTab().auto_compact);
-    expect(firstTabAutoCompact).toBe(true);
+    expect(firstTabAutoCompact).toBe(false);
 
     // Clean up the extra tab created by this test
     await page.evaluate(() => {
