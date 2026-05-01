@@ -453,8 +453,8 @@ test.describe('context compaction', () => {
     // Create a new tab and switch to it
     await page.locator('.chat-tab-add').click();
 
-    // New tab should have auto-compact off by default
-    const newTabAutoCompact = await page.evaluate(() => activeChatTab().auto_compact);
+    // New tab should have auto-compact off by default (undefined coerces to false)
+    const newTabAutoCompact = await page.evaluate(() => !!activeChatTab().auto_compact);
     expect(newTabAutoCompact).toBe(false);
 
     // Switch back to the test tab — settings should still be on (per-tab persistence)
@@ -462,7 +462,7 @@ test.describe('context compaction', () => {
       const testTab = chatTabs.find(t => t.name.startsWith('${TEST_TAB_PREFIX}'));
       if (testTab) switchChatTab(testTab.id);
     });
-    const firstTabAutoCompact = await page.evaluate(() => activeChatTab().auto_compact);
+    const firstTabAutoCompact = await page.evaluate(() => !!activeChatTab().auto_compact);
     expect(firstTabAutoCompact).toBe(true);
 
     // Clean up the extra tab created by this test
