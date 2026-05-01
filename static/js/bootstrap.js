@@ -7,6 +7,7 @@
 // replace the legacy script as features are extracted.
 
 import { escapeHtml } from './core/format.js';
+import { initDashboardRender } from './features/dashboard-render.js';
 import { initWebSocket } from './features/dashboard-ws.js';
 import { initFileBrowser } from './features/file-browser.js';
 import { initPresets } from './features/presets.js';
@@ -29,6 +30,7 @@ import { initUserMenu } from './features/user-menu.js';
 import { initConfig } from './features/config.js';
 import { initModels } from './features/models.js';
 import { initSensorBridge } from './features/sensor-bridge.js';
+import { initToast } from './features/toast.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
@@ -38,9 +40,10 @@ console.log('[bootstrap] Module entrypoint loaded');
 // duplicates in app.js.
 window.escapeHtml = escapeHtml;
 
-// Phase 3: Initialize WebSocket (replaces ws creation in app.js).
-// app.js still runs first and provides rendering functions on window.*.
-// The dashboard-ws module calls those functions via window.*.
+// Phase 1: Initialize rendering functions, then WebSocket.
+// dashboard-render provides rendering functions on window.*.
+// dashboard-ws calls those functions via window.*.
+initDashboardRender();
 initWebSocket();
 
 // Phase 4: Initialize extracted features — puts inline-handler functions on window.
@@ -65,7 +68,7 @@ initSetupView();
 initUpdates();
 initShortcuts();
 
-// Phase 8: Nav, animate, settings, user menu, config, models, sensor bridge
+// Phase 8: Nav, animate, settings, user menu, config, models, sensor bridge, toast
 initNav();
 initAnimate();
 initSettings();
@@ -73,6 +76,7 @@ initUserMenu();
 initConfig();
 initModels();
 initSensorBridge();
+initToast();
 
 // Service worker registration
 navigator.serviceWorker.register('/sw.js').catch(() => {});

@@ -41,6 +41,9 @@ pub const FEATURES_SETUP_VIEW_JS: &str = include_str!("../../static/js/features/
 pub const FEATURES_SHORTCUTS_JS: &str = include_str!("../../static/js/features/shortcuts.js");
 pub const FEATURES_UPDATES_JS: &str = include_str!("../../static/js/features/updates.js");
 pub const FEATURES_USER_MENU_JS: &str = include_str!("../../static/js/features/user-menu.js");
+pub const FEATURES_DASHBOARD_RENDER_JS: &str =
+    include_str!("../../static/js/features/dashboard-render.js");
+pub const FEATURES_TOAST_JS: &str = include_str!("../../static/js/features/toast.js");
 pub const LHM_JS: &str = include_str!("../../static/lhm.js");
 pub const MANIFEST_JSON: &str = include_str!("../../static/manifest.json");
 pub const SW_JS: &str = include_str!("../../static/sw.js");

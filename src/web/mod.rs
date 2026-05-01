@@ -501,6 +501,28 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
                 "application/javascript",
             )
         });
+    let js_features_dashboard_render = warp::path("js")
+        .and(warp::path("features"))
+        .and(warp::path("dashboard-render.js"))
+        .and(warp::get())
+        .map(|| {
+            warp::reply::with_header(
+                static_assets::FEATURES_DASHBOARD_RENDER_JS,
+                "content-type",
+                "application/javascript",
+            )
+        });
+    let js_features_toast = warp::path("js")
+        .and(warp::path("features"))
+        .and(warp::path("toast.js"))
+        .and(warp::get())
+        .map(|| {
+            warp::reply::with_header(
+                static_assets::FEATURES_TOAST_JS,
+                "content-type",
+                "application/javascript",
+            )
+        });
 
     let manifest = warp::path("manifest.json").and(warp::get()).map(|| {
         warp::reply::with_header(
@@ -569,6 +591,8 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .or(js_features_shortcuts)
         .or(js_features_updates)
         .or(js_features_user_menu)
+        .or(js_features_dashboard_render)
+        .or(js_features_toast)
         .or(lhm_js)
         .or(manifest)
         .or(sw)
