@@ -331,10 +331,10 @@ test.describe('context compaction', () => {
     await expect(page.locator('#page-chat')).toBeVisible();
 
     // Clean up any leftover test tabs from a previous run
-    await page.evaluate(() => {
-      chatTabs = chatTabs.filter(t => !t.name.startsWith('${TEST_TAB_PREFIX}'));
+    await page.evaluate((testTabPrefix) => {
+      chatTabs = chatTabs.filter(t => !t.name.startsWith(testTabPrefix));
       if (!chatTabs.length) chatTabs = [newChatTab('Chat 1')];
-    });
+    }, TEST_TAB_PREFIX);
 
     // Create a fresh test tab
     await page.evaluate(() => {
@@ -347,15 +347,15 @@ test.describe('context compaction', () => {
     });
 
     // Switch to the test tab and clear it for a clean slate
-    await page.evaluate(() => {
-      const testTab = chatTabs.find(t => t.name.startsWith('${TEST_TAB_PREFIX}'));
+    await page.evaluate((testTabPrefix) => {
+      const testTab = chatTabs.find(t => t.name.startsWith(testTabPrefix));
       if (testTab) {
         testTab.messages = [];
         testTab.visible_message_limit = 100;
         switchChatTab(testTab.id);
       }
       renderChatMessages();
-    });
+    }, TEST_TAB_PREFIX);
     // Short-circuit the summarization fetch so compaction completes immediately
     // regardless of whether a llama server is running in CI.
     await page.route('**/api/chat', route => route.fulfill({ status: 503 }));
@@ -363,12 +363,12 @@ test.describe('context compaction', () => {
 
   test.afterEach(async ({ page }) => {
     // Remove all test-created tabs
-    await page.evaluate(() => {
-      chatTabs = chatTabs.filter(t => !t.name.startsWith('${TEST_TAB_PREFIX}'));
+    await page.evaluate((testTabPrefix) => {
+      chatTabs = chatTabs.filter(t => !t.name.startsWith(testTabPrefix));
       if (!chatTabs.length) chatTabs = [newChatTab('Chat 1')];
       renderChatTabs();
       renderChatMessages();
-    });
+    }, TEST_TAB_PREFIX);
   });
 
   test('compact button removes old messages and creates tombstone', async ({ page }) => {
@@ -462,17 +462,17 @@ test.describe('context compaction', () => {
     expect(newTabAutoCompact2).toBe(true);
 
     // Switch back to the test tab — settings should still be off (per-tab persistence)
-    await page.evaluate(() => {
-      const testTab = chatTabs.find(t => t.name.startsWith('${TEST_TAB_PREFIX}'));
+    await page.evaluate((testTabPrefix) => {
+      const testTab = chatTabs.find(t => t.name.startsWith(testTabPrefix));
       if (testTab) switchChatTab(testTab.id);
-    });
+    }, TEST_TAB_PREFIX);
     const firstTabAutoCompact = await page.evaluate(() => !!activeChatTab().auto_compact);
     expect(firstTabAutoCompact).toBe(false);
 
     // Clean up the extra tab created by this test
-    await page.evaluate(() => {
-      chatTabs = chatTabs.filter(t => t.name.startsWith('${TEST_TAB_PREFIX}') || t.name === 'Chat 1');
+    await page.evaluate((testTabPrefix) => {
+      chatTabs = chatTabs.filter(t => t.name.startsWith(testTabPrefix) || t.name === 'Chat 1');
       if (!chatTabs.length) chatTabs = [newChatTab('Chat 1')];
-    });
+    }, TEST_TAB_PREFIX);
   });
 });

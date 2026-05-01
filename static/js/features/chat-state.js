@@ -37,13 +37,20 @@ export function newChatTab(name = 'New Chat') {
     };
 }
 
+function normalizeChatTab(tab) {
+    return {
+        ...tab,
+        auto_compact: tab.auto_compact ?? true,
+    };
+}
+
 // ── Tab Initialization ────────────────────────────────────────────────────────
 
 export async function initChatTabs() {
     try {
         const resp = await fetch('/api/chat/tabs');
         const data = await resp.json();
-        window.chatTabs = data.length ? data : [newChatTab('Chat 1')];
+        window.chatTabs = data.length ? data.map(normalizeChatTab) : [newChatTab('Chat 1')];
     } catch {
         window.chatTabs = [newChatTab('Chat 1')];
     }
