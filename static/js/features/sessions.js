@@ -5,7 +5,7 @@
 
 export async function loadSessions() {
     try {
-        const resp = await fetch('/api/window.sessions');
+        const resp = await fetch('/api/sessions');
         window.sessions = await resp.json();
         renderSessionList();
 
@@ -96,7 +96,7 @@ export function quickStartSession(sessionId) {
 export async function deleteSession(sessionId) {
     if (!confirm('Delete this session?')) return;
     try {
-        const resp = await fetch('/api/window.sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' });
+        const resp = await fetch('/api/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' });
         const data = await resp.json();
         if (data.ok) {
             window.showToast('Session deleted', 'success');
@@ -111,7 +111,7 @@ export async function deleteSession(sessionId) {
 
 export async function switchSession(sessionId) {
     try {
-        const resp = await fetch('/api/window.sessions/active', {
+        const resp = await fetch('/api/sessions/active', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: sessionId })
@@ -215,7 +215,7 @@ export function saveSession(event) {
     const presetId = document.getElementById('preset-select')?.value;
     const modalPresetId = document.getElementById('modal-session-preset')?.value;
     const endpoint = target || document.getElementById('server-endpoint')?.value.trim();
-    const url = mode === 'attach' ? '/api/attach' : '/api/window.sessions/spawn';
+    const url = mode === 'attach' ? '/api/attach' : '/api/sessions/spawn';
     const payload = mode === 'attach'
         ? { endpoint }
         : {
@@ -262,7 +262,7 @@ export function saveSession(event) {
 
 export async function updateActiveSessionInfo() {
     try {
-        const resp = await fetch('/api/window.sessions/active');
+        const resp = await fetch('/api/sessions/active');
         const data = await resp.json();
         if (data && data.mode) {
             const modeParts = data.mode.split(':');

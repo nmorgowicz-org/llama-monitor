@@ -19,7 +19,7 @@ function clearFieldErrors() {
 
 export async function loadPresets(selectId) {
     const [presetsResp, settingsResp] = await Promise.all([
-        fetch('/api/window.presets'),
+        fetch('/api/presets'),
         selectId === undefined ? fetch('/api/settings') : Promise.resolve(null),
     ]);
 
@@ -201,7 +201,7 @@ export async function savePreset(event) {
         let resp;
         let savedId;
         if (id) {
-            resp = await fetch('/api/window.presets/' + encodeURIComponent(id), {
+            resp = await fetch('/api/presets/' + encodeURIComponent(id), {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(preset),
@@ -213,7 +213,7 @@ export async function savePreset(event) {
             }
             savedId = id;
         } else {
-            resp = await fetch('/api/window.presets', {
+            resp = await fetch('/api/presets', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(preset),
@@ -247,7 +247,7 @@ export async function copyPreset() {
     copy.name = p.name + ' (copy)';
 
     try {
-        const resp = await fetch('/api/window.presets', {
+        const resp = await fetch('/api/presets', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(copy),
@@ -272,7 +272,7 @@ export async function deletePreset() {
     if (!confirm('Delete preset "' + p.name + '"?')) return;
 
     try {
-        const resp = await fetch('/api/window.presets/' + encodeURIComponent(id), { method: 'DELETE' });
+        const resp = await fetch('/api/presets/' + encodeURIComponent(id), { method: 'DELETE' });
         if (!resp.ok) {
             const err = await resp.text().catch(() => 'Unknown error');
             window.showToast('Delete failed: ' + err, 'error');
@@ -288,7 +288,7 @@ export async function deletePreset() {
 export async function resetPresets() {
     if (!confirm('Reset all presets to built-in defaults? Custom presets will be removed.')) return;
     try {
-        const resp = await fetch('/api/window.presets/reset', { method: 'POST' });
+        const resp = await fetch('/api/presets/reset', { method: 'POST' });
         if (!resp.ok) {
             const err = await resp.text().catch(() => 'Unknown error');
             window.showToast('Reset failed: ' + err, 'error');

@@ -220,7 +220,7 @@ export function doStartFromSetup() {
 
 export async function initAttachDetachButtons() {
     try {
-        const resp = await fetch('/api/window.sessions/active');
+        const resp = await fetch('/api/sessions/active');
         const data = await resp.json();
         const btnAttach = document.getElementById('btn-attach');
         const btnDetach = document.getElementById('btn-detach');
