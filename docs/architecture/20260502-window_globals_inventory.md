@@ -143,6 +143,25 @@ These are **action** functions exposed on `window` for inline HTML handlers or c
 
 ---
 
+## D1. Remote Agent Module Globals — ✅ COMPLETE (2026-05-02)
+
+| Global | Assigned By | Read By | Category | Action |
+|--------|------------|---------|----------|--------|
+| `window.remoteAgentInProgress` | bootstrap, remote-agent | remote-agent | state | ✅ replaced with `remoteAgent.inProgress` |
+| `window.remoteAgentSshConnection` | bootstrap, remote-agent | remote-agent | state | ✅ replaced with `remoteAgent.sshConnection` |
+| `window.latestSshHostKey` | bootstrap, remote-agent | remote-agent | state | ✅ replaced with `remoteAgent.latestHostKey` |
+| `window.setRemoteAgentStatus` | remote-agent | dashboard-ws | action | ✅ already ES export (dashboard-ws imports directly) |
+| `window.escapeHtml` | bootstrap | remote-agent | shim | ✅ imported from `core/format.js` |
+
+**Summary:** 4 remote-agent globals eliminated. `setRemoteAgentStatus` was already an ES export — no change needed.
+
+### What was NOT changed
+
+- `window.showToast`, `window.saveSettings`, `window.closeConfigModal`, `window.closeSettingsModal`, `window.openConfigModal` — cross-module bridges via `window.*`
+- `window.confirm`, `window.location` — browser-native
+
+---
+
 ## E. Chat Module Globals — ✅ COMPLETE (2026-05-02)
 
 | Global | Assigned By | Read By | Category | Action |

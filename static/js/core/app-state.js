@@ -81,15 +81,17 @@ export let serverRunning = false;
 export let prevLogLen = 0;
 
 // ── Remote Agent ──────────────────────────────────────────────────────────────
+// Container object so that reassignments are visible through ES module imports.
 
-/** Whether a remote-agent operation is in progress */
-export let remoteAgentInProgress = false;
-
-/** SSH connection info for remote agent */
-export let remoteAgentSshConnection = null;
-
-/** Latest SSH host key from scan */
-export let latestSshHostKey = null;
+/** Remote agent state container — mutable properties, imported as a live reference */
+export const remoteAgent = {
+    /** Whether a remote-agent operation is in progress */
+    inProgress: false,
+    /** SSH connection info for remote agent */
+    sshConnection: null,
+    /** Latest SSH host key from scan */
+    latestHostKey: null,
+};
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 

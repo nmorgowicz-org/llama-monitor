@@ -13,6 +13,7 @@ window.exportData = () => {};
 
 // Initialize window.* state from app-state.js (replaces init-state.js classic script)
 const chat = state.chat;
+const remoteAgent = state.remoteAgent;
 window.prevValues = state.prevValues;
 window.metricSeries = state.metricSeries;
 window.slotSnapshots = state.slotSnapshots;
@@ -33,6 +34,10 @@ window.activeSessionId = state.activeSessionId;
 window.activeSessionPort = state.activeSessionPort;
 window.serverRunning = state.serverRunning;
 window.prevLogLen = state.prevLogLen;
+// Remote agent state — copy to container (window.* copies kept for compat)
+remoteAgent.inProgress = state.remoteAgentInProgress;
+remoteAgent.sshConnection = state.remoteAgentSshConnection;
+remoteAgent.latestHostKey = state.latestSshHostKey;
 window.remoteAgentInProgress = state.remoteAgentInProgress;
 window.remoteAgentSshConnection = state.remoteAgentSshConnection;
 window.latestSshHostKey = state.latestSshHostKey;
