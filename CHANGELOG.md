@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.13.0...v0.14.0) (2026-05-02)
+
+
+### Features
+
+* **ui:** remove the legacy window facade and delete app.js startup wiring ([beee69e](https://github.com/nmorgowicz-org/llama-monitor/commit/beee69e3044296e1f78b82f577e95f6e63f9a4a3))
+
+
+### Bug Fixes
+
+* **ui:** improve modal interaction and accessibility for settings, models, and remote-agent flows ([beee69e](https://github.com/nmorgowicz-org/llama-monitor/commit/beee69e3044296e1f78b82f577e95f6e63f9a4a3))
+
+
+### Performance Improvements
+
+* **ui:** defer non-critical frontend modules to reduce startup work ([beee69e](https://github.com/nmorgowicz-org/llama-monitor/commit/beee69e3044296e1f78b82f577e95f6e63f9a4a3))
+* **ui:** optimize frontend bootstrap and rendering hot paths ([beee69e](https://github.com/nmorgowicz-org/llama-monitor/commit/beee69e3044296e1f78b82f577e95f6e63f9a4a3))
+
 ## [0.13.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.12.0...v0.13.0) (2026-05-01)
 
 
