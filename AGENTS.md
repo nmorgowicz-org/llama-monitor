@@ -119,7 +119,12 @@ cargo clippy -- -D warnings
 
 # Format
 cargo fmt
+
+# Validate JavaScript syntax (catches errors before browser load)
+./scripts/validate-js.sh
 ```
+
+**Important:** Always run `./scripts/validate-js.sh` after modifying any `.js` files. This catches syntax errors and ES module import issues before they reach the browser.
 
 ## CI/CD Workflow
 

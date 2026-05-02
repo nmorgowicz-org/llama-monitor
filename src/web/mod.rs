@@ -27,10 +27,10 @@ pub fn build_routes(
 
     // Apply HTTP security headers to all responses
     // Custom CSP: allow external CDN scripts, fonts, styles, and data URIs (app requirements)
-    // connect-src allows any HTTPS — needed for the service worker passthrough proxy to forward CDN requests
+    // connect-src allows any HTTPS — needed for API calls and WebSocket connections
     let csp = ContentSecurityPolicy::new()
         .default_src(vec!["'self'", "data:"])
-        .connect_src(vec!["'self'", "https:"])
+        .connect_src(vec!["'self'", "https:", "wss:"])
         .script_src(vec![
             "'self'",
             "'unsafe-inline'",
@@ -43,7 +43,8 @@ pub fn build_routes(
             "https://cdn.jsdelivr.net",
         ])
         .font_src(vec!["'self'", "https://fonts.gstatic.com"])
-        .img_src(vec!["'self'", "data:", "https:"]);
+        .img_src(vec!["'self'", "data:", "https:"])
+        .frame_src(vec!["'self'"]);
     let helmet: HelmetFilter = Helmet::new().add(csp).try_into().unwrap();
     helmet.wrap(routes)
 }
@@ -128,12 +129,12 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         warp::reply::html(html)
     });
 
-    // Helper: serve static JS with cache headers (1 hour — embedded at compile time, versioned by binary)
+    // Helper: serve static JS with no-cache (force browser to reload on every request)
     fn js_reply(content: &'static str) -> impl warp::Reply {
         warp::reply::with_header(
             warp::reply::with_header(content, "content-type", "application/javascript"),
             "cache-control",
-            "max-age=3600",
+            "no-cache, no-store, must-revalidate",
         )
     }
 
