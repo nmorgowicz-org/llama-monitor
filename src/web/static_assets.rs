@@ -16,6 +16,8 @@ pub const CORE_FORMAT_JS: &str = include_str!("../../static/js/core/format.js");
 pub const CORE_APP_STATE_JS: &str = include_str!("../../static/js/core/app-state.js");
 pub const FEATURES_DASHBOARD_WS_JS: &str = include_str!("../../static/js/features/dashboard-ws.js");
 pub const FEATURES_FILE_BROWSER_JS: &str = include_str!("../../static/js/features/file-browser.js");
+pub const FEATURES_FILE_BROWSER_LAUNCHER_JS: &str =
+    include_str!("../../static/js/features/file-browser-launcher.js");
 pub const FEATURES_PRESETS_JS: &str = include_str!("../../static/js/features/presets.js");
 pub const FEATURES_SESSIONS_JS: &str = include_str!("../../static/js/features/sessions.js");
 pub const FEATURES_ATTACH_DETACH_JS: &str =
@@ -28,6 +30,7 @@ pub const FEATURES_CHAT_TEMPLATES_JS: &str =
     include_str!("../../static/js/features/chat-templates.js");
 pub const FEATURES_CHAT_TRANSPORT_JS: &str =
     include_str!("../../static/js/features/chat-transport.js");
+pub const FEATURES_CONTEXT_CARD_JS: &str = include_str!("../../static/js/features/context-card.js");
 pub const FEATURES_CONFIG_JS: &str = include_str!("../../static/js/features/config.js");
 pub const FEATURES_LHM_JS: &str = include_str!("../../static/js/features/lhm.js");
 pub const FEATURES_MODELS_JS: &str = include_str!("../../static/js/features/models.js");

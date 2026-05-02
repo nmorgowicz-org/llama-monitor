@@ -217,6 +217,11 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .and(warp::path("file-browser.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_FILE_BROWSER_JS));
+    let js_features_file_browser_launcher = warp::path("js")
+        .and(warp::path("features"))
+        .and(warp::path("file-browser-launcher.js"))
+        .and(warp::get())
+        .map(|| js_reply(static_assets::FEATURES_FILE_BROWSER_LAUNCHER_JS));
     let js_features_presets = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("presets.js"))
@@ -262,6 +267,11 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .and(warp::path("chat-transport.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_CHAT_TRANSPORT_JS));
+    let js_features_context_card = warp::path("js")
+        .and(warp::path("features"))
+        .and(warp::path("context-card.js"))
+        .and(warp::get())
+        .map(|| js_reply(static_assets::FEATURES_CONTEXT_CARD_JS));
     let js_features_config = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("config.js"))
@@ -361,6 +371,7 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .or(js_core_app_state)
         .or(js_features_dashboard_ws)
         .or(js_features_file_browser)
+        .or(js_features_file_browser_launcher)
         .or(js_features_presets)
         .or(js_features_sessions)
         .or(js_features_attach_detach)
@@ -370,6 +381,7 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .or(js_features_chat_state)
         .or(js_features_chat_templates)
         .or(js_features_chat_transport)
+        .or(js_features_context_card)
         .or(js_features_config)
         .or(js_features_lhm)
         .or(js_features_models)

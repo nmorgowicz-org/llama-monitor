@@ -28,8 +28,8 @@ import {
     setMetricSectionVisibility,
 } from './dashboard-render.js';
 import { animateNumber } from './animate.js';
+import { updateContextCard } from './context-card.js';
 import { setRemoteAgentStatus } from './remote-agent.js';
-import { activeChatTab } from './chat-state.js';
 import { hideConnectingState, switchView } from './setup-view.js';
 
 // Local state — not shared across modules
@@ -66,15 +66,8 @@ function ensureCachedElements() {
         throughputCard: document.querySelector('.widget-speed'),
         generationCard: document.querySelector('.widget-generation'),
         contextCard: document.querySelector('.widget-context'),
-        // Context
-        mContextValue: document.getElementById('m-context-value'),
-        mContextPct: document.getElementById('m-context-pct'),
-        mContextDelta: document.getElementById('m-context-delta'),
-        mContextMax: document.getElementById('m-context-max'),
-        mContextBar: document.getElementById('m-context-bar'),
         mContextState: document.getElementById('m-context-state'),
         mContextEmpty: document.getElementById('m-context-empty'),
-        mContextAge: document.getElementById('m-context-age'),
         // Badges
         badgeServer: document.getElementById('badge-server'),
         badgeChat: document.getElementById('badge-chat'),
@@ -97,15 +90,6 @@ function ensureCachedElements() {
         statusDot: document.getElementById('status-dot'),
         btnStart: document.getElementById('btn-start'),
         btnStop: document.getElementById('btn-stop'),
-        // Context
-        mCtxFill: document.getElementById('m-ctx-fill'),
-        mCtxValue: document.getElementById('m-ctx'),
-        mCtxDetails: document.getElementById('m-ctx-details'),
-        mCtxState: document.getElementById('m-context-state'),
-        mCtxPeakFill: document.getElementById('m-ctx-peak-fill'),
-        mCtxLiveLabel: document.getElementById('m-ctx-live-label'),
-        mCtxLiveDetail: document.getElementById('m-ctx-live-detail'),
-        mCtxPeakDetail: document.getElementById('m-ctx-peak-detail'),
         mGenEmpty: document.getElementById('m-generation-empty'),
         mSlotsState: document.getElementById('m-slots-state'),
         mActivityState: document.getElementById('m-activity-state'),
@@ -514,74 +498,7 @@ function updateInferenceMetrics(d) {
 // ── Context metrics ──────────────────────────────────────────────────────────
 
 function updateContextMetrics(d, l, hasActiveEndpoint) {
-    const ce = cachedElements;
-    const ctxFill = ce.mCtxFill;
-    const ctxValue = ce.mCtxValue;
-    const ctxDetails = ce.mCtxDetails;
-    const ctxState = ce.mCtxState;
-    const ctxPeakFill = ce.mCtxPeakFill;
-    const ctxLiveLabel = ce.mCtxLiveLabel;
-    const ctxLiveDetail = ce.mCtxLiveDetail;
-    const ctxPeakDetail = ce.mCtxPeakDetail;
-    const contextCapacity = l?.context_capacity_tokens || l?.kv_cache_max || 0;
-    const contextLive = l?.context_live_tokens || l?.kv_cache_tokens || 0;
-    const contextPeak = l?.context_high_water_tokens || l?.kv_cache_high_water || 0;
-    const contextLiveAvailable = !!(l?.context_live_tokens_available || l?.kv_cache_tokens_available);
-    const peakPct = contextCapacity > 0 && contextPeak > 0 ? Math.min(100, Math.max(2, (contextPeak / contextCapacity) * 100)) : 0;
-    const contextCard = ce.contextCard;
-
-    setEmptyState(ce.mContextEmpty, !hasActiveEndpoint);
-    if (ctxPeakFill) ctxPeakFill.style.width = peakPct + '%';
-    if (ctxPeakDetail) ctxPeakDetail.textContent = contextPeak > 0 ? formatMetricNumber(contextPeak) + ' peak' : '\u2014';
-
-    if (l && contextCapacity > 0 && contextLiveAvailable) {
-        const pct = ((contextLive / contextCapacity) * 100);
-        const severity = pct >= 95 ? 'critical' : pct >= 80 ? 'warning' : '';
-        setCardState(contextCard, severity === 'critical' ? 'live' : 'idle');
-        setChipState(ctxState, 'live', severity || 'live');
-        if (ctxLiveLabel) ctxLiveLabel.textContent = 'Live usage';
-        if (ctxLiveDetail) ctxLiveDetail.textContent = formatMetricNumber(contextLive) + ' live';
-
-        animateNumber(ctxValue, state.prevValues.contextPct, pct, 300, 1, '%');
-        state.prevValues.contextPct = pct;
-
-        if (ctxFill) {
-            ctxFill.style.width = pct + '%';
-            ctxFill.className = 'context-progress-fill ' + severity;
-        }
-
-        if (ctxDetails) ctxDetails.textContent = formatMetricNumber(contextLive) + ' / ' + formatMetricNumber(contextCapacity);
-
-    } else if (l && contextCapacity > 0) {
-        setCardState(contextCard, 'unavailable');
-        setChipState(ctxState, 'capacity', 'idle');
-        if (ctxFill) {
-            ctxFill.style.width = '0%';
-            ctxFill.className = 'context-progress-fill unavailable';
-        }
-        if (ctxLiveLabel) ctxLiveLabel.textContent = 'Live usage';
-        if (ctxLiveDetail) ctxLiveDetail.textContent = 'not exposed by llama-server';
-        if (ctxValue) ctxValue.textContent = 'peak observed only';
-        if (ctxDetails) {
-            const detailParts = ['capacity ' + formatMetricNumber(contextCapacity)];
-            if (contextPeak > 0) {
-                detailParts.push('peak ' + formatMetricNumber(contextPeak));
-            }
-            ctxDetails.textContent = detailParts.join(' · ');
-        }
-    } else {
-        setCardState(contextCard, !hasActiveEndpoint ? 'dormant' : 'unavailable');
-        setChipState(ctxState, 'unknown', 'idle');
-        if (ctxLiveDetail) ctxLiveDetail.textContent = '\u2014';
-        if (ctxPeakDetail) ctxPeakDetail.textContent = '\u2014';
-        if (ctxFill) {
-            ctxFill.style.width = '0%';
-            ctxFill.className = 'context-progress-fill';
-        }
-        if (ctxPeakFill) ctxPeakFill.style.width = '0%';
-        if (ctxValue) ctxValue.textContent = '\u2014';
-        if (ctxDetails) ctxDetails.textContent = '';
-    }
+    updateContextCard(d, l, hasActiveEndpoint);
 }
 
 // ── GPU card ─────────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@
 // Settings modal: collect, save, apply, dirty tracking, and event bindings.
 
 import { settingsState } from '../core/app-state.js';
+import { setContextCardViewPreference } from './context-card.js';
 
 // ── Dirty tracking ────────────────────────────────────────────────────────────
 
@@ -42,6 +43,7 @@ export function collectSettings() {
         remote_agent_ssh_target: document.getElementById('set-remote-agent-ssh-target')?.value.trim() || '',
         remote_agent_ssh_command: document.getElementById('set-remote-agent-ssh-command')?.value.trim() || '',
         explicit_mode_policy: document.getElementById('explicit-policy-input')?.value || '',
+        context_card_view: document.getElementById('context-view-toggle-fleet')?.classList.contains('active') ? 'fleet' : 'gauge',
     };
 }
 
@@ -133,6 +135,10 @@ export function applySettings(s) {
     if (s.explicit_mode_policy !== undefined) {
         const el = document.getElementById('explicit-policy-input');
         if (el) el.value = s.explicit_mode_policy;
+    }
+
+    if (s.context_card_view !== undefined) {
+        setContextCardViewPreference(s.context_card_view);
     }
 }
 

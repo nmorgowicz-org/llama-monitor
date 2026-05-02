@@ -336,28 +336,40 @@
                         <!-- Context Card -->
                         <div class="widget-card widget-metric widget-context">
                             <div class="metric-card-topline">
-                                <div class="widget-metric-label">CONTEXT WINDOW</div>
-                                <div class="metric-live-chip" id="m-context-state">capacity</div>
-                            </div>
-                            <div class="inference-empty-state visible" id="m-context-empty">Context capacity appears after attach</div>
-                            <div class="context-rail-group">
-                                <div class="context-rail-label">
-                                    <span id="m-ctx-live-label">Live usage</span>
-                                    <span id="m-ctx-live-detail">&mdash;</span>
+                                <div class="context-topline-main">
+                                    <div class="widget-metric-label">CONTEXT WINDOW</div>
+                                    <div class="metric-live-chip" id="m-context-state">idle</div>
                                 </div>
-                                <div class="context-progress-bar context-live-bar" id="m-ctx-bar">
-                                    <div class="context-progress-fill" id="m-ctx-fill"></div>
-                                </div>
-                                <div class="context-rail-label">
-                                    <span>Peak observed</span>
-                                    <span id="m-ctx-peak-detail">&mdash;</span>
-                                </div>
-                                <div class="context-progress-bar context-peak-bar">
-                                    <div class="context-progress-fill historic" id="m-ctx-peak-fill"></div>
+                                <div class="context-view-toggle" role="tablist" aria-label="Context card view">
+                                    <button type="button" class="context-toggle-btn active" id="context-view-toggle-gauge" role="tab" aria-selected="true">Gauge</button>
+                                    <button type="button" class="context-toggle-btn" id="context-view-toggle-fleet" role="tab" aria-selected="false">Fleet</button>
                                 </div>
                             </div>
-                            <div class="context-value" id="m-ctx">&mdash;</div>
-                            <div class="context-details" id="m-ctx-details">&mdash;</div>
+                            <div class="inference-empty-state visible" id="m-context-empty">Start a chat or attach to a server to track context pressure</div>
+                            <div class="context-subtitle" id="m-context-subtitle">&mdash;</div>
+                            <div class="context-body">
+                                <div class="context-card-view active" id="context-view-gauge">
+                                    <div class="context-gauge-shell">
+                                        <svg class="context-gauge-svg" viewBox="0 0 120 120" aria-hidden="true">
+                                            <circle class="context-gauge-track" id="m-context-gauge-track" cx="60" cy="60" r="50"></circle>
+                                            <circle class="context-gauge-ring idle" id="m-context-gauge-ring" cx="60" cy="60" r="50"></circle>
+                                        </svg>
+                                        <div class="context-gauge-core">
+                                            <div class="context-gauge-value" id="m-context-gauge-value">&mdash;</div>
+                                            <div class="context-gauge-secondary" id="m-context-gauge-secondary">&mdash;</div>
+                                        </div>
+                                    </div>
+                                    <div class="context-chat-strip-wrap">
+                                        <div class="context-chat-strip" id="m-context-chat-strip"></div>
+                                        <div class="context-chat-strip-meta" id="m-context-chat-strip-meta">&mdash;</div>
+                                    </div>
+                                </div>
+                                <div class="context-card-view hidden" id="context-view-fleet">
+                                    <div class="context-fleet-summary" id="m-context-fleet-summary">&mdash;</div>
+                                    <div class="context-fleet-rows" id="m-context-fleet-rows"></div>
+                                    <div class="context-fleet-footer" id="m-context-fleet-footer">&mdash;</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="inference-detail-grid">
