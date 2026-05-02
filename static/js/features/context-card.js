@@ -187,7 +187,7 @@ function renderGaugeView(model) {
     const dash = 314;
     gaugeTrack.style.strokeDasharray = `${dash} ${dash}`;
     gaugeRing.style.strokeDasharray = `${(ringPct / 100) * dash} ${dash}`;
-    gaugeRing.className = `context-gauge-ring ${pctState(heroPct)}`;
+    gaugeRing.setAttribute('class', `context-gauge-ring ${pctState(heroPct)}`);
 
     if (model.mode === 'live-runtime') {
         gaugeValue.textContent = `${Math.round(displayPct)}%`;
