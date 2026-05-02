@@ -360,7 +360,7 @@ function renderDecodingConfig(l, hasActiveEndpoint, isGenerating) {
         if (modelName) {
             const parts = [escapeHtml(modelName)];
             if (modelParams) {
-                parts.push(formatParamCount(modelParams));
+                parts.push(escapeHtml(formatParamCount(modelParams)));
             }
             const stateClass = isGenerating ? 'generating' : 'idle';
             modelInfoRow.innerHTML = '<span class="model-info-text ' + stateClass + '">' + parts.join(' · ') + '</span>';

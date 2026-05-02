@@ -2,7 +2,7 @@
 // Hybrid runtime/chat-derived context card with dual gauge/fleet views.
 
 import { chat } from '../core/app-state.js';
-import { formatMetricNumber } from '../core/format.js';
+import { escapeHtml, formatMetricNumber } from '../core/format.js';
 import { setCardState, setChipState, setEmptyState } from './dashboard-render.js';
 
 const STALE_CHAT_MS = 7 * 24 * 60 * 60 * 1000;
@@ -159,7 +159,7 @@ function renderChatStrip(model) {
         const pill = document.createElement('div');
         pill.className = `context-pill ${item.state}`;
         pill.innerHTML = `
-            <span class="context-pill-name">${item.name}</span>
+            <span class="context-pill-name">${escapeHtml(item.name)}</span>
             <span class="context-pill-value">${item.ctxPct != null ? Math.round(item.ctxPct) + '%' : '—'}</span>
         `;
         strip.appendChild(pill);
@@ -231,7 +231,7 @@ function renderFleetView(model) {
         return `
             <div class="context-fleet-row ${item.state}">
                 <div class="context-fleet-row-top">
-                    <span class="context-fleet-name">${item.name}</span>
+                    <span class="context-fleet-name">${escapeHtml(item.name)}</span>
                     <span class="context-fleet-value">${pct != null ? pct + '%' : 'unknown'}</span>
                 </div>
                 <div class="context-fleet-bar">
