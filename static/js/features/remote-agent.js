@@ -54,7 +54,7 @@ function sshTargetFromConnection(connection) {
 
 // ── Remote Agent Setup Modal ───────────────────────────────────────────────────
 
-function openRemoteAgentSetup() {
+export function openRemoteAgentSetup() {
     if (typeof window.closeConfigModal === 'function') window.closeConfigModal();
     if (typeof window.closeSettingsModal === 'function') window.closeSettingsModal();
 

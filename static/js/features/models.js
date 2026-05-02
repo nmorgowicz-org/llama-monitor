@@ -3,7 +3,7 @@
 
 let initialized = false;
 
-function openModelsModal() {
+export function openModelsModal() {
     document.getElementById('models-modal')?.classList.add('open');
     loadModels();
 }

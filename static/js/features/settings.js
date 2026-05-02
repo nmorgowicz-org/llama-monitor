@@ -139,6 +139,8 @@ function applySettings(s) {
 function openSettingsModal() {
     const modal = document.getElementById('settings-modal');
     if (!modal) return;
+    modal.removeAttribute('aria-hidden');
+    modal.inert = false;
     modal.classList.remove('closing');
     modal.classList.add('open');
     clearSettingsDirty();
@@ -150,6 +152,8 @@ function closeSettingsModal() {
     modal.classList.add('closing');
     setTimeout(() => {
         modal.classList.remove('open', 'closing');
+        modal.setAttribute('aria-hidden', 'true');
+        modal.inert = true;
         clearSettingsDirty();
     }, 260);
 }

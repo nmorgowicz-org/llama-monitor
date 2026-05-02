@@ -55,6 +55,7 @@ import { initWebSocket } from './features/dashboard-ws.js';
 import { initPresets } from './features/presets.js';
 import { initSessions } from './features/sessions.js';
 import { initAttachDetach } from './features/attach-detach.js';
+import { initRemoteAgent } from './features/remote-agent.js';
 import { initChatState, initChatTabs, autoResizeChatInput } from './features/chat-state.js';
 import { initChatTransport } from './features/chat-transport.js';
 import { initChatRender } from './features/chat-render.js';
@@ -67,6 +68,7 @@ import { initAnimate } from './features/animate.js';
 import { initSettings } from './features/settings.js';
 import { initUserMenu } from './features/user-menu.js';
 import { initConfig } from './features/config.js';
+import { initModels } from './features/models.js';
 import { initSensorBridge } from './features/sensor-bridge.js';
 import { initToast } from './features/toast.js';
 
@@ -96,6 +98,7 @@ initWebSocket();
 initPresets();
 initSessions();
 initAttachDetach();
+initRemoteAgent();
 
 // Phase 6a: Chat state before transport (transport imports from state)
 initChatState();
@@ -125,6 +128,7 @@ initAnimate();
 initSettings();
 initUserMenu();
 initConfig();
+initModels();
 initSensorBridge();
 initToast();
 
@@ -133,8 +137,6 @@ initToast();
 
 const deferredInits = {
     fileBrowser: null,
-    models: null,
-    remoteAgent: null,
     updates: null,
     lhm: null,
 };
@@ -154,22 +156,6 @@ function ensureFileBrowser() {
     });
 }
 
-function ensureModels() {
-    return once('models', async () => {
-        const mod = await import('./features/models.js');
-        mod.initModels();
-        return mod;
-    });
-}
-
-function ensureRemoteAgent() {
-    return once('remoteAgent', async () => {
-        const mod = await import('./features/remote-agent.js');
-        mod.initRemoteAgent();
-        return mod;
-    });
-}
-
 function ensureUpdates() {
     return once('updates', async () => {
         const mod = await import('./features/updates.js');
@@ -181,30 +167,6 @@ function ensureUpdates() {
 window.openFileBrowser = (targetId, filter) => {
     ensureFileBrowser().then(mod => mod.openFileBrowser(targetId, filter));
 };
-
-window.setRemoteAgentStatus = (message, kind) => {
-    ensureRemoteAgent().then(mod => mod.setRemoteAgentStatus(message, kind));
-};
-
-document.getElementById('sidebar-btn-models')?.addEventListener('click', () => {
-    ensureModels();
-});
-
-document.getElementById('nav-agent-btn')?.addEventListener('click', () => {
-    ensureRemoteAgent();
-}, { once: true });
-
-document.getElementById('agent-status')?.addEventListener('click', () => {
-    ensureRemoteAgent();
-}, { once: true });
-
-document.getElementById('agent-fix-btn')?.addEventListener('click', () => {
-    ensureRemoteAgent();
-}, { once: true });
-
-document.getElementById('settings-open-config-btn')?.addEventListener('click', () => {
-    ensureRemoteAgent();
-});
 
 function scheduleDeferredUpdateCheck() {
     const runCheck = () => {
