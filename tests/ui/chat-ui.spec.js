@@ -1,11 +1,18 @@
 import { test, expect } from '@playwright/test';
 
+async function switchToMonitor(page) {
+  await page.evaluate(async () => {
+    const { switchView } = await import('/js/features/setup-view.js');
+    switchView('monitor');
+  });
+}
+
 test.describe('chat UI shell', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     // Switch to monitor view so chat page is accessible
-    await page.evaluate(() => switchView('monitor'));
+    await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
     await expect(page.locator('#page-chat')).toBeVisible();
   });
@@ -18,7 +25,9 @@ test.describe('chat UI shell', () => {
 
   test('renders personalized empty state with suggested prompts', async ({ page }) => {
     // Clear any persisted messages and re-render to ensure empty state
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { renderChatMessages } = await import('/js/features/chat-render.js');
       const tab = activeChatTab();
       if (tab) {
         tab.messages = [];
@@ -71,7 +80,7 @@ test.describe('system prompt panel', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
-    await page.evaluate(() => switchView('monitor'));
+    await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
   });
 
@@ -105,10 +114,12 @@ test.describe('explicit mode toggle', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
-    await page.evaluate(() => switchView('monitor'));
+    await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
     // Ensure clean state: disable explicit mode if it was left on
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { toggleExplicitMode } = await import('/js/features/chat-templates.js');
       const tab = activeChatTab();
       if (tab && tab.explicit_mode) toggleExplicitMode();
     });
@@ -139,7 +150,7 @@ test.describe('template manager', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
-    await page.evaluate(() => switchView('monitor'));
+    await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
     await page.locator('#btn-system-prompt').click();
   });
@@ -172,7 +183,7 @@ test.describe('model params panel', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
-    await page.evaluate(() => switchView('monitor'));
+    await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
   });
 
@@ -193,11 +204,13 @@ test.describe('model params panel', () => {
 
   test('dirty indicator activates on non-default temperature', async ({ page }) => {
     // Wait for chat to be initialized, then reset params to defaults
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { updateParamsDirtyIndicator } = await import('/js/features/chat-params.js');
       const tab = activeChatTab();
       if (tab) {
         tab.model_params = { temperature: 0.7, top_p: 0.9, top_k: 40, min_p: 0.01, repeat_penalty: 1.0, max_tokens: null, stream_timeout: 120 };
-        if (typeof window.updateParamsDirtyIndicator === 'function') window.updateParamsDirtyIndicator();
+        updateParamsDirtyIndicator();
       }
     });
     await page.locator('#btn-model-params').click();
@@ -223,12 +236,14 @@ test.describe('chat history pagination', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
-    await page.evaluate(() => switchView('monitor'));
+    await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
   });
 
   test('load more button appears when messages exceed visible limit', async ({ page }) => {
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { renderChatMessages } = await import('/js/features/chat-render.js');
       const t = activeChatTab();
       if (!t) return;
       t.visible_message_limit = 2;
@@ -243,7 +258,9 @@ test.describe('chat history pagination', () => {
   });
 
   test('load more button is absent when all messages fit', async ({ page }) => {
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { renderChatMessages } = await import('/js/features/chat-render.js');
       const t = activeChatTab();
       if (!t) return;
       t.visible_message_limit = 15;
@@ -257,7 +274,9 @@ test.describe('chat history pagination', () => {
   });
 
   test('clicking load more expands visible messages', async ({ page }) => {
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { renderChatMessages } = await import('/js/features/chat-render.js');
       const t = activeChatTab();
       if (!t) return;
       t.visible_message_limit = 2;
@@ -360,29 +379,47 @@ test.describe('context compaction', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
-    await page.evaluate(() => switchView('monitor'));
+    await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
     await expect(page.locator('#page-chat')).toBeVisible();
 
     // Clean up any leftover test tabs from a previous run
-    await page.evaluate((testTabPrefix) => {
-      chatTabs = chatTabs.filter(t => !t.name.startsWith(testTabPrefix));
-      if (!chatTabs.length) chatTabs = [newChatTab('Chat 1')];
+    await page.evaluate(async (testTabPrefix) => {
+      const { chat } = await import('/js/core/app-state.js');
+      const { newChatTab } = await import('/js/features/chat-state.js');
+      const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+      chat.tabs = chat.tabs.filter(t => !t.name.startsWith(testTabPrefix));
+      if (!chat.tabs.length) {
+        const fallback = newChatTab('Chat 1');
+        chat.tabs = [fallback];
+        chat.activeTabId = fallback.id;
+      } else if (!chat.tabs.some(t => t.id === chat.activeTabId)) {
+        chat.activeTabId = chat.tabs[0].id;
+      }
+      renderChatTabs();
+      renderChatMessages();
     }, TEST_TAB_PREFIX);
 
     // Create a fresh test tab
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
+      const { chat } = await import('/js/core/app-state.js');
+      const { newChatTab, switchChatTab } = await import('/js/features/chat-state.js');
+      const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
       const tab = newChatTab('Test Compaction');
       tab.name = '[TEST] Compaction';
       tab.visible_message_limit = 100;
-      chatTabs.push(tab);
+      chat.tabs.push(tab);
       switchChatTab(tab.id);
+      renderChatTabs();
       renderChatMessages();
     });
 
     // Switch to the test tab and clear it for a clean slate
-    await page.evaluate((testTabPrefix) => {
-      const testTab = chatTabs.find(t => t.name.startsWith(testTabPrefix));
+    await page.evaluate(async (testTabPrefix) => {
+      const { chat } = await import('/js/core/app-state.js');
+      const { switchChatTab } = await import('/js/features/chat-state.js');
+      const { renderChatMessages } = await import('/js/features/chat-render.js');
+      const testTab = chat.tabs.find(t => t.name.startsWith(testTabPrefix));
       if (testTab) {
         testTab.messages = [];
         testTab.visible_message_limit = 100;
@@ -397,9 +434,18 @@ test.describe('context compaction', () => {
 
   test.afterEach(async ({ page }) => {
     // Remove all test-created tabs
-    await page.evaluate((testTabPrefix) => {
-      chatTabs = chatTabs.filter(t => !t.name.startsWith(testTabPrefix));
-      if (!chatTabs.length) chatTabs = [newChatTab('Chat 1')];
+    await page.evaluate(async (testTabPrefix) => {
+      const { chat } = await import('/js/core/app-state.js');
+      const { newChatTab } = await import('/js/features/chat-state.js');
+      const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+      chat.tabs = chat.tabs.filter(t => !t.name.startsWith(testTabPrefix));
+      if (!chat.tabs.length) {
+        const fallback = newChatTab('Chat 1');
+        chat.tabs = [fallback];
+        chat.activeTabId = fallback.id;
+      } else if (!chat.tabs.some(t => t.id === chat.activeTabId)) {
+        chat.activeTabId = chat.tabs[0].id;
+      }
       renderChatTabs();
       renderChatMessages();
     }, TEST_TAB_PREFIX);
@@ -408,7 +454,9 @@ test.describe('context compaction', () => {
   test('compact button removes old messages and creates tombstone', async ({ page }) => {
     // Inject 20 synthetic messages to simulate a long conversation.
     // Set visible_message_limit high so pagination doesn't hide messages from DOM counts.
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { renderChatMessages } = await import('/js/features/chat-render.js');
       const tab = activeChatTab();
       tab.visible_message_limit = 100;
       for (let i = 0; i < 20; i++) {
@@ -442,7 +490,9 @@ test.describe('context compaction', () => {
   test('multiple compactions preserve old tombstones', async ({ page }) => {
     // Uses the shared test tab (cleared by beforeEach).
     // First round: inject messages and compact
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { renderChatMessages } = await import('/js/features/chat-render.js');
       const tab = activeChatTab();
       for (let i = 0; i < 20; i++) {
         tab.messages.push({ role: 'user', content: `Round 1 Q${i}`, timestamp_ms: Date.now() });
@@ -455,7 +505,9 @@ test.describe('context compaction', () => {
     await expect(page.locator('.chat-compact-marker[data-compact-state="final"]')).toHaveCount(1);
 
     // Second round: inject more messages and compact again
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { renderChatMessages } = await import('/js/features/chat-render.js');
       const tab = activeChatTab();
       for (let i = 0; i < 20; i++) {
         tab.messages.push({ role: 'user', content: `Round 2 Q${i}`, timestamp_ms: Date.now() });
@@ -473,11 +525,15 @@ test.describe('context compaction', () => {
 
   test('auto-compact settings persist on tab switch', async ({ page }) => {
     // New tabs have auto_compact on by default
-    const newTabAutoCompact = await page.evaluate(() => !!activeChatTab().auto_compact);
+    const newTabAutoCompact = await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
+      return !!activeChatTab().auto_compact;
+    });
     expect(newTabAutoCompact).toBe(true);
 
     // Disable auto-compact on the test tab
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
       const tab = activeChatTab();
       tab.auto_compact = false;
       tab.updated_at = Date.now();
@@ -487,21 +543,40 @@ test.describe('context compaction', () => {
     await page.locator('.chat-tab-add').click();
 
     // New tab should have auto-compact on by default
-    const newTabAutoCompact2 = await page.evaluate(() => !!activeChatTab().auto_compact);
+    const newTabAutoCompact2 = await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
+      return !!activeChatTab().auto_compact;
+    });
     expect(newTabAutoCompact2).toBe(true);
 
     // Switch back to the test tab — settings should still be off (per-tab persistence)
-    await page.evaluate((testTabPrefix) => {
-      const testTab = chatTabs.find(t => t.name.startsWith(testTabPrefix));
+    await page.evaluate(async (testTabPrefix) => {
+      const { chat } = await import('/js/core/app-state.js');
+      const { switchChatTab } = await import('/js/features/chat-state.js');
+      const testTab = chat.tabs.find(t => t.name.startsWith(testTabPrefix));
       if (testTab) switchChatTab(testTab.id);
     }, TEST_TAB_PREFIX);
-    const firstTabAutoCompact = await page.evaluate(() => !!activeChatTab().auto_compact);
+    const firstTabAutoCompact = await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
+      return !!activeChatTab().auto_compact;
+    });
     expect(firstTabAutoCompact).toBe(false);
 
     // Clean up the extra tab created by this test
-    await page.evaluate((testTabPrefix) => {
-      chatTabs = chatTabs.filter(t => t.name.startsWith(testTabPrefix) || t.name === 'Chat 1');
-      if (!chatTabs.length) chatTabs = [newChatTab('Chat 1')];
+    await page.evaluate(async (testTabPrefix) => {
+      const { chat } = await import('/js/core/app-state.js');
+      const { newChatTab } = await import('/js/features/chat-state.js');
+      const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+      chat.tabs = chat.tabs.filter(t => t.name.startsWith(testTabPrefix) || t.name === 'Chat 1');
+      if (!chat.tabs.length) {
+        const fallback = newChatTab('Chat 1');
+        chat.tabs = [fallback];
+        chat.activeTabId = fallback.id;
+      } else if (!chat.tabs.some(t => t.id === chat.activeTabId)) {
+        chat.activeTabId = chat.tabs[0].id;
+      }
+      renderChatTabs();
+      renderChatMessages();
     }, TEST_TAB_PREFIX);
   });
 });
