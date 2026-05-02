@@ -2,6 +2,7 @@
 // App version display, update check, release notes, and self-update flow.
 
 import { compareVersions } from '../core/format.js';
+import { renderMd } from './chat-render.js';
 
 // Holds the current pending release object
 let _pendingRelease = null;
@@ -77,7 +78,7 @@ export function openReleaseNotes() {
     link.href = release.html_url || '#';
 
     body.innerHTML = release.body
-        ? window.renderMd(release.body)
+        ? renderMd(release.body)
         : '<p>No release notes available.</p>';
 
     _resetUpdateBtn(updateBtn);

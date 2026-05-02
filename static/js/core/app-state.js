@@ -93,6 +93,13 @@ export const remoteAgent = {
     latestHostKey: null,
 };
 
+/** Latest dashboard websocket snapshot */
+export let wsData = null;
+
+export function setWsData(data) {
+    wsData = data;
+}
+
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 /** Settings state container — mutable properties, imported as a live reference */
@@ -137,6 +144,21 @@ export const chat = {
 export const lhm = {
     /** Temporary bridge for LHM overlay flow */
     resolve: null,
+};
+
+/** Setup/monitor view state */
+export const setupViewState = {
+    view: 'setup',
+    sessionActive: false,
+    lastSessionData: null,
+};
+
+/** Monitor metrics UI state */
+export const monitorState = {
+    speedMax: {
+        prompt: 0,
+        generation: 0,
+    },
 };
 
 // ── Updates ───────────────────────────────────────────────────────────────────

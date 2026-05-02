@@ -1,7 +1,9 @@
 // ── Chat Templates ────────────────────────────────────────────────────────────
 // System prompt templates, template manager, and explicit-mode policy.
 
-import { activeChatTab, scheduleChatPersist } from './chat-state.js';
+import { activeChatTab, registerChatViewBindings, scheduleChatPersist } from './chat-state.js';
+import { escapeHtml } from '../core/format.js';
+import { markSettingsDirty } from './settings.js';
 import { showToast } from './toast.js';
 
 // ── Built-in system prompt templates ──────────────────────────────────────────
@@ -221,7 +223,7 @@ async function saveUserTemplates(templates) {
 
 // ── Template Manager UI ───────────────────────────────────────────────────────
 
-async function openTemplateManager() {
+export async function openTemplateManager() {
     editingTemplateId = null;
     selectedTemplateId = null;
     await renderTemplateList();
@@ -239,8 +241,8 @@ async function renderTemplateList() {
     const templates = await loadTemplates();
     const list = document.getElementById('template-list');
     list.innerHTML = templates.map(t => {
-        const name = window.escapeHtml(t.name);
-        const id = window.escapeHtml(t.id);
+        const name = escapeHtml(t.name);
+        const id = escapeHtml(t.id);
         return `<div class="template-list-item ${selectedTemplateId === t.id ? 'selected' : ''} ${editingTemplateId === t.id ? 'editing' : ''}" data-template-id="${id}">
             <span class="template-list-name">${name}</span>
             <div class="template-list-actions">
@@ -307,11 +309,11 @@ async function renderTemplatePreview() {
             </div>
             <div class="template-editor-field">
                 <label class="template-editor-label">Name</label>
-                <input type="text" class="template-editor-input" id="template-name-input" value="${window.escapeHtml(t.name)}" placeholder="Template name">
+                <input type="text" class="template-editor-input" id="template-name-input" value="${escapeHtml(t.name)}" placeholder="Template name">
             </div>
             <div class="template-editor-field">
                 <label class="template-editor-label">Prompt <span class="template-editor-hint">(use {{char}} and {{user}})</span></label>
-                <textarea class="template-editor-textarea" id="template-prompt-input" rows="8" placeholder="You are {{char}}...">${window.escapeHtml(t.prompt)}</textarea>
+                <textarea class="template-editor-textarea" id="template-prompt-input" rows="8" placeholder="You are {{char}}...">${escapeHtml(t.prompt)}</textarea>
             </div>
             <div class="template-editor-actions">
                 <button class="template-save-btn" data-template-editor="save">Save</button>
@@ -320,13 +322,13 @@ async function renderTemplatePreview() {
     } else {
         preview.innerHTML = `
             <div class="template-preview-header">
-                <h3>${window.escapeHtml(t.name)}</h3>
+                <h3>${escapeHtml(t.name)}</h3>
                 <div class="template-preview-actions">
-                    <button class="template-preview-btn" data-template-id="${window.escapeHtml(t.id)}" data-template-preview-action="edit">Edit</button>
-                    <button class="template-preview-btn apply" data-template-id="${window.escapeHtml(t.id)}" data-template-preview-action="apply">Apply</button>
+                    <button class="template-preview-btn" data-template-id="${escapeHtml(t.id)}" data-template-preview-action="edit">Edit</button>
+                    <button class="template-preview-btn apply" data-template-id="${escapeHtml(t.id)}" data-template-preview-action="apply">Apply</button>
                 </div>
             </div>
-            <div class="template-preview-content">${window.escapeHtml(t.prompt)}</div>`;
+            <div class="template-preview-content">${escapeHtml(t.prompt)}</div>`;
     }
 }
 
@@ -449,7 +451,7 @@ async function applyTemplateById(id) {
     closeTemplateManager();
 }
 
-async function populateTemplatesDropdown() {
+export async function populateTemplatesDropdown() {
     const select = document.getElementById('chat-template-select');
     if (!select) return;
     const templates = await loadTemplates();
@@ -466,7 +468,7 @@ async function populateTemplatesDropdown() {
 
 // ── System prompt template application ────────────────────────────────────────
 
-function applySystemPromptTemplate(templateValue) {
+export function applySystemPromptTemplate(templateValue) {
     const tab = activeChatTab();
     if (!tab) return;
     tab.system_prompt = templateValue;
@@ -480,7 +482,7 @@ function applySystemPromptTemplate(templateValue) {
 
 // ── Explicit mode ─────────────────────────────────────────────────────────────
 
-function toggleExplicitMode() {
+export function toggleExplicitMode() {
     const tab = activeChatTab();
     if (!tab) return;
     tab.explicit_mode = !tab.explicit_mode;
@@ -489,7 +491,7 @@ function toggleExplicitMode() {
     updateExplicitToggleUI();
 }
 
-function updateExplicitToggleUI() {
+export function updateExplicitToggleUI() {
     const tab = activeChatTab();
     const isActive = tab && tab.explicit_mode;
     const settingsBtn = document.getElementById('chat-explicit-toggle-settings');
@@ -514,14 +516,14 @@ export function getExplicitModePolicy() {
 }
 
 function saveExplicitPolicy() {
-    window.markSettingsDirty();
+    markSettingsDirty();
 }
 
 function resetExplicitPolicy() {
     const el = document.getElementById('explicit-policy-input');
     if (el) {
         el.value = DEFAULT_EXPLICIT_POLICY;
-        window.markSettingsDirty();
+        markSettingsDirty();
     }
 }
 
@@ -529,13 +531,13 @@ function clearExplicitPolicy() {
     const el = document.getElementById('explicit-policy-input');
     if (el) {
         el.value = '';
-        window.markSettingsDirty();
+        markSettingsDirty();
     }
 }
 
 // ── System prompt panel ───────────────────────────────────────────────────────
 
-function toggleSystemPromptPanel() {
+export function toggleSystemPromptPanel() {
     const panel = document.getElementById('chat-system-panel');
     const isOpen = panel.classList.toggle('open');
     if (isOpen) {
@@ -544,7 +546,9 @@ function toggleSystemPromptPanel() {
     }
 }
 
-function onSystemPromptChange() {
+let systemPromptToastTimer = null;
+
+export function onSystemPromptChange() {
     const tab = activeChatTab();
     if (!tab) return;
     tab.system_prompt = document.getElementById('chat-system-input').value;
@@ -552,8 +556,8 @@ function onSystemPromptChange() {
     const indicator = document.getElementById('system-prompt-indicator');
     indicator.style.display = tab.system_prompt ? 'inline' : 'none';
     scheduleChatPersist();
-    clearTimeout(window.systemPromptToastTimer);
-    window.systemPromptToastTimer = setTimeout(() => showToast('System prompt saved', 'success'), 10000);
+    clearTimeout(systemPromptToastTimer);
+    systemPromptToastTimer = setTimeout(() => showToast('System prompt saved', 'success'), 10000);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -607,13 +611,8 @@ export function initChatTemplates() {
         });
     }
 
-    // Register functions on window for cross-module calls
-    window.openTemplateManager = openTemplateManager;
-    window.populateTemplatesDropdown = populateTemplatesDropdown;
-    window.applySystemPromptTemplate = applySystemPromptTemplate;
-    window.toggleExplicitMode = toggleExplicitMode;
-    window.updateExplicitToggleUI = updateExplicitToggleUI;
-    window.getExplicitModePolicy = getExplicitModePolicy;
-    window.toggleSystemPromptPanel = toggleSystemPromptPanel;
-    window.onSystemPromptChange = onSystemPromptChange;
+    registerChatViewBindings({
+        populateTemplatesDropdown,
+        updateExplicitToggleUI,
+    });
 }

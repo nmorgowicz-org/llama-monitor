@@ -3,7 +3,6 @@
 // Single authoritative startup path — no legacy app.js or init-state.js.
 
 import { escapeHtml } from './core/format.js';
-import * as state from './core/app-state.js';
 import './compat/globals.js'; // Set window.escapeHtml, window.formatMetricNumber
 
 // Stub functions for dead HTML references (analytics/export modals not yet implemented)
@@ -11,26 +10,15 @@ window.closeAnalyticsModal = () => {};
 window.closeExportModal = () => {};
 window.exportData = () => {};
 
-// Initialize window.* state from app-state.js (replaces init-state.js classic script)
-// Only variables still consumed via window.* by unmigrated modules are kept here.
-// Dashboard/chat/remote-agent modules import directly from app-state.js.
-window.presets = state.sessionState.presets;
-window.sessions = state.sessionState.sessions;
-window.activeSessionId = state.sessionState.activeSessionId;
-window.activeSessionPort = state.sessionState.activeSessionPort;
-window.settingsIsDirty = state.settingsState.isDirty;
-window.settingsSaveTimer = state.settingsState.saveTimer;
-window.lhmResolve = state.lhm.resolve;
-
 import { initDashboardRender } from './features/dashboard-render.js';
 import { initWebSocket } from './features/dashboard-ws.js';
 import { initPresets } from './features/presets.js';
 import { initSessions } from './features/sessions.js';
+import { addChatTab, autoResizeChatInput, initChatState, initChatTabs } from './features/chat-state.js';
+import { chatScroll, initChatRender } from './features/chat-render.js';
 import { initAttachDetach } from './features/attach-detach.js';
 import { initRemoteAgent } from './features/remote-agent.js';
-import { initChatState, initChatTabs, autoResizeChatInput } from './features/chat-state.js';
 import { initChatTransport } from './features/chat-transport.js';
-import { initChatRender } from './features/chat-render.js';
 import { initChatTemplates } from './features/chat-templates.js';
 import { initChatParams } from './features/chat-params.js';
 import { initSetupView } from './features/setup-view.js';
@@ -61,12 +49,10 @@ console.log('[bootstrap] Module entrypoint loaded');
 window.escapeHtml = escapeHtml;
 
 // Phase 1: Initialize rendering functions, then WebSocket.
-// dashboard-render provides rendering functions on window.*.
-// dashboard-ws calls those functions via window.*.
 initDashboardRender();
 initWebSocket();
 
-// Phase 4: Initialize extracted features — puts inline-handler functions on window.
+// Phase 4: Initialize extracted features.
 initPresets();
 initSessions();
 initAttachDetach();
@@ -80,10 +66,10 @@ initChatTransport();
 initChatRender();
 
 // Bind chat scroll button
-document.getElementById('chat-scroll-bottom')?.addEventListener('click', () => window.chatScroll(true));
+document.getElementById('chat-scroll-bottom')?.addEventListener('click', () => chatScroll(true));
 
 // Bind chat tab add button
-document.getElementById('chat-tab-add-btn')?.addEventListener('click', () => window.addChatTab());
+document.getElementById('chat-tab-add-btn')?.addEventListener('click', addChatTab);
 initChatTemplates();
 initChatParams();
 

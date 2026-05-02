@@ -5,15 +5,25 @@
 import { chat } from '../core/app-state.js';
 import {
     activeChatTab,
+    registerChatViewBindings,
     scheduleChatPersist,
     updateChatName,
 } from './chat-state.js';
-import { renderChatMessages } from './chat-render.js';
+import { exportChatTab, renderChatMessages } from './chat-render.js';
+import { fetchSummary, sendChat } from './chat-transport.js';
+import {
+    applySystemPromptTemplate,
+    onSystemPromptChange,
+    openTemplateManager,
+    toggleExplicitMode,
+    toggleSystemPromptPanel,
+} from './chat-templates.js';
 import { showToast, showToastWithActions } from './toast.js';
 
 // Local state — previously on window, migrated to local variables
 let chatFont = parseInt(localStorage.getItem('llama-monitor-chat-font') || '100');
 let enterToSend = localStorage.getItem('llama-monitor-enter-to-send') !== 'false';
+let paramToastTimer = null;
 
 // ── Model params panel ────────────────────────────────────────────────────────
 
@@ -62,8 +72,8 @@ function onParamChange(key, value) {
         if (el) el.textContent = value ?? '';
     }
     scheduleChatPersist();
-    clearTimeout(window.paramToastTimer);
-    window.paramToastTimer = setTimeout(() => showToast('Parameter saved', 'success'), 2000);
+    clearTimeout(paramToastTimer);
+    paramToastTimer = setTimeout(() => showToast('Parameter saved', 'success'), 2000);
     updateParamsDirtyIndicator();
 }
 
@@ -208,7 +218,7 @@ async function compactChatTab(tab, keepTail = 10, summarize = true) {
     let isSummarized = false;
 
     if (summarize) {
-        const summary = await window.fetchSummary(dropped);
+        const summary = await fetchSummary(dropped);
         if (summary) {
             const ctxNote = tab.lastCtxPct > 0 ? ` · was ${tab.lastCtxPct}% ctx` : '';
             tombstoneContent = `[Context compacted — ${dropped.length} messages summarized${ctxNote}]\n\n${summary}`;
@@ -381,6 +391,8 @@ function applyChatStyle(style) {
     }
 }
 
+export { applyChatStyle };
+
 const CHAT_STYLES = ['rounded', 'compact', 'minimal', 'bubbly'];
 const CHAT_STYLE_LABELS = { rounded: 'Rounded', compact: 'Compact', minimal: 'Minimal', bubbly: 'Bubbly' };
 
@@ -435,6 +447,14 @@ function onEnterToggleChange(checked) {
     if (prefCheckbox) prefCheckbox.checked = checked;
 }
 
+export function getEnterToSend() {
+    return enterToSend;
+}
+
+export function setEnterToSend(checked) {
+    onEnterToggleChange(checked);
+}
+
 function initEnterToggle() {
     const toggle = document.getElementById('chat-enter-toggle-input');
     if (toggle) toggle.checked = enterToSend;
@@ -454,7 +474,7 @@ function initChatInputHandler() {
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey && enterToSend) {
             e.preventDefault();
-            window.sendChat();
+            sendChat();
         }
     });
 }
@@ -482,7 +502,7 @@ export function initChatParams() {
     initChatInputHandler();
 
     // Bind chat header buttons
-    document.getElementById('btn-system-prompt')?.addEventListener('click', () => window.toggleSystemPromptPanel());
+    document.getElementById('btn-system-prompt')?.addEventListener('click', toggleSystemPromptPanel);
     document.getElementById('btn-model-params')?.addEventListener('click', toggleModelParamsPanel);
     document.getElementById('btn-chat-style')?.addEventListener('click', toggleStylePanel);
     document.getElementById('btn-compact')?.addEventListener('click', onManualCompact);
@@ -492,14 +512,14 @@ export function initChatParams() {
     document.getElementById('chat-user-name')?.addEventListener('input', (e) => updateChatName('user_name', e.target.value));
 
     // Bind explicit toggle (footer)
-    document.getElementById('chat-explicit-toggle-footer')?.addEventListener('click', () => window.toggleExplicitMode());
+    document.getElementById('chat-explicit-toggle-footer')?.addEventListener('click', toggleExplicitMode);
 
     // Bind font controls
     document.getElementById('chat-font-decrease')?.addEventListener('click', () => adjustChatFont(-1));
     document.getElementById('chat-font-increase')?.addEventListener('click', () => adjustChatFont(1));
 
     // Bind export button
-    document.getElementById('chat-export-btn')?.addEventListener('click', () => window.exportChatTab());
+    document.getElementById('chat-export-btn')?.addEventListener('click', exportChatTab);
 
     // Bind chat style cards (event delegation)
     const styleGrid = document.getElementById('chat-style-grid');
@@ -512,10 +532,10 @@ export function initChatParams() {
 
     // Bind system prompt panel
     document.getElementById('chat-copy-settings-btn')?.addEventListener('click', showCopySettingsDropdown);
-    document.getElementById('chat-template-select')?.addEventListener('change', (e) => window.applySystemPromptTemplate(e.target.value));
-    document.getElementById('chat-template-mgmt-btn')?.addEventListener('click', () => window.openTemplateManager());
-    document.getElementById('chat-explicit-toggle-settings')?.addEventListener('click', () => window.toggleExplicitMode());
-    document.getElementById('chat-system-input')?.addEventListener('input', () => window.onSystemPromptChange());
+    document.getElementById('chat-template-select')?.addEventListener('change', (e) => applySystemPromptTemplate(e.target.value));
+    document.getElementById('chat-template-mgmt-btn')?.addEventListener('click', openTemplateManager);
+    document.getElementById('chat-explicit-toggle-settings')?.addEventListener('click', toggleExplicitMode);
+    document.getElementById('chat-system-input')?.addEventListener('input', onSystemPromptChange);
     document.getElementById('chat-msg-limit')?.addEventListener('input', (e) => onMessageLimitChange(+e.target.value));
     document.getElementById('chat-auto-compact')?.addEventListener('change', (e) => onAutoCompactChange(e.target.checked));
     document.getElementById('compact-mode-percent')?.addEventListener('click', () => onCompactModeChange('percent'));
@@ -539,15 +559,11 @@ export function initChatParams() {
     // Bind enter toggle
     document.getElementById('chat-enter-toggle-input')?.addEventListener('change', (e) => onEnterToggleChange(e.target.checked));
 
-    // Keep on window for cross-module calls
-    window.applyChatStyle = applyChatStyle;
-    window.updateParamsDirtyIndicator = updateParamsDirtyIndicator;
-    window.syncMessageLimitInput = syncMessageLimitInput;
-    window.updateCtxPressureBar = updateCtxPressureBar;
-    window.syncCompactSettingsUI = syncCompactSettingsUI;
-    window.loadChatNames = loadChatNames;
-    updateChatName = updateChatName;
-    window.toggleSystemPromptPanel = toggleSystemPromptPanel;
-    window.onSystemPromptChange = onSystemPromptChange;
-    window.toggleExplicitMode = toggleExplicitMode;
+    registerChatViewBindings({
+        loadChatNames,
+        syncCompactSettingsUI,
+        syncMessageLimitInput,
+        updateCtxPressureBar,
+        updateParamsDirtyIndicator,
+    });
 }

@@ -3,6 +3,8 @@
 
 import { sessionState } from '../core/app-state.js';
 import { showToast } from './toast.js';
+import { hideConnectingState, saveLastSessionData, showConnectingState, switchView } from './setup-view.js';
+import { monitorState } from '../core/app-state.js';
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -72,10 +74,10 @@ export async function doStart() {
 
     if (!data.ok) {
         showToast('Start failed: ' + (data.error || 'unknown'), 'error');
-        if (window.hideConnectingState) window.hideConnectingState();
+        hideConnectingState();
     } else {
-        if (window.switchView) window.switchView('monitor');
-        if (window.hideConnectingState) window.hideConnectingState();
+        switchView('monitor');
+        hideConnectingState();
     }
 }
 
@@ -136,10 +138,10 @@ export async function doAttach() {
 
     if (!data.ok) {
         showToast('Attach failed: ' + (data.error || 'unknown'), 'error');
-        if (window.hideConnectingState) window.hideConnectingState();
+        hideConnectingState();
     } else {
         showToast('Attached to server', 'success');
-        if (window.hideConnectingState) window.hideConnectingState();
+        hideConnectingState();
 
         if (data.warning) {
             showToast(data.warning, 'warning');
@@ -148,8 +150,8 @@ export async function doAttach() {
         const serverHeader = document.getElementById('server-header');
         if (serverHeader) serverHeader.style.display = 'none';
 
-        window.speedMax = { prompt: 0, generation: 0 };
-        if (window.switchView) window.switchView('monitor');
+        monitorState.speedMax = { prompt: 0, generation: 0 };
+        switchView('monitor');
     }
 
     if (window.updateActiveSessionInfo) window.updateActiveSessionInfo();
@@ -164,13 +166,11 @@ export async function doDetach() {
     } else {
         showToast('Detached from server', 'success');
 
-        if (window.saveLastSessionData) {
-            window.saveLastSessionData({
-                promptRate: window.speedMax.prompt > 0 ? window.speedMax.prompt + ' t/s' : '—',
-                genRate: window.speedMax.generation > 0 ? window.speedMax.generation + ' t/s' : '—',
-                sessionName: sessionState.activeSessionId || '—'
-            });
-        }
+        saveLastSessionData({
+            promptRate: monitorState.speedMax.prompt > 0 ? monitorState.speedMax.prompt + ' t/s' : '—',
+            genRate: monitorState.speedMax.generation > 0 ? monitorState.speedMax.generation + ' t/s' : '—',
+            sessionName: sessionState.activeSessionId || '—'
+        });
 
         const btnAttach = document.getElementById('btn-attach');
         const btnDetach = document.getElementById('btn-detach');
@@ -188,8 +188,8 @@ export async function doDetach() {
         const historicBadge = document.getElementById('inference-historic-badge');
         if (historicBadge) historicBadge.style.display = 'inline-block';
 
-        window.speedMax = { prompt: 0, generation: 0 };
-        if (window.switchView) window.switchView('setup');
+        monitorState.speedMax = { prompt: 0, generation: 0 };
+        switchView('setup');
     }
 
     if (window.updateActiveSessionInfo) window.updateActiveSessionInfo();
@@ -205,7 +205,7 @@ export function doAttachFromSetup() {
         if (serverEndpoint) serverEndpoint.value = url;
         localStorage.setItem('llama-monitor-last-endpoint', url);
     }
-    if (window.showConnectingState) window.showConnectingState();
+    showConnectingState();
     doAttach();
 }
 
@@ -215,7 +215,7 @@ export function doStartFromSetup() {
         const presetSelect = document.getElementById('preset-select');
         if (presetSelect) presetSelect.value = select.value;
     }
-    if (window.showConnectingState) window.showConnectingState();
+    showConnectingState();
     doStart();
 }
 

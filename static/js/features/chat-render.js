@@ -6,6 +6,8 @@ import { chat, lastLlamaMetrics } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import {
     activeChatTab,
+    getChatViewBindings,
+    registerChatViewBindings,
     scheduleChatPersist,
     switchChatTab,
     closeChatTab,
@@ -17,6 +19,10 @@ import { showToast } from './toast.js';
 let _getTransport = null;
 export function setChatTransportGetter(getter) {
     _getTransport = getter;
+}
+
+function getTransport() {
+    return _getTransport ? _getTransport() : null;
 }
 
 // ── Cached DOM elements (populated at init time) ──────────────────────────────
@@ -53,7 +59,7 @@ export function renderMdStreaming(src) {
 
 // ── Scroll ────────────────────────────────────────────────────────────────────
 
-function chatScroll(force = false) {
+export function chatScroll(force = false) {
     ensureChatElements();
     const c = chatMessagesEl;
     if (!c) return;
@@ -82,7 +88,7 @@ function initChatScrollButton() {
     requestAnimationFrame(() => requestAnimationFrame(checkScroll));
 }
 
-function incrementUnreadCount() {
+export function incrementUnreadCount() {
     ensureChatElements();
     const container = chatMessagesEl;
     if (!container) return;
@@ -98,7 +104,7 @@ function incrementUnreadCount() {
 
 // ── Tab rendering ─────────────────────────────────────────────────────────────
 
-function renderChatTabs() {
+export function renderChatTabs() {
     ensureChatElements();
     const bar = chatTabBarEl;
     const addBtn = bar?.querySelector('.chat-tab-add');
@@ -131,7 +137,7 @@ function renderChatTabs() {
     updateTabBarOverflowMask();
 }
 
-function updateTabBarOverflowMask() {
+export function updateTabBarOverflowMask() {
     const bar = document.getElementById('chat-tab-bar');
     if (!bar) return;
     bar.classList.toggle('no-overflow', bar.scrollWidth <= bar.clientWidth);
@@ -139,7 +145,7 @@ function updateTabBarOverflowMask() {
 
 // ── Message rendering ─────────────────────────────────────────────────────────
 
-function renderChatMessages() {
+export function renderChatMessages() {
     ensureChatElements();
     const container = chatMessagesEl;
     const tab = activeChatTab();
@@ -209,7 +215,7 @@ function renderChatMessages() {
         idx++;
     }
     chatScroll(true);
-    window.syncCompactSettingsUI(activeChatTab());
+    getChatViewBindings().syncCompactSettingsUI?.(activeChatTab());
 }
 
 function loadMoreMessages(tab, currentLimit) {
@@ -364,7 +370,7 @@ function formatTokenCount(n) {
 
 // ── Streaming helpers ─────────────────────────────────────────────────────────
 
-function appendAssistantPlaceholder() {
+export function appendAssistantPlaceholder() {
     ensureChatElements();
     const container = chatMessagesEl;
     const tab = activeChatTab();
@@ -402,7 +408,7 @@ export function appendThinkingBlock(afterEl) {
     return details;
 }
 
-function finalizeAssistantMessage(el, content, usage, tab) {
+export function finalizeAssistantMessage(el, content, usage, tab) {
     el.classList.remove('chat-message-streaming');
     const body = el.querySelector('.chat-msg-body');
     if (content) {
@@ -593,7 +599,7 @@ function navigateVariant(btn, direction) {
         scheduleChatPersist();
 
         // User message is already in tab.messages — use sendChatResend
-        _getTransport?.sendChatResend(tab);
+        getTransport()?.sendChatResend(tab);
         return;
     }
 
@@ -627,7 +633,7 @@ function regenerateFromMessage(btn) {
     scheduleChatPersist();
 
     // User message is already in tab.messages — use sendChatResend
-    _getTransport?.sendChatResend(tab);
+    getTransport()?.sendChatResend(tab);
 }
 
 function editMessageContent(btn) {
@@ -721,7 +727,7 @@ function deleteMessage(btn) {
 
 // ── Export / Import ───────────────────────────────────────────────────────────
 
-function exportChatTab() {
+export function exportChatTab() {
     const tab = activeChatTab();
     if (!tab) return;
     const md = tab.messages
@@ -791,7 +797,7 @@ function importChatTab() {
 
 // ── Tab rename ────────────────────────────────────────────────────────────────
 
-function startRenameTab(id) {
+export function startRenameTab(id) {
     const tabEl = document.querySelector(`.chat-tab[data-tab-id="${id}"] .chat-tab-name`);
     if (!tabEl) return;
     const orig = tabEl.textContent;
@@ -824,11 +830,6 @@ export function updateChatTabBadge() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initChatRender() {
-    // Expose transport getter setter for chat-transport to wire up (avoids circular import)
-    window._setChatRenderTransportGetter = setChatTransportGetter;
-
-    window.startRenameTab = startRenameTab;
-
     // Call setup functions that bind DOM event listeners
     initChatScrollButton();
 
@@ -844,7 +845,7 @@ export function initChatRender() {
     document.getElementById('chat-tab-bar')?.addEventListener('dblclick', (e) => {
         const renameEl = e.target.closest('[data-chat-tab-rename]');
         if (renameEl) {
-            window.startRenameTab(renameEl.dataset.chatTabRename);
+            startRenameTab(renameEl.dataset.chatTabRename);
         }
     });
 
@@ -874,7 +875,7 @@ export function initChatRender() {
     document.getElementById('chat-messages')?.addEventListener('click', (e) => {
         const promptBtn = e.target.closest('[data-prompt-text]');
         if (promptBtn) {
-            window.sendSuggestedPrompt(promptBtn.dataset.promptText);
+            getTransport()?.sendSuggestedPrompt?.(promptBtn.dataset.promptText);
         }
     });
 
@@ -891,17 +892,9 @@ export function initChatRender() {
         marker.dataset.expanded = isExpanded ? 'false' : 'true';
     });
 
-    // Register functions on window for cross-module calls
-    window.renderMd = renderMd;
-    window.renderMdStreaming = renderMdStreaming;
-    window.chatScroll = chatScroll;
-    window.incrementUnreadCount = incrementUnreadCount;
-    window.renderChatTabs = renderChatTabs;
-    window.updateTabBarOverflowMask = updateTabBarOverflowMask;
-    window.renderChatMessages = renderChatMessages;
-    window.appendAssistantPlaceholder = appendAssistantPlaceholder;
-    window.appendThinkingBlock = appendThinkingBlock;
-    window.finalizeAssistantMessage = finalizeAssistantMessage;
-    window.exportChatTab = exportChatTab;
-    window.updateChatTabBadge = updateChatTabBadge;
+    registerChatViewBindings({
+        renderChatTabs,
+        renderChatMessages,
+        updateChatTabBadge,
+    });
 }

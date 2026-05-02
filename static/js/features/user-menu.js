@@ -2,6 +2,8 @@
 // User menu, profile, preferences modal, theme toggle.
 
 import { showToast } from './toast.js';
+import { applyChatStyle, getEnterToSend, setEnterToSend } from './chat-params.js';
+import { openKeyboardShortcutsModal } from './shortcuts.js';
 
 // ── User Menu ─────────────────────────────────────────────────────────────────
 
@@ -36,7 +38,7 @@ function openUserPreferencesModal(event) {
     event?.preventDefault();
     closeUserMenu();
     const enterCheckbox = document.getElementById('pref-enter-to-send');
-    if (enterCheckbox) enterCheckbox.checked = enterToSend;
+    if (enterCheckbox) enterCheckbox.checked = getEnterToSend();
     document.getElementById('user-preferences-modal')?.classList.add('open');
 }
 
@@ -55,11 +57,10 @@ function saveUserPreferences() {
     document.documentElement.style.fontSize = (Number(fontScale) * 16) + 'px';
     document.documentElement.style.setProperty('--gap-md', (Number(spacingScale) * 16) + 'px');
 
-    window.applyChatStyle(chatStyle);
+    applyChatStyle(chatStyle);
     localStorage.setItem('llama-monitor-chat-style', chatStyle);
 
-    enterToSend = enterToSendChecked;
-    // enterToSend saved locally in chat-params.js ? 'true' : 'false');
+    setEnterToSend(enterToSendChecked);
 
     localStorage.setItem('llama-monitor-preferences', JSON.stringify({
         theme,
@@ -96,7 +97,7 @@ function toggleTheme(event) {
 function openUserHelp(event) {
     event?.preventDefault();
     closeUserMenu();
-    window.openKeyboardShortcutsModal();
+    openKeyboardShortcutsModal();
 }
 
 // ── Logout ────────────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@ import { settingsState } from '../core/app-state.js';
 
 // ── Dirty tracking ────────────────────────────────────────────────────────────
 
-function markSettingsDirty() {
+export function markSettingsDirty() {
     settingsState.isDirty = true;
     clearTimeout(settingsState.saveTimer);
 }
@@ -16,7 +16,7 @@ function clearSettingsDirty() {
 
 // ── Collect / Save / Apply ────────────────────────────────────────────────────
 
-function collectSettings() {
+export function collectSettings() {
     const endpoint = document.getElementById('server-endpoint').value.trim();
 
     let port = 8001;
@@ -45,7 +45,7 @@ function collectSettings() {
     };
 }
 
-function saveSettings() {
+export function saveSettings() {
     clearTimeout(settingsState.saveTimer);
 
     // Ripple effect on save button
@@ -80,7 +80,7 @@ function saveSettings() {
     }, 400);
 }
 
-function applySettings(s) {
+export function applySettings(s) {
     if (!s) return;
 
     if (s.port) {
@@ -138,7 +138,7 @@ function applySettings(s) {
 
 // ── Modal open/close ──────────────────────────────────────────────────────────
 
-function openSettingsModal() {
+export function openSettingsModal() {
     const modal = document.getElementById('settings-modal');
     if (!modal) return;
     modal.removeAttribute('aria-hidden');
@@ -148,7 +148,7 @@ function openSettingsModal() {
     clearSettingsDirty();
 }
 
-function closeSettingsModal() {
+export function closeSettingsModal() {
     const modal = document.getElementById('settings-modal');
     if (!modal) return;
     modal.classList.add('closing');

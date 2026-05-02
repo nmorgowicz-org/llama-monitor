@@ -3,8 +3,11 @@
 // host key scanning, and status indicator.
 
 import { remoteAgent } from '../core/app-state.js';
+import { wsData } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast } from './toast.js';
+import { closeConfigModal, openConfigModal } from './config.js';
+import { closeSettingsModal, saveSettings } from './settings.js';
 
 let initialized = false;
 
@@ -59,8 +62,8 @@ function sshTargetFromConnection(connection) {
 // ── Remote Agent Setup Modal ───────────────────────────────────────────────────
 
 export function openRemoteAgentSetup() {
-    if (typeof window.closeConfigModal === 'function') window.closeConfigModal();
-    if (typeof window.closeSettingsModal === 'function') window.closeSettingsModal();
+    closeConfigModal();
+    closeSettingsModal();
 
     const modal = document.getElementById('remote-agent-setup-modal');
     if (!modal) return;
@@ -123,16 +126,15 @@ function updateAgentSetupStatusAlert() {
 
     if (!alert) return;
 
-    const state = window.appState?.wsData;
-    if (!state) {
+    if (!wsData) {
         alert.style.display = 'none';
         return;
     }
 
-    const isConnected = state.remote_agent_connected;
-    const isFirewallBlocked = state.remote_agent_connected && !state.remote_agent_health_reachable;
-    const hasRemoteEndpoint = state.session_mode === 'attach' && state.endpoint_kind === 'Remote';
-    const sys = state.system || {};
+    const isConnected = wsData.remote_agent_connected;
+    const isFirewallBlocked = wsData.remote_agent_connected && !wsData.remote_agent_health_reachable;
+    const hasRemoteEndpoint = wsData.session_mode === 'attach' && wsData.endpoint_kind === 'Remote';
+    const sys = wsData.system || {};
     const hasCpuTemp = sys.cpu_temp_available && sys.cpu_temp > 0;
 
     if (!hasRemoteEndpoint) {
@@ -979,7 +981,7 @@ function applySshSetupGuide() {
     remoteAgent.sshConnection = connection;
     clearRemoteAgentValidation();
     setRemoteAgentStatus('Guided SSH settings are ready. Click <strong>Check Host</strong>, <strong>Install & Start</strong>, or <strong>Start Agent</strong> when you want to contact the remote machine.', 'info');
-    if (typeof window.saveSettings === 'function') window.saveSettings();
+    saveSettings();
 }
 
 // ── Settings Panel UI Helpers ─────────────────────────────────────────────────
@@ -1176,7 +1178,7 @@ function maybeAutoSaveAgentToken(token) {
     const current = tokenInput.value.trim();
     if (current === token) return;
     tokenInput.value = token;
-    if (typeof window.saveSettings === 'function') window.saveSettings();
+    saveSettings();
 }
 
 async function remoteAgentLatestRelease() {
@@ -1720,7 +1722,7 @@ function showRemoteAgentFirewall(showAlert = true) {
 }
 
 function openFirewallHelp() {
-    if (typeof window.openConfigModal === 'function') window.openConfigModal();
+    openConfigModal();
 
     const panel = document.getElementById('remote-agent-panel');
     if (panel) panel.open = true;

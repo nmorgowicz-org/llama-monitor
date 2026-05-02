@@ -2,15 +2,17 @@
 // Config modal, GPU environment, and config save.
 
 import { showToast } from './toast.js';
+import { collectSettings, closeSettingsModal } from './settings.js';
+import { settingsState } from '../core/app-state.js';
 
 // ── Config Modal ──────────────────────────────────────────────────────────────
 
-function openConfigModal() {
-    window.closeSettingsModal();
+export function openConfigModal() {
+    closeSettingsModal();
     document.getElementById('config-modal').classList.add('open');
 }
 
-function closeConfigModal() {
+export function closeConfigModal() {
     document.getElementById('config-modal').classList.remove('open');
 }
 
@@ -57,11 +59,11 @@ async function loadGpuEnv() {
 // ── Save Config ───────────────────────────────────────────────────────────────
 
 function saveConfig() {
-    clearTimeout(window.settingsSaveTimer);
+    clearTimeout(settingsState.saveTimer);
     fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(window.collectSettings()),
+        body: JSON.stringify(collectSettings()),
     }).catch(() => {});
 
     const env = {

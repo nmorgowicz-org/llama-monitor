@@ -7,6 +7,7 @@ import {
     substituteNames,
     scheduleChatPersist,
     setChatBusyUI,
+    setTransportGetter,
 } from './chat-state.js';
 import {
     renderChatMessages,
@@ -18,6 +19,7 @@ import {
     renderMd,
     renderMdStreaming,
     updateChatTabBadge,
+    setChatTransportGetter,
 } from './chat-render.js';
 import { escapeHtml } from '../core/format.js';
 import { autoResizeChatInput } from './chat-state.js';
@@ -347,18 +349,7 @@ export function stopChat() {
 
 export function initChatTransport() {
     // Wire up transport getter for chat-state and chat-render (avoids circular import)
-    const transport = () => ({ sendChat, sendChatResend, stopChat });
-    if (typeof window._setChatTransportGetter === 'function') {
-        window._setChatTransportGetter(() => transport);
-    }
-    if (typeof window._setChatRenderTransportGetter === 'function') {
-        window._setChatRenderTransportGetter(() => transport);
-    }
-
-    // Put on window for cross-module calls
-    window.sendChat = sendChat;
-    window.sendChatResend = sendChatResend;
-    window.sendSuggestedPrompt = sendSuggestedPrompt;
-    window.stopChat = stopChat;
-    window.fetchSummary = fetchSummary;
+    const transport = () => ({ sendChat, sendChatResend, sendSuggestedPrompt, stopChat });
+    setTransportGetter(transport);
+    setChatTransportGetter(transport);
 }

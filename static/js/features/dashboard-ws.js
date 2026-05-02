@@ -30,11 +30,10 @@ import {
 import { animateNumber } from './animate.js';
 import { setRemoteAgentStatus } from './remote-agent.js';
 import { activeChatTab } from './chat-state.js';
+import { hideConnectingState, switchView } from './setup-view.js';
 
 // Local state — not shared across modules
 let lastGpuData = {};
-let speedMax = { prompt: 0, generation: 0 };
-
 // ── Cached DOM elements (populated at init time to avoid repeated queries) ──
 let cachedElements = null;
 
@@ -145,9 +144,7 @@ function updateDashboard(d) {
     ensureCachedElements();
 
     // Store for use by status alert and other components
-    if (typeof state.wsData !== 'undefined') {
-        state.wsData = d;
-    }
+    state.setWsData(d);
 
     // Endpoint health strip
     updateEndpointStrip(d);
@@ -293,8 +290,8 @@ function updateAttachDetach(d) {
 
         if (typeof state.view !== 'undefined' && state.view === 'setup') {
             // TODO: import from setup-view.js when that module is extracted
-            if (typeof window.hideConnectingState === 'function') window.hideConnectingState();
-            if (typeof window.switchView === 'function') window.switchView('monitor');
+            hideConnectingState();
+            switchView('monitor');
         }
     } else {
         if (serverHeader) serverHeader.style.display = '';
@@ -377,13 +374,13 @@ function updateInferenceMetrics(d) {
         animateNumber(promptEl, state.prevValues.prompt, promptDisplayRate, 300, 1, ' t/s');
         state.prevValues.prompt = promptDisplayRate;
 
-        if (promptDisplayRate > speedMax.prompt) {
-            speedMax.prompt = promptDisplayRate;
+        if (promptDisplayRate > state.monitorState.speedMax.prompt) {
+            state.monitorState.speedMax.prompt = promptDisplayRate;
         }
-        if (promptMaxEl && speedMax.prompt > 0) {
-            promptMaxEl.textContent = 'peak ' + speedMax.prompt.toFixed(0);
+        if (promptMaxEl && state.monitorState.speedMax.prompt > 0) {
+            promptMaxEl.textContent = 'peak ' + state.monitorState.speedMax.prompt.toFixed(0);
         }
-        const promptPct = Math.max((promptDisplayRate / speedMax.prompt) * 100, 4);
+        const promptPct = Math.max((promptDisplayRate / state.monitorState.speedMax.prompt) * 100, 4);
         if (promptBar) promptBar.style.width = promptPct + '%';
     } else {
         promptEl.textContent = '\u2014';
@@ -397,13 +394,13 @@ function updateInferenceMetrics(d) {
         animateNumber(genEl, state.prevValues.generation, genDisplayRate, 300, 1, ' t/s');
         state.prevValues.generation = genDisplayRate;
 
-        if (genDisplayRate > speedMax.generation) {
-            speedMax.generation = genDisplayRate;
+        if (genDisplayRate > state.monitorState.speedMax.generation) {
+            state.monitorState.speedMax.generation = genDisplayRate;
         }
-        if (genMaxEl && speedMax.generation > 0) {
-            genMaxEl.textContent = 'peak ' + speedMax.generation.toFixed(0);
+        if (genMaxEl && state.monitorState.speedMax.generation > 0) {
+            genMaxEl.textContent = 'peak ' + state.monitorState.speedMax.generation.toFixed(0);
         }
-        const genPct = Math.max((genDisplayRate / speedMax.generation) * 100, 4);
+        const genPct = Math.max((genDisplayRate / state.monitorState.speedMax.generation) * 100, 4);
         if (genBar) genBar.style.width = genPct + '%';
     } else {
         genEl.textContent = '\u2014';

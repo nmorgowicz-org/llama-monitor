@@ -5,6 +5,26 @@ import { chat } from '../core/app-state.js';
 import { showToast } from './toast.js';
 
 const CHAT_TABS_PERSIST_DEBOUNCE_MS = 500;
+const chatViewBindings = {
+    renderChatTabs: null,
+    renderChatMessages: null,
+    loadChatNames: null,
+    populateTemplatesDropdown: null,
+    updateExplicitToggleUI: null,
+    updateParamsDirtyIndicator: null,
+    syncMessageLimitInput: null,
+    syncCompactSettingsUI: null,
+    updateCtxPressureBar: null,
+    updateChatTabBadge: null,
+};
+
+export function registerChatViewBindings(bindings) {
+    Object.assign(chatViewBindings, bindings);
+}
+
+export function getChatViewBindings() {
+    return chatViewBindings;
+}
 
 // ── Tab Accessors ──────────────────────────────────────────────────────────────
 
@@ -60,16 +80,16 @@ export async function initChatTabs() {
     chat.activeTabId = chat.tabs[0].id;
 
     // Render (legacy — Phase 6b)
-    if (typeof window.renderChatTabs === 'function') window.renderChatTabs();
-    if (typeof window.renderChatMessages === 'function') window.renderChatMessages();
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatMessages?.();
 
     // Load UI state from tab
-    if (typeof window.loadChatNames === 'function') window.loadChatNames();
-    if (typeof window.populateTemplatesDropdown === 'function') window.populateTemplatesDropdown();
-    if (typeof window.updateExplicitToggleUI === 'function') window.updateExplicitToggleUI();
-    if (typeof window.updateParamsDirtyIndicator === 'function') window.updateParamsDirtyIndicator();
-    if (typeof window.syncMessageLimitInput === 'function') window.syncMessageLimitInput();
-    if (typeof window.syncCompactSettingsUI === 'function') window.syncCompactSettingsUI(activeChatTab());
+    chatViewBindings.loadChatNames?.();
+    chatViewBindings.populateTemplatesDropdown?.();
+    chatViewBindings.updateExplicitToggleUI?.();
+    chatViewBindings.updateParamsDirtyIndicator?.();
+    chatViewBindings.syncMessageLimitInput?.();
+    chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
 
     // Show welcome tip on first visit
     if (!localStorage.getItem('llama-monitor-chat-welcomed')) {
@@ -95,28 +115,28 @@ export function closeChatTab(id) {
     if (chat.activeTabId === id) {
         chat.activeTabId = chat.tabs[chat.tabs.length - 1].id;
     }
-    if (typeof window.renderChatTabs === 'function') window.renderChatTabs();
-    if (typeof window.renderChatMessages === 'function') window.renderChatMessages();
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatMessages?.();
     scheduleChatPersist();
 }
 
 export function switchChatTab(id) {
     if (chat.busy) return;
     chat.activeTabId = id;
-    if (typeof window.renderChatTabs === 'function') window.renderChatTabs();
-    if (typeof window.renderChatMessages === 'function') window.renderChatMessages();
-    if (typeof window.loadChatNames === 'function') window.loadChatNames();
-    if (typeof window.updateExplicitToggleUI === 'function') window.updateExplicitToggleUI();
-    if (typeof window.syncMessageLimitInput === 'function') window.syncMessageLimitInput();
-    if (typeof window.syncCompactSettingsUI === 'function') window.syncCompactSettingsUI(activeChatTab());
-    if (typeof window.updateCtxPressureBar === 'function') window.updateCtxPressureBar(0);
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatMessages?.();
+    chatViewBindings.loadChatNames?.();
+    chatViewBindings.updateExplicitToggleUI?.();
+    chatViewBindings.syncMessageLimitInput?.();
+    chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
+    chatViewBindings.updateCtxPressureBar?.(0);
 }
 
 export function renameChatTab(id, newName) {
     const tab = chat.tabs.find(t => t.id === id);
     if (tab) {
         tab.name = newName.trim() || tab.name;
-        if (typeof window.renderChatTabs === 'function') window.renderChatTabs();
+        chatViewBindings.renderChatTabs?.();
         scheduleChatPersist();
     }
 }
@@ -126,8 +146,8 @@ export function clearChat() {
     if (!tab) return;
     tab.messages = [];
     tab.updated_at = Date.now();
-    if (typeof window.renderChatMessages === 'function') window.renderChatMessages();
-    if (typeof window.updateChatTabBadge === 'function') window.updateChatTabBadge();
+    chatViewBindings.renderChatMessages?.();
+    chatViewBindings.updateChatTabBadge?.();
     scheduleChatPersist();
 }
 
@@ -146,7 +166,7 @@ export function updateChatName(field, value) {
     if (tab) {
         tab[field] = value.trim();
         scheduleChatPersist();
-        if (typeof window.renderChatMessages === 'function') window.renderChatMessages();
+        chatViewBindings.renderChatMessages?.();
     }
 }
 
@@ -246,27 +266,6 @@ export function autoResizeChatInput() {
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 export function initChatState() {
-    // Expose transport getter setter for chat-transport to wire up (avoids circular import)
-    window._setChatTransportGetter = setTransportGetter;
-
-    // Put on window for inline handlers
-    window.activeChatTab = activeChatTab;
-    window.initChatTabs = initChatTabs;
-    window.newChatTab = newChatTab;
-    window.addChatTab = addChatTab;
-    window.closeChatTab = closeChatTab;
-    window.switchChatTab = switchChatTab;
-    window.renameChatTab = renameChatTab;
-    window.clearChat = clearChat;
-    window.substituteNames = substituteNames;
-    window.updateChatName = updateChatName;
-    window.scheduleChatPersist = scheduleChatPersist;
-    window.persistChatTabs = persistChatTabs;
-    window.flushChatPersist = flushChatPersist;
-    window.markChatTabsDirty = markChatTabsDirty;
-    window.setChatBusyUI = setChatBusyUI;
-    window.autoResizeChatInput = autoResizeChatInput;
-
     // beforeunload flush
     window.addEventListener('beforeunload', flushChatPersist);
 }

@@ -3,6 +3,7 @@
 
 import { chat } from '../core/app-state.js';
 import { switchChatTab } from './chat-state.js';
+import { updateTabBarOverflowMask } from './chat-render.js';
 
 // ── Keyboard Shortcuts Modal ──────────────────────────────────────────────────
 
@@ -53,11 +54,13 @@ function initChatKeyboardShortcuts() {
         }
     });
     window.addEventListener('resize', () => {
-        window.updateTabBarOverflowMask();
+        updateTabBarOverflowMask();
     });
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
+
+export { openKeyboardShortcutsModal };
 
 export function initShortcuts() {
     // Call setup functions that bind DOM event listeners

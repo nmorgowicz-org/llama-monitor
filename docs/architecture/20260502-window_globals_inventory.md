@@ -4,6 +4,17 @@ Date: 2026-05-02
 
 Phase 1 of the window architecture cleanup plan. Enumerates every `window.*` bridge, grouped by owner and consumer.
 
+Status Update: 2026-05-02 evening
+
+This file started as the pre-cleanup inventory. Phases 1-5 have now been completed in code, so parts of the raw inventory below describe the former state rather than the current runtime shape.
+
+Current interpretation:
+
+- sections `A`, `B`, and `C` are historical inventory for the now-completed dashboard/bootstrap cleanup
+- section `E` is historical inventory for the now-completed chat cleanup
+- the remaining actionable globals are mostly compatibility shims and deliberate browser-global entrypoints
+- if this document is used for follow-up work, treat the phase result sections and the codebase as authoritative over the original pre-cleanup counts
+
 ## Legend
 
 | Category | Meaning |
