@@ -3,7 +3,28 @@
 // Imports state from app-state.js and render functions from dashboard-render.js.
 
 import { formatMetricAge, formatMetricNumber } from '../core/format.js';
-import * as state from '../core/app-state.js';
+import {
+    sessionState,
+    prevValues,
+    metricSeries,
+    liveOutputTracker,
+    metricCapabilities,
+    requestActivity,
+    recentTasks,
+    slotSnapshots,
+    setWsData,
+    setLastServerState,
+    setLastLlamaMetrics,
+    setLastSystemMetrics,
+    setLastGpuMetrics,
+    setLastCapabilities,
+    setLastGpuData,
+    lastLlamaMetrics,
+    lastSystemMetrics,
+    currentPollInterval,
+    monitorState,
+    setupViewState,
+} from '../core/app-state.js';
 import {
     setChipState,
     setCardState,
@@ -32,8 +53,6 @@ import { updateContextCard } from './context-card.js';
 import { setRemoteAgentStatus } from './remote-agent.js';
 import { hideConnectingState, switchView } from './setup-view.js';
 
-// Local state — not shared across modules
-let lastGpuData = {};
 // ── Cached DOM elements (populated at init time to avoid repeated queries) ──
 let cachedElements = null;
 
@@ -115,7 +134,7 @@ export function initWebSocket() {
     ws.onclose = () => {
         ensureCachedElements();
         if (cachedElements.statusText) cachedElements.statusText.textContent = 'Disconnected';
-        state.sessionState.prevLogLen = 0;
+        sessionState.prevLogLen = 0;
     };
 
     return ws;
@@ -128,7 +147,7 @@ function updateDashboard(d) {
     ensureCachedElements();
 
     // Store for use by status alert and other components
-    state.setWsData(d);
+    setWsData(d);
 
     // Endpoint health strip
     updateEndpointStrip(d);
@@ -272,7 +291,7 @@ function updateAttachDetach(d) {
         btnDetach.style.display = 'inline-block';
         if (btnDetachTop) btnDetachTop.style.display = 'inline-block';
 
-        if (typeof state.view !== 'undefined' && state.view === 'setup') {
+        if (typeof setupViewState !== 'undefined' && setupViewState.view === 'setup') {
             // TODO: import from setup-view.js when that module is extracted
             hideConnectingState();
             switchView('monitor');
@@ -292,7 +311,7 @@ function updateAttachDetach(d) {
 // ── Server state ─────────────────────────────────────────────────────────────
 
 function updateServerState(d) {
-    state.sessionState.serverRunning = d.server_running;
+    sessionState.serverRunning = d.server_running;
     const ce = cachedElements;
 
     const dot = ce.statusDot;
@@ -300,24 +319,24 @@ function updateServerState(d) {
     const btnStart = ce.btnStart;
     const btnStop = ce.btnStop;
 
-    dot.className = 'status-dot ' + (state.sessionState.serverRunning ? 'running' : 'stopped');
-    txt.textContent = state.sessionState.serverRunning ? 'Running' : 'Stopped';
+    dot.className = 'status-dot ' + (sessionState.serverRunning ? 'running' : 'stopped');
+    txt.textContent = sessionState.serverRunning ? 'Running' : 'Stopped';
 
     const localRunning = d.local_server_running || false;
     if (btnStart) btnStart.disabled = localRunning;
     if (btnStop) btnStop.disabled = !localRunning;
 
-    state.lastServerState = d.server_running;
-    state.lastLlamaMetrics = d.llama;
-    state.lastSystemMetrics = d.system || null;
-    state.lastCapabilities = d.capabilities || null;
-    state.lastGpuMetrics = d.gpu || {};
+    setLastServerState(d.server_running);
+    setLastLlamaMetrics(d.llama);
+    setLastSystemMetrics(d.system || null);
+    setLastCapabilities(d.capabilities || null);
+    setLastGpuMetrics(d.gpu || {});
 }
 
 // ── Inference metrics ────────────────────────────────────────────────────────
 
 function updateInferenceMetrics(d) {
-    const l = state.lastLlamaMetrics;
+    const l = lastLlamaMetrics;
     const hasActiveEndpoint = !!d.active_session_id;
     const ce = cachedElements;
 
@@ -354,17 +373,17 @@ function updateInferenceMetrics(d) {
 
     // Prompt throughput
     if (promptDisplayRate > 0) {
-        updateMetricDelta(promptDeltaEl, state.prevValues.prompt, promptDisplayRate, 1);
-        animateNumber(promptEl, state.prevValues.prompt, promptDisplayRate, 300, 1, ' t/s');
-        state.prevValues.prompt = promptDisplayRate;
+        updateMetricDelta(promptDeltaEl, prevValues.prompt, promptDisplayRate, 1);
+        animateNumber(promptEl, prevValues.prompt, promptDisplayRate, 300, 1, ' t/s');
+        prevValues.prompt = promptDisplayRate;
 
-        if (promptDisplayRate > state.monitorState.speedMax.prompt) {
-            state.monitorState.speedMax.prompt = promptDisplayRate;
+        if (promptDisplayRate > monitorState.speedMax.prompt) {
+            monitorState.speedMax.prompt = promptDisplayRate;
         }
-        if (promptMaxEl && state.monitorState.speedMax.prompt > 0) {
-            promptMaxEl.textContent = 'peak ' + state.monitorState.speedMax.prompt.toFixed(0);
+        if (promptMaxEl && monitorState.speedMax.prompt > 0) {
+            promptMaxEl.textContent = 'peak ' + monitorState.speedMax.prompt.toFixed(0);
         }
-        const promptPct = Math.max((promptDisplayRate / state.monitorState.speedMax.prompt) * 100, 4);
+        const promptPct = Math.max((promptDisplayRate / monitorState.speedMax.prompt) * 100, 4);
         if (promptBar) promptBar.style.width = promptPct + '%';
     } else {
         promptEl.textContent = '\u2014';
@@ -374,17 +393,17 @@ function updateInferenceMetrics(d) {
 
     // Generation throughput
     if (genDisplayRate > 0) {
-        updateMetricDelta(genDeltaEl, state.prevValues.generation, genDisplayRate, 1);
-        animateNumber(genEl, state.prevValues.generation, genDisplayRate, 300, 1, ' t/s');
-        state.prevValues.generation = genDisplayRate;
+        updateMetricDelta(genDeltaEl, prevValues.generation, genDisplayRate, 1);
+        animateNumber(genEl, prevValues.generation, genDisplayRate, 300, 1, ' t/s');
+        prevValues.generation = genDisplayRate;
 
-        if (genDisplayRate > state.monitorState.speedMax.generation) {
-            state.monitorState.speedMax.generation = genDisplayRate;
+        if (genDisplayRate > monitorState.speedMax.generation) {
+            monitorState.speedMax.generation = genDisplayRate;
         }
-        if (genMaxEl && state.monitorState.speedMax.generation > 0) {
-            genMaxEl.textContent = 'peak ' + state.monitorState.speedMax.generation.toFixed(0);
+        if (genMaxEl && monitorState.speedMax.generation > 0) {
+            genMaxEl.textContent = 'peak ' + monitorState.speedMax.generation.toFixed(0);
         }
-        const genPct = Math.max((genDisplayRate / state.monitorState.speedMax.generation) * 100, 4);
+        const genPct = Math.max((genDisplayRate / monitorState.speedMax.generation) * 100, 4);
         if (genBar) genBar.style.width = genPct + '%';
     } else {
         genEl.textContent = '\u2014';
@@ -395,8 +414,8 @@ function updateInferenceMetrics(d) {
     // Sparklines
     pushSparklinePoint('prompt', promptDisplayRate);
     pushSparklinePoint('generation', genDisplayRate);
-    renderSparkline('m-prompt-spark', state.metricSeries.prompt, 'prompt', false);
-    renderSparkline('m-gen-spark', state.metricSeries.generation, 'generation', false);
+    renderSparkline('m-prompt-spark', metricSeries.prompt, 'prompt', false);
+    renderSparkline('m-gen-spark', metricSeries.generation, 'generation', false);
 
     // Throughput ratio
     const ratioBar = ce.mRatioBar;
@@ -438,7 +457,7 @@ function updateInferenceMetrics(d) {
     renderSlotUtilization(l);
     renderRequestStats();
     renderDecodingConfig(l, hasActiveEndpoint, generationActive);
-    renderLiveSparkline('m-live-output-spark', state.metricSeries.liveOutput);
+    renderLiveSparkline('m-live-output-spark', metricSeries.liveOutput);
 
     setCardState(generationCard, !hasActiveEndpoint ? 'dormant' : generationActive ? 'live' : generationAvailable ? 'idle' : 'unavailable');
     setEmptyState(ce.mGenEmpty, !hasActiveEndpoint);
@@ -505,8 +524,7 @@ function updateContextMetrics(d, l, hasActiveEndpoint) {
 
 function updateGpuCard(d) {
     const gpuVisible = d.host_metrics_available === true && !!d.capabilities?.gpu;
-    lastGpuData = d.gpu || {};
-    state.lastGpuData = lastGpuData;
+    setLastGpuData(d.gpu || {});
 
     renderGpuCard(d.gpu || {}, gpuVisible);
 }
@@ -516,7 +534,7 @@ function updateGpuCard(d) {
 function updateSystemCard(d) {
     const systemVisible = d.host_metrics_available === true && !!d.capabilities?.system;
 
-    renderSystemCard(state.lastSystemMetrics, systemVisible);
+    renderSystemCard(lastSystemMetrics, systemVisible);
 }
 
 // ── Logs ─────────────────────────────────────────────────────────────────────
@@ -524,7 +542,7 @@ function updateSystemCard(d) {
 function updateLogs(d) {
     const logs = d.logs || [];
 
-    if (logs.length !== state.sessionState.prevLogLen) {
+    if (logs.length !== sessionState.prevLogLen) {
         const el = cachedElements.logPanel;
         const wasAtBottom = el && (el.scrollHeight - el.scrollTop - el.clientHeight < 40);
 
@@ -533,7 +551,7 @@ function updateLogs(d) {
             if (wasAtBottom) el.scrollTop = el.scrollHeight;
         }
 
-        state.sessionState.prevLogLen = logs.length;
+        sessionState.prevLogLen = logs.length;
     }
 }
 

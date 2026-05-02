@@ -96,9 +96,13 @@ export const remoteAgent = {
 /** Latest dashboard websocket snapshot */
 export let wsData = null;
 
-export function setWsData(data) {
-    wsData = data;
-}
+export function setWsData(data) { wsData = data; }
+export function setLastServerState(v) { lastServerState = v; }
+export function setLastLlamaMetrics(v) { lastLlamaMetrics = v; }
+export function setLastSystemMetrics(v) { lastSystemMetrics = v; }
+export function setLastGpuMetrics(v) { lastGpuMetrics = v; }
+export function setLastCapabilities(v) { lastCapabilities = v; }
+export function setLastGpuData(v) { lastGpuData = v; }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 

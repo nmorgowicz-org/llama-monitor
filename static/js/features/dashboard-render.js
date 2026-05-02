@@ -1,5 +1,14 @@
 import { escapeHtml, formatMetricNumber, formatDuration, formatClockReadout } from '../core/format.js';
-import * as state from '../core/app-state.js';
+import {
+    metricSeries,
+    liveOutputTracker,
+    requestActivity,
+    recentTasks,
+    lastGpuData,
+    lastSystemMetrics,
+    lastCapabilities,
+    setLastGpuData,
+} from '../core/app-state.js';
 
 function setChipState(el, label, state) {
     if (!el) return;
@@ -14,10 +23,10 @@ function setCardState(card, state) {
 }
 
 function pushSparklinePoint(name, value) {
-    state.metricSeries[name].push(Number.isFinite(value) ? value : 0);
+    metricSeries[name].push(Number.isFinite(value) ? value : 0);
     const limit = name === 'liveOutput' ? 90 : 40;
-    if (state.metricSeries[name].length > limit) {
-        state.metricSeries[name].shift();
+    if (metricSeries[name].length > limit) {
+        metricSeries[name].shift();
     }
 }
 
@@ -68,7 +77,7 @@ function getTaskKey(taskId, active) {
 }
 
 function updateLiveOutputEstimate(taskId, decoded, active, nowMs) {
-    const tracker = state.liveOutputTracker;
+    const tracker = liveOutputTracker;
     const taskChanged = tracker.taskId !== taskId;
     if (taskChanged) {
         tracker.taskId = taskId;
@@ -76,7 +85,7 @@ function updateLiveOutputEstimate(taskId, decoded, active, nowMs) {
         tracker.previousMs = nowMs;
         tracker.latestRate = 0;
         tracker.rates = [];
-        state.metricSeries.liveOutput = [];
+        metricSeries.liveOutput = [];
         pushSparklinePoint('liveOutput', 0);
         return 0;
     }
@@ -108,16 +117,16 @@ function updateLiveOutputEstimate(taskId, decoded, active, nowMs) {
 
 function updateRequestActivity(taskId, active, outputTokens, nowMs) {
     const taskKey = getTaskKey(taskId, active);
-    let openSegment = state.requestActivity.find(segment => !segment.endedAtMs);
+    let openSegment = requestActivity.find(segment => !segment.endedAtMs);
 
     if (active && taskKey) {
         if (!openSegment || openSegment.taskKey !== taskKey) {
             if (openSegment) {
                 openSegment.endedAtMs = nowMs;
                 openSegment.outputTokens = outputTokens || openSegment.outputTokens || 0;
-                state.recentTasks.unshift(openSegment);
+                recentTasks.unshift(openSegment);
             }
-            state.requestActivity.push({
+            requestActivity.push({
                 taskKey,
                 taskId,
                 startedAtMs: nowMs,
@@ -139,21 +148,21 @@ function updateRequestActivity(taskId, active, outputTokens, nowMs) {
             openSegment.firstOutputAtMs = nowMs;
         }
         openSegment.outputTokens = outputTokens || openSegment.outputTokens || 0;
-        state.recentTasks.unshift(openSegment);
+        recentTasks.unshift(openSegment);
     }
 
     const cutoff = nowMs - (10 * 60 * 1000);
-    const kept = state.requestActivity
+    const kept = requestActivity
         .filter(segment => !segment.endedAtMs || segment.endedAtMs >= cutoff)
         .slice(-100);
-    state.requestActivity.splice(0, state.requestActivity.length, ...kept);
-    state.recentTasks.splice(8);
+    requestActivity.splice(0, requestActivity.length, ...kept);
+    recentTasks.splice(8);
 }
 
 function renderRecentTask() {
     const el = document.getElementById('m-recent-task');
     if (!el) return;
-    const task = state.recentTasks[0];
+    const task = recentTasks[0];
     if (!task || !task.endedAtMs) {
         el.style.display = 'none';
         el.textContent = '';
@@ -171,7 +180,7 @@ function renderActivityRail(active) {
     if (!rail) return;
     const now = Date.now();
     const windowMs = 5 * 60 * 1000;
-    const segments = state.requestActivity.slice(-28);
+    const segments = requestActivity.slice(-28);
     if (!segments.length) {
         rail.innerHTML = '<span class="activity-empty">No recent tasks</span>';
         return;
@@ -324,7 +333,7 @@ function renderRequestStats() {
     const reqAvg = document.getElementById('m-req-avg');
     const now = Date.now();
     const windowMs = 10 * 60 * 1000;
-    const segments = state.requestActivity.filter(s => (s.endedAtMs || now) >= now - windowMs);
+    const segments = requestActivity.filter(s => (s.endedAtMs || now) >= now - windowMs);
     const completed = segments.filter(s => s.endedAtMs);
     if (reqCount) reqCount.textContent = formatMetricNumber(completed.length);
     if (reqAvg && completed.length > 0) {
@@ -803,7 +812,7 @@ function renderGpuCard(gpuMap, visible) {
         return;
     }
 
-    lastGpuData = gpuMap;
+    setLastGpuData(gpuMap);
     setEmptyState(emptyEl, false);
 
     // Use first GPU (most common case)
