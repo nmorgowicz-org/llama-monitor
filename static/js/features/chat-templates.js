@@ -239,11 +239,17 @@ export async function openTemplateManager() {
     selectedTemplateId = null;
     await renderTemplateList();
     await renderTemplatePreview();
-    document.getElementById('template-manager-modal').classList.add('active');
+    const modal = document.getElementById('template-manager-modal');
+    if (modal) modal.classList.add('active');
+    const btn = document.getElementById('btn-system-prompt');
+    if (btn) btn.classList.add('active');
 }
 
 function closeTemplateManager() {
-    document.getElementById('template-manager-modal').classList.remove('active');
+    const modal = document.getElementById('template-manager-modal');
+    if (modal) modal.classList.remove('active');
+    const btn = document.getElementById('btn-system-prompt');
+    if (btn) btn.classList.remove('active');
     editingTemplateId = null;
     selectedTemplateId = null;
 }

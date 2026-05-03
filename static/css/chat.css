@@ -1646,6 +1646,20 @@
 .chat-resize-handle.active::after {
   background: var(--color-primary);
 }
+.chat-resize-handle::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.3);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.chat-resize-handle.active::before {
+  opacity: 0.7;
+  background: rgba(200, 220, 255, 0.6);
+}
 
 /* ── Chat Input ─────────────────────────────────────── */
 .chat-input-row {
@@ -1656,6 +1670,29 @@
   background: rgba(255, 255, 255, 0.02);
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+.chat-input-row::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: rgba(99, 102, 241, 0.45);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.chat-input-row.input-at-boundary::after {
+  opacity: 1;
+  background: rgba(99, 102, 241, 0.8);
+}
+.chat-input-row.input-at-minimum::after {
+  background: rgba(139, 214, 82, 0.7);
+}
+.chat-input-row.input-at-maximum::after {
+  background: rgba(245, 158, 11, 0.75);
 }
 .chat-textarea-wrap {
   display: flex;

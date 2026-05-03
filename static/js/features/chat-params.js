@@ -577,9 +577,43 @@ export function initChatParams() {
     initChatResizeHandle();
 
     // Bind chat header buttons
-    document.getElementById('btn-system-prompt')?.addEventListener('click', toggleSystemPromptPanel);
-    document.getElementById('btn-model-params')?.addEventListener('click', toggleModelParamsPanel);
-    document.getElementById('btn-chat-style')?.addEventListener('click', toggleStylePanel);
+    document.getElementById('btn-system-prompt')?.addEventListener('click', (e) => {
+    const btn = document.getElementById('btn-system-prompt');
+    const panel = document.getElementById('chat-system-panel');
+    toggleSystemPromptPanel();
+    setTimeout(() => {
+        const isOpen = panel.classList.contains('open');
+        if (isOpen) {
+            btn.classList.remove('active');
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    }, 50);
+});
+    document.getElementById('btn-model-params')?.addEventListener('click', (e) => {
+    const btn = document.getElementById('btn-model-params');
+    const panel = document.getElementById('chat-params-panel');
+    const wasOpen = panel.classList.contains('open');
+    toggleModelParamsPanel();
+    setTimeout(() => {
+        const isOpen = panel.classList.contains('open');
+        if (isOpen) btn.classList.add('active');
+        else btn.classList.remove('active');
+    }, 0);
+});
+    document.getElementById('btn-chat-style')?.addEventListener('click', (e) => {
+    const btn = document.getElementById('btn-chat-style');
+    toggleStylePanel();
+    setTimeout(() => {
+        const panel = document.getElementById('chat-style-panel');
+        const isOpen = panel.style.display !== 'none';
+        if (btn) {
+            if (isOpen) btn.classList.add('active');
+            else btn.classList.remove('active');
+        }
+    }, 0);
+});
     document.getElementById('btn-compact')?.addEventListener('click', onManualCompact);
     registerPersonaMenuBindings();
     registerTemplateMenuBindings();
@@ -780,7 +814,9 @@ export function registerPersonaMenuBindings() {
     editBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
         menu.classList.add('hidden');
-        toggleSystemPromptPanel();
+        const btnSystemPrompt = document.getElementById('btn-system-prompt');
+        if (btnSystemPrompt) btnSystemPrompt.classList.add('active');
+        openTemplateManager();
     });
     
     document.addEventListener('click', (e) => {
