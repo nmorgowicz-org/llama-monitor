@@ -2,6 +2,13 @@
 // Remote agent setup modal, SSH guide, install/start/stop/update/remove,
 // host key scanning, and status indicator.
 
+import { remoteAgent } from '../core/app-state.js';
+import { wsData } from '../core/app-state.js';
+import { escapeHtml } from '../core/format.js';
+import { showToast } from './toast.js';
+import { closeConfigModal, openConfigModal } from './config.js';
+import { closeSettingsModal, saveSettings } from './settings.js';
+
 let initialized = false;
 
 // ── State ──────────────────────────────────────────────────────────────────────
@@ -55,8 +62,8 @@ function sshTargetFromConnection(connection) {
 // ── Remote Agent Setup Modal ───────────────────────────────────────────────────
 
 export function openRemoteAgentSetup() {
-    if (typeof window.closeConfigModal === 'function') window.closeConfigModal();
-    if (typeof window.closeSettingsModal === 'function') window.closeSettingsModal();
+    closeConfigModal();
+    closeSettingsModal();
 
     const modal = document.getElementById('remote-agent-setup-modal');
     if (!modal) return;
@@ -119,16 +126,15 @@ function updateAgentSetupStatusAlert() {
 
     if (!alert) return;
 
-    const state = window.appState?.wsData;
-    if (!state) {
+    if (!wsData) {
         alert.style.display = 'none';
         return;
     }
 
-    const isConnected = state.remote_agent_connected;
-    const isFirewallBlocked = state.remote_agent_connected && !state.remote_agent_health_reachable;
-    const hasRemoteEndpoint = state.session_mode === 'attach' && state.endpoint_kind === 'Remote';
-    const sys = state.system || {};
+    const isConnected = wsData.remote_agent_connected;
+    const isFirewallBlocked = wsData.remote_agent_connected && !wsData.remote_agent_health_reachable;
+    const hasRemoteEndpoint = wsData.session_mode === 'attach' && wsData.endpoint_kind === 'Remote';
+    const sys = wsData.system || {};
     const hasCpuTemp = sys.cpu_temp_available && sys.cpu_temp > 0;
 
     if (!hasRemoteEndpoint) {
@@ -259,17 +265,18 @@ async function scanRemoteAgentHostKey() {
         const data = await resp.json();
         if (!data.ok) {
             remoteAgentSetupState.hostKey = null;
-            if (hostKeyEl) hostKeyEl.innerHTML = '<em style="color:#bf616a;">Scan failed: ' + window.escapeHtml(data.error || 'unknown') + '</em>';
+            if (hostKeyEl) hostKeyEl.innerHTML = '<em style="color:#bf616a;">Scan failed: ' + escapeHtml(data.error || 'unknown') + '</em>';
             return;
         }
 
         remoteAgentSetupState.hostKey = data.host_key;
         const trusted = data.host_key.trusted ? 'trusted' : 'not trusted yet';
         if (hostKeyEl) {
+            // eslint-disable-next-line no-unsanitized/property -- all server strings wrapped in escapeHtml(); trusted is a hardcoded string
             hostKeyEl.innerHTML = [
-                '<strong>Key:</strong> ' + window.escapeHtml(data.host_key.key_type),
-                '<strong>Host:</strong> ' + window.escapeHtml(data.host_key.host + ':' + data.host_key.port),
-                '<strong>Fingerprint:</strong> ' + window.escapeHtml(formatHostKey(data.host_key.key_hex)),
+                '<strong>Key:</strong> ' + escapeHtml(data.host_key.key_type),
+                '<strong>Host:</strong> ' + escapeHtml(data.host_key.host + ':' + data.host_key.port),
+                '<strong>Fingerprint:</strong> ' + escapeHtml(formatHostKey(data.host_key.key_hex)),
                 '<strong>Status:</strong> ' + trusted,
             ].join('<br>');
         }
@@ -280,7 +287,7 @@ async function scanRemoteAgentHostKey() {
         }
     } catch (err) {
         remoteAgentSetupState.hostKey = null;
-        if (hostKeyEl) hostKeyEl.innerHTML = '<em style="color:#bf616a;">Scan failed: ' + window.escapeHtml(err.message) + '</em>';
+        if (hostKeyEl) hostKeyEl.innerHTML = '<em style="color:#bf616a;">Scan failed: ' + escapeHtml(err.message) + '</em>';
     }
 }
 
@@ -404,6 +411,7 @@ function showAgentSetupStatus(message, kind) {
     const el = document.getElementById('agent-setup-status');
     el.style.display = '';
     el.className = 'agent-setup-status ' + kind;
+    // eslint-disable-next-line no-unsanitized/property -- all call sites pass hardcoded strings or strings with server data wrapped in escapeHtml()
     el.innerHTML = message;
 }
 
@@ -434,13 +442,13 @@ function renderManagedAgentStatus(data) {
     if (removeBtn) removeBtn.style.display = data.installed || data.managed_task_installed ? '' : 'none';
 
     const managedLines = [
-        '<strong>Install path:</strong> ' + window.escapeHtml(data.install_path || 'unknown'),
+        '<strong>Install path:</strong> ' + escapeHtml(data.install_path || 'unknown'),
         '<strong>Installed:</strong> ' + (data.installed ? 'yes' : 'no'),
         '<strong>Running:</strong> ' + (data.running || data.reachable ? 'yes' : 'no'),
     ];
-    if (data.installed_version) managedLines.push('<strong>Version:</strong> ' + window.escapeHtml(data.installed_version));
-    if (data.managed_task_name) managedLines.push('<strong>Startup task:</strong> ' + window.escapeHtml(data.managed_task_name) + (data.managed_task_matches ? ' (healthy)' : ' (needs repair)'));
-    if (data.managed_task_command && !data.managed_task_matches) managedLines.push('<strong>Task command:</strong> ' + window.escapeHtml(data.managed_task_command));
+    if (data.installed_version) managedLines.push('<strong>Version:</strong> ' + escapeHtml(data.installed_version));
+    if (data.managed_task_name) managedLines.push('<strong>Startup task:</strong> ' + escapeHtml(data.managed_task_name) + (data.managed_task_matches ? ' (healthy)' : ' (needs repair)'));
+    if (data.managed_task_command && !data.managed_task_matches) managedLines.push('<strong>Task command:</strong> ' + escapeHtml(data.managed_task_command));
     showAgentSetupStatus(managedLines.join('<br>'), data.running || data.reachable ? 'ok' : 'info');
 }
 
@@ -466,14 +474,14 @@ async function checkManagedRemoteAgent() {
         const data = await resp.json();
         hideAgentSetupProgress();
         if (!data.ok) {
-            showAgentSetupStatus('Status check failed: ' + window.escapeHtml(data.error || 'unknown'), 'error');
+            showAgentSetupStatus('Status check failed: ' + escapeHtml(data.error || 'unknown'), 'error');
             return data;
         }
         renderManagedAgentStatus(data);
         return data;
     } catch (err) {
         hideAgentSetupProgress();
-        showAgentSetupStatus('Status check failed: ' + window.escapeHtml(err.message), 'error');
+        showAgentSetupStatus('Status check failed: ' + escapeHtml(err.message), 'error');
         return { ok: false, error: err.message };
     }
 }
@@ -552,6 +560,9 @@ async function installRemoteAgent() {
             return;
         }
 
+        // Auto-save token if agent is already running (repair scenario)
+        maybeAutoSaveAgentToken(detectData.agent_token);
+
         const remoteOs = detectData.os || 'linux';
         const remoteArch = detectData.arch || 'x86_64';
         showAgentSetupProgress('Remote: ' + remoteOs + ' ' + remoteArch + '. Fetching release\u2026', 15);
@@ -626,6 +637,9 @@ async function startRemoteAgent() {
             return;
         }
 
+        // Auto-save the token from the start response (if the agent exposed it via HTTP)
+        maybeAutoSaveAgentToken(data.agent_token);
+
         showAgentSetupProgress('Agent started\u2026 verifying\u2026', 80);
 
         await new Promise(r => setTimeout(r, 2000));
@@ -640,6 +654,9 @@ async function startRemoteAgent() {
             })
         });
         const verifyData = await verifyResp.json();
+
+        // Also auto-save from the detect/verify response
+        maybeAutoSaveAgentToken(verifyData.agent_token);
 
         hideAgentSetupProgress();
 
@@ -675,14 +692,14 @@ async function stopManagedRemoteAgent() {
         const data = await resp.json();
         hideAgentSetupProgress();
         if (!data.ok) {
-            showAgentSetupStatus('Stop failed: ' + window.escapeHtml(data.error || 'unknown'), 'error');
+            showAgentSetupStatus('Stop failed: ' + escapeHtml(data.error || 'unknown'), 'error');
             return;
         }
         showAgentSetupStatus('Agent process stopped. The managed startup task remains installed.', 'ok');
         await checkManagedRemoteAgent();
     } catch (err) {
         hideAgentSetupProgress();
-        showAgentSetupStatus('Stop failed: ' + window.escapeHtml(err.message), 'error');
+        showAgentSetupStatus('Stop failed: ' + escapeHtml(err.message), 'error');
     }
 }
 
@@ -709,7 +726,7 @@ async function removeManagedRemoteAgent() {
         const data = await resp.json();
         hideAgentSetupProgress();
         if (!data.ok) {
-            showAgentSetupStatus('Remove failed: ' + window.escapeHtml(data.error || 'unknown'), 'error');
+            showAgentSetupStatus('Remove failed: ' + escapeHtml(data.error || 'unknown'), 'error');
             return;
         }
         showAgentSetupStatus('Managed agent removed from this host.', 'ok');
@@ -720,7 +737,7 @@ async function removeManagedRemoteAgent() {
         document.getElementById('btn-agent-setup-remove')?.style.setProperty('display', 'none');
     } catch (err) {
         hideAgentSetupProgress();
-        showAgentSetupStatus('Remove failed: ' + window.escapeHtml(err.message), 'error');
+        showAgentSetupStatus('Remove failed: ' + escapeHtml(err.message), 'error');
     }
 }
 
@@ -731,12 +748,30 @@ async function finishRemoteAgentSetup() {
     const sshPortInput = document.getElementById('agent-setup-ssh-port');
     const sshAuthSelect = document.getElementById('agent-setup-ssh-auth');
 
+    // Fetch current settings to merge — avoids wiping unrelated settings
+    // (preset_id, port, llama_server_path, models_dir, server_endpoint, etc.)
+    let currentSettings = {};
+    try {
+        const resp = await fetch('/api/settings');
+        if (resp.ok) {
+            currentSettings = await resp.json();
+        }
+    } catch (_) {}
+
     const settings = {
+        ...currentSettings,
         remote_agent_url: agentUrlInput?.value.trim() || '',
-        remote_agent_token: agentTokenInput?.value.trim() || '',
         remote_agent_ssh_target: sshTargetFromSetup(),
         remote_agent_ssh_autostart: true,
     };
+
+    // Only override the token if the user explicitly entered one.
+    // If the token was auto-saved by maybeAutoSaveAgentToken, it's already
+    // in currentSettings and will be preserved by the spread above.
+    const explicitToken = agentTokenInput?.value.trim();
+    if (explicitToken) {
+        settings.remote_agent_token = explicitToken;
+    }
 
     const { auth, connection } = collectRemoteAgentSetupConnection();
     if (auth === 'password') {
@@ -838,10 +873,11 @@ function previewSshSetupGuide() {
     const agentUrl = 'http://' + connection.host + ':7779';
     const authLabel = auth === 'password' ? 'password for this operation' : auth === 'key' ? 'private key file' : 'SSH agent or keychain';
 
+    // eslint-disable-next-line no-unsanitized/property -- all server/computed strings wrapped in escapeHtml(); remaining items are hardcoded
     plan.innerHTML = [
-        '<strong>SSH target:</strong> ' + window.escapeHtml(target),
-        '<strong>Agent URL:</strong> ' + window.escapeHtml(agentUrl),
-        '<strong>Auth:</strong> ' + window.escapeHtml(authLabel),
+        '<strong>SSH target:</strong> ' + escapeHtml(target),
+        '<strong>Agent URL:</strong> ' + escapeHtml(agentUrl),
+        '<strong>Auth:</strong> ' + escapeHtml(authLabel),
         '<strong>Install path:</strong> detected by OS; usually ~/.config/llama-monitor/bin/llama-monitor or %APPDATA%\\llama-monitor\\bin\\llama-monitor.exe',
         '<strong>Release source:</strong> latest llama-monitor GitHub release asset matching remote OS/architecture',
         '<strong>Remote command:</strong> default OS-specific agent start command unless you override it below',
@@ -875,30 +911,31 @@ async function scanSshHostKey() {
         });
         const data = await resp.json();
         if (!data.ok) {
-            window.latestSshHostKey = null;
+            remoteAgent.latestHostKey = null;
             if (hostKeyEl) hostKeyEl.textContent = 'Host-key scan failed: ' + (data.error || 'unknown error');
             return;
         }
 
-        window.latestSshHostKey = data.host_key;
+        remoteAgent.latestHostKey = data.host_key;
         if (hostKeyEl) {
+            // eslint-disable-next-line no-unsanitized/property -- all server strings wrapped in escapeHtml(); trusted status is a hardcoded string
             hostKeyEl.innerHTML = [
-                '<strong>Host key:</strong> ' + window.escapeHtml(data.host_key.key_type),
-                '<strong>Host:</strong> ' + window.escapeHtml(data.host_key.host + ':' + data.host_key.port),
-                '<strong>Fingerprint:</strong> ' + window.escapeHtml(formatHostKey(data.host_key.key_hex)),
+                '<strong>Host key:</strong> ' + escapeHtml(data.host_key.key_type),
+                '<strong>Host:</strong> ' + escapeHtml(data.host_key.host + ':' + data.host_key.port),
+                '<strong>Fingerprint:</strong> ' + escapeHtml(formatHostKey(data.host_key.key_hex)),
                 data.host_key.trusted ? '<strong>Status:</strong> trusted' : '<strong>Status:</strong> not trusted yet',
             ].join('<br>');
         }
         if (trustBtn) trustBtn.style.display = data.host_key.trusted ? 'none' : '';
     } catch (err) {
-        window.latestSshHostKey = null;
+        remoteAgent.latestHostKey = null;
         if (hostKeyEl) hostKeyEl.textContent = 'Host-key scan failed: ' + err.message;
     }
 }
 
 async function trustSshHostKey() {
     const { connection } = collectSshGuideConnection();
-    if (!window.latestSshHostKey?.key_hex) {
+    if (!remoteAgent.latestHostKey?.key_hex) {
         showRemoteAgentValidation('Scan the host key before trusting it.', 'error');
         return;
     }
@@ -909,7 +946,7 @@ async function trustSshHostKey() {
         body: JSON.stringify({
             ssh_target: sshTargetFromConnection(connection),
             ssh_connection: connection,
-            key_hex: window.latestSshHostKey.key_hex,
+            key_hex: remoteAgent.latestHostKey.key_hex,
         })
     });
     const data = await resp.json();
@@ -945,10 +982,10 @@ function applySshSetupGuide() {
         agentUrlInput.value = 'http://' + connection.host + ':7779';
     }
 
-    window.remoteAgentSshConnection = connection;
+    remoteAgent.sshConnection = connection;
     clearRemoteAgentValidation();
     setRemoteAgentStatus('Guided SSH settings are ready. Click <strong>Check Host</strong>, <strong>Install & Start</strong>, or <strong>Start Agent</strong> when you want to contact the remote machine.', 'info');
-    if (typeof window.saveSettings === 'function') window.saveSettings();
+    saveSettings();
 }
 
 // ── Settings Panel UI Helpers ─────────────────────────────────────────────────
@@ -957,8 +994,8 @@ function remoteAgentSshPayload() {
     const sshTarget = document.getElementById('set-remote-agent-ssh-target')?.value.trim();
     const payload = { ssh_target: sshTarget };
 
-    if (window.remoteAgentSshConnection && sshTarget === sshTargetFromConnection(window.remoteAgentSshConnection)) {
-        payload.ssh_connection = window.remoteAgentSshConnection;
+    if (remoteAgent.sshConnection && sshTarget === sshTargetFromConnection(remoteAgent.sshConnection)) {
+        payload.ssh_connection = remoteAgent.sshConnection;
     }
 
     return payload;
@@ -969,6 +1006,7 @@ export function setRemoteAgentStatus(message, kind) {
     if (!el) return;
 
     el.style.color = kind === 'error' ? '#bf616a' : kind === 'ok' ? '#a3be8c' : '#9aa7b7';
+    // eslint-disable-next-line no-unsanitized/property -- all call sites pass hardcoded strings or strings with server data wrapped in escapeHtml()
     el.innerHTML = message;
 }
 
@@ -1027,7 +1065,7 @@ function setRemoteAgentButtonsDisabled(disabled) {
     if (restartBtn) restartBtn.disabled = disabled;
     if (removeBtn) removeBtn.disabled = disabled;
 
-    window.remoteAgentInProgress = disabled;
+    remoteAgent.inProgress = disabled;
 }
 
 // ── Status Indicator ──────────────────────────────────────────────────────────
@@ -1050,61 +1088,64 @@ function updateAgentStatusIndicator(connected, firewallBlocked) {
             menuSubtitle.textContent = host ? 'Manage agent for ' + host : 'No remote endpoint attached';
         }
     }
-
-    if (!el) return;
-
-    if (!connected) {
-        el.style.display = 'none';
-        return;
-    }
-
-    el.style.display = 'flex';
-    const fixBtn = el.querySelector('.btn-agent-fix');
-
-    if (firewallBlocked) {
-        el.className = 'agent-status firewall-blocked';
-        const indicator = el.querySelector('.agent-indicator');
-        const textEl = el.querySelector('.agent-text');
-        if (indicator) indicator.textContent = '\u26a0\ufe0f';
-        if (textEl) textEl.textContent = 'Firewall blocked';
-        if (fixBtn) fixBtn.style.display = '';
-    } else {
-        el.className = 'agent-status connected';
-        const indicator = el.querySelector('.agent-indicator');
-        const textEl = el.querySelector('.agent-text');
-        if (indicator) indicator.textContent = '\u25cf';
-        if (textEl) textEl.textContent = 'Remote Agent';
-        if (fixBtn) fixBtn.style.display = 'none';
-    }
+    if (el) updateAgentStatusPill(el, connected, firewallBlocked);
 }
 
-// ── Agent Menu ────────────────────────────────────────────────────────────────
-
-function toggleAgentMenu(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    document.getElementById('agent-menu-panel')?.classList.toggle('open');
+function updateAgentStatusPill(el, connected, firewallBlocked) {
+   if (!connected) {
+       el.style.display = 'none';
+       return;
+   }
+   el.style.display = 'flex';
+   const fixBtn = el.querySelector('.btn-agent-fix');
+   const tooltip = el.querySelector('.agent-status-tooltip');
+   const statusEl = tooltip ? tooltip.querySelector('.agent-tooltip-status') : null;
+   
+   if (firewallBlocked) {
+       el.className = 'agent-status firewall-blocked';
+       const indicator = el.querySelector('.agent-indicator');
+       const textEl = el.querySelector('.agent-text');
+       if (indicator) indicator.textContent = '\u26a0\ufe0f';
+       if (textEl) textEl.textContent = 'Firewall blocked';
+       if (statusEl) {
+           statusEl.textContent = 'Firewall blocked';
+           statusEl.className = 'agent-tooltip-status warning';
+       }
+       if (fixBtn) fixBtn.style.display = '';
+   } else {
+       el.className = 'agent-status connected';
+       const indicator = el.querySelector('.agent-indicator');
+       const textEl = el.querySelector('.agent-text');
+       if (indicator) indicator.textContent = '\u25cf';
+       if (textEl) textEl.textContent = 'Remote Agent';
+       if (statusEl) {
+           statusEl.textContent = 'Connected';
+           statusEl.className = 'agent-tooltip-status connected';
+       }
+       if (fixBtn) fixBtn.style.display = 'none';
+   }
 }
+
+// ── Agent Status Badge Click ────────────────────────────────────────────────
 
 function toggleAgentMenuFromBadge(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    closeAgentMenu();
-    openRemoteAgentSetup();
+   event.preventDefault();
+   event.stopPropagation();
+   openRemoteAgentSetup();
 }
 
 function openRemoteAgentSetupFromBadge(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    closeAgentMenu();
-    openRemoteAgentSetup();
-}
-
-function closeAgentMenu() {
-    document.getElementById('agent-menu-panel')?.classList.remove('open');
+   event.preventDefault();
+   event.stopPropagation();
+   openRemoteAgentSetup();
 }
 
 // ── Agent Menu Actions ────────────────────────────────────────────────────────
+
+function closeAgentMenu() {
+   // No longer needed - agent-menu-panel removed
+   // Kept for backward compatibility with action functions
+}
 
 async function agentMenuCheck() {
     closeAgentMenu();
@@ -1145,7 +1186,7 @@ function maybeAutoSaveAgentToken(token) {
     const current = tokenInput.value.trim();
     if (current === token) return;
     tokenInput.value = token;
-    if (typeof window.saveSettings === 'function') window.saveSettings();
+    saveSettings();
 }
 
 async function remoteAgentLatestRelease() {
@@ -1159,15 +1200,15 @@ async function remoteAgentLatestRelease() {
         if (!data.ok) {
             hideRemoteAgentProgress();
             setRemoteAgentButtonsDisabled(false);
-            setRemoteAgentStatus('Release check failed: ' + window.escapeHtml(data.error || 'unknown error'), 'error');
+            setRemoteAgentStatus('Release check failed: ' + escapeHtml(data.error || 'unknown error'), 'error');
             return;
         }
 
-        const assets = (data.release.assets || []).map(asset => window.escapeHtml(asset.name)).join('<br>');
+        const assets = (data.release.assets || []).map(asset => escapeHtml(asset.name)).join('<br>');
         const latestEl = document.getElementById('remote-agent-latest-version');
         if (latestEl) latestEl.textContent = data.release.tag_name || 'Unknown';
 
-        setRemoteAgentStatus('<strong>Latest release:</strong> ' + window.escapeHtml(data.release.tag_name) + '<br>' + assets, 'ok');
+        setRemoteAgentStatus('<strong>Latest release:</strong> ' + escapeHtml(data.release.tag_name) + '<br>' + assets, 'ok');
 
         setTimeout(() => {
             hideRemoteAgentProgress();
@@ -1176,7 +1217,7 @@ async function remoteAgentLatestRelease() {
     } catch (err) {
         hideRemoteAgentProgress();
         setRemoteAgentButtonsDisabled(false);
-        setRemoteAgentStatus('Release check failed: ' + window.escapeHtml(String(err)), 'error');
+        setRemoteAgentStatus('Release check failed: ' + escapeHtml(String(err)), 'error');
     }
 }
 
@@ -1215,24 +1256,24 @@ async function remoteAgentDetect(showProgress = false) {
         const installPath = data.install_path || 'unknown';
 
         const lines = [
-            '<strong>' + window.escapeHtml(data.os) + ' / ' + window.escapeHtml(data.arch) + '</strong>',
-            'Asset: ' + window.escapeHtml(asset) + window.escapeHtml(archiveNote),
-            'Install: ' + window.escapeHtml(installPath),
+            '<strong>' + escapeHtml(data.os) + ' / ' + escapeHtml(data.arch) + '</strong>',
+            'Asset: ' + escapeHtml(asset) + escapeHtml(archiveNote),
+            'Install: ' + escapeHtml(installPath),
             'Installed: ' + (data.installed ? 'yes' : 'no'),
             'Reachable: ' + (data.reachable ? 'yes' : 'no'),
         ];
 
         if (data.installed_version) {
-            lines.push('Installed: v' + window.escapeHtml(data.installed_version));
+            lines.push('Installed: v' + escapeHtml(data.installed_version));
         }
         if (data.managed_task_name) {
-            lines.push('Startup task: ' + window.escapeHtml(data.managed_task_name) + (data.managed_task_matches ? ' (healthy)' : ' (needs repair)'));
+            lines.push('Startup task: ' + escapeHtml(data.managed_task_name) + (data.managed_task_matches ? ' (healthy)' : ' (needs repair)'));
         }
         if (data.update_available) {
             const latestVer = data.latest_release?.tag_name || 'unknown';
-            lines.push('<strong style="color:#ebcb8b;">Update available: v' + window.escapeHtml(latestVer) + '</strong>');
+            lines.push('<strong style="color:#ebcb8b;">Update available: v' + escapeHtml(latestVer) + '</strong>');
         }
-        if (data.error) lines.push('Issue: ' + window.escapeHtml(data.error));
+        if (data.error) lines.push('Issue: ' + escapeHtml(data.error));
 
         setRemoteAgentStatus(lines.join('<br>'), data.ok ? 'ok' : 'error');
 
@@ -1248,7 +1289,7 @@ async function remoteAgentDetect(showProgress = false) {
 
         return data;
     } catch (err) {
-        setRemoteAgentStatus('Detection failed: ' + window.escapeHtml(String(err)), 'error');
+        setRemoteAgentStatus('Detection failed: ' + escapeHtml(String(err)), 'error');
         if (showProgress) {
             hideRemoteAgentProgress();
         }
@@ -1303,7 +1344,7 @@ async function remoteAgentInstall() {
             addTimelineItem('Installation failed: ' + (data.error || 'unknown'), 'failed');
             hideRemoteAgentProgress();
             setRemoteAgentButtonsDisabled(false);
-            setRemoteAgentStatus('Install failed: ' + window.escapeHtml(data.error || 'unknown'), 'error');
+            setRemoteAgentStatus('Install failed: ' + escapeHtml(data.error || 'unknown'), 'error');
             return;
         }
 
@@ -1313,15 +1354,15 @@ async function remoteAgentInstall() {
         setTimeout(() => {
             hideRemoteAgentProgress();
             setRemoteAgentButtonsDisabled(false);
-            setRemoteAgentStatus('Agent installed successfully at ' + window.escapeHtml(data.install_path || 'unknown'), 'ok');
+            setRemoteAgentStatus('Agent installed successfully at ' + escapeHtml(data.install_path || 'unknown'), 'ok');
             updateRemoteAgentPanelState(data);
             remoteAgentStart();
         }, 500);
     } catch (err) {
-        addTimelineItem('Installation error: ' + window.escapeHtml(String(err)), 'failed');
+        addTimelineItem('Installation error: ' + escapeHtml(String(err)), 'failed');
         hideRemoteAgentProgress();
         setRemoteAgentButtonsDisabled(false);
-        setRemoteAgentStatus('Install failed: ' + window.escapeHtml(String(err)), 'error');
+        setRemoteAgentStatus('Install failed: ' + escapeHtml(String(err)), 'error');
     }
 }
 
@@ -1374,7 +1415,7 @@ async function remoteAgentStart() {
             addTimelineItem('Start failed: ' + (data.error || 'unknown'), 'failed');
             hideRemoteAgentProgress();
             setRemoteAgentButtonsDisabled(false);
-            setRemoteAgentStatus('Start failed: ' + window.escapeHtml(data.error || 'unknown'), 'error');
+            setRemoteAgentStatus('Start failed: ' + escapeHtml(data.error || 'unknown'), 'error');
             return;
         }
 
@@ -1403,10 +1444,10 @@ async function remoteAgentStart() {
             updateRemoteAgentPanelState(data);
         }, 500);
     } catch (err) {
-        addTimelineItem('Start error: ' + window.escapeHtml(String(err)), 'failed');
+        addTimelineItem('Start error: ' + escapeHtml(String(err)), 'failed');
         hideRemoteAgentProgress();
         setRemoteAgentButtonsDisabled(false);
-        setRemoteAgentStatus('Start failed: ' + window.escapeHtml(String(err)), 'error');
+        setRemoteAgentStatus('Start failed: ' + escapeHtml(String(err)), 'error');
     }
 }
 
@@ -1457,7 +1498,7 @@ async function remoteAgentUpdate() {
             addTimelineItem('Update failed: ' + (data.error || 'unknown'), 'failed');
             hideRemoteAgentProgress();
             setRemoteAgentButtonsDisabled(false);
-            setRemoteAgentStatus('Update failed: ' + window.escapeHtml(data.error || 'unknown'), 'error');
+            setRemoteAgentStatus('Update failed: ' + escapeHtml(data.error || 'unknown'), 'error');
             return;
         }
 
@@ -1469,7 +1510,7 @@ async function remoteAgentUpdate() {
             hideRemoteAgentProgress();
             setRemoteAgentButtonsDisabled(false);
 
-            let message = 'Agent updated to ' + window.escapeHtml(data.new_version || 'latest');
+            let message = 'Agent updated to ' + escapeHtml(data.new_version || 'latest');
             if (data.health_reachable) {
                 message += ' and is reachable';
             } else {
@@ -1484,10 +1525,10 @@ async function remoteAgentUpdate() {
             updateRemoteAgentPanelState({ ...detectData, ...data, installed: true });
         }, 500);
     } catch (err) {
-        addTimelineItem('Update error: ' + window.escapeHtml(String(err)), 'failed');
+        addTimelineItem('Update error: ' + escapeHtml(String(err)), 'failed');
         hideRemoteAgentProgress();
         setRemoteAgentButtonsDisabled(false);
-        setRemoteAgentStatus('Update failed: ' + window.escapeHtml(String(err)), 'error');
+        setRemoteAgentStatus('Update failed: ' + escapeHtml(String(err)), 'error');
     }
 }
 
@@ -1518,7 +1559,7 @@ async function remoteAgentStop() {
             addTimelineItem('Stop failed: ' + (data.error || 'unknown'), 'failed');
             hideRemoteAgentProgress();
             setRemoteAgentButtonsDisabled(false);
-            setRemoteAgentStatus('Stop failed: ' + window.escapeHtml(data.error || 'unknown'), 'error');
+            setRemoteAgentStatus('Stop failed: ' + escapeHtml(data.error || 'unknown'), 'error');
             return data;
         }
 
@@ -1534,10 +1575,10 @@ async function remoteAgentStop() {
 
         return data;
     } catch (err) {
-        addTimelineItem('Stop error: ' + window.escapeHtml(String(err)), 'failed');
+        addTimelineItem('Stop error: ' + escapeHtml(String(err)), 'failed');
         hideRemoteAgentProgress();
         setRemoteAgentButtonsDisabled(false);
-        setRemoteAgentStatus('Stop failed: ' + window.escapeHtml(String(err)), 'error');
+        setRemoteAgentStatus('Stop failed: ' + escapeHtml(String(err)), 'error');
         return { ok: false, error: String(err) };
     }
 }
@@ -1591,7 +1632,7 @@ async function remoteAgentRemove() {
             addTimelineItem('Remove failed: ' + (data.error || 'unknown'), 'failed');
             hideRemoteAgentProgress();
             setRemoteAgentButtonsDisabled(false);
-            setRemoteAgentStatus('Remove failed: ' + window.escapeHtml(data.error || 'unknown'), 'error');
+            setRemoteAgentStatus('Remove failed: ' + escapeHtml(data.error || 'unknown'), 'error');
             return data;
         }
 
@@ -1607,10 +1648,10 @@ async function remoteAgentRemove() {
 
         return data;
     } catch (err) {
-        addTimelineItem('Remove error: ' + window.escapeHtml(String(err)), 'failed');
+        addTimelineItem('Remove error: ' + escapeHtml(String(err)), 'failed');
         hideRemoteAgentProgress();
         setRemoteAgentButtonsDisabled(false);
-        setRemoteAgentStatus('Remove failed: ' + window.escapeHtml(String(err)), 'error');
+        setRemoteAgentStatus('Remove failed: ' + escapeHtml(String(err)), 'error');
         return { ok: false, error: String(err) };
     }
 }
@@ -1683,13 +1724,13 @@ function showRemoteAgentFirewall(showAlert = true) {
     if (firewallEl) {
         firewallEl.style.display = '';
     }
-    if (showAlert && typeof window.showToast === 'function') {
-        window.showToast('Firewall blocked - Agent HTTP access is not reachable', 'error');
+    if (showAlert && typeof showToast === 'function') {
+        showToast('Firewall blocked - Agent HTTP access is not reachable', 'error');
     }
 }
 
 function openFirewallHelp() {
-    if (typeof window.openConfigModal === 'function') window.openConfigModal();
+    openConfigModal();
 
     const panel = document.getElementById('remote-agent-panel');
     if (panel) panel.open = true;
@@ -1733,6 +1774,7 @@ function addTimelineItem(message, status) {
     const timestamp = new Date().toLocaleTimeString();
     const item = document.createElement('div');
     item.className = 'remote-agent-timeline-item ' + status;
+    // eslint-disable-next-line no-unsanitized/property -- timestamp is from Date(); message is passed by internal callers as hardcoded strings or escapeHtml()-wrapped server data; status is a hardcoded enum
     item.innerHTML = '<span class="timestamp">[' + timestamp + ']</span>' + message;
 
     itemsEl.appendChild(item);
@@ -1756,18 +1798,7 @@ export function initRemoteAgent() {
     if (initialized) return;
     initialized = true;
 
-    // Bind agent menu toggle
-    document.getElementById('nav-agent-btn')?.addEventListener('click', (e) => toggleAgentMenu(e));
-
-    // Bind agent menu items
-    document.getElementById('agent-menu-check')?.addEventListener('click', agentMenuCheck);
-    document.getElementById('agent-menu-manage')?.addEventListener('click', openRemoteAgentSetup);
-    document.getElementById('agent-menu-install')?.addEventListener('click', agentMenuInstallRepair);
-    document.getElementById('agent-menu-start')?.addEventListener('click', agentMenuStart);
-    document.getElementById('agent-menu-stop')?.addEventListener('click', agentMenuStop);
-    document.getElementById('agent-menu-remove')?.addEventListener('click', agentMenuRemove);
-
-    // Bind agent status badge
+    // Bind agent status badge (opens setup modal)
     document.getElementById('agent-status')?.addEventListener('click', (e) => {
         if (!e.target.closest('.btn-agent-fix')) toggleAgentMenuFromBadge(e);
     });
@@ -1808,9 +1839,6 @@ export function initRemoteAgent() {
     document.getElementById('ssh-guide-scan')?.addEventListener('click', scanSshHostKey);
     document.getElementById('btn-ssh-guide-trust')?.addEventListener('click', trustSshHostKey);
     document.getElementById('ssh-guide-apply')?.addEventListener('click', applySshSetupGuide);
-
-    // Keep on window for cross-module calls
-    window.setRemoteAgentStatus = setRemoteAgentStatus;
 
     // Agent setup modal overlay click
     const modal = document.getElementById('remote-agent-setup-modal');
@@ -1861,7 +1889,7 @@ export function initRemoteAgent() {
                     sensorBtn.textContent = 'Setup';
                     sensorBtn.disabled = false;
                     if (callout) {
-                        callout.innerHTML = '<span style="color:#bf616a;">Install failed: ' + (data.error || 'Unknown error') + '</span>';
+                        callout.innerHTML = '<span style="color:#bf616a;">Install failed: ' + escapeHtml(data.error || 'Unknown error') + '</span>';
                     }
                     return;
                 }

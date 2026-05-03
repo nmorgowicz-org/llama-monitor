@@ -1,11 +1,60 @@
 // ── Dashboard WebSocket Transport ──────────────────────────────────────────────
 // WebSocket creation, onmessage dispatch, and dashboard update logic.
-// Rendering functions (renderGpuCard, renderSlotGrid, etc.) still live in app.js
-// and are called via window.* during this transition phase.
+// Imports state from app-state.js and render functions from dashboard-render.js.
 
-import { formatMetricAge } from '../core/format.js';
-
-let lastGpuData = {};
+import { formatMetricAge, formatMetricNumber } from '../core/format.js';
+import {
+    sessionState,
+    prevValues,
+    metricSeries,
+    liveOutputTracker,
+    metricCapabilities,
+    requestActivity,
+    recentTasks,
+    slotSnapshots,
+    setWsData,
+    setLastServerState,
+    setLastLlamaMetrics,
+    setLastSystemMetrics,
+    setLastGpuMetrics,
+    setLastCapabilities,
+    setLastGpuData,
+    lastLlamaMetrics,
+    lastSystemMetrics,
+    wsData,
+    currentPollInterval,
+    monitorState,
+    setupViewState,
+} from '../core/app-state.js';
+import {
+    setChipState,
+    setCardState,
+    setEmptyState,
+    pushSparklinePoint,
+    renderSparkline,
+    renderLiveSparkline,
+    updateLiveOutputEstimate,
+    updateRequestActivity,
+    renderRecentTask,
+    renderActivityRail,
+    renderSlotGrid,
+    getPrimarySlot,
+    renderSlotUtilization,
+    renderRequestStats,
+    renderGenerationDetailItems,
+    renderDecodingConfig,
+    formatParamCount,
+    renderCapabilityPopover,
+    updateMetricDelta,
+    setMetricSectionVisibility,
+    renderGpuCard,
+    renderSystemCard,
+} from './dashboard-render.js';
+import { animateNumber } from './animate.js';
+import { updateContextCard, updateContextCardFromChatTabs } from './context-card.js';
+import { activeChatTab } from './chat-state.js';
+import { setRemoteAgentStatus } from './remote-agent.js';
+import { hideConnectingState, switchView } from './setup-view.js';
 
 // ── Cached DOM elements (populated at init time to avoid repeated queries) ──
 let cachedElements = null;
@@ -39,15 +88,8 @@ function ensureCachedElements() {
         throughputCard: document.querySelector('.widget-speed'),
         generationCard: document.querySelector('.widget-generation'),
         contextCard: document.querySelector('.widget-context'),
-        // Context
-        mContextValue: document.getElementById('m-context-value'),
-        mContextPct: document.getElementById('m-context-pct'),
-        mContextDelta: document.getElementById('m-context-delta'),
-        mContextMax: document.getElementById('m-context-max'),
-        mContextBar: document.getElementById('m-context-bar'),
         mContextState: document.getElementById('m-context-state'),
         mContextEmpty: document.getElementById('m-context-empty'),
-        mContextAge: document.getElementById('m-context-age'),
         // Badges
         badgeServer: document.getElementById('badge-server'),
         badgeChat: document.getElementById('badge-chat'),
@@ -70,15 +112,6 @@ function ensureCachedElements() {
         statusDot: document.getElementById('status-dot'),
         btnStart: document.getElementById('btn-start'),
         btnStop: document.getElementById('btn-stop'),
-        // Context
-        mCtxFill: document.getElementById('m-ctx-fill'),
-        mCtxValue: document.getElementById('m-ctx'),
-        mCtxDetails: document.getElementById('m-ctx-details'),
-        mCtxState: document.getElementById('m-context-state'),
-        mCtxPeakFill: document.getElementById('m-ctx-peak-fill'),
-        mCtxLiveLabel: document.getElementById('m-ctx-live-label'),
-        mCtxLiveDetail: document.getElementById('m-ctx-live-detail'),
-        mCtxPeakDetail: document.getElementById('m-ctx-peak-detail'),
         mGenEmpty: document.getElementById('m-generation-empty'),
         mSlotsState: document.getElementById('m-slots-state'),
         mActivityState: document.getElementById('m-activity-state'),
@@ -94,17 +127,24 @@ export function initWebSocket() {
         (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'
     );
 
-    ws.onmessage = e => {
-        const d = JSON.parse(e.data);
-        updateDashboard(d);
-    };
+ws.onmessage = e => {
+    const d = JSON.parse(e.data);
+    updateDashboard(d);
+};
+
+// Poll context card after chat tabs load
+window.onChatTabsLoaded = () => {
+    setTimeout(() => {
+        updateContextCardFromChatTabs();
+    }, 500);
+};
 
     ws.onerror = e => console.error('WebSocket error:', e);
 
     ws.onclose = () => {
         ensureCachedElements();
         if (cachedElements.statusText) cachedElements.statusText.textContent = 'Disconnected';
-        window.prevLogLen = 0;
+        sessionState.prevLogLen = 0;
     };
 
     return ws;
@@ -117,9 +157,7 @@ function updateDashboard(d) {
     ensureCachedElements();
 
     // Store for use by status alert and other components
-    if (typeof window.appState !== 'undefined') {
-        window.appState.wsData = d;
-    }
+    setWsData(d);
 
     // Endpoint health strip
     updateEndpointStrip(d);
@@ -166,25 +204,20 @@ function updateEndpointStrip(d) {
         if (d.endpoint_kind === 'Local') {
             modeClass = 'local';
             modeText = 'Local';
-            if (!d.capabilities.system || !d.capabilities.gpu) {
-                statusClass = 'warning';
-                statusText = 'Limited';
-            }
         } else if (d.endpoint_kind === 'Remote') {
             modeClass = 'remote';
             modeText = 'Remote';
-            if (!d.capabilities.inference) {
-                statusClass = 'error';
-                statusText = 'Error';
-            } else {
-                statusClass = 'warning';
-                statusText = 'Inference only';
-            }
         }
 
-        if (d.capabilities.inference && !d.capabilities.host_metrics) {
+        if (!d.capabilities.inference) {
+            statusClass = 'error';
+            statusText = 'Error';
+        } else if (!d.capabilities.host_metrics) {
             statusClass = 'warning';
             statusText = 'Inference only';
+        } else if (!d.capabilities.system || !d.capabilities.gpu) {
+            statusClass = 'warning';
+            statusText = 'Limited';
         }
 
         if (endpointModeEl) {
@@ -195,6 +228,7 @@ function updateEndpointStrip(d) {
             endpointUrlEl.textContent = d.active_session_endpoint || d.active_session_id || 'No session';
         }
         if (endpointStatusEl) {
+            // eslint-disable-next-line no-unsanitized/property -- statusClass and statusText are hardcoded string enums set in this function
             endpointStatusEl.innerHTML = '<span class="status-dot ' + statusClass + '"></span>' + statusText;
         }
     }
@@ -237,13 +271,24 @@ function updateAgentStatus(d) {
     }
 
     if (d.remote_agent_connected && !remoteAgentHealthReachable) {
-        if (typeof window.setRemoteAgentStatus === 'function') {
-            window.setRemoteAgentStatus('Agent connected but HTTP is not reachable (firewall blocked)', 'warning');
+            setRemoteAgentStatus('Agent connected but HTTP is not reachable (firewall blocked)', 'warning');
         }
-    }
 
     if (agentLatencyEl) {
         agentLatencyEl.textContent = '';
+    }
+    
+    // Update agent menu subtitle
+    const menuSubtitle = document.getElementById('agent-menu-subtitle');
+    if (menuSubtitle) {
+        const hasRemoteEndpoint = d.session_mode === 'attach' && d.endpoint_kind === 'Remote';
+        if (!hasRemoteEndpoint) {
+            menuSubtitle.textContent = 'No remote endpoint attached';
+        } else if (d.remote_agent_connected) {
+            menuSubtitle.textContent = 'Connected to remote metrics';
+        } else {
+            menuSubtitle.textContent = 'Manage agent for ' + (d.endpoint_host || '');
+        }
     }
 }
 
@@ -265,9 +310,10 @@ function updateAttachDetach(d) {
         btnDetach.style.display = 'inline-block';
         if (btnDetachTop) btnDetachTop.style.display = 'inline-block';
 
-        if (typeof window.appState !== 'undefined' && window.appState.view === 'setup') {
-            if (typeof window.hideConnectingState === 'function') window.hideConnectingState();
-            if (typeof window.switchView === 'function') window.switchView('monitor');
+        if (typeof setupViewState !== 'undefined' && setupViewState.view === 'setup') {
+            // TODO: import from setup-view.js when that module is extracted
+            hideConnectingState();
+            switchView('monitor');
         }
     } else {
         if (serverHeader) serverHeader.style.display = '';
@@ -284,7 +330,7 @@ function updateAttachDetach(d) {
 // ── Server state ─────────────────────────────────────────────────────────────
 
 function updateServerState(d) {
-    window.serverRunning = d.server_running;
+    sessionState.serverRunning = d.server_running;
     const ce = cachedElements;
 
     const dot = ce.statusDot;
@@ -292,31 +338,26 @@ function updateServerState(d) {
     const btnStart = ce.btnStart;
     const btnStop = ce.btnStop;
 
-    dot.className = 'status-dot ' + (window.serverRunning ? 'running' : 'stopped');
-    txt.textContent = window.serverRunning ? 'Running' : 'Stopped';
+    dot.className = 'status-dot ' + (sessionState.serverRunning ? 'running' : 'stopped');
+    txt.textContent = sessionState.serverRunning ? 'Running' : 'Stopped';
 
     const localRunning = d.local_server_running || false;
     if (btnStart) btnStart.disabled = localRunning;
     if (btnStop) btnStop.disabled = !localRunning;
 
-    window.lastServerState = d.server_running;
-    window.lastLlamaMetrics = d.llama;
-    window.lastSystemMetrics = d.system || null;
-    window.lastCapabilities = d.capabilities || null;
-    window.lastGpuMetrics = d.gpu || {};
+    setLastServerState(d.server_running);
+    setLastLlamaMetrics(d.llama);
+    setLastSystemMetrics(d.system || null);
+    setLastCapabilities(d.capabilities || null);
+    setLastGpuMetrics(d.gpu || {});
 }
 
 // ── Inference metrics ────────────────────────────────────────────────────────
 
 function updateInferenceMetrics(d) {
-    const l = window.lastLlamaMetrics;
+    const l = lastLlamaMetrics;
     const hasActiveEndpoint = !!d.active_session_id;
     const ce = cachedElements;
-
-    // Speed metrics
-    if (!window.speedMax) {
-        window.speedMax = { prompt: 0, generation: 0 };
-    }
 
     const promptEl = ce.mPrompt;
     const genEl = ce.mGen;
@@ -341,9 +382,9 @@ function updateInferenceMetrics(d) {
     const latestThroughputMs = Math.max(promptAgeMs, genAgeMs);
     const throughputActive = promptRate > 0 || genRate > 0;
 
-    window.setCardState(throughputCard, !hasActiveEndpoint ? 'dormant' : throughputActive ? 'live' : 'idle');
-    window.setEmptyState(ce.mThroughputEmpty, !hasActiveEndpoint);
-    window.setChipState(throughputState, throughputActive ? 'live' : 'idle', throughputActive ? 'live' : 'idle');
+    setCardState(throughputCard, !hasActiveEndpoint ? 'dormant' : throughputActive ? 'live' : 'idle');
+    setEmptyState(ce.mThroughputEmpty, !hasActiveEndpoint);
+    setChipState(throughputState, throughputActive ? 'live' : 'idle', throughputActive ? 'live' : 'idle');
 
     if (throughputAge) {
         throughputAge.textContent = formatMetricAge(latestThroughputMs);
@@ -351,17 +392,17 @@ function updateInferenceMetrics(d) {
 
     // Prompt throughput
     if (promptDisplayRate > 0) {
-        window.updateMetricDelta(promptDeltaEl, window.prevValues.prompt, promptDisplayRate, 1);
-        window.animateNumber(promptEl, window.prevValues.prompt, promptDisplayRate, 300, 1, ' t/s');
-        window.prevValues.prompt = promptDisplayRate;
+        updateMetricDelta(promptDeltaEl, prevValues.prompt, promptDisplayRate, 1);
+        animateNumber(promptEl, prevValues.prompt, promptDisplayRate, 300, 1, ' t/s');
+        prevValues.prompt = promptDisplayRate;
 
-        if (promptDisplayRate > window.speedMax.prompt) {
-            window.speedMax.prompt = promptDisplayRate;
+        if (promptDisplayRate > monitorState.speedMax.prompt) {
+            monitorState.speedMax.prompt = promptDisplayRate;
         }
-        if (promptMaxEl && window.speedMax.prompt > 0) {
-            promptMaxEl.textContent = 'peak ' + window.speedMax.prompt.toFixed(0);
+        if (promptMaxEl && monitorState.speedMax.prompt > 0) {
+            promptMaxEl.textContent = 'peak ' + monitorState.speedMax.prompt.toFixed(0);
         }
-        const promptPct = Math.max((promptDisplayRate / window.speedMax.prompt) * 100, 4);
+        const promptPct = Math.max((promptDisplayRate / monitorState.speedMax.prompt) * 100, 4);
         if (promptBar) promptBar.style.width = promptPct + '%';
     } else {
         promptEl.textContent = '\u2014';
@@ -371,17 +412,17 @@ function updateInferenceMetrics(d) {
 
     // Generation throughput
     if (genDisplayRate > 0) {
-        window.updateMetricDelta(genDeltaEl, window.prevValues.generation, genDisplayRate, 1);
-        window.animateNumber(genEl, window.prevValues.generation, genDisplayRate, 300, 1, ' t/s');
-        window.prevValues.generation = genDisplayRate;
+        updateMetricDelta(genDeltaEl, prevValues.generation, genDisplayRate, 1);
+        animateNumber(genEl, prevValues.generation, genDisplayRate, 300, 1, ' t/s');
+        prevValues.generation = genDisplayRate;
 
-        if (genDisplayRate > window.speedMax.generation) {
-            window.speedMax.generation = genDisplayRate;
+        if (genDisplayRate > monitorState.speedMax.generation) {
+            monitorState.speedMax.generation = genDisplayRate;
         }
-        if (genMaxEl && window.speedMax.generation > 0) {
-            genMaxEl.textContent = 'peak ' + window.speedMax.generation.toFixed(0);
+        if (genMaxEl && monitorState.speedMax.generation > 0) {
+            genMaxEl.textContent = 'peak ' + monitorState.speedMax.generation.toFixed(0);
         }
-        const genPct = Math.max((genDisplayRate / window.speedMax.generation) * 100, 4);
+        const genPct = Math.max((genDisplayRate / monitorState.speedMax.generation) * 100, 4);
         if (genBar) genBar.style.width = genPct + '%';
     } else {
         genEl.textContent = '\u2014';
@@ -390,10 +431,10 @@ function updateInferenceMetrics(d) {
     }
 
     // Sparklines
-    window.pushSparklinePoint('prompt', promptDisplayRate);
-    window.pushSparklinePoint('generation', genDisplayRate);
-    window.renderSparkline('m-prompt-spark', window.metricSeries.prompt, 'prompt', false);
-    window.renderSparkline('m-gen-spark', window.metricSeries.generation, 'generation', false);
+    pushSparklinePoint('prompt', promptDisplayRate);
+    pushSparklinePoint('generation', genDisplayRate);
+    renderSparkline('m-prompt-spark', metricSeries.prompt, 'prompt', false);
+    renderSparkline('m-gen-spark', metricSeries.generation, 'generation', false);
 
     // Throughput ratio
     const ratioBar = ce.mRatioBar;
@@ -421,27 +462,27 @@ function updateInferenceMetrics(d) {
     const remaining = l?.slot_generation_remaining || 0;
     const generationAvailable = !!l?.slot_generation_available;
     const generationActive = !!l?.slot_generation_active || (l?.slots_processing || 0) > 0;
-    const slotLimit = window.getPrimarySlot(l)?.output_limit || 0;
+    const slotLimit = getPrimarySlot(l)?.output_limit || 0;
     const generationTotal = l?.slot_generation_limit || slotLimit || (generated + remaining);
     const generationPct = generationTotal > 0 ? Math.min(100, Math.max(2, (generated / generationTotal) * 100)) : 0;
     const taskId = generationActive ? l?.active_task_id : l?.last_task_id;
     const nowMs = Date.now();
-    const liveOutputRate = window.updateLiveOutputEstimate(taskId, generated, generationActive, nowMs);
+    const liveOutputRate = updateLiveOutputEstimate(taskId, generated, generationActive, nowMs);
 
-    window.updateRequestActivity(taskId, generationActive, generated, nowMs);
-    window.renderActivityRail(generationActive);
-    window.renderRecentTask();
-    window.renderSlotGrid(l, hasActiveEndpoint);
-    window.renderSlotUtilization(l);
-    window.renderRequestStats();
-    window.renderDecodingConfig(l, hasActiveEndpoint);
-    window.renderLiveSparkline('m-live-output-spark', window.metricSeries.liveOutput);
+    updateRequestActivity(taskId, generationActive, generated, nowMs);
+    renderActivityRail(generationActive);
+    renderRecentTask();
+    renderSlotGrid(l, hasActiveEndpoint);
+    renderSlotUtilization(l);
+    renderRequestStats();
+    renderDecodingConfig(l, hasActiveEndpoint, generationActive);
+    renderLiveSparkline('m-live-output-spark', metricSeries.liveOutput);
 
-    window.setCardState(generationCard, !hasActiveEndpoint ? 'dormant' : generationActive ? 'live' : generationAvailable ? 'idle' : 'unavailable');
-    window.setEmptyState(ce.mGenEmpty, !hasActiveEndpoint);
-    window.setChipState(generationState, generationActive ? 'generating' : 'idle', generationActive ? 'live' : 'idle');
-    window.setChipState(ce.mSlotsState, generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');
-    window.setChipState(ce.mActivityState, generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');
+    setCardState(generationCard, !hasActiveEndpoint ? 'dormant' : generationActive ? 'live' : generationAvailable ? 'idle' : 'unavailable');
+    setEmptyState(ce.mGenEmpty, !hasActiveEndpoint);
+    setChipState(generationState, generationActive ? 'generating' : 'idle', generationActive ? 'live' : 'idle');
+    setChipState(ce.mSlotsState, generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');
+    setChipState(ce.mActivityState, generationActive ? 'active' : 'idle', generationActive ? 'live' : 'idle');
     if (generationRing) generationRing.style.setProperty('--progress', generationPct.toFixed(2));
     if (liveVelocity) {
         liveVelocity.textContent = liveOutputRate > 0 ? liveOutputRate.toFixed(1) + ' t/s' : (generationActive ? 'warming' : 'retained');
@@ -460,125 +501,51 @@ function updateInferenceMetrics(d) {
         outputStage.classList.toggle('idle', !generationActive && !isPromptPhase);
     }
     if (generationAvailable) {
-        if (generationMain) generationMain.textContent = window.formatMetricNumber(generated) + ' output tokens';
-        if (generationSub) generationSub.textContent = window.formatMetricNumber(remaining) + ' remaining';
+        if (generationMain) generationMain.textContent = formatMetricNumber(generated) + ' output tokens';
+        if (generationSub) generationSub.textContent = formatMetricNumber(remaining) + ' remaining';
         if (generationDetails) {
             const detailParts = [];
             if (taskId !== null && taskId !== undefined) detailParts.push('task ' + taskId);
             if (generationTotal > 0) {
-                const maxStr = generationTotal >= 1000 ? Math.round(generationTotal / 1000) + 'k' : window.formatMetricNumber(generationTotal);
+                const maxStr = generationTotal >= 1000 ? Math.round(generationTotal / 1000) + 'k' : formatMetricNumber(generationTotal);
                 detailParts.push('max ' + maxStr);
             }
-            detailParts.push(window.formatMetricNumber(remaining) + ' left');
-            window.renderGenerationDetailItems(generationDetails, detailParts);
+            detailParts.push(formatMetricNumber(remaining) + ' left');
+            renderGenerationDetailItems(generationDetails, detailParts);
         }
     } else {
         if (generationMain) generationMain.textContent = generationActive ? 'working' : '\u2014';
         if (generationSub) generationSub.textContent = 'output budget';
-        window.renderGenerationDetailItems(generationDetails, []);
+        renderGenerationDetailItems(generationDetails, []);
     }
 
     // Context metrics
     updateContextMetrics(d, l, hasActiveEndpoint);
 
     // Capability popover
-    if (typeof window.renderCapabilityPopover === 'function') {
-        window.renderCapabilityPopover(d, l, generationAvailable, !!(l?.context_live_tokens_available || l?.kv_cache_tokens_available));
-    }
+    renderCapabilityPopover(d, l, generationAvailable, !!(l?.context_live_tokens_available || l?.kv_cache_tokens_available || (l?.context_capacity_tokens || 0) > 0));
 
     // Metric section visibility
     const hostMetricsVisible = d.host_metrics_available === true;
     const systemVisible = hostMetricsVisible && !!d.capabilities?.system;
     const gpuVisible = hostMetricsVisible && !!d.capabilities?.gpu;
-    if (typeof window.setMetricSectionVisibility === 'function') {
-        window.setMetricSectionVisibility('gpu-card', gpuVisible, 'gpu-section');
-        window.setMetricSectionVisibility('system-card', systemVisible, 'system-section');
-    }
+    setMetricSectionVisibility('gpu-card', gpuVisible, 'gpu-section');
+    setMetricSectionVisibility('system-card', systemVisible, 'system-section');
 }
 
 // ── Context metrics ──────────────────────────────────────────────────────────
 
 function updateContextMetrics(d, l, hasActiveEndpoint) {
-    const ce = cachedElements;
-    const ctxFill = ce.mCtxFill;
-    const ctxValue = ce.mCtxValue;
-    const ctxDetails = ce.mCtxDetails;
-    const ctxState = ce.mCtxState;
-    const ctxPeakFill = ce.mCtxPeakFill;
-    const ctxLiveLabel = ce.mCtxLiveLabel;
-    const ctxLiveDetail = ce.mCtxLiveDetail;
-    const ctxPeakDetail = ce.mCtxPeakDetail;
-    const contextCapacity = l?.context_capacity_tokens || l?.kv_cache_max || 0;
-    const contextLive = l?.context_live_tokens || l?.kv_cache_tokens || 0;
-    const contextPeak = l?.context_high_water_tokens || l?.kv_cache_high_water || 0;
-    const contextLiveAvailable = !!(l?.context_live_tokens_available || l?.kv_cache_tokens_available);
-    const peakPct = contextCapacity > 0 && contextPeak > 0 ? Math.min(100, Math.max(2, (contextPeak / contextCapacity) * 100)) : 0;
-    const contextCard = ce.contextCard;
-
-    if (typeof window.setEmptyState === 'function') window.setEmptyState(ce.mContextEmpty, !hasActiveEndpoint);
-    if (ctxPeakFill) ctxPeakFill.style.width = peakPct + '%';
-    if (ctxPeakDetail) ctxPeakDetail.textContent = contextPeak > 0 ? window.formatMetricNumber(contextPeak) + ' peak' : '\u2014';
-
-    if (l && contextCapacity > 0 && contextLiveAvailable) {
-        const pct = ((contextLive / contextCapacity) * 100);
-        const severity = pct >= 95 ? 'critical' : pct >= 80 ? 'warning' : '';
-        window.setCardState(contextCard, severity === 'critical' ? 'live' : 'idle');
-        window.setChipState(ctxState, 'live', severity || 'live');
-        if (ctxLiveLabel) ctxLiveLabel.textContent = 'Live usage';
-        if (ctxLiveDetail) ctxLiveDetail.textContent = window.formatMetricNumber(contextLive) + ' live';
-
-        window.animateNumber(ctxValue, window.prevValues.contextPct, pct, 300, 1, '%');
-        window.prevValues.contextPct = pct;
-
-        if (ctxFill) {
-            ctxFill.style.width = pct + '%';
-            ctxFill.className = 'context-progress-fill ' + severity;
-        }
-
-        if (ctxDetails) ctxDetails.textContent = window.formatMetricNumber(contextLive) + ' / ' + window.formatMetricNumber(contextCapacity);
-
-    } else if (l && contextCapacity > 0) {
-        window.setCardState(contextCard, 'unavailable');
-        window.setChipState(ctxState, 'capacity', 'idle');
-        if (ctxFill) {
-            ctxFill.style.width = '0%';
-            ctxFill.className = 'context-progress-fill unavailable';
-        }
-        if (ctxLiveLabel) ctxLiveLabel.textContent = 'Live usage';
-        if (ctxLiveDetail) ctxLiveDetail.textContent = 'not exposed by llama-server';
-        if (ctxValue) ctxValue.textContent = 'peak observed only';
-        if (ctxDetails) {
-            const detailParts = ['capacity ' + window.formatMetricNumber(contextCapacity)];
-            if (contextPeak > 0) {
-                detailParts.push('peak ' + window.formatMetricNumber(contextPeak));
-            }
-            ctxDetails.textContent = detailParts.join(' · ');
-        }
-    } else {
-        window.setCardState(contextCard, !hasActiveEndpoint ? 'dormant' : 'unavailable');
-        window.setChipState(ctxState, 'unknown', 'idle');
-        if (ctxLiveDetail) ctxLiveDetail.textContent = '\u2014';
-        if (ctxPeakDetail) ctxPeakDetail.textContent = '\u2014';
-        if (ctxFill) {
-            ctxFill.style.width = '0%';
-            ctxFill.className = 'context-progress-fill';
-        }
-        if (ctxPeakFill) ctxPeakFill.style.width = '0%';
-        if (ctxValue) ctxValue.textContent = '\u2014';
-        if (ctxDetails) ctxDetails.textContent = '';
-    }
+    updateContextCard(d, l, hasActiveEndpoint);
 }
 
 // ── GPU card ─────────────────────────────────────────────────────────────────
 
 function updateGpuCard(d) {
     const gpuVisible = d.host_metrics_available === true && !!d.capabilities?.gpu;
-    lastGpuData = d.gpu || {};
-    window.lastGpuData = lastGpuData;
+    setLastGpuData(d.gpu || {});
 
-    if (typeof window.renderGpuCard === 'function') {
-        window.renderGpuCard(d.gpu || {}, gpuVisible);
-    }
+    renderGpuCard(d.gpu || {}, gpuVisible);
 }
 
 // ── System card ──────────────────────────────────────────────────────────────
@@ -586,9 +553,7 @@ function updateGpuCard(d) {
 function updateSystemCard(d) {
     const systemVisible = d.host_metrics_available === true && !!d.capabilities?.system;
 
-    if (typeof window.renderSystemCard === 'function') {
-        window.renderSystemCard(window.lastSystemMetrics, systemVisible);
-    }
+    renderSystemCard(lastSystemMetrics, systemVisible);
 }
 
 // ── Logs ─────────────────────────────────────────────────────────────────────
@@ -596,7 +561,7 @@ function updateSystemCard(d) {
 function updateLogs(d) {
     const logs = d.logs || [];
 
-    if (logs.length !== window.prevLogLen) {
+    if (logs.length !== sessionState.prevLogLen) {
         const el = cachedElements.logPanel;
         const wasAtBottom = el && (el.scrollHeight - el.scrollTop - el.clientHeight < 40);
 
@@ -605,7 +570,7 @@ function updateLogs(d) {
             if (wasAtBottom) el.scrollTop = el.scrollHeight;
         }
 
-        window.prevLogLen = logs.length;
+        sessionState.prevLogLen = logs.length;
     }
 }
 
@@ -626,17 +591,15 @@ function updateBadges(d) {
 
     // Chat badge
     const badgeChat = ce.badgeChat;
-    if (typeof window.activeChatTab === 'function') {
-        const tab = window.activeChatTab();
-        const msgCount = tab ? tab.messages.filter(m => m.role !== 'system').length : 0;
-        if (badgeChat) {
-            if (msgCount > 0) {
-                badgeChat.textContent = ' ' + msgCount + ' msg';
-                badgeChat.style.display = '';
-            } else {
-                badgeChat.textContent = '';
-                badgeChat.style.display = 'none';
-            }
+    const tab = activeChatTab();
+    const msgCount = tab ? tab.messages.filter(m => m.role !== 'system').length : 0;
+    if (badgeChat) {
+        if (msgCount > 0) {
+            badgeChat.textContent = ' ' + msgCount + ' msg';
+            badgeChat.style.display = '';
+        } else {
+            badgeChat.textContent = '';
+            badgeChat.style.display = 'none';
         }
     }
 

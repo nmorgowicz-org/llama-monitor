@@ -905,6 +905,13 @@ Do not split it in a way that causes render/transport state desynchronization.
 
 ## Phase 6b: Extract Chat Rendering, Templates, and Params
 
+Status Note: 2026-05-02
+
+The remaining 6b follow-ups were closed on `feature/window-architecture-context-metrics`:
+
+1. chat import is wired back into the chat header UI
+2. explicit-policy reset/clear now rely on native settings-modal input bubbling instead of importing settings dirty-state logic into the chat slice
+
 ### Goal
 
 Move chat rendering, template manager, and model params panel out of the monolith.
@@ -945,6 +952,16 @@ Move chat rendering, template manager, and model params panel out of the monolit
 
 ## Phase 7: Extract LHM, Setup View, Updates, and Global Shortcuts
 
+Status Note: 2026-05-02
+
+Phase 7 is now complete on `feature/window-architecture-context-metrics`.
+
+The remaining setup-view and shortcuts global handshakes were removed:
+
+1. `sessions.js` now imports `showConnectingState()` directly from `setup-view.js`
+2. `setup-view.js` no longer republishes its helpers onto `window`
+3. `shortcuts.js` no longer republishes shortcut modal helpers onto `window`
+
 ### Goal
 
 Move the remaining peripheral systems out of the final legacy shell.
@@ -970,6 +987,17 @@ Move the remaining peripheral systems out of the final legacy shell.
 - Bootstrap only composes features
 
 ## Phase 8: Remove Legacy Shell and Minimize Global Facade
+
+Status Note: 2026-05-02
+
+Phase 8 is now complete on `feature/window-architecture-context-metrics`.
+
+What closed it:
+
+1. remaining feature-to-feature `window.*` bridges were replaced with direct imports
+2. deferred file-browser access now goes through a shared lazy launcher module instead of bootstrap globals
+3. settings/config/presets/sessions/attach-detach no longer coordinate through `window.*`
+4. the remaining facade is reduced to the tiny compatibility file for formatting helpers plus normal browser globals
 
 ### Goal
 
@@ -1181,6 +1209,8 @@ Every phase must be validated manually. Existing tests are not enough to guarant
 - template manager
 - model params panel
 - chat rendering fidelity
+- chat import wiring works
+- explicit-policy/settings dirty-state coupling is removed
 
 ### After Phase 7
 
@@ -1188,6 +1218,7 @@ Every phase must be validated manually. Existing tests are not enough to guarant
 - LHM flow
 - update flow
 - all keyboard shortcuts
+- setup-view and shortcuts no longer require their own `window.*` facade
 
 ## Specific Risks and How To Avoid Them
 
@@ -1330,17 +1361,21 @@ This is the recommended execution checklist.
 
 - Extract chat rendering, templates, params
 - Verify templates, params, rendering fidelity
+- Verify chat import/export both remain supported
+- Verify explicit-policy editing no longer imports settings dirty-state logic
 
 ### Phase 7
 
 - Extract setup view, updates, LHM, shortcuts
 - Verify all peripheral flows
+- Verify setup-view and shortcuts no longer rely on cross-module `window.*` bridges
 
 ### Phase 8
 
 - Reduce legacy shell
 - Minimize `window` facade
 - Optionally begin removing inline handlers
+- Verify no app-owned cross-module `window.*` bridges remain outside the compatibility shim
 
 ## Acceptance Criteria For The Full Refactor
 

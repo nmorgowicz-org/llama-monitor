@@ -11,10 +11,23 @@
 
 // Import the authoritative escapeHtml from format.js (replaces 3 duplicates in app.js)
 import { escapeHtml, formatMetricNumber } from '../core/format.js';
+import { loadTemplates } from '../features/chat-templates.js';
+import { openSettingsModal } from '../features/settings.js';
+import { openModelsModal } from '../features/models.js';
+import { openSessionModal } from '../features/sessions.js';
 
 // Attach to window — this is the ONLY place window assignments should happen
 window.escapeHtml = escapeHtml;
 window.formatMetricNumber = formatMetricNumber;
+window.loadTemplates = loadTemplates;
+window.openSettingsModal = openSettingsModal;
+window.openModelsModal = openModelsModal;
+window.openSessionModal = openSessionModal;
+
+// Persona quick-switch chips (Section 4B-C) - functions will be exposed on window after module init
+// window.applyPersona = applyPersona;
+// window.renderPersonaStrip = renderPersonaStrip;
+// window.scheduleChatPersist = scheduleChatPersist;
 
 // ── Functions to be migrated as features are extracted ─────────────────────────
 // Each function below is referenced from an inline handler in index.html.

@@ -1,27 +1,21 @@
 // ── Setup / Monitor View ──────────────────────────────────────────────────────
 // View transitions, animations, quick stats, and view state initialization.
 
-// ── View State ────────────────────────────────────────────────────────────────
-
-const appState = {
-    view: 'setup',
-    sessionActive: false,
-    lastSessionData: null
-};
+import { setupViewState } from '../core/app-state.js';
 
 // ── View Switching ────────────────────────────────────────────────────────────
 
-function switchView(targetView) {
-    if (appState.view === 'transitioning') return;
-    appState.view = 'transitioning';
+export function switchView(targetView) {
+    if (setupViewState.view === 'transitioning') return;
+    setupViewState.view = 'transitioning';
 
-    const currentViewEl = document.getElementById('view-' + (appState.view === 'transitioning' ? 'setup' : appState.view));
+    const currentViewEl = document.getElementById('view-' + (setupViewState.view === 'transitioning' ? 'setup' : setupViewState.view));
     const targetViewEl = document.getElementById('view-' + targetView);
     const setupStrip = document.getElementById('endpoint-strip-setup');
     const monitorStrip = document.getElementById('endpoint-strip-monitor');
 
     if (!currentViewEl || !targetViewEl) {
-        appState.view = targetView;
+        setupViewState.view = targetView;
         return;
     }
 
@@ -39,7 +33,7 @@ function switchView(targetView) {
             document.body.classList.remove('setup-active');
             setTimeout(() => {
                 targetViewEl.classList.remove('entering');
-                appState.view = 'monitor';
+                setupViewState.view = 'monitor';
             }, 500);
         }, 400);
     } else {
@@ -55,7 +49,7 @@ function switchView(targetView) {
             animateSetupCardsEnter();
             setTimeout(() => {
                 targetViewEl.classList.remove('entering');
-                appState.view = 'setup';
+                setupViewState.view = 'setup';
             }, 400);
         }, 600);
     }
@@ -63,12 +57,12 @@ function switchView(targetView) {
 
 // ── Connecting State ──────────────────────────────────────────────────────────
 
-function showConnectingState() {
+export function showConnectingState() {
     const connectingDots = document.getElementById('connecting-dots');
     if (connectingDots) connectingDots.style.display = '';
 }
 
-function hideConnectingState() {
+export function hideConnectingState() {
     const connectingDots = document.getElementById('connecting-dots');
     if (connectingDots) connectingDots.style.display = 'none';
 }
@@ -110,13 +104,13 @@ function animateSetupCardsEnter() {
 
 // ── Session Data ──────────────────────────────────────────────────────────────
 
-function saveLastSessionData(data) {
+export function saveLastSessionData(data) {
     const payload = { ...data, timestamp: Date.now() };
     localStorage.setItem('llama-monitor-last-session', JSON.stringify(payload));
-    appState.lastSessionData = payload;
+    setupViewState.lastSessionData = payload;
 }
 
-function loadLastSessionData() {
+export function loadLastSessionData() {
     try {
         const raw = localStorage.getItem('llama-monitor-last-session');
         if (!raw) return null;
@@ -133,7 +127,7 @@ function loadLastSessionData() {
 
 // ── Quick Stats ───────────────────────────────────────────────────────────────
 
-function renderQuickStats() {
+export function renderQuickStats() {
     const data = loadLastSessionData();
     const statsEl = document.getElementById('setup-stats');
     if (!statsEl) return;
@@ -151,7 +145,7 @@ function renderQuickStats() {
     }
 }
 
-function syncSetupPresetSelect() {
+export function syncSetupPresetSelect() {
     const setupSelect = document.getElementById('setup-preset-select');
     const mainSelect = document.getElementById('preset-select');
     if (!setupSelect || !mainSelect) return;
@@ -169,7 +163,7 @@ function syncSetupPresetSelect() {
 
 // ── Initialization ────────────────────────────────────────────────────────────
 
-function initViewState() {
+export function initViewState() {
     if (document.body.classList.contains('setup-active')) return; // already initialized
     renderQuickStats();
     syncSetupPresetSelect();
@@ -192,19 +186,6 @@ function initViewState() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initSetupView() {
-    window.appState = appState;
-    window.switchView = switchView;
-    window.showConnectingState = showConnectingState;
-    window.hideConnectingState = hideConnectingState;
-    window.showFlashOverlay = showFlashOverlay;
-    window.animateCardsEnter = animateCardsEnter;
-    window.animateCardsExit = animateCardsExit;
-    window.animateSetupCardsEnter = animateSetupCardsEnter;
-    window.saveLastSessionData = saveLastSessionData;
-    window.loadLastSessionData = loadLastSessionData;
-    window.renderQuickStats = renderQuickStats;
-    window.syncSetupPresetSelect = syncSetupPresetSelect;
-    window.initViewState = initViewState;
     // Initialize view state immediately — defensive functions return early if DOM not ready
     initViewState();
 }

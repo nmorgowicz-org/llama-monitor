@@ -1,31 +1,75 @@
 // ── Chat Transport & Streaming ────────────────────────────────────────────────
 // /api/chat calls, streaming decode, abort controller, summarization requests.
 
-import { activeChatTab, substituteNames, scheduleChatPersist, setChatBusyUI } from './chat-state.js';
+import { chat, lastLlamaMetrics } from '../core/app-state.js';
+import {
+    activeChatTab,
+    substituteNames,
+    scheduleChatPersist,
+    setChatBusyUI,
+    setTransportGetter,
+    getChatViewBindings,
+} from './chat-state.js';
+import {
+    renderChatMessages,
+    appendAssistantPlaceholder,
+    appendThinkingBlock,
+    finalizeAssistantMessage,
+    incrementUnreadCount,
+    chatScroll,
+    renderMd,
+    renderMdStreaming,
+    updateChatTabBadge,
+    setChatTransportGetter,
+} from './chat-render.js';
+import { escapeHtml, formatMetricNumber } from '../core/format.js';
+import { autoResizeChatInput } from './chat-state.js';
+import { getExplicitModePolicy } from './chat-templates.js';
+import { showToast, showToastWithActions } from './toast.js';
 
 // ── Summarization ──────────────────────────────────────────────────────────────
 
 export async function fetchSummary(messages) {
-    const MAX_TRANSCRIPT_CHARS = 100_000;
-    let transcript = messages
-        .filter(m => !m.compaction_marker)
+    // Derive transcript budget from the model's context window so the summarization
+    // request never overflows (small models) and doesn't under-use capacity (large models).
+    // 65% of context for the transcript; 35% reserved for system prompt + summary output.
+    // 3.5 chars/token is a conservative estimate for mixed English/roleplay content.
+    const capacityTokens =
+        lastLlamaMetrics?.context_capacity_tokens ||
+        lastLlamaMetrics?.kv_cache_max ||
+        0;
+    const MAX_TRANSCRIPT_CHARS = capacityTokens > 0
+        ? Math.min(Math.floor(capacityTokens * 3.5 * 0.65), 500_000)
+        : 140_000;
+
+    const conversational = messages.filter(m => !m.compaction_marker);
+    const rawTranscript = conversational
         .map(m => {
             const label = m.role === 'user' ? 'User' : 'Assistant';
             return `${label}: ${m.content}`;
         })
         .join('\n\n');
-    if (transcript.length > MAX_TRANSCRIPT_CHARS) {
-        transcript = transcript.slice(0, MAX_TRANSCRIPT_CHARS) + '\n\n[transcript truncated for length]';
+
+    // Smart truncation: preserve the first 25% (setup/persona/initial context) and the last 75%
+    // (recent events). Slicing only the beginning discards the most important recent turns.
+    let transcript = rawTranscript;
+    if (rawTranscript.length > MAX_TRANSCRIPT_CHARS) {
+        const headChars = Math.floor(MAX_TRANSCRIPT_CHARS * 0.25);
+        const tailChars = MAX_TRANSCRIPT_CHARS - headChars;
+        transcript =
+            rawTranscript.slice(0, headChars) +
+            '\n\n[... middle of conversation omitted for length ...]\n\n' +
+            rawTranscript.slice(-tailChars);
     }
 
     const summaryMessages = [
         {
             role: 'system',
-            content: 'Your task is to create a detailed summary of the conversation so far, paying close attention to the user\'s explicit requests and your previous responses. You will be given the conversation to summarize, and you should output your response directly without any preamble.',
+            content: 'You are a precise context-preservation assistant. Your job is to write a dense, structured summary of a conversation that will be injected as memory when the conversation resumes. Be specific — names, numbers, decisions, and unresolved threads matter. Output only the summary with no preamble or commentary.',
         },
         {
             role: 'user',
-            content: `${transcript}\n\nPlease provide a detailed summary of our conversation above. The summary will be used to restore context when the conversation continues, so it must capture everything needed to pick up exactly where we left off.\n\nInclude:\n- The main topics discussed and the purpose of the conversation\n- Key facts, figures, decisions, or conclusions established\n- Specific requests made and whether/how they were fulfilled\n- Any open questions, unresolved issues, or next steps mentioned\n- Important context, constraints, or preferences expressed by either party\n- The current state of any ongoing task or project\n\nWrite in past tense. Be thorough — omit nothing that would affect how the conversation continues.`,
+            content: `${transcript}\n\n---\n\nWrite a comprehensive memory summary of the conversation above. This summary will replace the conversation history, so it must contain everything needed to continue naturally.\n\nStructure your summary with these sections (omit any that don't apply):\n\n**Participants & Personas**\n- Names, roles, and established character traits (especially important for roleplay or character conversations)\n- Relationship dynamics between participants\n- Any user preferences, communication style, or stated constraints\n\n**Established Facts & Context**\n- Key facts, figures, technical details, or domain knowledge introduced\n- Decisions or conclusions that were agreed upon\n- Any world-building, setting, or scenario details (for creative/roleplay contexts)\n\n**Conversation Arc**\n- What was being discussed, created, or built\n- Major milestones or turning points in the conversation\n- How the most recent exchange ended (tone, content, where things stand)\n\n**Open Threads**\n- Unanswered questions or unresolved topics\n- In-progress tasks or ongoing narrative threads\n- Next steps or things the user said they'd do\n\nBe thorough. Err on the side of too much detail rather than too little — this summary is the only memory the assistant will have.`,
         },
     ];
 
@@ -80,7 +124,7 @@ export async function sendSuggestedPrompt(text) {
 // ── Send Chat ──────────────────────────────────────────────────────────────────
 
 export async function sendChatWithContent(text) {
-    if (window.chatBusy || window.compactionInProgress) return;
+    if (chat.busy || chat.compactionInProgress) return;
     const tab = activeChatTab();
     if (!tab) return;
 
@@ -95,22 +139,22 @@ export async function sendChatWithContent(text) {
     tab.messages.push(userMsg);
     tab.updated_at = Date.now();
 
-    if (typeof window.renderChatMessages === 'function') window.renderChatMessages();
+    if (typeof renderChatMessages === 'function') renderChatMessages();
 
     _doSendChat(tab);
 }
 
 // Send a message that is already in tab.messages (for resend/regenerate — no duplicate push)
 export async function sendChatResend(tab) {
-    if (window.chatBusy || window.compactionInProgress) return;
+    if (chat.busy || chat.compactionInProgress) return;
 
-    if (typeof window.renderChatMessages === 'function') window.renderChatMessages();
+    if (typeof renderChatMessages === 'function') renderChatMessages();
 
     _doSendChat(tab);
 }
 
 export async function sendChat() {
-    if (window.chatBusy || window.compactionInProgress) return;
+    if (chat.busy || chat.compactionInProgress) return;
     const tab = activeChatTab();
     if (!tab) return;
 
@@ -118,7 +162,7 @@ export async function sendChat() {
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
-    if (typeof window.autoResizeChatInput === 'function') window.autoResizeChatInput();
+    if (typeof autoResizeChatInput === 'function') autoResizeChatInput();
 
     const userMsg = {
         role: 'user',
@@ -128,18 +172,56 @@ export async function sendChat() {
     tab.messages.push(userMsg);
     tab.updated_at = Date.now();
 
-    if (typeof window.renderChatMessages === 'function') window.renderChatMessages();
+    if (typeof renderChatMessages === 'function') renderChatMessages();
 
     await _doSendChat(tab);
 }
 
 export async function _doSendChat(tab) {
+    // Pre-send overflow guard: estimate token usage against current model capacity.
+    // Uses the same formula as ctx%: cumulative output tokens + last input tokens.
+    const capacity = lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
+    if (capacity > 0) {
+        const asstMsgs = (tab.messages || []).filter(m => m.role === 'assistant' && !m.compaction_marker);
+        const totalOutput = asstMsgs.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
+        const lastInput = asstMsgs.at(-1)?.input_tokens || 0;
+        const estimatedTokens = totalOutput + lastInput;
+        if (estimatedTokens > capacity) {
+            const pct = Math.round((estimatedTokens / capacity) * 100);
+            // Restore the user's message before showing the toast
+            const lastMsg = tab.messages.at(-1);
+            if (lastMsg?.role === 'user') {
+                tab.messages.pop();
+                const input = document.getElementById('chat-input');
+                if (input) input.value = lastMsg.content;
+                if (typeof autoResizeChatInput === 'function') autoResizeChatInput();
+            }
+            chat.busy = false;
+            setChatBusyUI(false);
+            const toast = showToastWithActions(
+                'Context overflow',
+                'warning',
+                `Chat is ~${pct}% of the ${formatMetricNumber(capacity)}-token window. Compact first.`,
+                [{
+                    id: 'compact',
+                    label: 'Compact now',
+                    primary: true,
+                    handler: () => {
+                        document.getElementById('btn-compact')?.click();
+                        toast?.remove();
+                    },
+                }]
+            );
+            return;
+        }
+    }
+
     const params = tab.model_params;
     const messages = [];
     let systemPrompt = tab.system_prompt ? substituteNames(tab.system_prompt, tab.ai_name, tab.user_name) : '';
     if (tab.explicit_mode) {
-        const explicitPolicy = typeof window.getExplicitModePolicy === 'function'
-            ? window.getExplicitModePolicy() : '';
+        const explicitPolicy = typeof getExplicitModePolicy === 'function'
+            ? getExplicitModePolicy() : '';
         if (explicitPolicy) {
             systemPrompt += `\n\n${explicitPolicy}`;
         }
@@ -149,9 +231,9 @@ export async function _doSendChat(tab) {
     }
     messages.push(...tab.messages.map(m => ({ role: m.role, content: m.content })));
 
-    window.chatBusy = true;
+    chat.busy = true;
     setChatBusyUI(true);
-    window.chatAbortController = new AbortController();
+    chat.abortController = new AbortController();
 
     let thinkEl = null;
     let thinkContent = '';
@@ -165,7 +247,7 @@ export async function _doSendChat(tab) {
         const chatResp = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            signal: window.chatAbortController.signal,
+            signal: chat.abortController.signal,
             body: JSON.stringify({
                 messages,
                 stream: true,
@@ -189,13 +271,14 @@ export async function _doSendChat(tab) {
 
         while (true) {
             if (streamTimeoutMs > 0 && Date.now() - lastContentTime > streamTimeoutMs) {
-                window.chatAbortController.abort();
-                if (!msgEl && typeof window.appendAssistantPlaceholder === 'function') {
-                    msgEl = window.appendAssistantPlaceholder();
+                chat.abortController.abort();
+                if (!msgEl && typeof appendAssistantPlaceholder === 'function') {
+                    msgEl = appendAssistantPlaceholder();
                 }
                 if (msgEl) {
+                    // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context; fallback span is hardcoded
                     msgEl.querySelector('.chat-msg-body').innerHTML =
-                        msgContent ? (typeof window.renderMd === 'function' ? window.renderMd(msgContent) : msgContent)
+                        msgContent ? (typeof renderMd === 'function' ? renderMd(msgContent) : msgContent)
                             : '<span class="chat-stopped">[timed out — no response for too long]</span>';
                 }
                 break;
@@ -233,11 +316,11 @@ export async function _doSendChat(tab) {
                     const rc = delta.reasoning_content ?? '';
                     if (rc) {
                         thinkContent += rc;
-                        if (!msgEl && typeof window.appendAssistantPlaceholder === 'function') {
-                            msgEl = window.appendAssistantPlaceholder();
+                        if (!msgEl && typeof appendAssistantPlaceholder === 'function') {
+                            msgEl = appendAssistantPlaceholder();
                         }
-                        if (msgEl && !thinkEl && typeof window.appendThinkingBlock === 'function') {
-                            thinkEl = window.appendThinkingBlock(msgEl);
+                        if (msgEl && !thinkEl && typeof appendThinkingBlock === 'function') {
+                            thinkEl = appendThinkingBlock(msgEl);
                         }
                         if (thinkEl) {
                             thinkEl.querySelector('.chat-thinking-body').textContent = thinkContent;
@@ -248,34 +331,38 @@ export async function _doSendChat(tab) {
                     if (c) {
                         msgContent += c;
                         lastContentTime = Date.now();
-                        if (!msgEl && typeof window.appendAssistantPlaceholder === 'function') {
-                            msgEl = window.appendAssistantPlaceholder();
+                        const isFirstToken = !msgEl;
+                        if (!msgEl && typeof appendAssistantPlaceholder === 'function') {
+                            msgEl = appendAssistantPlaceholder();
                         }
                         if (msgEl) {
+                            // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context
                             msgEl.querySelector('.chat-msg-body').innerHTML =
-                                typeof window.renderMdStreaming === 'function'
-                                    ? window.renderMdStreaming(msgContent)
+                                typeof renderMdStreaming === 'function'
+                                    ? renderMdStreaming(msgContent)
                                     : msgContent;
                         }
-                        if (typeof window.incrementUnreadCount === 'function') window.incrementUnreadCount();
+                        // Increment once per response (not per token) so badge = unread message count
+                        if (isFirstToken && typeof incrementUnreadCount === 'function') incrementUnreadCount();
                     }
                 } catch { /* malformed chunk — skip */ }
             }
-            if (typeof window.chatScroll === 'function') window.chatScroll();
+            if (typeof chatScroll === 'function') chatScroll();
         }
 
     } catch (err) {
-        if (!msgEl && typeof window.appendAssistantPlaceholder === 'function') {
-            msgEl = window.appendAssistantPlaceholder();
+        if (!msgEl && typeof appendAssistantPlaceholder === 'function') {
+            msgEl = appendAssistantPlaceholder();
         }
         if (msgEl) {
             const body = msgEl.querySelector('.chat-msg-body');
             if (err.name === 'AbortError') {
+                // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context; fallback span is hardcoded
                 body.innerHTML = msgContent
-                    ? (typeof window.renderMd === 'function' ? window.renderMd(msgContent) : msgContent)
+                    ? (typeof renderMd === 'function' ? renderMd(msgContent) : msgContent)
                     : '<span class="chat-stopped">[stopped]</span>';
             } else {
-                body.innerHTML = `<span class="chat-error">[error] ${window.escapeHtml(err.message)}</span>`;
+                body.innerHTML = `<span class="chat-error">[error] ${escapeHtml(err.message)}</span>`;
             }
         }
     }
@@ -303,33 +390,35 @@ export async function _doSendChat(tab) {
     if (msgEl) {
         msgEl.dataset.msgIdx = tab.messages.length - 1;
     }
-    if (typeof window.finalizeAssistantMessage === 'function') {
-        window.finalizeAssistantMessage(msgEl, msgContent, tokenUsage, tab);
+    if (typeof finalizeAssistantMessage === 'function') {
+        finalizeAssistantMessage(msgEl, msgContent, tokenUsage, tab);
     }
     setChatBusyUI(false);
-    window.chatBusy = false;
-    window.chatAbortController = null;
-    if (typeof window.updateChatTabBadge === 'function') window.updateChatTabBadge();
+    chat.busy = false;
+    chat.abortController = null;
+    if (typeof updateChatTabBadge === 'function') updateChatTabBadge();
+
+    // Trigger auto-compact if the tab has it enabled and the threshold was hit.
+    // Runs after busy is cleared so compaction can proceed without being blocked.
+    getChatViewBindings().checkAutoCompact?.(tab);
 }
 
 // ── Stop Chat ──────────────────────────────────────────────────────────────────
 
 export function stopChat() {
-    if (window.chatAbortController) {
-        window.chatAbortController.abort();
-        window.chatAbortController = null;
+    if (chat.abortController) {
+        chat.abortController.abort();
+        chat.abortController = null;
     }
-    window.chatBusy = false;
+    chat.busy = false;
     setChatBusyUI(false);
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 export function initChatTransport() {
-    // Put on window for cross-module calls
-    window.sendChat = sendChat;
-    window.sendChatResend = sendChatResend;
-    window.sendSuggestedPrompt = sendSuggestedPrompt;
-    window.stopChat = stopChat;
-    window.fetchSummary = fetchSummary;
+    // Wire up transport getter for chat-state and chat-render (avoids circular import)
+    const transport = () => ({ sendChat, sendChatResend, sendSuggestedPrompt, stopChat });
+    setTransportGetter(transport);
+    setChatTransportGetter(transport);
 }

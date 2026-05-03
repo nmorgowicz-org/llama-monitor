@@ -41,6 +41,8 @@ pub struct LlamaMetrics {
     pub requests_processing: u32,
     pub status: String,
     pub model_name: String,
+    pub model_params: Option<u64>,
+    pub model_ctx_train: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]

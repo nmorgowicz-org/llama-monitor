@@ -27,13 +27,10 @@ pub fn build_routes(
 
     // Apply HTTP security headers to all responses
     // Custom CSP: allow external CDN scripts, fonts, styles, and data URIs (app requirements)
+    // connect-src allows any HTTPS — needed for API calls and WebSocket connections
     let csp = ContentSecurityPolicy::new()
         .default_src(vec!["'self'", "data:"])
-        .connect_src(vec![
-            "'self'",
-            "https://fonts.googleapis.com",
-            "https://cdn.jsdelivr.net",
-        ])
+        .connect_src(vec!["'self'", "https:", "wss:"])
         .script_src(vec![
             "'self'",
             "'unsafe-inline'",
@@ -46,7 +43,8 @@ pub fn build_routes(
             "https://cdn.jsdelivr.net",
         ])
         .font_src(vec!["'self'", "https://fonts.gstatic.com"])
-        .img_src(vec!["'self'", "data:", "https:"]);
+        .img_src(vec!["'self'", "data:", "https:"])
+        .frame_src(vec!["'self'"]);
     let helmet: HelmetFilter = Helmet::new().add(csp).try_into().unwrap();
     helmet.wrap(routes)
 }
@@ -131,12 +129,12 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         warp::reply::html(html)
     });
 
-    // Helper: serve static JS with cache headers (1 hour — embedded at compile time, versioned by binary)
+    // Helper: serve static JS with no-cache (force browser to reload on every request)
     fn js_reply(content: &'static str) -> impl warp::Reply {
         warp::reply::with_header(
             warp::reply::with_header(content, "content-type", "application/javascript"),
             "cache-control",
-            "max-age=3600",
+            "no-cache, no-store, must-revalidate",
         )
     }
 
@@ -220,6 +218,11 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .and(warp::path("file-browser.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_FILE_BROWSER_JS));
+    let js_features_file_browser_launcher = warp::path("js")
+        .and(warp::path("features"))
+        .and(warp::path("file-browser-launcher.js"))
+        .and(warp::get())
+        .map(|| js_reply(static_assets::FEATURES_FILE_BROWSER_LAUNCHER_JS));
     let js_features_presets = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("presets.js"))
@@ -265,6 +268,11 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .and(warp::path("chat-transport.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_CHAT_TRANSPORT_JS));
+    let js_features_context_card = warp::path("js")
+        .and(warp::path("features"))
+        .and(warp::path("context-card.js"))
+        .and(warp::get())
+        .map(|| js_reply(static_assets::FEATURES_CONTEXT_CARD_JS));
     let js_features_config = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("config.js"))
@@ -364,6 +372,7 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .or(js_core_app_state)
         .or(js_features_dashboard_ws)
         .or(js_features_file_browser)
+        .or(js_features_file_browser_launcher)
         .or(js_features_presets)
         .or(js_features_sessions)
         .or(js_features_attach_detach)
@@ -373,6 +382,7 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .or(js_features_chat_state)
         .or(js_features_chat_templates)
         .or(js_features_chat_transport)
+        .or(js_features_context_card)
         .or(js_features_config)
         .or(js_features_lhm)
         .or(js_features_models)

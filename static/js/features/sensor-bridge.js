@@ -1,6 +1,8 @@
 // ── Sensor Bridge ─────────────────────────────────────────────────────────────
 // Sensor bridge setup button handler.
 
+import { escapeHtml } from '../core/format.js';
+
 function _bindSensorBridgeSetup() {
     const btn = document.getElementById('btn-sensor-bridge-setup');
     if (!btn) return;
@@ -15,7 +17,7 @@ function _bindSensorBridgeSetup() {
                 btn.textContent = 'Setup';
                 btn.disabled = false;
                 if (callout) {
-                    callout.innerHTML = '<span style="color:#bf616a;">Install failed: ' + (data.error || 'Unknown error') + '</span>';
+                    callout.innerHTML = '<span style="color:#bf616a;">Install failed: ' + escapeHtml(data.error || 'Unknown error') + '</span>';
                 }
                 return;
             }

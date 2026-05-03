@@ -1,20 +1,26 @@
 // ── Settings ──────────────────────────────────────────────────────────────────
 // Settings modal: collect, save, apply, dirty tracking, and event bindings.
 
+import { settingsState } from '../core/app-state.js';
+import { setContextCardViewPreference } from './context-card.js';
+import { renderChatMessages } from './chat-render.js';
+
+const DATE_FORMAT_KEY = 'llama-monitor-date-format';
+
 // ── Dirty tracking ────────────────────────────────────────────────────────────
 
-function markSettingsDirty() {
-    window.settingsIsDirty = true;
-    clearTimeout(window.settingsSaveTimer);
+export function markSettingsDirty() {
+    settingsState.isDirty = true;
+    clearTimeout(settingsState.saveTimer);
 }
 
 function clearSettingsDirty() {
-    window.settingsIsDirty = false;
+    settingsState.isDirty = false;
 }
 
 // ── Collect / Save / Apply ────────────────────────────────────────────────────
 
-function collectSettings() {
+export function collectSettings() {
     const endpoint = document.getElementById('server-endpoint').value.trim();
 
     let port = 8001;
@@ -40,11 +46,12 @@ function collectSettings() {
         remote_agent_ssh_target: document.getElementById('set-remote-agent-ssh-target')?.value.trim() || '',
         remote_agent_ssh_command: document.getElementById('set-remote-agent-ssh-command')?.value.trim() || '',
         explicit_mode_policy: document.getElementById('explicit-policy-input')?.value || '',
+        context_card_view: document.getElementById('context-view-toggle-fleet')?.classList.contains('active') ? 'fleet' : 'gauge',
     };
 }
 
-function saveSettings() {
-    clearTimeout(window.settingsSaveTimer);
+export function saveSettings() {
+    clearTimeout(settingsState.saveTimer);
 
     // Ripple effect on save button
     const saveBtn = document.querySelector('#settings-modal .btn-modal-save');
@@ -69,7 +76,7 @@ function saveSettings() {
 
     clearSettingsDirty();
 
-    window.settingsSaveTimer = setTimeout(() => {
+    settingsState.saveTimer = setTimeout(() => {
         fetch('/api/settings', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -78,7 +85,7 @@ function saveSettings() {
     }, 400);
 }
 
-function applySettings(s) {
+export function applySettings(s) {
     if (!s) return;
 
     if (s.port) {
@@ -132,11 +139,15 @@ function applySettings(s) {
         const el = document.getElementById('explicit-policy-input');
         if (el) el.value = s.explicit_mode_policy;
     }
+
+    if (s.context_card_view !== undefined) {
+        setContextCardViewPreference(s.context_card_view);
+    }
 }
 
 // ── Modal open/close ──────────────────────────────────────────────────────────
 
-function openSettingsModal() {
+export function openSettingsModal() {
     const modal = document.getElementById('settings-modal');
     if (!modal) return;
     modal.removeAttribute('aria-hidden');
@@ -144,9 +155,12 @@ function openSettingsModal() {
     modal.classList.remove('closing');
     modal.classList.add('open');
     clearSettingsDirty();
+
+    const dateFmtEl = document.getElementById('chat-date-format');
+    if (dateFmtEl) dateFmtEl.value = localStorage.getItem(DATE_FORMAT_KEY) || 'MM/DD/YY';
 }
 
-function closeSettingsModal() {
+export function closeSettingsModal() {
     const modal = document.getElementById('settings-modal');
     if (!modal) return;
     modal.classList.add('closing');
@@ -184,6 +198,12 @@ function _bindSettingsEvents() {
         }
     });
 
+    // Date format — save immediately to localStorage and re-render messages
+    document.getElementById('chat-date-format')?.addEventListener('change', (e) => {
+        localStorage.setItem(DATE_FORMAT_KEY, e.target.value);
+        renderChatMessages();
+    });
+
     // Auto-save on controls change
     const controls = document.getElementById('controls');
     if (controls) {
@@ -206,20 +226,13 @@ function _bindSettingsEvents() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initSettings() {
-    // Bind settings button
+    // Bind settings button (sidebar button also bound by nav.js with data-tab="settings")
     document.getElementById('settings-btn')?.addEventListener('click', openSettingsModal);
-    document.getElementById('sidebar-btn-settings')?.addEventListener('click', openSettingsModal);
 
     // Bind settings modal buttons
     document.getElementById('settings-modal-close')?.addEventListener('click', closeSettingsModal);
     document.getElementById('settings-modal-cancel')?.addEventListener('click', closeSettingsModal);
     document.getElementById('settings-modal-save')?.addEventListener('click', saveSettings);
 
-    // Keep on window for cross-module calls
-    window.markSettingsDirty = markSettingsDirty;
-    window.collectSettings = collectSettings;
-    window.saveSettings = saveSettings;
-    window.applySettings = applySettings;
-    window.closeSettingsModal = closeSettingsModal;
     _bindSettingsEvents();
 }

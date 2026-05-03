@@ -37,6 +37,32 @@ All commits MUST follow the [Conventional Commits](https://www.conventionalcommi
 - `ci: add conventional commit validation`
 - `revert: revert breaking change from v0.2.0`
 
+### Scope Convention
+
+Scopes should describe the **component/area** being changed, not the type of change:
+
+| Scope | Purpose |
+|-------|---------|
+| `api` | Backend API endpoints, routes |
+| `ui` | Frontend layout, styling, components |
+| `chat` | Chat features, message rendering |
+| `gpu` | GPU monitoring, metrics |
+| `nav` | Navigation, sidebar, tab switching |
+| `settings` | Settings modal, preferences |
+| `models` | Model presets, configuration |
+| `sessions` | Session management, persistence |
+| `docs` | Documentation files |
+| `ci` | CI/CD, workflows, build scripts |
+
+**Good scope usage:**
+- `fix(nav): modal navigation state broken after export`
+- `docs(ui): add screenshots for chat features`
+- `feat(chat): add message edit/regenerate actions`
+
+**Avoid:**
+- `fix(modal): navigation broken` - too vague
+- `fix: fix: modal navigation` - redundant
+
 ❌ **Invalid:**
 - `Update README` (missing type)
 - `feat add new feature` (missing colon)
@@ -119,7 +145,20 @@ cargo clippy -- -D warnings
 
 # Format
 cargo fmt
+
+# Validate JavaScript syntax (catches errors before browser load)
+./scripts/validate-js.sh
+
+# Lint static/js with ESLint (catches XSS, no-undef, import-assign)
+npm run lint
 ```
+
+**Important:** Always run `npm run lint` after modifying any `.js` files under `static/js/`. This runs ESLint with three rules:
+- `no-import-assign` — catches assignment to ES module namespace bindings (the `TypeError: Assignment to constant variable` class of error)
+- `no-undef` — catches bare references to functions no longer on `window` after ES module extraction
+- `no-unsanitized/property` and `/method` — catches `innerHTML`/`insertAdjacentHTML` with unescaped user data (XSS); `escapeHtml()` is the approved sanitizer
+
+The lint job runs automatically in CI on every PR push that touches `static/**` or `tests/ui/**`, without requiring the `ready-to-test` label. Also run `./scripts/validate-js.sh` for syntax-only validation on all JS files.
 
 ## CI/CD Workflow
 

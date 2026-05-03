@@ -75,8 +75,8 @@ Important implications:
 
 ### Related refactor docs
 
-- [`docs/20260430-appjs_refactor.md`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/20260430-appjs_refactor.md:1)
-- [`docs/20260430-phase9_window_facade_cleanup.md`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/20260430-phase9_window_facade_cleanup.md:1)
+- [`docs/architecture/20260430-appjs_refactor.md`](20260430-appjs_refactor.md)
+- [`docs/architecture/20260430-phase9_window_facade_cleanup.md`](20260430-phase9_window_facade_cleanup.md)
 
 This optimization plan assumes Phase 9 either exists already or will happen first. If the window facade and inline handlers are still present, some optimizations should wait until that cleanup lands.
 

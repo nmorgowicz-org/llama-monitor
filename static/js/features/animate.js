@@ -1,7 +1,7 @@
 // ── Animate ───────────────────────────────────────────────────────────────────
 // Number counting animation for smooth value transitions.
 
-function animateNumber(element, from, to, duration = 300, decimals = 1, suffix = '') {
+export function animateNumber(element, from, to, duration = 300, decimals = 1, suffix = '') {
     if (!element) return;
 
     const startTime = performance.now();
@@ -28,5 +28,4 @@ function animateNumber(element, from, to, duration = 300, decimals = 1, suffix =
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initAnimate() {
-    window.animateNumber = animateNumber;
 }

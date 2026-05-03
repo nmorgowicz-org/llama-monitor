@@ -1,11 +1,17 @@
 // ── Attach / Detach / Start / Stop ─────────────────────────────────────────────
 // LLM lifecycle: start, stop, attach, detach, kill.
 
+import { sessionState } from '../core/app-state.js';
+import { updateActiveSessionInfo } from './sessions.js';
+import { showToast } from './toast.js';
+import { hideConnectingState, saveLastSessionData, showConnectingState, switchView } from './setup-view.js';
+import { monitorState } from '../core/app-state.js';
+
 // ── Config ─────────────────────────────────────────────────────────────────────
 
 export function getConfig() {
     const id = document.getElementById('preset-select').value;
-    const p = window.presets.find(pr => pr.id === id) || {};
+    const p = sessionState.presets.find(pr => pr.id === id) || {};
 
     return {
         model_path: p.model_path || '',
@@ -51,7 +57,7 @@ export function getConfig() {
 export async function doStart() {
     const config = getConfig();
     if (!config.model_path) {
-        window.showToast('No model path set. Edit the preset to select a model.', 'error');
+        showToast('No model path set. Edit the preset to select a model.', 'error');
         return;
     }
 
@@ -68,11 +74,11 @@ export async function doStart() {
     const data = await resp.json();
 
     if (!data.ok) {
-        window.showToast('Start failed: ' + (data.error || 'unknown'), 'error');
-        if (window.hideConnectingState) window.hideConnectingState();
+        showToast('Start failed: ' + (data.error || 'unknown'), 'error');
+        hideConnectingState();
     } else {
-        if (window.switchView) window.switchView('monitor');
-        if (window.hideConnectingState) window.hideConnectingState();
+        switchView('monitor');
+        hideConnectingState();
     }
 }
 
@@ -96,10 +102,10 @@ export async function doKillLlama() {
         const resp = await fetch('/api/kill-llama', { method: 'POST' });
         const data = await resp.json();
 
-        if (!data.ok) window.showToast('Kill failed: ' + (data.error || 'unknown'), 'error');
-        else window.showToast('llama-server killed', 'success');
+        if (!data.ok) showToast('Kill failed: ' + (data.error || 'unknown'), 'error');
+        else showToast('llama-server killed', 'success');
     } catch (e) {
-        window.showToast('Kill failed: ' + e.message, 'error');
+        showToast('Kill failed: ' + e.message, 'error');
     } finally {
         if (btnKill) btnKill.disabled = false;
     }
@@ -120,7 +126,7 @@ export async function doAttach() {
     const endpoint = endpointInput.value.trim();
 
     if (!endpoint) {
-        window.showToast('Please enter a server endpoint', 'error');
+        showToast('Please enter a server endpoint', 'error');
         return;
     }
 
@@ -132,24 +138,24 @@ export async function doAttach() {
     const data = await resp.json();
 
     if (!data.ok) {
-        window.showToast('Attach failed: ' + (data.error || 'unknown'), 'error');
-        if (window.hideConnectingState) window.hideConnectingState();
+        showToast('Attach failed: ' + (data.error || 'unknown'), 'error');
+        hideConnectingState();
     } else {
-        window.showToast('Attached to server', 'success');
-        if (window.hideConnectingState) window.hideConnectingState();
+        showToast('Attached to server', 'success');
+        hideConnectingState();
 
         if (data.warning) {
-            window.showToast(data.warning, 'warning');
+            showToast(data.warning, 'warning');
         }
 
         const serverHeader = document.getElementById('server-header');
         if (serverHeader) serverHeader.style.display = 'none';
 
-        window.speedMax = { prompt: 0, generation: 0 };
-        if (window.switchView) window.switchView('monitor');
+        monitorState.speedMax = { prompt: 0, generation: 0 };
+        switchView('monitor');
     }
 
-    if (window.updateActiveSessionInfo) window.updateActiveSessionInfo();
+    updateActiveSessionInfo();
 }
 
 export async function doDetach() {
@@ -157,17 +163,15 @@ export async function doDetach() {
     const data = await resp.json();
 
     if (!data.ok) {
-        window.showToast('Detach failed: ' + (data.error || 'unknown'), 'error');
+        showToast('Detach failed: ' + (data.error || 'unknown'), 'error');
     } else {
-        window.showToast('Detached from server', 'success');
+        showToast('Detached from server', 'success');
 
-        if (window.saveLastSessionData) {
-            window.saveLastSessionData({
-                promptRate: window.speedMax.prompt > 0 ? window.speedMax.prompt + ' t/s' : '—',
-                genRate: window.speedMax.generation > 0 ? window.speedMax.generation + ' t/s' : '—',
-                sessionName: window.activeSessionId || '—'
-            });
-        }
+        saveLastSessionData({
+            promptRate: monitorState.speedMax.prompt > 0 ? monitorState.speedMax.prompt + ' t/s' : '—',
+            genRate: monitorState.speedMax.generation > 0 ? monitorState.speedMax.generation + ' t/s' : '—',
+            sessionName: sessionState.activeSessionId || '—'
+        });
 
         const btnAttach = document.getElementById('btn-attach');
         const btnDetach = document.getElementById('btn-detach');
@@ -185,11 +189,11 @@ export async function doDetach() {
         const historicBadge = document.getElementById('inference-historic-badge');
         if (historicBadge) historicBadge.style.display = 'inline-block';
 
-        window.speedMax = { prompt: 0, generation: 0 };
-        if (window.switchView) window.switchView('setup');
+        monitorState.speedMax = { prompt: 0, generation: 0 };
+        switchView('setup');
     }
 
-    if (window.updateActiveSessionInfo) window.updateActiveSessionInfo();
+    updateActiveSessionInfo();
 }
 
 // ── Setup page helpers ─────────────────────────────────────────────────────────
@@ -202,7 +206,7 @@ export function doAttachFromSetup() {
         if (serverEndpoint) serverEndpoint.value = url;
         localStorage.setItem('llama-monitor-last-endpoint', url);
     }
-    if (window.showConnectingState) window.showConnectingState();
+    showConnectingState();
     doAttach();
 }
 
@@ -212,7 +216,7 @@ export function doStartFromSetup() {
         const presetSelect = document.getElementById('preset-select');
         if (presetSelect) presetSelect.value = select.value;
     }
-    if (window.showConnectingState) window.showConnectingState();
+    showConnectingState();
     doStart();
 }
 
@@ -239,9 +243,6 @@ export async function initAttachDetachButtons() {
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 export function initAttachDetach() {
-    window.doAttach = doAttach;
-    window.doStart = doStart;
-
     // Bind top detach button
     const detachTop = document.getElementById('btn-detach-top');
     if (detachTop) detachTop.addEventListener('click', doDetach);

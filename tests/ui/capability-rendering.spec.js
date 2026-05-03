@@ -1,7 +1,10 @@
 import { test, expect } from '@playwright/test';
 
 async function enterMonitorView(page) {
-  await page.evaluate(() => switchView('monitor'));
+  await page.evaluate(async () => {
+    const { switchView } = await import('/js/features/setup-view.js');
+    switchView('monitor');
+  });
   await expect(page.locator('body')).not.toHaveClass(/setup-active/);
   await expect(page.locator('#view-monitor')).toBeVisible();
   await expect(page.locator('#endpoint-strip-monitor')).toBeVisible();
@@ -240,7 +243,9 @@ test.describe('inference metric rendering', () => {
   });
 
   test('renders active slot, request, speculative, and sampler state from slot snapshots', async ({ page }) => {
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
+      const { renderSlotGrid, renderDecodingConfig, updateRequestActivity, renderActivityRail,
+              renderGenerationDetailItems, setChipState } = await import('/js/features/dashboard-render.js');
       const l = {
         slots_processing: 1,
         slots_idle: 0,
@@ -279,7 +284,7 @@ test.describe('inference metric rendering', () => {
       };
 
       renderSlotGrid(l, true);
-      renderDecodingConfig(l, true);
+      renderDecodingConfig(l, true, true);
       updateRequestActivity(6686, true, 690, Date.now());
       renderActivityRail(true);
       renderGenerationDetailItems(document.getElementById('m-generation-details'), [
@@ -304,8 +309,10 @@ test.describe('inference metric rendering', () => {
   });
 
   test('request rail leaves completion markers for finished tasks', async ({ page }) => {
-    await page.evaluate(() => {
-      window.requestActivity = [];
+    await page.evaluate(async () => {
+      const { updateRequestActivity, renderActivityRail } = await import('/js/features/dashboard-render.js');
+      const appState = await import('/js/core/app-state.js');
+      appState.requestActivity.splice(0);
       const now = Date.now();
       updateRequestActivity(7001, true, 0, now - 4000);
       updateRequestActivity(7001, true, 40, now - 2500);
@@ -318,16 +325,12 @@ test.describe('inference metric rendering', () => {
   });
 
   test('smooths live output estimate across recent polling samples', async ({ page }) => {
-    const rate = await page.evaluate(() => {
+    const rate = await page.evaluate(async () => {
+      const { updateLiveOutputEstimate } = await import('/js/features/dashboard-render.js');
+      const appState = await import('/js/core/app-state.js');
+      Object.assign(appState.liveOutputTracker, { taskId: null, previousDecoded: null, previousMs: null, latestRate: 0, rates: [] });
+      appState.metricSeries.liveOutput = [];
       const now = Date.now();
-      window.liveOutputTracker = {
-        taskId: null,
-        previousDecoded: null,
-        previousMs: null,
-        latestRate: 0,
-        rates: [],
-      };
-      window.metricSeries.liveOutput = [];
       updateLiveOutputEstimate(123, 0, true, now - 3000);
       updateLiveOutputEstimate(123, 100, true, now - 2000);
       return updateLiveOutputEstimate(123, 170, true, now - 1000);
@@ -337,8 +340,9 @@ test.describe('inference metric rendering', () => {
     expect(rate).toBeLessThan(90);
   });
 
-  test('capability popover opens by click and reports context honesty', async ({ page }) => {
-    await page.evaluate(() => {
+  test('capability popover opens by click and reports context live when capacity is known', async ({ page }) => {
+    await page.evaluate(async () => {
+      const { renderCapabilityPopover } = await import('/js/features/dashboard-render.js');
       renderCapabilityPopover({
         capabilities: { inference: true },
         host_metrics_available: false,
@@ -347,12 +351,12 @@ test.describe('inference metric rendering', () => {
         slots_processing: 1,
         slots_idle: 0,
         context_capacity_tokens: 212992,
-      }, true, false);
+      }, true, true);
     });
 
     await page.locator('#endpoint-status').click();
     await expect(page.locator('#capability-popover')).toContainText('Context usage');
-    await expect(page.locator('#capability-popover')).toContainText('not exposed');
+    await expect(page.locator('#capability-popover')).toContainText('live');
     await expect(page.locator('#endpoint-status')).toHaveAttribute('aria-expanded', 'true');
   });
 });

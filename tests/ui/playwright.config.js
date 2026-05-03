@@ -12,6 +12,14 @@ const config = {
     screenshot: 'only-on-failure',
     trace: 'on-first-retry',
   },
+  webServer: process.env.LLAMA_MONITOR_UI_URL ? undefined : {
+    command: 'cargo run -- --headless --port 7778',
+    url: 'http://127.0.0.1:7778',
+    reuseExistingServer: true,
+    stdout: 'pipe',
+    stderr: 'pipe',
+    timeout: 180000,
+  },
   projects: [
     {
       name: 'chromium',

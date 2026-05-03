@@ -2,6 +2,15 @@
 
 Web dashboard for managing [llama.cpp](https://github.com/ggerganov/llama.cpp) servers with real-time GPU and system monitoring. Supports local and remote deployments, multi-session management, and a lightweight agent mode for headless machines.
 
+## What's New (v0.2.0)
+
+Recent chat feature enhancements:
+
+- **Tab Pinning** — Pin important chat tabs to keep them at the front; pinned tabs persist across sessions
+- **Persona Templates** — Quick-swap conversation styles via clickable persona chips; includes non-roleplay assistant modes
+- **Chat Export** — Download entire chat history as formatted JSON
+- **Message Edit & Regenerate** — Edit corrections and regenerate from any user message (not just the last one)
+
 ## Quick Start
 
 ```bash
@@ -79,6 +88,7 @@ Sessions persist to `~/.config/llama-monitor/sessions.json` and survive restarts
 - **Smart Scroll** — Auto-scroll only when already near the bottom; scroll-to-bottom button shows unread message count badge
 - **Chat History Pagination** — Long conversations render only the most recent N messages (default 15) for performance; "Load More" button reveals older batches; limit is configurable per-tab
 - **Token Count Display** — Input character count shows approximate token estimate (`~N tok`) with warning color at 800+ tokens and error color at 1500+
+- **Context Compaction** — Manual and auto-compaction to recover from full context windows; summarizes earlier conversation into a tombstone message; per-tab auto-compact threshold control; multi-compact safe (tombstones preserved across re-compactions)
 - **Personalized Empty State** — Greeting shows active AI name and loaded model name; suggested prompts grid with stagger animation
 - **Animated Panels** — System prompt and model params panels open/close with smooth max-height transitions; send button shows spinner during generation
 
@@ -256,12 +266,17 @@ Control bar with preset selector and port. Start/stop the server. Live inference
 Multi-tab streaming chat proxied to the running llama-server's `/v1/chat/completions` endpoint. Features include:
 - Per-tab system prompts with template library
 - Model parameter controls (temperature, top_p, top_k, min_p, repeat_penalty); dirty-state indicator when non-defaults are active
+- Context compaction — manual and auto-compaction to recover from full context windows; summarizes earlier conversation into a tombstone; per-tab threshold control
 - Reasoning/thinking blocks, Markdown rendering, and syntax-highlighted code blocks (highlight.js)
 - Per-code-block headers: language label, line count, and copy button
 - Chat history pagination with configurable visible-message limit (default 15) — older messages load on demand
 - Token count estimate on input with color warnings at 800+ and 1500+ tokens
 - Keyboard tab switching: Ctrl+1–9 by position, Ctrl+Shift+← / → to cycle
 - Explicit mode toggle for uncensored content
+- **Tab pinning and favorites** — Pin important chat tabs with the pin button; pinned tabs stay at the front and persist across sessions; drag-to-reorder is guarded to prevent accidental movement across pinned/unpinned boundaries
+- **Persona templates** — Click persona chips in the chat header to quickly switch between conversation styles (assistant, creative, technical, etc.); includes non-roleplay options; active persona persists per-tab via `active_template_id`
+- **Chat export** — Export entire chat history as formatted JSON with messages array, metadata, and timestamps
+- **Message edit and regenerate** — Edit and regenerate responses from any user message (not just the last one); inline editing interface for message corrections
 
 ### Logs Tab
 Real-time server log output.
@@ -365,12 +380,16 @@ src/
     static_assets.rs   -- Embedded frontend assets (include_str! at compile time)
 static/
   index.html           -- Dashboard HTML (single-page app)
-  app.js               -- Frontend JavaScript (~8600 lines, vanilla JS)
   compact.html         -- Compact tray popover view
   manifest.json        -- PWA manifest
   sw.js                -- Service worker (PWA offline support)
-  js/features/lhm.js   -- LibreHardwareMonitor frontend integration
-  icon.svg             -- Application icon
+  js/                  -- Frontend JavaScript (22 ES modules, vanilla JS)
+    bootstrap.js       -- Module entrypoint and startup sequencing
+    core/              -- Shared infrastructure
+      app-state.js     -- Shared state module
+      format.js        -- Pure format helper functions
+    features/          -- Feature modules (dashboard, chat, remote-agent, etc.)
+    compat/            -- Compatibility shims and legacy bridges
   css/                 -- Stylesheet modules (split for AI agent readability)
     tokens.css         -- CSS custom properties, light theme variable overrides
     base.css           -- Reset, body, typography, element defaults
@@ -397,12 +416,16 @@ tests/
     screenshot.mjs     -- Screenshot automation
     gif.mjs            -- GIF capture for docs
 docs/
-  api.md                          -- REST API reference
-  cli-flags.md                    -- CLI flag reference
-  cross-compilation.md            -- Multi-platform build guide
-  20260426-security_hardening.md  -- Security audit findings and remediation status
-  20260427-chat_enhancements.md   -- Chat UI overhaul implementation plan
-  (+ additional design and implementation docs)
+  reference/                      -- API reference, CLI flags, cross-compilation guide
+  architecture/                   -- Frontend architecture, window cleanup, performance
+  chat/                           -- Chat enhancements, context compaction, context window redesign
+  ui-ux/                          -- UI modernization, settings, card proposals, welcome view
+  remote-agent/                   -- Remote agent API, SSH flow, Windows tray
+  gpu-hardware/                   -- Apple Silicon, GPU modernization, context tracking
+  security/                       -- Security audit, hardening, mTLS
+  implementation/                 -- Implementation plans, new metrics, app update capability
+  testing/                        -- Test runbook, visual QA, coverage gap analysis
+  screenshots/                    -- Screenshots and GIFs
 ```
 
 ### CSS Module Index

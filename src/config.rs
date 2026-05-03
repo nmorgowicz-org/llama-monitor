@@ -1,6 +1,40 @@
 use std::path::PathBuf;
+use std::fs;
 
 use crate::cli::AppArgs;
+
+fn migrate_config_if_needed(new_config_dir: &PathBuf) -> PathBuf {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let old_config_dir = home.join("Library").join("Application Support").join("llama-monitor");
+    
+    if new_config_dir.exists() {
+        // New location already exists, use it
+        return new_config_dir.clone();
+    }
+    
+    if old_config_dir.exists() {
+        // Old location exists, migrate it
+        if let Err(e) = fs::create_dir_all(&new_config_dir) {
+            eprintln!("[config] Failed to create new config dir: {e}");
+            return old_config_dir;
+        }
+        
+        if let Ok(entries) = fs::read_dir(&old_config_dir) {
+            for entry in entries.flatten() {
+                let src = entry.path();
+                let dst = new_config_dir.join(entry.file_name());
+                if let Err(e) = fs::copy(&src, &dst) {
+                    eprintln!("[config] Failed to migrate {:?}: {e}", src);
+                } else {
+                    eprintln!("[config] Migrated {:?} to {:?}", src, dst);
+                }
+            }
+        }
+        eprintln!("[config] Data migrated from old location to {:?}", new_config_dir);
+    }
+    
+    new_config_dir.clone()
+}
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -35,11 +69,11 @@ impl AppConfig {
         let default_server_path = PathBuf::from("llama-server");
         let default_server_cwd = PathBuf::from(".");
 
-        let config_dir = args.config_dir.unwrap_or_else(|| {
-            dirs::config_dir()
-                .unwrap_or_else(|| PathBuf::from("."))
-                .join("llama-monitor")
+        let new_config_dir = args.config_dir.unwrap_or_else(|| {
+            let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+            home.join(".config").join("llama-monitor")
         });
+        let config_dir = migrate_config_if_needed(&new_config_dir);
 
         // Register config dir for chat_tabs_path()
         crate::web::api::set_config_dir(config_dir.clone());

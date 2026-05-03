@@ -2,14 +2,53 @@
 // Model parameter panel, system prompt panel, style/font/enter-to-send controls,
 // and compaction settings.
 
-import { activeChatTab } from './chat-state.js';
+import { chat, lastLlamaMetrics } from '../core/app-state.js';
+import {
+    activeChatTab,
+    registerChatViewBindings,
+    scheduleChatPersist,
+    updateChatName,
+} from './chat-state.js';
+import { exportChatTab, importChatTab, renderChatMessages } from './chat-render.js';
+import { fetchSummary, sendChat } from './chat-transport.js';
+import {
+    applySystemPromptTemplate,
+} from './chat-templates.js';
+import { renderPersonaStrip } from './chat-render.js';
+import {
+    loadTemplates,
+    onSystemPromptChange,
+    openTemplateManager,
+    toggleExplicitMode,
+    toggleSystemPromptPanel,
+} from './chat-templates.js';
+import { showToast, showToastWithActions } from './toast.js';
+
+// Local state — previously on window, migrated to local variables
+let chatFont = parseInt(localStorage.getItem('llama-monitor-chat-font') || '100');
+let enterToSend = localStorage.getItem('llama-monitor-enter-to-send') !== 'false';
+let paramToastTimer = null;
 
 // ── Model params panel ────────────────────────────────────────────────────────
 
 function toggleModelParamsPanel() {
     const panel = document.getElementById('chat-params-panel');
+    const wasOpen = panel.classList.contains('open');
     const isOpen = panel.classList.toggle('open');
-    if (isOpen) syncParamPanelToTab();
+    if (isOpen && !wasOpen) {
+        const systemPanel = document.getElementById('chat-system-panel');
+        const stylePanel = document.getElementById('chat-style-panel');
+        const styleLabel = document.getElementById('chat-style-label');
+        if (systemPanel) systemPanel.classList.remove('open');
+        if (stylePanel) stylePanel.style.display = 'none';
+        if (styleLabel) styleLabel.textContent = 'Style';
+        const tab = activeChatTab();
+        if (tab && styleLabel) {
+            const currentStyle = localStorage.getItem('llama-monitor-chat-style') || 'rounded';
+            styleLabel.textContent = CHAT_STYLE_LABELS[currentStyle];
+        }
+        syncParamPanelToTab();
+    }
 }
 
 function syncParamPanelToTab() {
@@ -50,9 +89,9 @@ function onParamChange(key, value) {
         const el = document.getElementById(dispId);
         if (el) el.textContent = value ?? '';
     }
-    window.scheduleChatPersist();
-    clearTimeout(window.paramToastTimer);
-    window.paramToastTimer = setTimeout(() => window.showToast('Parameter saved', 'success'), 2000);
+    scheduleChatPersist();
+    clearTimeout(paramToastTimer);
+    paramToastTimer = setTimeout(() => showToast('Parameter saved', 'success'), 2000);
     updateParamsDirtyIndicator();
 }
 
@@ -80,12 +119,12 @@ function resetParamsToDefaults() {
     };
     tab.updated_at = Date.now();
     syncParamPanelToTab();
-    window.scheduleChatPersist();
+    scheduleChatPersist();
     updateParamsDirtyIndicator();
-    window.showToast('Parameters reset to defaults', 'success');
+    showToast('Parameters reset to defaults', 'success');
 }
 
-function updateParamsDirtyIndicator() {
+export function updateParamsDirtyIndicator() {
     const tab = activeChatTab();
     if (!tab) return;
     const p = tab.model_params;
@@ -100,30 +139,30 @@ function updateParamsDirtyIndicator() {
 // ── Copy settings between tabs ────────────────────────────────────────────────
 
 function duplicateTabSettings(sourceId) {
-    const source = window.chatTabs.find(t => t.id === sourceId);
+    const source = chat.tabs.find(t => t.id === sourceId);
     const target = activeChatTab();
     if (!source || !target || source.id === target.id) return;
     target.system_prompt = source.system_prompt;
     target.model_params = JSON.parse(JSON.stringify(source.model_params));
     target.updated_at = Date.now();
-    window.scheduleChatPersist();
+    scheduleChatPersist();
     syncParamPanelToTab();
     updateParamsDirtyIndicator();
     const indicator = document.getElementById('system-prompt-indicator');
     indicator.style.display = target.system_prompt ? 'inline' : 'none';
     document.getElementById('chat-system-input').value = target.system_prompt;
-    window.showToast('Settings copied from "' + source.name + '"', 'success');
+    showToast('Settings copied from "' + source.name + '"', 'success');
 }
 
 function showCopySettingsDropdown() {
     const target = activeChatTab();
     if (!target) return;
-    const others = window.chatTabs.filter(t => t.id !== target.id);
+    const others = chat.tabs.filter(t => t.id !== target.id);
     if (others.length === 0) {
-        window.showToast('No other tabs to copy from', 'info');
+        showToast('No other tabs to copy from', 'info');
         return;
     }
-    const toast = window.showToastWithActions(
+    const toast = showToastWithActions(
         'Copy settings from',
         'info',
         'Select a tab to copy its system prompt and parameters',
@@ -145,8 +184,8 @@ function onMessageLimitChange(value) {
     const limit = Math.max(5, Math.min(200, value));
     tab.visible_message_limit = limit;
     tab.updated_at = Date.now();
-    window.renderChatMessages();
-    window.scheduleChatPersist();
+    renderChatMessages();
+    scheduleChatPersist();
 }
 
 function syncMessageLimitInput() {
@@ -157,19 +196,57 @@ function syncMessageLimitInput() {
 
 // ── Compaction ────────────────────────────────────────────────────────────────
 
-async function compactChatTab(tab, keepTail = 10, summarize = true) {
+// Estimate ctx% from message token metadata (mirrors deriveCtxPctFromMessages in context-card.js).
+function estimateCtxPct(tab, capacity) {
+    if (!capacity) return null;
+    const asst = (tab.messages || []).filter(m => m.role === 'assistant' && !m.compaction_marker);
+    if (!asst.length) return null;
+    const totalOutput = asst.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
+    const lastInput = asst.at(-1).input_tokens || 0;
+    return Math.min(200, (totalOutput + lastInput) / capacity * 100); // allow >100 so overflow is visible
+}
+
+// Calculate how many recent messages can be kept while staying within 65% of capacity.
+// This leaves 35% for the system prompt, tombstone summary, and headroom for new responses.
+// Falls back to the default if capacity is unknown or token metadata is sparse.
+function calcKeepTailForCapacity(conversational, capacity) {
+    if (!capacity || conversational.length === 0) return 15;
+    const budget = Math.floor(capacity * 0.65);
+    let tokensUsed = 0;
+    let keep = 0;
+    for (let i = conversational.length - 1; i >= 0; i--) {
+        const m = conversational[i];
+        // Use recorded tokens; fall back to rough char estimate (4 chars ≈ 1 token)
+        const t = (m.input_tokens || 0) + (m.output_tokens || 0)
+            || Math.ceil((m.content?.length || 0) / 4);
+        if (tokensUsed + t > budget) break;
+        tokensUsed += t;
+        keep++;
+    }
+    // Must keep at least 1 and drop at least 1
+    return Math.max(1, Math.min(keep, conversational.length - 1));
+}
+
+export async function compactChatTab(tab, keepTail = null, summarize = true) {
     const msgs = tab.messages;
     const systemMsg = msgs[0]?.role === 'system' && !msgs[0]?.compaction_marker ? msgs[0] : null;
     const tombstones = msgs.filter(m => m.compaction_marker);
     const conversational = msgs.filter(m => m.role !== 'system' && !m.compaction_marker);
 
-    if (conversational.length <= keepTail) return;
+    // Resolve keepTail: capacity-aware if not specified, so a small model gets a
+    // smaller tail and the compacted conversation actually fits its context window.
+    const capacity = lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
+    const resolvedKeepTail = keepTail ?? (capacity > 0
+        ? calcKeepTailForCapacity(conversational, capacity)
+        : 15);
 
-    window.compactionInProgress = true;
+    if (conversational.length <= resolvedKeepTail) return;
+
+    chat.compactionInProgress = true;
     setCompactButtonBusy(true);
 
-    const dropped = conversational.slice(0, conversational.length - keepTail);
-    const kept = conversational.slice(-keepTail);
+    const dropped = conversational.slice(0, conversational.length - resolvedKeepTail);
+    const kept = conversational.slice(-resolvedKeepTail);
     console.log('[COMPACT] starting — dropped:', dropped.length, 'kept:', kept.length, 'oldTombstones:', tombstones.length);
 
     let placeholderEl = null;
@@ -197,7 +274,7 @@ async function compactChatTab(tab, keepTail = 10, summarize = true) {
     let isSummarized = false;
 
     if (summarize) {
-        const summary = await window.fetchSummary(dropped);
+        const summary = await fetchSummary(dropped);
         if (summary) {
             const ctxNote = tab.lastCtxPct > 0 ? ` · was ${tab.lastCtxPct}% ctx` : '';
             tombstoneContent = `[Context compacted — ${dropped.length} messages summarized${ctxNote}]\n\n${summary}`;
@@ -237,10 +314,10 @@ async function compactChatTab(tab, keepTail = 10, summarize = true) {
         console.warn('[COMPACT] kept markers:', kept.filter(m => m.compaction_marker).length);
     }
     tab.updated_at = Date.now();
-    window.scheduleChatPersist();
-    window.renderChatMessages();
+    scheduleChatPersist();
+    renderChatMessages();
     setCompactButtonBusy(false);
-    window.compactionInProgress = false;
+    chat.compactionInProgress = false;
 
     setTimeout(() => {
         const markers = document.querySelectorAll('.chat-compact-marker');
@@ -263,6 +340,34 @@ function onManualCompact() {
     compactChatTab(tab);
 }
 
+// Called after each response (via view binding) and after model switch.
+// Fires compaction if auto_compact is on and the tab has hit its threshold.
+export async function checkAutoCompact(tab) {
+    if (!tab || !tab.auto_compact || chat.compactionInProgress || chat.busy) return;
+    const capacity = lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
+    if (!capacity) return;
+
+    const ctxPct = estimateCtxPct(tab, capacity);
+    if (ctxPct === null) return;
+
+    const mode = tab.compact_mode || 'percent';
+    let shouldCompact = false;
+    if (mode === 'optimized') {
+        // Compact when fewer than 25k tokens remain
+        const asstMsgs = (tab.messages || []).filter(m => m.role === 'assistant' && !m.compaction_marker);
+        const totalOutput = asstMsgs.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
+        const lastInput = asstMsgs.at(-1)?.input_tokens || 0;
+        shouldCompact = capacity - (totalOutput + lastInput) < 25_000;
+    } else {
+        const threshold = (tab.compact_threshold || 0.8) * 100;
+        shouldCompact = ctxPct >= threshold;
+    }
+
+    if (shouldCompact) {
+        await compactChatTab(tab, null, !!tab.auto_compact_summarize);
+    }
+}
+
 function onAutoCompactChange(checked) {
     const tab = activeChatTab();
     if (!tab) return;
@@ -271,7 +376,7 @@ function onAutoCompactChange(checked) {
     document.getElementById('compact-threshold-field').style.opacity = checked ? '1' : '0.4';
     const summarizeField = document.getElementById('compact-summarize-field');
     if (summarizeField) summarizeField.style.opacity = checked ? '1' : '0.4';
-    window.scheduleChatPersist();
+    scheduleChatPersist();
 }
 
 function onAutoCompactSummarizeChange(checked) {
@@ -279,7 +384,7 @@ function onAutoCompactSummarizeChange(checked) {
     if (!tab) return;
     tab.auto_compact_summarize = checked;
     tab.updated_at = Date.now();
-    window.scheduleChatPersist();
+    scheduleChatPersist();
 }
 
 function onCompactModeChange(mode) {
@@ -287,7 +392,7 @@ function onCompactModeChange(mode) {
     if (!tab) return;
     tab.compact_mode = mode;
     tab.updated_at = Date.now();
-    window.scheduleChatPersist();
+    scheduleChatPersist();
     syncCompactSettingsUI(tab);
 }
 
@@ -297,7 +402,7 @@ function onCompactThresholdChange(value) {
     tab.compact_threshold = value / 100;
     tab.updated_at = Date.now();
     document.getElementById('chat-compact-threshold-val').textContent = `${value}%`;
-    window.scheduleChatPersist();
+    scheduleChatPersist();
 }
 
 function updateCtxPressureBar(pct) {
@@ -354,10 +459,10 @@ function syncCompactSettingsUI(tab) {
     const btn = document.getElementById('btn-compact');
     if (btn && tab) {
         const conversational = tab.messages.filter(m => m.role !== 'system' && !m.compaction_marker);
-        const willDrop = Math.max(0, conversational.length - 10);
+        const willDrop = Math.max(0, conversational.length - 15);
         btn.title = willDrop > 0
-            ? `Trim context — will remove ${willDrop} oldest messages`
-            : 'Trim context — nothing to remove yet';
+            ? `Compact context — will remove ${willDrop} oldest messages`
+            : 'Compact context — nothing to remove yet';
     }
 }
 
@@ -369,6 +474,8 @@ function applyChatStyle(style) {
         page.dataset.chatStyle = style;
     }
 }
+
+export { applyChatStyle };
 
 const CHAT_STYLES = ['rounded', 'compact', 'minimal', 'bubbly'];
 const CHAT_STYLE_LABELS = { rounded: 'Rounded', compact: 'Compact', minimal: 'Minimal', bubbly: 'Bubbly' };
@@ -382,8 +489,12 @@ function toggleStylePanel() {
         panel.querySelectorAll('.chat-style-card').forEach(card => {
             card.classList.toggle('active', card.dataset.style === current);
         });
-        document.getElementById('chat-system-panel').style.display = 'none';
-        document.getElementById('chat-params-panel').style.display = 'none';
+        const systemPanel = document.getElementById('chat-system-panel');
+        const paramsPanel = document.getElementById('chat-params-panel');
+        if (systemPanel) systemPanel.classList.remove('open');
+        if (paramsPanel) paramsPanel.classList.remove('open');
+        const styleLabel = document.getElementById('chat-style-label');
+        if (styleLabel) styleLabel.textContent = 'Style';
     }
 }
 
@@ -394,39 +505,51 @@ function selectChatStyle(style) {
     const select = document.getElementById('pref-chat-style');
     if (select) select.value = style;
     document.getElementById('chat-style-panel').style.display = 'none';
-    window.showToast(`Style: ${CHAT_STYLE_LABELS[style]}`, 'success');
+    showToast(`Style: ${CHAT_STYLE_LABELS[style]}`, 'success');
 }
 
 function updateChatStyleLabel(style) {
     const label = document.getElementById('chat-style-label');
-    if (label) label.textContent = CHAT_STYLE_LABELS[style] || 'Rounded';
+    if (label) label.textContent = 'Style';
 }
 
 function adjustChatFont(delta) {
-    window.chatFontSize = Math.max(70, Math.min(150, window.chatFontSize + delta * 10));
-    localStorage.setItem('llama-monitor-chat-font', window.chatFontSize);
+    chatFont = Math.max(70, Math.min(150, chatFont + delta * 10));
+    localStorage.setItem('llama-monitor-chat-font', chatFont);
     applyChatFontSize();
 }
 
 function applyChatFontSize() {
     const messages = document.getElementById('chat-messages');
     if (messages) {
-        messages.style.setProperty('--chat-font-scale', window.chatFontSize / 100);
+        messages.style.setProperty('--chat-font-scale', chatFont / 100);
+    }
+    const inputRow = document.getElementById('chat-input-row');
+    if (inputRow) {
+        inputRow.style.setProperty('--chat-font-scale', chatFont / 100);
     }
     const label = document.getElementById('chat-font-value');
-    if (label) label.textContent = window.chatFontSize + '%';
+    if (label) label.textContent = chatFont + '%';
 }
 
 function onEnterToggleChange(checked) {
-    window.enterToSend = checked;
+    enterToSend = checked;
     localStorage.setItem('llama-monitor-enter-to-send', checked ? 'true' : 'false');
     const prefCheckbox = document.getElementById('pref-enter-to-send');
     if (prefCheckbox) prefCheckbox.checked = checked;
 }
 
+export function getEnterToSend() {
+    return enterToSend;
+}
+
+export function setEnterToSend(checked) {
+    onEnterToggleChange(checked);
+}
+
 function initEnterToggle() {
     const toggle = document.getElementById('chat-enter-toggle-input');
-    if (toggle) toggle.checked = window.enterToSend;
+    if (toggle) toggle.checked = enterToSend;
 }
 
 function initChatStyle() {
@@ -441,9 +564,9 @@ function initChatInputHandler() {
     const input = document.getElementById('chat-input');
     if (!input) return;
     input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey && window.enterToSend) {
+        if (e.key === 'Enter' && !e.shiftKey && enterToSend) {
             e.preventDefault();
-            window.sendChat();
+            sendChat();
         }
     });
 }
@@ -469,26 +592,99 @@ export function initChatParams() {
     initEnterToggle();
     initChatStyle();
     initChatInputHandler();
+    initChatResizeHandle();
 
     // Bind chat header buttons
-    document.getElementById('btn-system-prompt')?.addEventListener('click', () => window.toggleSystemPromptPanel());
-    document.getElementById('btn-model-params')?.addEventListener('click', toggleModelParamsPanel);
-    document.getElementById('btn-chat-style')?.addEventListener('click', toggleStylePanel);
+    document.getElementById('btn-system-prompt')?.addEventListener('click', (e) => {
+    const btn = document.getElementById('btn-system-prompt');
+    const panel = document.getElementById('chat-system-panel');
+    const wasOpen = panel.classList.contains('open');
+    toggleSystemPromptPanel();
+    setTimeout(() => {
+        const isOpen = panel.classList.contains('open');
+        const styleBtn = document.getElementById('btn-chat-style');
+        const paramsBtn = document.getElementById('btn-model-params');
+        if (isOpen && !wasOpen) {
+            btn.classList.add('active');
+            if (styleBtn) styleBtn.classList.remove('active');
+            if (paramsBtn) paramsBtn.classList.remove('active');
+        } else if (!isOpen && wasOpen) {
+            btn.classList.remove('active');
+        }
+    }, 0);
+});
+    document.getElementById('btn-model-params')?.addEventListener('click', (e) => {
+    const btn = document.getElementById('btn-model-params');
+    const panel = document.getElementById('chat-params-panel');
+    const wasOpen = panel.classList.contains('open');
+    toggleModelParamsPanel();
+    setTimeout(() => {
+        const isOpen = panel.classList.contains('open');
+        const systemBtn = document.getElementById('btn-system-prompt');
+        const styleBtn = document.getElementById('btn-chat-style');
+        if (isOpen && !wasOpen) {
+            btn.classList.add('active');
+            if (systemBtn) systemBtn.classList.remove('active');
+            if (styleBtn) styleBtn.classList.remove('active');
+        } else if (!isOpen && wasOpen) {
+            btn.classList.remove('active');
+        }
+    }, 0);
+});
+    document.getElementById('btn-chat-style')?.addEventListener('click', (e) => {
+    const btn = document.getElementById('btn-chat-style');
+    toggleStylePanel();
+    setTimeout(() => {
+        const panel = document.getElementById('chat-style-panel');
+        const isOpen = panel.style.display !== 'none';
+        const systemBtn = document.getElementById('btn-system-prompt');
+        const paramsBtn = document.getElementById('btn-model-params');
+        if (isOpen) {
+            btn.classList.add('active');
+            if (systemBtn) systemBtn.classList.remove('active');
+            if (paramsBtn) paramsBtn.classList.remove('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    }, 0);
+});
     document.getElementById('btn-compact')?.addEventListener('click', onManualCompact);
+    registerPersonaMenuBindings();
+    registerTemplateMenuBindings();
 
     // Bind chat name inputs
-    document.getElementById('chat-ai-name')?.addEventListener('input', (e) => window.updateChatName('ai_name', e.target.value));
-    document.getElementById('chat-user-name')?.addEventListener('input', (e) => window.updateChatName('user_name', e.target.value));
+    document.getElementById('chat-ai-name')?.addEventListener('input', (e) => updateChatName('ai_name', e.target.value));
+    document.getElementById('chat-user-name')?.addEventListener('input', (e) => updateChatName('user_name', e.target.value));
 
     // Bind explicit toggle (footer)
-    document.getElementById('chat-explicit-toggle-footer')?.addEventListener('click', () => window.toggleExplicitMode());
+    document.getElementById('chat-explicit-toggle-footer')?.addEventListener('click', toggleExplicitMode);
 
     // Bind font controls
     document.getElementById('chat-font-decrease')?.addEventListener('click', () => adjustChatFont(-1));
     document.getElementById('chat-font-increase')?.addEventListener('click', () => adjustChatFont(1));
 
-    // Bind export button
-    document.getElementById('chat-export-btn')?.addEventListener('click', () => window.exportChatTab());
+    // Bind export button with dropdown menu
+    const exportBtn = document.getElementById('chat-export-btn');
+    const exportMenu = document.getElementById('chat-export-menu');
+    if (exportBtn && exportMenu) {
+        exportBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            exportMenu.classList.toggle('hidden');
+        });
+        exportMenu.addEventListener('click', e => {
+            const fmt = e.target.dataset.exportFormat;
+            if (fmt) {
+                exportChatTab(fmt);
+                exportMenu.classList.add('hidden');
+            }
+        });
+    }
+    document.addEventListener('click', e => {
+        if (!e.target.closest('#chat-export-btn') && !e.target.closest('#chat-export-menu')) {
+            document.getElementById('chat-export-menu')?.classList.add('hidden');
+        }
+    });
+    document.getElementById('chat-import-btn')?.addEventListener('click', importChatTab);
 
     // Bind chat style cards (event delegation)
     const styleGrid = document.getElementById('chat-style-grid');
@@ -501,10 +697,10 @@ export function initChatParams() {
 
     // Bind system prompt panel
     document.getElementById('chat-copy-settings-btn')?.addEventListener('click', showCopySettingsDropdown);
-    document.getElementById('chat-template-select')?.addEventListener('change', (e) => window.applySystemPromptTemplate(e.target.value));
-    document.getElementById('chat-template-mgmt-btn')?.addEventListener('click', () => window.openTemplateManager());
-    document.getElementById('chat-explicit-toggle-settings')?.addEventListener('click', () => window.toggleExplicitMode());
-    document.getElementById('chat-system-input')?.addEventListener('input', () => window.onSystemPromptChange());
+    document.getElementById('chat-template-select')?.addEventListener('change', (e) => applySystemPromptTemplate(e.target.value));
+    document.getElementById('chat-template-mgmt-btn')?.addEventListener('click', openTemplateManager);
+    document.getElementById('chat-explicit-toggle-settings')?.addEventListener('click', toggleExplicitMode);
+    document.getElementById('chat-system-input')?.addEventListener('input', onSystemPromptChange);
     document.getElementById('chat-msg-limit')?.addEventListener('input', (e) => onMessageLimitChange(+e.target.value));
     document.getElementById('chat-auto-compact')?.addEventListener('change', (e) => onAutoCompactChange(e.target.checked));
     document.getElementById('compact-mode-percent')?.addEventListener('click', () => onCompactModeChange('percent'));
@@ -528,15 +724,396 @@ export function initChatParams() {
     // Bind enter toggle
     document.getElementById('chat-enter-toggle-input')?.addEventListener('change', (e) => onEnterToggleChange(e.target.checked));
 
-    // Keep on window for cross-module calls
-    window.applyChatStyle = applyChatStyle;
-    window.updateParamsDirtyIndicator = updateParamsDirtyIndicator;
-    window.syncMessageLimitInput = syncMessageLimitInput;
-    window.updateCtxPressureBar = updateCtxPressureBar;
-    window.syncCompactSettingsUI = syncCompactSettingsUI;
-    window.loadChatNames = loadChatNames;
-    window.updateChatName = updateChatName;
-    window.toggleSystemPromptPanel = toggleSystemPromptPanel;
-    window.onSystemPromptChange = onSystemPromptChange;
-    window.toggleExplicitMode = toggleExplicitMode;
+    registerChatViewBindings({
+        loadChatNames,
+        syncCompactSettingsUI,
+        syncMessageLimitInput,
+        updateCtxPressureBar,
+        updateParamsDirtyIndicator,
+        checkAutoCompact,
+    });
+}
+
+// ── Chat Input Resize Handle ─────────────────────────────────────────────────
+let isResizing = false;
+let inputRowEl = null;
+let textareaEl = null;
+let startY = 0;
+let startHeight = 0;
+const MIN_ROWS = 1;
+const MAX_ROWS = 10;
+
+function initChatResizeHandle() {
+    const handle = document.getElementById('chat-resize-handle');
+    if (!handle) return;
+    
+    inputRowEl = document.getElementById('chat-input-row');
+    textareaEl = document.getElementById('chat-input');
+    
+    if (!inputRowEl || !textareaEl) return;
+    
+    // Restore saved height
+    const savedHeight = localStorage.getItem('llama-monitor-input-height');
+    if (savedHeight) {
+        textareaEl.style.height = savedHeight;
+        updateResizeHandleUI();
+    }
+    
+    handle.addEventListener('mousedown', startResize);
+    document.addEventListener('mousemove', doResize);
+    document.addEventListener('mouseup', stopResize);
+}
+
+function startResize(e) {
+    if (!textareaEl) return;
+    isResizing = true;
+    startY = e.clientY;
+    startHeight = textareaEl.getBoundingClientRect().height;
+    const handle = document.getElementById('chat-resize-handle');
+    if (handle) handle.classList.add('active');
+    e.preventDefault();
+}
+
+function doResize(e) {
+    if (!isResizing || !textareaEl) return;
+    const delta = startY - e.clientY;
+    const computedStyle = getComputedStyle(textareaEl);
+    const minHeight = parseFloat(computedStyle.minHeight) || 42;
+    const newHeight = Math.max(minHeight, startHeight + delta);
+    const padding = parseFloat(computedStyle.paddingTop) + parseFloat(computedStyle.paddingBottom);
+    const border = parseFloat(computedStyle.borderTopWidth) + parseFloat(computedStyle.borderBottomWidth);
+    const contentHeight = newHeight - padding - border;
+    const lineHeight = parseFloat(computedStyle.lineHeight) || 24;
+    const rows = Math.max(1, Math.round(contentHeight / lineHeight));
+    textareaEl.style.height = newHeight + 'px';
+    textareaEl.rows = Math.max(MIN_ROWS, Math.min(MAX_ROWS, rows));
+    updateResizeHandleUI();
+}
+
+function stopResize() {
+    if (!isResizing) return;
+    isResizing = false;
+    const handle = document.getElementById('chat-resize-handle');
+    if (handle) handle.classList.remove('active');
+    if (textareaEl) {
+        localStorage.setItem('llama-monitor-input-height', textareaEl.style.height || '42px');
+    }
+}
+
+function updateResizeHandleUI() {
+    const handle = document.getElementById('chat-resize-handle');
+    const hint = handle?.querySelector('.resize-hint');
+    if (handle && textareaEl) {
+        const height = textareaEl.getBoundingClientRect().height;
+        const max = 200;
+        const pct = Math.min(100, (height - 42) / (max - 42) * 100);
+        handle.style.setProperty('--resize-pct', pct / 100);
+    }
+}
+
+export function resetChatInputHeight() {
+    if (textareaEl) {
+        textareaEl.style.height = '';
+        textareaEl.rows = 1;
+        localStorage.removeItem('llama-monitor-input-height');
+        updateResizeHandleUI();
+    }
+}
+
+// ── Persona Menu Bindings ───────────────────────────────────────────────────
+
+let personaMenuEl = null;
+let personaMenuListEl = null;
+
+export function registerPersonaMenuBindings() {
+    const btn = document.getElementById('chat-persona-btn');
+    const menu = document.getElementById('chat-persona-menu');
+    const list = document.getElementById('chat-persona-menu-list');
+    const name = document.getElementById('chat-persona-menu-name');
+    const editBtn = document.getElementById('chat-persona-edit-prompt');
+    
+    personaMenuEl = menu;
+    personaMenuListEl = list;
+    
+    if (!btn || !menu || !list || !name) return;
+    
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = !menu.classList.toggle('hidden');
+        if (isVisible) {
+            loadPersonaMenuItems();
+        }
+    });
+    
+    editBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.classList.add('hidden');
+        const btnSystemPrompt = document.getElementById('btn-system-prompt');
+        if (btnSystemPrompt) btnSystemPrompt.classList.add('active');
+        openTemplateManager();
+    });
+    
+    document.addEventListener('click', (e) => {
+        if (!menu.contains(e.target)) {
+            menu.classList.add('hidden');
+        }
+    });
+}
+
+async function loadPersonaMenuItems() {
+    if (!personaMenuListEl) return;
+    
+    personaMenuListEl.innerHTML = '<div class="chat-persona-menu-loading">Loading personas...</div>';
+    
+    try {
+        const personas = await loadTemplates();
+        
+        if (personas.length === 0) {
+            personaMenuListEl.innerHTML = '<div class="chat-persona-menu-loading">No personas found</div>';
+            return;
+        }
+        
+        personaMenuListEl.innerHTML = '';
+        
+        // Check if we have both built-in and user templates
+        const hasBuiltIn = personas.some(p => p._isDefault);
+        const hasUser = personas.some(p => !p._isDefault);
+        
+        // Add section header for built-in templates
+        if (hasBuiltIn && hasUser) {
+            const header = document.createElement('div');
+            header.className = 'chat-persona-menu-section';
+            header.textContent = 'Built-in Personas';
+            personaMenuListEl.appendChild(header);
+        }
+        
+        personas.forEach((persona, index) => {
+            // Add separator before user templates section
+            if (hasBuiltIn && hasUser && !persona._isDefault) {
+                const firstUserIndex = personas.findIndex(p => !p._isDefault);
+                if (index === firstUserIndex) {
+                    const header = document.createElement('div');
+                    header.className = 'chat-persona-menu-section';
+                    header.textContent = 'Your Personas';
+                    personaMenuListEl.appendChild(header);
+                }
+            }
+            
+            const item = document.createElement('button');
+            item.className = 'chat-persona-menu-item';
+            const tab = activeChatTab();
+            if (tab && tab.active_template_id === persona.id) {
+                item.classList.add('active');
+            }
+            
+            const icon = document.createElement('span');
+            icon.className = 'chat-persona-menu-item-icon';
+            icon.textContent = persona._isDefault ? '🎭' : '✨';
+            
+            const content = document.createElement('div');
+            content.className = 'chat-persona-menu-item-content';
+            
+            const nameEl = document.createElement('div');
+            nameEl.className = 'chat-persona-menu-item-name';
+            nameEl.textContent = persona.name;
+            
+            // Add badge for built-in templates
+            if (persona._isDefault) {
+                const badge = document.createElement('span');
+                badge.className = 'chat-persona-menu-item-badge';
+                badge.textContent = 'Built-in';
+                nameEl.appendChild(badge);
+            }
+            
+            content.appendChild(nameEl);
+            
+            // Show description or first 60 chars of prompt as meta text
+            const metaText = persona.description || (persona.prompt ? persona.prompt.substring(0, 60) + '...' : '');
+            if (metaText) {
+                const meta = document.createElement('div');
+                meta.className = 'chat-persona-menu-item-meta';
+                meta.textContent = metaText;
+                content.appendChild(meta);
+            }
+            
+            item.appendChild(icon);
+            item.appendChild(content);
+            
+            item.addEventListener('click', () => {
+                window.currentPersona = persona;
+                document.getElementById('chat-persona-menu-name').textContent = persona.name;
+                document.getElementById('chat-persona-menu').classList.add('hidden');
+                const tab = activeChatTab();
+                if (tab && window.loadTemplates) {
+                    const templates = window.loadTemplates();
+                    templates.then(ts => {
+                        const t = ts?.find(x => x.name === persona.name);
+                        if (t) {
+                            tab.system_prompt = t.prompt;
+                            tab.active_template_id = t.id;
+                            tab.updated_at = Date.now();
+                            renderPersonaStrip?.();
+                            scheduleChatPersist?.();
+                        }
+                    });
+                }
+            });
+            
+            personaMenuListEl.appendChild(item);
+        });
+    } catch (err) {
+        const errorEl = document.createElement('div');
+        errorEl.className = 'chat-persona-menu-loading';
+        errorEl.textContent = 'Error: ' + err.message;
+        personaMenuListEl.appendChild(errorEl);
+    }
+}
+
+export function setPersonaMenuActive(personaName) {
+    const items = personaMenuListEl?.querySelectorAll('.chat-persona-menu-item');
+    items?.forEach(item => {
+        if (item.textContent.includes(personaName)) {
+            item.classList.add('active');
+        } else {
+            item.classList.remove('active');
+        }
+    });
+    const nameEl = document.getElementById('chat-persona-menu-name');
+    if (nameEl && personaName) {
+        nameEl.textContent = personaName;
+    }
+}
+
+// ── Template Menu Bindings ──────────────────────────────────────────────────
+
+let templateMenuEl = null;
+let templateMenuListEl = null;
+
+export function registerTemplateMenuBindings() {
+    const btn = document.getElementById('chat-template-select');
+    const menu = document.getElementById('chat-template-menu');
+    const list = document.getElementById('chat-template-menu-list');
+    
+    templateMenuEl = menu;
+    templateMenuListEl = list;
+    
+    if (!btn || !menu || !list) return;
+    
+    btn.addEventListener('change', (e) => {
+        const templateName = e.target.value;
+        if (templateName && window.setActiveTemplate) {
+            window.setActiveTemplate(templateName);
+        }
+    });
+    
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = !menu.classList.toggle('hidden');
+        if (isVisible) {
+            loadTemplateMenuItems();
+        }
+    });
+    
+    document.addEventListener('click', (e) => {
+        if (!menu.contains(e.target) && e.target.id !== 'chat-template-select') {
+            menu.classList.add('hidden');
+        }
+    });
+}
+
+async function loadTemplateMenuItems() {
+    if (!templateMenuListEl) return;
+    
+    templateMenuListEl.innerHTML = '<div class="chat-persona-menu-loading">Loading templates...</div>';
+    
+    try {
+        const response = await fetch('/api/chat-templates');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        const templates = data.templates || [];
+        
+        if (templates.length === 0) {
+            templateMenuListEl.innerHTML = '<div class="chat-persona-menu-loading">No templates found</div>';
+            return;
+        }
+        
+        templateMenuListEl.innerHTML = '';
+        
+        templates.forEach((template) => {
+            const item = document.createElement('button');
+            item.className = 'chat-persona-menu-item';
+            if (window.currentTemplate && window.currentTemplate.name === template.name) {
+                item.classList.add('active');
+            }
+            
+                const icon = document.createElement('span');
+            icon.className = 'chat-persona-menu-item-icon';
+            icon.textContent = '📝';
+            
+            const content = document.createElement('div');
+            content.className = 'chat-persona-menu-item-content';
+            
+            const nameEl = document.createElement('div');
+            nameEl.className = 'chat-persona-menu-item-name';
+            nameEl.textContent = template.name;
+            content.appendChild(nameEl);
+            
+            if (template.description) {
+                const meta = document.createElement('div');
+                meta.className = 'chat-persona-menu-item-meta';
+                meta.textContent = template.description.substring(0, 60);
+                content.appendChild(meta);
+            }
+            
+            item.appendChild(icon);
+            item.appendChild(content);
+            
+            item.addEventListener('click', async () => {
+                try {
+                    const res = await fetch(`/api/chat-templates/activate/${encodeURIComponent(template.name)}`, {
+                        method: 'POST',
+                    });
+                    if (!res.ok) {
+                        throw new Error(`HTTP ${res.status}`);
+                    }
+                    window.currentTemplate = template;
+                    document.getElementById('chat-template-select').value = template.name;
+                    document.getElementById('chat-template-menu').classList.add('hidden');
+                    // Re-render to apply template
+                    renderPersonaStrip?.();
+                    window.setActiveTemplate?.(template.id);
+                } catch (err) {
+                    console.error('Failed to activate template:', err);
+                    alert('Failed to activate template: ' + err.message);
+                }
+            });
+            
+            templateMenuListEl.appendChild(item);
+        });
+    } catch (err) {
+        const errorEl = document.createElement('div');
+        errorEl.className = 'chat-persona-menu-loading';
+        errorEl.textContent = 'Error: ' + err.message;
+        templateMenuListEl.appendChild(errorEl);
+    }
+}
+
+export function setTemplateMenuActive(templateName) {
+    const items = templateMenuListEl?.querySelectorAll('.chat-persona-menu-item');
+    items?.forEach(item => {
+        if (item.textContent.includes(templateName)) {
+            item.classList.add('active');
+        } else {
+            item.classList.remove('active');
+        }
+    });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }

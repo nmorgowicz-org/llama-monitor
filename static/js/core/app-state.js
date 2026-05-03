@@ -61,80 +61,109 @@ export let currentPollInterval = 5000;
 export let lastGpuData = null;
 
 // ── Presets / Sessions ────────────────────────────────────────────────────────
+// Container object so that reassignments (presets = [...]) are visible through
+// ES module imports (live binding to the object, not the variable).
 
-/** Loaded presets from backend */
-export let presets = [];
-
-/** Loaded sessions from backend */
-export let sessions = [];
-
-/** Currently active session ID */
-export let activeSessionId = 'default';
-
-/** Currently active session port */
-export let activeSessionPort = 8080;
-
-/** Whether the local server is running */
-export let serverRunning = false;
-
-/** Previous log length for incremental rendering */
-export let prevLogLen = 0;
+/** Presets/sessions state container — mutable properties, imported as a live reference */
+export const sessionState = {
+    /** Loaded presets from backend */
+    presets: [],
+    /** Loaded sessions from backend */
+    sessions: [],
+    /** Currently active session ID */
+    activeSessionId: 'default',
+    /** Currently active session port */
+    activeSessionPort: 8080,
+    /** Whether the local server is running */
+    serverRunning: false,
+    /** Previous log length for incremental rendering */
+    prevLogLen: 0,
+};
 
 // ── Remote Agent ──────────────────────────────────────────────────────────────
+// Container object so that reassignments are visible through ES module imports.
 
-/** Whether a remote-agent operation is in progress */
-export let remoteAgentInProgress = false;
+/** Remote agent state container — mutable properties, imported as a live reference */
+export const remoteAgent = {
+    /** Whether a remote-agent operation is in progress */
+    inProgress: false,
+    /** SSH connection info for remote agent */
+    sshConnection: null,
+    /** Latest SSH host key from scan */
+    latestHostKey: null,
+};
 
-/** SSH connection info for remote agent */
-export let remoteAgentSshConnection = null;
+/** Latest dashboard websocket snapshot */
+export let wsData = null;
 
-/** Latest SSH host key from scan */
-export let latestSshHostKey = null;
+export function setWsData(data) { wsData = data; }
+export function setLastServerState(v) { lastServerState = v; }
+export function setLastLlamaMetrics(v) { lastLlamaMetrics = v; }
+export function setLastSystemMetrics(v) { lastSystemMetrics = v; }
+export function setLastGpuMetrics(v) { lastGpuMetrics = v; }
+export function setLastCapabilities(v) { lastCapabilities = v; }
+export function setLastGpuData(v) { lastGpuData = v; }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
-/** Whether settings modal has unsaved changes */
-export let settingsIsDirty = false;
-
-/** Timer ID for debounced settings save */
-export let settingsSaveTimer = null;
+/** Settings state container — mutable properties, imported as a live reference */
+export const settingsState = {
+    /** Whether settings modal has unsaved changes */
+    isDirty: false,
+    /** Timer ID for debounced settings save */
+    saveTimer: null,
+};
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
+// Container object so that reassignments (chatTabs = [...]) are visible through
+// ES module imports (live binding to the object, not the variable).
 
-/** Whether a chat request is in progress */
-export let chatBusy = false;
-
-/** Whether compaction is in progress */
-export let compactionInProgress = false;
-
-/** Unread chat count */
-export let unreadChatCount = 0;
-
-/** Abort controller for the current chat request */
-export let chatAbortController = null;
-
-/** Chat tab collection */
-export let chatTabs = [];
-
-/** ID of the active chat tab */
-export let activeChatTabId = null;
-
-/** Index of the active chat tab */
-export let activeChatTabIdx = 0;
-
-/** Whether the chat tabs have unsaved changes */
-export let chatTabsDirty = false;
-
-/** Timer ID for debounced chat tab persistence */
-export let chatPersistTimer = null;
-
-/** Whether the chat view has been initialized */
-export let chatInitialized = false;
+/** Chat state container — mutable properties, imported as a live reference */
+export const chat = {
+    /** Whether a chat request is in progress */
+    busy: false,
+    /** Whether compaction is in progress */
+    compactionInProgress: false,
+    /** Unread chat count */
+    unreadChatCount: 0,
+    /** Abort controller for the current chat request */
+    abortController: null,
+    /** Chat tab collection */
+    tabs: [],
+    /** ID of the active chat tab */
+    activeTabId: null,
+    /** Index of the active chat tab */
+    activeTabIdx: 0,
+    /** Whether the chat tabs have unsaved changes */
+    tabsDirty: false,
+    /** Timer ID for debounced chat tab persistence */
+    persistTimer: null,
+    /** Whether the chat view has been initialized */
+    initialized: false,
+};
 
 // ── LHM (Windows Hardware Monitor) ───────────────────────────────────────────
 
-/** Temporary bridge for LHM overlay flow */
-export let lhmResolve = null;
+/** LHM state container — mutable properties, imported as a live reference */
+export const lhm = {
+    /** Temporary bridge for LHM overlay flow */
+    resolve: null,
+};
+
+/** Setup/monitor view state */
+export const setupViewState = {
+    view: 'setup',
+    sessionActive: false,
+    lastSessionData: null,
+};
+
+/** Monitor metrics UI state */
+export const monitorState = {
+    speedMax: {
+        prompt: 0,
+        generation: 0,
+    },
+};
 
 // ── Updates ───────────────────────────────────────────────────────────────────
 

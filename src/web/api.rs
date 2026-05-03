@@ -87,9 +87,11 @@ pub struct ChatTab {
     #[serde(default)]
     pub explicit_mode: Option<bool>,
     pub messages: Vec<ChatMessage>,
-    #[serde(default)]
+    // Serialized as camelCase so GET responses and PUT bodies use identical names.
+    // Alias keeps existing disk files readable if they were written as snake_case.
+    #[serde(rename = "totalInputTokens", alias = "total_input_tokens", default)]
     pub total_input_tokens: Option<u64>,
-    #[serde(default)]
+    #[serde(rename = "totalOutputTokens", alias = "total_output_tokens", default)]
     pub total_output_tokens: Option<u64>,
     pub model_params: ChatModelParams,
     pub created_at: u64,
@@ -98,6 +100,12 @@ pub struct ChatTab {
     pub auto_compact: Option<bool>,
     #[serde(default)]
     pub compact_threshold: Option<f32>,
+    /// Last known context window percentage (0–100). Derived client-side and
+    /// persisted so the dashboard can show it on page load without a live session.
+    #[serde(rename = "lastCtxPct", default)]
+    pub last_ctx_pct: Option<f32>,
+    #[serde(rename = "activeTemplateId", default)]
+    pub active_template_id: Option<String>,
 }
 
 static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -1112,6 +1120,10 @@ fn api_get_templates(
         })
 }
 
+// ── Personas API ───────────────────────────────────────────────────────
+
+
+
 fn api_create_template(
     state: AppState,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -1491,6 +1503,24 @@ fn api_chat_abort(
         })
 }
 
+fn compute_chat_tab_totals(mut tab: ChatTab) -> ChatTab {
+    if tab.total_input_tokens.is_none() || tab.total_output_tokens.is_none() {
+        let mut total_input: u64 = 0;
+        let mut total_output: u64 = 0;
+        for msg in &tab.messages {
+            if let Some(input) = msg.input_tokens {
+                total_input += input as u64;
+            }
+            if let Some(output) = msg.output_tokens {
+                total_output += output as u64;
+            }
+        }
+        tab.total_input_tokens = Some(total_input);
+        tab.total_output_tokens = Some(total_output);
+    }
+    tab
+}
+
 fn api_get_chat_tabs() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
 {
     warp::path!("api" / "chat" / "tabs")
@@ -1500,7 +1530,10 @@ fn api_get_chat_tabs() -> impl Filter<Extract = (impl warp::Reply,), Error = war
             if path.exists() {
                 match tokio::fs::read_to_string(&path).await {
                     Ok(raw) => match serde_json::from_str::<Vec<ChatTab>>(&raw) {
-                        Ok(tabs) => Ok::<_, warp::Rejection>(warp::reply::json(&tabs)),
+                        Ok(tabs) => {
+                            let tabs: Vec<ChatTab> = tabs.into_iter().map(compute_chat_tab_totals).collect();
+                            Ok::<_, warp::Rejection>(warp::reply::json(&tabs))
+                        }
                         Err(_) => {
                             Ok::<_, warp::Rejection>(warp::reply::json(&Vec::<ChatTab>::new()))
                         }

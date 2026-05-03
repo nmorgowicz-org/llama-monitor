@@ -1,12 +1,36 @@
 // ── Chat State & Persistence ─────────────────────────────────────────────────
 // Tab collection, active tab, busy flags, persistence scheduling, tab CRUD.
 
+import { chat } from '../core/app-state.js';
+import { showToast } from './toast.js';
+
 const CHAT_TABS_PERSIST_DEBOUNCE_MS = 500;
+const chatViewBindings = {
+    renderChatTabs: null,
+    renderChatMessages: null,
+    loadChatNames: null,
+    populateTemplatesDropdown: null,
+    updateExplicitToggleUI: null,
+    updateParamsDirtyIndicator: null,
+    syncMessageLimitInput: null,
+    syncCompactSettingsUI: null,
+    updateCtxPressureBar: null,
+    updateChatTabBadge: null,
+    checkAutoCompact: null,
+};
+
+export function registerChatViewBindings(bindings) {
+    Object.assign(chatViewBindings, bindings);
+}
+
+export function getChatViewBindings() {
+    return chatViewBindings;
+}
 
 // ── Tab Accessors ──────────────────────────────────────────────────────────────
 
 export function activeChatTab() {
-    return window.chatTabs.find(t => t.id === window.activeChatTabId) ?? null;
+    return chat.tabs.find(t => t.id === chat.activeTabId) ?? null;
 }
 
 // ── Tab Creation ───────────────────────────────────────────────────────────────
@@ -16,6 +40,7 @@ export function newChatTab(name = 'New Chat') {
         id: crypto.randomUUID(),
         name,
         system_prompt: 'You are {{char}}, a helpful, concise assistant. You are talking to {{user}}. Provide clear, accurate answers.',
+        active_template_id: '',
         ai_name: '',
         user_name: '',
         explicit_mode: false,
@@ -23,6 +48,7 @@ export function newChatTab(name = 'New Chat') {
         messages: [],
         totalInputTokens: 0,
         totalOutputTokens: 0,
+        lastCtxPct: 0,
         model_params: {
             temperature: 0.7,
             top_p: 0.9,
@@ -34,13 +60,22 @@ export function newChatTab(name = 'New Chat') {
         },
         created_at: Date.now(),
         updated_at: Date.now(),
+        pinned: false,
     };
 }
 
 function normalizeChatTab(tab) {
+    const messages = tab.messages || [];
+    const totalInputTokens = messages.reduce((sum, m) => sum + (m.input_tokens || 0), 0);
+    const totalOutputTokens = messages.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
     return {
         ...tab,
+        active_template_id: tab.active_template_id ?? '',
         auto_compact: tab.auto_compact ?? true,
+        lastCtxPct: tab.lastCtxPct ?? 0,
+        totalInputTokens: tab.totalInputTokens ?? totalInputTokens,
+        totalOutputTokens: tab.totalOutputTokens ?? totalOutputTokens,
+        pinned: tab.pinned ?? false,
     };
 }
 
@@ -50,31 +85,34 @@ export async function initChatTabs() {
     try {
         const resp = await fetch('/api/chat/tabs');
         const data = await resp.json();
-        window.chatTabs = data.length ? data.map(normalizeChatTab) : [newChatTab('Chat 1')];
+        chat.tabs = data.length ? data.map(normalizeChatTab) : [newChatTab('Chat 1')];
     } catch {
-        window.chatTabs = [newChatTab('Chat 1')];
+        chat.tabs = [newChatTab('Chat 1')];
     }
-    window.activeChatTabId = window.chatTabs[0].id;
+    chat.activeTabId = chat.tabs[0].id;
 
     // Render (legacy — Phase 6b)
-    if (typeof window.renderChatTabs === 'function') window.renderChatTabs();
-    if (typeof window.renderChatMessages === 'function') window.renderChatMessages();
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatMessages?.();
 
     // Load UI state from tab
-    if (typeof window.loadChatNames === 'function') window.loadChatNames();
-    if (typeof window.populateTemplatesDropdown === 'function') window.populateTemplatesDropdown();
-    if (typeof window.updateExplicitToggleUI === 'function') window.updateExplicitToggleUI();
-    if (typeof window.updateParamsDirtyIndicator === 'function') window.updateParamsDirtyIndicator();
-    if (typeof window.syncMessageLimitInput === 'function') window.syncMessageLimitInput();
-    if (typeof window.syncCompactSettingsUI === 'function') window.syncCompactSettingsUI(activeChatTab());
+    chatViewBindings.loadChatNames?.();
+    chatViewBindings.populateTemplatesDropdown?.();
+    chatViewBindings.updateExplicitToggleUI?.();
+    chatViewBindings.updateParamsDirtyIndicator?.();
+    chatViewBindings.syncMessageLimitInput?.();
+    chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
+
+   // Trigger context card update - mark that chat tabs loaded so dashboard can poll
+    if (typeof window.onChatTabsLoaded === 'function') {
+        window.onChatTabsLoaded();
+    }
 
     // Show welcome tip on first visit
     if (!localStorage.getItem('llama-monitor-chat-welcomed')) {
         localStorage.setItem('llama-monitor-chat-welcomed', 'true');
         setTimeout(() => {
-            if (typeof window.showToast === 'function') {
-                window.showToast('Tip: try a suggested prompt below to get started', 'info');
-            }
+            showToast('Tip: try a suggested prompt below to get started', 'info');
         }, 800);
     }
 }
@@ -82,42 +120,54 @@ export async function initChatTabs() {
 // ── Tab CRUD ───────────────────────────────────────────────────────────────────
 
 export function addChatTab() {
-    const tab = newChatTab(`Chat ${window.chatTabs.length + 1}`);
-    window.chatTabs.push(tab);
+    const tab = newChatTab(`Chat ${chat.tabs.length + 1}`);
+    chat.tabs.push(tab);
     switchChatTab(tab.id);
     scheduleChatPersist();
 }
 
 export function closeChatTab(id) {
-    if (window.chatTabs.length === 1) return;
-    window.chatTabs = window.chatTabs.filter(t => t.id !== id);
-    if (window.activeChatTabId === id) {
-        window.activeChatTabId = window.chatTabs[window.chatTabs.length - 1].id;
+    if (chat.tabs.length === 1) return;
+    chat.tabs = chat.tabs.filter(t => t.id !== id);
+    if (chat.activeTabId === id) {
+        chat.activeTabId = chat.tabs[chat.tabs.length - 1].id;
     }
-    if (typeof window.renderChatTabs === 'function') window.renderChatTabs();
-    if (typeof window.renderChatMessages === 'function') window.renderChatMessages();
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatMessages?.();
     scheduleChatPersist();
 }
 
 export function switchChatTab(id) {
-    if (window.chatBusy) return;
-    window.activeChatTabId = id;
-    if (typeof window.renderChatTabs === 'function') window.renderChatTabs();
-    if (typeof window.renderChatMessages === 'function') window.renderChatMessages();
-    if (typeof window.loadChatNames === 'function') window.loadChatNames();
-    if (typeof window.updateExplicitToggleUI === 'function') window.updateExplicitToggleUI();
-    if (typeof window.syncMessageLimitInput === 'function') window.syncMessageLimitInput();
-    if (typeof window.syncCompactSettingsUI === 'function') window.syncCompactSettingsUI(activeChatTab());
-    if (typeof window.updateCtxPressureBar === 'function') window.updateCtxPressureBar(0);
+    if (chat.busy) return;
+    chat.activeTabId = id;
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatMessages?.();
+    window.renderPersonaStrip?.();
+    chatViewBindings.loadChatNames?.();
+    chatViewBindings.updateExplicitToggleUI?.();
+    chatViewBindings.syncMessageLimitInput?.();
+    chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
+    chatViewBindings.updateCtxPressureBar?.(0);
 }
 
 export function renameChatTab(id, newName) {
-    const tab = window.chatTabs.find(t => t.id === id);
+    const tab = chat.tabs.find(t => t.id === id);
     if (tab) {
         tab.name = newName.trim() || tab.name;
-        if (typeof window.renderChatTabs === 'function') window.renderChatTabs();
+        chatViewBindings.renderChatTabs?.();
         scheduleChatPersist();
     }
+}
+
+export function togglePinTab(id) {
+    const tab = chat.tabs.find(t => t.id === id);
+    if (!tab) return;
+    tab.pinned = !tab.pinned;
+    const pinned = chat.tabs.filter(t => t.pinned);
+    const unpinned = chat.tabs.filter(t => !t.pinned);
+    chat.tabs = [...pinned, ...unpinned];
+    chatViewBindings.renderChatTabs?.();
+    scheduleChatPersist();
 }
 
 export function clearChat() {
@@ -125,8 +175,8 @@ export function clearChat() {
     if (!tab) return;
     tab.messages = [];
     tab.updated_at = Date.now();
-    if (typeof window.renderChatMessages === 'function') window.renderChatMessages();
-    if (typeof window.updateChatTabBadge === 'function') window.updateChatTabBadge();
+    chatViewBindings.renderChatMessages?.();
+    chatViewBindings.updateChatTabBadge?.();
     scheduleChatPersist();
 }
 
@@ -145,7 +195,7 @@ export function updateChatName(field, value) {
     if (tab) {
         tab[field] = value.trim();
         scheduleChatPersist();
-        if (typeof window.renderChatMessages === 'function') window.renderChatMessages();
+        chatViewBindings.renderChatMessages?.();
     }
 }
 
@@ -153,8 +203,6 @@ export function updateChatName(field, value) {
 
 export function normalizeTabForSave(tab) {
     const t = { ...tab };
-    delete t.totalInputTokens;
-    delete t.totalOutputTokens;
     t.messages = (t.messages || []).map(m => {
         const msg = { ...m };
         delete msg.cumulativeInputTokens;
@@ -165,19 +213,19 @@ export function normalizeTabForSave(tab) {
 }
 
 export function scheduleChatPersist() {
-    window.chatTabsDirty = true;
-    clearTimeout(window.chatPersistTimer);
-    window.chatPersistTimer = setTimeout(persistChatTabs, CHAT_TABS_PERSIST_DEBOUNCE_MS);
+    chat.tabsDirty = true;
+    clearTimeout(chat.persistTimer);
+    chat.persistTimer = setTimeout(persistChatTabs, CHAT_TABS_PERSIST_DEBOUNCE_MS);
 }
 
 export function markChatTabsDirty() {
-    window.chatTabsDirty = true;
+    chat.tabsDirty = true;
 }
 
 export async function persistChatTabs() {
-    if (!window.chatTabsDirty) return;
+    if (!chat.tabsDirty) return;
     try {
-        const tabsToSave = window.chatTabs.map(normalizeTabForSave);
+        const tabsToSave = chat.tabs.map(normalizeTabForSave);
         const totalMessages = tabsToSave.reduce((sum, t) => sum + (t.messages?.length || 0), 0);
         if (totalMessages === 0 && tabsToSave.length > 0) {
             return;
@@ -191,12 +239,12 @@ export async function persistChatTabs() {
 }
 
 export function flushChatPersist() {
-    clearTimeout(window.chatPersistTimer);
-    if (window.chatTabs && window.chatTabs.length) {
+    clearTimeout(chat.persistTimer);
+    if (chat.tabs && chat.tabs.length) {
         fetch('/api/chat/tabs', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(window.chatTabs.map(normalizeTabForSave)),
+            body: JSON.stringify(chat.tabs.map(normalizeTabForSave)),
             keepalive: true,
         });
     }
@@ -204,18 +252,24 @@ export function flushChatPersist() {
 
 // ── Busy UI ────────────────────────────────────────────────────────────────────
 
+// Getter for transport functions — avoids circular import (chat-state ↔ chat-transport)
+let _getTransport = null;
+export function setTransportGetter(getter) {
+    _getTransport = getter;
+}
+
 export function setChatBusyUI(busy) {
     const sendBtn = document.getElementById('btn-send');
+    const transport = _getTransport ? _getTransport() : null;
     if (busy) {
-        // Use window.* to avoid circular import (stopChat/sendChat are in chat-transport)
-        sendBtn.onclick = () => window.stopChat();
+        sendBtn.onclick = () => transport?.stopChat();
         sendBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
              <rect x="6" y="6" width="12" height="12" rx="2"/>
            </svg>`;
         sendBtn.classList.add('btn-chat-send-stop');
         sendBtn.title = 'Stop generating';
     } else {
-        sendBtn.onclick = () => window.sendChat();
+        sendBtn.onclick = () => transport?.sendChat();
         sendBtn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
              <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
            </svg>`;
@@ -239,24 +293,6 @@ export function autoResizeChatInput() {
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 export function initChatState() {
-    // Put on window for inline handlers
-    window.activeChatTab = activeChatTab;
-    window.initChatTabs = initChatTabs;
-    window.newChatTab = newChatTab;
-    window.addChatTab = addChatTab;
-    window.closeChatTab = closeChatTab;
-    window.switchChatTab = switchChatTab;
-    window.renameChatTab = renameChatTab;
-    window.clearChat = clearChat;
-    window.substituteNames = substituteNames;
-    window.updateChatName = updateChatName;
-    window.scheduleChatPersist = scheduleChatPersist;
-    window.persistChatTabs = persistChatTabs;
-    window.flushChatPersist = flushChatPersist;
-    window.markChatTabsDirty = markChatTabsDirty;
-    window.setChatBusyUI = setChatBusyUI;
-    window.autoResizeChatInput = autoResizeChatInput;
-
     // beforeunload flush
     window.addEventListener('beforeunload', flushChatPersist);
 }
