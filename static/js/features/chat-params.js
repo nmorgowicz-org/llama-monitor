@@ -864,7 +864,8 @@ async function loadPersonaMenuItems() {
             
             const item = document.createElement('button');
             item.className = 'chat-persona-menu-item';
-            if (window.currentPersona && window.currentPersona.name === persona.name) {
+            const tab = activeChatTab();
+            if (tab && tab.active_template_id === persona.id) {
                 item.classList.add('active');
             }
             
@@ -905,8 +906,20 @@ async function loadPersonaMenuItems() {
                 window.currentPersona = persona;
                 document.getElementById('chat-persona-menu-name').textContent = persona.name;
                 document.getElementById('chat-persona-menu').classList.add('hidden');
-                // Re-render persona chips to show active state
-                renderPersonaStrip?.();
+                const tab = activeChatTab();
+                if (tab && window.loadTemplates) {
+                    const templates = window.loadTemplates();
+                    templates.then(ts => {
+                        const t = ts?.find(x => x.name === persona.name);
+                        if (t) {
+                            tab.system_prompt = t.prompt;
+                            tab.active_template_id = t.id;
+                            tab.updated_at = Date.now();
+                            renderPersonaStrip?.();
+                            scheduleChatPersist?.();
+                        }
+                    });
+                }
             });
             
             personaMenuListEl.appendChild(item);
