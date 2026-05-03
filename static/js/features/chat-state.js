@@ -40,6 +40,7 @@ export function newChatTab(name = 'New Chat') {
         id: crypto.randomUUID(),
         name,
         system_prompt: 'You are {{char}}, a helpful, concise assistant. You are talking to {{user}}. Provide clear, accurate answers.',
+        active_template_id: '',
         ai_name: '',
         user_name: '',
         explicit_mode: false,
@@ -59,6 +60,7 @@ export function newChatTab(name = 'New Chat') {
         },
         created_at: Date.now(),
         updated_at: Date.now(),
+        pinned: false,
     };
 }
 
@@ -68,10 +70,12 @@ function normalizeChatTab(tab) {
     const totalOutputTokens = messages.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
     return {
         ...tab,
+        active_template_id: tab.active_template_id ?? '',
         auto_compact: tab.auto_compact ?? true,
         lastCtxPct: tab.lastCtxPct ?? 0,
         totalInputTokens: tab.totalInputTokens ?? totalInputTokens,
         totalOutputTokens: tab.totalOutputTokens ?? totalOutputTokens,
+        pinned: tab.pinned ?? false,
     };
 }
 
@@ -138,6 +142,7 @@ export function switchChatTab(id) {
     chat.activeTabId = id;
     chatViewBindings.renderChatTabs?.();
     chatViewBindings.renderChatMessages?.();
+    window.renderPersonaStrip?.();
     chatViewBindings.loadChatNames?.();
     chatViewBindings.updateExplicitToggleUI?.();
     chatViewBindings.syncMessageLimitInput?.();
@@ -152,6 +157,17 @@ export function renameChatTab(id, newName) {
         chatViewBindings.renderChatTabs?.();
         scheduleChatPersist();
     }
+}
+
+export function togglePinTab(id) {
+    const tab = chat.tabs.find(t => t.id === id);
+    if (!tab) return;
+    tab.pinned = !tab.pinned;
+    const pinned = chat.tabs.filter(t => t.pinned);
+    const unpinned = chat.tabs.filter(t => !t.pinned);
+    chat.tabs = [...pinned, ...unpinned];
+    chatViewBindings.renderChatTabs?.();
+    scheduleChatPersist();
 }
 
 export function clearChat() {

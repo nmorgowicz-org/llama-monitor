@@ -2,6 +2,15 @@
 
 Web dashboard for managing [llama.cpp](https://github.com/ggerganov/llama.cpp) servers with real-time GPU and system monitoring. Supports local and remote deployments, multi-session management, and a lightweight agent mode for headless machines.
 
+## What's New (v0.2.0)
+
+Recent chat feature enhancements:
+
+- **Tab Pinning** — Pin important chat tabs to keep them at the front; pinned tabs persist across sessions
+- **Persona Templates** — Quick-swap conversation styles via clickable persona chips; includes non-roleplay assistant modes
+- **Chat Export** — Download entire chat history as formatted JSON
+- **Message Edit & Regenerate** — Edit corrections and regenerate from any user message (not just the last one)
+
 ## Quick Start
 
 ```bash
@@ -264,6 +273,10 @@ Multi-tab streaming chat proxied to the running llama-server's `/v1/chat/complet
 - Token count estimate on input with color warnings at 800+ and 1500+ tokens
 - Keyboard tab switching: Ctrl+1–9 by position, Ctrl+Shift+← / → to cycle
 - Explicit mode toggle for uncensored content
+- **Tab pinning and favorites** — Pin important chat tabs with the pin button; pinned tabs stay at the front and persist across sessions; drag-to-reorder is guarded to prevent accidental movement across pinned/unpinned boundaries
+- **Persona templates** — Click persona chips in the chat header to quickly switch between conversation styles (assistant, creative, technical, etc.); includes non-roleplay options; active persona persists per-tab via `active_template_id`
+- **Chat export** — Export entire chat history as formatted JSON with messages array, metadata, and timestamps
+- **Message edit and regenerate** — Edit and regenerate responses from any user message (not just the last one); inline editing interface for message corrections
 
 ### Logs Tab
 Real-time server log output.

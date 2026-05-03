@@ -652,6 +652,10 @@
                         </svg>
                         <span class="chat-header-label">Export</span>
                     </button>
+                    <div id="chat-export-menu" class="chat-export-menu hidden">
+                        <button data-export-format="md">Save as Markdown</button>
+                        <button data-export-format="json">Save as JSON</button>
+                    </div>
                     <button class="chat-header-btn" id="chat-import-btn" title="Import conversation from file">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
@@ -883,6 +887,9 @@
 
             <!-- Message thread -->
             <div class="chat-messages" id="chat-messages"></div>
+
+            <!-- Persona strip -->
+            <div id="chat-persona-strip" class="chat-persona-strip"></div>
 
             <!-- Input area -->
             <div class="chat-input-row" id="chat-input-row">

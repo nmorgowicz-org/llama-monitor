@@ -12,6 +12,8 @@ import {
     switchChatTab,
     closeChatTab,
     renameChatTab,
+    normalizeTabForSave,
+    togglePinTab,
 } from './chat-state.js';
 import { showToast } from './toast.js';
 
@@ -131,6 +133,28 @@ export function incrementUnreadCount() {
 
 let _draggedTabId = null;
 
+// Template cache for persona label lookup
+let _templateCache = null;
+let _templateCacheTimestamp = 0;
+
+async function getTemplateCache() {
+    const now = Date.now();
+    if (_templateCache && (now - _templateCacheTimestamp) < 30000) {
+        return _templateCache;
+    }
+    const templates = await window.loadTemplates?.();
+    _templateCache = templates || [];
+    _templateCacheTimestamp = now;
+    return _templateCache;
+}
+
+async function getTemplateNameById(id) {
+    if (!id) return null;
+    const templates = await getTemplateCache();
+    const template = templates.find(t => t.id === id);
+    return template ? template.name : null;
+}
+
 export function renderChatTabs() {
     ensureChatElements();
     const bar = chatTabBarEl;
@@ -143,13 +167,18 @@ export function renderChatTabs() {
         let extraClasses = '';
         if (msgCount > 50) extraClasses = ' tab-hot';
         else if (msgCount > 20) extraClasses = ' tab-warm';
-        el.className = 'chat-tab' + (tab.id === chat.activeTabId ? ' active' : '') + extraClasses;
+        el.className = 'chat-tab' + (tab.id === chat.activeTabId ? ' active' : '') + (tab.pinned ? ' chat-tab-pinned' : '') + extraClasses;
         el.dataset.tabId = tab.id;
-        el.dataset.msgCount = msgCount;
         el.draggable = true;
         // eslint-disable-next-line no-unsanitized/property -- tab.name wrapped in escapeHtml(); tab.id is an internal UUID; message count is numeric
         el.innerHTML = `
-          <span class="chat-tab-name" data-chat-tab-rename="${tab.id}">${escapeHtml(tab.name)}</span>
+          <div class="chat-tab-name-wrapper">
+            <span class="chat-tab-name" data-chat-tab-rename="${tab.id}">${escapeHtml(tab.name)}</span>
+            ${tab.active_template_id ? `<span class="chat-tab-persona"></span>` : ''}
+          </div>
+          <svg class="chat-tab-pin-icon ${tab.pinned ? 'pinned' : ''}" width="11" height="11" viewBox="0 0 24 24" fill="${tab.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M16 12V3h-3V2H8v1H5v9l-2 6 3 1 2-5v9h6v-9l2 5 3-1-2-6z"/>
+          </svg>
           <svg class="chat-tab-edit-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
             <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
             <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
@@ -191,6 +220,11 @@ export function renderChatTabs() {
             e.preventDefault();
             el.classList.remove('tab-drop-target');
             if (!_draggedTabId || _draggedTabId === tab.id) return;
+            const draggedTab = chat.tabs.find(t => t.id === _draggedTabId);
+            const targetTab = tab;
+            if (!draggedTab || !targetTab) return;
+            // Can't drag pinned tabs into unpinned section and vice versa
+            if (draggedTab.pinned !== targetTab.pinned) return;
             const fromIdx = chat.tabs.findIndex(t => t.id === _draggedTabId);
             const toIdx = chat.tabs.findIndex(t => t.id === tab.id);
             if (fromIdx < 0 || toIdx < 0) return;
@@ -200,7 +234,36 @@ export function renderChatTabs() {
             scheduleChatPersist();
         });
 
+        // Pin button click handler
+        const pinBtn = el.querySelector('.chat-tab-pin-icon');
+        if (pinBtn) {
+            pinBtn.title = tab.pinned ? 'Unpin tab' : 'Pin tab';
+            pinBtn.addEventListener('click', e => {
+                e.stopPropagation();
+                togglePinTab(tab.id);
+            });
+        }
+
+        // Populate persona label
+        const personaLabel = el.querySelector('.chat-tab-persona');
+        if (personaLabel && tab.active_template_id) {
+            getTemplateNameById(tab.active_template_id).then(name => {
+                if (personaLabel && name) {
+                    personaLabel.textContent = name;
+                }
+            });
+        }
+
         bar.insertBefore(el, addBtn);
+    }
+    // Add separator between pinned and unpinned tabs if both exist
+    const firstUnpinned = bar.querySelector('.chat-tab:not(.chat-tab-pinned)');
+    if (firstUnpinned && bar.querySelector('.chat-tab-pinned')) {
+        const sep = document.createElement('div');
+        sep.className = 'chat-tab-pin-sep';
+        if (!bar.querySelector('.chat-tab-pin-sep')) {
+            bar.insertBefore(sep, firstUnpinned);
+        }
     }
     updateTabBarOverflowMask();
 }
@@ -286,6 +349,7 @@ export function renderChatMessages() {
     }
     chatScroll(true);
     getChatViewBindings().syncCompactSettingsUI?.(activeChatTab());
+    renderPersonaStrip();
 }
 
 function loadMoreMessages(tab, currentLimit) {
@@ -668,10 +732,12 @@ function navigateVariant(btn, direction) {
 
         let newVariants = variants.length > 0 ? [...variants, msg.content] : [msg.content];
 
-        // Find the last user message before this assistant message
-        const lastUser = [...tab.messages].reverse().find(m => m.role === 'user');
-        if (!lastUser) return;
-        const userMsgIdx = tab.messages.indexOf(lastUser);
+        // Find the user message immediately before this assistant message
+        let userMsgIdx = -1;
+        for (let i = msgIdx - 1; i >= 0; i--) {
+            if (tab.messages[i].role === 'user') { userMsgIdx = i; break; }
+        }
+        if (userMsgIdx === -1) return;
 
         // Truncate to include the user message, remove all subsequent
         tab.messages = tab.messages.slice(0, userMsgIdx + 1);
@@ -728,11 +794,9 @@ function editMessageContent(btn) {
     const msg = tab.messages[msgIdx];
     if (!msg) return;
 
-    const isLastUserMsg = msg.role === 'user' &&
-        tab.messages.slice(msgIdx + 1).every(m => m.role !== 'user');
-
-    const resendBtn = isLastUserMsg
-        ? `<button class="chat-edit-btn chat-edit-btn-resend" data-chat-edit="resend">Resend</button>`
+    // Show "Resend from here" for ALL user messages, not just the last one
+    const resendBtn = msg.role === 'user'
+        ? `<button class="chat-edit-btn chat-edit-btn-resend" data-chat-edit="resend">Resend from here</button>`
         : '';
     // eslint-disable-next-line no-unsanitized/property -- msg.content wrapped in escapeHtml() for textarea value; resendBtn is a hardcoded button element
     body.innerHTML = `<textarea class="chat-msg-edit-area" rows="6">${escapeHtml(msg.content)}</textarea>
@@ -810,9 +874,21 @@ function deleteMessage(btn) {
 
 // ── Export / Import ───────────────────────────────────────────────────────────
 
-export function exportChatTab() {
+export function exportChatTab(format = 'md') {
     const tab = activeChatTab();
     if (!tab) return;
+
+    if (format === 'json') {
+        const data = JSON.stringify([normalizeTabForSave(tab)], null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${tab.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        return;
+    }
+
     const md = tab.messages
         .filter(m => m.role !== 'system')
         .map(m => `**${m.role === 'user' ? 'You' : 'Assistant'}**\n\n${m.content}`)
@@ -910,11 +986,95 @@ export function updateChatTabBadge() {
     if (sidebarBadgeChat) sidebarBadgeChat.textContent = count > 0 ? count : '';
 }
 
+// ── Persona Strip (Section 4B-C) ────────────────────────────────────────────────
+
+const PERSONA_RECENT_KEY = 'llama-persona-recent';
+
+function getPersonaIcon(personaName) {
+    const name = personaName.toLowerCase();
+    if (name.includes('assistant') || name.includes('default') || name.includes('helpful')) return '💬';
+    if (name.includes('creative') || name.includes('writing') || name.includes('story')) return '✨';
+    if (name.includes('code') || name.includes('dev') || name.includes('programming')) return '💻';
+    if (name.includes('technical') || name.includes('analysis') || name.includes('research')) return '🔬';
+    if (name.includes('business') || name.includes('professional')) return '💼';
+    if (name.includes('roleplay') || name.includes('rp')) return '🎭';
+    if (name.includes('educational') || name.includes('learning') || name.includes('teach')) return '📚';
+    if (name.includes('creative writing')) return '🎨';
+    return '🤖';
+}
+
+export function renderPersonaStrip() {
+    const strip = document.getElementById('chat-persona-strip');
+    if (!strip) return;
+    
+    // Remove existing chips to avoid duplicate event handlers
+    strip.innerHTML = '';
+    
+    const recent = JSON.parse(localStorage.getItem(PERSONA_RECENT_KEY) || '[]');
+    const recentLimited = recent.slice(0, 5);
+    const activeTemplateId = activeChatTab()?.active_template_id || '';
+    
+   recentLimited.forEach(persona => {
+        const btn = document.createElement('button');
+        btn.className = 'chat-persona-chip' + (persona.id === activeTemplateId ? ' active' : '');
+        btn.dataset.personaId = persona.id;
+        // ICONS: Hardcoded safe emoji strings only
+        const personaName = persona.name.toLowerCase();
+        let icon = '🤖';
+        if (personaName.includes('assistant') || personaName.includes('default')) icon = '💬';
+        else if (personaName.includes('creative') || personaName.includes('writing')) icon = '✨';
+        else if (personaName.includes('code') || personaName.includes('dev')) icon = '💻';
+        else if (personaName.includes('technical') || personaName.includes('analysis')) icon = '🔬';
+        else if (personaName.includes('business') || personaName.includes('professional')) icon = '💼';
+        else if (personaName.includes('roleplay')) icon = '🎭';
+        else if (personaName.includes('educational') || personaName.includes('learning')) icon = '📚';
+        btn.innerHTML = `<span class="chat-persona-chip-icon">${icon}</span><span class="chat-persona-chip-name">${escapeHtml(persona.name)}</span>`;
+        btn.addEventListener('click', () => applyPersona(persona.id));
+        strip.appendChild(btn);
+    });
+    
+    if (recent.length > 5) {
+        const moreBtn = document.createElement('button');
+        moreBtn.className = 'chat-persona-chip-more';
+        moreBtn.textContent = '⋯';
+        moreBtn.title = 'More personas...';
+        moreBtn.addEventListener('click', () => {
+            document.getElementById('chat-template-mgmt-btn')?.click();
+        });
+        strip.appendChild(moreBtn);
+    }
+}
+
+export async function applyPersona(templateId) {
+    const templates = await window.loadTemplates?.();
+    const template = templates?.find(t => t.id === templateId);
+    if (!template) return;
+    
+    const tab = activeChatTab();
+    if (!tab) return;
+    
+    tab.system_prompt = template.prompt;
+    tab.active_template_id = template.id;
+    
+    // Update recent usage
+    const recent = JSON.parse(localStorage.getItem(PERSONA_RECENT_KEY) || '[]');
+    const filtered = recent.filter(p => p.id !== templateId);
+    const newRecent = [{ id: template.id, name: template.name, timestamp: Date.now() }, ...filtered].slice(0, 5);
+    localStorage.setItem(PERSONA_RECENT_KEY, JSON.stringify(newRecent));
+    
+    // Refresh UI
+    renderPersonaStrip();
+    renderChatMessages();
+    scheduleChatPersist();
+    showToast(`Applied persona: ${template.name}`, 'info');
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initChatRender() {
     // Call setup functions that bind DOM event listeners
     initChatScrollButton();
+    renderPersonaStrip();
 
     // Event delegation for chat tab close buttons
     document.getElementById('chat-tab-bar')?.addEventListener('click', (e) => {

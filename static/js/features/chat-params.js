@@ -584,9 +584,29 @@ export function initChatParams() {
     document.getElementById('chat-font-decrease')?.addEventListener('click', () => adjustChatFont(-1));
     document.getElementById('chat-font-increase')?.addEventListener('click', () => adjustChatFont(1));
 
-    // Bind export button
-    document.getElementById('chat-export-btn')?.addEventListener('click', exportChatTab);
+    // Bind export button with dropdown menu
+    const exportBtn = document.getElementById('chat-export-btn');
+    const exportMenu = document.getElementById('chat-export-menu');
+    if (exportBtn && exportMenu) {
+        exportBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            exportMenu.classList.toggle('hidden');
+        });
+        exportMenu.addEventListener('click', e => {
+            const fmt = e.target.dataset.exportFormat;
+            if (fmt) {
+                exportChatTab(fmt);
+                exportMenu.classList.add('hidden');
+            }
+        });
+    }
+    document.addEventListener('click', e => {
+        if (!e.target.closest('#chat-export-btn') && !e.target.closest('#chat-export-menu')) {
+            document.getElementById('chat-export-menu')?.classList.add('hidden');
+        }
+    });
     document.getElementById('chat-import-btn')?.addEventListener('click', importChatTab);
+    document.addEventListener('click', () => document.getElementById('chat-export-menu')?.classList.add('hidden'));
 
     // Bind chat style cards (event delegation)
     const styleGrid = document.getElementById('chat-style-grid');
