@@ -271,6 +271,22 @@
   background: rgba(255, 255, 255, 0.07);
   color: var(--text-primary);
 }
+.chat-header-btn.active {
+  border-color: rgba(99, 102, 241, 0.25);
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--color-primary-light);
+}
+.chat-header-btn.active::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-primary-light);
+  box-shadow: 0 0 6px rgba(99, 102, 241, 0.45);
+}
 .chat-style-btn {
   border-color: rgba(139, 92, 246, 0.15);
   background: rgba(139, 92, 246, 0.06);
