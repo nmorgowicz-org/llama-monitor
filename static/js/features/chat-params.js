@@ -788,13 +788,13 @@ async function loadPersonaMenuItems() {
     personaMenuListEl.innerHTML = '<div class="chat-persona-menu-loading">Loading personas...</div>';
     
     try {
-        const response = await fetch('/api/personas');
+        const response = await fetch('/api/templates');
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
         
-        const data = await response.json();
-        const personas = data.personas || [];
+        const templates = await response.json();
+        const personas = templates || [];
         
         if (personas.length === 0) {
             personaMenuListEl.innerHTML = '<div class="chat-persona-menu-loading">No personas found</div>';
@@ -832,23 +832,12 @@ async function loadPersonaMenuItems() {
             item.appendChild(icon);
             item.appendChild(content);
             
-            item.addEventListener('click', async () => {
-                try {
-                    const res = await fetch(`/api/personas/activate/${encodeURIComponent(persona.name)}`, {
-                        method: 'POST',
-                    });
-                    if (!res.ok) {
-                        throw new Error(`HTTP ${res.status}`);
-                    }
-                    window.currentPersona = persona;
-                    document.getElementById('chat-persona-menu-name').textContent = persona.name;
-                    document.getElementById('chat-persona-menu').classList.add('hidden');
-                    // Re-render persona chips to show active state
-                    renderPersonaStrip?.();
-                } catch (err) {
-                    console.error('Failed to activate persona:', err);
-                    alert('Failed to activate persona: ' + err.message);
-                }
+            item.addEventListener('click', () => {
+                window.currentPersona = persona;
+                document.getElementById('chat-persona-menu-name').textContent = persona.name;
+                document.getElementById('chat-persona-menu').classList.add('hidden');
+                // Re-render persona chips to show active state
+                renderPersonaStrip?.();
             });
             
             personaMenuListEl.appendChild(item);
