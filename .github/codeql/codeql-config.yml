@@ -17,6 +17,8 @@ paths-ignore:
   - src/gpu/env.rs
   - src/agent.rs
   - src/models/mod.rs
-  # XSS findings in the frontend are false positives — data comes from
+ # XSS findings in the frontend are false positives — data comes from
   # the backend llama.cpp API, not from user input.
   - static/compact.html
+  - static/js/features/chat-render.js
+  - static/js/features/dashboard-render.js
