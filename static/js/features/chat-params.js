@@ -33,8 +33,22 @@ let paramToastTimer = null;
 
 function toggleModelParamsPanel() {
     const panel = document.getElementById('chat-params-panel');
+    const wasOpen = panel.classList.contains('open');
     const isOpen = panel.classList.toggle('open');
-    if (isOpen) syncParamPanelToTab();
+    if (isOpen && !wasOpen) {
+        const systemPanel = document.getElementById('chat-system-panel');
+        const stylePanel = document.getElementById('chat-style-panel');
+        const styleLabel = document.getElementById('chat-style-label');
+        if (systemPanel) systemPanel.classList.remove('open');
+        if (stylePanel) stylePanel.style.display = 'none';
+        if (styleLabel) styleLabel.textContent = 'Style';
+        const tab = activeChatTab();
+        if (tab && styleLabel) {
+            const currentStyle = localStorage.getItem('llama-monitor-chat-style') || 'rounded';
+            styleLabel.textContent = CHAT_STYLE_LABELS[currentStyle];
+        }
+        syncParamPanelToTab();
+    }
 }
 
 function syncParamPanelToTab() {
@@ -475,8 +489,12 @@ function toggleStylePanel() {
         panel.querySelectorAll('.chat-style-card').forEach(card => {
             card.classList.toggle('active', card.dataset.style === current);
         });
-        document.getElementById('chat-system-panel').style.display = 'none';
-        document.getElementById('chat-params-panel').style.display = 'none';
+        const systemPanel = document.getElementById('chat-system-panel');
+        const paramsPanel = document.getElementById('chat-params-panel');
+        if (systemPanel) systemPanel.classList.remove('open');
+        if (paramsPanel) paramsPanel.classList.remove('open');
+        const styleLabel = document.getElementById('chat-style-label');
+        if (styleLabel) styleLabel.textContent = 'Style';
     }
 }
 
@@ -492,7 +510,7 @@ function selectChatStyle(style) {
 
 function updateChatStyleLabel(style) {
     const label = document.getElementById('chat-style-label');
-    if (label) label.textContent = CHAT_STYLE_LABELS[style] || 'Rounded';
+    if (label) label.textContent = 'Style';
 }
 
 function adjustChatFont(delta) {
@@ -584,8 +602,15 @@ export function initChatParams() {
     toggleSystemPromptPanel();
     setTimeout(() => {
         const isOpen = panel.classList.contains('open');
-        if (isOpen && !wasOpen) btn.classList.add('active');
-        else if (!isOpen && wasOpen) btn.classList.remove('active');
+        const styleBtn = document.getElementById('btn-chat-style');
+        const paramsBtn = document.getElementById('btn-model-params');
+        if (isOpen && !wasOpen) {
+            btn.classList.add('active');
+            if (styleBtn) styleBtn.classList.remove('active');
+            if (paramsBtn) paramsBtn.classList.remove('active');
+        } else if (!isOpen && wasOpen) {
+            btn.classList.remove('active');
+        }
     }, 0);
 });
     document.getElementById('btn-model-params')?.addEventListener('click', (e) => {
@@ -595,8 +620,15 @@ export function initChatParams() {
     toggleModelParamsPanel();
     setTimeout(() => {
         const isOpen = panel.classList.contains('open');
-        if (isOpen) btn.classList.add('active');
-        else btn.classList.remove('active');
+        const systemBtn = document.getElementById('btn-system-prompt');
+        const styleBtn = document.getElementById('btn-chat-style');
+        if (isOpen && !wasOpen) {
+            btn.classList.add('active');
+            if (systemBtn) systemBtn.classList.remove('active');
+            if (styleBtn) styleBtn.classList.remove('active');
+        } else if (!isOpen && wasOpen) {
+            btn.classList.remove('active');
+        }
     }, 0);
 });
     document.getElementById('btn-chat-style')?.addEventListener('click', (e) => {
@@ -605,9 +637,14 @@ export function initChatParams() {
     setTimeout(() => {
         const panel = document.getElementById('chat-style-panel');
         const isOpen = panel.style.display !== 'none';
-        if (btn) {
-            if (isOpen) btn.classList.add('active');
-            else btn.classList.remove('active');
+        const systemBtn = document.getElementById('btn-system-prompt');
+        const paramsBtn = document.getElementById('btn-model-params');
+        if (isOpen) {
+            btn.classList.add('active');
+            if (systemBtn) systemBtn.classList.remove('active');
+            if (paramsBtn) paramsBtn.classList.remove('active');
+        } else {
+            btn.classList.remove('active');
         }
     }, 0);
 });

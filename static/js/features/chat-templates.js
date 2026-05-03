@@ -558,10 +558,22 @@ function clearExplicitPolicy() {
 
 export function toggleSystemPromptPanel() {
     const panel = document.getElementById('chat-system-panel');
+    const wasOpen = panel.classList.contains('open');
     const isOpen = panel.classList.toggle('open');
-    if (isOpen) {
+    if (isOpen && !wasOpen) {
+        const stylePanel = document.getElementById('chat-style-panel');
+        const paramsPanel = document.getElementById('chat-params-panel');
+        const compactBtn = document.getElementById('btn-compact');
+        if (stylePanel) stylePanel.style.display = 'none';
+        if (paramsPanel) paramsPanel.style.display = 'none';
+        if (compactBtn) compactBtn.classList.remove('active');
         const tab = activeChatTab();
         document.getElementById('chat-system-input').value = tab?.system_prompt ?? '';
+        const indicator = document.getElementById('system-prompt-indicator');
+        if (indicator) indicator.style.display = 'inline';
+    } else if (!isOpen && wasOpen) {
+        const indicator = document.getElementById('system-prompt-indicator');
+        if (indicator) indicator.style.display = 'none';
     }
 }
 

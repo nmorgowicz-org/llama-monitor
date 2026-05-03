@@ -340,7 +340,7 @@ test.describe('inference metric rendering', () => {
     expect(rate).toBeLessThan(90);
   });
 
-  test('capability popover opens by click and reports context honesty', async ({ page }) => {
+  test('capability popover opens by click and reports context live when capacity is known', async ({ page }) => {
     await page.evaluate(async () => {
       const { renderCapabilityPopover } = await import('/js/features/dashboard-render.js');
       renderCapabilityPopover({
@@ -351,12 +351,12 @@ test.describe('inference metric rendering', () => {
         slots_processing: 1,
         slots_idle: 0,
         context_capacity_tokens: 212992,
-      }, true, false);
+      }, true, true);
     });
 
     await page.locator('#endpoint-status').click();
     await expect(page.locator('#capability-popover')).toContainText('Context usage');
-    await expect(page.locator('#capability-popover')).toContainText('not exposed');
+    await expect(page.locator('#capability-popover')).toContainText('live');
     await expect(page.locator('#endpoint-status')).toHaveAttribute('aria-expanded', 'true');
   });
 });

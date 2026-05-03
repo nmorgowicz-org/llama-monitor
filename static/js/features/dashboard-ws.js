@@ -204,25 +204,20 @@ function updateEndpointStrip(d) {
         if (d.endpoint_kind === 'Local') {
             modeClass = 'local';
             modeText = 'Local';
-            if (!d.capabilities.system || !d.capabilities.gpu) {
-                statusClass = 'warning';
-                statusText = 'Limited';
-            }
         } else if (d.endpoint_kind === 'Remote') {
             modeClass = 'remote';
             modeText = 'Remote';
-            if (!d.capabilities.inference) {
-                statusClass = 'error';
-                statusText = 'Error';
-            } else {
-                statusClass = 'warning';
-                statusText = 'Inference only';
-            }
         }
 
-        if (d.capabilities.inference && !d.capabilities.host_metrics) {
+        if (!d.capabilities.inference) {
+            statusClass = 'error';
+            statusText = 'Error';
+        } else if (!d.capabilities.host_metrics) {
             statusClass = 'warning';
             statusText = 'Inference only';
+        } else if (!d.capabilities.system || !d.capabilities.gpu) {
+            statusClass = 'warning';
+            statusText = 'Limited';
         }
 
         if (endpointModeEl) {
@@ -528,7 +523,7 @@ function updateInferenceMetrics(d) {
     updateContextMetrics(d, l, hasActiveEndpoint);
 
     // Capability popover
-    renderCapabilityPopover(d, l, generationAvailable, !!(l?.context_live_tokens_available || l?.kv_cache_tokens_available));
+    renderCapabilityPopover(d, l, generationAvailable, !!(l?.context_live_tokens_available || l?.kv_cache_tokens_available || (l?.context_capacity_tokens || 0) > 0));
 
     // Metric section visibility
     const hostMetricsVisible = d.host_metrics_available === true;
