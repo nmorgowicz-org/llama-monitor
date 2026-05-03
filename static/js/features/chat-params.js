@@ -16,6 +16,7 @@ import {
 } from './chat-templates.js';
 import { renderPersonaStrip } from './chat-render.js';
 import {
+    loadTemplates,
     onSystemPromptChange,
     openTemplateManager,
     toggleExplicitMode,
@@ -707,10 +708,10 @@ function startResize(e) {
 
 function doResize(e) {
     if (!isResizing || !textareaEl) return;
-    const delta = e.clientY - startY;
-    const minHeight = textareaEl.offsetHeight;
-    const newHeight = Math.max(minHeight, startHeight + delta);
+    const delta = startY - e.clientY;
     const computedStyle = getComputedStyle(textareaEl);
+    const minHeight = parseFloat(computedStyle.minHeight) || 42;
+    const newHeight = Math.max(minHeight, startHeight + delta);
     const padding = parseFloat(computedStyle.paddingTop) + parseFloat(computedStyle.paddingBottom);
     const border = parseFloat(computedStyle.borderTopWidth) + parseFloat(computedStyle.borderBottomWidth);
     const contentHeight = newHeight - padding - border;
@@ -761,6 +762,7 @@ export function registerPersonaMenuBindings() {
     const menu = document.getElementById('chat-persona-menu');
     const list = document.getElementById('chat-persona-menu-list');
     const name = document.getElementById('chat-persona-menu-name');
+    const editBtn = document.getElementById('chat-persona-edit-prompt');
     
     personaMenuEl = menu;
     personaMenuListEl = list;
@@ -773,6 +775,12 @@ export function registerPersonaMenuBindings() {
         if (isVisible) {
             loadPersonaMenuItems();
         }
+    });
+    
+    editBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        menu.classList.add('hidden');
+        toggleSystemPromptPanel();
     });
     
     document.addEventListener('click', (e) => {
@@ -788,13 +796,7 @@ async function loadPersonaMenuItems() {
     personaMenuListEl.innerHTML = '<div class="chat-persona-menu-loading">Loading personas...</div>';
     
     try {
-        const response = await fetch('/api/templates');
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const templates = await response.json();
-        const personas = templates || [];
+        const personas = await loadTemplates();
         
         if (personas.length === 0) {
             personaMenuListEl.innerHTML = '<div class="chat-persona-menu-loading">No personas found</div>';
@@ -803,7 +805,30 @@ async function loadPersonaMenuItems() {
         
         personaMenuListEl.innerHTML = '';
         
-        personas.forEach((persona) => {
+        // Check if we have both built-in and user templates
+        const hasBuiltIn = personas.some(p => p._isDefault);
+        const hasUser = personas.some(p => !p._isDefault);
+        
+        // Add section header for built-in templates
+        if (hasBuiltIn && hasUser) {
+            const header = document.createElement('div');
+            header.className = 'chat-persona-menu-section';
+            header.textContent = 'Built-in Personas';
+            personaMenuListEl.appendChild(header);
+        }
+        
+        personas.forEach((persona, index) => {
+            // Add separator before user templates section
+            if (hasBuiltIn && hasUser && !persona._isDefault) {
+                const firstUserIndex = personas.findIndex(p => !p._isDefault);
+                if (index === firstUserIndex) {
+                    const header = document.createElement('div');
+                    header.className = 'chat-persona-menu-section';
+                    header.textContent = 'Your Personas';
+                    personaMenuListEl.appendChild(header);
+                }
+            }
+            
             const item = document.createElement('button');
             item.className = 'chat-persona-menu-item';
             if (window.currentPersona && window.currentPersona.name === persona.name) {
@@ -812,7 +837,7 @@ async function loadPersonaMenuItems() {
             
             const icon = document.createElement('span');
             icon.className = 'chat-persona-menu-item-icon';
-            icon.textContent = '🎭';
+            icon.textContent = persona._isDefault ? '🎭' : '✨';
             
             const content = document.createElement('div');
             content.className = 'chat-persona-menu-item-content';
@@ -820,12 +845,23 @@ async function loadPersonaMenuItems() {
             const nameEl = document.createElement('div');
             nameEl.className = 'chat-persona-menu-item-name';
             nameEl.textContent = persona.name;
+            
+            // Add badge for built-in templates
+            if (persona._isDefault) {
+                const badge = document.createElement('span');
+                badge.className = 'chat-persona-menu-item-badge';
+                badge.textContent = 'Built-in';
+                nameEl.appendChild(badge);
+            }
+            
             content.appendChild(nameEl);
             
-            if (persona.description) {
+            // Show description or first 60 chars of prompt as meta text
+            const metaText = persona.description || (persona.prompt ? persona.prompt.substring(0, 60) + '...' : '');
+            if (metaText) {
                 const meta = document.createElement('div');
                 meta.className = 'chat-persona-menu-item-meta';
-                meta.textContent = persona.description.substring(0, 60);
+                meta.textContent = metaText;
                 content.appendChild(meta);
             }
             
