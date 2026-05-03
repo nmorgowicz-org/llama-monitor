@@ -580,16 +580,13 @@ export function initChatParams() {
     document.getElementById('btn-system-prompt')?.addEventListener('click', (e) => {
     const btn = document.getElementById('btn-system-prompt');
     const panel = document.getElementById('chat-system-panel');
+    const wasOpen = panel.classList.contains('open');
     toggleSystemPromptPanel();
     setTimeout(() => {
         const isOpen = panel.classList.contains('open');
-        if (isOpen) {
-            btn.classList.remove('active');
-            btn.classList.add('active');
-        } else {
-            btn.classList.remove('active');
-        }
-    }, 50);
+        if (isOpen && !wasOpen) btn.classList.add('active');
+        else if (!isOpen && wasOpen) btn.classList.remove('active');
+    }, 0);
 });
     document.getElementById('btn-model-params')?.addEventListener('click', (e) => {
     const btn = document.getElementById('btn-model-params');

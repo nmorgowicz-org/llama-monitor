@@ -352,6 +352,7 @@ async function renderTemplatePreview() {
 
 function editTemplate(id) {
     editingTemplateId = id;
+    renderTemplateList();
     renderTemplatePreview();
 }
 
