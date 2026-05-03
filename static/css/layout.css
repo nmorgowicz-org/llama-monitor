@@ -728,6 +728,10 @@
   font-weight: 600;
   line-height: 1;
 }
+.sidebar-badge:empty {
+  background: transparent;
+  color: transparent;
+}
 
 .content-area {
   height: calc(100vh - var(--shell-top));
