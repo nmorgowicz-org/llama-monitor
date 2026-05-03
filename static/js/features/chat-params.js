@@ -2,7 +2,7 @@
 // Model parameter panel, system prompt panel, style/font/enter-to-send controls,
 // and compaction settings.
 
-import { chat } from '../core/app-state.js';
+import { chat, lastLlamaMetrics } from '../core/app-state.js';
 import {
     activeChatTab,
     registerChatViewBindings,
@@ -178,19 +178,57 @@ function syncMessageLimitInput() {
 
 // ── Compaction ────────────────────────────────────────────────────────────────
 
-async function compactChatTab(tab, keepTail = 15, summarize = true) {
+// Estimate ctx% from message token metadata (mirrors deriveCtxPctFromMessages in context-card.js).
+function estimateCtxPct(tab, capacity) {
+    if (!capacity) return null;
+    const asst = (tab.messages || []).filter(m => m.role === 'assistant' && !m.compaction_marker);
+    if (!asst.length) return null;
+    const totalOutput = asst.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
+    const lastInput = asst.at(-1).input_tokens || 0;
+    return Math.min(200, (totalOutput + lastInput) / capacity * 100); // allow >100 so overflow is visible
+}
+
+// Calculate how many recent messages can be kept while staying within 65% of capacity.
+// This leaves 35% for the system prompt, tombstone summary, and headroom for new responses.
+// Falls back to the default if capacity is unknown or token metadata is sparse.
+function calcKeepTailForCapacity(conversational, capacity) {
+    if (!capacity || conversational.length === 0) return 15;
+    const budget = Math.floor(capacity * 0.65);
+    let tokensUsed = 0;
+    let keep = 0;
+    for (let i = conversational.length - 1; i >= 0; i--) {
+        const m = conversational[i];
+        // Use recorded tokens; fall back to rough char estimate (4 chars ≈ 1 token)
+        const t = (m.input_tokens || 0) + (m.output_tokens || 0)
+            || Math.ceil((m.content?.length || 0) / 4);
+        if (tokensUsed + t > budget) break;
+        tokensUsed += t;
+        keep++;
+    }
+    // Must keep at least 1 and drop at least 1
+    return Math.max(1, Math.min(keep, conversational.length - 1));
+}
+
+export async function compactChatTab(tab, keepTail = null, summarize = true) {
     const msgs = tab.messages;
     const systemMsg = msgs[0]?.role === 'system' && !msgs[0]?.compaction_marker ? msgs[0] : null;
     const tombstones = msgs.filter(m => m.compaction_marker);
     const conversational = msgs.filter(m => m.role !== 'system' && !m.compaction_marker);
 
-    if (conversational.length <= keepTail) return;
+    // Resolve keepTail: capacity-aware if not specified, so a small model gets a
+    // smaller tail and the compacted conversation actually fits its context window.
+    const capacity = lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
+    const resolvedKeepTail = keepTail ?? (capacity > 0
+        ? calcKeepTailForCapacity(conversational, capacity)
+        : 15);
+
+    if (conversational.length <= resolvedKeepTail) return;
 
     chat.compactionInProgress = true;
     setCompactButtonBusy(true);
 
-    const dropped = conversational.slice(0, conversational.length - keepTail);
-    const kept = conversational.slice(-keepTail);
+    const dropped = conversational.slice(0, conversational.length - resolvedKeepTail);
+    const kept = conversational.slice(-resolvedKeepTail);
     console.log('[COMPACT] starting — dropped:', dropped.length, 'kept:', kept.length, 'oldTombstones:', tombstones.length);
 
     let placeholderEl = null;
@@ -282,6 +320,34 @@ function onManualCompact() {
     const tab = activeChatTab();
     if (!tab) return;
     compactChatTab(tab);
+}
+
+// Called after each response (via view binding) and after model switch.
+// Fires compaction if auto_compact is on and the tab has hit its threshold.
+export async function checkAutoCompact(tab) {
+    if (!tab || !tab.auto_compact || chat.compactionInProgress || chat.busy) return;
+    const capacity = lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
+    if (!capacity) return;
+
+    const ctxPct = estimateCtxPct(tab, capacity);
+    if (ctxPct === null) return;
+
+    const mode = tab.compact_mode || 'percent';
+    let shouldCompact = false;
+    if (mode === 'optimized') {
+        // Compact when fewer than 25k tokens remain
+        const asstMsgs = (tab.messages || []).filter(m => m.role === 'assistant' && !m.compaction_marker);
+        const totalOutput = asstMsgs.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
+        const lastInput = asstMsgs.at(-1)?.input_tokens || 0;
+        shouldCompact = capacity - (totalOutput + lastInput) < 25_000;
+    } else {
+        const threshold = (tab.compact_threshold || 0.8) * 100;
+        shouldCompact = ctxPct >= threshold;
+    }
+
+    if (shouldCompact) {
+        await compactChatTab(tab, null, !!tab.auto_compact_summarize);
+    }
 }
 
 function onAutoCompactChange(checked) {
@@ -566,5 +632,6 @@ export function initChatParams() {
         syncMessageLimitInput,
         updateCtxPressureBar,
         updateParamsDirtyIndicator,
+        checkAutoCompact,
     });
 }

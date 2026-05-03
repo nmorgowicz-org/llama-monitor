@@ -16,6 +16,7 @@ const chatViewBindings = {
     syncCompactSettingsUI: null,
     updateCtxPressureBar: null,
     updateChatTabBadge: null,
+    checkAutoCompact: null,
 };
 
 export function registerChatViewBindings(bindings) {

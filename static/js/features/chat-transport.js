@@ -8,6 +8,7 @@ import {
     scheduleChatPersist,
     setChatBusyUI,
     setTransportGetter,
+    getChatViewBindings,
 } from './chat-state.js';
 import {
     renderChatMessages,
@@ -24,7 +25,7 @@ import {
 import { escapeHtml, formatMetricNumber } from '../core/format.js';
 import { autoResizeChatInput } from './chat-state.js';
 import { getExplicitModePolicy } from './chat-templates.js';
-import { showToast } from './toast.js';
+import { showToast, showToastWithActions } from './toast.js';
 
 // ── Summarization ──────────────────────────────────────────────────────────────
 
@@ -187,12 +188,7 @@ export async function _doSendChat(tab) {
         const estimatedTokens = totalOutput + lastInput;
         if (estimatedTokens > capacity) {
             const pct = Math.round((estimatedTokens / capacity) * 100);
-            showToast(
-                `Chat is ~${pct}% of the ${formatMetricNumber(capacity)}-token context window. ` +
-                `Compact before sending to avoid an overflow error.`,
-                'warning'
-            );
-            // Restore the last user message to the input so it isn't lost
+            // Restore the user's message before showing the toast
             const lastMsg = tab.messages.at(-1);
             if (lastMsg?.role === 'user') {
                 tab.messages.pop();
@@ -202,6 +198,20 @@ export async function _doSendChat(tab) {
             }
             chat.busy = false;
             setChatBusyUI(false);
+            const toast = showToastWithActions(
+                'Context overflow',
+                'warning',
+                `Chat is ~${pct}% of the ${formatMetricNumber(capacity)}-token window. Compact first.`,
+                [{
+                    id: 'compact',
+                    label: 'Compact now',
+                    primary: true,
+                    handler: () => {
+                        document.getElementById('btn-compact')?.click();
+                        toast?.remove();
+                    },
+                }]
+            );
             return;
         }
     }
@@ -387,6 +397,10 @@ export async function _doSendChat(tab) {
     chat.busy = false;
     chat.abortController = null;
     if (typeof updateChatTabBadge === 'function') updateChatTabBadge();
+
+    // Trigger auto-compact if the tab has it enabled and the threshold was hit.
+    // Runs after busy is cleared so compaction can proceed without being blocked.
+    getChatViewBindings().checkAutoCompact?.(tab);
 }
 
 // ── Stop Chat ──────────────────────────────────────────────────────────────────

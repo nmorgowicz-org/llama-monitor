@@ -4,8 +4,9 @@
 import { chat } from '../core/app-state.js';
 import { escapeHtml, formatMetricNumber } from '../core/format.js';
 import { setCardState, setChipState, setEmptyState } from './dashboard-render.js';
-import { scheduleChatPersist } from './chat-state.js';
-import { showToast } from './toast.js';
+import { scheduleChatPersist, switchChatTab } from './chat-state.js';
+import { showToast, showToastWithActions } from './toast.js';
+import { compactChatTab } from './chat-params.js';
 
 const STALE_CHAT_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_VISIBLE_CHATS = 5;
@@ -403,16 +404,27 @@ export function updateContextCard(d, l) {
         // where the user loads a smaller model after building up a large conversation.
         if (_lastSeenCapacity > 0 && capacity !== _lastSeenCapacity) {
             const overflowing = chat.tabs.filter(tab => {
-                const derived = deriveCtxPctFromMessages(tab, capacity);
-                return derived !== null && derived > 100;
+                const pct = deriveCtxPctFromMessages(tab, capacity);
+                return pct !== null && pct > 100;
             });
             if (overflowing.length > 0) {
-                const names = overflowing.map(t => t.name).join(', ');
-                showToast(
-                    `Model context changed to ${formatMetricNumber(capacity)} tokens. ` +
-                    `${overflowing.length === 1 ? `"${names}" exceeds` : `${overflowing.length} chats exceed`} ` +
-                    `the new limit — compact before sending.`,
-                    'warning'
+                const msg = overflowing.length === 1
+                    ? `"${overflowing[0].name}" exceeds the new ${formatMetricNumber(capacity)}-token window`
+                    : `${overflowing.length} chats exceed the new ${formatMetricNumber(capacity)}-token window`;
+                const toast = showToastWithActions(
+                    'Context window shrank',
+                    'warning',
+                    `${msg} — compact before sending.`,
+                    overflowing.map(tab => ({
+                        id: tab.id,
+                        label: overflowing.length === 1 ? 'Compact now' : `Compact "${tab.name}"`,
+                        primary: overflowing.length === 1,
+                        handler: () => {
+                            switchChatTab(tab.id);
+                            compactChatTab(tab, null, !!tab.auto_compact_summarize);
+                            toast?.remove();
+                        },
+                    }))
                 );
             }
         }
