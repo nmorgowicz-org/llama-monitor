@@ -1,5 +1,6 @@
 import { escapeHtml, formatMetricNumber, formatDuration, formatClockReadout } from '../core/format.js';
 import {
+    chat,
     metricSeries,
     liveOutputTracker,
     requestActivity,
@@ -432,6 +433,11 @@ function formatParamCount(params) {
     return params + ' params';
 }
 
+function chatDerivedContextAvailable() {
+    const tabs = chat.tabs || [];
+    return tabs.length > 0 && tabs.some(t => t.messageCount > 0);
+}
+
 function renderCapabilityPopover(d, l, generationAvailable, contextLiveAvailable) {
     const popover = document.getElementById('capability-popover');
     if (!popover) return;
@@ -451,7 +457,7 @@ function renderCapabilityPopover(d, l, generationAvailable, contextLiveAvailable
         ['Generation progress', generationAvailable ? 'live' : 'not exposed', generationAvailable],
         ['Throughput', metricsAvailable ? 'retained avg + live estimate' : 'waiting', metricsAvailable],
         ['Context capacity', (l?.context_capacity_tokens || 0) > 0 ? 'live' : 'waiting', (l?.context_capacity_tokens || 0) > 0],
-        ['Context usage', contextLiveAvailable ? 'live' : 'not exposed', contextLiveAvailable],
+        ['Context usage', contextLiveAvailable ? 'live' : chatDerivedContextAvailable() ? 'derived from chat' : 'not exposed', contextLiveAvailable || chatDerivedContextAvailable()],
         ['Host metrics', d.host_metrics_available ? 'live' : 'unavailable', !!d.host_metrics_available],
         ['Remote agent', d.remote_agent_connected ? 'connected' : 'disconnected', !!d.remote_agent_connected]
     ];
