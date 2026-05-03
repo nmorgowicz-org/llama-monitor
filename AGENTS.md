@@ -37,6 +37,32 @@ All commits MUST follow the [Conventional Commits](https://www.conventionalcommi
 - `ci: add conventional commit validation`
 - `revert: revert breaking change from v0.2.0`
 
+### Scope Convention
+
+Scopes should describe the **component/area** being changed, not the type of change:
+
+| Scope | Purpose |
+|-------|---------|
+| `api` | Backend API endpoints, routes |
+| `ui` | Frontend layout, styling, components |
+| `chat` | Chat features, message rendering |
+| `gpu` | GPU monitoring, metrics |
+| `nav` | Navigation, sidebar, tab switching |
+| `settings` | Settings modal, preferences |
+| `models` | Model presets, configuration |
+| `sessions` | Session management, persistence |
+| `docs` | Documentation files |
+| `ci` | CI/CD, workflows, build scripts |
+
+**Good scope usage:**
+- `fix(nav): modal navigation state broken after export`
+- `docs(ui): add screenshots for chat features`
+- `feat(chat): add message edit/regenerate actions`
+
+**Avoid:**
+- `fix(modal): navigation broken` - too vague
+- `fix: fix: modal navigation` - redundant
+
 ❌ **Invalid:**
 - `Update README` (missing type)
 - `feat add new feature` (missing colon)
