@@ -87,9 +87,11 @@ pub struct ChatTab {
     #[serde(default)]
     pub explicit_mode: Option<bool>,
     pub messages: Vec<ChatMessage>,
-    #[serde(default, alias = "totalInputTokens")]
+    // Serialized as camelCase so GET responses and PUT bodies use identical names.
+    // Alias keeps existing disk files readable if they were written as snake_case.
+    #[serde(rename = "totalInputTokens", alias = "total_input_tokens", default)]
     pub total_input_tokens: Option<u64>,
-    #[serde(default, alias = "totalOutputTokens")]
+    #[serde(rename = "totalOutputTokens", alias = "total_output_tokens", default)]
     pub total_output_tokens: Option<u64>,
     pub model_params: ChatModelParams,
     pub created_at: u64,
@@ -100,7 +102,7 @@ pub struct ChatTab {
     pub compact_threshold: Option<f32>,
     /// Last known context window percentage (0–100). Derived client-side and
     /// persisted so the dashboard can show it on page load without a live session.
-    #[serde(default, alias = "lastCtxPct")]
+    #[serde(rename = "lastCtxPct", default)]
     pub last_ctx_pct: Option<f32>,
 }
 
