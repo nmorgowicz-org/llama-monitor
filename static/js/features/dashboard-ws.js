@@ -282,6 +282,19 @@ function updateAgentStatus(d) {
     if (agentLatencyEl) {
         agentLatencyEl.textContent = '';
     }
+    
+    // Update agent menu subtitle
+    const menuSubtitle = document.getElementById('agent-menu-subtitle');
+    if (menuSubtitle) {
+        const hasRemoteEndpoint = d.session_mode === 'attach' && d.endpoint_kind === 'Remote';
+        if (!hasRemoteEndpoint) {
+            menuSubtitle.textContent = 'No remote endpoint attached';
+        } else if (d.remote_agent_connected) {
+            menuSubtitle.textContent = 'Connected to remote metrics';
+        } else {
+            menuSubtitle.textContent = 'Manage agent for ' + (d.endpoint_host || '');
+        }
+    }
 }
 
 // ── Attach/Detach buttons ────────────────────────────────────────────────────

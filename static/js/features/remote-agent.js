@@ -1088,61 +1088,64 @@ function updateAgentStatusIndicator(connected, firewallBlocked) {
             menuSubtitle.textContent = host ? 'Manage agent for ' + host : 'No remote endpoint attached';
         }
     }
-
-    if (!el) return;
-
-    if (!connected) {
-        el.style.display = 'none';
-        return;
-    }
-
-    el.style.display = 'flex';
-    const fixBtn = el.querySelector('.btn-agent-fix');
-
-    if (firewallBlocked) {
-        el.className = 'agent-status firewall-blocked';
-        const indicator = el.querySelector('.agent-indicator');
-        const textEl = el.querySelector('.agent-text');
-        if (indicator) indicator.textContent = '\u26a0\ufe0f';
-        if (textEl) textEl.textContent = 'Firewall blocked';
-        if (fixBtn) fixBtn.style.display = '';
-    } else {
-        el.className = 'agent-status connected';
-        const indicator = el.querySelector('.agent-indicator');
-        const textEl = el.querySelector('.agent-text');
-        if (indicator) indicator.textContent = '\u25cf';
-        if (textEl) textEl.textContent = 'Remote Agent';
-        if (fixBtn) fixBtn.style.display = 'none';
-    }
+    if (el) updateAgentStatusPill(el, connected, firewallBlocked);
 }
 
-// ── Agent Menu ────────────────────────────────────────────────────────────────
-
-function toggleAgentMenu(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    document.getElementById('agent-menu-panel')?.classList.toggle('open');
+function updateAgentStatusPill(el, connected, firewallBlocked) {
+   if (!connected) {
+       el.style.display = 'none';
+       return;
+   }
+   el.style.display = 'flex';
+   const fixBtn = el.querySelector('.btn-agent-fix');
+   const tooltip = el.querySelector('.agent-status-tooltip');
+   const statusEl = tooltip ? tooltip.querySelector('.agent-tooltip-status') : null;
+   
+   if (firewallBlocked) {
+       el.className = 'agent-status firewall-blocked';
+       const indicator = el.querySelector('.agent-indicator');
+       const textEl = el.querySelector('.agent-text');
+       if (indicator) indicator.textContent = '\u26a0\ufe0f';
+       if (textEl) textEl.textContent = 'Firewall blocked';
+       if (statusEl) {
+           statusEl.textContent = 'Firewall blocked';
+           statusEl.className = 'agent-tooltip-status warning';
+       }
+       if (fixBtn) fixBtn.style.display = '';
+   } else {
+       el.className = 'agent-status connected';
+       const indicator = el.querySelector('.agent-indicator');
+       const textEl = el.querySelector('.agent-text');
+       if (indicator) indicator.textContent = '\u25cf';
+       if (textEl) textEl.textContent = 'Remote Agent';
+       if (statusEl) {
+           statusEl.textContent = 'Connected';
+           statusEl.className = 'agent-tooltip-status connected';
+       }
+       if (fixBtn) fixBtn.style.display = 'none';
+   }
 }
+
+// ── Agent Status Badge Click ────────────────────────────────────────────────
 
 function toggleAgentMenuFromBadge(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    closeAgentMenu();
-    openRemoteAgentSetup();
+   event.preventDefault();
+   event.stopPropagation();
+   openRemoteAgentSetup();
 }
 
 function openRemoteAgentSetupFromBadge(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    closeAgentMenu();
-    openRemoteAgentSetup();
-}
-
-function closeAgentMenu() {
-    document.getElementById('agent-menu-panel')?.classList.remove('open');
+   event.preventDefault();
+   event.stopPropagation();
+   openRemoteAgentSetup();
 }
 
 // ── Agent Menu Actions ────────────────────────────────────────────────────────
+
+function closeAgentMenu() {
+   // No longer needed - agent-menu-panel removed
+   // Kept for backward compatibility with action functions
+}
 
 async function agentMenuCheck() {
     closeAgentMenu();
@@ -1795,18 +1798,7 @@ export function initRemoteAgent() {
     if (initialized) return;
     initialized = true;
 
-    // Bind agent menu toggle
-    document.getElementById('nav-agent-btn')?.addEventListener('click', (e) => toggleAgentMenu(e));
-
-    // Bind agent menu items
-    document.getElementById('agent-menu-check')?.addEventListener('click', agentMenuCheck);
-    document.getElementById('agent-menu-manage')?.addEventListener('click', openRemoteAgentSetup);
-    document.getElementById('agent-menu-install')?.addEventListener('click', agentMenuInstallRepair);
-    document.getElementById('agent-menu-start')?.addEventListener('click', agentMenuStart);
-    document.getElementById('agent-menu-stop')?.addEventListener('click', agentMenuStop);
-    document.getElementById('agent-menu-remove')?.addEventListener('click', agentMenuRemove);
-
-    // Bind agent status badge
+    // Bind agent status badge (opens setup modal)
     document.getElementById('agent-status')?.addEventListener('click', (e) => {
         if (!e.target.closest('.btn-agent-fix')) toggleAgentMenuFromBadge(e);
     });

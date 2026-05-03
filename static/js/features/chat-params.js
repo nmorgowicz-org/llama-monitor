@@ -13,6 +13,10 @@ import { exportChatTab, importChatTab, renderChatMessages } from './chat-render.
 import { fetchSummary, sendChat } from './chat-transport.js';
 import {
     applySystemPromptTemplate,
+    setActiveTemplate,
+    renderPersonaStrip,
+} from './chat-templates.js';
+import {
     onSystemPromptChange,
     openTemplateManager,
     toggleExplicitMode,
@@ -502,6 +506,10 @@ function applyChatFontSize() {
     if (messages) {
         messages.style.setProperty('--chat-font-scale', chatFont / 100);
     }
+    const inputRow = document.getElementById('chat-input-row');
+    if (inputRow) {
+        inputRow.style.setProperty('--chat-font-scale', chatFont / 100);
+    }
     const label = document.getElementById('chat-font-value');
     if (label) label.textContent = chatFont + '%';
 }
@@ -566,12 +574,15 @@ export function initChatParams() {
     initEnterToggle();
     initChatStyle();
     initChatInputHandler();
+    initChatResizeHandle();
 
     // Bind chat header buttons
     document.getElementById('btn-system-prompt')?.addEventListener('click', toggleSystemPromptPanel);
     document.getElementById('btn-model-params')?.addEventListener('click', toggleModelParamsPanel);
     document.getElementById('btn-chat-style')?.addEventListener('click', toggleStylePanel);
     document.getElementById('btn-compact')?.addEventListener('click', onManualCompact);
+    registerPersonaMenuBindings();
+    registerTemplateMenuBindings();
 
     // Bind chat name inputs
     document.getElementById('chat-ai-name')?.addEventListener('input', (e) => updateChatName('ai_name', e.target.value));
@@ -653,4 +664,349 @@ export function initChatParams() {
         updateParamsDirtyIndicator,
         checkAutoCompact,
     });
+}
+
+// ── Chat Input Resize Handle ─────────────────────────────────────────────────
+let isResizing = false;
+let inputRowEl = null;
+let textareaEl = null;
+let startY = 0;
+let startHeight = 0;
+const MIN_ROWS = 1;
+const MAX_ROWS = 10;
+
+function initChatResizeHandle() {
+    const handle = document.getElementById('chat-resize-handle');
+    if (!handle) return;
+    
+    inputRowEl = document.getElementById('chat-input-row');
+    textareaEl = document.getElementById('chat-input');
+    
+    if (!inputRowEl || !textareaEl) return;
+    
+    // Restore saved height
+    const savedHeight = localStorage.getItem('llama-monitor-input-height');
+    if (savedHeight) {
+        textareaEl.style.height = savedHeight;
+        updateResizeHandleUI();
+    }
+    
+    handle.addEventListener('mousedown', startResize);
+    document.addEventListener('mousemove', doResize);
+    document.addEventListener('mouseup', stopResize);
+}
+
+function startResize(e) {
+    if (!textareaEl) return;
+    isResizing = true;
+    startY = e.clientY;
+    startHeight = textareaEl.getBoundingClientRect().height;
+    const handle = document.getElementById('chat-resize-handle');
+    if (handle) handle.classList.add('active');
+    e.preventDefault();
+}
+
+function doResize(e) {
+    if (!isResizing || !textareaEl) return;
+    const delta = e.clientY - startY;
+    const minHeight = textareaEl.offsetHeight;
+    const newHeight = Math.max(minHeight, startHeight + delta);
+    const computedStyle = getComputedStyle(textareaEl);
+    const padding = parseFloat(computedStyle.paddingTop) + parseFloat(computedStyle.paddingBottom);
+    const border = parseFloat(computedStyle.borderTopWidth) + parseFloat(computedStyle.borderBottomWidth);
+    const contentHeight = newHeight - padding - border;
+    const lineHeight = parseFloat(computedStyle.lineHeight) || 24;
+    const rows = Math.max(1, Math.round(contentHeight / lineHeight));
+    textareaEl.style.height = newHeight + 'px';
+    textareaEl.rows = Math.max(MIN_ROWS, Math.min(MAX_ROWS, rows));
+    updateResizeHandleUI();
+}
+
+function stopResize() {
+    if (!isResizing) return;
+    isResizing = false;
+    const handle = document.getElementById('chat-resize-handle');
+    if (handle) handle.classList.remove('active');
+    if (textareaEl) {
+        localStorage.setItem('llama-monitor-input-height', textareaEl.style.height || '42px');
+    }
+}
+
+function updateResizeHandleUI() {
+    const handle = document.getElementById('chat-resize-handle');
+    const hint = handle?.querySelector('.resize-hint');
+    if (handle && textareaEl) {
+        const height = textareaEl.getBoundingClientRect().height;
+        const max = 200;
+        const pct = Math.min(100, (height - 42) / (max - 42) * 100);
+        handle.style.setProperty('--resize-pct', pct / 100);
+    }
+}
+
+export function resetChatInputHeight() {
+    if (textareaEl) {
+        textareaEl.style.height = '';
+        textareaEl.rows = 1;
+        localStorage.removeItem('llama-monitor-input-height');
+        updateResizeHandleUI();
+    }
+}
+
+// ── Persona Menu Bindings ───────────────────────────────────────────────────
+
+let personaMenuEl = null;
+let personaMenuListEl = null;
+
+export function registerPersonaMenuBindings() {
+    const btn = document.getElementById('chat-persona-btn');
+    const menu = document.getElementById('chat-persona-menu');
+    const list = document.getElementById('chat-persona-menu-list');
+    const name = document.getElementById('chat-persona-menu-name');
+    
+    personaMenuEl = menu;
+    personaMenuListEl = list;
+    
+    if (!btn || !menu || !list || !name) return;
+    
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = !menu.classList.toggle('hidden');
+        if (isVisible) {
+            loadPersonaMenuItems();
+        }
+    });
+    
+    document.addEventListener('click', (e) => {
+        if (!menu.contains(e.target)) {
+            menu.classList.add('hidden');
+        }
+    });
+}
+
+async function loadPersonaMenuItems() {
+    if (!personaMenuListEl) return;
+    
+    personaMenuListEl.innerHTML = '<div class="chat-persona-menu-loading">Loading personas...</div>';
+    
+    try {
+        const response = await fetch('/api/personas');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        const personas = data.personas || [];
+        
+        if (personas.length === 0) {
+            personaMenuListEl.innerHTML = '<div class="chat-persona-menu-loading">No personas found</div>';
+            return;
+        }
+        
+        personaMenuListEl.innerHTML = '';
+        
+        personas.forEach((persona) => {
+            const item = document.createElement('button');
+            item.className = 'chat-persona-menu-item';
+            if (window.currentPersona && window.currentPersona.name === persona.name) {
+                item.classList.add('active');
+            }
+            
+            const icon = document.createElement('span');
+            icon.className = 'chat-persona-menu-item-icon';
+            icon.textContent = '🎭';
+            
+            const content = document.createElement('div');
+            content.className = 'chat-persona-menu-item-content';
+            
+            const nameEl = document.createElement('div');
+            nameEl.className = 'chat-persona-menu-item-name';
+            nameEl.textContent = persona.name;
+            content.appendChild(nameEl);
+            
+            if (persona.description) {
+                const meta = document.createElement('div');
+                meta.className = 'chat-persona-menu-item-meta';
+                meta.textContent = persona.description.substring(0, 60);
+                content.appendChild(meta);
+            }
+            
+            item.appendChild(icon);
+            item.appendChild(content);
+            
+            item.addEventListener('click', async () => {
+                try {
+                    const res = await fetch(`/api/personas/activate/${encodeURIComponent(persona.name)}`, {
+                        method: 'POST',
+                    });
+                    if (!res.ok) {
+                        throw new Error(`HTTP ${res.status}`);
+                    }
+                    window.currentPersona = persona;
+                    document.getElementById('chat-persona-menu-name').textContent = persona.name;
+                    document.getElementById('chat-persona-menu').classList.add('hidden');
+                    // Re-render persona chips to show active state
+                    renderPersonaStrip?.();
+                } catch (err) {
+                    console.error('Failed to activate persona:', err);
+                    alert('Failed to activate persona: ' + err.message);
+                }
+            });
+            
+            personaMenuListEl.appendChild(item);
+        });
+    } catch (err) {
+        const errorEl = document.createElement('div');
+        errorEl.className = 'chat-persona-menu-loading';
+        errorEl.textContent = 'Error: ' + err.message;
+        personaMenuListEl.appendChild(errorEl);
+    }
+}
+
+export function setPersonaMenuActive(personaName) {
+    const items = personaMenuListEl?.querySelectorAll('.chat-persona-menu-item');
+    items?.forEach(item => {
+        if (item.textContent.includes(personaName)) {
+            item.classList.add('active');
+        } else {
+            item.classList.remove('active');
+        }
+    });
+    const nameEl = document.getElementById('chat-persona-menu-name');
+    if (nameEl && personaName) {
+        nameEl.textContent = personaName;
+    }
+}
+
+// ── Template Menu Bindings ──────────────────────────────────────────────────
+
+let templateMenuEl = null;
+let templateMenuListEl = null;
+
+export function registerTemplateMenuBindings() {
+    const btn = document.getElementById('chat-template-select');
+    const menu = document.getElementById('chat-template-menu');
+    const list = document.getElementById('chat-template-menu-list');
+    
+    templateMenuEl = menu;
+    templateMenuListEl = list;
+    
+    if (!btn || !menu || !list) return;
+    
+    btn.addEventListener('change', (e) => {
+        const templateName = e.target.value;
+        if (templateName && window.setActiveTemplate) {
+            window.setActiveTemplate(templateName);
+        }
+    });
+    
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isVisible = !menu.classList.toggle('hidden');
+        if (isVisible) {
+            loadTemplateMenuItems();
+        }
+    });
+    
+    document.addEventListener('click', (e) => {
+        if (!menu.contains(e.target) && e.target.id !== 'chat-template-select') {
+            menu.classList.add('hidden');
+        }
+    });
+}
+
+async function loadTemplateMenuItems() {
+    if (!templateMenuListEl) return;
+    
+    templateMenuListEl.innerHTML = '<div class="chat-persona-menu-loading">Loading templates...</div>';
+    
+    try {
+        const response = await fetch('/api/chat-templates');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        const templates = data.templates || [];
+        
+        if (templates.length === 0) {
+            templateMenuListEl.innerHTML = '<div class="chat-persona-menu-loading">No templates found</div>';
+            return;
+        }
+        
+        templateMenuListEl.innerHTML = '';
+        
+        templates.forEach((template) => {
+            const item = document.createElement('button');
+            item.className = 'chat-persona-menu-item';
+            if (window.currentTemplate && window.currentTemplate.name === template.name) {
+                item.classList.add('active');
+            }
+            
+                const icon = document.createElement('span');
+            icon.className = 'chat-persona-menu-item-icon';
+            icon.textContent = '📝';
+            
+            const content = document.createElement('div');
+            content.className = 'chat-persona-menu-item-content';
+            
+            const nameEl = document.createElement('div');
+            nameEl.className = 'chat-persona-menu-item-name';
+            nameEl.textContent = template.name;
+            content.appendChild(nameEl);
+            
+            if (template.description) {
+                const meta = document.createElement('div');
+                meta.className = 'chat-persona-menu-item-meta';
+                meta.textContent = template.description.substring(0, 60);
+                content.appendChild(meta);
+            }
+            
+            item.appendChild(icon);
+            item.appendChild(content);
+            
+            item.addEventListener('click', async () => {
+                try {
+                    const res = await fetch(`/api/chat-templates/activate/${encodeURIComponent(template.name)}`, {
+                        method: 'POST',
+                    });
+                    if (!res.ok) {
+                        throw new Error(`HTTP ${res.status}`);
+                    }
+                    window.currentTemplate = template;
+                    document.getElementById('chat-template-select').value = template.name;
+                    document.getElementById('chat-template-menu').classList.add('hidden');
+                    // Re-render to apply template
+                    renderPersonaStrip?.();
+                    setActiveTemplate?.(template.id);
+                } catch (err) {
+                    console.error('Failed to activate template:', err);
+                    alert('Failed to activate template: ' + err.message);
+                }
+            });
+            
+            templateMenuListEl.appendChild(item);
+        });
+    } catch (err) {
+        const errorEl = document.createElement('div');
+        errorEl.className = 'chat-persona-menu-loading';
+        errorEl.textContent = 'Error: ' + err.message;
+        templateMenuListEl.appendChild(errorEl);
+    }
+}
+
+export function setTemplateMenuActive(templateName) {
+    const items = templateMenuListEl?.querySelectorAll('.chat-persona-menu-item');
+    items?.forEach(item => {
+        if (item.textContent.includes(templateName)) {
+            item.classList.add('active');
+        } else {
+            item.classList.remove('active');
+        }
+    });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }

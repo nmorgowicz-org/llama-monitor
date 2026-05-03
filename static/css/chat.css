@@ -376,6 +376,100 @@
     display: none;
 }
 
+/* ── Persona Menu ───────────────────────────────────── */
+.chat-persona-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 280px;
+    max-height: 400px;
+    overflow-y: auto;
+    background: rgba(20, 20, 30, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+}
+.chat-persona-menu-header {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+}
+.chat-persona-menu-name {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+.chat-persona-menu-list {
+    padding: 6px;
+}
+.chat-persona-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.15s;
+    width: 100%;
+    text-align: left;
+}
+.chat-persona-menu-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+.chat-persona-menu-item.active {
+    background: rgba(99, 102, 241, 0.15);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+}
+.chat-persona-menu-item-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+}
+.chat-persona-menu-item-name {
+    flex: 1;
+    font-size: var(--text-sm);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.chat-persona-menu-item-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+.chat-persona-menu-item.active .chat-persona-menu-item-name {
+    color: #818cf8;
+}
+.chat-persona-menu-loading {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+}
+.chat-persona-menu.hidden {
+    display: none;
+}
+
+.chat-template-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 280px;
+    max-height: 400px;
+    overflow-y: auto;
+    background: rgba(20, 20, 30, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+}
+.chat-template-menu.hidden {
+    display: none;
+}
+
 /* ── System Prompt Panel ────────────────────────────── */
 .chat-system-panel {
   padding: var(--gap-sm) var(--gap-md);
@@ -1479,6 +1573,34 @@
   30%           { transform: translateY(-6px) scale(1.2); opacity: 1; }
 }
 
+/* ── Chat Resize Handle ─────────────────────────────── */
+.chat-resize-handle {
+  height: 4px;
+  margin: 0 calc(var(--gap-md) - 4px);
+  cursor: ns-resize;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.15s;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.chat-resize-handle::after {
+  content: '';
+  width: 40px;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 1px;
+  transition: background 0.15s;
+}
+.chat-resize-handle:hover::after {
+  background: rgba(136, 192, 208, 0.5);
+}
+.chat-resize-handle.active::after {
+  background: var(--color-primary);
+}
+
 /* ── Chat Input ─────────────────────────────────────── */
 .chat-input-row {
   display: flex;
@@ -1497,16 +1619,16 @@
 }
 .chat-input-row textarea {
   width: 100%;
-  min-height: 42px;
-  max-height: 200px;
+  min-height: calc(42px * var(--chat-font-scale, 1));
+  max-height: calc(200px * var(--chat-font-scale, 1));
   resize: none;
   overflow-y: auto;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
-  padding: 10px 14px;
+  padding: calc(10px * var(--chat-font-scale, 1)) calc(14px * var(--chat-font-scale, 1));
   font-family: var(--font-sans);
-  font-size: var(--text-base);
-  line-height: 1.5;
+  font-size: calc(var(--text-base) * var(--chat-font-scale, 1));
+  line-height: calc(1.5 * var(--chat-font-scale, 1));
   background: rgba(255, 255, 255, 0.03);
   color: var(--text-primary);
   transition: border-color 0.2s, box-shadow 0.2s, height 0.1s ease;

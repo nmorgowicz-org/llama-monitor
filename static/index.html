@@ -45,11 +45,16 @@
                 </span>
             </div>
             <div class="strip-right">
-                <div class="agent-status" id="agent-status" style="display:none;" title="Remote agent actions" role="button" tabindex="0">
+                <div class="agent-status" id="agent-status" style="display:none;" title="Click to manage remote agent" role="button" tabindex="0">
                     <span class="agent-indicator">●</span>
                     <span class="agent-text">Remote Agent</span>
                     <span class="agent-latency" id="agent-latency"></span>
                     <button type="button" class="btn-agent-fix" style="display:none;" id="agent-fix-btn" title="Set up remote agent">⚡ Fix</button>
+                    <div class="agent-status-tooltip" id="agent-status-tooltip">
+                        <div class="agent-tooltip-title">Remote Agent</div>
+                        <div class="agent-tooltip-status" id="agent-tooltip-status">Checking...</div>
+                        <div class="agent-tooltip-details" id="agent-tooltip-details"></div>
+                    </div>
                 </div>
                 <span class="status-dot" id="status-dot"></span>
                 <span class="status-text" id="status-text"></span>
@@ -79,25 +84,7 @@
             <div id="session-controls">
                 <button class="nav-btn" id="nav-new-session-btn" title="New Session">+ New Session</button>
             </div>
-            <div class="agent-menu" id="agent-menu">
-                <button type="button" class="nav-btn agent-menu-btn" id="nav-agent-btn" title="Remote agent">
-                    <span class="agent-menu-dot" id="agent-menu-dot"></span>
-                    Agent
-                </button>
-                <div class="agent-menu-panel" id="agent-menu-panel">
-                    <div class="agent-menu-header">
-                        <div class="agent-menu-title">Remote Agent</div>
-                        <div class="agent-menu-subtitle" id="agent-menu-subtitle">No remote endpoint attached</div>
-                    </div>
-                    <button type="button" class="agent-menu-item" id="agent-menu-check">Check agent</button>
-                    <button type="button" class="agent-menu-item" id="agent-menu-manage">Manage agent</button>
-                    <button type="button" class="agent-menu-item" id="agent-menu-install">Install / repair</button>
-                    <button type="button" class="agent-menu-item" id="agent-menu-start">Start</button>
-                    <button type="button" class="agent-menu-item" id="agent-menu-stop">Stop</button>
-                    <button type="button" class="agent-menu-item danger" id="agent-menu-remove">Remove managed agent</button>
-                </div>
-            </div>
-            <button id="settings-btn" class="nav-btn" title="Settings">⚙️ Settings</button>
+                      <button id="settings-btn" class="nav-btn" title="Settings">⚙️ Settings</button>
             <button id="update-pill" class="top-nav-pill" style="display:none;">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/>
@@ -656,12 +643,26 @@
                         <button data-export-format="md">Save as Markdown</button>
                         <button data-export-format="json">Save as JSON</button>
                     </div>
-                    <button class="chat-header-btn" id="chat-import-btn" title="Import conversation from file">
+                      <button class="chat-header-btn" id="chat-import-btn" title="Import conversation from file">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
                         </svg>
                         <span class="chat-header-label">Import</span>
                     </button>
+                    <button class="chat-header-btn" id="chat-persona-btn" title="Personas & Templates">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="8" r="7"/><path d="M2 21h20M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/>
+                        </svg>
+                        <span class="chat-header-label">Persona</span>
+                    </button>
+                    <div id="chat-persona-menu" class="chat-persona-menu hidden">
+                        <div class="chat-persona-menu-header">
+                            <span>Active: <span id="chat-persona-menu-name">None</span></span>
+                        </div>
+                        <div class="chat-persona-menu-list" id="chat-persona-menu-list">
+                            <div class="chat-persona-menu-loading">Loading personas...</div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -724,6 +725,11 @@
                             <option value="">— Templates —</option>
                             <option value="">None</option>
                         </select>
+                        <div id="chat-template-menu" class="chat-template-menu hidden">
+                            <div class="chat-persona-menu-list" id="chat-template-menu-list">
+                                <div class="chat-persona-menu-loading">Loading templates...</div>
+                            </div>
+                        </div>
                         <button class="chat-template-mgmt-btn" id="chat-template-mgmt-btn" title="Manage templates">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M12 5v14M5 12h14"/>
@@ -890,6 +896,9 @@
 
             <!-- Persona strip -->
             <div id="chat-persona-strip" class="chat-persona-strip"></div>
+
+            <!-- Resize handle -->
+            <div class="chat-resize-handle" id="chat-resize-handle" title="Drag to resize input area"></div>
 
             <!-- Input area -->
             <div class="chat-input-row" id="chat-input-row">
