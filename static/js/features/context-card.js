@@ -5,6 +5,7 @@ import { chat } from '../core/app-state.js';
 import { escapeHtml, formatMetricNumber } from '../core/format.js';
 import { setCardState, setChipState, setEmptyState } from './dashboard-render.js';
 import { scheduleChatPersist } from './chat-state.js';
+import { showToast } from './toast.js';
 
 const STALE_CHAT_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_VISIBLE_CHATS = 5;
@@ -79,6 +80,8 @@ function backfillCtxPct(capacity) {
     if (dirty) scheduleChatPersist();
 }
 
+let _lastSeenCapacity = 0;
+
 function deriveChatSummaries(capacity) {
     const now = Date.now();
     return chat.tabs
@@ -89,10 +92,12 @@ function deriveChatSummaries(capacity) {
                 || tab.created_at
                 || 0;
 
-            // Prefer lastCtxPct (already computed / persisted), then derive from messages.
-            let ctxPct = (typeof tab.lastCtxPct === 'number' && tab.lastCtxPct > 0)
-                ? tab.lastCtxPct
-                : (capacity ? deriveCtxPctFromMessages(tab, capacity) : null);
+            // Always re-derive from message tokens when capacity is known — using stale
+            // lastCtxPct after a model swap would show the wrong percentage (e.g. 37% of
+            // 131k still showing as 37% on a 32k model where it actually represents 150%+).
+            let ctxPct = capacity > 0
+                ? deriveCtxPctFromMessages(tab, capacity)
+                : (typeof tab.lastCtxPct === 'number' && tab.lastCtxPct > 0 ? tab.lastCtxPct : null);
 
             return {
                 id: tab.id,
@@ -390,10 +395,29 @@ export function updateContextCard(d, l) {
     lastDashboard = d;
     lastLlamaMetrics = l;
 
-    // When capacity is known, backfill lastCtxPct for any tab that doesn't have it.
-    // This runs once per capacity value change (e.g., first connect after page load).
     const capacity = l?.context_capacity_tokens || l?.kv_cache_max || 0;
-    if (capacity > 0) backfillCtxPct(capacity);
+    if (capacity > 0) {
+        backfillCtxPct(capacity);
+
+        // Warn when capacity drops below what a chat actually uses — catches the case
+        // where the user loads a smaller model after building up a large conversation.
+        if (_lastSeenCapacity > 0 && capacity !== _lastSeenCapacity) {
+            const overflowing = chat.tabs.filter(tab => {
+                const derived = deriveCtxPctFromMessages(tab, capacity);
+                return derived !== null && derived > 100;
+            });
+            if (overflowing.length > 0) {
+                const names = overflowing.map(t => t.name).join(', ');
+                showToast(
+                    `Model context changed to ${formatMetricNumber(capacity)} tokens. ` +
+                    `${overflowing.length === 1 ? `"${names}" exceeds` : `${overflowing.length} chats exceed`} ` +
+                    `the new limit — compact before sending.`,
+                    'warning'
+                );
+            }
+        }
+        _lastSeenCapacity = capacity;
+    }
 
     renderContextCard();
 }

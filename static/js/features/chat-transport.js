@@ -21,9 +21,10 @@ import {
     updateChatTabBadge,
     setChatTransportGetter,
 } from './chat-render.js';
-import { escapeHtml } from '../core/format.js';
+import { escapeHtml, formatMetricNumber } from '../core/format.js';
 import { autoResizeChatInput } from './chat-state.js';
 import { getExplicitModePolicy } from './chat-templates.js';
+import { showToast } from './toast.js';
 
 // ── Summarization ──────────────────────────────────────────────────────────────
 
@@ -176,6 +177,35 @@ export async function sendChat() {
 }
 
 export async function _doSendChat(tab) {
+    // Pre-send overflow guard: estimate token usage against current model capacity.
+    // Uses the same formula as ctx%: cumulative output tokens + last input tokens.
+    const capacity = lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
+    if (capacity > 0) {
+        const asstMsgs = (tab.messages || []).filter(m => m.role === 'assistant' && !m.compaction_marker);
+        const totalOutput = asstMsgs.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
+        const lastInput = asstMsgs.at(-1)?.input_tokens || 0;
+        const estimatedTokens = totalOutput + lastInput;
+        if (estimatedTokens > capacity) {
+            const pct = Math.round((estimatedTokens / capacity) * 100);
+            showToast(
+                `Chat is ~${pct}% of the ${formatMetricNumber(capacity)}-token context window. ` +
+                `Compact before sending to avoid an overflow error.`,
+                'warning'
+            );
+            // Restore the last user message to the input so it isn't lost
+            const lastMsg = tab.messages.at(-1);
+            if (lastMsg?.role === 'user') {
+                tab.messages.pop();
+                const input = document.getElementById('chat-input');
+                if (input) input.value = lastMsg.content;
+                if (typeof autoResizeChatInput === 'function') autoResizeChatInput();
+            }
+            chat.busy = false;
+            setChatBusyUI(false);
+            return;
+        }
+    }
+
     const params = tab.model_params;
     const messages = [];
     let systemPrompt = tab.system_prompt ? substituteNames(tab.system_prompt, tab.ai_name, tab.user_name) : '';
