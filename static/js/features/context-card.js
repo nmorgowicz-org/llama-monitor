@@ -205,9 +205,12 @@ function renderChatStrip(model) {
         strip.appendChild(more);
     }
 
+    // Only show meta when it adds info the pills don't already convey
     stripMeta.textContent = model.staleChatCount > 0
-        ? `${model.chatSummaries.length} chats · ${model.staleChatCount} stale`
-        : `${model.chatSummaries.length} chat${model.chatSummaries.length !== 1 ? 's' : ''} tracked`;
+        ? `${model.staleChatCount} stale chat${model.staleChatCount !== 1 ? 's' : ''}`
+        : model.capacityTokens > 0
+            ? `${formatMetricNumber(model.capacityTokens)} ctx window`
+            : '';
 }
 
 const GAUGE_CIRCUMFERENCE = 402; // 2π × r64

@@ -687,9 +687,21 @@
 }
 
 .context-gauge-shell {
+  position: relative;
   display: grid;
   place-items: center;
   padding: 8px 8px 0;
+}
+
+.context-gauge-shell::before {
+  content: '';
+  position: absolute;
+  width: 110px;
+  height: 110px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.07), transparent 70%);
+  filter: blur(16px);
+  pointer-events: none;
 }
 
 /* Grid stacking: SVG and center text share the same cell */
@@ -728,17 +740,24 @@
 .context-gauge-ring.state-critical { stroke: #fc8181; }
 
 @keyframes gauge-breathe {
-  0%, 100% { opacity: 0.55; }
-  50%       { opacity: 0.9; }
+  0%, 100% { opacity: 0.45; }
+  50%       { opacity: 0.8; }
+}
+@keyframes gauge-chat-breathe {
+  0%, 100% { opacity: 0.75; filter: drop-shadow(0 0 2px rgba(16, 185, 129, 0.2)); }
+  50%       { opacity: 1;    filter: drop-shadow(0 0 5px rgba(16, 185, 129, 0.45)); }
 }
 @keyframes gauge-live-glow {
-  0%, 100% { filter: drop-shadow(0 0 3px rgba(16, 185, 129, 0.35)); opacity: 1; }
-  50%       { filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.75)); opacity: 1; }
+  0%, 100% { filter: drop-shadow(0 0 4px rgba(16, 185, 129, 0.4)); opacity: 1; }
+  50%       { filter: drop-shadow(0 0 10px rgba(16, 185, 129, 0.85)); opacity: 1; }
 }
 
-.context-gauge-ring.idle { animation: gauge-breathe 3.2s ease-in-out infinite; }
+/* no pct data: slow dim pulse */
+.context-gauge-ring.idle { animation: gauge-breathe 3.6s ease-in-out infinite; }
+/* chat-derived data present: gentle glow breathe */
+.context-gauge-ring.chat { animation: gauge-chat-breathe 2.8s ease-in-out infinite; }
+/* live runtime data: active glow */
 .context-gauge-ring.live { animation: gauge-live-glow 1.6s ease-in-out infinite; }
-.context-gauge-ring.chat { opacity: 0.85; }
 
 .context-gauge-center {
   display: flex;
