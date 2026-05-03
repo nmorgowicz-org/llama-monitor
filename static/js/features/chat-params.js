@@ -13,7 +13,6 @@ import { exportChatTab, importChatTab, renderChatMessages } from './chat-render.
 import { fetchSummary, sendChat } from './chat-transport.js';
 import {
     applySystemPromptTemplate,
-    setActiveTemplate,
 } from './chat-templates.js';
 import { renderPersonaStrip } from './chat-render.js';
 import {
@@ -977,7 +976,7 @@ async function loadTemplateMenuItems() {
                     document.getElementById('chat-template-menu').classList.add('hidden');
                     // Re-render to apply template
                     renderPersonaStrip?.();
-                    setActiveTemplate?.(template.id);
+                    window.setActiveTemplate?.(template.id);
                 } catch (err) {
                     console.error('Failed to activate template:', err);
                     alert('Failed to activate template: ' + err.message);
