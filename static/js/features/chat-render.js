@@ -445,10 +445,8 @@ function buildMessageElement(msg, idx, allMessages) {
         }
     }
 
-    // LLM output rendered via marked.js in trusted local context; user content escaped with escapeHtml().replace(); labels are user-configured display names
-    // CodeQL[js/client-side-xss] safe: data from llama.cpp backend API, msg.content escaped, other values internal/hardcoded
-    // eslint-disable-next-line no-unsanitized/property
-    wrapper.innerHTML = `
+ // LLM output rendered via marked.js; user content escaped with escapeHtml().replace(); labels are user-configured display names
+    const html = `
       <div class="chat-avatar">${isUser ? userLabel : aiLabel}</div>
       <div class="chat-bubble">
         <div class="chat-msg-body">${isUser ? escapeHtml(msg.content).replace(/\n/g, '<br>') : renderMd(msg.content)}</div>
@@ -459,7 +457,7 @@ function buildMessageElement(msg, idx, allMessages) {
             <button class="chat-action-btn" data-chat-action="copy" title="Copy">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                    stroke="currentColor" stroke-width="2">
-                <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012-2v1"/>
               </svg>
             </button>
             ${!isUser ? (() => {
@@ -491,12 +489,14 @@ function buildMessageElement(msg, idx, allMessages) {
             <button class="chat-action-btn chat-action-btn-delete" data-chat-action="delete" title="Delete">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                    stroke="currentColor" stroke-width="2">
-                <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+                <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012-2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
               </svg>
             </button>
           </div>
         </div>
       </div>`;
+    // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+    wrapper.innerHTML = window.DOMPurify.sanitize(html);
 
     return wrapper;
 }

@@ -20,5 +20,3 @@ paths-ignore:
  # XSS findings in the frontend are false positives — data comes from
   # the backend llama.cpp API, not from user input.
   - static/compact.html
-  - static/js/features/chat-render.js
-  - static/js/features/dashboard-render.js

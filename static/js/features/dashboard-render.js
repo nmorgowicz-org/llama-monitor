@@ -189,9 +189,8 @@ function renderActivityRail(active) {
         return;
     }
     // all values are numeric (toFixed) or internal hardcoded enums ('active'/'complete')
-    // CodeQL[js/client-side-xss] safe: data from llama.cpp backend API metrics, all values numeric or internal strings
-    // eslint-disable-next-line no-unsanitized/property
-    rail.innerHTML = segments.map(segment => {
+    // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+    rail.innerHTML = window.DOMPurify.sanitize(segments.map(segment => {
         let start = Math.max(0, Math.min(100, ((segment.startedAtMs - (now - windowMs)) / windowMs) * 100));
         const endMs = segment.endedAtMs || now;
         const minWidth = segment.endedAtMs ? 3 : 8;
@@ -215,7 +214,7 @@ function renderActivityRail(active) {
             segment.endedAtMs ? '<span class="activity-marker" aria-hidden="true"></span>' : ''
         ].join('');
         return '<span class="activity-segment ' + cls + '" style="left:' + start.toFixed(2) + '%;width:' + width.toFixed(2) + '%" tabindex="0" title="' + title + '">' + phases + '</span>';
-    }).join('');
+    }).join(''));
 }
 
 function renderSamplerParamsInline(slot) {
@@ -274,8 +273,9 @@ function renderSlotGrid(l, hasActiveEndpoint) {
     }
     const slotSnapshots = Array.isArray(l.slots) ? l.slots : [];
     if (slotSnapshots.length > 0) {
-        // eslint-disable-next-line no-unsanitized/property -- server strings (slot.id, task id) are wrapped in escapeHtml(); busy/idle are hardcoded
-        grid.innerHTML = slotSnapshots.map(slot => {
+        // server strings (slot.id, task id) are wrapped in escapeHtml(); busy/idle are hardcoded
+        // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+        grid.innerHTML = window.DOMPurify.sanitize(slotSnapshots.map(slot => {
             const busy = !!slot.is_processing;
             const task = busy && slot.id_task !== null && slot.id_task !== undefined ? 'task ' + slot.id_task : 'idle';
             const output = slot.output_available ? formatMetricNumber(slot.output_tokens || 0) + ' output' : 'output unknown';
@@ -285,7 +285,7 @@ function renderSlotGrid(l, hasActiveEndpoint) {
                 '<div class="slot-tile-task">' + escapeHtml(task) + '</div>' +
                 '<div class="slot-tile-meta"><span>' + output + '</span><span>' + ctx + '</span></div>' +
             '</div>';
-        }).join('');
+        }).join(''));
         return;
     }
     const processing = l?.slots_processing || 0;
@@ -312,9 +312,8 @@ function renderSlotGrid(l, hasActiveEndpoint) {
     }
 
     // tiles built from numeric index, numeric formatMetricNumber output, and hardcoded 'busy'/'idle'/'active' strings
-    // CodeQL[js/client-side-xss] safe: data from llama.cpp backend API, all values numeric or hardcoded strings
-    // eslint-disable-next-line no-unsanitized/property
-    grid.innerHTML = tiles.join('');
+    // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+    grid.innerHTML = window.DOMPurify.sanitize(tiles.join(''));
 }
 
 function getPrimarySlot(l) {
@@ -494,9 +493,8 @@ function getTempSeverityColor(temp) {
 function setVizContent(container, html) {
     if (!container) return;
     // html always built internally from numeric values, hardcoded CSS class names, and getSeverityColor() hex strings
-    // CodeQL[js/client-side-xss] safe: html built internally, never from user input
-    // eslint-disable-next-line no-unsanitized/property
-    container.innerHTML = html;
+    // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+    container.innerHTML = window.DOMPurify.sanitize(html);
 }
 
 function renderHwBar(container, pct, isHot) {
