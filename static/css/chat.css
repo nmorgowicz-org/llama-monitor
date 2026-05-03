@@ -2497,3 +2497,21 @@
 .chat-explicit-toggle.active .chat-explicit-icon-unlocked {
   opacity: 1;
 }
+
+/* ── SillyTavern footnote ─────────────────────────────────────────────────── */
+.chat-sillytavern-note {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  line-height: 1.5;
+}
+.chat-sillytavern-note a {
+  color: var(--text-muted);
+  text-decoration: underline;
+  opacity: 0.7;
+}
+.chat-sillytavern-note a:hover {
+  opacity: 1;
+}
