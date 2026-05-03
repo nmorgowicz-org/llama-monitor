@@ -1,7 +1,7 @@
 // ── Chat Transport & Streaming ────────────────────────────────────────────────
 // /api/chat calls, streaming decode, abort controller, summarization requests.
 
-import { chat } from '../core/app-state.js';
+import { chat, lastLlamaMetrics } from '../core/app-state.js';
 import {
     activeChatTab,
     substituteNames,
@@ -28,7 +28,18 @@ import { getExplicitModePolicy } from './chat-templates.js';
 // ── Summarization ──────────────────────────────────────────────────────────────
 
 export async function fetchSummary(messages) {
-    const MAX_TRANSCRIPT_CHARS = 140_000;
+    // Derive transcript budget from the model's context window so the summarization
+    // request never overflows (small models) and doesn't under-use capacity (large models).
+    // 65% of context for the transcript; 35% reserved for system prompt + summary output.
+    // 3.5 chars/token is a conservative estimate for mixed English/roleplay content.
+    const capacityTokens =
+        lastLlamaMetrics?.context_capacity_tokens ||
+        lastLlamaMetrics?.kv_cache_max ||
+        0;
+    const MAX_TRANSCRIPT_CHARS = capacityTokens > 0
+        ? Math.min(Math.floor(capacityTokens * 3.5 * 0.65), 500_000)
+        : 140_000;
+
     const conversational = messages.filter(m => !m.compaction_marker);
     const rawTranscript = conversational
         .map(m => {
