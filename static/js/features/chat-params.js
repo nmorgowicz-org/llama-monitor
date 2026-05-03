@@ -14,8 +14,8 @@ import { fetchSummary, sendChat } from './chat-transport.js';
 import {
     applySystemPromptTemplate,
     setActiveTemplate,
-    renderPersonaStrip,
 } from './chat-templates.js';
+import { renderPersonaStrip } from './chat-render.js';
 import {
     onSystemPromptChange,
     openTemplateManager,
