@@ -6,6 +6,16 @@
 
 ---
 
+## 05/03 Bug Fixes Applied
+
+- **Export menu auto-hide bug** - Document-level click listener removed (fixed in nav.js)
+- **Modal navigation broken** - Settings/Sessions/Models buttons now use `data-tab` and properly trigger modal opens
+- **Pin tooltips** - Added hover tooltips ("Pin tab"/"Unpin tab") to pin icons
+
+See commit 837e048 for implementation details.
+
+---
+
 ## 1. Tab Pinning System Analysis
 
 ### Implementation Status: ✅ Complete
