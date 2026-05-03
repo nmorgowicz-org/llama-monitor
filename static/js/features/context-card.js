@@ -234,9 +234,8 @@ function renderGaugeView(model) {
         gaugeSecondary.textContent = `${formatMetricNumber(model.runtimeLiveTokens)} / ${formatMetricNumber(model.capacityTokens)} live`;
     } else if (model.mode === 'chat-derived') {
         gaugeValue.textContent = heroPct != null ? `${Math.round(displayPct)}%` : '—';
-        gaugeSecondary.textContent = model.busiestChat
-            ? `${model.busiestChat.name} · ${model.busiestChat.autoCompact ? 'auto-compact' : 'manual'}`
-            : `${model.activeChatCount} chat${model.activeChatCount !== 1 ? 's' : ''}`;
+        gaugeSecondary.textContent = model.busiestChat?.name
+            ?? `${model.activeChatCount} chat${model.activeChatCount !== 1 ? 's' : ''}`;
     } else if (model.mode === 'capacity-only') {
         gaugeValue.textContent = formatMetricNumber(model.capacityTokens);
         gaugeSecondary.textContent = 'Capacity';
@@ -273,7 +272,6 @@ function renderFleetView(model) {
         const state = escapeHtml(item.state);
         const pctLabel = escapeHtml(pct != null ? pct + '%' : '—');
         const width = escapeHtml(String(pct != null ? Math.min(100, pct) : 0));
-        const badge = escapeHtml(item.autoCompact ? 'auto-compact' : 'manual');
         return `
             <div class="context-fleet-row ${state}">
                 <div class="context-fleet-row-top">
@@ -283,7 +281,6 @@ function renderFleetView(model) {
                 <div class="context-fleet-bar">
                     <div class="context-fleet-fill ${state}" style="width:${width}%"></div>
                 </div>
-                <div class="context-fleet-meta">${badge}</div>
             </div>
         `;
     }).join('');
@@ -294,13 +291,11 @@ function renderFleetView(model) {
         fleetRows.appendChild(more);
     }
 
-    if (model.mode === 'live-runtime') {
-        fleetFooter.textContent = `${formatMetricNumber(model.runtimeLiveTokens)} / ${formatMetricNumber(model.capacityTokens)} live`;
-    } else if (model.aggregateChatPressure.avgPct != null) {
-        fleetFooter.textContent = `avg ${Math.round(model.aggregateChatPressure.avgPct)}% · max ${Math.round(model.aggregateChatPressure.maxPct)}%`;
-    } else {
-        fleetFooter.textContent = '';
-    }
+    fleetFooter.textContent = model.mode === 'live-runtime'
+        ? `${formatMetricNumber(model.runtimeLiveTokens)} / ${formatMetricNumber(model.capacityTokens)} live`
+        : model.capacityTokens > 0
+            ? `${formatMetricNumber(model.capacityTokens)} ctx window`
+            : '';
 }
 
 function applyViewMode(viewMode) {

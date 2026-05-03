@@ -1006,7 +1006,6 @@
   box-shadow: 0 0 18px rgba(239, 107, 107, 0.24);
 }
 
-.context-fleet-meta,
 .context-fleet-more,
 .context-fleet-empty {
   color: var(--color-text-muted);
