@@ -188,8 +188,9 @@ function renderActivityRail(active) {
         rail.innerHTML = '<span class="activity-empty">No recent tasks</span>';
         return;
     }
-    // eslint-disable-next-line no-unsanitized/property -- all values are numeric (toFixed) or internal hardcoded enums ('active'/'complete')
+    // all values are numeric (toFixed) or internal hardcoded enums ('active'/'complete')
     // CodeQL[js/client-side-xss] safe: data from llama.cpp backend API metrics, all values numeric or internal strings
+    // eslint-disable-next-line no-unsanitized/property
     rail.innerHTML = segments.map(segment => {
         let start = Math.max(0, Math.min(100, ((segment.startedAtMs - (now - windowMs)) / windowMs) * 100));
         const endMs = segment.endedAtMs || now;
@@ -310,8 +311,9 @@ function renderSlotGrid(l, hasActiveEndpoint) {
         );
     }
 
-    // eslint-disable-next-line no-unsanitized/property -- tiles built from numeric index, numeric formatMetricNumber output, and hardcoded 'busy'/'idle'/'active' strings
+    // tiles built from numeric index, numeric formatMetricNumber output, and hardcoded 'busy'/'idle'/'active' strings
     // CodeQL[js/client-side-xss] safe: data from llama.cpp backend API, all values numeric or hardcoded strings
+    // eslint-disable-next-line no-unsanitized/property
     grid.innerHTML = tiles.join('');
 }
 
@@ -491,8 +493,9 @@ function getTempSeverityColor(temp) {
 
 function setVizContent(container, html) {
     if (!container) return;
-    // eslint-disable-next-line no-unsanitized/property -- html is always built internally from numeric values, hardcoded CSS class names, and getSeverityColor() hex strings
-    // CodeQL[js/client-side-xss] safe: html built internally from numeric values, colors, and hardcoded CSS class names
+    // html always built internally from numeric values, hardcoded CSS class names, and getSeverityColor() hex strings
+    // CodeQL[js/client-side-xss] safe: html built internally, never from user input
+    // eslint-disable-next-line no-unsanitized/property
     container.innerHTML = html;
 }
 

@@ -445,8 +445,9 @@ function buildMessageElement(msg, idx, allMessages) {
         }
     }
 
-    // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context; user content escaped with escapeHtml().replace(); labels are user-configured display names
-    // CodeQL[js/client-side-xss] safe: data from llama.cpp backend API, not user input; msg.content escaped, other values internal/hardcoded
+    // LLM output rendered via marked.js in trusted local context; user content escaped with escapeHtml().replace(); labels are user-configured display names
+    // CodeQL[js/client-side-xss] safe: data from llama.cpp backend API, msg.content escaped, other values internal/hardcoded
+    // eslint-disable-next-line no-unsanitized/property
     wrapper.innerHTML = `
       <div class="chat-avatar">${isUser ? userLabel : aiLabel}</div>
       <div class="chat-bubble">
