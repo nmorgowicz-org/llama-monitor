@@ -152,6 +152,31 @@
 .chat-tab-pin-icon:not(.pinned) {
   transform: rotate(0deg);
 }
+
+/* Pin tooltip */
+.chat-tab-pin-icon::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: rgba(30, 36, 43, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+.chat-tab-pin-icon:hover::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-8px);
+}
 .chat-tab-pinned .chat-tab-pin-icon {
   opacity: 1;
   pointer-events: auto;

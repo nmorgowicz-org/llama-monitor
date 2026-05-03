@@ -66,11 +66,7 @@ export function initModels() {
     if (initialized) return;
     initialized = true;
 
-    // Bind sidebar button
-    const sidebarBtn = document.getElementById('sidebar-btn-models');
-    if (sidebarBtn) sidebarBtn.addEventListener('click', openModelsModal);
-
-    // Bind modal buttons
+    // Bind modal buttons (sidebar button also bound by nav.js with data-tab="models")
     const closeBtn = document.getElementById('models-modal-close');
     if (closeBtn) closeBtn.addEventListener('click', closeModelsModal);
 

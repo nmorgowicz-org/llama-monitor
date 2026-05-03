@@ -606,7 +606,6 @@ export function initChatParams() {
         }
     });
     document.getElementById('chat-import-btn')?.addEventListener('click', importChatTab);
-    document.addEventListener('click', () => document.getElementById('chat-export-menu')?.classList.add('hidden'));
 
     // Bind chat style cards (event delegation)
     const styleGrid = document.getElementById('chat-style-grid');

@@ -323,9 +323,6 @@ export function initSessions() {
     const sessionForm = document.getElementById('session-form');
     if (sessionForm) sessionForm.addEventListener('submit', saveSession);
 
-    // Bind sidebar sessions button
-    document.getElementById('sidebar-btn-sessions')?.addEventListener('click', openSessionModal);
-
     // Bind nav new session button
     document.getElementById('nav-new-session-btn')?.addEventListener('click', openSessionModal);
 

@@ -176,7 +176,7 @@ export function renderChatTabs() {
             <span class="chat-tab-name" data-chat-tab-rename="${tab.id}">${escapeHtml(tab.name)}</span>
             ${tab.active_template_id ? `<span class="chat-tab-persona"></span>` : ''}
           </div>
-          <svg class="chat-tab-pin-icon ${tab.pinned ? 'pinned' : ''}" width="11" height="11" viewBox="0 0 24 24" fill="${tab.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <svg class="chat-tab-pin-icon ${tab.pinned ? 'pinned' : ''}" width="11" height="11" viewBox="0 0 24 24" fill="${tab.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" aria-hidden="true" data-tooltip="${tab.pinned ? 'Unpin tab' : 'Pin tab'}">
             <path d="M16 12V3h-3V2H8v1H5v9l-2 6 3 1 2-5v9h6v-9l2 5 3-1-2-6z"/>
           </svg>
           <svg class="chat-tab-edit-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">

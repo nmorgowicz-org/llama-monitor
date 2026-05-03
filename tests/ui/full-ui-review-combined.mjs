@@ -237,19 +237,42 @@ fs.mkdirSync(OUTPUT_DIR, { recursive: true });
       await page.screenshot({ path: `${OUTPUT_DIR}/full-13-export-modal.png`, fullPage: true });
       console.log('[FULL UI REVIEW] ✓ full-13-export-modal.png');
 
-      // ====================================
+    // ====================================
       // 14. SETTINGS MODAL
       // ====================================
       console.log('[FULL UI REVIEW] Opening Settings modal...');
       await page.evaluate(() => {
+        // Close any open modal first
+        const closeBtn = document.querySelector('.modal-close');
+        if (closeBtn) closeBtn.click();
+      });
+      await sleep(500);
+      await page.evaluate(() => {
         const settingsBtn = document.querySelector('#sidebar-btn-settings');
         if (settingsBtn) settingsBtn.click();
       });
-      await sleep(3000);
+      await sleep(2000);
       await page.screenshot({ path: `${OUTPUT_DIR}/full-14-settings-modal.png`, fullPage: true });
       console.log('[FULL UI REVIEW] ✓ full-14-settings-modal.png');
 
-          console.log('\n[FULL UI REVIEW] ✅ All screenshots captured successfully!');
+      // ====================================
+      // 15. MODELS MODAL
+      // ====================================
+      console.log('[FULL UI REVIEW] Opening Models modal...');
+      await page.evaluate(() => {
+        const closeBtn = document.querySelector('.modal-close');
+        if (closeBtn) closeBtn.click();
+      });
+      await sleep(500);
+      await page.evaluate(() => {
+        const modelsBtn = document.querySelector('#sidebar-btn-models');
+        if (modelsBtn) modelsBtn.click();
+      });
+      await sleep(2000);
+      await page.screenshot({ path: `${OUTPUT_DIR}/full-15-models-modal.png`, fullPage: true });
+      console.log('[FULL UI REVIEW] ✓ full-15-models-modal.png');
+
+      console.log('\n[FULL UI REVIEW] ✅ All screenshots captured successfully!');
       console.log(`[FULL UI REVIEW] Output directory: ${OUTPUT_DIR}`);
       const files = fs.readdirSync(OUTPUT_DIR).filter(f => f.startsWith('full-')).sort();
       files.forEach(f => console.log(`  - ${f}`));

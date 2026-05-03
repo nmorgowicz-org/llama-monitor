@@ -226,9 +226,8 @@ function _bindSettingsEvents() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initSettings() {
-    // Bind settings button
+    // Bind settings button (sidebar button also bound by nav.js with data-tab="settings")
     document.getElementById('settings-btn')?.addEventListener('click', openSettingsModal);
-    document.getElementById('sidebar-btn-settings')?.addEventListener('click', openSettingsModal);
 
     // Bind settings modal buttons
     document.getElementById('settings-modal-close')?.addEventListener('click', closeSettingsModal);
