@@ -178,7 +178,7 @@ function syncMessageLimitInput() {
 
 // ── Compaction ────────────────────────────────────────────────────────────────
 
-async function compactChatTab(tab, keepTail = 10, summarize = true) {
+async function compactChatTab(tab, keepTail = 15, summarize = true) {
     const msgs = tab.messages;
     const systemMsg = msgs[0]?.role === 'system' && !msgs[0]?.compaction_marker ? msgs[0] : null;
     const tombstones = msgs.filter(m => m.compaction_marker);
@@ -375,10 +375,10 @@ function syncCompactSettingsUI(tab) {
     const btn = document.getElementById('btn-compact');
     if (btn && tab) {
         const conversational = tab.messages.filter(m => m.role !== 'system' && !m.compaction_marker);
-        const willDrop = Math.max(0, conversational.length - 10);
+        const willDrop = Math.max(0, conversational.length - 15);
         btn.title = willDrop > 0
-            ? `Trim context — will remove ${willDrop} oldest messages`
-            : 'Trim context — nothing to remove yet';
+            ? `Compact context — will remove ${willDrop} oldest messages`
+            : 'Compact context — nothing to remove yet';
     }
 }
 

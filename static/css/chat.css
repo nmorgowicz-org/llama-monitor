@@ -104,6 +104,24 @@
 .chat-tab:hover .chat-tab-close { opacity: 1; }
 .chat-tab-close:hover { background: rgba(244, 63, 94, 0.15); color: #f43f5e; }
 
+.chat-tab-edit-icon {
+  opacity: 0;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+.chat-tab:hover .chat-tab-edit-icon { opacity: 0.45; }
+
+/* Drag-to-reorder */
+.chat-tab[draggable] { cursor: grab; }
+.chat-tab[draggable]:active { cursor: grabbing; }
+.chat-tab.tab-dragging { opacity: 0.35; }
+.chat-tab.tab-drop-target {
+  border-left-color: var(--color-primary);
+  box-shadow: -3px 0 0 var(--color-primary);
+}
+
 .chat-tab-add {
   display: flex;
   align-items: center;

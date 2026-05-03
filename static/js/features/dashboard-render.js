@@ -223,8 +223,10 @@ function renderSamplerParamsInline(slot) {
         return;
     }
     const samplerItems = slot.sampler_config || [];
-    const priorityKeys = ['top_k', 'top_p', 'min_p', 'temp', 'dry', 'xtc'];
-    const priorityItems = samplerItems.filter(item => priorityKeys.includes(item.label));
+    const priorityKeys = ['temp', 'top_k', 'top_p', 'min_p', 'dry', 'xtc'];
+    const priorityItems = samplerItems
+        .filter(item => priorityKeys.includes(item.label))
+        .sort((a, b) => priorityKeys.indexOf(a.label) - priorityKeys.indexOf(b.label));
     if (priorityItems.length === 0) {
         el.innerHTML = '';
         return;

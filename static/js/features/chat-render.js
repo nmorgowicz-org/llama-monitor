@@ -129,6 +129,8 @@ export function incrementUnreadCount() {
 
 // ── Tab rendering ─────────────────────────────────────────────────────────────
 
+let _draggedTabId = null;
+
 export function renderChatTabs() {
     ensureChatElements();
     const bar = chatTabBarEl;
@@ -144,10 +146,15 @@ export function renderChatTabs() {
         el.className = 'chat-tab' + (tab.id === chat.activeTabId ? ' active' : '') + extraClasses;
         el.dataset.tabId = tab.id;
         el.dataset.msgCount = msgCount;
+        el.draggable = true;
         // eslint-disable-next-line no-unsanitized/property -- tab.name wrapped in escapeHtml(); tab.id is an internal UUID; message count is numeric
         el.innerHTML = `
           <span class="chat-tab-name" data-chat-tab-rename="${tab.id}">${escapeHtml(tab.name)}</span>
-          <span class="chat-tab-count">${tab.messages.filter(m => m.role !== 'system').length || ''}</span>
+          <svg class="chat-tab-edit-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+          <span class="chat-tab-count">${msgCount || ''}</span>
           ${chat.tabs.length > 1
             ? `<button class="chat-tab-close" data-chat-tab-close="${tab.id}" title="Close tab">×</button>`
             : ''}
@@ -158,6 +165,41 @@ export function renderChatTabs() {
             if (e.target.classList.contains('chat-tab-name') && e.detail === 2) return;
             switchChatTab(tab.id);
         });
+
+        // Drag-to-reorder
+        el.addEventListener('dragstart', e => {
+            _draggedTabId = tab.id;
+            el.classList.add('tab-dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        el.addEventListener('dragend', () => {
+            _draggedTabId = null;
+            bar.querySelectorAll('.chat-tab').forEach(t => {
+                t.classList.remove('tab-dragging', 'tab-drop-target');
+            });
+        });
+        el.addEventListener('dragover', e => {
+            if (_draggedTabId && _draggedTabId !== tab.id) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                bar.querySelectorAll('.chat-tab').forEach(t => t.classList.remove('tab-drop-target'));
+                el.classList.add('tab-drop-target');
+            }
+        });
+        el.addEventListener('dragleave', () => el.classList.remove('tab-drop-target'));
+        el.addEventListener('drop', e => {
+            e.preventDefault();
+            el.classList.remove('tab-drop-target');
+            if (!_draggedTabId || _draggedTabId === tab.id) return;
+            const fromIdx = chat.tabs.findIndex(t => t.id === _draggedTabId);
+            const toIdx = chat.tabs.findIndex(t => t.id === tab.id);
+            if (fromIdx < 0 || toIdx < 0) return;
+            const [moved] = chat.tabs.splice(fromIdx, 1);
+            chat.tabs.splice(toIdx, 0, moved);
+            renderChatTabs();
+            scheduleChatPersist();
+        });
+
         bar.insertBefore(el, addBtn);
     }
     updateTabBarOverflowMask();

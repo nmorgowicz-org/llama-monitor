@@ -28,26 +28,35 @@ import { getExplicitModePolicy } from './chat-templates.js';
 // ── Summarization ──────────────────────────────────────────────────────────────
 
 export async function fetchSummary(messages) {
-    const MAX_TRANSCRIPT_CHARS = 100_000;
-    let transcript = messages
-        .filter(m => !m.compaction_marker)
+    const MAX_TRANSCRIPT_CHARS = 140_000;
+    const conversational = messages.filter(m => !m.compaction_marker);
+    const rawTranscript = conversational
         .map(m => {
             const label = m.role === 'user' ? 'User' : 'Assistant';
             return `${label}: ${m.content}`;
         })
         .join('\n\n');
-    if (transcript.length > MAX_TRANSCRIPT_CHARS) {
-        transcript = transcript.slice(0, MAX_TRANSCRIPT_CHARS) + '\n\n[transcript truncated for length]';
+
+    // Smart truncation: preserve the first 25% (setup/persona/initial context) and the last 75%
+    // (recent events). Slicing only the beginning discards the most important recent turns.
+    let transcript = rawTranscript;
+    if (rawTranscript.length > MAX_TRANSCRIPT_CHARS) {
+        const headChars = Math.floor(MAX_TRANSCRIPT_CHARS * 0.25);
+        const tailChars = MAX_TRANSCRIPT_CHARS - headChars;
+        transcript =
+            rawTranscript.slice(0, headChars) +
+            '\n\n[... middle of conversation omitted for length ...]\n\n' +
+            rawTranscript.slice(-tailChars);
     }
 
     const summaryMessages = [
         {
             role: 'system',
-            content: 'Your task is to create a detailed summary of the conversation so far, paying close attention to the user\'s explicit requests and your previous responses. You will be given the conversation to summarize, and you should output your response directly without any preamble.',
+            content: 'You are a precise context-preservation assistant. Your job is to write a dense, structured summary of a conversation that will be injected as memory when the conversation resumes. Be specific — names, numbers, decisions, and unresolved threads matter. Output only the summary with no preamble or commentary.',
         },
         {
             role: 'user',
-            content: `${transcript}\n\nPlease provide a detailed summary of our conversation above. The summary will be used to restore context when the conversation continues, so it must capture everything needed to pick up exactly where we left off.\n\nInclude:\n- The main topics discussed and the purpose of the conversation\n- Key facts, figures, decisions, or conclusions established\n- Specific requests made and whether/how they were fulfilled\n- Any open questions, unresolved issues, or next steps mentioned\n- Important context, constraints, or preferences expressed by either party\n- The current state of any ongoing task or project\n\nWrite in past tense. Be thorough — omit nothing that would affect how the conversation continues.`,
+            content: `${transcript}\n\n---\n\nWrite a comprehensive memory summary of the conversation above. This summary will replace the conversation history, so it must contain everything needed to continue naturally.\n\nStructure your summary with these sections (omit any that don't apply):\n\n**Participants & Personas**\n- Names, roles, and established character traits (especially important for roleplay or character conversations)\n- Relationship dynamics between participants\n- Any user preferences, communication style, or stated constraints\n\n**Established Facts & Context**\n- Key facts, figures, technical details, or domain knowledge introduced\n- Decisions or conclusions that were agreed upon\n- Any world-building, setting, or scenario details (for creative/roleplay contexts)\n\n**Conversation Arc**\n- What was being discussed, created, or built\n- Major milestones or turning points in the conversation\n- How the most recent exchange ended (tone, content, where things stand)\n\n**Open Threads**\n- Unanswered questions or unresolved topics\n- In-progress tasks or ongoing narrative threads\n- Next steps or things the user said they'd do\n\nBe thorough. Err on the side of too much detail rather than too little — this summary is the only memory the assistant will have.`,
         },
     ];
 
