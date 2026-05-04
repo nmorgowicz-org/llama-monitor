@@ -804,6 +804,8 @@ function editMessageContent(btn) {
         <button class="chat-edit-btn chat-edit-btn-cancel" data-chat-edit="cancel">Cancel</button>
       </div>`;
     const textarea = body.querySelector('.chat-msg-edit-area');
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, window.innerHeight * 0.6) + 'px';
     textarea.focus();
     textarea.selectionStart = textarea.value.length;
 }

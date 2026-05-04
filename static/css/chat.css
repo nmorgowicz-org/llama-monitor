@@ -1347,7 +1347,8 @@
 /* ── Message Edit ──────────────────────────────────── */
 .chat-msg-edit-area {
   width: 100%;
-  min-height: 80px;
+  min-height: 140px;
+  max-height: 60vh;
   padding: 8px 12px;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
@@ -1357,7 +1358,9 @@
   border-radius: 6px;
   color: var(--text-primary);
   resize: vertical;
+  overflow-y: auto;
   outline: none;
+  box-sizing: border-box;
 }
 .chat-msg-edit-area:focus {
   border-color: var(--color-accent);
