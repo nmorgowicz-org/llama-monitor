@@ -624,8 +624,11 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
             const msgIdx = firstVisibleIdx + idx;
             msg = tab?.messages[msgIdx] || null;
         }
-        const hasVariants = msg && msg._variants && msg._variants.length > 1;
+        const variants = msg?._variants || [];
         const variantIdx = msg?._variantIndex || 0;
+        const total = variants.length || 1;
+        const canGoLeft = variants.length > 1 && variantIdx > 0;
+        const canGoRight = variants.length > 1 ? variantIdx < variants.length - 1 : true;
 
         // eslint-disable-next-line no-unsanitized/property -- hardcoded SVG action buttons; variant counts are numeric; disabled attribute is boolean
         actions.innerHTML = `
@@ -636,25 +639,17 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
               <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
             </svg>
           </button>
-          <button class="chat-action-btn" data-chat-action="regenerate" title="Regenerate">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2">
-              <path d="M1 4v6h6M23 20v-6h-6"/>
-              <path d="M20.5 9A9 9 0 005.6 5.6L1 10m22 4l-4.6 4.4A9 9 0 013.5 15"/>
-            </svg>
-          </button>
-          ${hasVariants ? `
-          <button class="chat-action-btn" data-chat-action="nav-variant" data-variant-dir="-1" title="Previous variant" ${variantIdx <= 0 ? 'disabled' : ''}>
+          <button class="chat-action-btn" data-chat-action="nav-variant" data-variant-dir="-1" title="Previous response" ${canGoLeft ? '' : 'disabled'}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M15 18l-6-6 6-6"/>
             </svg>
           </button>
-          <span class="chat-variant-badge">${variantIdx+1}/${msg._variants.length}</span>
-          <button class="chat-action-btn" data-chat-action="nav-variant" data-variant-dir="1" title="Next variant" ${variantIdx >= msg._variants.length-1 ? 'disabled' : ''}>
+          <span class="chat-variant-badge">${variantIdx+1}/${total}</span>
+          <button class="chat-action-btn" data-chat-action="nav-variant" data-variant-dir="1" title="${canGoRight && variants.length <= 1 ? 'Regenerate' : 'Next response'}" ${canGoRight ? '' : 'disabled'}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M9 18l6-6-6-6"/>
             </svg>
-          </button>` : ''}
+          </button>
           <button class="chat-action-btn" data-chat-action="edit" title="Edit">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                  stroke="currentColor" stroke-width="2">
