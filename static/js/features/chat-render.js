@@ -834,7 +834,7 @@ function resendMessageEdit(btn) {
     scheduleChatPersist();
 
     // Use sendChatResend — the user message is already in tab.messages
-    _getTransport?.sendChatResend(tab);
+    getTransport()?.sendChatResend(tab);
 }
 
 function saveMessageEdit(btn) {
