@@ -565,7 +565,7 @@ export function toggleSystemPromptPanel() {
         const paramsPanel = document.getElementById('chat-params-panel');
         const compactBtn = document.getElementById('btn-compact');
         if (stylePanel) stylePanel.style.display = 'none';
-        if (paramsPanel) paramsPanel.style.display = 'none';
+        if (paramsPanel) paramsPanel.classList.remove('open');
         if (compactBtn) compactBtn.classList.remove('active');
         const tab = activeChatTab();
         document.getElementById('chat-system-input').value = tab?.system_prompt ?? '';
