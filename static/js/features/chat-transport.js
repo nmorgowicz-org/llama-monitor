@@ -479,4 +479,5 @@ export function initChatTransport() {
     const transport = () => ({ sendChat, sendChatResend, sendSuggestedPrompt, stopChat });
     setTransportGetter(transport);
     setChatTransportGetter(transport);
+    setChatBusyUI(chat.busy);
 }

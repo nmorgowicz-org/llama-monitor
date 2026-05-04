@@ -157,6 +157,36 @@
    display: flex;
    flex-direction: column;
    gap: 16px;
+   position: relative;
+   overflow: hidden;
+   background:
+     radial-gradient(circle at top right, rgba(255, 255, 255, 0.04), transparent 22%),
+     linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.012));
+ }
+
+ .widget-hardware::after {
+   content: '';
+   position: absolute;
+   inset: 0;
+   pointer-events: none;
+   background:
+     radial-gradient(circle at 12% 18%, rgba(255, 255, 255, 0.025), transparent 18%),
+     linear-gradient(135deg, rgba(255, 255, 255, 0.03), transparent 42%);
+   opacity: 0.9;
+ }
+
+ .widget-gpu {
+   background:
+     radial-gradient(circle at 84% 14%, rgba(244, 63, 94, 0.12), transparent 24%),
+     radial-gradient(circle at 16% 86%, rgba(251, 113, 133, 0.07), transparent 28%),
+     linear-gradient(180deg, rgba(255, 255, 255, 0.034), rgba(255, 255, 255, 0.012));
+ }
+
+ .widget-system {
+   background:
+     radial-gradient(circle at 84% 14%, rgba(96, 165, 250, 0.12), transparent 24%),
+     radial-gradient(circle at 16% 86%, rgba(45, 212, 191, 0.07), transparent 28%),
+     linear-gradient(180deg, rgba(255, 255, 255, 0.034), rgba(255, 255, 255, 0.012));
  }
 
  .hw-device-name {
@@ -245,16 +275,35 @@
  }
 
  .hw-metric-block {
-   background: rgba(255, 255, 255, 0.03);
-   border: 1px solid rgba(255, 255, 255, 0.06);
-   border-radius: 12px;
+   background:
+     radial-gradient(circle at top right, rgba(255, 255, 255, 0.04), transparent 22%),
+     linear-gradient(180deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.018));
+   border: 1px solid rgba(255, 255, 255, 0.07);
+   border-radius: 16px;
    padding: 14px;
    display: flex;
    flex-direction: column;
    gap: 8px;
    min-width: 0;
    min-height: 188px;
-   transition: border-color 200ms ease, background 200ms ease;
+   transition: border-color 200ms ease, background 200ms ease, transform 200ms ease, box-shadow 200ms ease;
+   box-shadow:
+     0 10px 24px rgba(0, 0, 0, 0.18),
+     inset 0 1px 0 rgba(255, 255, 255, 0.04);
+   position: relative;
+   overflow: hidden;
+ }
+
+ .widget-gpu .hw-metric-block {
+   background:
+     radial-gradient(circle at 84% 12%, rgba(244, 63, 94, 0.08), transparent 24%),
+     linear-gradient(180deg, rgba(255, 255, 255, 0.042), rgba(255, 255, 255, 0.018));
+ }
+
+ .widget-system .hw-metric-block {
+   background:
+     radial-gradient(circle at 84% 12%, rgba(96, 165, 250, 0.08), transparent 24%),
+     linear-gradient(180deg, rgba(255, 255, 255, 0.042), rgba(255, 255, 255, 0.018));
  }
 
  .hw-metric-block#gpu-clocks-block,
@@ -264,8 +313,23 @@
  }
 
  .hw-metric-block:hover {
-   border-color: rgba(255, 255, 255, 0.1);
-   background: rgba(255, 255, 255, 0.04);
+   border-color: rgba(255, 255, 255, 0.12);
+   background:
+     radial-gradient(circle at top right, rgba(255, 255, 255, 0.05), transparent 22%),
+     linear-gradient(180deg, rgba(255, 255, 255, 0.046), rgba(255, 255, 255, 0.024));
+   transform: translateY(-2px);
+   box-shadow:
+     0 16px 32px rgba(0, 0, 0, 0.24),
+     inset 0 1px 0 rgba(255, 255, 255, 0.05);
+ }
+
+ .hw-metric-block::before {
+   content: '';
+   position: absolute;
+   inset: 0;
+   pointer-events: none;
+   background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 38%);
+   opacity: 0.9;
  }
 
  .hw-metric-label {
@@ -274,6 +338,8 @@
    color: var(--color-text-muted);
    text-transform: uppercase;
    letter-spacing: 0.04em;
+   position: relative;
+   z-index: 1;
  }
 
  .hw-metric-viz {
@@ -301,24 +367,49 @@
    white-space: nowrap;
    overflow: hidden;
    text-overflow: ellipsis;
+   position: relative;
+   z-index: 1;
  }
 
  /* Bar visualization */
  .hw-bar-bg {
    width: 100%;
-   height: 6px;
-   border-radius: 3px;
-   background: rgba(255, 255, 255, 0.06);
+   height: 10px;
+   border-radius: 999px;
+   background:
+     linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+     rgba(255, 255, 255, 0.04);
    overflow: hidden;
-   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
- }
+   box-shadow:
+     inset 0 1px 0 rgba(255, 255, 255, 0.08),
+     inset 0 -1px 2px rgba(0, 0, 0, 0.22),
+     0 10px 20px rgba(0, 0, 0, 0.14);
+   position: relative;
+  }
+
+  .hw-bar-bg::before {
+    content: '';
+    position: absolute;
+    inset: 2px 4px;
+    border-radius: inherit;
+    background:
+      repeating-linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.08) 0 1px,
+        transparent 1px 14px
+      );
+    opacity: 0.22;
+    pointer-events: none;
+  }
 
  .hw-bar-fill {
     height: 100%;
-    border-radius: 3px;
+    border-radius: 999px;
     background: linear-gradient(90deg, var(--bar-start, #8fbcbb), var(--bar-end, #88c0d1));
     transition: width 300ms ease, background 300ms ease;
-    box-shadow: 0 0 10px var(--bar-start, #8fbcbb);
+    box-shadow:
+      0 0 12px color-mix(in srgb, var(--bar-start, #8fbcbb) 70%, transparent),
+      0 0 22px color-mix(in srgb, var(--bar-start, #8fbcbb) 30%, transparent);
     position: relative;
     overflow: hidden;
     animation: hw-bar-glow 3s ease-in-out infinite;
@@ -339,6 +430,30 @@
     background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
     transform: translateX(-100%);
     animation: hw-bar-shimmer 2.5s ease-in-out infinite;
+  }
+
+  .hw-bar-cap {
+    position: absolute;
+    top: 50%;
+    left: clamp(7px, var(--pct, 0%), calc(100% - 7px));
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    transform: translate(-50%, -50%);
+    background:
+      radial-gradient(circle, rgba(255, 255, 255, 1) 0 26%, color-mix(in srgb, white 65%, var(--bar-end, #88c0d1) 35%) 26% 50%, var(--bar-end, #88c0d1) 50% 72%, transparent 78%);
+    box-shadow:
+      0 0 0 2px rgba(10, 12, 16, 0.72),
+      0 0 14px color-mix(in srgb, var(--bar-end, #88c0d1) 72%, transparent),
+      0 0 28px color-mix(in srgb, var(--bar-end, #88c0d1) 34%, transparent);
+    pointer-events: none;
+    z-index: 2;
+    animation: hw-bar-cap-pulse 2.6s ease-in-out infinite;
+  }
+
+  @keyframes hw-bar-cap-pulse {
+    0%, 100% { transform: translate(-50%, -50%) scale(0.96); }
+    50% { transform: translate(-50%, -50%) scale(1.08); }
   }
 
   .hw-bar-fill.is-hot {
@@ -385,8 +500,14 @@
     width: 100%;
     height: clamp(72px, 11vh, 110px);
     overflow: visible;
-    border-radius: 8px;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01));
+    border-radius: 12px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)),
+      repeating-linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.03) 0 1px,
+        transparent 1px 16px
+      );
     animation: hw-sparkline-glow 3s ease-in-out infinite;
   }
 
@@ -417,6 +538,15 @@
     height: clamp(46px, 8vh, 82px);
     margin-top: 2px;
     overflow: visible;
+    border-radius: 12px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.008)),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.02), transparent 18%, transparent 82%, rgba(255, 255, 255, 0.02)),
+      repeating-linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.024) 0 1px,
+        transparent 1px 16px
+      );
   }
 
   .hw-metric-sparkline .sparkline-line {
@@ -428,35 +558,86 @@
   }
 
   .hw-metric-sparkline .sparkline-fill {
-    opacity: 0.16;
+    opacity: 0.2;
   }
 
   .hw-metric-sparkline .sparkline-peak {
-    animation: hw-peak-pulse 1.8s ease-in-out infinite;
+    animation: hw-peak-pulse 2.1s ease-in-out infinite;
     transform-origin: center;
     transform-box: fill-box;
+    opacity: 0.78;
+  }
+
+  .hw-metric-sparkline .sparkline-current-halo {
+    animation: hw-current-halo 2s ease-in-out infinite;
+    transform-origin: center;
+    transform-box: fill-box;
+  }
+
+  .hw-metric-sparkline .sparkline-current {
+    filter: drop-shadow(0 0 8px currentColor);
+    animation: hw-current-dot 2s ease-in-out infinite;
+    transform-origin: center;
+    transform-box: fill-box;
+  }
+
+  .hw-metric-sparkline .sparkline-current-core {
+    opacity: 0.96;
   }
 
   .hw-metric-sparkline {
     animation: hw-sparkline-glow 3s ease-in-out infinite;
   }
 
+  @keyframes hw-current-halo {
+    0%, 100% { opacity: 0.12; transform: scale(0.9); }
+    50% { opacity: 0.22; transform: scale(1.15); }
+  }
+
+  @keyframes hw-current-dot {
+    0%, 100% { transform: scale(0.96); }
+    50% { transform: scale(1.08); }
+  }
+
  /* Stacked bar visualization */
  .hw-stacked-bg {
    width: 100%;
-   height: 6px;
-   border-radius: 3px;
-   background: rgba(255, 255, 255, 0.06);
+   height: 10px;
+   border-radius: 999px;
+   background:
+     linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+     rgba(255, 255, 255, 0.04);
    overflow: hidden;
-   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+   box-shadow:
+     inset 0 1px 0 rgba(255, 255, 255, 0.08),
+     inset 0 -1px 2px rgba(0, 0, 0, 0.22),
+     0 10px 20px rgba(0, 0, 0, 0.14);
+   position: relative;
+ }
+
+ .hw-stacked-bg::before {
+   content: '';
+   position: absolute;
+   inset: 2px 4px;
+   border-radius: inherit;
+   background:
+     repeating-linear-gradient(
+       90deg,
+       rgba(255, 255, 255, 0.08) 0 1px,
+       transparent 1px 14px
+     );
+   opacity: 0.22;
+   pointer-events: none;
  }
 
 .hw-stacked-fill {
     height: 100%;
-    border-radius: 3px;
+    border-radius: 999px;
     background: linear-gradient(90deg, var(--bar-start, #8fbcbb), var(--bar-end, #88c0d1));
     transition: width 300ms ease;
-    box-shadow: 0 0 10px var(--bar-start, #8fbcbb);
+    box-shadow:
+      0 0 12px color-mix(in srgb, var(--bar-start, #8fbcbb) 70%, transparent),
+      0 0 22px color-mix(in srgb, var(--bar-start, #8fbcbb) 30%, transparent);
     animation: hw-bar-glow 3s ease-in-out infinite;
   }
 
@@ -490,20 +671,8 @@
     overflow: hidden;
   }
 
-  .hw-clock-gpu-layout {
-    display: grid;
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
-    width: 100%;
-    max-width: 100%;
-    padding-inline: 8px;
-  }
-
   .hw-clock-gpu-layout .hw-clock-cluster {
-    width: min(84px, 100%);
+    width: min(96px, 100%);
     margin: 0 auto;
   }
 
@@ -540,7 +709,7 @@
   }
 
   .hw-clock-orbit.inner {
-    inset: 15%;
+    inset: 20%;
   }
 
   .hw-clock-orbit-track,
@@ -581,26 +750,31 @@
     position: absolute;
     left: 50%;
     top: 50%;
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
     border-radius: 999px;
     transform-origin: 0 0;
   }
 
   .hw-clock-orbit-dot {
-    background: radial-gradient(circle, rgba(255, 255, 255, 0.96) 0 26%, var(--orbit-color, #8fbcbb) 42%, transparent 78%);
+    background:
+      radial-gradient(circle, rgba(255, 255, 255, 1) 0 24%, color-mix(in srgb, white 72%, var(--orbit-color, #8fbcbb) 28%) 24% 48%, var(--orbit-color, #8fbcbb) 48% 72%, transparent 78%);
     transform:
       rotate(var(--orbit-angle))
       translateY(calc(var(--dot-radius, -68px)))
       rotate(calc(var(--orbit-angle) * -1));
-    box-shadow: 0 0 18px var(--orbit-color, #8fbcbb);
+    box-shadow:
+      0 0 0 2px rgba(10, 12, 16, 0.72),
+      0 0 20px color-mix(in srgb, var(--orbit-color, #8fbcbb) 92%, white 8%),
+      0 0 34px color-mix(in srgb, var(--orbit-color, #8fbcbb) 48%, transparent);
     animation: hw-clock-orbit-dot-pulse var(--pulse-duration, 3.2s) ease-in-out infinite;
+    z-index: 2;
   }
 
   .hw-clock-orbit-peak,
   .hw-clock-orbit-low {
-    width: 6px;
-    height: 8px;
+    width: 5px;
+    height: 7px;
     border: 1px solid rgba(255, 255, 255, 0.18);
     background: rgba(15, 17, 21, 0.95);
   }
@@ -614,8 +788,8 @@
   }
 
   .hw-clock-orbit-low {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
     transform:
       rotate(var(--low-angle))
       translateY(calc(var(--dot-radius, -68px)))
@@ -627,11 +801,11 @@
     0%, 100% { transform:
       rotate(var(--orbit-angle))
       translateY(calc(var(--dot-radius, -68px)))
-      rotate(calc(var(--orbit-angle) * -1)) scale(0.94); }
+      rotate(calc(var(--orbit-angle) * -1)) scale(0.96); }
     50% { transform:
       rotate(var(--orbit-angle))
       translateY(calc(var(--dot-radius, -68px)))
-      rotate(calc(var(--orbit-angle) * -1)) scale(1.18); }
+      rotate(calc(var(--orbit-angle) * -1)) scale(1.14); }
   }
 
   .hw-clock-core {
@@ -754,8 +928,8 @@
 
   .hw-clock-gpu-readout {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 24px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
     align-items: start;
     align-self: stretch;
     width: 100%;
@@ -877,23 +1051,236 @@
     white-space: nowrap;
   }
 
-  .hw-clock-system-layout {
+  .hw-clock-gpu-layout {
     display: grid;
-    grid-template-columns: minmax(112px, 132px) minmax(34px, 48px);
+    grid-template-columns: minmax(108px, 120px) minmax(0, 1fr);
+    grid-template-areas:
+      'cluster legend'
+      'cluster readout';
     align-items: center;
-    justify-content: center;
-    gap: 10px;
+    gap: 6px 8px;
     width: 100%;
     max-width: 100%;
-    padding-inline: 4px;
+  }
+
+  .hw-clock-gpu-layout .hw-clock-cluster {
+    grid-area: cluster;
+    justify-self: start;
+    margin: 0;
+  }
+
+  .hw-clock-gpu-legend {
+    grid-area: legend;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    align-self: end;
+  }
+
+  .hw-clock-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+
+  .hw-clock-legend-swatch {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: currentColor;
+    box-shadow: 0 0 10px currentColor;
+    flex-shrink: 0;
+  }
+
+  .hw-clock-legend-swatch.sclk {
+    color: #8fbcbb;
+  }
+
+  .hw-clock-legend-swatch.mclk {
+    color: #60a5fa;
+  }
+
+  .hw-clock-legend-text {
+    color: var(--color-text-secondary);
+    font-family: var(--font-mono);
+    font-size: 0.48rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .hw-clock-gpu-readout .hw-clock-meter {
+    justify-items: stretch;
+    gap: 5px;
+  }
+
+  .hw-clock-gpu-readout .hw-clock-meter-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .hw-clock-gpu-readout .hw-clock-meter-label::after {
+    content: '';
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--meter-color, #8fbcbb) 78%, white 22%);
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--meter-color, #8fbcbb) 18%, transparent),
+      0 0 12px color-mix(in srgb, var(--meter-color, #8fbcbb) 60%, transparent);
+  }
+
+  .hw-clock-gpu-readout .hw-clock-meter-value,
+  .hw-clock-gpu-readout .hw-clock-meter-band {
+    text-align: left;
+  }
+
+  .hw-clock-gpu-readout .hw-clock-meter-bar::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: calc(var(--pct, 0) * 1%);
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.96) 0 30%, color-mix(in srgb, var(--meter-color, #8fbcbb) 82%, white 18%) 40%, var(--meter-color, #8fbcbb) 68%, transparent 78%);
+    box-shadow:
+      0 0 0 2px rgba(9, 11, 15, 0.74),
+      0 0 16px color-mix(in srgb, var(--meter-color, #8fbcbb) 68%, transparent);
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .hw-clock-gpu-readout .hw-clock-meter-value {
+    font-size: 0.72rem;
+  }
+
+  .hw-clock-gpu-readout .hw-clock-meter-band {
+    font-size: 0.45rem;
+  }
+
+  .hw-clock-gpu-readout .hw-clock-footer-spark {
+    height: 34px;
+    border-radius: 8px;
+  }
+
+  .hw-clock-system-readout .hw-clock-meter-bar,
+  .hw-clock-gpu-readout .hw-clock-meter-bar {
+    min-height: 18px;
+    border-radius: 999px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)),
+      rgba(255, 255, 255, 0.04);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      inset 0 -1px 2px rgba(0, 0, 0, 0.22),
+      0 10px 20px rgba(0, 0, 0, 0.14);
+  }
+
+  .hw-clock-system-readout .hw-clock-meter-bar::before,
+  .hw-clock-gpu-readout .hw-clock-meter-bar::before {
+    inset: 3px 4px;
+    background:
+      repeating-linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.08) 0 1px,
+        transparent 1px 14px
+      );
+    opacity: 0.22;
+  }
+
+  .hw-clock-system-readout .hw-clock-meter-fill,
+  .hw-clock-gpu-readout .hw-clock-meter-fill {
+    box-shadow:
+      0 0 12px color-mix(in srgb, var(--meter-color, #8fbcbb) 70%, transparent),
+      0 0 22px color-mix(in srgb, var(--meter-color, #8fbcbb) 30%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  }
+
+  .hw-clock-system-readout .hw-clock-meter-fill::after,
+  .hw-clock-gpu-readout .hw-clock-meter-fill::after {
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.34), transparent);
+    transform: translateX(-100%);
+    animation: hw-bar-shimmer 2.5s ease-in-out infinite;
+  }
+
+  .hw-clock-system-layout {
+    display: grid;
+    grid-template-columns: minmax(120px, 138px) minmax(0, 1fr);
+    align-items: center;
+    justify-content: stretch;
+    gap: 14px;
+    width: 100%;
+    max-width: 100%;
+    padding-inline: 2px;
   }
 
   .hw-clock-system-layout .hw-clock-cluster {
-    width: min(118px, 100%);
+    width: min(124px, 100%);
+    justify-self: start;
+  }
+
+  .hw-clock-system-readout {
+    display: grid;
+    grid-template-rows: auto auto auto;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
   }
 
   .hw-clock-system-layout .hw-clock-meter {
-    min-height: 50px;
+    width: 100%;
+    min-height: 0;
+    justify-items: stretch;
+    gap: 8px;
+  }
+
+  .hw-clock-system-meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .hw-clock-system-readout .hw-clock-meter-value {
+    font-size: 1rem;
+  }
+
+  .hw-clock-system-readout .hw-clock-meter-band {
+    text-align: right;
+  }
+
+  .hw-clock-system-readout .hw-clock-meter-bar::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: calc(var(--pct, 0) * 1%);
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.96) 0 30%, color-mix(in srgb, var(--meter-color, #8fbcbb) 82%, white 18%) 40%, var(--meter-color, #8fbcbb) 68%, transparent 78%);
+    box-shadow:
+      0 0 0 2px rgba(9, 11, 15, 0.74),
+      0 0 16px color-mix(in srgb, var(--meter-color, #8fbcbb) 68%, transparent);
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    pointer-events: none;
+    animation: hw-bar-cap-pulse 2.6s ease-in-out infinite;
+  }
+
+  .hw-clock-system-spark {
+    height: 68px;
+    margin-top: 2px;
   }
 
   .hw-clock-chip {
@@ -1281,3 +1668,47 @@
   font-size: var(--text-sm);
 }
 
+@media (max-width: 980px) {
+  .hw-clock-gpu-layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'cluster'
+      'legend'
+      'readout';
+    justify-items: center;
+  }
+
+  .hw-clock-gpu-layout .hw-clock-cluster {
+    justify-self: center;
+  }
+
+  .hw-clock-gpu-legend {
+    justify-content: center;
+    align-self: center;
+  }
+}
+
+@media (max-width: 720px) {
+  .hw-clock-gpu-readout {
+    grid-template-columns: 1fr;
+  }
+
+  .hw-clock-system-layout {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+
+  .hw-clock-system-layout .hw-clock-cluster {
+    justify-self: center;
+  }
+
+  .hw-clock-system-meta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .hw-clock-system-readout .hw-clock-meter-band {
+    text-align: left;
+  }
+}

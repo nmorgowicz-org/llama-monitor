@@ -267,6 +267,14 @@ export function initAttachDetach() {
     const btnStop = document.getElementById('btn-stop');
     if (btnStop) btnStop.addEventListener('click', doStop);
 
+    // Bind logs empty state button
+    const btnSpawnFromLogs = document.getElementById('btn-spawn-server');
+    if (btnSpawnFromLogs) btnSpawnFromLogs.addEventListener('click', () => {
+        doStart();
+        // Switch to server tab to see metrics
+        window.switchTab?.('server');
+    });
+
     // Initialize button states
     initAttachDetachButtons();
 }

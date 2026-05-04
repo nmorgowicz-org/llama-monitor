@@ -2,6 +2,8 @@
 
 The capabilities object describes what metrics and features are available for the current session. It is included in every WebSocket push (`capabilities` field) and is also available via `GET /api/capabilities`.
 
+The `/api/capabilities` endpoint adds a `tray_mode` field not present in WebSocket messages.
+
 ---
 
 ## MetricsCapabilities Object
@@ -87,6 +89,14 @@ Included alongside capabilities in the WebSocket message and `/api/capabilities`
 | `"Spawn"` | llama-monitor started the llama.cpp server process |
 | `"Attach"` | llama-monitor attached to an already-running server |
 | `"None"` | No active session |
+
+### `tray_mode` (API-only, not in WebSocket)
+
+| Value | Meaning |
+|-------|---------|
+| `"Desktop"` | Running in desktop environment with tray icon support |
+| `"Headless"` | No graphical session; tray not available |
+| `"Failed"` | Tray initialization failed |
 
 ---
 

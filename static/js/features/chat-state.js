@@ -102,17 +102,23 @@ export async function initChatTabs() {
     chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
 
    // Trigger context card update - mark that chat tabs loaded so dashboard can poll
-    if (typeof window.onChatTabsLoaded === 'function') {
-        window.onChatTabsLoaded();
-    }
+     if (typeof window.onChatTabsLoaded === 'function') {
+         window.onChatTabsLoaded();
+     }
 
-    // Show welcome tip on first visit
-    if (!localStorage.getItem('llama-monitor-chat-welcomed')) {
-        localStorage.setItem('llama-monitor-chat-welcomed', 'true');
-        setTimeout(() => {
-            showToast('Tip: try a suggested prompt below to get started', 'info');
-        }, 800);
-    }
+     // Show chat tip only when user is on monitor view with an active chat session
+     const { setupViewState } = await import('../core/app-state.js');
+     if (setupViewState.view === 'monitor') {
+         const activeTab = activeChatTab();
+         if (activeTab && activeTab.messages.length > 0) {
+             if (!localStorage.getItem('llama-monitor-chat-tips-seen')) {
+                 localStorage.setItem('llama-monitor-chat-tips-seen', 'true');
+                 setTimeout(() => {
+                     showToast('Tip: try a suggested prompt below to get started', 'info');
+                 }, 800);
+             }
+         }
+     }
 }
 
 // ── Tab CRUD ───────────────────────────────────────────────────────────────────

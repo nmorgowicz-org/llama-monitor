@@ -199,7 +199,7 @@ function updateEndpointStrip(d) {
         let modeClass = 'unknown';
         let modeText = 'Unknown';
         let statusClass = 'ok';
-        let statusText = 'OK';
+        let statusText = 'Full telemetry';
 
         if (d.endpoint_kind === 'Local') {
             modeClass = 'local';
@@ -560,6 +560,9 @@ function updateSystemCard(d) {
 
 function updateLogs(d) {
     const logs = d.logs || [];
+    const isAttached = d.session_mode === 'attach' && d.active_session_endpoint;
+    const emptyState = document.getElementById('logs-empty-state');
+    const logsPage = document.getElementById('page-logs');
 
     if (logs.length !== sessionState.prevLogLen) {
         const el = cachedElements.logPanel;
@@ -571,6 +574,18 @@ function updateLogs(d) {
         }
 
         sessionState.prevLogLen = logs.length;
+    }
+
+    // Remote attach sessions never have local console output, so keep the empty
+    // state accurate even when the log length remains at zero across updates.
+    if (emptyState) {
+        if (isAttached && logs.length === 0) {
+            emptyState.classList.add('visible');
+            logsPage?.classList.add('logs-empty-mode');
+        } else {
+            emptyState.classList.remove('visible');
+            logsPage?.classList.remove('logs-empty-mode');
+        }
     }
 }
 

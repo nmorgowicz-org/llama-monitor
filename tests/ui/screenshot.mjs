@@ -1,237 +1,287 @@
 import puppeteer from 'puppeteer';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { spawn } from 'child_process';
+import net from 'net';
 
-const BASE_URL = process.env.LLAMA_MONITOR_URL || 'http://localhost:7778';
-const REMOTE_SERVER = 'http://192.168.2.16:8001';
-const OUTPUT_DIR = '../../docs/screenshots';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const OUTPUT_DIR = join(__dirname, '../../docs/screenshots');
+
+const REMOTE_SERVER = process.env.REMOTE_SERVER || 'http://192.168.2.16:8001';
 const CHAT_ONLY = process.argv.includes('--chat-only');
+const SCREENSHOT_PORT = parseInt(process.env.SCREENSHOT_PORT || '8891', 10);
+const SCREENSHOT_TAB_PREFIX = '[screenshot]';
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
-(async () => {
-  console.log('Launching browser...');
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-  });
-
-  const page = await browser.newPage();
-  await page.setViewport({ width: 1440, height: 900 });
-
-  try {
-    if (CHAT_ONLY) {
-      await captureChatOnly(page, BASE_URL, REMOTE_SERVER);
-    } else {
-      await captureAll(page, BASE_URL, REMOTE_SERVER);
+async function findAvailablePort(startPort = SCREENSHOT_PORT) {
+    for (let port = startPort; port < startPort + 200; port++) {
+        const available = await new Promise(resolve => {
+            const server = net.createServer();
+            server.unref();
+            server.on('error', () => resolve(false));
+            server.listen(port, '127.0.0.1', () => {
+                server.close(() => resolve(true));
+            });
+        });
+        if (available) return port;
     }
-  } catch (err) {
-    console.error('Error:', err.message);
-    console.error(err.stack);
-  } finally {
-    await browser.close();
-  }
-})();
-
-async function captureAll(page, baseUrl, remoteServer) {
-  console.log('Taking welcome screen screenshot...');
-  await page.goto(baseUrl, { waitUntil: 'networkidle0' });
-  await sleep(3000);
-  await page.screenshot({ path: `${OUTPUT_DIR}/01-welcome.png`, fullPage: true });
-  console.log('Done: 01-welcome.png');
-
-  await attachToServer(page, remoteServer);
-
-  console.log('Taking inference metrics screenshot...');
-  await page.click('button[onclick="switchTab(\'server\')"]');
-  await sleep(5000);
-  await page.screenshot({ path: `${OUTPUT_DIR}/02-inference-metrics.png`, fullPage: true });
-  console.log('Done: 02-inference-metrics.png');
-
-  await captureChat(page, '03-chat-inline.png');
-
-  console.log('Taking GPU/system metrics screenshot...');
-  await page.click('button[onclick="switchTab(\'server\')"]');
-  await sleep(3000);
-  await page.evaluate(() => {
-    const gpuSection = document.getElementById('gpu-section');
-    if (gpuSection) gpuSection.scrollIntoView({ behavior: 'instant', block: 'start' });
-  });
-  await sleep(2000);
-  await page.screenshot({ path: `${OUTPUT_DIR}/04-gpu-metrics.png`, fullPage: true });
-  console.log('Done: 04-gpu-metrics.png');
-
-  console.log('Taking logs screenshot...');
-  await page.click('button[onclick="switchTab(\'logs\')"]');
-  await sleep(2000);
-  await page.screenshot({ path: `${OUTPUT_DIR}/05-logs.png`, fullPage: true });
-  console.log('Done: 05-logs.png');
-
-  console.log('\nAll screenshots saved to docs/screenshots/');
+    throw new Error(`No available port found starting at ${startPort}`);
 }
 
-async function captureChatOnly(page, baseUrl, remoteServer) {
-  console.log('[CHAT ONLY] Navigating and attaching to server...');
-  await page.goto(baseUrl, { waitUntil: 'networkidle0' });
-  await sleep(3000);
-
-  await attachToServer(page, remoteServer);
-
-  console.log('[CHAT ONLY] Switching to chat tab...');
-  await page.click('button[onclick="switchTab(\'chat\')"]');
-  await sleep(2000);
-
-  // Create two extra tabs to demonstrate multi-tab bar
-  console.log('[CHAT ONLY] Creating extra tabs...');
-  await page.evaluate(() => {
-    const addBtn = document.querySelector('.chat-tab-add');
-    if (addBtn) { addBtn.click(); addBtn.click(); }
-  });
-  await sleep(500);
-
-  // Switch back to first tab and inject a rich sample conversation
-  console.log('[CHAT ONLY] Injecting sample conversation...');
-  await page.evaluate(() => {
-    if (window.chatTabs && window.chatTabs.length > 1) {
-      switchChatTab(window.chatTabs[0].id);
+async function waitForHttp(url, timeout = 30000) {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+        try {
+            const response = await fetch(url, { method: 'GET' });
+            if (response.ok) return;
+        } catch (_) {
+            // keep polling
+        }
+        await sleep(250);
     }
-    const t = activeChatTab();
-    if (!t) return;
+    throw new Error(`Server did not become ready at ${url} within ${timeout}ms`);
+}
 
-    // Rename tabs for the screenshot
-    if (window.chatTabs) {
-      if (window.chatTabs[0]) window.chatTabs[0].name = 'Rust vs Go';
-      if (window.chatTabs[1]) window.chatTabs[1].name = 'Refactor help';
-      if (window.chatTabs[2]) window.chatTabs[2].name = 'New Chat';
+async function spawnLlamaMonitor(port) {
+    const binaryPath = join(__dirname, '../../target/release/llama-monitor');
+    const proc = spawn(binaryPath, ['--port', String(port), '--headless'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    proc.stdout.on('data', data => {
+        const output = data.toString().trim();
+        if (output) console.log(`[llama-monitor] ${output}`);
+    });
+
+    proc.stderr.on('data', data => {
+        const output = data.toString().trim();
+        if (output) console.log(`[llama-monitor] ${output}`);
+    });
+
+    proc.on('error', err => {
+        console.error(`Failed to spawn llama-monitor: ${err.message}`);
+    });
+
+    const url = `http://127.0.0.1:${port}`;
+    await waitForHttp(url);
+    return { proc, url };
+}
+
+async function cleanupServer(server) {
+    if (!server?.proc) return;
+    server.proc.kill('SIGTERM');
+    await sleep(750);
+    if (server.proc.exitCode === null) {
+        server.proc.kill('SIGKILL');
     }
+}
 
-    t.ai_name = 'Qwen3.6';
-    t.user_name = 'Nick';
-    t.messages = [
-      {
-        role: 'user',
-        content: 'What are the key differences between Rust and Go for systems programming?',
-        timestamp_ms: Date.now() - 120000,
-      },
-      {
-        role: 'assistant',
-        content: `Great question. Here are the main differences:\n\n**Memory Safety**\nRust enforces ownership and borrowing at compile time — no GC, no dangling pointers. Go uses a garbage collector, which simplifies code but adds latency.\n\n**Concurrency**\n\`\`\`rust\nuse std::thread;\n\nfn main() {\n    let handle = thread::spawn(|| {\n        println!("Hello from a thread!");\n    });\n    handle.join().unwrap();\n}\n\`\`\`\n\nGo uses goroutines and channels — simpler mental model, but no compile-time data-race prevention.\n\n**Performance**\nRust has zero-cost abstractions and no GC pauses. Go trades some performance for developer speed.\n\nWant me to benchmark a specific use case?`,
-        timestamp_ms: Date.now() - 90000,
-        input_tokens: 42,
-        output_tokens: 187,
-      },
-      {
-        role: 'user',
-        content: 'Show me a Rust example of safe concurrent shared state.',
-        timestamp_ms: Date.now() - 60000,
-      },
-      {
-        role: 'assistant',
-        content: `Sure — the standard pattern uses \`Arc<Mutex<T>>\`:\n\n\`\`\`rust\nuse std::sync::{Arc, Mutex};\nuse std::thread;\n\nfn main() {\n    let counter = Arc::new(Mutex::new(0u32));\n\n    let handles: Vec<_> = (0..4).map(|_| {\n        let c = Arc::clone(&counter);\n        thread::spawn(move || {\n            let mut val = c.lock().unwrap();\n            *val += 1;\n        })\n    }).collect();\n\n    for h in handles { h.join().unwrap(); }\n    println!("Final: {}", *counter.lock().unwrap()); // always 4\n}\n\`\`\`\n\n- \`Arc\` — atomic reference count (cheap clone, heap-allocated)\n- \`Mutex\` — exclusive lock; \`.lock()\` blocks until acquired\n- The compiler **prevents** sharing without \`Arc\`; no runtime surprise\n\nFor read-heavy workloads, swap \`Mutex\` for \`RwLock\` to allow concurrent readers.`,
-        timestamp_ms: Date.now() - 30000,
-        input_tokens: 230,
-        output_tokens: 312,
-      },
-    ];
+async function waitForMonitor(page) {
+    await page.waitForFunction(() => {
+        const setup = document.getElementById('view-setup');
+        const monitor = document.getElementById('view-monitor');
+        if (!setup || !monitor) return false;
+        return getComputedStyle(monitor).display !== 'none' && getComputedStyle(setup).display === 'none';
+    }, { timeout: 30000 });
+}
 
-    // Set visible_message_limit low enough to trigger the Load More button
-    t.visible_message_limit = 3;
-
-    renderChatMessages();
-    renderChatTabs();
-  });
-  await sleep(1200); // let hljs run on the code blocks
-
-  // Open model params panel to show the controls
-  console.log('[CHAT ONLY] Opening model params panel...');
-  await page.evaluate(() => {
-    const btn = document.getElementById('btn-model-params');
-    if (btn) btn.click();
-  });
-  await sleep(500);
-
-  // Set a non-default temperature to light up the dirty indicator
-  console.log('[CHAT ONLY] Setting non-default temperature...');
-  await page.evaluate(() => {
-    const slider = document.getElementById('param-temperature');
-    if (slider) {
-      slider.value = '0.4';
-      slider.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-  });
-  await sleep(300);
-
-  await page.screenshot({ path: `${OUTPUT_DIR}/03-chat.png`, fullPage: true });
-  console.log('Done: 03-chat.png');
-
-  // Second shot: chat-only with system prompt panel open (for docs variety)
-  await page.evaluate(() => {
-    const paramsBtn = document.getElementById('btn-model-params');
-    if (paramsBtn) paramsBtn.click(); // close params
-  });
-  await sleep(400);
-  await page.evaluate(() => {
-    const sysBtn = document.getElementById('btn-system-prompt');
-    if (sysBtn) sysBtn.click();
-  });
-  await sleep(500);
-
-  await page.screenshot({ path: `${OUTPUT_DIR}/chat-system-prompt.png`, fullPage: true });
-  console.log('Done: chat-system-prompt.png');
+async function switchTab(page, tabName) {
+    await page.click(`button[data-tab="${tabName}"]`);
+    await page.waitForFunction((name) => {
+        const tab = document.querySelector(`button[data-tab="${name}"]`);
+        const pageEl = document.getElementById(`page-${name}`);
+        if (!tab || !pageEl) return false;
+        const activeTab = tab.classList.contains('active') || tab.classList.contains('selected');
+        const activePage = pageEl.classList.contains('active');
+        return activeTab && activePage;
+    }, { timeout: 10000 }, tabName);
 }
 
 async function attachToServer(page, remoteServer) {
-  console.log('Attaching to remote server...');
-  await page.evaluate((url) => {
-    const input = document.getElementById('setup-endpoint-url');
-    if (input) {
-      input.value = url;
-      input.dispatchEvent(new Event('input', { bubbles: true }));
+    console.log(`Attaching to ${remoteServer}...`);
+    await page.waitForSelector('#setup-endpoint-url', { visible: true });
+    await page.$eval('#setup-endpoint-url', (input, url) => {
+        input.value = url;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, remoteServer);
+    await sleep(200);
+    await page.click('#setup-attach-btn');
+    await waitForMonitor(page);
+    await page.waitForFunction(
+        endpoint => document.getElementById('endpoint-url-display')?.textContent?.includes(endpoint),
+        { timeout: 15000 },
+        remoteServer
+    ).catch(() => null);
+    await sleep(1500);
+}
+
+async function clearExistingChats(page) {
+    await page.evaluate(() => {
+        const clearBtn = document.getElementById('btn-clear');
+        clearBtn?.click();
+    });
+    await sleep(200);
+}
+
+async function cleanupScreenshotTabs(page, { keepOne = false } = {}) {
+    await page.evaluate(async ({ prefix, keepOne }) => {
+        const { chat } = await import('/js/core/app-state.js');
+        const { newChatTab, persistChatTabs } = await import('/js/features/chat-state.js');
+        const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+
+        const screenshotTabs = chat.tabs.filter(tab => tab.name.startsWith(prefix));
+        const keepId = keepOne ? screenshotTabs.at(-1)?.id : null;
+
+        chat.tabs = chat.tabs.filter(tab => {
+            if (!tab.name.startsWith(prefix)) return true;
+            return keepOne && tab.id === keepId;
+        });
+
+        if (!chat.tabs.length) {
+            const fallback = newChatTab('Chat 1');
+            chat.tabs = [fallback];
+            chat.activeTabId = fallback.id;
+        } else if (!chat.tabs.some(tab => tab.id === chat.activeTabId)) {
+            chat.activeTabId = chat.tabs[chat.tabs.length - 1].id;
+        }
+
+        renderChatTabs();
+        renderChatMessages();
+        await persistChatTabs();
+    }, { prefix: SCREENSHOT_TAB_PREFIX, keepOne });
+}
+
+async function createFreshChat(page) {
+    await switchTab(page, 'chat');
+    await page.waitForSelector('#chat-input', { visible: true });
+
+    await cleanupScreenshotTabs(page);
+    await page.click('#chat-tab-add-btn');
+    await page.waitForFunction(prefix => {
+        const tabs = Array.from(document.querySelectorAll('#chat-tab-bar .chat-tab'));
+        const active = tabs.find(tab => tab.classList.contains('active'));
+        return !!active && active.textContent.includes(prefix);
+    }, { timeout: 5000 }, SCREENSHOT_TAB_PREFIX).catch(() => null);
+
+    await page.evaluate(async (prefix) => {
+        const { chat } = await import('/js/core/app-state.js');
+        const { persistChatTabs } = await import('/js/features/chat-state.js');
+        const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+
+        const activeTab = chat.tabs.find(tab => tab.id === chat.activeTabId);
+        if (!activeTab) return;
+        activeTab.name = `${prefix} Chat`;
+        activeTab.messages = [];
+        activeTab.updated_at = Date.now();
+        renderChatTabs();
+        renderChatMessages();
+        await persistChatTabs();
+    }, SCREENSHOT_TAB_PREFIX);
+
+    await clearExistingChats(page);
+    await sleep(300);
+}
+
+async function waitForChatResponse(page, timeoutMs = 180000) {
+    await page.waitForFunction(
+        () => {
+            const streaming = document.querySelector('#chat-messages .chat-message-streaming');
+            if (streaming) return false;
+            const assistantMessages = Array.from(document.querySelectorAll('#chat-messages .chat-message-assistant'));
+            const thinkingBlocks = Array.from(document.querySelectorAll('#chat-messages .chat-thinking'));
+            return assistantMessages.length > 0 || thinkingBlocks.length > 0;
+        },
+        { timeout: timeoutMs }
+    );
+}
+
+async function sendChatPrompt(page, prompt) {
+    await page.$eval('#chat-input', (input, text) => {
+        input.value = text;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, prompt);
+    await page.click('#btn-send');
+    await page.waitForFunction(() => {
+        return document.querySelectorAll('#chat-messages .chat-message-user').length > 0;
+    }, { timeout: 10000 });
+}
+
+async function captureWelcome(page, baseUrl) {
+    console.log('Capturing welcome screen...');
+    await page.goto(baseUrl, { waitUntil: 'networkidle0' });
+    await page.waitForSelector('#view-setup', { visible: true });
+    await sleep(1500);
+    await page.screenshot({ path: `${OUTPUT_DIR}/01-welcome.png`, fullPage: true });
+}
+
+async function captureLogs(page) {
+    console.log('Capturing logs screen...');
+    await switchTab(page, 'logs');
+    await page.waitForSelector('#logs-empty-state.visible', { timeout: 10000 });
+    await sleep(1200);
+    await page.screenshot({ path: `${OUTPUT_DIR}/05-logs.png`, fullPage: true });
+}
+
+async function captureChat(page) {
+    console.log('Capturing chat screen...');
+    await createFreshChat(page);
+    await sendChatPrompt(
+        page,
+        'Reply with a compact final answer only: explain what llama.cpp GPU offload via -ngl does and why prompt processing and generation often run at different token speeds.'
+    );
+    await waitForChatResponse(page);
+    await sleep(1500);
+    await page.screenshot({ path: `${OUTPUT_DIR}/03-chat.png`, fullPage: true });
+    await cleanupScreenshotTabs(page);
+}
+
+async function captureAll(page, baseUrl, remoteServer) {
+    await captureWelcome(page, baseUrl);
+    await attachToServer(page, remoteServer);
+    await captureChat(page);
+    await captureLogs(page);
+}
+
+async function captureChatOnly(page, baseUrl, remoteServer) {
+    await page.goto(baseUrl, { waitUntil: 'networkidle0' });
+    await attachToServer(page, remoteServer);
+    await captureChat(page);
+}
+
+(async () => {
+    const port = await findAvailablePort();
+    console.log(`Using port: ${port}`);
+
+    let server = null;
+    const browser = await puppeteer.launch({
+        headless: 'new',
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    });
+
+    try {
+        server = await spawnLlamaMonitor(port);
+        const page = await browser.newPage();
+        await page.setViewport({ width: 1440, height: 900, deviceScaleFactor: 1 });
+
+        if (CHAT_ONLY) {
+            await captureChatOnly(page, server.url, REMOTE_SERVER);
+        } else {
+            await captureAll(page, server.url, REMOTE_SERVER);
+        }
+
+        console.log(`Screenshots saved to ${OUTPUT_DIR}`);
+    } catch (err) {
+        console.error(err.stack || err.message);
+        process.exitCode = 1;
+    } finally {
+        await browser.close();
+        await cleanupServer(server);
     }
-  }, remoteServer);
-  await sleep(500);
-  await page.evaluate(() => document.querySelector('button[onclick="doAttachFromSetup()"]')?.click());
-  await sleep(8000);
-}
-
-async function captureChat(page, filename) {
-  // Inject a rich sample conversation with code blocks (no LLM dependency)
-  console.log('Injecting sample messages for screenshot...');
-  await page.evaluate(() => {
-    const tab = activeChatTab();
-    if (!tab) return;
-    tab.ai_name = 'Assistant';
-    tab.messages = [
-      {
-        role: 'user',
-        content: 'Explain how llama.cpp offloads layers to GPU.',
-        timestamp_ms: Date.now() - 90000,
-      },
-      {
-        role: 'assistant',
-        content: `llama.cpp uses the \`-ngl\` (number GPU layers) flag to split the model between CPU and GPU.\n\n\`\`\`bash\nllama-server -m model.gguf -ngl 32\n\`\`\`\n\nThis offloads 32 transformer layers to the GPU while keeping the rest on CPU.\n\n**What stays on CPU:**\n- Token embedding lookup\n- Output softmax + sampling\n- Any layers beyond \`-ngl\`\n\n**What goes to GPU:**\n- Transformer self-attention\n- FFN matrix multiplications (the bulk of compute)\n\nThe GPU handles the heavy matrix multiplications in the offloaded layers, which is where most of the compute time is spent.`,
-        timestamp_ms: Date.now() - 60000,
-        input_tokens: 38,
-        output_tokens: 156,
-      },
-      {
-        role: 'user',
-        content: 'How do I check which layers are on GPU vs CPU at runtime?',
-        timestamp_ms: Date.now() - 30000,
-      },
-      {
-        role: 'assistant',
-        content: `The cleanest way is to check llama-server's startup log — it prints a per-layer offload summary:\n\n\`\`\`\nllm_load_tensors: offloading 32 repeating layers to GPU\nllm_load_tensors: offloading non-repeating layers to GPU\nllm_load_tensors: offloaded 33/33 layers to GPU\nllm_load_tensors: VRAM used: 14532 MiB\n\`\`\`\n\nYou can also query the Prometheus metrics endpoint at runtime:\n\n\`\`\`bash\ncurl -s http://localhost:8080/metrics | grep kv_cache\n\`\`\`\n\nIf you want programmatic access, the \`/v1/completions\` response includes \`timings\` with \`predicted_ms\` and \`prompt_ms\` which indirectly reflect GPU utilisation.`,
-        timestamp_ms: Date.now() - 10000,
-        input_tokens: 195,
-        output_tokens: 203,
-      },
-    ];
-    renderChatMessages();
-  });
-  await sleep(1200); // let hljs highlight the code blocks
-
-  await page.screenshot({ path: `${OUTPUT_DIR}/${filename}`, fullPage: true });
-  console.log(`Done: ${filename}`);
-}
+})();

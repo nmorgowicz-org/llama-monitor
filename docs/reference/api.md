@@ -33,7 +33,9 @@ List all known sessions.
 ```
 
 **Session status values:** `Stopped` · `Running` · `Disconnected` · `Error(message)`  
-**Session mode:** `{ "Spawn": { "port": 8001 } }` or `{ "Attach": { "endpoint": "http://..." } }`
+**Session mode:** Nested object from Serde serialization of `SessionMode` enum:  
+- Spawn: `{ "Spawn": { "port": 8001 } }`  
+- Attach: `{ "Attach": { "endpoint": "http://..." } }`
 
 ---
 
@@ -91,16 +93,22 @@ Spawn a new llama.cpp server with a preset and make it the active session.
 ```json
 {
   "preset_id": "my-preset",
-  "session_name": "My Session"
+  "name": "My Session",
+  "port": 8001
 }
 ```
+
+Fields:
+- `preset_id` (required): Preset ID to use for server launch
+- `name` (optional): Session name; defaults to `"Session on port {port}"`
+- `port` (optional): Server port; defaults to `8001`
 
 **Response:**
 ```json
 {
+  "ok": true,
   "session_id": "session_1746000000000",
-  "endpoint": "http://127.0.0.1:8001",
-  "status": "starting"
+  "port": 8001
 }
 ```
 
@@ -151,6 +159,7 @@ Get current capabilities and availability reasons. Mirrors the `capabilities` / 
   },
   "endpoint_kind": "Local",
   "session_kind": "Spawn",
+  "tray_mode": "Desktop",
   "availability": {
     "system": "Available",
     "gpu": "Available",
@@ -158,6 +167,13 @@ Get current capabilities and availability reasons. Mirrors the `capabilities` / 
   }
 }
 ```
+
+Fields:
+- `capabilities`: MetricsCapabilities object (see `capabilities.md`)
+- `endpoint_kind`: `"Local"` | `"Remote"` | `"Unknown"`
+- `session_kind`: `"Spawn"` | `"Attach"` | `"None"`
+- `tray_mode`: `"Desktop"` | `"Headless"` | `"Failed"`
+- `availability`: Availability reasons for system/gpu/cpu_temp
 
 See `capabilities.md` for value enumerations.
 
@@ -283,6 +299,15 @@ Retrieve persisted UI settings.
   "context_card_view": "gauge"
 }
 ```
+
+Fields from `ui-settings.json`:
+- `preset_id`, `port`, `llama_server_path`, `llama_server_cwd`, `models_dir`
+- `server_endpoint`, `llama_poll_interval`
+- `remote_agent_*`: Remote agent configuration
+- `explicit_mode_policy`: Policy text appended when explicit mode is enabled
+- `context_card_view`: `"gauge"` | `"text"` (UI preference)
+
+**Note:** Only `GET` is currently implemented; `PUT` returns 404. Settings are persisted via the `POST /api/settings/save` endpoint (deprecated in favor of direct file writes from the UI).
 
 ### `PUT /api/settings`
 Save UI settings. Body is the same shape as GET response.

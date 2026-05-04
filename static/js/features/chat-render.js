@@ -666,7 +666,6 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
           </button>`;
     } else if (actions && !content && tab?.messages.at(-1)?.role === 'user') {
         // Timeout or error on a fresh send — no content to show, offer retry and dismiss
-        // eslint-disable-next-line no-unsanitized/property -- hardcoded SVG buttons only
         actions.innerHTML = `
           <button class="chat-action-btn" data-chat-action="retry-send" title="Retry">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

@@ -187,6 +187,10 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .and(warp::path("settings-modal.css"))
         .and(warp::get())
         .map(|| css_reply(static_assets::CSS_SETTINGS_MODAL));
+    let css_logs = warp::path("css")
+        .and(warp::path("logs.css"))
+        .and(warp::get())
+        .map(|| css_reply(static_assets::CSS_LOGS));
 
     // Module bootstrap and supporting files (Phase 1 of app.js refactor)
     let js_bootstrap = warp::path("js")
@@ -366,6 +370,7 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .or(css_chat)
         .or(css_setup_view)
         .or(css_settings_modal)
+        .or(css_logs)
         .or(js_bootstrap)
         .or(js_compat_globals)
         .or(js_core_format)

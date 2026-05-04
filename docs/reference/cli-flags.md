@@ -10,10 +10,36 @@ llama-monitor --help
 
 ## Core Configuration
 
+### `--host` (default: "127.0.0.1")
+
+**Type:** String  
+**Description:** Host/interface for the dashboard web UI
+
+Use `0.0.0.0` to allow LAN access. When binding to `0.0.0.0`, consider using `--basic-auth` to require credentials.
+
+```bash
+llama-monitor --host 0.0.0.0
+llama-monitor --host 127.0.0.1
+```
+
+### `--basic-auth`
+
+**Type:** String (format: `user:password`)  
+**Description:** Enable HTTP Basic Auth
+
+Requires `--host 0.0.0.0` to be effective. When set, all API requests must include valid credentials via browser prompt or Authorization header.
+
+```bash
+llama-monitor --host 0.0.0.0 --basic-auth admin:secret123
+```
+
 ### `--port`, `-p` (default: 7778)
 
 **Type:** Integer  
-**Description:** Port for the monitor web UI
+**Description:** Port for the monitor web UI  
+**Short flag:** `-p`
+
+> **Note:** The short flag for `--port` is `-p` (clap auto-generates it from `--port`).
 
 ```bash
 llama-monitor --port 8000
@@ -23,7 +49,13 @@ llama-monitor -p 9999
 ### `--llama-server-path`, `-s`
 
 **Type:** Path  
-**Description:** Path to the llama-server binary
+**Description:** Path to the llama-server binary  
+**Short flag:** `-s`
+
+```bash
+llama-monitor --llama-server-path /usr/local/bin/llama-server
+llama-monitor -s /opt/llama.cpp/llama-server
+```
 
 ```bash
 llama-monitor --llama-server-path /usr/local/bin/llama-server
@@ -65,6 +97,17 @@ llama-monitor --presets-file ~/.config/llama-monitor/presets-custom.json
 llama-monitor --sessions-file ~/.config/llama-monitor/sessions-custom.json
 ```
 
+### `--config-dir`
+
+**Type:** Path  
+**Description:** Override the config directory (default: `~/.config/llama-monitor`)
+
+Override the default config directory for all persisted files (presets, sessions, settings, etc.).
+
+```bash
+llama-monitor --config-dir /custom/config/path
+```
+
 ---
 
 ## GPU Configuration
@@ -72,14 +115,15 @@ llama-monitor --sessions-file ~/.config/llama-monitor/sessions-custom.json
 ### `--gpu-backend` (default: "auto")
 
 **Type:** String  
-**Description:** GPU monitoring backend: auto, rocm, nvidia, apple, none
+**Description:** GPU monitoring backend
 
 Available backends:
 - `auto` - Auto-detect based on system
 - `rocm` - AMD ROCm (Linux)
 - `nvidia` - NVIDIA CUDA (Linux/Windows)
-- `apple` - Apple Silicon (macOS)
 - `none` - Disable GPU monitoring
+
+> **Note:** Apple Silicon uses automatic detection; there is no separate `apple` backend flag.
 
 ```bash
 llama-monitor --gpu-backend rocm

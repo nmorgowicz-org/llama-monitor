@@ -506,7 +506,11 @@ function setVizContent(container, html) {
 function renderHwBar(container, pct, isHot) {
     if (!container) return;
     const bgCls = isHot ? 'hw-bar-bg is-hot' : 'hw-bar-bg';
-    setVizContent(container, '<div class="' + bgCls + '"><div class="hw-bar-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div></div>');
+    setVizContent(container,
+        '<div class="' + bgCls + '" style="--pct:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + ';">' +
+          '<div class="hw-bar-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div>' +
+          '<div class="hw-bar-cap"></div>' +
+        '</div>');
 }
 
 function renderHwRing(container, pct, isHot) {
@@ -542,6 +546,9 @@ function renderHwMetricSparkline(svgId, history, color, show) {
     const peakIndex = history.lastIndexOf(peakValue);
     const peakX = peakIndex * step;
     const peakY = height - (((peakValue - min) / range) * (height - 4)) - 2;
+    const currentValue = history[history.length - 1];
+    const currentX = width;
+    const currentY = height - (((currentValue - min) / range) * (height - 4)) - 2;
     const path = history.map((value, index) => {
         const x = index * step;
         const y = height - (((value - min) / range) * (height - 4)) - 2;
@@ -549,16 +556,31 @@ function renderHwMetricSparkline(svgId, history, color, show) {
     }).join(' ');
     // eslint-disable-next-line no-unsanitized/property -- SVG path built from numeric history values; color is a hex string from getSeverityColor()
     svg.innerHTML =
-        '<path class="sparkline-fill" d="' + path + ' L 120 28 L 0 28 Z" fill="' + color + '" opacity="0.16"></path>' +
-        '<path class="sparkline-line" d="' + path + '" stroke="' + color + '" fill="none" stroke-width="2.4" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" filter="drop-shadow(0 0 4px ' + color + ')"></path>' +
-        '<circle class="sparkline-peak" cx="' + peakX.toFixed(2) + '" cy="' + peakY.toFixed(2) + '" r="2.3" fill="' + color + '" opacity="0.9"></circle>';
+        '<defs>' +
+          '<linearGradient id="' + svgId + '-fill" x1="0" y1="0" x2="0" y2="1">' +
+            '<stop offset="0%" stop-color="' + color + '" stop-opacity="0.34"></stop>' +
+            '<stop offset="70%" stop-color="' + color + '" stop-opacity="0.1"></stop>' +
+            '<stop offset="100%" stop-color="' + color + '" stop-opacity="0.02"></stop>' +
+          '</linearGradient>' +
+        '</defs>' +
+        '<path class="sparkline-fill" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + svgId + '-fill)"></path>' +
+        '<path class="sparkline-line" d="' + path + '" stroke="' + color + '" fill="none" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" filter="drop-shadow(0 0 5px ' + color + ')"></path>' +
+        '<circle class="sparkline-peak" cx="' + peakX.toFixed(2) + '" cy="' + peakY.toFixed(2) + '" r="2.1" fill="' + color + '" opacity="0.78"></circle>' +
+        '<circle class="sparkline-current-halo" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="6.8" fill="' + color + '" opacity="0.14"></circle>' +
+        '<circle class="sparkline-current" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="3.2" fill="' + color + '"></circle>' +
+        '<circle class="sparkline-current-core" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.35" fill="rgba(255,255,255,0.96)"></circle>';
 }
 
 function renderHwStacked(container, pct) {
     if (!container) return;
     const isHot = pct >= 90;
     const bgCls = isHot ? 'hw-stacked-bg is-hot' : 'hw-stacked-bg';
-    setVizContent(container, '<div class="' + bgCls + '"><div class="hw-stacked-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div><div class="hw-stacked-free" style="width:' + (100 - pct).toFixed(1) + '%"></div></div>');
+    setVizContent(container,
+        '<div class="' + bgCls + '" style="--pct:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + ';">' +
+          '<div class="hw-stacked-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div>' +
+          '<div class="hw-stacked-free" style="width:' + (100 - pct).toFixed(1) + '%"></div>' +
+          '<div class="hw-bar-cap"></div>' +
+        '</div>');
 }
 
 function renderHwChips(container, chips) {
@@ -599,15 +621,15 @@ function renderHwDualRing(container, sclk, mclk) {
     var mclkPulse = (3.8 - Math.min(mclkBand.pct, 100) * 0.016).toFixed(2) + 's';
     setVizContent(container,
         '<div class="hw-clock-gpu-layout">' +
-          '<div class="hw-clock-cluster hw-clock-gpu" style="--dot-radius:-47px;">' +
-            '<div class="hw-clock-orbit outer" style="--pct:' + mclkBand.pct.toFixed(1) + ';--peak-pct:' + mclkBand.peakPct.toFixed(1) + ';--low-pct:' + mclkBand.lowPct.toFixed(1) + ';--orbit-color:' + mclkColor + ';--dot-radius:-47px;--pulse-duration:' + mclkPulse + ';">' +
+          '<div class="hw-clock-cluster hw-clock-gpu" style="--dot-radius:-53px;">' +
+            '<div class="hw-clock-orbit outer" style="--pct:' + mclkBand.pct.toFixed(1) + ';--peak-pct:' + mclkBand.peakPct.toFixed(1) + ';--low-pct:' + mclkBand.lowPct.toFixed(1) + ';--orbit-color:' + mclkColor + ';--dot-radius:-53px;--pulse-duration:' + mclkPulse + ';">' +
               '<div class="hw-clock-orbit-track"></div>' +
               '<div class="hw-clock-orbit-fill"></div>' +
               '<div class="hw-clock-orbit-peak"></div>' +
               '<div class="hw-clock-orbit-low"></div>' +
               '<div class="hw-clock-orbit-dot"></div>' +
             '</div>' +
-            '<div class="hw-clock-orbit inner" style="--pct:' + sclkBand.pct.toFixed(1) + ';--peak-pct:' + sclkBand.peakPct.toFixed(1) + ';--low-pct:' + sclkBand.lowPct.toFixed(1) + ';--orbit-color:' + sclkColor + ';--dot-radius:-45px;--pulse-duration:' + sclkPulse + ';">' +
+            '<div class="hw-clock-orbit inner" style="--pct:' + sclkBand.pct.toFixed(1) + ';--peak-pct:' + sclkBand.peakPct.toFixed(1) + ';--low-pct:' + sclkBand.lowPct.toFixed(1) + ';--orbit-color:' + sclkColor + ';--dot-radius:-33px;--pulse-duration:' + sclkPulse + ';">' +
               '<div class="hw-clock-orbit-track"></div>' +
               '<div class="hw-clock-orbit-fill"></div>' +
               '<div class="hw-clock-orbit-peak"></div>' +
@@ -615,8 +637,18 @@ function renderHwDualRing(container, sclk, mclk) {
               '<div class="hw-clock-orbit-dot"></div>' +
             '</div>' +
           '</div>' +
+          '<div class="hw-clock-gpu-legend">' +
+            '<div class="hw-clock-legend-item">' +
+              '<span class="hw-clock-legend-swatch sclk"></span>' +
+              '<span class="hw-clock-legend-text">Core clock</span>' +
+            '</div>' +
+            '<div class="hw-clock-legend-item">' +
+              '<span class="hw-clock-legend-swatch mclk"></span>' +
+              '<span class="hw-clock-legend-text">Memory clock</span>' +
+            '</div>' +
+          '</div>' +
           '<div class="hw-clock-gpu-readout">' +
-            '<div class="hw-clock-meter">' +
+            '<div class="hw-clock-meter" style="--meter-color:' + sclkColor + ';">' +
               '<div class="hw-clock-meter-label">SCLK</div>' +
               '<div class="hw-clock-meter-bar" style="--pct:' + sclkBand.pct.toFixed(1) + ';--peak-pct:' + sclkBand.peakPct.toFixed(1) + ';--low-pct:' + sclkBand.lowPct.toFixed(1) + ';">' +
                 '<div class="hw-clock-meter-fill" style="--pct:' + sclkBand.pct.toFixed(1) + ';--meter-color:' + sclkColor + ';--pulse-duration:' + sclkPulse + ';"></div>' +
@@ -627,7 +659,7 @@ function renderHwDualRing(container, sclk, mclk) {
               '<div class="hw-clock-meter-band">' + sclkBand.min + '-' + sclkBand.max + '</div>' +
               (gpuHistory.sclk.length > 1 ? '<div class="hw-clock-footer-spark">' + buildSparklineSVG(gpuHistory.sclk, 'hw-clock-footer-spark', sclkColor) + '</div>' : '') +
             '</div>' +
-            '<div class="hw-clock-meter">' +
+            '<div class="hw-clock-meter" style="--meter-color:' + mclkColor + ';">' +
               '<div class="hw-clock-meter-label">MCLK</div>' +
               '<div class="hw-clock-meter-bar" style="--pct:' + mclkBand.pct.toFixed(1) + ';--peak-pct:' + mclkBand.peakPct.toFixed(1) + ';--low-pct:' + mclkBand.lowPct.toFixed(1) + ';">' +
                 '<div class="hw-clock-meter-fill" style="--pct:' + mclkBand.pct.toFixed(1) + ';--meter-color:' + mclkColor + ';--pulse-duration:' + mclkPulse + ';"></div>' +
@@ -666,16 +698,20 @@ function renderHwClockRing(container, clock) {
               '<div class="hw-clock-unit">' + display.unit + '</div>' +
             '</div>' +
           '</div>' +
-          '<div class="hw-clock-meter">' +
-            '<div class="hw-clock-meter-label">CLOCK</div>' +
-            '<div class="hw-clock-meter-bar" style="--pct:' + band.pct.toFixed(1) + ';--peak-pct:' + band.peakPct.toFixed(1) + ';--low-pct:' + band.lowPct.toFixed(1) + ';">' +
-              '<div class="hw-clock-meter-fill" style="--pct:' + band.pct.toFixed(1) + ';--meter-color:' + color + ';--pulse-duration:' + pulse + ';"></div>' +
-              '<div class="hw-clock-meter-marker"></div>' +
-              '<div class="hw-clock-meter-marker-low"></div>' +
+          '<div class="hw-clock-system-readout">' +
+            '<div class="hw-clock-meter">' +
+              '<div class="hw-clock-meter-label">CPU CLOCK</div>' +
+              '<div class="hw-clock-meter-bar" style="--pct:' + band.pct.toFixed(1) + ';--peak-pct:' + band.peakPct.toFixed(1) + ';--low-pct:' + band.lowPct.toFixed(1) + ';">' +
+                '<div class="hw-clock-meter-fill" style="--pct:' + band.pct.toFixed(1) + ';--meter-color:' + color + ';--pulse-duration:' + pulse + ';"></div>' +
+                '<div class="hw-clock-meter-marker"></div>' +
+                '<div class="hw-clock-meter-marker-low"></div>' +
+              '</div>' +
             '</div>' +
-            '<div class="hw-clock-meter-value">' + formatClockReadout(clock).value + ' ' + formatClockReadout(clock).unit + '</div>' +
-            '<div class="hw-clock-meter-band">' + formatClockReadout(band.min).value + '-' + formatClockReadout(band.max).value + ' ' + formatClockReadout(band.max).unit + '</div>' +
-            (sysHistory.cpuClock.length > 1 ? '<div class="hw-clock-footer-spark">' + buildSparklineSVG(sysHistory.cpuClock, 'hw-clock-footer-spark', color) + '</div>' : '') +
+            '<div class="hw-clock-system-meta">' +
+              '<div class="hw-clock-meter-value">' + formatClockReadout(clock).value + ' ' + formatClockReadout(clock).unit + '</div>' +
+              '<div class="hw-clock-meter-band">Range ' + formatClockReadout(band.min).value + '-' + formatClockReadout(band.max).value + ' ' + formatClockReadout(band.max).unit + '</div>' +
+            '</div>' +
+            (sysHistory.cpuClock.length > 1 ? '<div class="hw-clock-footer-spark hw-clock-system-spark">' + buildSparklineSVG(sysHistory.cpuClock, 'hw-clock-footer-spark', color) + '</div>' : '') +
           '</div>' +
         '</div>');
 }

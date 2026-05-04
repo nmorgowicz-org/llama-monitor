@@ -21,6 +21,7 @@
     <link rel="stylesheet" href="/css/chat.css">
     <link rel="stylesheet" href="/css/setup-view.css">
     <link rel="stylesheet" href="/css/settings-modal.css">
+    <link rel="stylesheet" href="/css/logs.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
@@ -920,6 +921,38 @@
         <!-- Page: Logs -->
         <div class="page" id="page-logs">
             <div class="log-panel" id="log-panel" style="flex:1;"></div>
+            <div class="logs-empty-state" id="logs-empty-state">
+                <div class="logs-empty-content">
+                    <div class="logs-empty-ambient logs-empty-ambient-a"></div>
+                    <div class="logs-empty-ambient logs-empty-ambient-b"></div>
+                    <div class="logs-empty-badge">REMOTE ATTACH</div>
+                    <div class="logs-empty-console">
+                        <div class="logs-console-topbar">
+                            <span></span><span></span><span></span>
+                        </div>
+                        <div class="logs-console-body">
+                            <div class="logs-console-line"><span>$</span> tail -f llama-server.log</div>
+                            <div class="logs-console-line logs-console-muted">unavailable: endpoint is attached remotely</div>
+                            <div class="logs-console-line logs-console-caret">waiting for a local process…</div>
+                        </div>
+                    </div>
+                    <h3>Console logs stay on the host that launched `llama-server`</h3>
+                    <p>Remote endpoints still stream inference metrics into the dashboard, but stdout and stderr are only available when this app owns the local process. Spawn locally to watch the live console here.</p>
+                    <div class="logs-empty-capabilities">
+                        <div class="logs-capability-chip">Inference metrics: live</div>
+                        <div class="logs-capability-chip">GPU/System: remote agent dependent</div>
+                        <div class="logs-capability-chip">Console: local spawn only</div>
+                    </div>
+                    <div class="logs-empty-actions">
+                        <button class="btn btn-secondary" id="btn-spawn-server">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="5 3 19 12 5 21 5 3"/>
+                            </svg>
+                            Spawn Local Server
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
                 </div>
             </div>

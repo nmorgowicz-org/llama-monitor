@@ -52,7 +52,7 @@ Sessions persist to `~/.config/llama-monitor/sessions.json` and survive restarts
 - **System Metrics** — CPU name, temperature, load, clock speed, RAM usage, motherboard model
 - **Inference Metrics** — Prompt/generation throughput, slot status, context window, generation progress via Prometheus and `/slots`
 - **Context Window Card** — Live gauge showing context pressure across all active chats; displays per-chat usage bars, stale-chat indicators, and total context window size sourced from the active server. Falls back to chat-derived estimates when the server does not expose per-slot token counts
-- **Capability-Aware UI** — Status pill in the top nav shows OK (green), Inference only, Limited, or Error based on live capability flags. Remote sessions with the agent connected show green OK, identical to local sessions
+- **Capability-Aware UI** — Status pill in the top nav shows Full telemetry (green), Inference only, Limited, or Error based on live capability flags. Remote sessions with the agent connected show green Full telemetry, identical to local sessions
 
 ![Inference Metrics](docs/screenshots/02-inference-metrics.gif)
 

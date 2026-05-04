@@ -32,7 +32,7 @@ The server pushes messages on a fixed 500 ms interval. The client never sends me
   "remote_agent_url":          "http://...",
   "capabilities":              { ...MetricsCapabilities },
   "endpoint_kind":             "Local" | "Remote" | "Unknown",
-  "session_kind":              "Spawn" | "Attach" | "None",
+  "session_kind":              "spawn" | "attach" | "none",  // lowercase from Serde #[serde(rename_all = "lowercase")]
   "availability": {
     "system":   "Available" | "RemoteEndpoint" | ...,
     "gpu":      "Available" | "BackendUnavailable" | ...,
@@ -151,16 +151,18 @@ Used in `availability.system`, `availability.gpu`, and `availability.cpu_temp`.
 
 | Value | Meaning |
 |-------|---------|
-| `Available` | Metric is live and working |
-| `RemoteEndpoint` | No host metrics over remote connection without agent |
-| `NoDisplay` | No graphical session (headless system) |
-| `TrayUnavailable` | Tray not supported on this build |
-| `SensorUnavailable` | Hardware sensor not present |
-| `BackendUnavailable` | GPU backend not detected |
-| `CommandMissing` | Required system utility not installed |
-| `PermissionDenied` | Insufficient OS permissions |
-| `MetricsUnreachable` | Metrics endpoint not responding |
-| `NotApplicable` | Metric does not apply in this configuration |
+| `"Available"` | Metric is live and working |
+| `"RemoteEndpoint"` | No host metrics over remote connection without agent |
+| `"NoDisplay"` | No graphical session (headless system) |
+| `"TrayUnavailable"` | Tray not supported on this build |
+| `"SensorUnavailable` | Hardware sensor not present |
+| `"BackendUnavailable"` | GPU backend not detected |
+| `"CommandMissing` | Required system utility not installed |
+| `"PermissionDenied"` | Insufficient OS permissions |
+| `"MetricsUnreachable` | Metrics endpoint not responding |
+| `"NotApplicable"` | Metric does not apply in this configuration |
+
+**Note:** The enum values are PascalCase strings (e.g., `"Available"` not `"available"`).
 
 ---
 
