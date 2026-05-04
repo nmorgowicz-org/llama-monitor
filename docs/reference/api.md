@@ -1,8 +1,8 @@
-# Llama Monitor API Documentation
+# REST API Reference
 
-## Overview
+Llama Monitor exposes a REST API on the same port as the web UI (default **7778**).
 
-Llama Monitor provides a RESTful API for retrieving metrics data and system information. This document describes all available endpoints.
+For real-time data use the WebSocket endpoint documented in `websocket-schema.md`. The REST API is for configuration, session management, and one-off queries.
 
 ## Base URL
 
@@ -10,44 +10,131 @@ Llama Monitor provides a RESTful API for retrieving metrics data and system info
 http://localhost:7778
 ```
 
-## Endpoints
+---
 
-### GET `/api/metrics`
+## Sessions
 
-Retrieve all current metrics.
+### `GET /api/sessions`
+List all known sessions.
 
 **Response:**
 ```json
+[
+  {
+    "id": "session_1746000000000",
+    "name": "Default Session",
+    "mode": { "Spawn": { "port": 8001 } },
+    "status": "Running",
+    "preset_id": "my-preset",
+    "created_at": 1746000000,
+    "last_active": 1746001000
+  }
+]
+```
+
+**Session status values:** `Stopped` · `Running` · `Disconnected` · `Error(message)`  
+**Session mode:** `{ "Spawn": { "port": 8001 } }` or `{ "Attach": { "endpoint": "http://..." } }`
+
+---
+
+### `POST /api/sessions`
+Create a new session record (does not start it).
+
+**Request:**
+```json
 {
-  "inference": {
-    "tokens_per_second": 42.5,
-    "prompt_tokens": 1024,
-    "generated_tokens": 256,
-    "context_usage": 1280,
-    "context_window": 4096,
-    "gpu_memory_used": 2048,
-    "gpu_memory_total": 8192
-  },
-  "system": {
-    "cpu_usage": 45.2,
-    "memory_used": 4096,
-    "memory_total": 16384
-  },
-  "gpu": {
-    "gpu_usage": 78.5,
-    "gpu_temperature": 72,
-    "gpu_power": 125.0
-  },
-  "cpu_temperature": 65.0,
-  "timestamp": "2026-04-20T16:00:00Z"
+  "name": "My Session",
+  "mode": "spawn",
+  "endpoint": "http://127.0.0.1:8001"
 }
 ```
 
 ---
 
-### GET `/api/capabilities`
+### `DELETE /api/sessions/{id}`
+Delete a session record.
 
-Retrieve system capabilities and availability reasons.
+---
+
+### `GET /api/sessions/active`
+Get the currently active session.
+
+**Response:**
+```json
+{
+  "id": "session_1746000000000",
+  "name": "Default Session",
+  "mode": { "Spawn": { "port": 8001 } },
+  "status": "Running",
+  "preset_id": "",
+  "created_at": 1746000000,
+  "last_active": 1746001000
+}
+```
+
+---
+
+### `POST /api/sessions/active`
+Set the active session by ID.
+
+**Request:**
+```json
+{ "id": "session_1746000000000" }
+```
+
+---
+
+### `POST /api/sessions/spawn`
+Spawn a new llama.cpp server with a preset and make it the active session.
+
+**Request:**
+```json
+{
+  "preset_id": "my-preset",
+  "session_name": "My Session"
+}
+```
+
+**Response:**
+```json
+{
+  "session_id": "session_1746000000000",
+  "endpoint": "http://127.0.0.1:8001",
+  "status": "starting"
+}
+```
+
+---
+
+### `POST /api/attach`
+Attach to an existing llama.cpp server endpoint.
+
+**Request:**
+```json
+{
+  "endpoint": "http://192.168.1.50:8001",
+  "session_name": "Remote GPU Box"
+}
+```
+
+**Response:**
+```json
+{
+  "session_id": "session_1746000000001",
+  "endpoint": "http://192.168.1.50:8001",
+  "status": "attached"
+}
+```
+
+---
+
+### `POST /api/detach`
+Detach from the current endpoint (stops polling, clears active session).
+
+---
+
+### `GET /api/capabilities`
+Get current capabilities and availability reasons. Mirrors the `capabilities` / `endpoint_kind` / `availability` fields from the WebSocket push.
 
 **Response:**
 ```json
@@ -59,283 +146,346 @@ Retrieve system capabilities and availability reasons.
     "cpu_temperature": true,
     "memory": true,
     "host_metrics": true,
-    "tray": true
+    "tray": true,
+    "sensor_bridge_setup_available": false
   },
-  "endpoint_kind": "local",
-  "session_kind": "spawn",
+  "endpoint_kind": "Local",
+  "session_kind": "Spawn",
   "availability": {
-    "system_reason": "available",
-    "gpu_reason": "available",
-    "cpu_temp_reason": "available"
+    "system": "Available",
+    "gpu": "Available",
+    "cpu_temp": "Available"
   }
 }
 ```
 
-**Endpoint Kinds:**
-- `local` - Running on same machine as server
-- `remote` - Connected to remote llama.cpp server
-- `unknown` - Unknown or undetermined
-
-**Session Kinds:**
-- `spawn` - Server spawned by llama-monitor (full metrics available)
-- `attach` - Attached to existing server (inference only)
-- `none` - No active session
-
-**Availability Reasons:**
-- `available` - Metric is available and working
-- `remote_endpoint` - Remote connection limits metrics
-- `no_display` - No graphical session (headless)
-- `tray_unavailable` - Tray not supported
-- `sensor_unavailable` - Hardware sensor missing
-- `backend_unavailable` - GPU backend not detected
-- `command_missing` - Required utility not installed
-- `permission_denied` - Insufficient permissions
-- `metrics_unreachable` - Metrics server not responding
+See `capabilities.md` for value enumerations.
 
 ---
 
-### GET `/api/sessions`
+## Server Control
 
-Retrieve active sessions.
+### `POST /api/start`
+Start the llama.cpp server for the active spawn session.
+
+### `POST /api/stop`
+Stop the llama.cpp server for the active spawn session.
+
+### `POST /api/kill-llama`
+Force-kill any running llama.cpp process (emergency stop).
+
+---
+
+## Presets
+
+Model presets store llama.cpp server launch parameters.
+
+### `GET /api/presets`
+```json
+[
+  {
+    "id": "my-preset",
+    "name": "My 7B Preset",
+    "model_path": "/models/llama-3-8b.Q4_K_M.gguf",
+    "n_gpu_layers": 99,
+    "n_threads": 8,
+    "n_ctx": 32768,
+    "n_batch": 512,
+    "n_parallel": 1,
+    "extra_args": []
+  }
+]
+```
+
+### `POST /api/presets`
+Create a preset. Body is a preset object (without `id`).
+
+### `PUT /api/presets/{id}`
+Update a preset.
+
+### `DELETE /api/presets/{id}`
+Delete a preset.
+
+### `POST /api/presets/reset`
+Reset all presets to factory defaults.
+
+---
+
+## Templates (Personas)
+
+System prompt templates / personas for the chat interface.
+
+### `GET /api/templates`
+```json
+[
+  {
+    "id": "helpful-assistant",
+    "name": "Helpful Assistant",
+    "system_prompt": "You are a helpful assistant.",
+    "ai_name": "Assistant",
+    "user_name": "User"
+  }
+]
+```
+
+### `POST /api/templates`
+Create a template.
+
+### `PUT /api/templates/{id}`
+Update a template.
+
+### `DELETE /api/templates/{id}`
+Delete a template.
+
+---
+
+## Models
+
+### `GET /api/models`
+Discover available GGUF model files from the configured models directory.
 
 **Response:**
 ```json
-{
-  "sessions": [
-    {
-      "id": "session-1",
-      "mode": "spawn",
-      "endpoint": "http://localhost:8080",
-      "model": "llama-2-7b.Q4_K_M.gguf",
-      "spawn_options": {
-        "n_gpu_layers": 32,
-        "n_threads": 8,
-        "n_ctx": 2048
-      }
-    }
-  ]
-}
+[
+  {
+    "name": "llama-3-8b.Q4_K_M.gguf",
+    "path": "/models/llama-3-8b.Q4_K_M.gguf",
+    "size_bytes": 4680000000
+  }
+]
 ```
+
+### `POST /api/models/refresh`
+Re-scan the models directory.
 
 ---
 
-### GET `/api/presets`
+## Settings
 
-Retrieve saved model presets.
+### `GET /api/settings`
+Retrieve persisted UI settings.
 
-**Response:**
 ```json
 {
-  "presets": [
-    {
-      "id": "default",
-      "name": "Default Settings",
-      "model_path": "/models/llama-2-7b.Q4_K_M.gguf",
-      "n_gpu_layers": 32,
-      "n_threads": 8,
-      "n_ctx": 2048,
-      "n_batch": 512,
-      "n_parallel": 1
-    }
-  ]
+  "preset_id": "my-preset",
+  "port": 8001,
+  "llama_server_path": "/usr/local/bin/llama-server",
+  "llama_server_cwd": "",
+  "models_dir": "/models",
+  "server_endpoint": "http://127.0.0.1:8001",
+  "llama_poll_interval": 1,
+  "remote_agent_url": "",
+  "remote_agent_token": "",
+  "remote_agent_ssh_autostart": false,
+  "remote_agent_ssh_target": "",
+  "remote_agent_ssh_command": "",
+  "explicit_mode_policy": "",
+  "context_card_view": "gauge"
 }
 ```
 
----
-
-### GET `/api/state`
-
-Retrieve current application state.
-
-**Response:**
-```json
-{
-  "server_port": 7778,
-  "ui_port": 8080,
-  "gpu_backend": "vulkan",
-  "gpu_device_index": 0,
-  "tray_enabled": true,
-  "headless": false
-}
-```
+### `PUT /api/settings`
+Save UI settings. Body is the same shape as GET response.
 
 ---
 
-### POST `/api/sessions`
+## GPU Environment
 
-Create a new session.
+### `GET /api/gpu-env`
+Get detected GPU backend configuration.
+
+### `PUT /api/gpu-env`
+Override GPU backend configuration.
+
+---
+
+## Chat
+
+### `POST /api/chat`
+Send a message to the active llama.cpp server via the OpenAI-compatible `/v1/chat/completions` endpoint. Streams the response.
 
 **Request:**
 ```json
 {
-  "mode": "spawn",
-  "model_preset": "default",
-  "server_port": 8080,
-  "extra_args": []
+  "messages": [
+    { "role": "system", "content": "You are helpful." },
+    { "role": "user", "content": "Hello!" }
+  ],
+  "temperature": 0.7,
+  "max_tokens": 512
 }
 ```
 
-**Response:**
+### `POST /api/chat/abort`
+Abort the currently streaming chat response.
+
+### `GET /api/chat/tabs`
+Load all persisted chat tabs from disk.
+
+**Response:** Array of `ChatTab` objects (see below).
+
+### `PUT /api/chat/tabs`
+Save all chat tabs to disk. Body is an array of `ChatTab` objects.
+
+### ChatTab Object
+
 ```json
 {
-  "session_id": "session-1",
-  "endpoint": "http://localhost:8080",
-  "status": "starting"
+  "id": "tab_abc123",
+  "name": "My Chat",
+  "system_prompt": "You are helpful.",
+  "ai_name": null,
+  "user_name": null,
+  "explicit_mode": null,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello",
+      "timestamp_ms": 1746000000000,
+      "input_tokens": null,
+      "output_tokens": null,
+      "cumulative_input_tokens": null,
+      "cumulative_output_tokens": null,
+      "compaction_marker": null
+    }
+  ],
+  "totalInputTokens": 0,
+  "totalOutputTokens": 0,
+  "model_params": {
+    "temperature": 0.7,
+    "top_p": 0.9,
+    "top_k": 40,
+    "min_p": 0.01,
+    "repeat_penalty": 1.0,
+    "max_tokens": null
+  },
+  "created_at": 1746000000000,
+  "updated_at": 1746001000000,
+  "auto_compact": null,
+  "compact_threshold": null,
+  "lastCtxPct": null,
+  "activeTemplateId": null
 }
 ```
+
+**Notes:**
+- `totalInputTokens` / `totalOutputTokens` use camelCase in both GET and PUT bodies.
+- `lastCtxPct` is the last known context window pressure (0–100), persisted by the client so the context card can show a value before the server responds.
+- `activeTemplateId` links the tab to a template/persona by ID.
 
 ---
 
-### POST `/api/sessions/attach`
+## File Browser
 
-Attach to an existing llama.cpp server.
+### `GET /api/browse?path=/some/dir`
+Browse the local filesystem for model files. Returns directory entries.
+
+---
+
+## Remote Agent
+
+The remote agent runs on a target machine (typically Linux/Windows) and provides host metrics + server control over SSH or direct HTTP.
+
+### `GET /api/remote-agent/releases/latest`
+Fetch the latest agent release info from GitHub.
+
+### `POST /api/remote-agent/detect`
+Probe a target machine via SSH to check agent install state.
 
 **Request:**
 ```json
 {
-  "endpoint": "http://remote-server:8080",
-  "session_name": "Remote Server"
-}
-```
-
-**Response:**
-```json
-{
-  "session_id": "session-2",
-  "endpoint": "http://remote-server:8080",
-  "status": "attached"
-}
-```
-
----
-
-### DELETE `/api/sessions/{id}`
-
-Stop a session.
-
-**Response:**
-```json
-{
-  "session_id": "session-1",
-  "status": "stopped"
-}
-```
-
----
-
-## Websocket API
-
-### `/ws/metrics`
-
-Real-time metrics streaming.
-
-**Connection:**
-```
-ws://localhost:7778/ws/metrics
-```
-
-**Messages:**
-```json
-{
-  "type": "metrics",
-  "data": {
-    "inference": {...},
-    "system": {...},
-    "gpu": {...},
-    "cpu_temperature": 65.0,
-    "capabilities": {...},
-    "availability": {...}
+  "ssh_target": "ssh://user@192.168.1.50:22",
+  "ssh_connection": {
+    "host": "192.168.1.50",
+    "username": "user",
+    "port": 22
   }
 }
 ```
+
+### `POST /api/remote-agent/ssh/host-key`
+Retrieve the SSH host key for a target.
+
+### `POST /api/remote-agent/ssh/trust`
+Add a host key to the trusted hosts list.
+
+### `GET /api/remote-agent/status`
+Get the current remote agent connection status.
+
+### `POST /api/remote-agent/install`
+Install the remote agent on the target machine via SSH.
+
+### `POST /api/remote-agent/start`
+Start the remote agent on the target machine.
+
+### `POST /api/remote-agent/update`
+Update the remote agent binary on the target machine.
+
+### `POST /api/remote-agent/stop`
+Stop the remote agent on the target machine.
+
+### `DELETE /api/remote-agent/remove`
+Uninstall the remote agent from the target machine.
+
+---
+
+## Windows: LibreHardwareMonitor (LHM)
+
+LHM provides hardware sensor data on Windows. These endpoints are Windows-only; non-Windows platforms return `{"available": false}` or equivalent.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/lhm/check` | Check if LHM is running/installed |
+| `GET` | `/api/lhm/status` | Get disabled/enabled state |
+| `GET` | `/api/lhm/progress` | Get install progress |
+| `POST` | `/api/lhm/start` | Start LHM service |
+| `POST` | `/api/lhm/install` | Download and install LHM |
+| `POST` | `/api/lhm/uninstall` | Uninstall LHM |
+| `POST` | `/api/lhm/disable` | Disable LHM without uninstalling |
+
+---
+
+## Windows: Sensor Bridge
+
+The sensor bridge is a C# sidecar that forwards LHM sensor data.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/sensor-bridge/status` | Check bridge status |
+| `POST` | `/api/sensor-bridge/install` | Install the bridge |
+| `POST` | `/api/sensor-bridge/uninstall` | Uninstall the bridge |
+
+---
+
+## Self-Update
+
+### `POST /api/self-update`
+Trigger a self-update of the llama-monitor binary from GitHub releases.
 
 ---
 
 ## Error Responses
 
-All endpoints return standard HTTP status codes:
+All endpoints return standard HTTP status codes.
 
-- `200 OK` - Success
-- `400 Bad Request` - Invalid parameters
-- `404 Not Found` - Resource not found
-- `500 Internal Server Error` - Server error
+| Code | Meaning |
+|------|---------|
+| `200` | Success |
+| `400` | Bad request / invalid parameters |
+| `404` | Resource not found |
+| `500` | Internal server error |
 
-**Error format:**
-```json
-{
-  "error": "Invalid session ID",
-  "code": "INVALID_SESSION"
-}
+---
+
+## WebSocket
+
+See `websocket-schema.md` for the real-time metrics stream.
+
+```
+ws://localhost:7778/ws
 ```
 
 ---
 
-## Monitoring Modes
-
-### Local Spawn Mode
-
-- Full metrics (inference, system, GPU, temperatures)
-- Server controlled by llama-monitor
-- All capabilities available
-
-### Local Attach Mode
-
-- Inference metrics only
-- Connected to existing llama.cpp server
-- Host metrics unavailable
-
-### Remote Attach Mode
-
-- Inference metrics only
-- Connected to remote llama.cpp server
-- Host metrics unavailable
-- Endpoint shows `remote` kind
-
-### Headless Mode
-
-- No tray icon
-- Web API available
-- Use `--headless` or `--no-tray` flags
-
----
-
-## Examples
-
-### Check capabilities before connecting
-
-```bash
-curl http://localhost:7778/api/capabilities | jq .
-```
-
-### Start a session with a preset
-
-```bash
-curl -X POST http://localhost:7778/api/sessions \
-  -H "Content-Type: application/json" \
-  -d '{"mode": "spawn", "model_preset": "default"}' | jq .
-```
-
-### Attach to remote server
-
-```bash
-curl -X POST http://localhost:7778/api/sessions/attach \
-  -H "Content-Type: application/json" \
-  -d '{"endpoint": "http://192.168.1.100:8080"}' | jq .
-```
-
-### Monitor metrics via websocket
-
-```bash
-wscat -c ws://localhost:7778/ws/metrics
-```
-
----
-
-## CLI Flags Reference
-
-See `docs/cli-flags.md` for complete CLI flag documentation.
-
----
-
-**Version:** 1.0  
-**Last updated:** 2026-04-20
+**Last updated:** 2026-05-03
