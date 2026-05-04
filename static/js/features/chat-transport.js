@@ -242,7 +242,8 @@ export async function _doSendChat(tab) {
     let tokenUsage = null;
     const streamTimeoutMs = (params.stream_timeout ?? 120) * 1000;
     let lastContentTime = Date.now();
-    let regenTimedOut = false;
+    let regenReverted = false;
+    let regenRevertReason = '';
 
     try {
         const chatResp = await fetch('/api/chat', {
@@ -274,7 +275,8 @@ export async function _doSendChat(tab) {
             if (streamTimeoutMs > 0 && Date.now() - lastContentTime > streamTimeoutMs) {
                 chat.abortController.abort();
                 if (!msgContent && tab._pendingVariants) {
-                    regenTimedOut = true;
+                    regenReverted = true;
+                    regenRevertReason = 'Generation timed out — restored previous response';
                 } else {
                     if (!msgEl && typeof appendAssistantPlaceholder === 'function') {
                         msgEl = appendAssistantPlaceholder();
@@ -356,23 +358,28 @@ export async function _doSendChat(tab) {
         }
 
     } catch (err) {
-        if (!msgEl && typeof appendAssistantPlaceholder === 'function') {
-            msgEl = appendAssistantPlaceholder();
-        }
-        if (msgEl) {
-            const body = msgEl.querySelector('.chat-msg-body');
-            if (err.name === 'AbortError') {
-                // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context; fallback span is hardcoded
-                body.innerHTML = msgContent
-                    ? (typeof renderMd === 'function' ? renderMd(msgContent) : msgContent)
-                    : '<span class="chat-stopped">[stopped]</span>';
-            } else {
-                body.innerHTML = `<span class="chat-error">[error] ${escapeHtml(err.message)}</span>`;
+        if (!msgContent && tab._pendingVariants && err.name !== 'AbortError') {
+            regenReverted = true;
+            regenRevertReason = `Request failed — restored previous response`;
+        } else {
+            if (!msgEl && typeof appendAssistantPlaceholder === 'function') {
+                msgEl = appendAssistantPlaceholder();
+            }
+            if (msgEl) {
+                const body = msgEl.querySelector('.chat-msg-body');
+                if (err.name === 'AbortError') {
+                    // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context; fallback span is hardcoded
+                    body.innerHTML = msgContent
+                        ? (typeof renderMd === 'function' ? renderMd(msgContent) : msgContent)
+                        : '<span class="chat-stopped">[stopped]</span>';
+                } else {
+                    body.innerHTML = `<span class="chat-error">[error] ${escapeHtml(err.message)}</span>`;
+                }
             }
         }
     }
 
-    if (regenTimedOut) {
+    if (regenReverted) {
         const prevVariants = tab._pendingVariants;
         const prevContent = prevVariants[prevVariants.length - 1];
         const priorVariants = prevVariants.slice(0, -1);
@@ -388,7 +395,7 @@ export async function _doSendChat(tab) {
         setChatBusyUI(false);
         chat.busy = false;
         chat.abortController = null;
-        showToast('Generation timed out — restored previous response', 'warning');
+        showToast(regenRevertReason, 'warning');
         renderChatMessages();
         if (typeof updateChatTabBadge === 'function') updateChatTabBadge();
         return;
