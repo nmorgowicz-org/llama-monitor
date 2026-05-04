@@ -33,6 +33,7 @@ let paramToastTimer = null;
 
 function toggleModelParamsPanel() {
     const panel = document.getElementById('chat-params-panel');
+    const btn = document.getElementById('btn-model-params');
     const wasOpen = panel.classList.contains('open');
     const isOpen = panel.classList.toggle('open');
     if (isOpen && !wasOpen) {
@@ -42,12 +43,10 @@ function toggleModelParamsPanel() {
         if (systemPanel) systemPanel.classList.remove('open');
         if (stylePanel) stylePanel.style.display = 'none';
         if (styleLabel) styleLabel.textContent = 'Style';
-        const tab = activeChatTab();
-        if (tab && styleLabel) {
-            const currentStyle = localStorage.getItem('llama-monitor-chat-style') || 'rounded';
-            styleLabel.textContent = CHAT_STYLE_LABELS[currentStyle];
-        }
+        if (btn) btn.classList.add('active');
         syncParamPanelToTab();
+    } else if (!isOpen && wasOpen) {
+        if (btn) btn.classList.remove('active');
     }
 }
 
@@ -127,13 +126,7 @@ function resetParamsToDefaults() {
 export function updateParamsDirtyIndicator() {
     const tab = activeChatTab();
     if (!tab) return;
-    const p = tab.model_params;
-    const isDirty = p.temperature !== 0.7 || p.top_p !== 0.9
-        || p.top_k !== 40 || p.min_p !== 0.01
-        || p.repeat_penalty !== 1.0 || (p.max_tokens && p.max_tokens !== 0)
-        || p.stream_timeout !== 120;
-    const btn = document.getElementById('btn-model-params');
-    if (btn) btn.classList.toggle('has-active-params', isDirty);
+    // Dirty indicator removed - use active state for visual feedback
 }
 
 // ── Copy settings between tabs ────────────────────────────────────────────────
@@ -482,6 +475,7 @@ const CHAT_STYLE_LABELS = { rounded: 'Rounded', compact: 'Compact', minimal: 'Mi
 
 function toggleStylePanel() {
     const panel = document.getElementById('chat-style-panel');
+    const btn = document.getElementById('btn-chat-style');
     const isOpen = panel.style.display !== 'none';
     panel.style.display = isOpen ? 'none' : 'block';
     if (!isOpen) {
@@ -495,6 +489,9 @@ function toggleStylePanel() {
         if (paramsPanel) paramsPanel.classList.remove('open');
         const styleLabel = document.getElementById('chat-style-label');
         if (styleLabel) styleLabel.textContent = 'Style';
+        if (btn) btn.classList.add('active');
+    } else {
+        if (btn) btn.classList.remove('active');
     }
 }
 
@@ -511,6 +508,10 @@ function selectChatStyle(style) {
 function updateChatStyleLabel(style) {
     const label = document.getElementById('chat-style-label');
     if (label) label.textContent = 'Style';
+    const btn = document.getElementById('btn-chat-style');
+    if (btn && !style) {
+        btn.classList.remove('active');
+    }
 }
 
 function adjustChatFont(delta) {

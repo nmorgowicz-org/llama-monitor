@@ -323,9 +323,7 @@
   background: rgba(99, 102, 241, 0.08);
   color: var(--color-primary-light);
 }
-.chat-style-btn.active::before {
-  animation: active-indicator 2s ease-in-out infinite;
-}
+
 .chat-header-badge {
   width: 16px;
   height: 16px;
@@ -2368,23 +2366,6 @@
   overflow-y: auto;
   opacity: 1;
   padding: var(--gap-sm) var(--gap-md);
-}
-
-/* ── Params Dirty Indicator ───────────────────────────── */
-#btn-model-params.has-active-params {
-  border-color: rgba(99, 102, 241, 0.25);
-  background: rgba(99, 102, 241, 0.08);
-  color: var(--color-primary-light);
-}
-#btn-model-params.has-active-params::before {
-  content: '';
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--color-primary-light);
 }
 
 /* ── Tab Message Count Warning ────────────────────────── */
