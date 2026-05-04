@@ -199,11 +199,18 @@ function renderChatStrip(model) {
     for (const item of visible) {
         const pill = document.createElement('div');
         pill.className = `context-pill ${item.state}`;
+        pill.title = item.name;
         pill.innerHTML = `
             <span class="context-pill-name">${escapeHtml(item.name)}</span>
             <span class="context-pill-value">${escapeHtml(item.ctxPct != null ? Math.round(item.ctxPct) + '%' : '—')}</span>
         `;
         strip.appendChild(pill);
+        const nameEl = pill.querySelector('.context-pill-name');
+        const overflow = nameEl.scrollWidth - nameEl.offsetWidth;
+        if (overflow > 0) {
+            nameEl.style.setProperty('--scroll-dist', `${overflow}px`);
+            nameEl.classList.add('scrollable');
+        }
     }
 
     if (overflow > 0) {

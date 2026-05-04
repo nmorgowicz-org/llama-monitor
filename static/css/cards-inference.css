@@ -114,6 +114,8 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-surface);
+  position: relative;
+  z-index: 1;
 }
 
 .widget-card {
@@ -827,7 +829,7 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  max-width: 85px;
+  max-width: 130px;
   padding: 6px 10px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.05);
@@ -837,31 +839,26 @@
 
 .context-pill-name {
   min-width: 0;
+  max-width: 90px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-text-primary);
   font-size: var(--text-xs);
   font-weight: 600;
-  max-width: 60px;
 }
 
-.context-pill-value {
-  color: var(--color-text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  font-weight: 700;
+.context-pill-name.scrollable {
+  text-overflow: clip;
 }
 
-.context-pill-name {
-  min-width: 0;
-  max-width: 55px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text-primary);
-  font-size: var(--text-xs);
-  font-weight: 600;
+.context-pill:hover .context-pill-name.scrollable {
+  animation: pill-name-scroll 1.8s ease-in-out forwards;
+}
+
+@keyframes pill-name-scroll {
+  0%, 20%   { transform: translateX(0); }
+  80%, 100% { transform: translateX(calc(-1 * var(--scroll-dist))); }
 }
 
 .context-pill-value {
