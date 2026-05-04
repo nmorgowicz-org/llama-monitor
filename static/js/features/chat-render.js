@@ -15,7 +15,7 @@ import {
     normalizeTabForSave,
     togglePinTab,
 } from './chat-state.js';
-import { showToast } from './toast.js';
+import { showToast, showToastWithActions } from './toast.js';
 import { openTemplateManager } from './chat-templates.js';
 
 // Getter for transport functions — avoids circular import (chat-render ↔ chat-transport)
@@ -678,6 +678,14 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
               <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
             </svg>
           </button>`;
+        const isMsgTimeout = el.querySelector('.chat-stopped') !== null;
+        if (isMsgTimeout) {
+            const t = showToastWithActions('Generation timed out', 'warning', 'Increase the timeout if your model needs more time to respond.', [{
+                id: 'adjust-timeout',
+                label: 'Adjust timeout',
+                handler: () => { openTimeoutSetting(); t?.remove(); },
+            }]);
+        }
     }
 
     // Populate footer metadata (single line)
@@ -884,6 +892,19 @@ function deleteMessage(btn) {
     tab.updated_at = Date.now();
     renderChatMessages();
     scheduleChatPersist();
+}
+
+function openTimeoutSetting() {
+    const panel = document.getElementById('chat-params-panel');
+    if (!panel?.classList.contains('open')) {
+        document.getElementById('btn-model-params')?.click();
+    }
+    setTimeout(() => {
+        const el = document.getElementById('param-stream-timeout');
+        el?.scrollIntoView({ block: 'nearest' });
+        el?.focus();
+        el?.select();
+    }, 50);
 }
 
 function retrySend(btn) {

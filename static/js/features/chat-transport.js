@@ -395,7 +395,16 @@ export async function _doSendChat(tab) {
         setChatBusyUI(false);
         chat.busy = false;
         chat.abortController = null;
-        showToast(regenRevertReason, 'warning');
+        const isTimeout = regenRevertReason.includes('timed out');
+        if (isTimeout) {
+            const toast = showToastWithActions(regenRevertReason, 'warning', null, [{
+                id: 'adjust-timeout',
+                label: 'Adjust timeout',
+                handler: () => { openTimeoutSetting(); toast?.remove(); },
+            }]);
+        } else {
+            showToast(regenRevertReason, 'warning');
+        }
         renderChatMessages();
         if (typeof updateChatTabBadge === 'function') updateChatTabBadge();
         return;
@@ -435,6 +444,21 @@ export async function _doSendChat(tab) {
     // Trigger auto-compact if the tab has it enabled and the threshold was hit.
     // Runs after busy is cleared so compaction can proceed without being blocked.
     getChatViewBindings().checkAutoCompact?.(tab);
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function openTimeoutSetting() {
+    const panel = document.getElementById('chat-params-panel');
+    if (!panel?.classList.contains('open')) {
+        document.getElementById('btn-model-params')?.click();
+    }
+    setTimeout(() => {
+        const el = document.getElementById('param-stream-timeout');
+        el?.scrollIntoView({ block: 'nearest' });
+        el?.focus();
+        el?.select();
+    }, 50);
 }
 
 // ── Stop Chat ──────────────────────────────────────────────────────────────────
