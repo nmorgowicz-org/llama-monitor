@@ -664,6 +664,20 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
               <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
             </svg>
           </button>`;
+    } else if (actions && !content && tab?.messages.at(-1)?.role === 'user') {
+        // Timeout or error on a fresh send — no content to show, offer retry and dismiss
+        // eslint-disable-next-line no-unsanitized/property -- hardcoded SVG buttons only
+        actions.innerHTML = `
+          <button class="chat-action-btn" data-chat-action="retry-send" title="Retry">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/>
+            </svg>
+          </button>
+          <button class="chat-action-btn chat-action-btn-delete" data-chat-action="dismiss-error" title="Dismiss">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+            </svg>
+          </button>`;
     }
 
     // Populate footer metadata (single line)
@@ -870,6 +884,18 @@ function deleteMessage(btn) {
     tab.updated_at = Date.now();
     renderChatMessages();
     scheduleChatPersist();
+}
+
+function retrySend(btn) {
+    const msgEl = btn.closest('.chat-message');
+    const tab = activeChatTab();
+    if (!tab) return;
+    msgEl.remove();
+    getTransport()?.sendChatResend(tab);
+}
+
+function dismissError(btn) {
+    btn.closest('.chat-message').remove();
 }
 
 // ── Export / Import ───────────────────────────────────────────────────────────
@@ -1100,6 +1126,8 @@ export function initChatRender() {
         else if (action === 'nav-variant') navigateVariant(actionBtn, +actionBtn.dataset.variantDir);
         else if (action === 'edit') editMessageContent(actionBtn);
         else if (action === 'delete') deleteMessage(actionBtn);
+        else if (action === 'retry-send') retrySend(actionBtn);
+        else if (action === 'dismiss-error') dismissError(actionBtn);
     });
 
     // Event delegation for chat message edit buttons
