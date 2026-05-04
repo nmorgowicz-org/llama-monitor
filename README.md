@@ -2,15 +2,6 @@
 
 Web dashboard for managing [llama.cpp](https://github.com/ggerganov/llama.cpp) servers with real-time GPU and system monitoring. Supports local and remote deployments, multi-session management, and a lightweight agent mode for headless machines.
 
-## What's New (v0.2.0)
-
-Recent chat feature enhancements:
-
-- **Tab Pinning** — Pin important chat tabs to keep them at the front; pinned tabs persist across sessions
-- **Persona Templates** — Quick-swap conversation styles via clickable persona chips; includes non-roleplay assistant modes
-- **Chat Export** — Download entire chat history as formatted JSON
-- **Message Edit & Regenerate** — Edit corrections and regenerate from any user message (not just the last one)
-
 ## Quick Start
 
 ```bash
@@ -56,20 +47,24 @@ Sessions persist to `~/.config/llama-monitor/sessions.json` and survive restarts
 ## Features
 
 ### Monitoring
+
 - **GPU Metrics** — Temperature, load, VRAM, power, clock speeds (AMD ROCm, NVIDIA, Apple Silicon)
 - **System Metrics** — CPU name, temperature, load, clock speed, RAM usage, motherboard model
-- **Inference Metrics** — Prompt/generation speed, KV cache usage, slot status via Prometheus endpoint
-- **Capability-Aware UI** — Shows available metrics with reasons for unavailability; sections hide automatically when not applicable
+- **Inference Metrics** — Prompt/generation throughput, slot status, context window, generation progress via Prometheus and `/slots`
+- **Context Window Card** — Live gauge showing context pressure across all active chats; displays per-chat usage bars, stale-chat indicators, and total context window size sourced from the active server. Falls back to chat-derived estimates when the server does not expose per-slot token counts
+- **Capability-Aware UI** — Status pill in the top nav shows OK (green), Inference only, Limited, or Error based on live capability flags. Remote sessions with the agent connected show green OK, identical to local sessions
 
 ![Inference Metrics](docs/screenshots/02-inference-metrics.gif)
 
 ### Server Management
+
 - **Spawn & Control** — Start/stop llama-server from the UI with configurable presets
 - **Customizable Presets** — All llama.cpp parameters grouped into collapsible sections; persisted to disk
 - **File Browser** — Browse filesystem for `llama-server` binary and `.gguf` model files
 - **Auto-Discovery** — Models in the configured directory are discovered automatically
 
 ### Remote Agents
+
 - **SSH-Based Management** — Detect, install, start, stop, update, and remove agents on remote machines
 - **Auto-Start** — Attempts SSH autostart once when a remote agent becomes unreachable; if it fails, the header shows a Fix button to open the agent menu for manual intervention
 - **Version Detection** — Compares installed version against latest release; update available indicator
@@ -79,8 +74,9 @@ Sessions persist to `~/.config/llama-monitor/sessions.json` and survive restarts
 - **Cross-Platform** — Linux, macOS, and Windows support with automatic OS/arch detection
 
 ### Chat & Logs
-- **Multi-Tab Chat** — Parallel conversations with per-tab persistence, rename, and close; Ctrl+1–9 and Ctrl+Shift+Arrow keyboard tab switching
-- **System Prompts & Templates** — Customizable behavior with pre-built templates and policy management
+
+- **Multi-Tab Chat** — Parallel conversations with per-tab persistence, rename, pin, and close; Ctrl+1–9 and Ctrl+Shift+Arrow keyboard tab switching
+- **System Prompts & Templates** — Customizable behavior with pre-built templates and policy management; active persona persists per-tab via `active_template_id`
 - **Model Parameters** — Per-tab temperature, top_p, top_k, min_p, repeat_penalty, and max_tokens controls; active-params dot indicator when non-defaults are set
 - **Streaming with Reasoning** — Real-time SSE streaming with thinking/reasoning block support; typing indicator while waiting for first token
 - **Explicit Mode** — Toggle for uncensored content on models that require guardrail override
@@ -89,8 +85,10 @@ Sessions persist to `~/.config/llama-monitor/sessions.json` and survive restarts
 - **Chat History Pagination** — Long conversations render only the most recent N messages (default 15) for performance; "Load More" button reveals older batches; limit is configurable per-tab
 - **Token Count Display** — Input character count shows approximate token estimate (`~N tok`) with warning color at 800+ tokens and error color at 1500+
 - **Context Compaction** — Manual and auto-compaction to recover from full context windows; summarizes earlier conversation into a tombstone message; per-tab auto-compact threshold control; multi-compact safe (tombstones preserved across re-compactions)
+- **Tab Pinning** — Pin important chat tabs to keep them at the front; pinned tabs persist across sessions
+- **Chat Export** — Download entire chat history as formatted JSON
+- **Message Edit & Regenerate** — Edit and regenerate from any user message, not just the last one
 - **Personalized Empty State** — Greeting shows active AI name and loaded model name; suggested prompts grid with stagger animation
-- **Animated Panels** — System prompt and model params panels open/close with smooth max-height transitions; send button shows spinner during generation
 
 ![Chat Interface](docs/screenshots/03-chat.png)
 
@@ -104,6 +102,7 @@ Local sessions show real-time hardware monitoring with sparkline graphs:
 ![GPU & System Metrics](docs/screenshots/04-gpu-metrics.gif)
 
 ### Desktop
+
 - **System Tray** — Native tray icon (optional, disabled with `--headless` or `--no-tray`)
 - **PWA Support** — Installable as a standalone app on mobile and desktop
 - **Headless Mode** — Web/API server only, no tray or desktop UI
@@ -273,73 +272,36 @@ Multi-tab streaming chat proxied to the running llama-server's `/v1/chat/complet
 - Token count estimate on input with color warnings at 800+ and 1500+ tokens
 - Keyboard tab switching: Ctrl+1–9 by position, Ctrl+Shift+← / → to cycle
 - Explicit mode toggle for uncensored content
-- **Tab pinning and favorites** — Pin important chat tabs with the pin button; pinned tabs stay at the front and persist across sessions; drag-to-reorder is guarded to prevent accidental movement across pinned/unpinned boundaries
-- **Persona templates** — Click persona chips in the chat header to quickly switch between conversation styles (assistant, creative, technical, etc.); includes non-roleplay options; active persona persists per-tab via `active_template_id`
-- **Chat export** — Export entire chat history as formatted JSON with messages array, metadata, and timestamps
-- **Message edit and regenerate** — Edit and regenerate responses from any user message (not just the last one); inline editing interface for message corrections
+- Tab pinning — pinned tabs stay at the front and persist across sessions
+- Persona templates — click persona chips to switch conversation style; persists per-tab
+- Chat export — download history as formatted JSON
+- Message edit and regenerate — edit from any user message, not just the last one
 
 ### Logs Tab
 Real-time server log output.
 
 ## API Reference
 
-### Capabilities
+Full REST API documentation is in [`docs/reference/api.md`](docs/reference/api.md).  
+WebSocket push schema is in [`docs/reference/websocket-schema.md`](docs/reference/websocket-schema.md).  
+Capability flags are documented in [`docs/reference/capabilities.md`](docs/reference/capabilities.md).
+
+### Quick Reference
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/capabilities` | Metric capabilities and availability reasons |
-
-### Server & Sessions
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/start` | Start llama-server with preset |
-| POST | `/api/stop` | Stop running llama-server |
+| WS | `/ws` | Real-time metrics push (500 ms interval) |
+| GET | `/api/capabilities` | Capability flags and availability reasons |
 | GET | `/api/sessions` | List all sessions |
-| POST | `/api/sessions` | Create a new session |
-| DELETE | `/api/sessions/{id}` | Delete a session |
-| GET | `/api/sessions/active` | Get active session |
-| POST | `/api/sessions/active` | Set active session |
 | POST | `/api/sessions/spawn` | Spawn server with preset |
-
-### Presets & Settings
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/presets` | List all presets |
-| POST | `/api/presets` | Create a preset |
-| PUT | `/api/presets/{id}` | Update a preset |
-| DELETE | `/api/presets/{id}` | Delete a preset |
-| POST | `/api/presets/reset` | Reset to defaults |
-| GET | `/api/settings` | Get UI settings |
-| PUT | `/api/settings` | Save UI settings |
-
-### GPU & System
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/gpu-env` | Get GPU environment config |
-| PUT | `/api/gpu-env` | Save GPU environment config |
-| GET | `/api/browse?path=&filter=` | Browse filesystem (`gguf`, `executable`) |
-
-### Chat
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/chat` | Streaming SSE proxy to active session's `/v1/chat/completions` |
-
-### App Updates
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/remote-agent/releases/latest` | Latest GitHub release info (`tag_name`, `body`, `assets`) |
-| POST | `/api/self-update` | Download latest release and replace the running binary; returns `{ ok, tag_name, restart_required }` |
-
-### WebSocket
-
-| Method | Path | Description |
-|--------|------|-------------|
-| WS | `/ws` | Real-time metrics push |
+| POST | `/api/attach` | Attach to existing server |
+| POST | `/api/detach` | Detach current session |
+| GET | `/api/presets` | List model presets |
+| GET | `/api/templates` | List persona templates |
+| GET | `/api/chat/tabs` | Load persisted chat tabs |
+| PUT | `/api/chat/tabs` | Save chat tabs |
+| POST | `/api/chat` | Streaming chat proxy |
+| POST | `/api/self-update` | Download and apply latest release |
 
 ## Architecture
 
@@ -364,9 +326,9 @@ src/
     env.rs             -- GPU environment config, architecture table
     dummy.rs           -- No-op backend for headless/testing
   llama/
-    metrics.rs         -- Prometheus text format parser
+    metrics.rs         -- Prometheus text + /slots JSON parser, slot snapshots
     server.rs          -- Subprocess management (start/stop/kill)
-    poller.rs          -- Async polling loop for /health, /metrics, /slots
+    poller.rs          -- Async polling loop for /health, /metrics, /slots, /v1/models
   system/
     poller.rs          -- System metrics polling thread (CPU, RAM, temp)
   presets/
@@ -375,22 +337,20 @@ src/
     mod.rs             -- GGUF file discovery and filename parsing
   web/
     mod.rs             -- Warp route composition, CSP headers, basic auth
-    api.rs             -- REST API handlers (1400+ lines)
-    ws.rs              -- WebSocket real-time metrics push (server → client)
+    api.rs             -- REST API handlers
+    ws.rs              -- WebSocket real-time metrics push (server → client, 500 ms)
     static_assets.rs   -- Embedded frontend assets (include_str! at compile time)
 static/
   index.html           -- Dashboard HTML (single-page app)
   compact.html         -- Compact tray popover view
   manifest.json        -- PWA manifest
   sw.js                -- Service worker (PWA offline support)
-  js/                  -- Frontend JavaScript (22 ES modules, vanilla JS)
+  js/                  -- Frontend JavaScript (ES modules, vanilla JS)
     bootstrap.js       -- Module entrypoint and startup sequencing
-    core/              -- Shared infrastructure
-      app-state.js     -- Shared state module
-      format.js        -- Pure format helper functions
-    features/          -- Feature modules (dashboard, chat, remote-agent, etc.)
+    core/              -- Shared infrastructure (app-state, format helpers)
+    features/          -- Feature modules (dashboard, chat, context-card, remote-agent, etc.)
     compat/            -- Compatibility shims and legacy bridges
-  css/                 -- Stylesheet modules (split for AI agent readability)
+  css/                 -- Stylesheet modules (split for maintainability)
     tokens.css         -- CSS custom properties, light theme variable overrides
     base.css           -- Reset, body, typography, element defaults
     layout.css         -- Health strip, nav bar, sidebar, page/content layout
@@ -415,17 +375,11 @@ tests/
     *.spec.js          -- End-to-end UI tests
     screenshot.mjs     -- Screenshot automation
     gif.mjs            -- GIF capture for docs
+plans/                 -- Active in-progress work
 docs/
-  reference/                      -- API reference, CLI flags, cross-compilation guide
-  architecture/                   -- Frontend architecture, window cleanup, performance
-  chat/                           -- Chat enhancements, context compaction, context window redesign
-  ui-ux/                          -- UI modernization, settings, card proposals, welcome view
-  remote-agent/                   -- Remote agent API, SSH flow, Windows tray
-  gpu-hardware/                   -- Apple Silicon, GPU modernization, context tracking
-  security/                       -- Security audit, hardening, mTLS
-  implementation/                 -- Implementation plans, new metrics, app update capability
-  testing/                        -- Test runbook, visual QA, coverage gap analysis
-  screenshots/                    -- Screenshots and GIFs
+  reference/           -- Living technical reference (API, WebSocket, capabilities, CLI, cross-compilation)
+  archive/             -- Completed planning and design docs (organized by topic)
+  screenshots/         -- Screenshots and GIFs used in this README
 ```
 
 ### CSS Module Index
@@ -454,7 +408,7 @@ grep -r "\.your-class" static/css/
 ```
 GPU (rocm-smi/nvidia-smi/mactop)  -->  GPU Poller (500ms)  --> AppState
 System (sysinfo/sensors)           -->  System Poller (5s)  --> AppState
-llama-server /metrics              -->  Llama Poller (1s)   --> AppState
+llama-server /metrics + /slots     -->  Llama Poller (1s)   --> AppState
 Remote Agent /metrics              -->  Agent Poller (2s)   --> AppState
                                                               |
                                                          WebSocket (500ms)
@@ -473,7 +427,7 @@ cargo build --release  # Production binary
 ```
 
 - Frontend files in `static/` are embedded at compile time via `include_str!`
-- No Node.js or build tooling required
+- No Node.js or build tooling required for the Rust backend
 - Single binary deployment — no external assets needed
 
 ## License
