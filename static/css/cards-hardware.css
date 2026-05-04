@@ -1053,12 +1053,12 @@
 
   .hw-clock-gpu-layout {
     display: grid;
-    grid-template-columns: minmax(108px, 120px) minmax(0, 1fr);
+    grid-template-columns: minmax(96px, 108px) minmax(0, 1fr);
     grid-template-areas:
       'cluster legend'
       'cluster readout';
     align-items: center;
-    gap: 6px 8px;
+    gap: 4px 5px;
     width: 100%;
     max-width: 100%;
   }
