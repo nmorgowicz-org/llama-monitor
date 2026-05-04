@@ -825,6 +825,10 @@
   max-width: 82%;
   animation: chat-msg-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
+.chat-message:has(.chat-msg-edit-area) {
+  max-width: 100%;
+  width: 100%;
+}
 @keyframes chat-msg-in {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
