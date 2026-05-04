@@ -11,9 +11,6 @@ import {
 } from './chat-state.js';
 import { exportChatTab, importChatTab, renderChatMessages } from './chat-render.js';
 import { fetchSummary, sendChat } from './chat-transport.js';
-import {
-    applySystemPromptTemplate,
-} from './chat-templates.js';
 import { renderPersonaStrip } from './chat-render.js';
 import {
     loadTemplates,
@@ -651,7 +648,6 @@ export function initChatParams() {
 });
     document.getElementById('btn-compact')?.addEventListener('click', onManualCompact);
     registerPersonaMenuBindings();
-    registerTemplateMenuBindings();
 
     // Bind chat name inputs
     document.getElementById('chat-ai-name')?.addEventListener('input', (e) => updateChatName('ai_name', e.target.value));
@@ -698,8 +694,6 @@ export function initChatParams() {
 
     // Bind system prompt panel
     document.getElementById('chat-copy-settings-btn')?.addEventListener('click', showCopySettingsDropdown);
-    document.getElementById('chat-template-select')?.addEventListener('change', (e) => applySystemPromptTemplate(e.target.value));
-    document.getElementById('chat-template-mgmt-btn')?.addEventListener('click', openTemplateManager);
     document.getElementById('chat-explicit-toggle-settings')?.addEventListener('click', toggleExplicitMode);
     document.getElementById('chat-system-input')?.addEventListener('input', onSystemPromptChange);
     document.getElementById('chat-msg-limit')?.addEventListener('input', (e) => onMessageLimitChange(+e.target.value));
@@ -851,7 +845,8 @@ export function registerPersonaMenuBindings() {
         menu.classList.add('hidden');
         const btnSystemPrompt = document.getElementById('btn-system-prompt');
         if (btnSystemPrompt) btnSystemPrompt.classList.add('active');
-        openTemplateManager();
+        const activeId = activeChatTab()?.active_template_id || null;
+        openTemplateManager(activeId);
     });
     
     document.addEventListener('click', (e) => {
@@ -864,6 +859,7 @@ export function registerPersonaMenuBindings() {
 async function loadPersonaMenuItems() {
     if (!personaMenuListEl) return;
     
+    personaMenuListEl.scrollTop = 0;
     personaMenuListEl.innerHTML = '<div class="chat-persona-menu-loading">Loading personas...</div>';
     
     try {
@@ -986,132 +982,6 @@ export function setPersonaMenuActive(personaName) {
 }
 
 // ── Template Menu Bindings ──────────────────────────────────────────────────
-
-let templateMenuEl = null;
-let templateMenuListEl = null;
-
-export function registerTemplateMenuBindings() {
-    const btn = document.getElementById('chat-template-select');
-    const menu = document.getElementById('chat-template-menu');
-    const list = document.getElementById('chat-template-menu-list');
-    
-    templateMenuEl = menu;
-    templateMenuListEl = list;
-    
-    if (!btn || !menu || !list) return;
-    
-    btn.addEventListener('change', (e) => {
-        const templateName = e.target.value;
-        if (templateName && window.setActiveTemplate) {
-            window.setActiveTemplate(templateName);
-        }
-    });
-    
-    btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const isVisible = !menu.classList.toggle('hidden');
-        if (isVisible) {
-            loadTemplateMenuItems();
-        }
-    });
-    
-    document.addEventListener('click', (e) => {
-        if (!menu.contains(e.target) && e.target.id !== 'chat-template-select') {
-            menu.classList.add('hidden');
-        }
-    });
-}
-
-async function loadTemplateMenuItems() {
-    if (!templateMenuListEl) return;
-    
-    templateMenuListEl.innerHTML = '<div class="chat-persona-menu-loading">Loading templates...</div>';
-    
-    try {
-        const response = await fetch('/api/chat-templates');
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const data = await response.json();
-        const templates = data.templates || [];
-        
-        if (templates.length === 0) {
-            templateMenuListEl.innerHTML = '<div class="chat-persona-menu-loading">No templates found</div>';
-            return;
-        }
-        
-        templateMenuListEl.innerHTML = '';
-        
-        templates.forEach((template) => {
-            const item = document.createElement('button');
-            item.className = 'chat-persona-menu-item';
-            if (window.currentTemplate && window.currentTemplate.name === template.name) {
-                item.classList.add('active');
-            }
-            
-                const icon = document.createElement('span');
-            icon.className = 'chat-persona-menu-item-icon';
-            icon.textContent = '📝';
-            
-            const content = document.createElement('div');
-            content.className = 'chat-persona-menu-item-content';
-            
-            const nameEl = document.createElement('div');
-            nameEl.className = 'chat-persona-menu-item-name';
-            nameEl.textContent = template.name;
-            content.appendChild(nameEl);
-            
-            if (template.description) {
-                const meta = document.createElement('div');
-                meta.className = 'chat-persona-menu-item-meta';
-                meta.textContent = template.description.substring(0, 60);
-                content.appendChild(meta);
-            }
-            
-            item.appendChild(icon);
-            item.appendChild(content);
-            
-            item.addEventListener('click', async () => {
-                try {
-                    const res = await fetch(`/api/chat-templates/activate/${encodeURIComponent(template.name)}`, {
-                        method: 'POST',
-                    });
-                    if (!res.ok) {
-                        throw new Error(`HTTP ${res.status}`);
-                    }
-                    window.currentTemplate = template;
-                    document.getElementById('chat-template-select').value = template.name;
-                    document.getElementById('chat-template-menu').classList.add('hidden');
-                    // Re-render to apply template
-                    renderPersonaStrip?.();
-                    window.setActiveTemplate?.(template.id);
-                } catch (err) {
-                    console.error('Failed to activate template:', err);
-                    alert('Failed to activate template: ' + err.message);
-                }
-            });
-            
-            templateMenuListEl.appendChild(item);
-        });
-    } catch (err) {
-        const errorEl = document.createElement('div');
-        errorEl.className = 'chat-persona-menu-loading';
-        errorEl.textContent = 'Error: ' + err.message;
-        templateMenuListEl.appendChild(errorEl);
-    }
-}
-
-export function setTemplateMenuActive(templateName) {
-    const items = templateMenuListEl?.querySelectorAll('.chat-persona-menu-item');
-    items?.forEach(item => {
-        if (item.textContent.includes(templateName)) {
-            item.classList.add('active');
-        } else {
-            item.classList.remove('active');
-        }
-    });
-}
 
 function escapeHtml(text) {
     const div = document.createElement('div');

@@ -234,15 +234,20 @@ async function saveUserTemplates(templates) {
 
 // ── Template Manager UI ───────────────────────────────────────────────────────
 
-export async function openTemplateManager() {
-    editingTemplateId = null;
-    selectedTemplateId = null;
+export async function openTemplateManager(editId = null) {
+    editingTemplateId = editId;
+    selectedTemplateId = editId;
     await renderTemplateList();
     await renderTemplatePreview();
     const modal = document.getElementById('template-manager-modal');
     if (modal) modal.classList.add('active');
     const btn = document.getElementById('btn-system-prompt');
     if (btn) btn.classList.add('active');
+    if (editId) {
+        const list = document.getElementById('template-list');
+        const el = list?.querySelector(`[data-template-id="${CSS.escape(editId)}"]`);
+        el?.scrollIntoView({ block: 'nearest' });
+    }
 }
 
 function closeTemplateManager() {
@@ -470,21 +475,6 @@ async function applyTemplateById(id) {
     closeTemplateManager();
 }
 
-export async function populateTemplatesDropdown() {
-    const select = document.getElementById('chat-template-select');
-    if (!select) return;
-    const templates = await loadTemplates();
-    const currentVal = select.value;
-    select.innerHTML = '<option value="">— Templates —</option><option value="">None</option>';
-    templates.forEach(t => {
-        const opt = document.createElement('option');
-        opt.value = t.prompt;
-        opt.textContent = t.name;
-        select.appendChild(opt);
-    });
-    select.value = currentVal;
-}
-
 // ── System prompt template application ────────────────────────────────────────
 
 export function applySystemPromptTemplate(templateValue) {
@@ -642,7 +632,6 @@ export function initChatTemplates() {
     }
 
     registerChatViewBindings({
-        populateTemplatesDropdown,
         updateExplicitToggleUI,
     });
 }

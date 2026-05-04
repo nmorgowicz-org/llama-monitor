@@ -242,6 +242,7 @@ export async function _doSendChat(tab) {
     let tokenUsage = null;
     const streamTimeoutMs = (params.stream_timeout ?? 120) * 1000;
     let lastContentTime = Date.now();
+    let regenTimedOut = false;
 
     try {
         const chatResp = await fetch('/api/chat', {
@@ -272,14 +273,18 @@ export async function _doSendChat(tab) {
         while (true) {
             if (streamTimeoutMs > 0 && Date.now() - lastContentTime > streamTimeoutMs) {
                 chat.abortController.abort();
-                if (!msgEl && typeof appendAssistantPlaceholder === 'function') {
-                    msgEl = appendAssistantPlaceholder();
-                }
-                if (msgEl) {
-                    // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context; fallback span is hardcoded
-                    msgEl.querySelector('.chat-msg-body').innerHTML =
-                        msgContent ? (typeof renderMd === 'function' ? renderMd(msgContent) : msgContent)
-                            : '<span class="chat-stopped">[timed out — no response for too long]</span>';
+                if (!msgContent && tab._pendingVariants) {
+                    regenTimedOut = true;
+                } else {
+                    if (!msgEl && typeof appendAssistantPlaceholder === 'function') {
+                        msgEl = appendAssistantPlaceholder();
+                    }
+                    if (msgEl) {
+                        // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context; fallback span is hardcoded
+                        msgEl.querySelector('.chat-msg-body').innerHTML =
+                            msgContent ? (typeof renderMd === 'function' ? renderMd(msgContent) : msgContent)
+                                : '<span class="chat-stopped">[timed out — no response for too long]</span>';
+                    }
                 }
                 break;
             }
@@ -365,6 +370,28 @@ export async function _doSendChat(tab) {
                 body.innerHTML = `<span class="chat-error">[error] ${escapeHtml(err.message)}</span>`;
             }
         }
+    }
+
+    if (regenTimedOut) {
+        const prevVariants = tab._pendingVariants;
+        const prevContent = prevVariants[prevVariants.length - 1];
+        const priorVariants = prevVariants.slice(0, -1);
+        const restoredMsg = { role: 'assistant', content: prevContent, timestamp_ms: Date.now() };
+        if (priorVariants.length > 0) {
+            restoredMsg._variants = priorVariants;
+            restoredMsg._variantIndex = priorVariants.length - 1;
+        }
+        tab.messages.push(restoredMsg);
+        tab._pendingVariants = null;
+        tab.updated_at = Date.now();
+        scheduleChatPersist();
+        setChatBusyUI(false);
+        chat.busy = false;
+        chat.abortController = null;
+        showToast('Generation timed out — restored previous response', 'warning');
+        renderChatMessages();
+        if (typeof updateChatTabBadge === 'function') updateChatTabBadge();
+        return;
     }
 
     if (msgContent) {

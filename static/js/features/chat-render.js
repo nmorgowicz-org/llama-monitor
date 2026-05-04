@@ -16,6 +16,7 @@ import {
     togglePinTab,
 } from './chat-state.js';
 import { showToast } from './toast.js';
+import { openTemplateManager } from './chat-templates.js';
 
 // Getter for transport functions — avoids circular import (chat-render ↔ chat-transport)
 let _getTransport = null;
@@ -1035,9 +1036,7 @@ export function renderPersonaStrip() {
         moreBtn.className = 'chat-persona-chip-more';
         moreBtn.textContent = '⋯';
         moreBtn.title = 'More personas...';
-        moreBtn.addEventListener('click', () => {
-            document.getElementById('chat-template-mgmt-btn')?.click();
-        });
+        moreBtn.addEventListener('click', () => openTemplateManager());
         strip.appendChild(moreBtn);
     }
 }

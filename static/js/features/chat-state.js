@@ -9,7 +9,6 @@ const chatViewBindings = {
     renderChatTabs: null,
     renderChatMessages: null,
     loadChatNames: null,
-    populateTemplatesDropdown: null,
     updateExplicitToggleUI: null,
     updateParamsDirtyIndicator: null,
     syncMessageLimitInput: null,
@@ -97,7 +96,6 @@ export async function initChatTabs() {
 
     // Load UI state from tab
     chatViewBindings.loadChatNames?.();
-    chatViewBindings.populateTemplatesDropdown?.();
     chatViewBindings.updateExplicitToggleUI?.();
     chatViewBindings.updateParamsDirtyIndicator?.();
     chatViewBindings.syncMessageLimitInput?.();
