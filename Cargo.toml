@@ -16,7 +16,7 @@ webview-popover = ["dep:wry"]
     dirs = "6"
     futures-util = "0.3"
     once_cell = "1"
-    rcgen = "0.13"
+    rcgen = "0.14"
     reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "json"] }
     serde = { version = "1", features = ["derive"] }
     serde_json = "1"
@@ -29,7 +29,7 @@ webview-popover = ["dep:wry"]
     url = "2"
     warp = { version = "0.4", features = ["server", "websocket"] }
     warp-helmet = "1.0"
-    tray-icon = { version = "0.22", optional = true }
+    tray-icon = { version = "0.23", optional = true }
     winit = { version = "0.31.0-beta.2", default-features = false, features = ["x11", "wayland"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
