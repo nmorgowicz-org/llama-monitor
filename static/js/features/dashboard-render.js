@@ -39,6 +39,9 @@ function renderSparkline(id, points, className, isBlocked) {
     const height = 28;
     const max = Math.max(...points, 1);
     const step = width / (points.length - 1);
+    const currentValue = points[points.length - 1];
+    const currentX = width - 4;
+    const currentY = height - ((currentValue / max) * (height - 4)) - 2;
     const path = points.map((value, index) => {
         const x = index * step;
         const y = height - ((value / max) * (height - 4)) - 2;
@@ -46,7 +49,14 @@ function renderSparkline(id, points, className, isBlocked) {
     }).join(' ');
     const wallLine = isBlocked ? '<line x1="120" y1="0" x2="120" y2="28" stroke="#ebcb8b" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>' : '';
     // eslint-disable-next-line no-unsanitized/property -- SVG path data from numeric array values; className is a hardcoded CSS class
-    svg.innerHTML = '<path class="sparkline-fill ' + className + '" d="' + path + ' L 120 28 L 0 28 Z"></path><path class="sparkline-line ' + className + '" d="' + path + '"></path>' + wallLine;
+    svg.innerHTML =
+        '<path class="sparkline-fill ' + className + '" d="' + path + ' L 120 28 L 0 28 Z"></path>' +
+        '<path class="sparkline-line ' + className + '" d="' + path + '"></path>' +
+        '<line class="sparkline-current-trace ' + className + '" x1="' + Math.max(currentX - 18, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>' +
+        '<circle class="sparkline-current-halo ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="9.2"></circle>' +
+        '<circle class="sparkline-current ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="4.2"></circle>' +
+        '<circle class="sparkline-current-core ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.8"></circle>' +
+        wallLine;
 }
 
 function renderLiveSparkline(id, points) {
@@ -67,11 +77,18 @@ function renderLiveSparkline(id, points) {
         if (value > peak.value) peak = { value, x, y };
         return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
     }).join(' ');
+    const currentValue = points[points.length - 1];
+    const currentX = width - 4;
+    const currentY = height - ((currentValue / max) * (height - 6)) - 3;
     // eslint-disable-next-line no-unsanitized/property -- SVG path data built from numeric array values only
     svg.innerHTML = [
         '<path class="sparkline-fill live-output" d="' + path + ' L 120 28 L 0 28 Z"></path>',
         '<path class="sparkline-line live-output" d="' + path + '"></path>',
-        '<circle class="sparkline-peak live-output" cx="' + peak.x.toFixed(2) + '" cy="' + peak.y.toFixed(2) + '" r="2.6"></circle>'
+        '<line class="sparkline-current-trace live-output" x1="' + Math.max(currentX - 18, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>',
+        '<circle class="sparkline-peak live-output" cx="' + peak.x.toFixed(2) + '" cy="' + peak.y.toFixed(2) + '" r="2.6"></circle>',
+        '<circle class="sparkline-current-halo live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="9.2"></circle>',
+        '<circle class="sparkline-current live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="4.2"></circle>',
+        '<circle class="sparkline-current-core live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.8"></circle>'
     ].join('');
 }
 

@@ -442,6 +442,28 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(16px) saturate(140%);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+  overflow: hidden;
+}
+
+.top-nav-bar::after,
+.nav-search::after,
+.sidebar-nav::before {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  background: linear-gradient(112deg, transparent 12%, rgba(255, 255, 255, 0.05) 50%, transparent 86%);
+  mix-blend-mode: screen;
+  opacity: 0.24;
+  animation: shell-sheen 9s ease-in-out infinite;
+}
+
+.top-nav-bar::after {
+  inset: -10% -8%;
+}
+
+@keyframes shell-sheen {
+  0%, 100% { transform: translateX(-14%); opacity: 0.14; }
+  50% { transform: translateX(12%); opacity: 0.28; }
 }
 
 .nav-left,
@@ -482,6 +504,12 @@
 
 .nav-search {
   position: relative;
+  overflow: hidden;
+  border-radius: calc(var(--radius-sm) + 2px);
+}
+
+.nav-search::after {
+  inset: -8% -6%;
 }
 
 .nav-search input,
@@ -570,6 +598,7 @@
   border: 1px solid var(--border-emphasis);
   border-radius: var(--radius-base);
   box-shadow: var(--shadow-elevated);
+  backdrop-filter: blur(16px) saturate(150%);
 }
 
 .nav-user:hover .nav-user-menu,
@@ -606,6 +635,11 @@
   border-right: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.03);
   transition: width 250ms cubic-bezier(0.16, 1, 0.3, 1), padding 250ms cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden auto;
+}
+
+.sidebar-nav::before {
+  inset: 0;
 }
 
 .sidebar-nav.collapsed {
@@ -681,6 +715,7 @@
   cursor: pointer;
   text-align: left;
   transition: background 160ms ease, color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+  overflow: hidden;
 }
 
 .sidebar-btn:hover {
@@ -692,6 +727,21 @@
   transform: translateY(-1px);
 }
 
+.sidebar-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 18%, rgba(255, 255, 255, 0.06) 50%, transparent 82%);
+  opacity: 0;
+  transition: opacity 220ms ease;
+  pointer-events: none;
+}
+
+.sidebar-btn:hover::after,
+.sidebar-btn.active::after {
+  opacity: 1;
+}
+
 .sidebar-btn.active {
   color: var(--color-primary-light);
   background:
@@ -699,7 +749,8 @@
     linear-gradient(135deg, rgba(99, 102, 241, 0.18), rgba(99, 102, 241, 0.08));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 14px 28px rgba(79, 70, 229, 0.18);
+    0 14px 28px rgba(79, 70, 229, 0.18),
+    0 0 28px rgba(99, 102, 241, 0.1);
 }
 
 .sidebar-btn.active::before {

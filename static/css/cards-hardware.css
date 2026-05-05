@@ -502,6 +502,7 @@
     overflow: visible;
     border-radius: 12px;
     background:
+      radial-gradient(circle at 84% 18%, rgba(255, 255, 255, 0.04), transparent 20%),
       linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)),
       repeating-linear-gradient(
         90deg,
@@ -509,6 +510,9 @@
         transparent 1px 16px
       );
     animation: hw-sparkline-glow 3s ease-in-out infinite;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.14);
   }
 
   .hw-sparkline .sparkline-line {
@@ -521,7 +525,9 @@
   }
 
   .hw-sparkline .sparkline-fill {
-    opacity: 0.18;
+    opacity: 0.24;
+    animation: spark-fill-drift 8.2s linear infinite;
+    filter: saturate(1.04) brightness(1);
   }
 
   .hw-sparkline circle:last-child {
@@ -540,6 +546,7 @@
     overflow: visible;
     border-radius: 12px;
     background:
+      radial-gradient(circle at 84% 18%, rgba(255, 255, 255, 0.04), transparent 20%),
       linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.008)),
       linear-gradient(90deg, rgba(255, 255, 255, 0.02), transparent 18%, transparent 82%, rgba(255, 255, 255, 0.02)),
       repeating-linear-gradient(
@@ -558,7 +565,9 @@
   }
 
   .hw-metric-sparkline .sparkline-fill {
-    opacity: 0.2;
+    opacity: 0.24;
+    animation: spark-fill-drift 8s linear infinite;
+    filter: saturate(1.04) brightness(1);
   }
 
   .hw-metric-sparkline .sparkline-peak {
@@ -572,10 +581,11 @@
     animation: hw-current-halo 2s ease-in-out infinite;
     transform-origin: center;
     transform-box: fill-box;
+    opacity: 0.22;
   }
 
   .hw-metric-sparkline .sparkline-current {
-    filter: drop-shadow(0 0 8px currentColor);
+    filter: drop-shadow(0 0 12px currentColor);
     animation: hw-current-dot 2s ease-in-out infinite;
     transform-origin: center;
     transform-box: fill-box;
@@ -597,6 +607,11 @@
   @keyframes hw-current-dot {
     0%, 100% { transform: scale(0.96); }
     50% { transform: scale(1.08); }
+  }
+
+  @keyframes spark-fill-drift {
+    0%, 100% { opacity: 0.2; filter: saturate(1.04) brightness(0.98); }
+    50% { opacity: 0.3; filter: saturate(1.14) brightness(1.06); }
   }
 
  /* Stacked bar visualization */
@@ -915,7 +930,9 @@
     height: 60px;
     border-radius: 10px;
     overflow: hidden;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+    background:
+      radial-gradient(circle at 84% 18%, rgba(255, 255, 255, 0.035), transparent 20%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
   }
 
   .hw-clock-footer-spark .sparkline-line {
@@ -923,7 +940,9 @@
   }
 
   .hw-clock-footer-spark .sparkline-fill {
-    opacity: 0.12;
+    opacity: 0.18;
+    animation: spark-fill-drift 8.4s linear infinite;
+    filter: saturate(1.04) brightness(1);
   }
 
   .hw-clock-gpu-readout {
