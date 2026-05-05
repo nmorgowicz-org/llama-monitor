@@ -1726,6 +1726,10 @@
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="19" cy="13.5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><path d="M13 9.5c2 1 4 3 4 6"/><path d="M9 9.5C7 10.5 5 12.5 5 15.5"/></svg>
                     Appearance
                 </button>
+                <button class="settings-tab" data-tab="performance">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    Performance
+                </button>
                 <button class="settings-tab" data-tab="advanced">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4"/><path d="M12 19v4"/><path d="M4.22 4.22l2.83 2.83"/><path d="M16.95 16.95l2.83 2.83"/><path d="M1 12h4"/><path d="M19 12h4"/><path d="M4.22 19.78l2.83-2.83"/><path d="M16.95 7.05l2.83-2.83"/></svg>
                     Advanced
@@ -1814,6 +1818,26 @@
                             <label class="chk"><input type="checkbox" id="settings-widget-memory" checked> Memory</label>
                         </div>
                     </label>
+                </div>
+                <div class="settings-pane" id="settings-performance">
+                    <h3>Performance &amp; Connection</h3>
+                    <p class="settings-help">
+                        Control how frequently the dashboard refreshes metrics. Lower intervals give smoother real-time updates but use more bandwidth and battery. On slow or metered connections, a higher interval reduces network usage.
+                    </p>
+                    <label class="modal-field">
+                        Dashboard Refresh Rate
+                        <select id="settings-ws-push-interval">
+                            <option value="auto">Auto — Adjusts to your connection speed</option>
+                            <option value="500">Normal (500ms) — Smooth real-time updates</option>
+                            <option value="1000">Balanced (1s) — Good for most connections</option>
+                            <option value="2000">Battery Saver (2s) — 75% less bandwidth</option>
+                            <option value="5000">Slow Connection (5s) — Minimum updates</option>
+                        </select>
+                    </label>
+                    <div id="network-status-indicator" class="network-status-indicator" style="display:none;">
+                        <span class="network-status-icon" id="network-status-icon"></span>
+                        <span class="network-status-text" id="network-status-text"></span>
+                    </div>
                 </div>
                 <div class="settings-pane" id="settings-advanced">
                     <h3>Advanced Settings</h3>

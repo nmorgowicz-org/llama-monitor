@@ -25,6 +25,7 @@ import { initConfig } from './features/config.js';
 import { initModels } from './features/models.js';
 import { initSensorBridge } from './features/sensor-bridge.js';
 import { initToast } from './features/toast.js';
+import { initNetworkDetection } from './features/network-detection.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
@@ -113,8 +114,9 @@ initSettings();
 initUserMenu();
 initConfig();
 initModels();
-initSensorBridge();
+ initSensorBridge();
 initToast();
+initNetworkDetection();
 
 // ── Deferred feature initialization ──────────────────────────────────────────
 // These features are loaded on first use to reduce startup cost.

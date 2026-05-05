@@ -107,6 +107,14 @@ pub struct UiSettings {
     pub explicit_mode_policy: String,
     #[serde(default = "default_context_card_view")]
     pub context_card_view: String,
+    /// WebSocket dashboard push interval in milliseconds.
+    /// Presets: 500 (Normal), 1000 (Balanced), 2000 (Battery Saver), 5000 (Slow Connection).
+    #[serde(default = "default_ws_push_interval_ms")]
+    pub ws_push_interval_ms: u64,
+}
+
+fn default_ws_push_interval_ms() -> u64 {
+    500
 }
 
 /// Session mode: either spawn a new server or attach to existing
@@ -216,6 +224,7 @@ impl Default for UiSettings {
             remote_agent_ssh_command: String::new(),
             explicit_mode_policy: String::new(),
             context_card_view: default_context_card_view(),
+            ws_push_interval_ms: default_ws_push_interval_ms(),
         }
     }
 }
@@ -324,6 +333,8 @@ pub struct AppState {
     pub tray_mode: Arc<Mutex<TrayMode>>,
     pub remote_agent_connected: Arc<Mutex<bool>>,
     pub remote_agent_url: Arc<Mutex<Option<String>>>,
+    pub remote_agent_version: Arc<Mutex<Option<String>>>,
+    pub remote_agent_update_available: Arc<Mutex<bool>>,
 }
 
 impl AppState {
@@ -400,6 +411,8 @@ impl AppState {
             tray_mode: Arc::new(Mutex::new(TrayMode::Headless)),
             remote_agent_connected: Arc::new(Mutex::new(false)),
             remote_agent_url: Arc::new(Mutex::new(None)),
+            remote_agent_version: Arc::new(Mutex::new(None)),
+            remote_agent_update_available: Arc::new(Mutex::new(false)),
         };
 
         // Prune old inactive sessions on startup (older than 7 days)

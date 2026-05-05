@@ -156,7 +156,27 @@
 }
 
 .agent-tooltip-status.warning {
-   color: #ebcb8b;
+    color: #ebcb8b;
+}
+
+/* Agent update-available state — amber warning */
+.agent-status.update-available {
+    border-color: rgba(235, 203, 131, 0.4);
+    background: rgba(235, 203, 131, 0.08);
+    animation: agent-update-pulse 2.5s ease-in-out infinite;
+}
+
+.agent-status.update-available .agent-indicator {
+    color: #ebcb8b;
+}
+
+@keyframes agent-update-pulse {
+    0%, 100% { box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 12px rgba(235, 203, 131, 0.2); }
+    50% { box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 24px rgba(235, 203, 131, 0.4); }
+}
+
+.btn-agent-fix {
+    transition: background 0.18s ease, box-shadow 0.18s ease;
 }
 
 .endpoint-status-wrap {

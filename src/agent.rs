@@ -681,9 +681,63 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                         *state.system_metrics.lock().unwrap() = metrics.system;
                         *state.gpu_metrics.lock().unwrap() = metrics.gpu;
                         *state.remote_agent_connected.lock().unwrap() = true;
-                        *state.remote_agent_url.lock().unwrap() = Some(url);
+                        *state.remote_agent_url.lock().unwrap() = Some(url.clone());
                         state.refresh_capability_state();
                         autostart_attempted = false;
+
+                        // Fetch agent version from /info endpoint
+                        let info_url = format!("{}/info", url.trim_end_matches('/'));
+                        let mut info_request = client.get(&info_url);
+                        if let Some(t) = &token {
+                            info_request = info_request.bearer_auth(t);
+                        }
+                        match info_request.send().await {
+                            Ok(info_resp) if info_resp.status().is_success() => {
+                                match info_resp.json::<serde_json::Value>().await {
+                                    Ok(json) => {
+                                        if let Some(ver) =
+                                            json.get("version").and_then(|v| v.as_str())
+                                        {
+                                            *state.remote_agent_version.lock().unwrap() =
+                                                Some(ver.to_string());
+                                            // Check if update is available
+                                            match latest_release_info().await {
+                                                Ok(latest) => {
+                                                    let needs_update = ver != latest.tag_name;
+                                                    *state
+                                                        .remote_agent_update_available
+                                                        .lock()
+                                                        .unwrap() = needs_update;
+                                                    if needs_update {
+                                                        eprintln!(
+                                                            "[agent] Update available: running {}, latest {}",
+                                                            ver, latest.tag_name
+                                                        );
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    eprintln!(
+                                                        "[agent] Could not check latest release: {e}"
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[agent] Failed to parse /info response: {e}");
+                                    }
+                                }
+                            }
+                            Ok(info_resp) => {
+                                eprintln!(
+                                    "[agent] /info request failed: HTTP {}",
+                                    info_resp.status()
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!("[agent] /info request error: {e}");
+                            }
+                        }
                     }
                     Err(e) => {
                         mark_disconnected(&state);
@@ -867,6 +921,8 @@ fn mark_disconnected(state: &AppState) {
         *connected = false;
         was_connected
     };
+    *state.remote_agent_version.lock().unwrap() = None;
+    *state.remote_agent_update_available.lock().unwrap() = false;
     if was_connected {
         state.refresh_capability_state();
     }
