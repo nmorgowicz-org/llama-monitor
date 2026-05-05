@@ -153,55 +153,50 @@ cargo fmt
 npm run lint
 ```
 
-## Static Asset Registration (CRITICAL)
+## Static Asset Registration (AUTO-GENERATED)
 
-All static files (JS, CSS) are embedded at compile time via `include_str!` macros. **New files must be registered in TWO places or they will 404 at runtime:**
+All static files (JS, CSS, HTML, etc.) are embedded at compile time via `include_str!` macros. **Registration is automatic** — `build.rs` scans `static/` and generates:
 
-### Step 1: Add to `src/web/static_assets.rs`
+- `src/gen/static_assets.rs` — `include_str!` constants for each file
+- `src/gen/routes.rs` — warp route filters for each file
 
-```rust
-pub const FEATURES_NEW_FILE_JS: &str =
-    include_str!("../../static/js/features/new-file.js");
-```
+### Adding a New Static File
 
-### Step 2: Add route to `src/web/mod.rs`
+1. Add the file to `static/` (e.g. `static/js/features/new-file.js`)
+2. Run `cargo build` — `build.rs` regenerates the constants and routes automatically
+3. Commit both your new file AND the updated `src/gen/*.rs` files
 
-```rust
-let js_features_new_file = warp::path("js")
-    .and(warp::path("features"))
-    .and(warp::path("new-file.js"))
-    .and(warp::get())
-    .map(|| js_reply(static_assets::FEATURES_NEW_FILE_JS));
-```
+**That's it.** No manual registration needed. The build system handles everything.
 
-### Step 3: Wire into OR chain
+### Constant Naming Convention
 
-```rust
-.or(js_features_new_file)
-```
+The generator follows this convention (match it when referencing constants):
 
-**Failure to register a new file will cause a 404 error in the browser console and break any module that imports it.** This is the #1 cause of silent frontend failures.
+| File Path | Generated Constant |
+|-----------|-------------------|
+| `css/tokens.css` | `CSS_TOKENS` |
+| `css/cards-inference.css` | `CSS_CARDS_INFERENCE` |
+| `js/bootstrap.js` | `BOOTSTRAP_JS` |
+| `js/compat/globals.js` | `COMPAT_GLOBALS_JS` |
+| `js/features/nav.js` | `FEATURES_NAV_JS` |
+| `js/features/chat-render.js` | `FEATURES_CHAT_RENDER_JS` |
+| `index.html` | `INDEX_HTML` |
+| `manifest.json` | `MANIFEST_JSON` |
+| `icon.svg` | `ICON_SVG` |
 
-### CSS Files
+Rules:
+- **CSS**: `CSS_` + filename stem, hyphens → underscores, uppercase
+- **JS**: skip `js/` prefix, join remaining path parts with `_`, replace `.` and `-` with `_`, uppercase
+- **Root files**: filename with `.` and `-` replaced by `_`, uppercase
 
-Same process applies to CSS files. Add to `static_assets.rs`:
+### Special Cases
 
-```rust
-pub const CSS_NEW_FILE: &str = include_str!("../../static/css/new-file.css");
-```
+- **index.html**: Constant generated, but route handled specially in `mod.rs` (version/platform injection)
+- **Generated files**: Committed to git for code review and incremental builds. Marked with `// AUTO-GENERATED` header.
 
-Then add route in `mod.rs`:
+### JavaScript Linting
 
-```rust
-let css_new_file = warp::path("css")
-    .and(warp::path("new-file.css"))
-    .and(warp::get())
-    .map(|| css_reply(static_assets::CSS_NEW_FILE));
-```
-
-Wire into OR chain.
-
-**Important:** Always run `npm run lint` after modifying any `.js` files under `static/js/`. This runs ESLint with three rules:
+Always run `npm run lint` after modifying any `.js` files under `static/js/`. This runs ESLint with three rules:
 - `no-import-assign` — catches assignment to ES module namespace bindings (the `TypeError: Assignment to constant variable` class of error)
 - `no-undef` — catches bare references to functions no longer on `window` after ES module extraction
 - `no-unsanitized/property` and `/method` — catches `innerHTML`/`insertAdjacentHTML` with unescaped user data (XSS); `escapeHtml()` is the approved sanitizer
