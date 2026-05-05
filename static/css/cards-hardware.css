@@ -308,7 +308,8 @@
 
  .hw-metric-block#gpu-clocks-block,
  .hw-metric-block#sys-clock-block {
-   padding-inline: 18px;
+   padding-left: 10px;
+   padding-right: 18px;
    overflow: hidden;
  }
 
@@ -948,7 +949,7 @@
   .hw-clock-gpu-readout {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    gap: 14px;
     align-items: start;
     align-self: stretch;
     width: 100%;
@@ -1072,7 +1073,7 @@
 
   .hw-clock-gpu-layout {
     display: grid;
-    grid-template-columns: minmax(96px, 108px) minmax(0, 1fr);
+    grid-template-columns: 96px minmax(0, 1fr);
     grid-template-areas:
       'cluster legend'
       'cluster readout';
