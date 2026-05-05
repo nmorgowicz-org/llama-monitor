@@ -36,6 +36,8 @@ pub const FEATURES_CONFIG_JS: &str = include_str!("../../static/js/features/conf
 pub const FEATURES_LHM_JS: &str = include_str!("../../static/js/features/lhm.js");
 pub const FEATURES_MODELS_JS: &str = include_str!("../../static/js/features/models.js");
 pub const FEATURES_NAV_JS: &str = include_str!("../../static/js/features/nav.js");
+pub const FEATURES_NETWORK_DETECTION_JS: &str =
+    include_str!("../../static/js/features/network-detection.js");
 pub const FEATURES_REMOTE_AGENT_JS: &str = include_str!("../../static/js/features/remote-agent.js");
 pub const FEATURES_SENSOR_BRIDGE_JS: &str =
     include_str!("../../static/js/features/sensor-bridge.js");

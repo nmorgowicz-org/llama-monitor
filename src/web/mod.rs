@@ -297,6 +297,11 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .and(warp::path("nav.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_NAV_JS));
+    let js_features_network_detection = warp::path("js")
+        .and(warp::path("features"))
+        .and(warp::path("network-detection.js"))
+        .and(warp::get())
+        .map(|| js_reply(static_assets::FEATURES_NETWORK_DETECTION_JS));
     let js_features_remote_agent = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("remote-agent.js"))
@@ -392,6 +397,7 @@ fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         .or(js_features_lhm)
         .or(js_features_models)
         .or(js_features_nav)
+        .or(js_features_network_detection)
         .or(js_features_remote_agent)
         .or(js_features_sensor_bridge)
         .or(js_features_settings)

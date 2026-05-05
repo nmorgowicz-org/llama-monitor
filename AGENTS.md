@@ -153,6 +153,54 @@ cargo fmt
 npm run lint
 ```
 
+## Static Asset Registration (CRITICAL)
+
+All static files (JS, CSS) are embedded at compile time via `include_str!` macros. **New files must be registered in TWO places or they will 404 at runtime:**
+
+### Step 1: Add to `src/web/static_assets.rs`
+
+```rust
+pub const FEATURES_NEW_FILE_JS: &str =
+    include_str!("../../static/js/features/new-file.js");
+```
+
+### Step 2: Add route to `src/web/mod.rs`
+
+```rust
+let js_features_new_file = warp::path("js")
+    .and(warp::path("features"))
+    .and(warp::path("new-file.js"))
+    .and(warp::get())
+    .map(|| js_reply(static_assets::FEATURES_NEW_FILE_JS));
+```
+
+### Step 3: Wire into OR chain
+
+```rust
+.or(js_features_new_file)
+```
+
+**Failure to register a new file will cause a 404 error in the browser console and break any module that imports it.** This is the #1 cause of silent frontend failures.
+
+### CSS Files
+
+Same process applies to CSS files. Add to `static_assets.rs`:
+
+```rust
+pub const CSS_NEW_FILE: &str = include_str!("../../static/css/new-file.css");
+```
+
+Then add route in `mod.rs`:
+
+```rust
+let css_new_file = warp::path("css")
+    .and(warp::path("new-file.css"))
+    .and(warp::get())
+    .map(|| css_reply(static_assets::CSS_NEW_FILE));
+```
+
+Wire into OR chain.
+
 **Important:** Always run `npm run lint` after modifying any `.js` files under `static/js/`. This runs ESLint with three rules:
 - `no-import-assign` — catches assignment to ES module namespace bindings (the `TypeError: Assignment to constant variable` class of error)
 - `no-undef` — catches bare references to functions no longer on `window` after ES module extraction
