@@ -656,7 +656,7 @@ function renderHwDualRing(container, sclk, mclk) {
                 '<div class="hw-clock-meter-marker-low"></div>' +
               '</div>' +
               '<div class="hw-clock-meter-value">' + formatClockReadout(sclk).value + ' ' + formatClockReadout(sclk).unit + '</div>' +
-              '<div class="hw-clock-meter-band">' + sclkBand.min + '-' + sclkBand.max + '</div>' +
+              '<div class="hw-clock-meter-band">' + formatClockReadout(sclkBand.min).value + '-' + formatClockReadout(sclkBand.max).value + ' ' + formatClockReadout(sclkBand.max).unit + '</div>' +
               (gpuHistory.sclk.length > 1 ? '<div class="hw-clock-footer-spark">' + buildSparklineSVG(gpuHistory.sclk, 'hw-clock-footer-spark', sclkColor) + '</div>' : '') +
             '</div>' +
             '<div class="hw-clock-meter" style="--meter-color:' + mclkColor + ';">' +
