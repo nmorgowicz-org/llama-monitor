@@ -67,6 +67,33 @@ async function spawnServer(port) {
   return { proc, url: `http://127.0.0.1:${port}` };
 }
 
+async function captureSparklineClips(page, selector) {
+  const rects = await page.$$eval(selector, els => els.map((el, index) => {
+    const rect = el.getBoundingClientRect();
+    return {
+      index,
+      x: rect.x + window.scrollX,
+      y: rect.y + window.scrollY,
+      width: rect.width,
+      height: rect.height
+    };
+  }).filter(rect => rect.width > 0 && rect.height > 0));
+
+  console.log(`Found ${rects.length} sparkline SVGs`);
+  for (const rect of rects) {
+    await page.screenshot({
+      path: `${OUTPUT_DIR}/sparkline-validate-svg-${rect.index}.png`,
+      clip: {
+        x: Math.max(0, rect.x),
+        y: Math.max(0, rect.y),
+        width: Math.max(1, rect.width),
+        height: Math.max(1, rect.height)
+      }
+    });
+  }
+  console.log(`Captured ${rects.length} individual sparkline SVGs`);
+}
+
 (async () => {
   const port = await findPort();
   console.log(`Port: ${port}`);
@@ -116,12 +143,8 @@ async function spawnServer(port) {
     console.log('Captured: sparkline-validate-system-section.png');
 
     // Capture all sparkline SVGs for close inspection
-    const sparklines = await page.$$('svg.metric-sparkline, svg.hw-sparkline, svg.hw-metric-sparkline, svg.hw-clock-footer-spark');
-    console.log(`Found ${sparklines.length} sparkline SVGs`);
-    for (let i = 0; i < sparklines.length; i++) {
-      await sparklines[i].screenshot({ path: `${OUTPUT_DIR}/sparkline-validate-svg-${i}.png` });
-    }
-    console.log(`Captured ${sparklines.length} individual sparkline SVGs`);
+    const sparklineSelector = 'svg.metric-sparkline, svg.hw-sparkline, svg.hw-metric-sparkline, svg.hw-clock-footer-spark';
+    await captureSparklineClips(page, sparklineSelector);
 
     console.log('Done — check docs/screenshots/ for sparkline-validate-*.png');
   } catch (err) {

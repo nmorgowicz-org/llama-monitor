@@ -26,6 +26,41 @@ function lerpColor(a, b, t) {
     ];
 }
 
+let sparklineGradientSeq = 0;
+
+function nextSparklineGradientId(prefix) {
+    sparklineGradientSeq += 1;
+    return prefix + '-spark-fill-' + sparklineGradientSeq;
+}
+
+function getSparklineFillColor(ratio) {
+    const clamped = Math.max(0, Math.min(1, Number.isFinite(ratio) ? ratio : 0));
+    if (clamped < 0.6) {
+        return lerpColor([80, 200, 120], [235, 203, 139], clamped / 0.6);
+    }
+    return lerpColor([235, 203, 139], [200, 80, 80], (clamped - 0.6) / 0.4);
+}
+
+function buildSparklineFillDefs(fillId, fillColor, topOpacity = 0.62, midOpacity = 0.2, bottomOpacity = 0.04) {
+    const fillRgb = 'rgb(' + fillColor.join(',') + ')';
+    return (
+        '<defs>' +
+          '<linearGradient id="' + fillId + '" x1="0" y1="0" x2="0" y2="1">' +
+            '<stop offset="0%" stop-color="' + fillRgb + '" stop-opacity="' + topOpacity.toFixed(2) + '"></stop>' +
+            '<stop offset="62%" stop-color="' + fillRgb + '" stop-opacity="' + midOpacity.toFixed(2) + '"></stop>' +
+            '<stop offset="100%" stop-color="' + fillRgb + '" stop-opacity="' + bottomOpacity.toFixed(2) + '"></stop>' +
+          '</linearGradient>' +
+        '</defs>'
+    );
+}
+
+function getInferenceSparklineColor(className) {
+    if (className === 'prompt') return '#88c0d1';
+    if (className === 'generation') return '#a3be8c';
+    if (className === 'live-output') return '#8fbcbb';
+    return '#8fbcbb';
+}
+
 function setCardState(card, state) {
     if (!card) return;
     card.classList.remove('is-live', 'is-idle', 'is-unavailable', 'is-dormant');
@@ -43,12 +78,13 @@ function pushSparklinePoint(name, value) {
 function renderSparkline(id, points, className, isBlocked) {
     const svg = document.getElementById(id);
     if (!svg || !points || points.length < 2) return;
+    svg.style.color = getInferenceSparklineColor(className);
     const width = 120;
     const height = 28;
     const max = Math.max(...points, 1);
     const step = width / (points.length - 1);
     const currentValue = points[points.length - 1];
-    const currentX = width - 4;
+    const currentX = width - 10;
     const currentY = height - ((currentValue / max) * (height - 4)) - 2;
     const path = points.map((value, index) => {
         const x = index * step;
@@ -57,23 +93,18 @@ function renderSparkline(id, points, className, isBlocked) {
     }).join(' ');
     // Level-based fill color: green (low) → yellow (mid) → red (high)
     const ratio = max > 0 ? currentValue / max : 0;
-    let fillColor;
-    if (ratio < 0.6) {
-        const t = ratio / 0.6;
-        fillColor = lerpColor([80, 200, 120], [235, 203, 139], t);
-    } else {
-        const t = (ratio - 0.6) / 0.4;
-        fillColor = lerpColor([235, 203, 139], [200, 80, 80], t);
-    }
+    const fillColor = getSparklineFillColor(ratio);
+    const fillId = nextSparklineGradientId(id);
     const wallLine = isBlocked ? '<line x1="120" y1="0" x2="120" y2="28" stroke="#ebcb8b" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>' : '';
     // eslint-disable-next-line no-unsanitized/property -- SVG path data from numeric array values; className is a hardcoded CSS class
     svg.innerHTML =
-        '<path class="sparkline-fill ' + className + '" d="' + path + ' L 120 28 L 0 28 Z" fill="rgb(' + fillColor.join(',') + ')"></path>' +
+        buildSparklineFillDefs(fillId, fillColor, 0.66, 0.22, 0.05) +
+        '<path class="sparkline-fill ' + className + '" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + fillId + ')"></path>' +
         '<path class="sparkline-line ' + className + '" d="' + path + '"></path>' +
-        '<line class="sparkline-current-trace ' + className + '" x1="' + Math.max(currentX - 18, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>' +
-        '<circle class="sparkline-current-halo ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="9.2"></circle>' +
-        '<circle class="sparkline-current ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="4.2"></circle>' +
-        '<circle class="sparkline-current-core ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.8"></circle>' +
+        '<line class="sparkline-current-trace ' + className + '" x1="' + Math.max(currentX - 16, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>' +
+        '<circle class="sparkline-current-halo ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="7.4"></circle>' +
+        '<circle class="sparkline-current ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="3.6"></circle>' +
+        '<circle class="sparkline-current-core ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.2"></circle>' +
         wallLine;
 }
 
@@ -84,6 +115,7 @@ function renderLiveSparkline(id, points) {
         svg.innerHTML = '';
         return;
     }
+    svg.style.color = getInferenceSparklineColor('live-output');
     const width = 120;
     const height = 28;
     const max = Math.max(...points, 1);
@@ -96,26 +128,21 @@ function renderLiveSparkline(id, points) {
         return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
     }).join(' ');
     const currentValue = points[points.length - 1];
-    const currentX = width - 4;
+    const currentX = width - 10;
     const currentY = height - ((currentValue / max) * (height - 6)) - 3;
     const ratio = max > 0 ? currentValue / max : 0;
-    let fillColor;
-    if (ratio < 0.6) {
-        const t = ratio / 0.6;
-        fillColor = lerpColor([80, 200, 120], [235, 203, 139], t);
-    } else {
-        const t = (ratio - 0.6) / 0.4;
-        fillColor = lerpColor([235, 203, 139], [200, 80, 80], t);
-    }
+    const fillColor = getSparklineFillColor(ratio);
+    const fillId = nextSparklineGradientId(id);
     // eslint-disable-next-line no-unsanitized/property -- SVG path data built from numeric array values only
     svg.innerHTML = [
-        '<path class="sparkline-fill live-output" d="' + path + ' L 120 28 L 0 28 Z" fill="rgb(' + fillColor.join(',') + ')"></path>',
+        buildSparklineFillDefs(fillId, fillColor, 0.68, 0.24, 0.05),
+        '<path class="sparkline-fill live-output" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + fillId + ')"></path>',
         '<path class="sparkline-line live-output" d="' + path + '"></path>',
-        '<line class="sparkline-current-trace live-output" x1="' + Math.max(currentX - 18, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>',
+        '<line class="sparkline-current-trace live-output" x1="' + Math.max(currentX - 16, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>',
         '<circle class="sparkline-peak live-output" cx="' + peak.x.toFixed(2) + '" cy="' + peak.y.toFixed(2) + '" r="2.6"></circle>',
-        '<circle class="sparkline-current-halo live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="9.2"></circle>',
-        '<circle class="sparkline-current live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="4.2"></circle>',
-        '<circle class="sparkline-current-core live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.8"></circle>'
+        '<circle class="sparkline-current-halo live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="7.4"></circle>',
+        '<circle class="sparkline-current live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="3.6"></circle>',
+        '<circle class="sparkline-current-core live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.2"></circle>'
     ].join('');
 }
 
@@ -580,6 +607,7 @@ function renderHwMetricSparkline(svgId, history, color, show) {
         return;
     }
     svg.style.visibility = '';
+    svg.style.color = color;
     const width = 120;
     const height = 28;
     const max = Math.max(...history, 1);
@@ -591,7 +619,7 @@ function renderHwMetricSparkline(svgId, history, color, show) {
     const peakX = peakIndex * step;
     const peakY = height - (((peakValue - min) / range) * (height - 4)) - 2;
     const currentValue = history[history.length - 1];
-    const currentX = width;
+    const currentX = width - 10;
     const currentY = height - (((currentValue - min) / range) * (height - 4)) - 2;
     const path = history.map((value, index) => {
         const x = index * step;
@@ -599,30 +627,17 @@ function renderHwMetricSparkline(svgId, history, color, show) {
         return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
     }).join(' ');
     var ratio = range > 0 ? (currentValue - min) / range : 0;
-    var fillColor;
-    if (ratio < 0.6) {
-        var t = ratio / 0.6;
-        fillColor = lerpColor([80, 200, 120], [235, 203, 139], t);
-    } else {
-        var t = (ratio - 0.6) / 0.4;
-        fillColor = lerpColor([235, 203, 139], [200, 80, 80], t);
-    }
-    var fillRgb = 'rgb(' + fillColor.join(',') + ')';
+    var fillColor = getSparklineFillColor(ratio);
+    var fillId = nextSparklineGradientId(svgId);
     // eslint-disable-next-line no-unsanitized/property -- SVG path from numeric values; svgId/color from getSeverityColor()
     svg.innerHTML =
-        '<defs>' +
-          '<linearGradient id="' + svgId + '-fill" x1="0" y1="0" x2="0" y2="1">' +
-            '<stop offset="0%" stop-color="' + fillRgb + '" stop-opacity="0.45"></stop>' +
-            '<stop offset="70%" stop-color="' + fillRgb + '" stop-opacity="0.16"></stop>' +
-            '<stop offset="100%" stop-color="' + fillRgb + '" stop-opacity="0.06"></stop>' +
-          '</linearGradient>' +
-        '</defs>' +
-        '<path class="sparkline-fill" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + svgId + '-fill)"></path>' +
+        buildSparklineFillDefs(fillId, fillColor, 0.58, 0.18, 0.04) +
+        '<path class="sparkline-fill" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + fillId + ')"></path>' +
         '<path class="sparkline-line" d="' + path + '" stroke="' + color + '" fill="none" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" filter="drop-shadow(0 0 5px ' + color + ')"></path>' +
         '<circle class="sparkline-peak" cx="' + peakX.toFixed(2) + '" cy="' + peakY.toFixed(2) + '" r="2.1" fill="' + color + '" opacity="0.78"></circle>' +
-        '<circle class="sparkline-current-halo" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="6.8" fill="' + color + '" opacity="0.14"></circle>' +
-        '<circle class="sparkline-current" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="3.2" fill="' + color + '"></circle>' +
-        '<circle class="sparkline-current-core" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.35" fill="' + color + '" opacity="0.7"></circle>';
+        '<circle class="sparkline-current-halo" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="5.8"></circle>' +
+        '<circle class="sparkline-current" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="2.9"></circle>' +
+        '<circle class="sparkline-current-core" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.1"></circle>';
 }
 
 function renderHwStacked(container, pct) {
@@ -785,21 +800,20 @@ function buildSparklineSVG(points, cssClass, color) {
     var peakX = peakIdx * step;
     var peakY = h - pad - ((max - min) / range) * (h - pad * 2);
     var currentVal = points[len - 1];
+    var currentX = Math.max(pad, Math.min(w - 10, (len - 1) * step));
+    var currentY = h - pad - ((currentVal - min) / range) * (h - pad * 2);
     var ratio = range > 0 ? (currentVal - min) / range : 0;
-    var fillColor;
-    if (ratio < 0.6) {
-        var t = ratio / 0.6;
-        fillColor = lerpColor([80, 200, 120], [235, 203, 139], t);
-    } else {
-        var t = (ratio - 0.6) / 0.4;
-        fillColor = lerpColor([235, 203, 139], [200, 80, 80], t);
-    }
-    var fillRgb = 'rgb(' + fillColor.join(',') + ')';
-    return '<svg class="metric-sparkline ' + cssClass + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">' +
-        '<defs><linearGradient id="hw-spark-grad-' + cssClass + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="' + fillRgb + '" stop-opacity="0.45"/><stop offset="100%" stop-color="' + fillRgb + '" stop-opacity="0.06"/></linearGradient></defs>' +
-        '<path d="' + fillPath + '" fill="url(#hw-spark-grad-' + cssClass + ')"/>' +
-        '<path d="' + linePath + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
-        (len > 3 ? '<circle cx="' + peakX.toFixed(1) + '" cy="' + peakY.toFixed(1) + '" r="2" fill="' + color + '" opacity="0.8"/>' : '') +
+    var fillColor = getSparklineFillColor(ratio);
+    var fillId = nextSparklineGradientId(cssClass);
+    return '<svg class="metric-sparkline ' + cssClass + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true" style="color:' + color + ';">' +
+        buildSparklineFillDefs(fillId, fillColor, 0.56, 0.16, 0.03) +
+        '<path class="sparkline-fill" d="' + fillPath + '" fill="url(#' + fillId + ')"/>' +
+        '<path class="sparkline-line" d="' + linePath + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+        (len > 3 ? '<circle class="sparkline-peak" cx="' + peakX.toFixed(1) + '" cy="' + peakY.toFixed(1) + '" r="2" fill="' + color + '" opacity="0.8"/>' : '') +
+        '<line class="sparkline-current-trace" x1="' + Math.max(currentX - 12, 0).toFixed(1) + '" y1="' + currentY.toFixed(1) + '" x2="' + currentX.toFixed(1) + '" y2="' + currentY.toFixed(1) + '" stroke="' + color + '"></line>' +
+        '<circle class="sparkline-current-halo" cx="' + currentX.toFixed(1) + '" cy="' + currentY.toFixed(1) + '" r="4.8"></circle>' +
+        '<circle class="sparkline-current" cx="' + currentX.toFixed(1) + '" cy="' + currentY.toFixed(1) + '" r="2.5"></circle>' +
+        '<circle class="sparkline-current-core" cx="' + currentX.toFixed(1) + '" cy="' + currentY.toFixed(1) + '" r="0.95"></circle>' +
         '</svg>';
 }
 
