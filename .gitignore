@@ -32,6 +32,9 @@ tests/ui/test-results/
 tests/ui/playwright-report/
 tests/ui/blob-report/
 
+# Screenshot validation artifacts (curated screenshots stay in docs/screenshots/)
+docs/screenshots/artifacts/
+
 # Special artifact files
 $null
 

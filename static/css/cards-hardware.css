@@ -525,7 +525,8 @@
   }
 
   .hw-sparkline .sparkline-fill {
-    fill: url(#spark-shimmer);
+    fill: currentColor;
+    opacity: 0.24;
   }
 
   .hw-sparkline circle:last-child {
@@ -562,7 +563,8 @@
   }
 
   .hw-metric-sparkline .sparkline-fill {
-    fill: url(#spark-shimmer);
+    fill: currentColor;
+    opacity: 0.24;
   }
 
   .hw-metric-sparkline .sparkline-peak {
@@ -573,22 +575,21 @@
   }
 
   .hw-metric-sparkline .sparkline-current-halo {
-    filter: url(#spark-pulse-glow);
     animation: hw-current-halo 2s ease-in-out infinite;
     transform-origin: center;
     transform-box: fill-box;
-    opacity: 0.22;
+    opacity: 0.15;
   }
 
   .hw-metric-sparkline .sparkline-current {
-    filter: url(#spark-rich-glow);
+    filter: drop-shadow(0 0 2px currentColor);
     animation: hw-current-dot 2s ease-in-out infinite;
     transform-origin: center;
     transform-box: fill-box;
   }
 
   .hw-metric-sparkline .sparkline-current-core {
-    opacity: 0.96;
+    opacity: 0.6;
   }
 
   .hw-metric-sparkline {
@@ -939,7 +940,8 @@
   }
 
   .hw-clock-footer-spark .sparkline-fill {
-    fill: url(#spark-shimmer);
+    fill: currentColor;
+    opacity: 0.18;
   }
 
   .hw-clock-gpu-readout {

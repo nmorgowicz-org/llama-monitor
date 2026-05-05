@@ -714,7 +714,8 @@
 }
 
 .sparkline-fill {
-  fill: url(#spark-shimmer);
+  fill: currentColor;
+  opacity: 0.22;
 }
 
 .sparkline-line.prompt {
@@ -724,6 +725,7 @@
 
 .sparkline-fill.prompt {
   color: #88c0d1;
+  fill: #88c0d1;
 }
 
 .sparkline-line.generation {
@@ -733,6 +735,7 @@
 
 .sparkline-fill.generation {
   color: #a3be8c;
+  fill: #a3be8c;
 }
 
 .sparkline-current-trace {
@@ -747,8 +750,7 @@
 
 .sparkline-current-halo {
   fill: currentColor;
-  opacity: 0.22;
-  filter: url(#spark-pulse-glow);
+  opacity: 0.15;
   animation: spark-current-halo 2s ease-in-out infinite;
   transform-origin: center;
   transform-box: fill-box;
@@ -756,14 +758,15 @@
 
 .sparkline-current {
   fill: currentColor;
-  filter: url(#spark-rich-glow);
+  filter: drop-shadow(0 0 2px currentColor);
   animation: spark-current-dot 2s ease-in-out infinite;
   transform-origin: center;
   transform-box: fill-box;
 }
 
 .sparkline-current-core {
-  fill: rgba(255, 255, 255, 0.96);
+  fill: currentColor;
+  opacity: 0.6;
 }
 
 /* Context Card */
@@ -1400,6 +1403,7 @@
 
 .sparkline-fill.live-output {
   color: #8fbcbb;
+  fill: #8fbcbb;
 }
 
 .sparkline-peak.live-output {

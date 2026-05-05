@@ -31,21 +31,12 @@
     <script>const APP_VERSION = '{{ VERSION }}'; const APP_PLATFORM = '{{ PLATFORM }}';</script>
 </head>
 <body>
-      <!-- Shared SVG filters/gradients for sparkline visualizations -->
+      <!-- Shared SVG filters for sparkline visualizations -->
       <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
         <defs>
-          <!-- Subtle shimmer gradient for sparkline fills — gentle light band sweep -->
-          <linearGradient id="spark-shimmer" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stop-color="currentColor" stop-opacity="0.12"/>
-            <stop offset="60%" stop-color="currentColor" stop-opacity="0.22"/>
-            <stop offset="100%" stop-color="currentColor" stop-opacity="0.12"/>
-            <animate attributeName="x1" values="-0.5;1.5" dur="6s" repeatCount="indefinite"/>
-            <animate attributeName="x2" values="0.5;2.5" dur="6s" repeatCount="indefinite"/>
-          </linearGradient>
-
           <!-- Subtle glow filter — single small blur for current position dot -->
           <filter id="spark-rich-glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur"/>
+            <feGaussianBlur in="SourceGraphic" stdDeviation="1" result="blur"/>
             <feMerge>
               <feMergeNode in="blur"/>
               <feMergeNode in="SourceGraphic"/>
@@ -54,8 +45,8 @@
 
           <!-- Animated pulse glow — breathing glow via animated stdDeviation -->
           <filter id="spark-pulse-glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="2" result="blur">
-              <animate attributeName="stdDeviation" values="1.5;3;1.5" dur="2.5s" repeatCount="indefinite"/>
+            <feGaussianBlur stdDeviation="1.5" result="blur">
+              <animate attributeName="stdDeviation" values="1;2;1" dur="2.5s" repeatCount="indefinite"/>
             </feGaussianBlur>
             <feMerge>
               <feMergeNode in="blur"/>
