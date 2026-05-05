@@ -160,6 +160,42 @@ npm run lint
 
 The lint job runs automatically in CI on every PR push that touches `static/**` or `tests/ui/**`, without requiring the `ready-to-test` label. Also run `./scripts/validate-js.sh` for syntax-only validation on all JS files.
 
+## Pre-PR Validation
+
+Before creating a PR, the agent **must** run a cross-cutting validation pass using a sub-agent (Task tool) to catch issues that automated checks miss. This is mandatory for any PR that touches multiple files or introduces new features.
+
+### Validation Checklist
+
+The sub-agent must verify:
+
+1. **CSS integrity**: No duplicate selectors, duplicate `@keyframes`, or specificity conflicts where new styles are silently overridden
+2. **Cross-module wiring**: All new JS functions have callers, all new HTML elements have CSS rules, all new CSS classes are used in HTML
+3. **Accessibility**: All new animations have `@media (prefers-reduced-motion: reduce)` overrides
+4. **Theme coverage**: All new styled elements have `[data-theme="light"]` overrides
+5. **Backend-frontend contract**: New API fields are serialized, deserialized, and consumed on the frontend; new WebSocket messages are handled
+6. **No stale code**: No leftover blocks from refactoring (e.g., duplicate rules, commented-out sections that should be deleted)
+
+### Validation Command
+
+Use the Task tool with a prompt like:
+
+```
+Use a sub-agent to validate all changes in the current branch. Check for:
+- CSS selector duplication and specificity conflicts
+- Missing prefers-reduced-motion overrides for new animations
+- Missing light theme overrides for new styled elements
+- Broken cross-module references (JS → HTML → CSS)
+- Backend-frontend contract mismatches
+- Stale code from refactoring
+Return a detailed report of any issues found with file:line references.
+```
+
+### Action on Findings
+
+- **Critical issues** (broken functionality, silent CSS overrides): Must fix before PR
+- **Medium issues** (missing accessibility, incomplete theme coverage): Should fix before PR
+- **Low issues** (cosmetic, minor cleanup): Can note in PR description as follow-up
+
 ## CI/CD Workflow
 
 ### Pull Requests
