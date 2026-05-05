@@ -180,12 +180,13 @@
   background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.45), transparent);
 }
 
-.agent-setup-hero::before {
+.agent-setup-hero::after {
   content: '';
   position: absolute;
   inset: -50%;
   background: linear-gradient(120deg, transparent 30%, rgba(136, 192, 209, 0.08) 50%, transparent 70%);
   animation: hero-sweep 3s ease-in-out infinite;
+  pointer-events: none;
 }
 
 @keyframes hero-sweep {

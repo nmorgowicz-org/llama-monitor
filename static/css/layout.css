@@ -998,3 +998,11 @@ body.sidebar-collapsed .content-area {
   border-color: rgba(239, 68, 68, 0.25);
   color: #f87171;
 }
+
+/* --- Reduced Motion --- */
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-status.update-available {
+    animation: none;
+  }
+}

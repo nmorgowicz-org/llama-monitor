@@ -467,77 +467,9 @@
   padding-top: 4px;
 }
 
-#settings-modal .settings-pane {
-  display: none;
-  gap: var(--gap-lg);
-  animation: settings-pane-entrance 250ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-#settings-modal .settings-pane.active {
-  display: grid;
-}
-
-/* Performance section — widget-card treatment */
+/* Performance section — select overrides (inherits universal widget-card from .settings-pane > .modal-field) */
 #settings-performance {
   padding: 4px 0;
-}
-
-#settings-performance > .modal-field {
-  position: relative;
-  padding: 22px;
-  background:
-    radial-gradient(circle at 84% 16%, rgba(129, 140, 248, 0.1), transparent 22%),
-    radial-gradient(circle at 12% 88%, rgba(99, 102, 241, 0.06), transparent 28%),
-    linear-gradient(145deg, rgba(40, 48, 58, 0.92), rgba(27, 33, 41, 0.98));
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: var(--radius-card);
-  box-shadow:
-    0 16px 40px rgba(0, 0, 0, 0.36),
-    0 4px 16px rgba(0, 0, 0, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.2),
-    inset 0 40px 60px -20px rgba(99, 102, 241, 0.04);
-  transition: border-color 250ms ease, box-shadow 250ms ease, transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-#settings-performance > .modal-field::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.45), transparent);
-}
-
-#settings-performance > .modal-field::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: var(--radius-card);
-  padding: 1px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), transparent 40%, transparent 60%, rgba(99, 102, 241, 0.15));
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  opacity: 0;
-  transition: opacity 250ms ease;
-  pointer-events: none;
-}
-
-#settings-performance > .modal-field:hover::after {
-  opacity: 1;
-}
-
-#settings-performance > .modal-field:hover {
-  border-color: rgba(99, 102, 241, 0.45);
-  box-shadow:
-    0 18px 42px rgba(0, 0, 0, 0.45),
-    0 4px 16px rgba(0, 0, 0, 0.32),
-    0 0 40px rgba(99, 102, 241, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.25);
-  transform: translateY(-2px);
 }
 
 #settings-performance > .modal-field > select {
@@ -570,17 +502,6 @@
     0 0 0 3px rgba(99, 102, 241, 0.15),
     0 4px 12px rgba(0, 0, 0, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-@keyframes settings-pane-entrance {
-  0% {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 /* --- 4. Typography & Hierarchy --- */
@@ -1318,6 +1239,43 @@
 [data-theme="light"] #settings-modal .modal-buttons .keyboard-hint kbd {
   background: rgba(0, 0, 0, 0.04);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
+}
+
+/* Light theme: network status indicator */
+[data-theme="light"] .network-status-indicator {
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 22%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(240, 244, 248, 0.9));
+  border-color: rgba(235, 203, 131, 0.25);
+  box-shadow:
+    0 8px 24px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+[data-theme="light"] .network-status-indicator.slow {
+  border-color: rgba(235, 203, 131, 0.35);
+  box-shadow:
+    0 8px 24px rgba(15, 23, 42, 0.08),
+    0 0 20px rgba(235, 203, 131, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+[data-theme="light"] .network-status-indicator.good {
+  border-color: rgba(163, 190, 139, 0.25);
+  box-shadow:
+    0 8px 24px rgba(15, 23, 42, 0.08),
+    0 0 20px rgba(163, 190, 139, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+[data-theme="light"] .network-status-icon {
+  background: rgba(235, 203, 131, 0.08);
+  box-shadow: 0 0 12px rgba(235, 203, 131, 0.1);
+}
+
+[data-theme="light"] .network-status-indicator.good .network-status-icon {
+  background: rgba(163, 190, 139, 0.08);
+  box-shadow: 0 0 12px rgba(163, 190, 139, 0.1);
 }
 
 /* --- Mobile Responsive --- */
