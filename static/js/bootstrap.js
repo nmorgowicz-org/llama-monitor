@@ -8,8 +8,8 @@ import { initDashboardRender } from './features/dashboard-render.js';
 import { initWebSocket } from './features/dashboard-ws.js';
 import { initPresets } from './features/presets.js';
 import { initSessions } from './features/sessions.js';
-import { addChatTab, autoResizeChatInput, initChatState, initChatTabs } from './features/chat-state.js';
-import { chatScroll, initChatRender } from './features/chat-render.js';
+import { addChatTab, autoResizeChatInput, initChatState, initChatTabs, restoreTabFromTrash } from './features/chat-state.js';
+import { chatScroll, initChatRender, renderTrashDropdown } from './features/chat-render.js';
 import { initAttachDetach } from './features/attach-detach.js';
 import { initRemoteAgent } from './features/remote-agent.js';
 import { initChatTransport } from './features/chat-transport.js';
@@ -59,6 +59,43 @@ document.getElementById('chat-scroll-bottom')?.addEventListener('click', () => c
 
 // Bind chat tab add button
 document.getElementById('chat-tab-add-btn')?.addEventListener('click', addChatTab);
+
+// Bind trash dropdown toggle
+document.getElementById('chat-tab-trash-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const dropdown = document.getElementById('chat-tab-trash-dropdown');
+    if (!dropdown) return;
+    const isOpen = dropdown.classList.contains('open');
+    if (!isOpen) {
+        renderTrashDropdown();
+        const rect = e.currentTarget.getBoundingClientRect();
+        dropdown.style.top = (rect.bottom + 4) + 'px';
+        dropdown.style.right = (window.innerWidth - rect.right) + 'px';
+    }
+    dropdown.classList.toggle('open');
+});
+
+// Close trash dropdown when clicking outside
+document.addEventListener('click', (e) => {
+    const dropdown = document.getElementById('chat-tab-trash-dropdown');
+    const trashBtn = document.getElementById('chat-tab-trash-btn');
+    if (dropdown && dropdown.classList.contains('open') &&
+        !trashBtn.contains(e.target) && !dropdown.contains(e.target)) {
+        dropdown.classList.remove('open');
+    }
+});
+
+// Event delegation for trash restore buttons
+document.getElementById('chat-tab-trash-dropdown')?.addEventListener('click', (e) => {
+    const restoreBtn = e.target.closest('[data-trash-restore]');
+    if (restoreBtn) {
+        e.stopPropagation();
+        const tabId = restoreBtn.dataset.trashRestore;
+        restoreTabFromTrash(tabId);
+        document.getElementById('chat-tab-trash-dropdown')?.classList.remove('open');
+    }
+});
+
 initChatTemplates();
 initChatParams();
 

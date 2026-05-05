@@ -140,6 +140,10 @@ export const chat = {
     persistTimer: null,
     /** Whether the chat view has been initialized */
     initialized: false,
+    /** Trash bin for recently deleted tabs: array of { tab, trashedAt } */
+    tabTrash: [],
+    /** Interval ID for periodic trash purge (24h) */
+    trashPurgeTimer: null,
 };
 
 // ── LHM (Windows Hardware Monitor) ───────────────────────────────────────────

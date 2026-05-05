@@ -1122,8 +1122,6 @@ fn api_get_templates(
 
 // ── Personas API ───────────────────────────────────────────────────────
 
-
-
 fn api_create_template(
     state: AppState,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -1509,10 +1507,10 @@ fn compute_chat_tab_totals(mut tab: ChatTab) -> ChatTab {
         let mut total_output: u64 = 0;
         for msg in &tab.messages {
             if let Some(input) = msg.input_tokens {
-                total_input += input as u64;
+                total_input += input;
             }
             if let Some(output) = msg.output_tokens {
-                total_output += output as u64;
+                total_output += output;
             }
         }
         tab.total_input_tokens = Some(total_input);
@@ -1531,7 +1529,8 @@ fn api_get_chat_tabs() -> impl Filter<Extract = (impl warp::Reply,), Error = war
                 match tokio::fs::read_to_string(&path).await {
                     Ok(raw) => match serde_json::from_str::<Vec<ChatTab>>(&raw) {
                         Ok(tabs) => {
-                            let tabs: Vec<ChatTab> = tabs.into_iter().map(compute_chat_tab_totals).collect();
+                            let tabs: Vec<ChatTab> =
+                                tabs.into_iter().map(compute_chat_tab_totals).collect();
                             Ok::<_, warp::Rejection>(warp::reply::json(&tabs))
                         }
                         Err(_) => {

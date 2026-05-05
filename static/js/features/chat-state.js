@@ -2,9 +2,11 @@
 // Tab collection, active tab, busy flags, persistence scheduling, tab CRUD.
 
 import { chat } from '../core/app-state.js';
-import { showToast } from './toast.js';
+import { showToast, showToastWithActions } from './toast.js';
 
 const CHAT_TABS_PERSIST_DEBOUNCE_MS = 500;
+const TRASH_AUTO_PURGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const TRASH_PURGE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // check every hour
 const chatViewBindings = {
     renderChatTabs: null,
     renderChatMessages: null,
@@ -131,13 +133,45 @@ export function addChatTab() {
 }
 
 export function closeChatTab(id) {
+    const tabIdx = chat.tabs.findIndex(t => t.id === id);
+    if (tabIdx === -1) return;
     if (chat.tabs.length === 1) return;
-    chat.tabs = chat.tabs.filter(t => t.id !== id);
+
+    const [tab] = chat.tabs.splice(tabIdx, 1);
+    chat.tabTrash.push({ tab, trashedAt: Date.now() });
+
     if (chat.activeTabId === id) {
         chat.activeTabId = chat.tabs[chat.tabs.length - 1].id;
     }
+
     chatViewBindings.renderChatTabs?.();
     chatViewBindings.renderChatMessages?.();
+    scheduleChatPersist();
+
+    showToastWithActions('Tab deleted', 'info', '', [
+        {
+            id: 'undo',
+            label: 'Undo',
+            primary: true,
+            handler: () => restoreTabFromTrash(id),
+        },
+    ]);
+}
+
+export function restoreTabFromTrash(id) {
+    const trashIdx = chat.tabTrash.findIndex(t => t.tab.id === id);
+    if (trashIdx === -1) return;
+
+    const [trashEntry] = chat.tabTrash.splice(trashIdx, 1);
+    chat.tabs.push(trashEntry.tab);
+    chat.activeTabId = trashEntry.tab.id;
+
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatMessages?.();
+    chatViewBindings.loadChatNames?.();
+    chatViewBindings.updateExplicitToggleUI?.();
+    chatViewBindings.syncMessageLimitInput?.();
+    chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
     scheduleChatPersist();
 }
 
@@ -222,6 +256,17 @@ export function scheduleChatPersist() {
     chat.persistTimer = setTimeout(persistChatTabs, CHAT_TABS_PERSIST_DEBOUNCE_MS);
 }
 
+export function purgeOldTrash() {
+    const cutoff = Date.now() - TRASH_AUTO_PURGE_MS;
+    const before = chat.tabTrash.length;
+    chat.tabTrash = chat.tabTrash.filter(entry => entry.trashedAt > cutoff);
+    const purged = before - chat.tabTrash.length;
+    if (purged > 0) {
+        scheduleChatPersist();
+    }
+    return purged;
+}
+
 export function markChatTabsDirty() {
     chat.tabsDirty = true;
 }
@@ -297,6 +342,7 @@ export function autoResizeChatInput() {
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 export function initChatState() {
-    // beforeunload flush
     window.addEventListener('beforeunload', flushChatPersist);
+    chat.trashPurgeTimer = setInterval(purgeOldTrash, TRASH_PURGE_CHECK_INTERVAL_MS);
+    purgeOldTrash();
 }

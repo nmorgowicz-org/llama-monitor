@@ -14,6 +14,7 @@ import {
     renameChatTab,
     normalizeTabForSave,
     togglePinTab,
+    restoreTabFromTrash,
 } from './chat-state.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { openTemplateManager } from './chat-templates.js';
@@ -273,6 +274,69 @@ export function updateTabBarOverflowMask() {
     const bar = document.getElementById('chat-tab-bar');
     if (!bar) return;
     bar.classList.toggle('no-overflow', bar.scrollWidth <= bar.clientWidth);
+}
+
+function getTimeAgo(ts) {
+    const diff = Date.now() - ts;
+    const secs = Math.floor(diff / 1000);
+    if (secs < 60) return `${secs}s ago`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ago`;
+}
+
+export function renderTrashDropdown() {
+    const dropdown = document.getElementById('chat-tab-trash-dropdown');
+    const trashBtn = document.getElementById('chat-tab-trash-btn');
+    if (!dropdown || !trashBtn) return;
+
+    const existingBadge = trashBtn.querySelector('.trash-badge');
+    if (existingBadge) existingBadge.remove();
+    if (chat.tabTrash.length > 0) {
+        const badge = document.createElement('span');
+        badge.className = 'trash-badge';
+        badge.textContent = chat.tabTrash.length;
+        trashBtn.appendChild(badge);
+    }
+
+    dropdown.innerHTML = '';
+    if (chat.tabTrash.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'chat-tab-trash-dropdown-empty';
+        empty.textContent = 'Trash is empty';
+        dropdown.appendChild(empty);
+        return;
+    }
+
+    for (const entry of chat.tabTrash) {
+        const item = document.createElement('div');
+        item.className = 'chat-tab-trash-item';
+        const timeAgo = getTimeAgo(entry.trashedAt);
+        // eslint-disable-next-line no-unsanitized/property -- entry.tab.name wrapped in escapeHtml(); entry.tab.id is an internal UUID; timeAgo is numeric
+        item.innerHTML = `
+            <span class="chat-tab-trash-item-name">${escapeHtml(entry.tab.name)}</span>
+            <span class="chat-tab-trash-item-time">${timeAgo}</span>
+            <button class="chat-tab-trash-item-restore" data-trash-restore="${entry.tab.id}">Restore</button>
+        `;
+        dropdown.appendChild(item);
+    }
+
+    const footer = document.createElement('div');
+    footer.className = 'chat-tab-trash-dropdown-footer';
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'chat-tab-trash-clear-btn';
+    clearBtn.textContent = 'Clear all';
+    clearBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        chat.tabTrash = [];
+        renderTrashDropdown();
+        scheduleChatPersist();
+    });
+    footer.appendChild(clearBtn);
+    dropdown.appendChild(footer);
 }
 
 // ── Message rendering ─────────────────────────────────────────────────────────
@@ -611,8 +675,9 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
             tab._pendingVariants = null;
             for (let i = tab.messages.length - 1; i >= 0; i--) {
                 if (tab.messages[i].role === 'assistant') {
-                    tab.messages[i]._variants = variants;
-                    tab.messages[i]._variantIndex = variants.length - 1;
+                    const fullVariants = [...variants, content];
+                    tab.messages[i]._variants = fullVariants;
+                    tab.messages[i]._variantIndex = fullVariants.length - 1;
                     msg = tab.messages[i];
                     break;
                 }
@@ -749,7 +814,7 @@ function navigateVariant(btn, direction) {
     if (direction === 1 && (variants.length <= 1 || curIdx >= variants.length - 1)) {
         if (chat.busy) return;
 
-        let newVariants = variants.length > 0 ? [...variants, msg.content] : [msg.content];
+        const newVariants = variants.length > 0 ? [...variants] : [msg.content];
 
         // Find the user message immediately before this assistant message
         let userMsgIdx = -1;
@@ -789,6 +854,8 @@ function regenerateFromMessage(btn) {
     const msg = tab.messages[msgIdx];
     if (!msg || msg.role !== 'assistant') return;
 
+    const variants = msg._variants && msg._variants.length > 0 ? [...msg._variants] : [msg.content];
+
     // Find the last user message before this assistant message
     const lastUser = [...tab.messages].reverse().find(m => m.role === 'user');
     if (!lastUser) return;
@@ -797,6 +864,7 @@ function regenerateFromMessage(btn) {
     // Truncate to include the user message, remove all subsequent
     tab.messages = tab.messages.slice(0, userMsgIdx + 1);
     tab.updated_at = Date.now();
+    tab._pendingVariants = variants;
     scheduleChatPersist();
 
     // User message is already in tab.messages — use sendChatResend

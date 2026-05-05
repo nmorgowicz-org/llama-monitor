@@ -1,24 +1,27 @@
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 
 use crate::cli::AppArgs;
 
 fn migrate_config_if_needed(new_config_dir: &PathBuf) -> PathBuf {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let old_config_dir = home.join("Library").join("Application Support").join("llama-monitor");
-    
+    let old_config_dir = home
+        .join("Library")
+        .join("Application Support")
+        .join("llama-monitor");
+
     if new_config_dir.exists() {
         // New location already exists, use it
         return new_config_dir.clone();
     }
-    
+
     if old_config_dir.exists() {
         // Old location exists, migrate it
-        if let Err(e) = fs::create_dir_all(&new_config_dir) {
+        if let Err(e) = fs::create_dir_all(new_config_dir) {
             eprintln!("[config] Failed to create new config dir: {e}");
             return old_config_dir;
         }
-        
+
         if let Ok(entries) = fs::read_dir(&old_config_dir) {
             for entry in entries.flatten() {
                 let src = entry.path();
@@ -30,9 +33,12 @@ fn migrate_config_if_needed(new_config_dir: &PathBuf) -> PathBuf {
                 }
             }
         }
-        eprintln!("[config] Data migrated from old location to {:?}", new_config_dir);
+        eprintln!(
+            "[config] Data migrated from old location to {:?}",
+            new_config_dir
+        );
     }
-    
+
     new_config_dir.clone()
 }
 

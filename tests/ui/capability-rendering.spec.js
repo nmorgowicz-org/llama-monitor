@@ -29,8 +29,8 @@ test.describe('modern UI shell', () => {
     await expect(page.locator('.top-nav-bar')).toBeVisible();
     await expect(page.locator('.sidebar-nav')).toBeVisible();
     await expect(page.locator('#view-setup')).toBeVisible();
-    await expect(page.getByText('Attach to Endpoint')).toBeVisible();
-    await expect(page.getByText('Spawn Local Server')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Attach to Endpoint' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Spawn Local Server' })).toBeVisible();
   });
 
   test('top status endpoint is read-only and edit control is in dashboard', async ({ page }) => {
