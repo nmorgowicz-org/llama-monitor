@@ -18,6 +18,14 @@ function setChipState(el, label, state) {
     el.className = 'metric-live-chip ' + (state || '');
 }
 
+function lerpColor(a, b, t) {
+    return [
+        Math.round(a[0] + (b[0] - a[0]) * t),
+        Math.round(a[1] + (b[1] - a[1]) * t),
+        Math.round(a[2] + (b[2] - a[2]) * t)
+    ];
+}
+
 function setCardState(card, state) {
     if (!card) return;
     card.classList.remove('is-live', 'is-idle', 'is-unavailable', 'is-dormant');
@@ -47,10 +55,20 @@ function renderSparkline(id, points, className, isBlocked) {
         const y = height - ((value / max) * (height - 4)) - 2;
         return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
     }).join(' ');
+    // Level-based fill color: green (low) → yellow (mid) → red (high)
+    const ratio = max > 0 ? currentValue / max : 0;
+    let fillColor;
+    if (ratio < 0.6) {
+        const t = ratio / 0.6;
+        fillColor = lerpColor([163, 190, 140], [235, 203, 139], t);
+    } else {
+        const t = (ratio - 0.6) / 0.4;
+        fillColor = lerpColor([235, 203, 139], [191, 97, 106], t);
+    }
     const wallLine = isBlocked ? '<line x1="120" y1="0" x2="120" y2="28" stroke="#ebcb8b" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>' : '';
     // eslint-disable-next-line no-unsanitized/property -- SVG path data from numeric array values; className is a hardcoded CSS class
     svg.innerHTML =
-        '<path class="sparkline-fill ' + className + '" d="' + path + ' L 120 28 L 0 28 Z"></path>' +
+        '<path class="sparkline-fill ' + className + '" d="' + path + ' L 120 28 L 0 28 Z" fill="rgb(' + fillColor.join(',') + ')"></path>' +
         '<path class="sparkline-line ' + className + '" d="' + path + '"></path>' +
         '<line class="sparkline-current-trace ' + className + '" x1="' + Math.max(currentX - 18, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>' +
         '<circle class="sparkline-current-halo ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="9.2"></circle>' +
@@ -80,9 +98,18 @@ function renderLiveSparkline(id, points) {
     const currentValue = points[points.length - 1];
     const currentX = width - 4;
     const currentY = height - ((currentValue / max) * (height - 6)) - 3;
+    const ratio = max > 0 ? currentValue / max : 0;
+    let fillColor;
+    if (ratio < 0.6) {
+        const t = ratio / 0.6;
+        fillColor = lerpColor([163, 190, 140], [235, 203, 139], t);
+    } else {
+        const t = (ratio - 0.6) / 0.4;
+        fillColor = lerpColor([235, 203, 139], [191, 97, 106], t);
+    }
     // eslint-disable-next-line no-unsanitized/property -- SVG path data built from numeric array values only
     svg.innerHTML = [
-        '<path class="sparkline-fill live-output" d="' + path + ' L 120 28 L 0 28 Z"></path>',
+        '<path class="sparkline-fill live-output" d="' + path + ' L 120 28 L 0 28 Z" fill="rgb(' + fillColor.join(',') + ')"></path>',
         '<path class="sparkline-line live-output" d="' + path + '"></path>',
         '<line class="sparkline-current-trace live-output" x1="' + Math.max(currentX - 18, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>',
         '<circle class="sparkline-peak live-output" cx="' + peak.x.toFixed(2) + '" cy="' + peak.y.toFixed(2) + '" r="2.6"></circle>',
@@ -571,13 +598,23 @@ function renderHwMetricSparkline(svgId, history, color, show) {
         const y = height - (((value - min) / range) * (height - 4)) - 2;
         return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
     }).join(' ');
-    // eslint-disable-next-line no-unsanitized/property -- SVG path built from numeric history values; color is a hex string from getSeverityColor()
+    var ratio = range > 0 ? (currentValue - min) / range : 0;
+    var fillColor;
+    if (ratio < 0.6) {
+        var t = ratio / 0.6;
+        fillColor = lerpColor([163, 190, 140], [235, 203, 139], t);
+    } else {
+        var t = (ratio - 0.6) / 0.4;
+        fillColor = lerpColor([235, 203, 139], [191, 97, 106], t);
+    }
+    var fillRgb = 'rgb(' + fillColor.join(',') + ')';
+    // eslint-disable-next-line no-unsanitized/property -- SVG path from numeric values; svgId/color from getSeverityColor()
     svg.innerHTML =
         '<defs>' +
           '<linearGradient id="' + svgId + '-fill" x1="0" y1="0" x2="0" y2="1">' +
-            '<stop offset="0%" stop-color="' + color + '" stop-opacity="0.34"></stop>' +
-            '<stop offset="70%" stop-color="' + color + '" stop-opacity="0.1"></stop>' +
-            '<stop offset="100%" stop-color="' + color + '" stop-opacity="0.02"></stop>' +
+            '<stop offset="0%" stop-color="' + fillRgb + '" stop-opacity="0.34"></stop>' +
+            '<stop offset="70%" stop-color="' + fillRgb + '" stop-opacity="0.1"></stop>' +
+            '<stop offset="100%" stop-color="' + fillRgb + '" stop-opacity="0.02"></stop>' +
           '</linearGradient>' +
         '</defs>' +
         '<path class="sparkline-fill" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + svgId + '-fill)"></path>' +
@@ -585,7 +622,7 @@ function renderHwMetricSparkline(svgId, history, color, show) {
         '<circle class="sparkline-peak" cx="' + peakX.toFixed(2) + '" cy="' + peakY.toFixed(2) + '" r="2.1" fill="' + color + '" opacity="0.78"></circle>' +
         '<circle class="sparkline-current-halo" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="6.8" fill="' + color + '" opacity="0.14"></circle>' +
         '<circle class="sparkline-current" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="3.2" fill="' + color + '"></circle>' +
-        '<circle class="sparkline-current-core" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.35" fill="rgba(255,255,255,0.96)"></circle>';
+        '<circle class="sparkline-current-core" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.35" fill="' + color + '" opacity="0.7"></circle>';
 }
 
 function renderHwStacked(container, pct) {
@@ -747,8 +784,19 @@ function buildSparklineSVG(points, cssClass, color) {
     var peakIdx = points.indexOf(max);
     var peakX = peakIdx * step;
     var peakY = h - pad - ((max - min) / range) * (h - pad * 2);
+    var currentVal = points[len - 1];
+    var ratio = range > 0 ? (currentVal - min) / range : 0;
+    var fillColor;
+    if (ratio < 0.6) {
+        var t = ratio / 0.6;
+        fillColor = lerpColor([163, 190, 140], [235, 203, 139], t);
+    } else {
+        var t = (ratio - 0.6) / 0.4;
+        fillColor = lerpColor([235, 203, 139], [191, 97, 106], t);
+    }
+    var fillRgb = 'rgb(' + fillColor.join(',') + ')';
     return '<svg class="metric-sparkline ' + cssClass + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">' +
-        '<defs><linearGradient id="hw-spark-grad-' + cssClass + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="' + color + '" stop-opacity="0.25"/><stop offset="100%" stop-color="' + color + '" stop-opacity="0.02"/></linearGradient></defs>' +
+        '<defs><linearGradient id="hw-spark-grad-' + cssClass + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="' + fillRgb + '" stop-opacity="0.25"/><stop offset="100%" stop-color="' + fillRgb + '" stop-opacity="0.02"/></linearGradient></defs>' +
         '<path d="' + fillPath + '" fill="url(#hw-spark-grad-' + cssClass + ')"/>' +
         '<path d="' + linePath + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
         (len > 3 ? '<circle cx="' + peakX.toFixed(1) + '" cy="' + peakY.toFixed(1) + '" r="2" fill="' + color + '" opacity="0.8"/>' : '') +
