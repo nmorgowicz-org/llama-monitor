@@ -34,33 +34,28 @@
       <!-- Shared SVG filters/gradients for sparkline visualizations -->
       <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
         <defs>
-          <!-- Shimmer sweep gradient for sparkline fills — creates a light band that sweeps across -->
+          <!-- Subtle shimmer gradient for sparkline fills — gentle light band sweep -->
           <linearGradient id="spark-shimmer" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stop-color="currentColor" stop-opacity="0.08"/>
-            <stop offset="35%" stop-color="currentColor" stop-opacity="0.35"/>
-            <stop offset="55%" stop-color="currentColor" stop-opacity="0.35"/>
-            <stop offset="100%" stop-color="currentColor" stop-opacity="0.08"/>
-            <animate attributeName="x1" values="-1;2" dur="4s" repeatCount="indefinite"/>
-            <animate attributeName="x2" values="0;3" dur="4s" repeatCount="indefinite"/>
+            <stop offset="0%" stop-color="currentColor" stop-opacity="0.12"/>
+            <stop offset="60%" stop-color="currentColor" stop-opacity="0.22"/>
+            <stop offset="100%" stop-color="currentColor" stop-opacity="0.12"/>
+            <animate attributeName="x1" values="-0.5;1.5" dur="6s" repeatCount="indefinite"/>
+            <animate attributeName="x2" values="0.5;2.5" dur="6s" repeatCount="indefinite"/>
           </linearGradient>
 
-          <!-- Multi-layer glow filter — 3 stacked blurs for neon-tube quality -->
+          <!-- Subtle glow filter — single small blur for current position dot -->
           <filter id="spark-rich-glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="1.5" result="blur1"/>
-            <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur2"/>
-            <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur3"/>
+            <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur"/>
             <feMerge>
-              <feMergeNode in="blur3"/>
-              <feMergeNode in="blur2"/>
-              <feMergeNode in="blur1"/>
+              <feMergeNode in="blur"/>
               <feMergeNode in="SourceGraphic"/>
             </feMerge>
           </filter>
 
           <!-- Animated pulse glow — breathing glow via animated stdDeviation -->
           <filter id="spark-pulse-glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="3" result="blur">
-              <animate attributeName="stdDeviation" values="2;5;2" dur="2.5s" repeatCount="indefinite"/>
+            <feGaussianBlur stdDeviation="2" result="blur">
+              <animate attributeName="stdDeviation" values="1.5;3;1.5" dur="2.5s" repeatCount="indefinite"/>
             </feGaussianBlur>
             <feMerge>
               <feMergeNode in="blur"/>

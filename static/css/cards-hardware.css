@@ -927,8 +927,11 @@
     border-radius: 10px;
     overflow: hidden;
     background:
-      radial-gradient(circle at 84% 18%, rgba(255, 255, 255, 0.035), transparent 20%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+      radial-gradient(ellipse at 20% 50%, rgba(99, 179, 237, 0.05) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, rgba(163, 190, 140, 0.04) 0%, transparent 40%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.008));
+    background-size: 100% 100%, 100% 100%, 100% 100%;
+    animation: mesh-drift 12s ease-in-out infinite alternate;
   }
 
   .hw-clock-footer-spark .sparkline-line {
@@ -936,9 +939,7 @@
   }
 
   .hw-clock-footer-spark .sparkline-fill {
-    opacity: 0.18;
-    animation: spark-fill-drift 8.4s linear infinite;
-    filter: saturate(1.04) brightness(1);
+    fill: url(#spark-shimmer);
   }
 
   .hw-clock-gpu-readout {
@@ -1823,6 +1824,11 @@
   .hw-metric-sparkline .sparkline-fill,
   .hw-clock-footer-spark .sparkline-fill {
     animation: none !important;
+  }
+
+  /* mesh-drift — background-position (neutralized) */
+  @keyframes mesh-drift {
+    0%, 100% { background-position: 0% 0%, 100% 0%, 50% 100%, 0% 0%, 0% 0%; }
   }
 
   /* hw-peak-pulse — transform scale */
