@@ -32,9 +32,9 @@
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: calc(var(--radius-card) + 2px);
   background:
-    radial-gradient(circle at 12% 18%, rgba(96, 165, 250, 0.08), transparent 24%),
-    radial-gradient(circle at 88% 12%, rgba(34, 211, 238, 0.08), transparent 20%),
-    linear-gradient(145deg, rgba(28, 33, 42, 0.86), rgba(20, 24, 32, 0.94));
+    radial-gradient(circle at 12% 18%, var(--surface-card-ambient-a), transparent 24%),
+    radial-gradient(circle at 88% 12%, var(--surface-card-ambient-b), transparent 20%),
+    linear-gradient(180deg, var(--surface-card-elevated), var(--surface-card-base));
   box-shadow:
     0 20px 48px rgba(0, 0, 0, 0.28),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
@@ -59,9 +59,9 @@
 .control-bar {
   padding: 18px;
   background:
-    radial-gradient(circle at top right, rgba(99, 102, 241, 0.10), transparent 20%),
-    radial-gradient(circle at bottom left, rgba(16, 185, 129, 0.08), transparent 26%),
-    linear-gradient(145deg, rgba(33, 38, 48, 0.86), rgba(21, 26, 34, 0.96));
+    radial-gradient(circle at top right, var(--surface-card-ambient-a), transparent 20%),
+    radial-gradient(circle at bottom left, var(--surface-card-ambient-b), transparent 26%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-card-elevated) 94%, transparent), color-mix(in srgb, var(--surface-card-base) 98%, transparent));
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius-card);
   box-shadow:
@@ -118,6 +118,21 @@
   gap: var(--gap-md);
 }
 
+.metric-section > .dashboard-section-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: clamp(1.2rem, 1.4vw, 1.55rem);
+}
+
+.metric-section > .dashboard-section-title::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--surface-card-line), rgba(255, 255, 255, 0.03));
+}
+
 .dashboard-section-title {
   margin: 0;
   color: var(--color-text-primary);
@@ -147,7 +162,7 @@
 .inference-grid::before {
     width: 500px;
     height: 500px;
-    background: radial-gradient(circle, var(--color-info) 0%, transparent 70%);
+    background: radial-gradient(circle, color-mix(in srgb, var(--surface-card-ambient-a) 90%, transparent) 0%, transparent 70%);
     top: -200px;
     right: -100px;
 }
@@ -155,7 +170,7 @@
 .inference-grid::after {
     width: 400px;
     height: 400px;
-    background: radial-gradient(circle, var(--color-teal) 0%, transparent 70%);
+    background: radial-gradient(circle, color-mix(in srgb, var(--surface-card-ambient-b) 100%, transparent) 0%, transparent 70%);
     bottom: -150px;
     left: -100px;
 }
@@ -172,7 +187,7 @@
 .export-option,
 .personalization-section,
 .shortcuts-modal {
-  background: linear-gradient(145deg, rgba(40, 48, 58, 0.86), rgba(30, 36, 43, 0.94));
+  background: linear-gradient(180deg, var(--surface-card-elevated), var(--surface-card-base));
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-surface);
@@ -184,9 +199,10 @@
   position: relative;
   padding: 22px;
   background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.04), transparent 22%),
-    linear-gradient(145deg, rgba(40, 48, 58, 0.94), rgba(27, 33, 41, 0.99));
-  border: 1px solid rgba(255, 255, 255, 0.08);
+    radial-gradient(circle at 18% 18%, var(--surface-card-ambient-a), transparent 26%),
+    radial-gradient(circle at 82% 14%, var(--surface-card-ambient-b), transparent 24%),
+    linear-gradient(180deg, var(--surface-card-elevated), var(--surface-card-base));
+  border: 1px solid var(--surface-card-overlay-strong);
   border-radius: var(--radius-card);
   box-shadow:
     0 16px 40px rgba(0, 0, 0, 0.36),
@@ -206,62 +222,20 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  background: linear-gradient(90deg, transparent, var(--surface-card-line), transparent);
 }
-
-/* Per-card accent top-line — overrides the generic white with a theme color */
-.widget-speed::before    { background: linear-gradient(90deg, transparent, rgba(6, 182, 212, 0.55), transparent); }
-.widget-generation::before { background: linear-gradient(90deg, transparent, rgba(245, 158, 11, 0.55), transparent); }
-.widget-context::before  { background: linear-gradient(90deg, transparent, rgba(16, 185, 129, 0.55), transparent); }
-.widget-gpu::before      { background: linear-gradient(90deg, transparent, rgba(244, 63, 94, 0.45), transparent); }
-.widget-system::before   { background: linear-gradient(90deg, transparent, rgba(96, 165, 250, 0.45), transparent); }
-.inference-mini-panel::before    { background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.45), transparent); }
-.inference-config-panel::before  { background: linear-gradient(90deg, transparent, rgba(168, 85, 247, 0.5), transparent); }
-
-/* Matching subtle inner top-glow for each card */
-.widget-speed     { box-shadow: 0 4px 16px rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 0 rgba(0,0,0,.2), inset 0 40px 60px -20px rgba(6,182,212,.03); }
-.widget-generation { box-shadow: 0 4px 16px rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 0 rgba(0,0,0,.2), inset 0 40px 60px -20px rgba(245,158,11,.04); }
-.widget-context   { box-shadow: 0 4px 16px rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 0 rgba(0,0,0,.2), inset 0 40px 60px -20px rgba(16,185,129,.04); }
-.widget-gpu       { box-shadow: 0 4px 16px rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 0 rgba(0,0,0,.2), inset 0 40px 60px -20px rgba(244,63,94,.03); }
-.widget-system    { box-shadow: 0 4px 16px rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 0 rgba(0,0,0,.2), inset 0 40px 60px -20px rgba(96,165,250,.03); }
-.inference-mini-panel    { box-shadow: 0 4px 16px rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 0 rgba(0,0,0,.2), inset 0 40px 60px -20px rgba(99,102,241,.04); }
-.inference-config-panel  { box-shadow: 0 4px 16px rgba(0,0,0,.4), 0 2px 8px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.06), inset 0 -1px 0 rgba(0,0,0,.2), inset 0 40px 60px -20px rgba(168,85,247,.04); }
 
 .widget-speed,
 .widget-generation,
+.widget-context,
+.widget-gpu,
+.widget-system,
 .inference-mini-panel,
 .inference-config-panel {
   background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.045), transparent 22%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.034), rgba(255, 255, 255, 0.014));
-}
-
-.widget-speed {
-  background:
-    radial-gradient(circle at 82% 14%, rgba(34, 211, 238, 0.11), transparent 24%),
-    radial-gradient(circle at 12% 86%, rgba(96, 165, 250, 0.09), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.036), rgba(255, 255, 255, 0.014));
-}
-
-.widget-generation {
-  background:
-    radial-gradient(circle at 82% 16%, rgba(250, 204, 21, 0.11), transparent 24%),
-    radial-gradient(circle at 14% 84%, rgba(249, 115, 22, 0.08), transparent 26%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.014));
-}
-
-.inference-mini-panel {
-  background:
-    radial-gradient(circle at 84% 16%, rgba(129, 140, 248, 0.11), transparent 22%),
-    radial-gradient(circle at 12% 88%, rgba(99, 102, 241, 0.07), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.014));
-}
-
-.inference-config-panel {
-  background:
-    radial-gradient(circle at 84% 16%, rgba(192, 132, 252, 0.12), transparent 24%),
-    radial-gradient(circle at 12% 84%, rgba(168, 85, 247, 0.08), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.014));
+    radial-gradient(circle at 84% 16%, var(--surface-card-ambient-a), transparent 22%),
+    radial-gradient(circle at 12% 88%, var(--surface-card-ambient-b), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.012));
 }
 
 .widget-card::after {
@@ -270,7 +244,7 @@
   inset: 0;
   border-radius: var(--radius-card);
   padding: 1px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), transparent 40%, transparent 60%, rgba(99, 102, 241, 0.15));
+  background: linear-gradient(135deg, var(--surface-card-line), transparent 40%, transparent 60%, rgba(45, 212, 191, 0.16));
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -283,11 +257,11 @@
 }
 
 .widget-card:hover {
-  border-color: rgba(99, 102, 241, 0.45);
+  border-color: var(--surface-card-line-strong);
   box-shadow:
     0 18px 42px rgba(0, 0, 0, 0.45),
     0 4px 16px rgba(0, 0, 0, 0.32),
-    0 0 40px rgba(99, 102, 241, 0.12),
+    0 0 40px var(--surface-card-glow),
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     inset 0 -1px 0 rgba(0, 0, 0, 0.25);
   transform: translateY(-4px) scale(1.015);
@@ -317,7 +291,7 @@
 
 .widget-card.is-live::after {
   opacity: 1;
-  background: linear-gradient(135deg, rgba(143, 188, 187, 0.42), transparent 42%, rgba(180, 142, 173, 0.22));
+  background: linear-gradient(135deg, rgba(103, 232, 249, 0.34), transparent 42%, rgba(45, 212, 191, 0.22));
   animation: card-edge-breathe 2.8s ease-in-out infinite;
 }
 
@@ -806,9 +780,9 @@
   position: relative;
   overflow: hidden;
   background:
-    radial-gradient(circle at top right, rgba(34, 197, 94, 0.08), transparent 34%),
-    radial-gradient(circle at bottom left, rgba(56, 189, 248, 0.09), transparent 38%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.02));
+    radial-gradient(circle at 84% 16%, var(--surface-card-ambient-a), transparent 22%),
+    radial-gradient(circle at 12% 88%, var(--surface-card-ambient-b), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.012));
 }
 
 .widget-context .context-chat-strip-wrap,
@@ -826,12 +800,11 @@
 .sampler-params-inline {
   border-radius: 16px;
   background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.04), transparent 24%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.016));
-  border: 1px solid rgba(255, 255, 255, 0.06);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.012));
+  border: 1px solid var(--surface-card-overlay);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.03),
-    0 10px 24px rgba(0, 0, 0, 0.12);
+    inset 0 1px 0 rgba(255, 255, 255, 0.02),
+    0 6px 16px rgba(0, 0, 0, 0.08);
   padding: 12px 14px;
 }
 
@@ -841,8 +814,8 @@
   inset: 0;
   pointer-events: none;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent 40%),
-    radial-gradient(circle at 80% 16%, rgba(255, 255, 255, 0.05), transparent 18%);
+    linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 40%),
+    radial-gradient(circle at 80% 16%, rgba(255, 255, 255, 0.04), transparent 18%);
   opacity: 0.9;
 }
 
@@ -1330,8 +1303,8 @@
 
 .stage-segment.active {
   color: #d8fbf4;
-  background: linear-gradient(135deg, rgba(6, 182, 212, 0.22), rgba(16, 185, 129, 0.16));
-  box-shadow: 0 0 18px rgba(6, 182, 212, 0.16);
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.18), rgba(45, 212, 191, 0.14));
+  box-shadow: 0 0 18px rgba(8, 145, 178, 0.14);
 }
 
 .stage-segment.idle {
@@ -1469,8 +1442,8 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #a3be8c, #88c0d1);
-  box-shadow: 0 0 12px rgba(136, 192, 209, 0.35);
+  background: linear-gradient(135deg, #67e8f9, #5eead4);
+  box-shadow: 0 0 12px rgba(8, 145, 178, 0.24);
   animation: token-stream 1.3s ease-in-out infinite;
 }
 
@@ -1732,6 +1705,10 @@
 .inference-config-panel {
   position: relative;
   align-content: start;
+  background:
+    radial-gradient(circle at 84% 16%, var(--surface-card-ambient-a), transparent 22%),
+    radial-gradient(circle at 12% 88%, var(--surface-card-ambient-b), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.012));
 }
 
 .sampler-params-inline {

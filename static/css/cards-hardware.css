@@ -160,7 +160,8 @@
    position: relative;
    overflow: hidden;
    background:
-     radial-gradient(circle at top right, rgba(255, 255, 255, 0.04), transparent 22%),
+     radial-gradient(circle at 18% 18%, var(--surface-card-ambient-a), transparent 26%),
+     radial-gradient(circle at 82% 14%, var(--surface-card-ambient-b), transparent 24%),
      linear-gradient(180deg, rgba(255, 255, 255, 0.032), rgba(255, 255, 255, 0.012));
  }
 
@@ -177,15 +178,15 @@
 
  .widget-gpu {
    background:
-     radial-gradient(circle at 84% 14%, rgba(244, 63, 94, 0.12), transparent 24%),
-     radial-gradient(circle at 16% 86%, rgba(251, 113, 133, 0.07), transparent 28%),
+     radial-gradient(circle at 84% 14%, var(--surface-card-ambient-a), transparent 24%),
+     radial-gradient(circle at 16% 86%, var(--surface-card-ambient-b), transparent 28%),
      linear-gradient(180deg, rgba(255, 255, 255, 0.034), rgba(255, 255, 255, 0.012));
  }
 
  .widget-system {
    background:
-     radial-gradient(circle at 84% 14%, rgba(96, 165, 250, 0.12), transparent 24%),
-     radial-gradient(circle at 16% 86%, rgba(45, 212, 191, 0.07), transparent 28%),
+     radial-gradient(circle at 84% 14%, var(--surface-card-ambient-a), transparent 24%),
+     radial-gradient(circle at 16% 86%, var(--surface-card-ambient-b), transparent 28%),
      linear-gradient(180deg, rgba(255, 255, 255, 0.034), rgba(255, 255, 255, 0.012));
  }
 
@@ -276,9 +277,8 @@
 
  .hw-metric-block {
    background:
-     radial-gradient(circle at top right, rgba(255, 255, 255, 0.04), transparent 22%),
-     linear-gradient(180deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.018));
-   border: 1px solid rgba(255, 255, 255, 0.07);
+     linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.012));
+   border: 1px solid var(--surface-card-overlay);
    border-radius: 16px;
    padding: 14px;
    display: flex;
@@ -288,22 +288,10 @@
     min-height: 188px;
     transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease, background 0.25s ease;
    box-shadow:
-     0 10px 24px rgba(0, 0, 0, 0.18),
+     0 8px 18px rgba(0, 0, 0, 0.12),
      inset 0 1px 0 rgba(255, 255, 255, 0.04);
    position: relative;
    overflow: hidden;
- }
-
- .widget-gpu .hw-metric-block {
-   background:
-     radial-gradient(circle at 84% 12%, rgba(244, 63, 94, 0.08), transparent 24%),
-     linear-gradient(180deg, rgba(255, 255, 255, 0.042), rgba(255, 255, 255, 0.018));
- }
-
- .widget-system .hw-metric-block {
-   background:
-     radial-gradient(circle at 84% 12%, rgba(96, 165, 250, 0.08), transparent 24%),
-     linear-gradient(180deg, rgba(255, 255, 255, 0.042), rgba(255, 255, 255, 0.018));
  }
 
  .hw-metric-block#gpu-clocks-block,
@@ -314,13 +302,12 @@
  }
 
  .hw-metric-block:hover {
-   border-color: rgba(255, 255, 255, 0.12);
+   border-color: var(--surface-card-line);
    background:
-     radial-gradient(circle at top right, rgba(255, 255, 255, 0.05), transparent 22%),
-     linear-gradient(180deg, rgba(255, 255, 255, 0.046), rgba(255, 255, 255, 0.024));
+     linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
    transform: translateY(-2px);
    box-shadow:
-     0 16px 32px rgba(0, 0, 0, 0.24),
+     0 12px 24px rgba(0, 0, 0, 0.16),
      inset 0 1px 0 rgba(255, 255, 255, 0.05);
  }
 
@@ -729,7 +716,7 @@
     border-radius: 999px;
     background:
       radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.08), transparent 58%),
-      radial-gradient(circle at 30% 30%, rgba(99, 102, 241, 0.18), transparent 42%);
+      radial-gradient(circle at 30% 30%, var(--surface-card-ambient-a), transparent 42%);
     opacity: 0.8;
     filter: blur(10px);
     animation: hw-clock-cluster-ambient 5s ease-in-out infinite;
@@ -1370,8 +1357,8 @@
  }
 
  .hw-power-capped .hw-bar-fill {
-   animation: bar-shimmer 1.2s ease-in-out infinite;
- }
+   animation: hw-bar-shimmer 1.2s ease-in-out infinite;
+  }
 
  /* Visualization Switcher */
  .viz-gear-btn {
@@ -1654,14 +1641,14 @@
   }
 
   .hw-metric-block {
-    animation: hw-block-ambient 4s ease-in-out infinite;
+    animation: none;
   }
 
   /* Metric block hover glow */
   .hw-metric-block:hover {
-    border-color: rgba(136, 192, 209, 0.2);
-    background: rgba(136, 192, 209, 0.04);
-    box-shadow: 0 0 20px rgba(136, 192, 209, 0.06);
+    border-color: var(--surface-card-line);
+    background: rgba(34, 211, 238, 0.03);
+    box-shadow: 0 0 18px rgba(8, 145, 178, 0.05);
     animation: none;
   }
 
@@ -1672,7 +1659,7 @@
   }
 
   .hw-metric-value {
-    animation: hw-value-ambient 3s ease-in-out infinite;
+    animation: none;
   }
 
 /* Hardware card empty state */

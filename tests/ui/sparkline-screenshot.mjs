@@ -94,6 +94,34 @@ async function captureSparklineClips(page, selector) {
   console.log(`Captured ${rects.length} individual sparkline SVGs`);
 }
 
+async function captureElementScreenshot(page, selector, path, options = {}) {
+  const padding = options.padding ?? 20;
+  const handle = await page.$(selector);
+  if (!handle) {
+    throw new Error(`Missing selector for screenshot capture: ${selector}`);
+  }
+
+  await handle.evaluate(el => {
+    el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'nearest' });
+  });
+  await sleep(options.settleMs ?? 500);
+
+  const box = await handle.boundingBox();
+  if (!box) {
+    throw new Error(`Selector has no visible bounds for screenshot capture: ${selector}`);
+  }
+
+  const viewport = page.viewport();
+  const clip = {
+    x: Math.max(0, box.x - padding),
+    y: Math.max(0, box.y - padding),
+    width: Math.min((viewport?.width ?? box.width) - Math.max(0, box.x - padding), box.width + padding * 2),
+    height: Math.min((viewport?.height ?? box.height) - Math.max(0, box.y - padding), box.height + padding * 2)
+  };
+
+  await page.screenshot({ path, clip });
+}
+
 (async () => {
   const port = await findPort();
   console.log(`Port: ${port}`);
@@ -130,16 +158,12 @@ async function captureSparklineClips(page, selector) {
     await page.screenshot({ path: `${OUTPUT_DIR}/sparkline-validate-full.png`, fullPage: true });
     console.log('Captured: sparkline-validate-full.png');
 
-    // Scroll to GPU section and capture
-    await page.evaluate(() => window.scrollTo(0, 400));
-    await sleep(500);
-    await page.screenshot({ path: `${OUTPUT_DIR}/sparkline-validate-gpu-section.png`, fullPage: true });
+    // Capture clipped GPU section
+    await captureElementScreenshot(page, '#gpu-section', `${OUTPUT_DIR}/sparkline-validate-gpu-section.png`, { padding: 24 });
     console.log('Captured: sparkline-validate-gpu-section.png');
 
-    // Scroll to System section and capture
-    await page.evaluate(() => window.scrollTo(0, 800));
-    await sleep(500);
-    await page.screenshot({ path: `${OUTPUT_DIR}/sparkline-validate-system-section.png`, fullPage: true });
+    // Capture clipped System section
+    await captureElementScreenshot(page, '#system-section', `${OUTPUT_DIR}/sparkline-validate-system-section.png`, { padding: 24 });
     console.log('Captured: sparkline-validate-system-section.png');
 
     // Capture all sparkline SVGs for close inspection
