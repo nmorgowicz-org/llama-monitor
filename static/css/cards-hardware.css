@@ -521,8 +521,7 @@
   }
 
   .hw-sparkline .sparkline-fill {
-    fill: currentColor;
-    opacity: 0.24;
+    opacity: 0.38;
   }
 
   .hw-sparkline circle:last-child {
@@ -555,8 +554,7 @@
   }
 
   .hw-metric-sparkline .sparkline-fill {
-    fill: currentColor;
-    opacity: 0.24;
+    opacity: 0.38;
   }
 
   .hw-metric-sparkline .sparkline-peak {
@@ -927,8 +925,7 @@
   }
 
   .hw-clock-footer-spark .sparkline-fill {
-    fill: currentColor;
-    opacity: 0.18;
+    opacity: 0.32;
   }
 
   .hw-clock-gpu-readout {

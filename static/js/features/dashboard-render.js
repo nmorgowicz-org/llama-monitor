@@ -60,10 +60,10 @@ function renderSparkline(id, points, className, isBlocked) {
     let fillColor;
     if (ratio < 0.6) {
         const t = ratio / 0.6;
-        fillColor = lerpColor([163, 190, 140], [235, 203, 139], t);
+        fillColor = lerpColor([80, 200, 120], [235, 203, 139], t);
     } else {
         const t = (ratio - 0.6) / 0.4;
-        fillColor = lerpColor([235, 203, 139], [191, 97, 106], t);
+        fillColor = lerpColor([235, 203, 139], [200, 80, 80], t);
     }
     const wallLine = isBlocked ? '<line x1="120" y1="0" x2="120" y2="28" stroke="#ebcb8b" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>' : '';
     // eslint-disable-next-line no-unsanitized/property -- SVG path data from numeric array values; className is a hardcoded CSS class
@@ -102,10 +102,10 @@ function renderLiveSparkline(id, points) {
     let fillColor;
     if (ratio < 0.6) {
         const t = ratio / 0.6;
-        fillColor = lerpColor([163, 190, 140], [235, 203, 139], t);
+        fillColor = lerpColor([80, 200, 120], [235, 203, 139], t);
     } else {
         const t = (ratio - 0.6) / 0.4;
-        fillColor = lerpColor([235, 203, 139], [191, 97, 106], t);
+        fillColor = lerpColor([235, 203, 139], [200, 80, 80], t);
     }
     // eslint-disable-next-line no-unsanitized/property -- SVG path data built from numeric array values only
     svg.innerHTML = [
@@ -602,19 +602,19 @@ function renderHwMetricSparkline(svgId, history, color, show) {
     var fillColor;
     if (ratio < 0.6) {
         var t = ratio / 0.6;
-        fillColor = lerpColor([163, 190, 140], [235, 203, 139], t);
+        fillColor = lerpColor([80, 200, 120], [235, 203, 139], t);
     } else {
         var t = (ratio - 0.6) / 0.4;
-        fillColor = lerpColor([235, 203, 139], [191, 97, 106], t);
+        fillColor = lerpColor([235, 203, 139], [200, 80, 80], t);
     }
     var fillRgb = 'rgb(' + fillColor.join(',') + ')';
     // eslint-disable-next-line no-unsanitized/property -- SVG path from numeric values; svgId/color from getSeverityColor()
     svg.innerHTML =
         '<defs>' +
           '<linearGradient id="' + svgId + '-fill" x1="0" y1="0" x2="0" y2="1">' +
-            '<stop offset="0%" stop-color="' + fillRgb + '" stop-opacity="0.34"></stop>' +
-            '<stop offset="70%" stop-color="' + fillRgb + '" stop-opacity="0.1"></stop>' +
-            '<stop offset="100%" stop-color="' + fillRgb + '" stop-opacity="0.02"></stop>' +
+            '<stop offset="0%" stop-color="' + fillRgb + '" stop-opacity="0.45"></stop>' +
+            '<stop offset="70%" stop-color="' + fillRgb + '" stop-opacity="0.16"></stop>' +
+            '<stop offset="100%" stop-color="' + fillRgb + '" stop-opacity="0.06"></stop>' +
           '</linearGradient>' +
         '</defs>' +
         '<path class="sparkline-fill" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + svgId + '-fill)"></path>' +
@@ -789,14 +789,14 @@ function buildSparklineSVG(points, cssClass, color) {
     var fillColor;
     if (ratio < 0.6) {
         var t = ratio / 0.6;
-        fillColor = lerpColor([163, 190, 140], [235, 203, 139], t);
+        fillColor = lerpColor([80, 200, 120], [235, 203, 139], t);
     } else {
         var t = (ratio - 0.6) / 0.4;
-        fillColor = lerpColor([235, 203, 139], [191, 97, 106], t);
+        fillColor = lerpColor([235, 203, 139], [200, 80, 80], t);
     }
     var fillRgb = 'rgb(' + fillColor.join(',') + ')';
     return '<svg class="metric-sparkline ' + cssClass + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">' +
-        '<defs><linearGradient id="hw-spark-grad-' + cssClass + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="' + fillRgb + '" stop-opacity="0.25"/><stop offset="100%" stop-color="' + fillRgb + '" stop-opacity="0.02"/></linearGradient></defs>' +
+        '<defs><linearGradient id="hw-spark-grad-' + cssClass + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="' + fillRgb + '" stop-opacity="0.45"/><stop offset="100%" stop-color="' + fillRgb + '" stop-opacity="0.06"/></linearGradient></defs>' +
         '<path d="' + fillPath + '" fill="url(#hw-spark-grad-' + cssClass + ')"/>' +
         '<path d="' + linePath + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
         (len > 3 ? '<circle cx="' + peakX.toFixed(1) + '" cy="' + peakY.toFixed(1) + '" r="2" fill="' + color + '" opacity="0.8"/>' : '') +
