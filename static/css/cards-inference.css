@@ -86,7 +86,7 @@
 .num-sm,
 .modal-field {
   display: grid;
-  gap: 5px;
+  gap: var(--gap-xs);
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
   font-weight: 650;
@@ -130,6 +130,34 @@
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.3fr) minmax(220px, 1fr);
   gap: var(--gap-md);
+  position: relative;
+}
+
+.inference-grid::before,
+.inference-grid::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.12;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.inference-grid::before {
+    width: 500px;
+    height: 500px;
+    background: radial-gradient(circle, var(--color-info) 0%, transparent 70%);
+    top: -200px;
+    right: -100px;
+}
+
+.inference-grid::after {
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(circle, var(--color-teal) 0%, transparent 70%);
+    bottom: -150px;
+    left: -100px;
 }
 
 .widget-card,
@@ -166,7 +194,7 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.06),
     inset 0 -1px 0 rgba(0, 0, 0, 0.2),
     inset 0 36px 80px -38px rgba(255, 255, 255, 0.05);
-  transition: border-color 250ms ease, box-shadow 250ms ease, transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
   backdrop-filter: blur(12px);
   overflow: hidden;
 }
@@ -383,7 +411,7 @@
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--gap-xs);
   flex: 0 0 auto;
   min-height: 22px;
   padding: 4px 9px;
@@ -528,7 +556,7 @@
 .speed-item {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: var(--gap-xs);
 }
 
 .speed-item .speed-peak-badge {
@@ -556,7 +584,7 @@
 .speed-value-wrap {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--gap-xs);
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -1329,7 +1357,7 @@
 
 .generation-live-panel {
   display: grid;
-  gap: 6px;
+  gap: var(--gap-xs);
   min-width: 0;
 }
 
@@ -1395,7 +1423,7 @@
 .token-flow {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--gap-xs);
   height: 15px;
   opacity: 0.45;
 }
@@ -1427,7 +1455,7 @@
 .generation-details {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: var(--gap-xs);
   color: var(--color-text-muted);
   font-family: var(--font-mono);
   font-size: 0.52rem;
@@ -1562,7 +1590,7 @@
 
 .throughput-ratio {
   display: grid;
-  gap: 6px;
+  gap: var(--gap-xs);
 }
 
 .ratio-label {
@@ -1599,7 +1627,7 @@
 
 .slot-utilization {
   display: grid;
-  gap: 6px;
+  gap: var(--gap-xs);
 }
 
 .util-label {
@@ -1672,11 +1700,168 @@
 .sampler-params-inline {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: var(--gap-xs);
   padding-top: 4px;
 }
 
 .sampler-params-inline .config-kv {
   font-size: var(--text-2xs);
   padding: 3px 5px;
+}
+
+/* ── Reduced Motion ─────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  /* card-float — transform translateY+scale */
+  .widget-card:hover {
+    animation: none !important;
+  }
+
+  /* card-edge-breathe — opacity (visual, but paired with movement states) */
+  .widget-card.is-live::after,
+  .widget-card.is-blocked::after {
+    animation: none !important;
+  }
+
+  /* card hover/active — transform translateY+scale */
+  .widget-card {
+    transition: border-color 250ms ease, box-shadow 250ms ease !important;
+  }
+  .widget-card:hover,
+  .widget-card:active {
+    transform: none !important;
+  }
+
+  /* chip-blocked-pulse — box-shadow */
+  .metric-live-chip.blocked {
+    animation: none !important;
+  }
+
+  /* dot-pulse — transform scale */
+  .metric-live-chip.blocked::before,
+  .metric-live-chip.live::before {
+    animation: none !important;
+  }
+
+  /* spark-fill-drift — opacity+filter */
+  .sparkline-fill {
+    animation: none !important;
+  }
+
+  /* spark-panel-sheen — opacity+transform translateX */
+  .dashboard-header::after,
+  .control-bar::after,
+  .widget-context::after {
+    animation: none !important;
+  }
+
+  /* spark-current-trace — opacity+transform scaleX */
+  .sparkline-current-trace {
+    animation: none !important;
+  }
+
+  /* spark-current-halo — opacity+transform scale */
+  .sparkline-current-halo {
+    animation: none !important;
+  }
+
+  /* spark-current-dot — transform scale */
+  .sparkline-current {
+    animation: none !important;
+  }
+
+  /* inference-empty-state — opacity+transform translateY */
+  .inference-empty-state {
+    transition: opacity 220ms ease !important;
+  }
+  .inference-empty-state.visible {
+    transform: none !important;
+  }
+
+  /* metric-delta — opacity+transform translateY */
+  .metric-delta {
+    transition: opacity 180ms ease !important;
+  }
+  .metric-delta.show {
+    transform: none !important;
+  }
+
+  /* speed-bar — width transition (visual, keep); bar-shimmer — transform translateX */
+  .speed-bar::after {
+    animation: none !important;
+  }
+
+  /* context-toggle-btn — transform */
+  .context-toggle-btn {
+    transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease !important;
+  }
+
+  /* context-card-view — opacity+transform translateY */
+  .context-card-view {
+    transition: opacity 200ms ease !important;
+  }
+  .context-card-view.hidden,
+  .context-card-view.active {
+    transform: none !important;
+  }
+
+  /* context-gauge-ring — stroke-dashoffset transition (visual, keep) */
+
+  /* gauge-breathe, gauge-chat-breathe, gauge-live-glow — opacity+filter */
+  .context-gauge-ring.idle,
+  .context-gauge-ring.chat,
+  .context-gauge-ring.live {
+    animation: none !important;
+  }
+
+  /* pill-name-scroll — transform translateX */
+  .context-pill-name.scrollable {
+    animation: none !important;
+  }
+  .context-pill:hover .context-pill-name.scrollable {
+    animation: none !important;
+  }
+
+  /* pill-fade, context-pill-scan — opacity / box-shadow */
+  .context-pill.idle {
+    animation: none !important;
+  }
+
+  /* pill-scan — box-shadow */
+  .context-pill.warm {
+    animation: none !important;
+  }
+
+  /* warning-breathe — box-shadow */
+  .context-pill.warning {
+    animation: none !important;
+  }
+
+  /* critical-shimmer — (no transform, visual only, keep) */
+
+  /* critical-pulse — opacity */
+  .context-pill.critical {
+    animation: none !important;
+  }
+
+  /* context-fleet-fill — width transition (visual, keep) */
+
+  /* ring-breathe — box-shadow */
+  .widget-generation.is-live .generation-ring {
+    animation: none !important;
+  }
+
+  /* generation-ring — background transition (visual, keep) */
+
+  /* token-stream — transform translateY+scale */
+  .token-flow span {
+    animation: none !important;
+  }
+
+  /* ambient-glow — opacity+transform scale (unused keyframe, defensive) */
+
+  /* slot-sweep — transform (applied to ::after) */
+  .slot-tile.busy::after {
+    animation: none !important;
+  }
 }

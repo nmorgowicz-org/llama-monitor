@@ -460,3 +460,55 @@ button:disabled {
   max-height: 360px;
   overflow: auto;
 }
+
+/* ── Reduced Motion ─────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  /* fix-btn-pulse — box-shadow */
+  .btn-agent-fix {
+    animation: none !important;
+  }
+
+  /* btn hover — transform translateY */
+  .btn:hover,
+  .btn-sm:hover,
+  .nav-btn:hover,
+  .nav-user-btn:hover,
+  .btn-modal-save:hover,
+  .btn-modal-cancel:hover {
+    transform: none !important;
+  }
+  .btn,
+  .btn-sm,
+  .nav-btn,
+  .nav-user-btn,
+  .btn-modal-save,
+  .btn-modal-cancel,
+  .btn-preset,
+  .btn-preset-reset,
+  .btn-firewall-fix,
+  .btn-lhm-inline,
+  .btn-session-new {
+    transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease !important;
+  }
+
+  /* btn-agent-fix hover — transform translateY */
+  .btn-agent-fix:hover {
+    transform: none !important;
+  }
+  .btn-agent-fix {
+    transition: all 200ms ease !important;
+  }
+
+  /* btn-preset hover — transform translateY */
+  .btn-preset:hover,
+  .btn-preset-reset:hover {
+    transform: none !important;
+  }
+  .btn-preset,
+  .btn-preset-reset {
+    transition: all 180ms ease !important;
+  }
+
+  /* remote-agent-progress-bar — width transition (visual, keep) */
+}

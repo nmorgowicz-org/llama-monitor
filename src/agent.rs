@@ -691,36 +691,44 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                         if let Some(t) = &token {
                             info_request = info_request.bearer_auth(t);
                         }
-                        match info_request.send().await {
+                       match info_request.send().await {
                             Ok(info_resp) if info_resp.status().is_success() => {
                                 match info_resp.json::<serde_json::Value>().await {
                                     Ok(json) => {
                                         if let Some(ver) =
                                             json.get("version").and_then(|v| v.as_str())
                                         {
-                                            *state.remote_agent_version.lock().unwrap() =
-                                                Some(ver.to_string());
-                                            // Check if update is available
-                                                   match latest_release_info().await {
-                                                        Ok(latest) => {
-                                                            let needs_update = ver != latest.tag_name;
-                                                            let mut update_avail = state
-                                                                .remote_agent_update_available
-                                                                .lock()
-                                                                .unwrap();
-                                                            let was_available = *update_avail;
-                                                            *update_avail = needs_update;
-                                                            if needs_update && !was_available {
-                                                                eprintln!(
-                                                                    "[agent] Update available: running {}, latest {}",
-                                                                    ver, latest.tag_name
-                                                                );
-                                                            }
+                                            let version_str = ver.to_string();
+                                            let should_check = {
+                                                let mut version = state.remote_agent_version.lock().unwrap();
+                                                let is_new = version.is_none() || version.as_deref() != Some(&version_str);
+                                                *version = Some(version_str.clone());
+                                                is_new
+                                            };
+
+                                            // Only check GitHub once per session (on first discovery or version change)
+                                            if should_check {
+                                                match latest_release_info().await {
+                                                    Ok(latest) => {
+                                                        let needs_update = version_str != latest.tag_name;
+                                                        let mut update_avail = state
+                                                            .remote_agent_update_available
+                                                            .lock()
+                                                            .unwrap();
+                                                        *update_avail = needs_update;
+                                                        drop(update_avail);
+                                                        if needs_update {
+                                                            eprintln!(
+                                                                "[agent] Update available: running {}, latest {}",
+                                                                version_str, latest.tag_name
+                                                            );
                                                         }
-                                                Err(e) => {
-                                                    eprintln!(
-                                                        "[agent] Could not check latest release: {e}"
-                                                    );
+                                                    }
+                                                    Err(e) => {
+                                                        eprintln!(
+                                                            "[agent] Could not check latest release: {e}"
+                                                        );
+                                                    }
                                                 }
                                             }
                                         }

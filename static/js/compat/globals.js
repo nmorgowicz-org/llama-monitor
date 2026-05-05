@@ -38,8 +38,8 @@ window.openSessionModal = openSessionModal;
 //
 // Examples (to be filled in as features are extracted):
 //
-// import { switchTab } from '../features/nav.js';
-// window.switchTab = switchTab;
+import { switchTab } from '../features/nav.js';
+window.switchTab = switchTab;
 //
 // import { sendChat } from '../features/chat-transport.js';
 // window.sendChat = sendChat;

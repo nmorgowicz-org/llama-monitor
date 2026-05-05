@@ -22,7 +22,7 @@
 
 .slots-values {
   display: flex;
-  gap: 8px;
+  gap: var(--gap-xs);
   flex-wrap: wrap;
 }
 
@@ -40,7 +40,7 @@
   box-shadow:
     0 2px 8px rgba(0, 0, 0, 0.2),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  transition: all 200ms ease;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
   position: relative;
   overflow: hidden;
 }
@@ -282,11 +282,11 @@
    border-radius: 16px;
    padding: 14px;
    display: flex;
-   flex-direction: column;
-   gap: 8px;
-   min-width: 0;
-   min-height: 188px;
-   transition: border-color 200ms ease, background 200ms ease, transform 200ms ease, box-shadow 200ms ease;
+    flex-direction: column;
+    gap: var(--gap-xs);
+    min-width: 0;
+    min-height: 188px;
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease, background 0.25s ease;
    box-shadow:
      0 10px 24px rgba(0, 0, 0, 0.18),
      inset 0 1px 0 rgba(255, 255, 255, 0.04);
@@ -1731,4 +1731,167 @@
   .hw-clock-system-readout .hw-clock-meter-band {
     text-align: left;
   }
+}
+
+/* ── Reduced Motion ─────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  /* dot-pulse — transform scale */
+  .slot-dot {
+    animation: none !important;
+  }
+
+  /* slot-pill hover — transform translateY */
+  .slot-pill.idle:hover,
+  .slot-pill.busy:hover {
+    transform: none !important;
+  }
+  .slot-pill {
+    transition: all 200ms ease !important;
+  }
+
+  /* btn-detach-top — transform scale */
+  .btn-detach-top:active {
+    transform: none !important;
+  }
+  .btn-detach-top {
+    transition: all 150ms ease !important;
+  }
+
+  /* ripple-animation — transform scale */
+  .ripple {
+    animation: none !important;
+  }
+
+  /* hw-metric-block hover — transform translateY */
+  .hw-metric-block:hover {
+    transform: none !important;
+  }
+  .hw-metric-block {
+    transition: border-color 200ms ease, background 200ms ease, box-shadow 200ms ease !important;
+  }
+
+  /* hw-temp-gauge — background transition (visual, keep) */
+
+  /* badgeFadeIn — opacity+transform scale */
+  .hw-temp-unavailable-badge {
+    animation: none !important;
+  }
+
+  /* hw-temp-ambient, hw-temp-breathe — box-shadow */
+  .hw-temp-gauge,
+  .hw-temp-gauge.is-warming {
+    animation: none !important;
+  }
+
+  /* ring-breathe (from inference, used here) — box-shadow */
+  .hw-temp-gauge.is-warming {
+    animation: none !important;
+  }
+
+  /* hw-bar-glow — box-shadow */
+  .hw-bar-fill,
+  .hw-stacked-fill {
+    animation: none !important;
+  }
+
+  /* hw-bar-shimmer — transform translateX */
+  .hw-bar-fill::after,
+  .hw-stacked-fill::after,
+  .hw-clock-system-readout .hw-clock-meter-fill::after,
+  .hw-clock-gpu-readout .hw-clock-meter-fill::after {
+    animation: none !important;
+  }
+
+  /* hw-bar-cap-pulse — transform scale */
+  .hw-bar-cap,
+  .hw-clock-system-readout .hw-clock-meter-bar::after {
+    animation: none !important;
+  }
+
+  /* hw-bar-fill transitions — width (visual, keep) */
+
+  /* hw-ring-ambient, hw-ring-ambient-warm, hw-ring-breathe — box-shadow */
+  .hw-ring-viz,
+  .hw-ring-viz.is-warming {
+    animation: none !important;
+  }
+
+  /* hw-sparkline-glow — filter drop-shadow */
+  .hw-sparkline,
+  .hw-metric-sparkline {
+    animation: none !important;
+  }
+
+  /* spark-fill-drift — opacity+filter */
+  .hw-sparkline .sparkline-fill,
+  .hw-metric-sparkline .sparkline-fill,
+  .hw-clock-footer-spark .sparkline-fill {
+    animation: none !important;
+  }
+
+  /* hw-peak-pulse — transform scale */
+  .hw-sparkline circle:last-child,
+  .hw-metric-sparkline .sparkline-peak {
+    animation: none !important;
+  }
+
+  /* hw-current-halo — opacity+transform scale */
+  .hw-metric-sparkline .sparkline-current-halo {
+    animation: none !important;
+  }
+
+  /* hw-current-dot — transform scale */
+  .hw-metric-sparkline .sparkline-current {
+    animation: none !important;
+  }
+
+  /* hw-clock-cluster-ambient — transform scale+opacity */
+  .hw-clock-cluster::before {
+    animation: none !important;
+  }
+
+  /* hw-clock-orbit-breathe — transform scale+opacity */
+  .hw-clock-orbit-fill {
+    animation: none !important;
+  }
+
+  /* hw-clock-orbit-dot-pulse — transform scale */
+  .hw-clock-orbit-dot {
+    animation: none !important;
+  }
+
+  /* hw-clock-meter-breathe — filter */
+  .hw-clock-meter-fill {
+    animation: none !important;
+  }
+
+  /* hw-chip-breathe — box-shadow+border-color */
+  .hw-chip {
+    animation: none !important;
+  }
+
+  /* hw-power-pulse — box-shadow */
+  .hw-power-capped {
+    animation: none !important;
+  }
+
+  /* bar-shimmer (from inference, used here) — transform translateX */
+  .hw-power-capped .hw-bar-fill {
+    animation: none !important;
+  }
+
+  /* hw-block-ambient — border-color */
+  .hw-metric-block {
+    animation: none !important;
+  }
+
+  /* hw-value-ambient — opacity */
+  .hw-metric-value {
+    animation: none !important;
+  }
+
+  /* hw-metric-viz transitions — opacity only (visual, keep) */
+
+  /* viz-gear-btn, viz-reset-btn, viz-option transitions — color/bg (visual, keep) */
 }

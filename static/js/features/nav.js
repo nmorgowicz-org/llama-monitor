@@ -1,7 +1,7 @@
 // ── Navigation ────────────────────────────────────────────────────────────────
 // Tab switching and sidebar collapse.
 
-function switchTab(name) {
+export function switchTab(name) {
     const page = document.getElementById('page-' + name);
 
     // Handle modal tabs (no corresponding page div)

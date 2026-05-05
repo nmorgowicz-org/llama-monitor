@@ -268,3 +268,23 @@
         justify-content: flex-start;
     }
 }
+
+/* ── Reduced Motion ─────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  /* logs-orb-drift — transform translate3d+scale */
+  .logs-empty-ambient-a,
+  .logs-empty-ambient-b {
+    animation: none !important;
+  }
+
+  /* logs-caret-blink — opacity (visual-only, keep) */
+
+  /* btn hover — transform translateY */
+  .logs-empty-actions .btn:hover {
+    transform: none !important;
+  }
+  .logs-empty-actions .btn {
+    transition: box-shadow 0.2s ease, border-color 0.2s ease !important;
+  }
+}

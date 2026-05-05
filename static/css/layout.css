@@ -1002,7 +1002,76 @@ body.sidebar-collapsed .content-area {
 /* --- Reduced Motion --- */
 
 @media (prefers-reduced-motion: reduce) {
+  /* agent-update-pulse — box-shadow */
   .agent-status.update-available {
     animation: none;
   }
+
+  /* status-badge-glow — box-shadow+border-color+background */
+  .endpoint-status-wrap .endpoint-status {
+    animation: none !important;
+  }
+
+  /* status-badge hover — transform translateY */
+  .endpoint-status-wrap:hover .endpoint-status {
+    transform: none !important;
+  }
+
+  /* status-pulse — transform scale */
+  .status-dot.running,
+  .status-dot.ok {
+    animation: none !important;
+  }
+
+  /* shell-sheen — transform translateX */
+  .top-nav-bar::after,
+  .nav-search::after,
+  .sidebar-nav::before {
+    animation: none !important;
+  }
+
+  /* capability-popover — transform translateY */
+  .capability-popover {
+    transition: opacity 180ms ease !important;
+  }
+  .endpoint-status-wrap:hover .capability-popover,
+  .endpoint-status-wrap:focus-within .capability-popover,
+  .endpoint-status-wrap.open .capability-popover {
+    transform: none !important;
+  }
+
+  /* sidebar-nav collapse — width+padding transition (structural, keep) */
+
+  /* sidebar-collapse-icon — transform rotate */
+  .sidebar-collapse-icon {
+    transition: none !important;
+  }
+  .sidebar-nav.collapsed .sidebar-collapse-icon {
+    transform: none !important;
+  }
+
+  /* sidebar-btn hover — transform translateY */
+  .sidebar-btn:hover {
+    transform: none !important;
+  }
+  .sidebar-btn {
+    transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease !important;
+  }
+
+  /* sidebar-btn::after sheen — opacity (visual, keep) */
+
+  /* content-area — margin-left transition (structural, keep) */
+
+  /* slide-panel — transform translateX */
+  .slide-panel {
+    transition: none !important;
+  }
+
+  /* nav search/input transitions — color/bg (visual, keep) */
+
+  /* agent-status hover transitions — color/bg/shadow (visual, keep) */
+
+  /* top-nav-pill hover — color/bg (visual, keep) */
+
+  /* btn-update-action transitions — color/bg (visual, keep) */
 }
