@@ -476,3 +476,109 @@ All animations must respect `prefers-reduced-motion`:
 | `static/index.html` | Modal HTML structure |
 | `static/js/features/settings.js` | Settings modal JS |
 | `static/js/features/remote-agent.js` | Agent modal JS |
+
+---
+
+## Light Theme Audit — 2026-05-05
+
+**Status:** Critical gap. Light theme toggle exists in JS but only ~3% of CSS selectors have light theme overrides. App is effectively dark-only.
+
+### Root Cause
+
+`tokens.css` defines a complete CSS variable system with light/dark variants, but **~97% of selectors bypass it** by using hardcoded dark rgba/hex values instead of `var(--*)`. The 55 light-theme rules that exist only cover settings-modal and agent-modal partial areas.
+
+### Coverage Table
+
+| File | Lines | Selectors | Light Rules | Coverage |
+|------|-------|-----------|-------------|----------|
+| `tokens.css` | 70 | 1 | 2 | 100% (defines all vars) |
+| `settings-modal.css` | 1327 | 160 | 29 | 18% |
+| `agent-modal.css` | 1065 | 147 | 13 | 9% |
+| `chat.css` | 3176 | 522 | 11 | 2% |
+| `base.css` | 85 | 13 | 0 | **0%** |
+| `layout.css` | 1008 | 130 | 0 | **0%** |
+| `components.css` | 462 | 56 | 0 | **0%** |
+| `cards-inference.css` | 1682 | 266 | 0 | **0%** |
+| `cards-hardware.css` | 1733 | 241 | 0 | **0%** |
+| `setup-view.css` | 1000 | 170 | 0 | **0%** |
+| `logs.css` | 270 | 39 | 0 | **0%** |
+| **TOTAL** | **11878** | **~1745** | **55** | **~3%** |
+
+### JS Theme Toggle — Working
+
+- `static/js/features/user-menu.js` — `applyThemePreference()` correctly sets `document.documentElement.dataset.theme`
+- `toggleTheme()` toggles between `'light'` and `'dark'`
+- Default theme: `'dark'`
+- Persisted to `localStorage` under `uiSettings.theme`
+
+### Top 20 Most Critical Missing Overrides
+
+| # | File:Line | Element | Hardcoded Value | Should Use |
+|---|-----------|---------|-----------------|------------|
+| 1 | `base.css:26-38` | `body::before` grid | `mix-blend-mode: screen` + white grid | Invisible on light bg |
+| 2 | `layout.css` | `.nav-sidebar` bg | `rgba(15, 17, 21, 0.92)` | `var(--color-bg-surface)` |
+| 3 | `layout.css` | `.topbar` bg | hardcoded dark | `var(--color-bg-surface)` |
+| 4 | `layout.css` | `.tab-bar` bg | hardcoded dark | `var(--color-bg-surface)` |
+| 5 | `cards-inference.css` | `.dashboard-header` bg | `rgba(28, 33, 42, 0.86)` | `var(--color-bg-surface)` |
+| 6 | `cards-hardware.css` | `.hw-card` bg | hardcoded dark | `var(--color-bg-surface)` |
+| 7 | `chat.css` | `.chat-container` bg | hardcoded dark | `var(--color-bg)` |
+| 8 | `chat.css` | `.message-assistant` bg | `rgba(255,255,255,0.03)` | `var(--color-bg-surface)` |
+| 9 | `chat.css` | `.message-user` bg | hardcoded dark | `var(--color-bg-elevated)` |
+| 10 | `chat.css` | `.chat-input` bg | `rgba(255,255,255,0.05)` | `var(--color-bg-elevated)` |
+| 11 | `setup-view.css` | `.setup-container` bg | `rgba(10, 14, 24, 0.82)` | `var(--color-bg)` |
+| 12 | `setup-view.css` | `.setup-step` bg | `rgba(0,0,0,0.62)` | `var(--color-bg-surface)` |
+| 13 | `agent-modal.css` | `.agent-modal` bg | `rgba(32, 40, 50, 0.97)` | `var(--color-bg-floating)` |
+| 14 | `logs.css` | `.logs-container` bg | `rgba(10, 14, 24, 0.82)` | `var(--color-bg-surface)` |
+| 15 | `components.css` | `.btn-secondary` bg | `rgba(255,255,255,0.08)` | `var(--color-bg-elevated)` |
+| 16 | `components.css` | `.input` bg | `rgba(255,255,255,0.04)` | `var(--color-bg-elevated)` |
+| 17 | `cards-inference.css` | `.card` bg | `rgba(255,255,255,0.045)` | `var(--color-bg-surface)` |
+| 18 | `cards-hardware.css` | `.bar-fill` bg | hardcoded dark | `var(--color-primary)` |
+| 19 | `layout.css` | `.scrollbar` thumb | `rgba(255,255,255,0.1)` | `rgba(17,24,39,0.15)` |
+| 20 | `chat.css` | `.code-block` bg | hardcoded dark | `var(--color-bg-code)` |
+
+### Implementation Strategy
+
+#### Phase 1: Structural Containers (Highest Impact)
+
+Replace hardcoded dark backgrounds on these elements with CSS variables:
+
+```css
+/* layout.css */
+[data-theme="light"] .nav-sidebar { background: var(--color-bg-surface); }
+[data-theme="light"] .topbar { background: var(--color-bg-surface); }
+[data-theme="light"] .tab-bar { background: var(--color-bg-surface); }
+
+/* base.css */
+[data-theme="light"] body::before { mix-blend-mode: multiply; }
+```
+
+This alone would make ~60% of the UI respond to theme toggle.
+
+#### Phase 2: Cards and Components
+
+Replace hardcoded `rgba(255,255,255,0.X)` backgrounds with `var(--color-bg-surface)` and `var(--color-bg-elevated)`.
+
+#### Phase 3: Chat and Logs
+
+Chat messages, code blocks, and log output need comprehensive overrides for readability.
+
+#### Phase 4: Modals
+
+All modal shells and internal sections need light theme overrides (already started in settings-modal.css and agent-modal.css).
+
+### Estimated Effort
+
+| Phase | Files | Lines CSS | Priority |
+|-------|-------|-----------|----------|
+| Phase 1 | base.css, layout.css | ~50 | Critical |
+| Phase 2 | components.css, cards-inference.css, cards-hardware.css | ~200 | High |
+| Phase 3 | chat.css, logs.css, setup-view.css | ~300 | High |
+| Phase 4 | All modal CSS files | ~150 | Medium |
+| **Total** | **11 files** | **~700 lines** | |
+
+### Notes for Future Agents
+
+- The `tokens.css` variable system is complete and correct — the problem is adoption, not definition
+- Every new CSS rule should use `var(--*)` instead of hardcoded colors
+- Light theme overrides should be added at the END of each CSS file, grouped under `[data-theme="light"]` blocks
+- Test light theme by toggling in the UI or setting `document.documentElement.dataset.theme = 'light'` in the browser console
