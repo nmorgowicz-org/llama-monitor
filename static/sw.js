@@ -1,10 +1,6 @@
+// Service worker disabled for development - prevents caching of updated JS
+// Enable in production with proper cache versioning
 self.addEventListener('fetch', function(event) {
-    event.respondWith(
-        fetch(event.request).catch(function() {
-            return new Response('', {
-                status: 503,
-                statusText: 'Service Unavailable'
-            });
-        })
-    );
+    // Pass through all requests - no caching
+    event.respondWith(fetch(event.request));
 });

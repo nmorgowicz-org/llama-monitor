@@ -1,14 +1,19 @@
 // ── Config ────────────────────────────────────────────────────────────────────
 // Config modal, GPU environment, and config save.
 
+import { showToast } from './toast.js';
+import { openDeferredFileBrowser } from './file-browser-launcher.js';
+import { collectSettings, closeSettingsModal } from './settings.js';
+import { settingsState } from '../core/app-state.js';
+
 // ── Config Modal ──────────────────────────────────────────────────────────────
 
-function openConfigModal() {
-    window.closeSettingsModal();
+export function openConfigModal() {
+    closeSettingsModal();
     document.getElementById('config-modal').classList.add('open');
 }
 
-function closeConfigModal() {
+export function closeConfigModal() {
     document.getElementById('config-modal').classList.remove('open');
 }
 
@@ -55,11 +60,11 @@ async function loadGpuEnv() {
 // ── Save Config ───────────────────────────────────────────────────────────────
 
 function saveConfig() {
-    clearTimeout(window.settingsSaveTimer);
+    clearTimeout(settingsState.saveTimer);
     fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(window.collectSettings()),
+        body: JSON.stringify(collectSettings()),
     }).catch(() => {});
 
     const env = {
@@ -75,13 +80,13 @@ function saveConfig() {
     }).catch(() => {});
 
     closeConfigModal();
-    window.showToast('Configuration saved', 'success');
+    showToast('Configuration saved', 'success');
 }
 
 function usePathServerBinary() {
     const input = document.getElementById('set-server-path');
     if (input) input.value = '';
-    window.showToast('llama-server will be resolved from PATH', 'info');
+    showToast('llama-server will be resolved from PATH', 'info');
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -106,19 +111,16 @@ export function initConfig() {
 
     // Bind Browse buttons in config modal
     const browseServerPath = document.getElementById('config-browse-server-path');
-    if (browseServerPath) browseServerPath.addEventListener('click', () => window.openFileBrowser('set-server-path', 'executable'));
+    if (browseServerPath) browseServerPath.addEventListener('click', () => openDeferredFileBrowser('set-server-path', 'executable'));
 
     const usePathBtn = document.getElementById('config-use-path-btn');
     if (usePathBtn) usePathBtn.addEventListener('click', usePathServerBinary);
 
     const browseCwd = document.getElementById('config-browse-cwd');
-    if (browseCwd) browseCwd.addEventListener('click', () => window.openFileBrowser('set-server-cwd', 'dir'));
+    if (browseCwd) browseCwd.addEventListener('click', () => openDeferredFileBrowser('set-server-cwd', 'dir'));
 
     // Bind "Open Runtime Configuration" in settings modal
     const openConfigBtn = document.getElementById('settings-open-config-btn');
     if (openConfigBtn) openConfigBtn.addEventListener('click', openConfigModal);
 
-    // Keep on window for cross-module calls
-    window.openConfigModal = openConfigModal;
-    window.closeConfigModal = closeConfigModal;
 }

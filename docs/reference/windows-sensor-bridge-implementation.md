@@ -1,17 +1,21 @@
-# Agent Instructions: Rust System Metrics App with LHM Sidecar
+# Windows Sensor Bridge Implementation
 
 ## Overview
 
-You are building a Windows system metrics application in Rust. The app collects the following data:
+This document describes the Windows sensor bridge architecture used by llama-monitor to collect hardware sensor data on Windows systems.
+
+**Data sources collected:**
 
 - Motherboard name and model
-- CPU temperature (requires a C# sidecar binary)
+- CPU temperature (via C# sidecar binary)
 - CPU load (usage %)
 - Current CPU clock speed (MHz)
 - RAM usage (% used and free GB)
 - CPU model name
 
-**Architecture summary:** Most metrics come from native Rust crates. CPU temperature cannot be read natively on Windows without a kernel driver. The solution is a small C# sidecar executable (`sensor_bridge.exe`) that uses the `LibreHardwareMonitorLib` NuGet package to read the kernel-level sensor data and output it as JSON to stdout. The Rust app spawns this sidecar as a child process and parses its output.
+**Architecture:** Most metrics come from native Rust crates. CPU temperature cannot be read natively on Windows without a kernel driver. The solution is a small C# sidecar executable (`sensor_bridge.exe`) that uses the `LibreHardwareMonitorLib` NuGet package to read the kernel-level sensor data and output it as JSON to stdout. The Rust app spawns this sidecar as a child process and parses its output.
+
+> **Note:** This document is implementation documentation describing the existing sensor bridge design. It is NOT build instructions for new development.
 
 ---
 
@@ -441,3 +445,17 @@ Before shipping or testing, confirm these files exist:
 | Motherboard name/model | WMI `Win32_BaseBoard` via `wmi` crate |
 | RAM total, used, free | `sysinfo` crate |
 | CPU temperature | `sensor_bridge.exe` via `LibreHardwareMonitorLib` |
+
+---
+
+## Usage in llama-monitor
+
+In the current llama-monitor implementation, this sensor bridge architecture is encapsulated in:
+
+- `src/lhm.rs` - LibreHardwareMonitor integration, sensor bridge lifecycle management
+- `src/lhm_persistence.rs` - Persistence of LHM disabled/enabled state
+- `static/js/windows-lhm.js` - Frontend UI for sensor bridge installation/management
+
+The sensor bridge is installed and managed through the `/api/sensor-bridge/*` API endpoints.
+
+**Last updated:** 2026-05-04

@@ -1,11 +1,14 @@
 // ── LHM (LibreHardwareMonitor) ────────────────────────────────────────────────
 // LHM notification, install/start/uninstall flow, UAC warning, and status check.
 
+import { lhm } from '../core/app-state.js';
+import { showToast } from './toast.js';
+
 // ── LHM Notification ──────────────────────────────────────────────────────────
 
 export async function showLHMNotification() {
     return new Promise(async (resolve) => {
-        window.lhmResolve = resolve;
+        lhm.resolve = resolve;
         const overlay = document.createElement('div');
         overlay.className = 'notification-container';
         overlay.style.cssText = `
@@ -37,7 +40,7 @@ export async function showLHMNotification() {
         // Bind cancel button
         document.getElementById('lhm-cancel-btn')?.addEventListener('click', () => {
             overlay.remove();
-            window.lhmResolve('cancel');
+            lhm.resolve('cancel');
         });
 
         const lhmStatusEl = document.getElementById('lhm-status-text');
@@ -78,11 +81,11 @@ export async function showLHMNotification() {
                             body: JSON.stringify({ disabled: false })
                         });
                         if (disableResp.ok) {
-                            window.showToast('LHM monitoring enabled', 'success');
+                            showToast('LHM monitoring enabled', 'success');
                             setTimeout(() => location.reload(), 1500);
                         }
                     } catch (err) {
-                        window.showToast('Failed to enable LHM: ' + err.message, 'error');
+                        showToast('Failed to enable LHM: ' + err.message, 'error');
                     }
                 };
             } else if (lhmAvailable) {
@@ -97,11 +100,11 @@ export async function showLHMNotification() {
                         try {
                             const uninstallResp = await fetch('/api/lhm/uninstall', { method: 'POST' });
                             if (uninstallResp.ok) {
-                                window.showToast('LHM uninstalled successfully', 'success');
+                                showToast('LHM uninstalled successfully', 'success');
                                 setTimeout(() => location.reload(), 1500);
                             }
                         } catch (err) {
-                            window.showToast('Failed to uninstall LHM: ' + err.message, 'error');
+                            showToast('Failed to uninstall LHM: ' + err.message, 'error');
                         }
                     }
                 };
@@ -122,14 +125,14 @@ export async function showLHMNotification() {
                     try {
                         const startResp = await fetch('/api/lhm/start', { method: 'POST' });
                         if (startResp.ok) {
-                            window.showToast('LHM started successfully', 'success');
+                            showToast('LHM started successfully', 'success');
                             setTimeout(() => location.reload(), 2000);
                         } else {
                             const data = await startResp.json();
-                            window.showToast('Failed to start LHM: ' + (data.error || 'Unknown error'), 'error');
+                            showToast('Failed to start LHM: ' + (data.error || 'Unknown error'), 'error');
                         }
                     } catch (err) {
-                        window.showToast('Failed to start LHM: ' + err.message, 'error');
+                        showToast('Failed to start LHM: ' + err.message, 'error');
                     }
                 };
 
@@ -140,11 +143,11 @@ export async function showLHMNotification() {
                         try {
                             const uninstallResp = await fetch('/api/lhm/uninstall', { method: 'POST' });
                             if (uninstallResp.ok) {
-                                window.showToast('LHM uninstalled successfully', 'success');
+                                showToast('LHM uninstalled successfully', 'success');
                                 setTimeout(() => location.reload(), 1500);
                             }
                         } catch (err) {
-                            window.showToast('Failed to uninstall LHM: ' + err.message, 'error');
+                            showToast('Failed to uninstall LHM: ' + err.message, 'error');
                         }
                     }
                 };
@@ -164,11 +167,11 @@ export async function showLHMNotification() {
                             body: JSON.stringify({ disabled: true })
                         });
                         if (disableResp.ok) {
-                            window.showToast('LHM monitoring disabled', 'success');
+                            showToast('LHM monitoring disabled', 'success');
                             setTimeout(() => location.reload(), 1500);
                         }
                     } catch (err) {
-                        window.showToast('Failed to disable LHM: ' + err.message, 'error');
+                        showToast('Failed to disable LHM: ' + err.message, 'error');
                     }
                 };
 
@@ -244,7 +247,7 @@ export async function showLHMNotification() {
                             const checkProgress = async () => {
                                 if (attempts >= maxAttempts) {
                                     if (progressOverlay) progressOverlay.remove();
-                                    window.showToast('Installation timeout. Please check if LHM was installed.', 'error');
+                                    showToast('Installation timeout. Please check if LHM was installed.', 'error');
                                     return;
                                 }
 
@@ -287,7 +290,7 @@ export async function showLHMNotification() {
                                         if (progress === 'completed' || progress === 'failed') {
                                             setTimeout(() => {
                                                 if (progressOverlay) progressOverlay.remove();
-                                                window.showToast('Installation ' + (progress === 'completed' ? 'complete! Reloading...' : 'failed'), progress === 'completed' ? 'success' : 'error');
+                                                showToast('Installation ' + (progress === 'completed' ? 'complete! Reloading...' : 'failed'), progress === 'completed' ? 'success' : 'error');
                                                 if (progress === 'completed') {
                                                     setTimeout(() => window.location.reload(), 2000);
                                                 }
@@ -307,12 +310,12 @@ export async function showLHMNotification() {
                             const data = await response.json();
                             console.error('[LHM UI] /api/lhm/install failed:', data);
                             if (progressOverlay) progressOverlay.remove();
-                            window.showToast(`Installation failed: ${data.error || 'Unknown error'}`, 'error');
+                            showToast(`Installation failed: ${data.error || 'Unknown error'}`, 'error');
                         }
                     } catch (err) {
                         console.error('[LHM UI] /api/lhm/install error:', err);
                         if (progressOverlay) progressOverlay.remove();
-                        window.showToast(`Installation error: ${err.message}`, 'error');
+                        showToast(`Installation error: ${err.message}`, 'error');
                     }
                 };
             }
@@ -436,6 +439,7 @@ async function checkLHMAndPrompt() {
         if (currentRow) {
             const existingCells = currentRow.querySelectorAll('td');
             if (existingCells.length >= 2) {
+                // eslint-disable-next-line no-unsanitized/property -- tempColumn is built entirely from hardcoded HTML strings with no external data
                 existingCells[1].outerHTML = tempColumn;
             }
         }

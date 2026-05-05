@@ -1,7 +1,8 @@
 // ── Updates ───────────────────────────────────────────────────────────────────
 // App version display, update check, release notes, and self-update flow.
 
-import { compareVersions } from '../core/format.js';
+import { compareVersions, escapeHtml } from '../core/format.js';
+import { renderMd } from './chat-render.js';
 
 // Holds the current pending release object
 let _pendingRelease = null;
@@ -76,8 +77,9 @@ export function openReleaseNotes() {
 
     link.href = release.html_url || '#';
 
+    // eslint-disable-next-line no-unsanitized/property -- release notes rendered via marked.js (same path as LLM chat output); fallback is hardcoded
     body.innerHTML = release.body
-        ? window.renderMd(release.body)
+        ? renderMd(release.body)
         : '<p>No release notes available.</p>';
 
     _resetUpdateBtn(updateBtn);
@@ -139,7 +141,7 @@ async function triggerSelfUpdate() {
     } catch (e) {
         btn.dataset.state = 'error';
         btn.disabled = false;
-        btn.innerHTML = `⚠ ${e.message} — retry?`;
+        btn.innerHTML = `⚠ ${escapeHtml(e.message)} — retry?`;
     }
 }
 

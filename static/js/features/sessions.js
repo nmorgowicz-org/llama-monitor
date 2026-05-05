@@ -1,15 +1,24 @@
 // ── Sessions ───────────────────────────────────────────────────────────────────
 // Session CRUD: load, switch, delete, modal management.
 
+import { sessionState } from '../core/app-state.js';
+import { escapeHtml } from '../core/format.js';
+import { doAttach, doStart } from './attach-detach.js';
+import { openDeferredFileBrowser } from './file-browser-launcher.js';
+import { loadPresets } from './presets.js';
+import { saveSettings } from './settings.js';
+import { showConnectingState } from './setup-view.js';
+import { showToast } from './toast.js';
+
 // ── Load ───────────────────────────────────────────────────────────────────────
 
 export async function loadSessions() {
     try {
         const resp = await fetch('/api/sessions');
-        window.sessions = await resp.json();
+        sessionState.sessions = await resp.json();
         renderSessionList();
 
-        const lastAttach = window.sessions
+        const lastAttach = sessionState.sessions
             .filter(s => s.mode && s.mode.Attach)
             .sort((a, b) => b.last_active - a.last_active)[0];
 
@@ -18,7 +27,7 @@ export async function loadSessions() {
             if (endpointInput) {
                 endpointInput.value = lastAttach.mode.Attach.endpoint;
                 endpointInput.dataset.preserved = '1';
-                if (window.saveSettings) window.saveSettings();
+                saveSettings();
             }
         }
     } catch (err) {
@@ -33,15 +42,16 @@ export function renderSessionList() {
     const empty = document.getElementById('sessions-empty');
     if (!list) return;
 
-    if (window.sessions.length === 0) {
+    if (sessionState.sessions.length === 0) {
         list.innerHTML = '';
         if (empty) empty.style.display = 'block';
         return;
     }
     if (empty) empty.style.display = 'none';
 
-    list.innerHTML = window.sessions.map(s => {
-        const is_active = s.id === window.activeSessionId;
+    // eslint-disable-next-line no-unsanitized/property -- all server strings (name, endpoint, id, presetName, status) wrapped in escapeHtml(); mode/status text values are from controlled enums
+    list.innerHTML = sessionState.sessions.map(s => {
+        const is_active = s.id === sessionState.activeSessionId;
         const isAttach = s.mode && s.mode.Attach;
         const isSpawn = s.mode && s.mode.Spawn;
         const modeText = isSpawn ? 'Spawn' : 'Attach';
@@ -49,27 +59,27 @@ export function renderSessionList() {
         const endpoint = isAttach ? s.mode.Attach.endpoint : '';
         const port = isSpawn ? s.mode.Spawn.port : '';
         const presetId = s.preset_id || '';
-        const presetObj = window.presets.find(p => p.id === presetId);
+        const presetObj = sessionState.presets.find(p => p.id === presetId);
         const presetName = presetObj ? presetObj.name : (isSpawn ? '(no preset)' : '');
         const statusText = s.status === 'Running' ? 'Running' :
                            s.status === 'Stopped' ? 'Stopped' :
                            s.status === 'Disconnected' ? 'Disconnected' : (s.status || '');
 
-        const name = window.escapeHtml(s.name);
-        const detailText = modeText + (port ? ' : ' + port : '') + (isSpawn && presetName ? ' · ' + window.escapeHtml(presetName) : '') + (endpoint ? ' · ' + window.escapeHtml(endpoint) : '');
-        const statusHtml = statusText ? '<span class="session-item-status">' + window.escapeHtml(statusText) + '</span>' : '';
+        const name = escapeHtml(s.name);
+        const detailText = modeText + (port ? ' : ' + port : '') + (isSpawn && presetName ? ' · ' + escapeHtml(presetName) : '') + (endpoint ? ' · ' + escapeHtml(endpoint) : '');
+        const statusHtml = statusText ? '<span class="session-item-status">' + escapeHtml(statusText) + '</span>' : '';
 
         let actionsHtml = '';
         if (isAttach) {
-            actionsHtml += `<button class="btn-sm btn-preset" data-action="connect" data-endpoint="${window.escapeHtml(endpoint)}">Connect</button>`;
+            actionsHtml += `<button class="btn-sm btn-preset" data-action="connect" data-endpoint="${escapeHtml(endpoint)}">Connect</button>`;
         }
         if (isSpawn) {
-            actionsHtml += `<button class="btn-sm btn-preset" data-action="start" data-session-id="${window.escapeHtml(s.id)}">Start</button>`;
+            actionsHtml += `<button class="btn-sm btn-preset" data-action="start" data-session-id="${escapeHtml(s.id)}">Start</button>`;
         }
-        actionsHtml += `<button class="btn-sm btn-preset btn-preset-delete" data-action="delete" data-session-id="${window.escapeHtml(s.id)}">✕</button>`;
+        actionsHtml += `<button class="btn-sm btn-preset btn-preset-delete" data-action="delete" data-session-id="${escapeHtml(s.id)}">✕</button>`;
 
         return `<div class="session-item${is_active ? ' active' : ''}">` +
-            `<div class="session-item-main" data-session-id="${window.escapeHtml(s.id)}">` +
+            `<div class="session-item-main" data-session-id="${escapeHtml(s.id)}">` +
             '<span class="session-item-icon">' + modeIcon + '</span>' +
             '<div class="session-item-info">' +
             '<span class="session-item-name">' + name + '</span>' +
@@ -91,15 +101,15 @@ export function quickAttachSession(endpoint) {
     if (serverEndpoint) serverEndpoint.value = endpoint;
     localStorage.setItem('llama-monitor-last-endpoint', endpoint);
     closeSessionModal();
-    if (window.showConnectingState) window.showConnectingState();
-    if (window.doAttach) window.doAttach();
+    showConnectingState();
+    doAttach();
 }
 
 export function quickStartSession(sessionId) {
     closeSessionModal();
     switchSession(sessionId);
-    if (window.showConnectingState) window.showConnectingState();
-    if (window.doStart) window.doStart();
+    showConnectingState();
+    doStart();
 }
 
 // ── CRUD ───────────────────────────────────────────────────────────────────────
@@ -110,13 +120,13 @@ export async function deleteSession(sessionId) {
         const resp = await fetch('/api/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' });
         const data = await resp.json();
         if (data.ok) {
-            window.showToast('Session deleted', 'success');
+            showToast('Session deleted', 'success');
             loadSessions();
         } else {
-            window.showToast('Delete failed: ' + (data.error || 'unknown'), 'error');
+            showToast('Delete failed: ' + (data.error || 'unknown'), 'error');
         }
     } catch (e) {
-        window.showToast('Delete failed: ' + e.message, 'error');
+        showToast('Delete failed: ' + e.message, 'error');
     }
 }
 
@@ -129,15 +139,15 @@ export async function switchSession(sessionId) {
         });
         const data = await resp.json();
         if (data.ok) {
-            window.activeSessionId = sessionId;
+            sessionState.activeSessionId = sessionId;
             renderSessionList();
-            window.showToast('Switched to session', 'success');
-            if (window.loadPresets) window.loadPresets();
+            showToast('Switched to session', 'success');
+            loadPresets();
         } else {
-            window.showToast('Failed to switch session: ' + data.error, 'error');
+            showToast('Failed to switch session: ' + data.error, 'error');
         }
     } catch (err) {
-        window.showToast('Failed to switch session: ' + err.message, 'error');
+        showToast('Failed to switch session: ' + err.message, 'error');
     }
 }
 
@@ -184,7 +194,7 @@ export function updateSessionModalMode() {
     } else {
         label.textContent = 'Port';
         input.placeholder = '8001';
-        input.value = window.activeSessionPort || 8001;
+        input.value = sessionState.activeSessionPort || 8001;
         if (spawnFields) {
             spawnFields.style.display = 'block';
             const presetSelect = document.getElementById('modal-session-preset');
@@ -218,7 +228,7 @@ export function saveSession(event) {
     const name = document.getElementById('modal-session-name').value.trim();
 
     if (!name) {
-        window.showToast('Please enter a session name', 'error');
+        showToast('Please enter a session name', 'error');
         return;
     }
 
@@ -241,12 +251,12 @@ export function saveSession(event) {
           };
 
     if (mode === 'attach' && !endpoint) {
-        window.showToast('Please enter an endpoint', 'error');
+        showToast('Please enter an endpoint', 'error');
         return;
     }
 
     if (mode === 'spawn' && !modalPresetId && !presetId) {
-        window.showToast('Select a model preset before creating a spawn session', 'error');
+        showToast('Select a model preset before creating a spawn session', 'error');
         return;
     }
 
@@ -261,12 +271,12 @@ export function saveSession(event) {
             closeSessionModal();
             loadSessions();
             updateActiveSessionInfo();
-            window.showToast(mode === 'attach' ? 'Attached to endpoint' : 'Session created', 'success');
+            showToast(mode === 'attach' ? 'Attached to endpoint' : 'Session created', 'success');
         } else {
-            window.showToast('Failed to create session: ' + data.error, 'error');
+            showToast('Failed to create session: ' + data.error, 'error');
         }
     })
-    .catch(err => window.showToast('Failed to create session: ' + err.message, 'error'));
+    .catch(err => showToast('Failed to create session: ' + err.message, 'error'));
 }
 
 // ── Active session info ────────────────────────────────────────────────────────
@@ -278,19 +288,19 @@ export async function updateActiveSessionInfo() {
         if (data && data.mode) {
             const modeParts = data.mode.split(':');
             if (modeParts[0] === 'Spawn') {
-                window.activeSessionPort = parseInt(modeParts[1]) || 8080;
+                sessionState.activeSessionPort = parseInt(modeParts[1]) || 8080;
             } else if (modeParts[0] === 'Attach') {
                 const endpoint = modeParts.slice(1).join(':');
                 try {
                     const url = new URL(endpoint);
-                    window.activeSessionPort = parseInt(url.port) || 8080;
+                    sessionState.activeSessionPort = parseInt(url.port) || 8080;
                 } catch(e) {
-                    window.activeSessionPort = 8080;
+                    sessionState.activeSessionPort = 8080;
                 }
                 const endpointInput = document.getElementById('server-endpoint');
                 if (endpointInput && endpointInput.value !== endpoint) {
                     endpointInput.value = endpoint;
-                    if (window.saveSettings) window.saveSettings();
+                    saveSettings();
                 }
             }
         }
@@ -307,14 +317,11 @@ export function initSessions() {
     document.getElementById('session-modal-cancel')?.addEventListener('click', closeSessionModal);
     document.getElementById('btn-new-session')?.addEventListener('click', showNewSessionForm);
     document.getElementById('session-create-first')?.addEventListener('click', showNewSessionForm);
-    document.getElementById('session-browse-model-btn')?.addEventListener('click', () => window.openFileBrowser('modal-session-model-path', 'gguf'));
+    document.getElementById('session-browse-model-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-session-model-path', 'gguf'));
 
     // Bind session form submit
     const sessionForm = document.getElementById('session-form');
     if (sessionForm) sessionForm.addEventListener('submit', saveSession);
-
-    // Bind sidebar sessions button
-    document.getElementById('sidebar-btn-sessions')?.addEventListener('click', openSessionModal);
 
     // Bind nav new session button
     document.getElementById('nav-new-session-btn')?.addEventListener('click', openSessionModal);
@@ -356,10 +363,6 @@ export function initSessions() {
     if (modeSelect) {
         modeSelect.addEventListener('change', updateSessionModalMode);
     }
-
-    // Keep on window for cross-module calls
-    window.updateActiveSessionInfo = updateActiveSessionInfo;
-
     // Initial load
     loadSessions();
 

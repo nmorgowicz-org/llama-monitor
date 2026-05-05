@@ -1,5 +1,16 @@
-import { metricSeries, recentTasks, requestActivity, liveOutputTracker } from '../core/app-state.js';
 import { escapeHtml, formatMetricNumber, formatDuration, formatClockReadout } from '../core/format.js';
+import {
+    chat,
+    metricSeries,
+    liveOutputTracker,
+    requestActivity,
+    recentTasks,
+    lastGpuData,
+    lastSystemMetrics,
+    lastCapabilities,
+    wsData,
+    setLastGpuData,
+} from '../core/app-state.js';
 
 function setChipState(el, label, state) {
     if (!el) return;
@@ -28,13 +39,24 @@ function renderSparkline(id, points, className, isBlocked) {
     const height = 28;
     const max = Math.max(...points, 1);
     const step = width / (points.length - 1);
+    const currentValue = points[points.length - 1];
+    const currentX = width - 4;
+    const currentY = height - ((currentValue / max) * (height - 4)) - 2;
     const path = points.map((value, index) => {
         const x = index * step;
         const y = height - ((value / max) * (height - 4)) - 2;
         return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
     }).join(' ');
     const wallLine = isBlocked ? '<line x1="120" y1="0" x2="120" y2="28" stroke="#ebcb8b" stroke-width="1" stroke-dasharray="3 3" opacity="0.5"/>' : '';
-    svg.innerHTML = '<path class="sparkline-fill ' + className + '" d="' + path + ' L 120 28 L 0 28 Z"></path><path class="sparkline-line ' + className + '" d="' + path + '"></path>' + wallLine;
+    // eslint-disable-next-line no-unsanitized/property -- SVG path data from numeric array values; className is a hardcoded CSS class
+    svg.innerHTML =
+        '<path class="sparkline-fill ' + className + '" d="' + path + ' L 120 28 L 0 28 Z"></path>' +
+        '<path class="sparkline-line ' + className + '" d="' + path + '"></path>' +
+        '<line class="sparkline-current-trace ' + className + '" x1="' + Math.max(currentX - 18, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>' +
+        '<circle class="sparkline-current-halo ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="9.2"></circle>' +
+        '<circle class="sparkline-current ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="4.2"></circle>' +
+        '<circle class="sparkline-current-core ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.8"></circle>' +
+        wallLine;
 }
 
 function renderLiveSparkline(id, points) {
@@ -55,10 +77,18 @@ function renderLiveSparkline(id, points) {
         if (value > peak.value) peak = { value, x, y };
         return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
     }).join(' ');
+    const currentValue = points[points.length - 1];
+    const currentX = width - 4;
+    const currentY = height - ((currentValue / max) * (height - 6)) - 3;
+    // eslint-disable-next-line no-unsanitized/property -- SVG path data built from numeric array values only
     svg.innerHTML = [
         '<path class="sparkline-fill live-output" d="' + path + ' L 120 28 L 0 28 Z"></path>',
         '<path class="sparkline-line live-output" d="' + path + '"></path>',
-        '<circle class="sparkline-peak live-output" cx="' + peak.x.toFixed(2) + '" cy="' + peak.y.toFixed(2) + '" r="2.6"></circle>'
+        '<line class="sparkline-current-trace live-output" x1="' + Math.max(currentX - 18, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>',
+        '<circle class="sparkline-peak live-output" cx="' + peak.x.toFixed(2) + '" cy="' + peak.y.toFixed(2) + '" r="2.6"></circle>',
+        '<circle class="sparkline-current-halo live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="9.2"></circle>',
+        '<circle class="sparkline-current live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="4.2"></circle>',
+        '<circle class="sparkline-current-core live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.8"></circle>'
     ].join('');
 }
 
@@ -143,10 +173,11 @@ function updateRequestActivity(taskId, active, outputTokens, nowMs) {
     }
 
     const cutoff = nowMs - (10 * 60 * 1000);
-    window.requestActivity = requestActivity
+    const kept = requestActivity
         .filter(segment => !segment.endedAtMs || segment.endedAtMs >= cutoff)
         .slice(-100);
-    window.recentTasks = recentTasks.slice(0, 8);
+    requestActivity.splice(0, requestActivity.length, ...kept);
+    recentTasks.splice(8);
 }
 
 function renderRecentTask() {
@@ -175,7 +206,9 @@ function renderActivityRail(active) {
         rail.innerHTML = '<span class="activity-empty">No recent tasks</span>';
         return;
     }
-    rail.innerHTML = segments.map(segment => {
+    // all values are numeric (toFixed) or internal hardcoded enums ('active'/'complete')
+    // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+    rail.innerHTML = window.DOMPurify.sanitize(segments.map(segment => {
         let start = Math.max(0, Math.min(100, ((segment.startedAtMs - (now - windowMs)) / windowMs) * 100));
         const endMs = segment.endedAtMs || now;
         const minWidth = segment.endedAtMs ? 3 : 8;
@@ -199,7 +232,7 @@ function renderActivityRail(active) {
             segment.endedAtMs ? '<span class="activity-marker" aria-hidden="true"></span>' : ''
         ].join('');
         return '<span class="activity-segment ' + cls + '" style="left:' + start.toFixed(2) + '%;width:' + width.toFixed(2) + '%" tabindex="0" title="' + title + '">' + phases + '</span>';
-    }).join('');
+    }).join(''));
 }
 
 function renderSamplerParamsInline(slot) {
@@ -209,13 +242,16 @@ function renderSamplerParamsInline(slot) {
         return;
     }
     const samplerItems = slot.sampler_config || [];
-    const priorityKeys = ['top_k', 'top_p', 'min_p', 'temperature', 'dry', 'xtc'];
-    const priorityItems = samplerItems.filter(item => priorityKeys.includes(item.label));
+    const priorityKeys = ['temp', 'top_k', 'top_p', 'min_p', 'dry', 'xtc'];
+    const priorityItems = samplerItems
+        .filter(item => priorityKeys.includes(item.label))
+        .sort((a, b) => priorityKeys.indexOf(a.label) - priorityKeys.indexOf(b.label));
     if (priorityItems.length === 0) {
         el.innerHTML = '';
         return;
     }
-    el.innerHTML = priorityItems.slice(0, 4).map(item => {
+    // eslint-disable-next-line no-unsanitized/property -- all interpolated values wrapped in escapeHtml()
+    el.innerHTML = priorityItems.slice(0, 5).map(item => {
         const displayValue = formatConfigValue(item.value);
         return '<span class="config-kv"><span>' + escapeHtml(item.label) + '</span><strong>' + escapeHtml(displayValue) + '</strong></span>';
     }).join('');
@@ -234,9 +270,11 @@ function renderConfigItems(id, items, emptyText) {
     const el = document.getElementById(id);
     if (!el) return;
     if (!items || !items.length) {
+        // eslint-disable-next-line no-unsanitized/property -- emptyText is always a hardcoded string literal at every call site
         el.innerHTML = '<span class="config-empty">' + emptyText + '</span>';
         return;
     }
+    // eslint-disable-next-line no-unsanitized/property -- all interpolated values wrapped in escapeHtml()
     el.innerHTML = items.map(item => {
         const displayValue = formatConfigValue(item.value);
         return '<span class="config-kv"><span>' + escapeHtml(item.label) + '</span><strong>' + escapeHtml(displayValue) + '</strong></span>';
@@ -253,7 +291,9 @@ function renderSlotGrid(l, hasActiveEndpoint) {
     }
     const slotSnapshots = Array.isArray(l.slots) ? l.slots : [];
     if (slotSnapshots.length > 0) {
-        grid.innerHTML = slotSnapshots.map(slot => {
+        // server strings (slot.id, task id) are wrapped in escapeHtml(); busy/idle are hardcoded
+        // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+        grid.innerHTML = window.DOMPurify.sanitize(slotSnapshots.map(slot => {
             const busy = !!slot.is_processing;
             const task = busy && slot.id_task !== null && slot.id_task !== undefined ? 'task ' + slot.id_task : 'idle';
             const output = slot.output_available ? formatMetricNumber(slot.output_tokens || 0) + ' output' : 'output unknown';
@@ -263,7 +303,7 @@ function renderSlotGrid(l, hasActiveEndpoint) {
                 '<div class="slot-tile-task">' + escapeHtml(task) + '</div>' +
                 '<div class="slot-tile-meta"><span>' + output + '</span><span>' + ctx + '</span></div>' +
             '</div>';
-        }).join('');
+        }).join(''));
         return;
     }
     const processing = l?.slots_processing || 0;
@@ -289,7 +329,9 @@ function renderSlotGrid(l, hasActiveEndpoint) {
         );
     }
 
-    grid.innerHTML = tiles.join('');
+    // tiles built from numeric index, numeric formatMetricNumber output, and hardcoded 'busy'/'idle'/'active' strings
+    // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+    grid.innerHTML = window.DOMPurify.sanitize(tiles.join(''));
 }
 
 function getPrimarySlot(l) {
@@ -337,19 +379,38 @@ function renderRequestStats() {
 
 function renderGenerationDetailItems(el, parts) {
     if (!el) return;
+    // eslint-disable-next-line no-unsanitized/property -- all parts wrapped in escapeHtml()
     el.innerHTML = parts
         .filter(Boolean)
         .map(part => '<span class="generation-detail-chip">' + escapeHtml(part) + '</span>')
         .join('');
 }
 
-function renderDecodingConfig(l, hasActiveEndpoint) {
+function renderDecodingConfig(l, hasActiveEndpoint, isGenerating) {
     const slot = getPrimarySlot(l);
     const specChip = document.getElementById('m-speculative-chip');
     const decodingState = document.getElementById('m-decoding-state');
+    const modelInfoRow = document.getElementById('model-info-row');
     const hasConfig = !!slot && ((slot.sampler_stack || []).length > 0 || (slot.speculative_config || []).length > 0);
 
     setChipState(decodingState, hasConfig ? 'config' : 'waiting', hasConfig ? 'live' : 'idle');
+
+    // Model info row
+    if (modelInfoRow) {
+        const modelName = l?.model_name || '';
+        const modelParams = l?.model_params || null;
+        if (modelName) {
+            const parts = [escapeHtml(modelName)];
+            if (modelParams) {
+                parts.push(escapeHtml(formatParamCount(modelParams)));
+            }
+            const stateClass = isGenerating ? 'generating' : 'idle';
+            // eslint-disable-next-line no-unsanitized/property -- stateClass is hardcoded enum; parts array members are all wrapped in escapeHtml()
+            modelInfoRow.innerHTML = '<span class="model-info-text ' + stateClass + '">' + parts.join(' · ') + '</span>';
+        } else {
+            modelInfoRow.innerHTML = '';
+        }
+    }
 
     if (!hasActiveEndpoint || !slot) {
         if (specChip) specChip.textContent = 'Attach an endpoint for decoding config';
@@ -375,6 +436,25 @@ function renderDecodingConfig(l, hasActiveEndpoint) {
     renderSamplerParamsInline(slot);
 }
 
+function formatParamCount(params) {
+    if (!params || params === 0) return '';
+    if (params >= 1_000_000_000_000) {
+        return (params / 1_000_000_000_000).toFixed(0) + 'T params';
+    }
+    if (params >= 1_000_000_000) {
+        return (params / 1_000_000_000).toFixed(0) + 'B params';
+    }
+    if (params >= 1_000_000) {
+        return (params / 1_000_000).toFixed(0) + 'M params';
+    }
+    return params + ' params';
+}
+
+function chatDerivedContextAvailable() {
+    const tabs = chat.tabs || [];
+    return tabs.length > 0 && tabs.some(t => t.messageCount > 0);
+}
+
 function renderCapabilityPopover(d, l, generationAvailable, contextLiveAvailable) {
     const popover = document.getElementById('capability-popover');
     if (!popover) return;
@@ -394,10 +474,11 @@ function renderCapabilityPopover(d, l, generationAvailable, contextLiveAvailable
         ['Generation progress', generationAvailable ? 'live' : 'not exposed', generationAvailable],
         ['Throughput', metricsAvailable ? 'retained avg + live estimate' : 'waiting', metricsAvailable],
         ['Context capacity', (l?.context_capacity_tokens || 0) > 0 ? 'live' : 'waiting', (l?.context_capacity_tokens || 0) > 0],
-        ['Context usage', contextLiveAvailable ? 'live' : 'not exposed', contextLiveAvailable],
+        ['Context usage', contextLiveAvailable ? 'live' : chatDerivedContextAvailable() ? 'derived from chat' : 'not exposed', contextLiveAvailable || chatDerivedContextAvailable()],
         ['Host metrics', d.host_metrics_available ? 'live' : 'unavailable', !!d.host_metrics_available],
         ['Remote agent', d.remote_agent_connected ? 'connected' : 'disconnected', !!d.remote_agent_connected]
     ];
+    // eslint-disable-next-line no-unsanitized/property -- label and value are all hardcoded string literals from the rows array above; ok is boolean
     popover.innerHTML = rows.map(([label, value, ok]) => {
         return '<span class="capability-row"><span class="capability-led ' + (ok ? 'ok' : 'muted') + '"></span><span>' + label + '</span><strong>' + value + '</strong></span>';
     }).join('');
@@ -434,13 +515,19 @@ function getTempSeverityColor(temp) {
 
 function setVizContent(container, html) {
     if (!container) return;
-    container.innerHTML = html;
+    // html always built internally from numeric values, hardcoded CSS class names, and getSeverityColor() hex strings
+    // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+    container.innerHTML = window.DOMPurify.sanitize(html);
 }
 
 function renderHwBar(container, pct, isHot) {
     if (!container) return;
     const bgCls = isHot ? 'hw-bar-bg is-hot' : 'hw-bar-bg';
-    setVizContent(container, '<div class="' + bgCls + '"><div class="hw-bar-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div></div>');
+    setVizContent(container,
+        '<div class="' + bgCls + '" style="--pct:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + ';">' +
+          '<div class="hw-bar-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div>' +
+          '<div class="hw-bar-cap"></div>' +
+        '</div>');
 }
 
 function renderHwRing(container, pct, isHot) {
@@ -476,22 +563,41 @@ function renderHwMetricSparkline(svgId, history, color, show) {
     const peakIndex = history.lastIndexOf(peakValue);
     const peakX = peakIndex * step;
     const peakY = height - (((peakValue - min) / range) * (height - 4)) - 2;
+    const currentValue = history[history.length - 1];
+    const currentX = width;
+    const currentY = height - (((currentValue - min) / range) * (height - 4)) - 2;
     const path = history.map((value, index) => {
         const x = index * step;
         const y = height - (((value - min) / range) * (height - 4)) - 2;
         return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
     }).join(' ');
+    // eslint-disable-next-line no-unsanitized/property -- SVG path built from numeric history values; color is a hex string from getSeverityColor()
     svg.innerHTML =
-        '<path class="sparkline-fill" d="' + path + ' L 120 28 L 0 28 Z" fill="' + color + '" opacity="0.16"></path>' +
-        '<path class="sparkline-line" d="' + path + '" stroke="' + color + '" fill="none" stroke-width="2.4" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" filter="drop-shadow(0 0 4px ' + color + ')"></path>' +
-        '<circle class="sparkline-peak" cx="' + peakX.toFixed(2) + '" cy="' + peakY.toFixed(2) + '" r="2.3" fill="' + color + '" opacity="0.9"></circle>';
+        '<defs>' +
+          '<linearGradient id="' + svgId + '-fill" x1="0" y1="0" x2="0" y2="1">' +
+            '<stop offset="0%" stop-color="' + color + '" stop-opacity="0.34"></stop>' +
+            '<stop offset="70%" stop-color="' + color + '" stop-opacity="0.1"></stop>' +
+            '<stop offset="100%" stop-color="' + color + '" stop-opacity="0.02"></stop>' +
+          '</linearGradient>' +
+        '</defs>' +
+        '<path class="sparkline-fill" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + svgId + '-fill)"></path>' +
+        '<path class="sparkline-line" d="' + path + '" stroke="' + color + '" fill="none" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round" filter="drop-shadow(0 0 5px ' + color + ')"></path>' +
+        '<circle class="sparkline-peak" cx="' + peakX.toFixed(2) + '" cy="' + peakY.toFixed(2) + '" r="2.1" fill="' + color + '" opacity="0.78"></circle>' +
+        '<circle class="sparkline-current-halo" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="6.8" fill="' + color + '" opacity="0.14"></circle>' +
+        '<circle class="sparkline-current" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="3.2" fill="' + color + '"></circle>' +
+        '<circle class="sparkline-current-core" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.35" fill="rgba(255,255,255,0.96)"></circle>';
 }
 
 function renderHwStacked(container, pct) {
     if (!container) return;
     const isHot = pct >= 90;
     const bgCls = isHot ? 'hw-stacked-bg is-hot' : 'hw-stacked-bg';
-    setVizContent(container, '<div class="' + bgCls + '"><div class="hw-stacked-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div><div class="hw-stacked-free" style="width:' + (100 - pct).toFixed(1) + '%"></div></div>');
+    setVizContent(container,
+        '<div class="' + bgCls + '" style="--pct:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + ';">' +
+          '<div class="hw-stacked-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + getSeverityColor(pct) + ';--bar-end:' + getSeverityColor(Math.min(pct + 15, 100)) + '"></div>' +
+          '<div class="hw-stacked-free" style="width:' + (100 - pct).toFixed(1) + '%"></div>' +
+          '<div class="hw-bar-cap"></div>' +
+        '</div>');
 }
 
 function renderHwChips(container, chips) {
@@ -532,15 +638,15 @@ function renderHwDualRing(container, sclk, mclk) {
     var mclkPulse = (3.8 - Math.min(mclkBand.pct, 100) * 0.016).toFixed(2) + 's';
     setVizContent(container,
         '<div class="hw-clock-gpu-layout">' +
-          '<div class="hw-clock-cluster hw-clock-gpu" style="--dot-radius:-47px;">' +
-            '<div class="hw-clock-orbit outer" style="--pct:' + mclkBand.pct.toFixed(1) + ';--peak-pct:' + mclkBand.peakPct.toFixed(1) + ';--low-pct:' + mclkBand.lowPct.toFixed(1) + ';--orbit-color:' + mclkColor + ';--dot-radius:-47px;--pulse-duration:' + mclkPulse + ';">' +
+          '<div class="hw-clock-cluster hw-clock-gpu" style="--dot-radius:-53px;">' +
+            '<div class="hw-clock-orbit outer" style="--pct:' + mclkBand.pct.toFixed(1) + ';--peak-pct:' + mclkBand.peakPct.toFixed(1) + ';--low-pct:' + mclkBand.lowPct.toFixed(1) + ';--orbit-color:' + mclkColor + ';--dot-radius:-53px;--pulse-duration:' + mclkPulse + ';">' +
               '<div class="hw-clock-orbit-track"></div>' +
               '<div class="hw-clock-orbit-fill"></div>' +
               '<div class="hw-clock-orbit-peak"></div>' +
               '<div class="hw-clock-orbit-low"></div>' +
               '<div class="hw-clock-orbit-dot"></div>' +
             '</div>' +
-            '<div class="hw-clock-orbit inner" style="--pct:' + sclkBand.pct.toFixed(1) + ';--peak-pct:' + sclkBand.peakPct.toFixed(1) + ';--low-pct:' + sclkBand.lowPct.toFixed(1) + ';--orbit-color:' + sclkColor + ';--dot-radius:-45px;--pulse-duration:' + sclkPulse + ';">' +
+            '<div class="hw-clock-orbit inner" style="--pct:' + sclkBand.pct.toFixed(1) + ';--peak-pct:' + sclkBand.peakPct.toFixed(1) + ';--low-pct:' + sclkBand.lowPct.toFixed(1) + ';--orbit-color:' + sclkColor + ';--dot-radius:-33px;--pulse-duration:' + sclkPulse + ';">' +
               '<div class="hw-clock-orbit-track"></div>' +
               '<div class="hw-clock-orbit-fill"></div>' +
               '<div class="hw-clock-orbit-peak"></div>' +
@@ -548,8 +654,18 @@ function renderHwDualRing(container, sclk, mclk) {
               '<div class="hw-clock-orbit-dot"></div>' +
             '</div>' +
           '</div>' +
+          '<div class="hw-clock-gpu-legend">' +
+            '<div class="hw-clock-legend-item">' +
+              '<span class="hw-clock-legend-swatch sclk"></span>' +
+              '<span class="hw-clock-legend-text">Core clock</span>' +
+            '</div>' +
+            '<div class="hw-clock-legend-item">' +
+              '<span class="hw-clock-legend-swatch mclk"></span>' +
+              '<span class="hw-clock-legend-text">Memory clock</span>' +
+            '</div>' +
+          '</div>' +
           '<div class="hw-clock-gpu-readout">' +
-            '<div class="hw-clock-meter">' +
+            '<div class="hw-clock-meter" style="--meter-color:' + sclkColor + ';">' +
               '<div class="hw-clock-meter-label">SCLK</div>' +
               '<div class="hw-clock-meter-bar" style="--pct:' + sclkBand.pct.toFixed(1) + ';--peak-pct:' + sclkBand.peakPct.toFixed(1) + ';--low-pct:' + sclkBand.lowPct.toFixed(1) + ';">' +
                 '<div class="hw-clock-meter-fill" style="--pct:' + sclkBand.pct.toFixed(1) + ';--meter-color:' + sclkColor + ';--pulse-duration:' + sclkPulse + ';"></div>' +
@@ -557,10 +673,10 @@ function renderHwDualRing(container, sclk, mclk) {
                 '<div class="hw-clock-meter-marker-low"></div>' +
               '</div>' +
               '<div class="hw-clock-meter-value">' + formatClockReadout(sclk).value + ' ' + formatClockReadout(sclk).unit + '</div>' +
-              '<div class="hw-clock-meter-band">' + sclkBand.min + '-' + sclkBand.max + '</div>' +
+              '<div class="hw-clock-meter-band">' + formatClockReadout(sclkBand.min).value + '-' + formatClockReadout(sclkBand.max).value + ' ' + formatClockReadout(sclkBand.max).unit + '</div>' +
               (gpuHistory.sclk.length > 1 ? '<div class="hw-clock-footer-spark">' + buildSparklineSVG(gpuHistory.sclk, 'hw-clock-footer-spark', sclkColor) + '</div>' : '') +
             '</div>' +
-            '<div class="hw-clock-meter">' +
+            '<div class="hw-clock-meter" style="--meter-color:' + mclkColor + ';">' +
               '<div class="hw-clock-meter-label">MCLK</div>' +
               '<div class="hw-clock-meter-bar" style="--pct:' + mclkBand.pct.toFixed(1) + ';--peak-pct:' + mclkBand.peakPct.toFixed(1) + ';--low-pct:' + mclkBand.lowPct.toFixed(1) + ';">' +
                 '<div class="hw-clock-meter-fill" style="--pct:' + mclkBand.pct.toFixed(1) + ';--meter-color:' + mclkColor + ';--pulse-duration:' + mclkPulse + ';"></div>' +
@@ -599,16 +715,20 @@ function renderHwClockRing(container, clock) {
               '<div class="hw-clock-unit">' + display.unit + '</div>' +
             '</div>' +
           '</div>' +
-          '<div class="hw-clock-meter">' +
-            '<div class="hw-clock-meter-label">CLOCK</div>' +
-            '<div class="hw-clock-meter-bar" style="--pct:' + band.pct.toFixed(1) + ';--peak-pct:' + band.peakPct.toFixed(1) + ';--low-pct:' + band.lowPct.toFixed(1) + ';">' +
-              '<div class="hw-clock-meter-fill" style="--pct:' + band.pct.toFixed(1) + ';--meter-color:' + color + ';--pulse-duration:' + pulse + ';"></div>' +
-              '<div class="hw-clock-meter-marker"></div>' +
-              '<div class="hw-clock-meter-marker-low"></div>' +
+          '<div class="hw-clock-system-readout">' +
+            '<div class="hw-clock-meter">' +
+              '<div class="hw-clock-meter-label">CPU CLOCK</div>' +
+              '<div class="hw-clock-meter-bar" style="--pct:' + band.pct.toFixed(1) + ';--peak-pct:' + band.peakPct.toFixed(1) + ';--low-pct:' + band.lowPct.toFixed(1) + ';">' +
+                '<div class="hw-clock-meter-fill" style="--pct:' + band.pct.toFixed(1) + ';--meter-color:' + color + ';--pulse-duration:' + pulse + ';"></div>' +
+                '<div class="hw-clock-meter-marker"></div>' +
+                '<div class="hw-clock-meter-marker-low"></div>' +
+              '</div>' +
             '</div>' +
-            '<div class="hw-clock-meter-value">' + formatClockReadout(clock).value + ' ' + formatClockReadout(clock).unit + '</div>' +
-            '<div class="hw-clock-meter-band">' + formatClockReadout(band.min).value + '-' + formatClockReadout(band.max).value + ' ' + formatClockReadout(band.max).unit + '</div>' +
-            (sysHistory.cpuClock.length > 1 ? '<div class="hw-clock-footer-spark">' + buildSparklineSVG(sysHistory.cpuClock, 'hw-clock-footer-spark', color) + '</div>' : '') +
+            '<div class="hw-clock-system-meta">' +
+              '<div class="hw-clock-meter-value">' + formatClockReadout(clock).value + ' ' + formatClockReadout(clock).unit + '</div>' +
+              '<div class="hw-clock-meter-band">Range ' + formatClockReadout(band.min).value + '-' + formatClockReadout(band.max).value + ' ' + formatClockReadout(band.max).unit + '</div>' +
+            '</div>' +
+            (sysHistory.cpuClock.length > 1 ? '<div class="hw-clock-footer-spark hw-clock-system-spark">' + buildSparklineSVG(sysHistory.cpuClock, 'hw-clock-footer-spark', color) + '</div>' : '') +
           '</div>' +
         '</div>');
 }
@@ -771,7 +891,7 @@ function renderGpuCard(gpuMap, visible) {
         return;
     }
 
-    lastGpuData = gpuMap;
+    setLastGpuData(gpuMap);
     setEmptyState(emptyEl, false);
 
     // Use first GPU (most common case)
@@ -907,7 +1027,7 @@ function renderSystemCard(sys, visible) {
     // Show temp unavailable badge when connected to remote agent without temp data
     var tempBadge = document.getElementById('sys-temp-unavailable-badge');
     if (tempBadge) {
-        var isRemoteAgent = appState.wsData && appState.wsData.endpoint_kind === 'Remote';
+        var isRemoteAgent = wsData && wsData.endpoint_kind === 'Remote';
         if (!hasTemp && isRemoteAgent) {
             var reason = sys.cpu_temp_available
                 ? 'Sensor returned no data'
@@ -1005,26 +1125,30 @@ export function initDashboardRender() {
             selectVizStyle(card, metric, style);
         });
     });
-
-    window.setChipState = setChipState;
-    window.setCardState = setCardState;
-    window.pushSparklinePoint = pushSparklinePoint;
-    window.renderSparkline = renderSparkline;
-    window.renderLiveSparkline = renderLiveSparkline;
-    window.updateLiveOutputEstimate = updateLiveOutputEstimate;
-    window.updateRequestActivity = updateRequestActivity;
-    window.renderRecentTask = renderRecentTask;
-    window.renderActivityRail = renderActivityRail;
-    window.renderSlotGrid = renderSlotGrid;
-    window.getPrimarySlot = getPrimarySlot;
-    window.renderSlotUtilization = renderSlotUtilization;
-    window.renderRequestStats = renderRequestStats;
-    window.renderGenerationDetailItems = renderGenerationDetailItems;
-    window.renderDecodingConfig = renderDecodingConfig;
-    window.renderCapabilityPopover = renderCapabilityPopover;
-    window.updateMetricDelta = updateMetricDelta;
-    window.setEmptyState = setEmptyState;
-    window.renderGpuCard = renderGpuCard;
-    window.renderSystemCard = renderSystemCard;
-    window.setMetricSectionVisibility = setMetricSectionVisibility;
 }
+
+// Export render functions for dashboard-ws.js (replaces window.* bridges)
+export {
+    setChipState,
+    setCardState,
+    pushSparklinePoint,
+    renderSparkline,
+    renderLiveSparkline,
+    updateLiveOutputEstimate,
+    updateRequestActivity,
+    renderRecentTask,
+    renderActivityRail,
+    renderSlotGrid,
+    getPrimarySlot,
+    renderSlotUtilization,
+    renderRequestStats,
+    renderGenerationDetailItems,
+    renderDecodingConfig,
+    formatParamCount,
+    renderCapabilityPopover,
+    updateMetricDelta,
+    setEmptyState,
+    renderGpuCard,
+    renderSystemCard,
+    setMetricSectionVisibility,
+};

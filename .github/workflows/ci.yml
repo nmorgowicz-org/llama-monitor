@@ -110,6 +110,30 @@ jobs:
           needs.paths-filter.outputs.code != 'true'
         run: echo "No code changes detected, skipping Rust checks"
 
+  lint:
+    needs: paths-filter
+    if: >-
+      always() &&
+      !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
+      needs.paths-filter.outputs.ui == 'true' &&
+      github.event.pull_request.draft == false
+    runs-on: arc-llama-monitor
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install ESLint dependencies
+        run: npm ci
+
+      - name: ESLint static/js
+        run: npm run lint
+
   ui:
     needs: paths-filter
     if: >-
@@ -147,10 +171,7 @@ jobs:
           cache-dependency-path: tests/ui/package-lock.json
 
       - name: Check static JavaScript syntax
-        run: |
-          for f in static/js/bootstrap.js static/js/core/*.js static/js/features/*.js; do
-            node --check "$f" || exit 1
-          done
+        run: ./scripts/validate-js.sh
 
       - name: Install UI test dependencies
         working-directory: tests/ui

@@ -1,6 +1,8 @@
 // ── File Browser ───────────────────────────────────────────────────────────────
 // File/directory browser modal. Used by preset modal, session modal, settings.
 
+import { escapeHtml } from '../core/format.js';
+
 let fbTargetId = '';
 let fbFilter = '';
 let fbCurrentPath = '';
@@ -42,7 +44,7 @@ export async function fileBrowserGo(path) {
         const resp = await fetch('/api/browse?' + params);
         const data = await resp.json();
         if (data.error) {
-            entriesEl.innerHTML = '<div class="fb-empty">' + data.error + '</div>';
+            entriesEl.innerHTML = '<div class="fb-empty">' + escapeHtml(data.error) + '</div>';
             return;
         }
 
@@ -53,22 +55,23 @@ export async function fileBrowserGo(path) {
             return;
         }
 
+        // eslint-disable-next-line no-unsanitized/property -- all server strings (name, path, size_display) wrapped in escapeHtml()
         entriesEl.innerHTML = data.entries.map(e => {
-            const name = window.escapeHtml(e.name);
-            const size = window.escapeHtml(e.size_display || '');
+            const name = escapeHtml(e.name);
+            const size = escapeHtml(e.size_display || '');
             if (e.is_dir) {
-                return `<div class="fb-entry fb-entry-dir" data-path="${window.escapeHtml(e.path)}">` +
+                return `<div class="fb-entry fb-entry-dir" data-path="${escapeHtml(e.path)}">` +
                     '<span class="fb-entry-icon">\u{1F4C1}</span>' +
                     '<span class="fb-entry-name">' + name + '</span></div>';
             } else {
-                return `<div class="fb-entry fb-entry-file fb-match" data-path="${window.escapeHtml(e.path)}">` +
+                return `<div class="fb-entry fb-entry-file fb-match" data-path="${escapeHtml(e.path)}">` +
                     '<span class="fb-entry-icon">\u{1F4C4}</span>' +
                     '<span class="fb-entry-name">' + name + '</span>' +
                     '<span class="fb-entry-size">' + size + '</span></div>';
             }
         }).join('');
     } catch (err) {
-        entriesEl.innerHTML = '<div class="fb-empty">Error: ' + err.message + '</div>';
+        entriesEl.innerHTML = '<div class="fb-empty">Error: ' + escapeHtml(err.message) + '</div>';
     }
 }
 
@@ -121,7 +124,7 @@ export function initFileBrowser() {
             if (!entry) return;
             const path = entry.dataset.path;
             if (entry.classList.contains('fb-entry-dir')) {
-                openFileBrowser(path);
+                fileBrowserGo(path);
             } else {
                 fileBrowserSelect(path);
             }
@@ -143,7 +146,4 @@ export function initFileBrowser() {
             e.stopImmediatePropagation();
         }
     }, true);
-
-    // Keep on window for cross-module calls
-    window.openFileBrowser = openFileBrowser;
 }

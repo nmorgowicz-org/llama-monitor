@@ -250,6 +250,12 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
         }
     };
 
+    // Write token to a user-readable temp file so the main app can read it via SSH
+    // (needed on Windows where the agent runs as SYSTEM and the token file is in
+    // the SYSTEM profile, inaccessible to the SSH user).
+    // The temp file is cleaned up after a delay to give the main app time to read it.
+    let _ = write_token_to_temp_file(&token);
+
     let backend = gpu::detect_backend(&app_config.gpu_backend);
     let gpu_metrics: Arc<Mutex<BTreeMap<String, GpuMetrics>>> =
         Arc::new(Mutex::new(BTreeMap::new()));
@@ -295,6 +301,7 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
         });
     }
 
+    let agent_info_token = token.clone(); // for authenticated /agent/info endpoint
     let auth =
         warp::any()
             .and(warp::header::headers_cloned())
@@ -340,6 +347,31 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
             })
     };
 
+    // Agent info endpoint (authenticated — returns token for token-verification flows)
+    let agent_info = {
+        let agent_token = agent_info_token.clone();
+        let info_bind_addr = bind_addr;
+        warp::path("agent")
+            .and(warp::path("info"))
+            .and(warp::get())
+            .and(auth.clone())
+            .map(move |_| {
+                warp::reply::json(&serde_json::json!({
+                    "ok": true,
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "mode": "agent",
+                    "pid": std::process::id(),
+                    "executable": std::env::current_exe()
+                        .ok()
+                        .map(|path| path.to_string_lossy().to_string()),
+                    "bind": info_bind_addr.to_string(),
+                    "platform": std::env::consts::OS,
+                    "arch": std::env::consts::ARCH,
+                    "agent_token": agent_token,
+                }))
+            })
+    };
+
     let system_route = {
         let system_metrics = Arc::clone(&system_metrics);
         warp::path!("metrics" / "system")
@@ -377,6 +409,7 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
 
     let routes = health
         .or(info)
+        .or(agent_info)
         .or(system_route)
         .or(gpu_route)
         .or(metrics_route)
@@ -506,7 +539,7 @@ pub async fn detect_remote_agent(req: RemoteAgentDetectRequest) -> RemoteAgentDe
     };
 
     let agent_token = if ssh_ok {
-        read_remote_agent_token(&connection, remote_os).await
+        read_remote_agent_token(&connection, remote_os, req.agent_url.as_deref()).await
     } else {
         None
     };
@@ -814,7 +847,8 @@ async fn maybe_autostart_remote_agent(
     // poller can authenticate on its next attempt.
     if started
         && settings.remote_agent_token.is_empty()
-        && let Some(token) = read_remote_agent_token(&connection, remote_os).await
+        && let Some(token) =
+            read_remote_agent_token(&connection, remote_os, Some(&settings.remote_agent_url)).await
     {
         let mut s = state.ui_settings.lock().unwrap();
         if s.remote_agent_token.is_empty() {
@@ -1200,7 +1234,100 @@ async fn agent_health_reachable_with_token(agent_url: &str, token: Option<&str>)
     resp.status().is_success()
 }
 
-async fn read_remote_agent_token(connection: &SshConnection, os: RemoteOs) -> Option<String> {
+/// Write the agent token to a temp file in each user's home directory, so the
+/// main app can read it via SSH even when the agent runs as SYSTEM (Windows) or
+/// another user. The files are cleaned up after 30 seconds.
+fn write_token_to_temp_file(token: &str) -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+    let file_name = format!("llama-monitor-agent-token-{}.tmp", std::process::id());
+
+    // Determine home directories to write to
+    let home_dirs: Vec<std::path::PathBuf> = if cfg!(windows) {
+        // On Windows, write to every user's home directory under C:\Users\
+        // so the SSH user can read it. The agent runs as SYSTEM, so it can
+        // write to any user's directory.
+        match std::fs::read_dir("C:\\Users") {
+            Ok(entries) => entries
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| {
+                    // Skip system accounts
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    !name.starts_with("$") && name != "Default" && name != "Public"
+                })
+                .map(|entry| entry.path().join(".llama-monitor"))
+                .collect(),
+            Err(_) => Vec::new(),
+        }
+    } else {
+        // On Unix, write to /tmp (accessible by all users)
+        vec![std::env::temp_dir()]
+    };
+
+    for mut home_dir in home_dirs {
+        let _ = std::fs::create_dir_all(&home_dir);
+        home_dir.push(&file_name);
+
+        if std::fs::write(&home_dir, token).is_ok() {
+            let cleanup_path = home_dir.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                let _ = std::fs::remove_file(&cleanup_path);
+                // Clean up the .llama-monitor dir if empty
+                if let Some(parent) = cleanup_path.parent() {
+                    let _ = std::fs::remove_dir(parent);
+                }
+            });
+            eprintln!("[agent] Token written to temp file: {}", home_dir.display());
+            paths.push(home_dir);
+        } else {
+            eprintln!(
+                "[agent] Failed to write token to temp file: {}",
+                home_dir.display()
+            );
+        }
+    }
+
+    paths
+}
+
+async fn read_remote_agent_token(
+    connection: &SshConnection,
+    os: RemoteOs,
+    _agent_url: Option<&str>,
+) -> Option<String> {
+    // Try the user-readable temp file first (written by the agent on startup,
+    // cleaned up after 30 seconds). On Windows, the agent writes to each user's
+    // home directory so the SSH user can read it. On Unix, it writes to /tmp.
+    let temp_file_cmd = match os {
+        RemoteOs::Windows => {
+            // Agent writes to C:\Users\<user>\.llama-monitor\agent-token-{pid}.tmp
+            // Read the most recent one from the current user's home directory.
+            "cmd.exe /C \"dir %USERPROFILE%\\.llama-monitor\\llama-monitor-agent-token-*.tmp /O:-D /B 2>NUL | set /p file= && type %USERPROFILE%\\.llama-monitor\\%file% 2>NUL\""
+                .to_string()
+        }
+        RemoteOs::Unix | RemoteOs::Macos => {
+            // Agent writes to /tmp/llama-monitor-agent-token-{pid}.tmp
+            // Read the most recent one.
+            "ls -t /tmp/llama-monitor-agent-token-*.tmp 2>/dev/null | head -1 | xargs cat 2>/dev/null"
+                .to_string()
+        }
+        RemoteOs::Unknown => return None,
+    };
+    if let Ok(Ok(output)) = tokio::time::timeout(
+        Duration::from_secs(5),
+        remote_ssh::exec(connection.clone(), temp_file_cmd),
+    )
+    .await
+        && output.status == 0
+    {
+        let token = output.stdout.trim().to_string();
+        if !token.is_empty() && token.len() >= 16 {
+            return Some(token);
+        }
+    }
+
+    // Fall back to reading the token from the config directory (works on Unix,
+    // fails on Windows SYSTEM profile).
     let command = match os {
         RemoteOs::Windows => {
             // Agent runs as SYSTEM; token lives in SYSTEM's roaming profile.
@@ -1953,7 +2080,7 @@ Start-Sleep -Seconds 2\""
         let agent_token = if running {
             let mut token = None;
             for _ in 0..6 {
-                token = read_remote_agent_token(&connection, os_hint).await;
+                token = read_remote_agent_token(&connection, os_hint, Some(&agent_url)).await;
                 if token.is_some() {
                     break;
                 }

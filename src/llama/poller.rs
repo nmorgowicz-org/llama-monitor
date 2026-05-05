@@ -239,7 +239,7 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             }
         }
 
-        // Poll /v1/models — get model name
+        // Poll /v1/models — get model name and metadata
         if let Ok(resp) = client.get(format!("{base}/v1/models")).send().await
             && let Ok(body) = resp.text().await
             && let Ok(json) = serde_json::from_str::<serde_json::Value>(&body)
@@ -247,6 +247,12 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
         {
             let mut m = state.llama_metrics.lock().unwrap();
             m.model_name = model_name.to_string();
+            if let Some(n_params) = json["data"][0]["meta"]["n_params"].as_u64() {
+                m.model_params = Some(n_params);
+            }
+            if let Some(n_ctx_train) = json["data"][0]["meta"]["n_ctx_train"].as_u64() {
+                m.model_ctx_train = Some(n_ctx_train);
+            }
         }
 
         tokio::time::sleep(Duration::from_secs(poll_interval)).await;

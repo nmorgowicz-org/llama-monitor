@@ -105,6 +105,8 @@ pub struct UiSettings {
     /// Stored in `ui-settings.json` so it persists across restarts.
     #[serde(default)]
     pub explicit_mode_policy: String,
+    #[serde(default = "default_context_card_view")]
+    pub context_card_view: String,
 }
 
 /// Session mode: either spawn a new server or attach to existing
@@ -193,6 +195,10 @@ fn default_llama_poll_interval() -> u64 {
     1
 }
 
+fn default_context_card_view() -> String {
+    "gauge".to_string()
+}
+
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
@@ -209,6 +215,7 @@ impl Default for UiSettings {
             remote_agent_ssh_target: String::new(),
             remote_agent_ssh_command: String::new(),
             explicit_mode_policy: String::new(),
+            context_card_view: default_context_card_view(),
         }
     }
 }

@@ -1,0 +1,270 @@
+/* ── Logs Empty State ──────────────────────────────────────────────────────── */
+
+#page-logs {
+    position: relative;
+    padding: 32px;
+    gap: 24px;
+}
+
+#page-logs .log-panel {
+    min-height: 100%;
+}
+
+#page-logs.logs-empty-mode .log-panel {
+    display: none;
+}
+
+.logs-empty-state {
+    display: none;
+    position: relative;
+    width: 100%;
+    padding: 0 0 32px;
+    align-items: flex-start;
+    justify-content: flex-start;
+    pointer-events: none;
+    z-index: 10;
+    background:
+        radial-gradient(circle at 18% 24%, rgba(56, 189, 248, 0.12), transparent 32%),
+        radial-gradient(circle at 78% 20%, rgba(45, 212, 191, 0.10), transparent 28%),
+        linear-gradient(180deg, rgba(10, 14, 24, 0.82), rgba(10, 14, 24, 0.94));
+    backdrop-filter: blur(4px);
+    overflow: visible;
+    border-radius: 28px;
+}
+
+.logs-empty-state.visible {
+    display: flex;
+    z-index: 20;
+}
+
+.logs-empty-content {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 40px 40px 44px;
+    width: min(1180px, 100%);
+    border-radius: 28px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    background:
+        linear-gradient(180deg, rgba(20, 27, 45, 0.94), rgba(9, 13, 24, 0.96)),
+        rgba(15, 23, 42, 0.88);
+    box-shadow:
+        0 32px 90px rgba(2, 8, 23, 0.55),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    pointer-events: auto;
+    position: relative;
+    overflow: hidden;
+}
+
+.logs-empty-ambient {
+    position: absolute;
+    border-radius: 999px;
+    filter: blur(0);
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+.logs-empty-ambient-a {
+    width: 220px;
+    height: 220px;
+    top: -70px;
+    right: -40px;
+    background: radial-gradient(circle, rgba(56, 189, 248, 0.24), transparent 68%);
+    animation: logs-orb-drift 8s ease-in-out infinite;
+}
+
+.logs-empty-ambient-b {
+    width: 260px;
+    height: 260px;
+    bottom: -120px;
+    left: -70px;
+    background: radial-gradient(circle, rgba(45, 212, 191, 0.18), transparent 70%);
+    animation: logs-orb-drift 10s ease-in-out infinite reverse;
+}
+
+.logs-empty-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    border-radius: 999px;
+    margin-bottom: 18px;
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    font-weight: 700;
+    color: #c7f9ff;
+    background: rgba(34, 211, 238, 0.12);
+    border: 1px solid rgba(34, 211, 238, 0.2);
+}
+
+.logs-empty-console {
+    position: relative;
+    margin: 0 auto 24px;
+    width: min(100%, 720px);
+    border-radius: 20px;
+    overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    background: rgba(2, 6, 23, 0.82);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.logs-console-topbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 12px 14px;
+    background: rgba(148, 163, 184, 0.08);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.10);
+}
+
+.logs-console-topbar span {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(226, 232, 240, 0.28);
+}
+
+.logs-console-topbar span:nth-child(1) { background: rgba(248, 113, 113, 0.75); }
+.logs-console-topbar span:nth-child(2) { background: rgba(250, 204, 21, 0.75); }
+.logs-console-topbar span:nth-child(3) { background: rgba(74, 222, 128, 0.75); }
+
+.logs-console-body {
+    padding: 18px 18px 20px;
+    text-align: left;
+    font-family: "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88rem;
+    line-height: 1.75;
+}
+
+.logs-console-line {
+    color: rgba(226, 232, 240, 0.92);
+}
+
+.logs-console-line span {
+    color: #67e8f9;
+    margin-right: 8px;
+}
+
+.logs-console-muted {
+    color: rgba(148, 163, 184, 0.9);
+}
+
+.logs-console-caret {
+    color: #5eead4;
+}
+
+.logs-console-caret::after {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 1.1em;
+    margin-left: 6px;
+    vertical-align: text-bottom;
+    background: currentColor;
+    opacity: 0.9;
+    animation: logs-caret-blink 1.1s steps(1) infinite;
+}
+
+.logs-empty-state h3 {
+    font-size: clamp(1.45rem, 2vw, 2rem);
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 14px 0;
+    letter-spacing: -0.02em;
+    max-width: 840px;
+    margin-inline: auto;
+}
+
+.logs-empty-state p {
+    font-size: 1rem;
+    line-height: 1.6;
+    margin: 0 auto 22px;
+    max-width: 880px;
+    opacity: 0.88;
+}
+
+.logs-empty-capabilities {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    margin-bottom: 26px;
+}
+
+.logs-capability-chip {
+    padding: 9px 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    color: rgba(226, 232, 240, 0.9);
+    font-size: 0.82rem;
+    letter-spacing: 0.01em;
+}
+
+.logs-empty-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}
+
+.logs-empty-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    border-radius: 999px;
+    border: 1px solid rgba(34, 211, 238, 0.28);
+    background: linear-gradient(180deg, rgba(34, 211, 238, 0.18), rgba(13, 148, 136, 0.18));
+    color: #ecfeff;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    box-shadow: 0 10px 24px rgba(8, 145, 178, 0.18);
+}
+
+.logs-empty-actions .btn:hover {
+    border-color: rgba(103, 232, 249, 0.42);
+    transform: translateY(-1px);
+    box-shadow: 0 16px 30px rgba(8, 145, 178, 0.22);
+}
+
+.logs-empty-actions .btn svg {
+    opacity: 0.9;
+}
+
+@keyframes logs-orb-drift {
+    0%, 100% {
+        transform: translate3d(0, 0, 0) scale(1);
+    }
+    50% {
+        transform: translate3d(0, -10px, 0) scale(1.06);
+    }
+}
+
+@keyframes logs-caret-blink {
+    0%, 45% { opacity: 1; }
+    46%, 100% { opacity: 0; }
+}
+
+@media (max-width: 900px) {
+    #page-logs {
+        padding: 18px;
+    }
+
+    .logs-empty-state {
+        padding: 0 0 18px;
+    }
+
+    .logs-empty-content {
+        padding: 28px 20px 32px;
+        border-radius: 22px;
+    }
+
+    .logs-empty-capabilities {
+        justify-content: flex-start;
+    }
+
+    .logs-empty-actions {
+        justify-content: flex-start;
+    }
+}

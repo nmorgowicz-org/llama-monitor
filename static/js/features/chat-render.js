@@ -2,6 +2,58 @@
 // Rendering functions for chat tabs, messages, compaction markers, and actions.
 // Calls rendering functions via window.* to avoid circular imports.
 
+import { chat, lastLlamaMetrics } from '../core/app-state.js';
+import { escapeHtml } from '../core/format.js';
+import {
+    activeChatTab,
+    getChatViewBindings,
+    registerChatViewBindings,
+    scheduleChatPersist,
+    switchChatTab,
+    closeChatTab,
+    renameChatTab,
+    normalizeTabForSave,
+    togglePinTab,
+    restoreTabFromTrash,
+} from './chat-state.js';
+import { showToast, showToastWithActions } from './toast.js';
+import { openTemplateManager } from './chat-templates.js';
+
+// Getter for transport functions — avoids circular import (chat-render ↔ chat-transport)
+let _getTransport = null;
+export function setChatTransportGetter(getter) {
+    _getTransport = getter;
+}
+
+function getTransport() {
+    return _getTransport ? _getTransport() : null;
+}
+
+// ── Date formatting ───────────────────────────────────────────────────────────
+
+const DATE_FORMAT_KEY = 'llama-monitor-date-format';
+
+export function formatMessageDateTime(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const fmt = localStorage.getItem(DATE_FORMAT_KEY) || 'MM/DD/YY';
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const yy = String(d.getFullYear()).slice(-2);
+    let date;
+    if (fmt === 'locale') {
+        date = d.toLocaleDateString([], { month: 'numeric', day: 'numeric', year: '2-digit' });
+    } else if (fmt === 'DD/MM/YY') {
+        date = `${dd}/${mm}/${yy}`;
+    } else if (fmt === 'YYYY-MM-DD') {
+        date = `${d.getFullYear()}-${mm}-${dd}`;
+    } else {
+        date = `${mm}/${dd}/${yy}`;
+    }
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `${date} ${time}`;
+}
+
 // ── Cached DOM elements (populated at init time) ──────────────────────────────
 let chatMessagesEl = null;
 let chatTabBarEl = null;
@@ -20,14 +72,14 @@ function ensureChatElements() {
 
 // ── Markdown rendering ────────────────────────────────────────────────────────
 
-function renderMd(src) {
+export function renderMd(src) {
     if (typeof marked !== 'undefined') {
         try { return marked.parse(src); } catch(_) {}
     }
     return src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>');
 }
 
-function renderMdStreaming(src) {
+export function renderMdStreaming(src) {
     if (typeof marked !== 'undefined') {
         try { return marked.parse(src, { gfm: true, breaks: true, renderer: new marked.Renderer() }); } catch(_) {}
     }
@@ -36,7 +88,7 @@ function renderMdStreaming(src) {
 
 // ── Scroll ────────────────────────────────────────────────────────────────────
 
-function chatScroll(force = false) {
+export function chatScroll(force = false) {
     ensureChatElements();
     const c = chatMessagesEl;
     if (!c) return;
@@ -45,7 +97,7 @@ function chatScroll(force = false) {
         c.scrollTop = c.scrollHeight;
     }
     if (force) {
-        window.unreadChatCount = 0;
+        chat.unreadChatCount = 0;
         if (chatScrollBadge) chatScrollBadge.style.display = 'none';
     }
 }
@@ -65,15 +117,15 @@ function initChatScrollButton() {
     requestAnimationFrame(() => requestAnimationFrame(checkScroll));
 }
 
-function incrementUnreadCount() {
+export function incrementUnreadCount() {
     ensureChatElements();
     const container = chatMessagesEl;
     if (!container) return;
     const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     if (distFromBottom > 80) {
-        window.unreadChatCount++;
+        chat.unreadChatCount++;
         if (chatScrollBadge) {
-            chatScrollBadge.textContent = window.unreadChatCount;
+            chatScrollBadge.textContent = chat.unreadChatCount;
             chatScrollBadge.style.display = 'flex';
         }
     }
@@ -81,25 +133,60 @@ function incrementUnreadCount() {
 
 // ── Tab rendering ─────────────────────────────────────────────────────────────
 
-function renderChatTabs() {
+let _draggedTabId = null;
+
+// Template cache for persona label lookup
+let _templateCache = null;
+let _templateCacheTimestamp = 0;
+
+async function getTemplateCache() {
+    const now = Date.now();
+    if (_templateCache && (now - _templateCacheTimestamp) < 30000) {
+        return _templateCache;
+    }
+    const templates = await window.loadTemplates?.();
+    _templateCache = templates || [];
+    _templateCacheTimestamp = now;
+    return _templateCache;
+}
+
+async function getTemplateNameById(id) {
+    if (!id) return null;
+    const templates = await getTemplateCache();
+    const template = templates.find(t => t.id === id);
+    return template ? template.name : null;
+}
+
+export function renderChatTabs() {
     ensureChatElements();
     const bar = chatTabBarEl;
     const addBtn = bar?.querySelector('.chat-tab-add');
     bar?.querySelectorAll('.chat-tab').forEach(el => el.remove());
 
-    for (const tab of window.chatTabs) {
+    for (const tab of chat.tabs) {
         const el = document.createElement('div');
         const msgCount = tab.messages.filter(m => m.role !== 'system').length;
         let extraClasses = '';
         if (msgCount > 50) extraClasses = ' tab-hot';
         else if (msgCount > 20) extraClasses = ' tab-warm';
-        el.className = 'chat-tab' + (tab.id === window.activeChatTabId ? ' active' : '') + extraClasses;
+        el.className = 'chat-tab' + (tab.id === chat.activeTabId ? ' active' : '') + (tab.pinned ? ' chat-tab-pinned' : '') + extraClasses;
         el.dataset.tabId = tab.id;
-        el.dataset.msgCount = msgCount;
+        el.draggable = true;
+        // eslint-disable-next-line no-unsanitized/property -- tab.name wrapped in escapeHtml(); tab.id is an internal UUID; message count is numeric
         el.innerHTML = `
-          <span class="chat-tab-name" data-chat-tab-rename="${tab.id}">${window.escapeHtml(tab.name)}</span>
-          <span class="chat-tab-count">${tab.messages.filter(m => m.role !== 'system').length || ''}</span>
-          ${window.chatTabs.length > 1
+          <div class="chat-tab-name-wrapper">
+            <span class="chat-tab-name" data-chat-tab-rename="${tab.id}">${escapeHtml(tab.name)}</span>
+            ${tab.active_template_id ? `<span class="chat-tab-persona"></span>` : ''}
+          </div>
+          <svg class="chat-tab-pin-icon ${tab.pinned ? 'pinned' : ''}" width="11" height="11" viewBox="0 0 24 24" fill="${tab.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" aria-hidden="true" data-tooltip="${tab.pinned ? 'Unpin tab' : 'Pin tab'}">
+            <path d="M16 12V3h-3V2H8v1H5v9l-2 6 3 1 2-5v9h6v-9l2 5 3-1-2-6z"/>
+          </svg>
+          <svg class="chat-tab-edit-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+            <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+          <span class="chat-tab-count">${msgCount || ''}</span>
+          ${chat.tabs.length > 1
             ? `<button class="chat-tab-close" data-chat-tab-close="${tab.id}" title="Close tab">×</button>`
             : ''}
         `;
@@ -107,25 +194,157 @@ function renderChatTabs() {
             const closeBtn = e.target.closest('.chat-tab-close');
             if (closeBtn) return;
             if (e.target.classList.contains('chat-tab-name') && e.detail === 2) return;
-            window.switchChatTab(tab.id);
+            switchChatTab(tab.id);
         });
+
+        // Drag-to-reorder
+        el.addEventListener('dragstart', e => {
+            _draggedTabId = tab.id;
+            el.classList.add('tab-dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        el.addEventListener('dragend', () => {
+            _draggedTabId = null;
+            bar.querySelectorAll('.chat-tab').forEach(t => {
+                t.classList.remove('tab-dragging', 'tab-drop-target');
+            });
+        });
+        el.addEventListener('dragover', e => {
+            if (_draggedTabId && _draggedTabId !== tab.id) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                bar.querySelectorAll('.chat-tab').forEach(t => t.classList.remove('tab-drop-target'));
+                el.classList.add('tab-drop-target');
+            }
+        });
+        el.addEventListener('dragleave', () => el.classList.remove('tab-drop-target'));
+        el.addEventListener('drop', e => {
+            e.preventDefault();
+            el.classList.remove('tab-drop-target');
+            if (!_draggedTabId || _draggedTabId === tab.id) return;
+            const draggedTab = chat.tabs.find(t => t.id === _draggedTabId);
+            const targetTab = tab;
+            if (!draggedTab || !targetTab) return;
+            // Can't drag pinned tabs into unpinned section and vice versa
+            if (draggedTab.pinned !== targetTab.pinned) return;
+            const fromIdx = chat.tabs.findIndex(t => t.id === _draggedTabId);
+            const toIdx = chat.tabs.findIndex(t => t.id === tab.id);
+            if (fromIdx < 0 || toIdx < 0) return;
+            const [moved] = chat.tabs.splice(fromIdx, 1);
+            chat.tabs.splice(toIdx, 0, moved);
+            renderChatTabs();
+            scheduleChatPersist();
+        });
+
+        // Pin button click handler
+        const pinBtn = el.querySelector('.chat-tab-pin-icon');
+        if (pinBtn) {
+            pinBtn.title = tab.pinned ? 'Unpin tab' : 'Pin tab';
+            pinBtn.addEventListener('click', e => {
+                e.stopPropagation();
+                togglePinTab(tab.id);
+            });
+        }
+
+        // Populate persona label
+        const personaLabel = el.querySelector('.chat-tab-persona');
+        if (personaLabel && tab.active_template_id) {
+            getTemplateNameById(tab.active_template_id).then(name => {
+                if (personaLabel && name) {
+                    personaLabel.textContent = name;
+                }
+            });
+        }
+
         bar.insertBefore(el, addBtn);
+    }
+    // Add separator between pinned and unpinned tabs if both exist
+    const firstUnpinned = bar.querySelector('.chat-tab:not(.chat-tab-pinned)');
+    if (firstUnpinned && bar.querySelector('.chat-tab-pinned')) {
+        const sep = document.createElement('div');
+        sep.className = 'chat-tab-pin-sep';
+        if (!bar.querySelector('.chat-tab-pin-sep')) {
+            bar.insertBefore(sep, firstUnpinned);
+        }
     }
     updateTabBarOverflowMask();
 }
 
-function updateTabBarOverflowMask() {
+export function updateTabBarOverflowMask() {
     const bar = document.getElementById('chat-tab-bar');
     if (!bar) return;
     bar.classList.toggle('no-overflow', bar.scrollWidth <= bar.clientWidth);
 }
 
+function getTimeAgo(ts) {
+    const diff = Date.now() - ts;
+    const secs = Math.floor(diff / 1000);
+    if (secs < 60) return `${secs}s ago`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ago`;
+}
+
+export function renderTrashDropdown() {
+    const dropdown = document.getElementById('chat-tab-trash-dropdown');
+    const trashBtn = document.getElementById('chat-tab-trash-btn');
+    if (!dropdown || !trashBtn) return;
+
+    const existingBadge = trashBtn.querySelector('.trash-badge');
+    if (existingBadge) existingBadge.remove();
+    if (chat.tabTrash.length > 0) {
+        const badge = document.createElement('span');
+        badge.className = 'trash-badge';
+        badge.textContent = chat.tabTrash.length;
+        trashBtn.appendChild(badge);
+    }
+
+    dropdown.innerHTML = '';
+    if (chat.tabTrash.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'chat-tab-trash-dropdown-empty';
+        empty.textContent = 'Trash is empty';
+        dropdown.appendChild(empty);
+        return;
+    }
+
+    for (const entry of chat.tabTrash) {
+        const item = document.createElement('div');
+        item.className = 'chat-tab-trash-item';
+        const timeAgo = getTimeAgo(entry.trashedAt);
+        // eslint-disable-next-line no-unsanitized/property -- entry.tab.name wrapped in escapeHtml(); entry.tab.id is an internal UUID; timeAgo is numeric
+        item.innerHTML = `
+            <span class="chat-tab-trash-item-name">${escapeHtml(entry.tab.name)}</span>
+            <span class="chat-tab-trash-item-time">${timeAgo}</span>
+            <button class="chat-tab-trash-item-restore" data-trash-restore="${entry.tab.id}">Restore</button>
+        `;
+        dropdown.appendChild(item);
+    }
+
+    const footer = document.createElement('div');
+    footer.className = 'chat-tab-trash-dropdown-footer';
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'chat-tab-trash-clear-btn';
+    clearBtn.textContent = 'Clear all';
+    clearBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        chat.tabTrash = [];
+        renderTrashDropdown();
+        scheduleChatPersist();
+    });
+    footer.appendChild(clearBtn);
+    dropdown.appendChild(footer);
+}
+
 // ── Message rendering ─────────────────────────────────────────────────────────
 
-function renderChatMessages() {
+export function renderChatMessages() {
     ensureChatElements();
     const container = chatMessagesEl;
-    const tab = window.activeChatTab();
+    const tab = activeChatTab();
 
     if (!tab || tab.messages.filter(m => m.role !== 'system').length === 0) {
         const prompts = [
@@ -136,16 +355,17 @@ function renderChatMessages() {
         ];
         const promptCards = prompts.map((p, i) => `
             <button class="chat-empty-prompt" style="animation-delay:${i * 60}ms"
-                    data-prompt-text="${window.escapeHtml(p.text)}">
+                    data-prompt-text="${escapeHtml(p.text)}">
                 <span class="chat-empty-prompt-icon">${p.icon}</span>
                 <span class="chat-empty-prompt-text">${p.text}</span>
             </button>`).join('');
 
         const aiName = tab?.ai_name || 'Assistant';
-        const modelName = window.lastLlamaMetrics?.model_name
-            ? ` (${window.lastLlamaMetrics.model_name.split('/').pop().replace(/\.gguf$/i, '')})`
+        const modelName = lastLlamaMetrics?.model_name
+            ? ` (${lastLlamaMetrics.model_name.split('/').pop().replace(/\.gguf$/i, '')})`
             : '';
 
+        // eslint-disable-next-line no-unsanitized/property -- aiName and modelName wrapped in escapeHtml(); promptCards use escapeHtml(); SVG is hardcoded
         container.innerHTML = `
           <div class="chat-empty">
             <div class="chat-empty-icon">
@@ -154,7 +374,7 @@ function renderChatMessages() {
                 <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
               </svg>
             </div>
-            <p class="chat-empty-title">${window.escapeHtml(aiName)}${window.escapeHtml(modelName)} is ready</p>
+            <p class="chat-empty-title">${escapeHtml(aiName)}${escapeHtml(modelName)} is ready</p>
             <p class="chat-empty-hint">Ask anything, or try a suggestion below</p>
             <div class="chat-empty-prompts">${promptCards}</div>
           </div>`;
@@ -173,6 +393,7 @@ function renderChatMessages() {
         const loadMoreBtn = document.createElement('button');
         loadMoreBtn.className = 'chat-load-more';
         const olderCount = allMessages.length - limit;
+        // eslint-disable-next-line no-unsanitized/property -- hardcoded SVG with numeric message counts only
         loadMoreBtn.innerHTML = `
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 5v14M5 12l7 7 7-7"/>
@@ -192,7 +413,8 @@ function renderChatMessages() {
         idx++;
     }
     chatScroll(true);
-    window.syncCompactSettingsUI(activeChatTab());
+    getChatViewBindings().syncCompactSettingsUI?.(activeChatTab());
+    renderPersonaStrip();
 }
 
 function loadMoreMessages(tab, currentLimit) {
@@ -204,7 +426,7 @@ function loadMoreMessages(tab, currentLimit) {
 
 function buildMessageElement(msg, idx, allMessages) {
     const isUser = msg.role === 'user';
-    const tab = window.activeChatTab();
+    const tab = activeChatTab();
     const wrapper = document.createElement('div');
 
     // Render compaction tombstone as a divider
@@ -232,11 +454,12 @@ function buildMessageElement(msg, idx, allMessages) {
         } else if (msg.dropped_preview && msg.dropped_preview.length > 0) {
             const rows = msg.dropped_preview.map(p => {
                 const label = p.role === 'user' ? 'You' : 'AI';
-                return `<div class="compact-peek-row"><span class="compact-peek-role">${label}</span><span class="compact-peek-snippet">${window.escapeHtml(p.snippet)}${p.snippet.length >= 80 ? '…' : ''}</span></div>`;
+                return `<div class="compact-peek-row"><span class="compact-peek-role">${label}</span><span class="compact-peek-snippet">${escapeHtml(p.snippet)}${p.snippet.length >= 80 ? '…' : ''}</span></div>`;
             }).join('');
             bodyHtml = `<div class="compact-peek-list">${rows}</div>`;
         }
 
+        // eslint-disable-next-line no-unsanitized/property -- bodyHtml is LLM output rendered via marked.js in trusted local context; statsHtml uses numeric counts and hardcoded strings; labelText/iconPath are hardcoded
         wrapper.innerHTML = `
           <div class="compact-marker-content">
             <div class="compact-marker-rule compact-marker-rule-left"></div>
@@ -255,9 +478,7 @@ function buildMessageElement(msg, idx, allMessages) {
 
     wrapper.className = `chat-message chat-message-${msg.role}`;
 
-    const ts = msg.timestamp_ms
-        ? new Date(msg.timestamp_ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        : '';
+    const ts = formatMessageDateTime(msg.timestamp_ms);
     const aiLabel = tab?.ai_name || 'AI';
     const userLabel = tab?.user_name || 'You';
 
@@ -276,20 +497,24 @@ function buildMessageElement(msg, idx, allMessages) {
         }
         const cumTotal = cumInput + cumOutput;
         if (cumTotal > 0) parts.push(`R${formatTokenCount(cumTotal)}`);
-        const capacity = window.lastLlamaMetrics?.context_capacity_tokens || 0;
-        const ctxPct = capacity > 0 ? Math.round((cumTotal / capacity) * 100) : 0;
+        const capacity = lastLlamaMetrics?.context_capacity_tokens || 0;
+        // ctx% = (cumulative output tokens up to this message + this message's input) / capacity.
+        // KV cache means input_tokens is incremental; output tokens accumulate as the actual context content.
+        const ctxTokens = cumOutput + (msg.input_tokens || 0);
+        const ctxPct = capacity > 0 && ctxTokens > 0 ? Math.min(100, Math.round((ctxTokens / capacity) * 100)) : 0;
         if (ctxPct > 0) parts.push(`${ctxPct}% ctx`);
-        const modelName = msg.model_name || window.lastLlamaMetrics?.model_name || '';
+        const modelName = msg.model_name || lastLlamaMetrics?.model_name || '';
         if (modelName) parts.push(modelName);
         if (parts.length > 0) {
             metaHtml = `<span class="chat-msg-meta-sep">·</span><span class="chat-msg-meta-model" title="↓ = prompt tokens in · ↑ = tokens generated · R = running total · ctx = % of context window used">${parts.join(' · ')}</span>`;
         }
     }
 
-    wrapper.innerHTML = `
+ // LLM output rendered via marked.js; user content escaped with escapeHtml().replace(); labels are user-configured display names
+    const html = `
       <div class="chat-avatar">${isUser ? userLabel : aiLabel}</div>
       <div class="chat-bubble">
-        <div class="chat-msg-body">${isUser ? window.escapeHtml(msg.content).replace(/\n/g, '<br>') : renderMd(msg.content)}</div>
+        <div class="chat-msg-body">${isUser ? escapeHtml(msg.content).replace(/\n/g, '<br>') : renderMd(msg.content)}</div>
         <div class="chat-msg-footer">
           <span class="chat-msg-time">${ts}</span>
           ${metaHtml}
@@ -297,7 +522,7 @@ function buildMessageElement(msg, idx, allMessages) {
             <button class="chat-action-btn" data-chat-action="copy" title="Copy">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                    stroke="currentColor" stroke-width="2">
-                <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+                <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012-2v1"/>
               </svg>
             </button>
             ${!isUser ? (() => {
@@ -329,12 +554,14 @@ function buildMessageElement(msg, idx, allMessages) {
             <button class="chat-action-btn chat-action-btn-delete" data-chat-action="delete" title="Delete">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                    stroke="currentColor" stroke-width="2">
-                <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+                <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012-2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
               </svg>
             </button>
           </div>
         </div>
       </div>`;
+    // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
+    wrapper.innerHTML = window.DOMPurify.sanitize(html);
 
     return wrapper;
 }
@@ -347,13 +574,14 @@ function formatTokenCount(n) {
 
 // ── Streaming helpers ─────────────────────────────────────────────────────────
 
-function appendAssistantPlaceholder() {
+export function appendAssistantPlaceholder() {
     ensureChatElements();
     const container = chatMessagesEl;
-    const tab = window.activeChatTab();
+    const tab = activeChatTab();
     const aiLabel = tab?.ai_name || 'AI';
     const wrapper = document.createElement('div');
     wrapper.className = 'chat-message chat-message-assistant chat-message-streaming';
+    // eslint-disable-next-line no-unsanitized/property -- aiLabel is a user-configured display name; rest is hardcoded SVG/HTML skeleton
     wrapper.innerHTML = `
       <div class="chat-avatar">${aiLabel}</div>
       <div class="chat-bubble">
@@ -370,7 +598,7 @@ function appendAssistantPlaceholder() {
     return wrapper;
 }
 
-function appendThinkingBlock(afterEl) {
+export function appendThinkingBlock(afterEl) {
     const details = document.createElement('details');
     details.className = 'chat-thinking';
     details.innerHTML = `
@@ -385,10 +613,11 @@ function appendThinkingBlock(afterEl) {
     return details;
 }
 
-function finalizeAssistantMessage(el, content, usage, tab) {
+export function finalizeAssistantMessage(el, content, usage, tab) {
     el.classList.remove('chat-message-streaming');
     const body = el.querySelector('.chat-msg-body');
     if (content) {
+        // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context
         body.innerHTML = renderMd(content);
         if (typeof hljs !== 'undefined') {
             body.querySelectorAll('pre code:not(.hljs)').forEach(codeEl => {
@@ -406,6 +635,7 @@ function finalizeAssistantMessage(el, content, usage, tab) {
 
             const header = document.createElement('div');
             header.className = 'chat-code-header';
+            // eslint-disable-next-line no-unsanitized/property -- lang is extracted from a CSS class name by marked.js; lineCount is numeric
             header.innerHTML = `
                 <span class="chat-code-lang">${lang || 'code'}</span>
                 <span class="chat-code-lines">${lineCount} line${lineCount !== 1 ? 's' : ''}</span>
@@ -434,19 +664,20 @@ function finalizeAssistantMessage(el, content, usage, tab) {
     }
     const time = el.querySelector('.chat-msg-time');
     if (time) {
-        time.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        time.textContent = formatMessageDateTime(Date.now());
     }
     const actions = el.querySelector('.chat-msg-actions');
     if (actions && content) {
-        const tab = window.activeChatTab();
+        const tab = activeChatTab();
         const variants = tab?._pendingVariants || null;
         let msg = null;
         if (variants) {
             tab._pendingVariants = null;
             for (let i = tab.messages.length - 1; i >= 0; i--) {
                 if (tab.messages[i].role === 'assistant') {
-                    tab.messages[i]._variants = variants;
-                    tab.messages[i]._variantIndex = variants.length - 1;
+                    const fullVariants = [...variants, content];
+                    tab.messages[i]._variants = fullVariants;
+                    tab.messages[i]._variantIndex = fullVariants.length - 1;
                     msg = tab.messages[i];
                     break;
                 }
@@ -459,9 +690,13 @@ function finalizeAssistantMessage(el, content, usage, tab) {
             const msgIdx = firstVisibleIdx + idx;
             msg = tab?.messages[msgIdx] || null;
         }
-        const hasVariants = msg && msg._variants && msg._variants.length > 1;
+        const msgVariants = msg?._variants || [];
         const variantIdx = msg?._variantIndex || 0;
+        const total = msgVariants.length || 1;
+        const canGoLeft = msgVariants.length > 1 && variantIdx > 0;
+        const canGoRight = msgVariants.length > 1 ? variantIdx < msgVariants.length - 1 : true;
 
+        // eslint-disable-next-line no-unsanitized/property -- hardcoded SVG action buttons; variant counts are numeric; disabled attribute is boolean
         actions.innerHTML = `
           <button class="chat-action-btn" data-chat-action="copy" title="Copy">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
@@ -470,25 +705,17 @@ function finalizeAssistantMessage(el, content, usage, tab) {
               <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
             </svg>
           </button>
-          <button class="chat-action-btn" data-chat-action="regenerate" title="Regenerate">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" stroke-width="2">
-              <path d="M1 4v6h6M23 20v-6h-6"/>
-              <path d="M20.5 9A9 9 0 005.6 5.6L1 10m22 4l-4.6 4.4A9 9 0 013.5 15"/>
-            </svg>
-          </button>
-          ${hasVariants ? `
-          <button class="chat-action-btn" data-chat-action="nav-variant" data-variant-dir="-1" title="Previous variant" ${variantIdx <= 0 ? 'disabled' : ''}>
+          <button class="chat-action-btn" data-chat-action="nav-variant" data-variant-dir="-1" title="Previous response" ${canGoLeft ? '' : 'disabled'}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M15 18l-6-6 6-6"/>
             </svg>
           </button>
-          <span class="chat-variant-badge">${variantIdx+1}/${msg._variants.length}</span>
-          <button class="chat-action-btn" data-chat-action="nav-variant" data-variant-dir="1" title="Next variant" ${variantIdx >= msg._variants.length-1 ? 'disabled' : ''}>
+          <span class="chat-variant-badge">${variantIdx+1}/${total}</span>
+          <button class="chat-action-btn" data-chat-action="nav-variant" data-variant-dir="1" title="${canGoRight && msgVariants.length <= 1 ? 'Regenerate' : 'Next response'}" ${canGoRight ? '' : 'disabled'}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M9 18l6-6-6-6"/>
             </svg>
-          </button>` : ''}
+          </button>
           <button class="chat-action-btn" data-chat-action="edit" title="Edit">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                  stroke="currentColor" stroke-width="2">
@@ -502,19 +729,45 @@ function finalizeAssistantMessage(el, content, usage, tab) {
               <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
             </svg>
           </button>`;
+    } else if (actions && !content && tab?.messages.at(-1)?.role === 'user') {
+        // Timeout or error on a fresh send — no content to show, offer retry and dismiss
+        actions.innerHTML = `
+          <button class="chat-action-btn" data-chat-action="retry-send" title="Retry">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/>
+            </svg>
+          </button>
+          <button class="chat-action-btn chat-action-btn-delete" data-chat-action="dismiss-error" title="Dismiss">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+            </svg>
+          </button>`;
+        const isMsgTimeout = el.querySelector('.chat-stopped') !== null;
+        if (isMsgTimeout) {
+            const t = showToastWithActions('Generation timed out', 'warning', 'Increase the timeout if your model needs more time to respond.', [{
+                id: 'adjust-timeout',
+                label: 'Adjust timeout',
+                handler: () => { openTimeoutSetting(); t?.remove(); },
+            }]);
+        }
     }
 
     // Populate footer metadata (single line)
     const footer = el.querySelector('.chat-msg-footer');
     if (footer) {
-        const modelName = window.lastLlamaMetrics?.model_name || '';
+        const modelName = lastLlamaMetrics?.model_name || '';
         const inp = usage ? (usage.prompt_tokens ?? 0) : 0;
         const out = usage ? (usage.completion_tokens ?? 0) : 0;
         const totalInput = tab ? (tab.totalInputTokens || 0) : inp;
         const totalOutput = tab ? (tab.totalOutputTokens || 0) : out;
         const total = totalInput + totalOutput;
-        const capacity = window.lastLlamaMetrics?.context_capacity_tokens || 0;
-        const ctxPct = capacity > 0 ? Math.round((total / capacity) * 100) : 0;
+        const capacity = lastLlamaMetrics?.context_capacity_tokens || 0;
+        // ctx% = (all generated output tokens in this chat + current request's input tokens) / capacity.
+        // llama.cpp KV cache means each request only sends incremental new tokens, so summing
+        // input_tokens alone overcounts. Summing all output tokens gives the true accumulated
+        // context content, and adding this request's input covers the new prompt tokens.
+        const ctxTokens = totalOutput + inp;
+        const ctxPct = capacity > 0 && ctxTokens > 0 ? Math.min(100, Math.round((ctxTokens / capacity) * 100)) : 0;
 
         if (tab) tab.lastCtxPct = ctxPct;
 
@@ -548,7 +801,7 @@ function copyMessageContent(btn) {
 function navigateVariant(btn, direction) {
     const msgEl = btn.closest('.chat-message');
     const msgIdx = parseInt(msgEl.dataset.msgIdx);
-    const tab = window.activeChatTab();
+    const tab = activeChatTab();
     if (!tab || isNaN(msgIdx)) return;
 
     const msg = tab.messages[msgIdx];
@@ -559,24 +812,26 @@ function navigateVariant(btn, direction) {
 
     // Going right on the last variant (or only variant) → regenerate
     if (direction === 1 && (variants.length <= 1 || curIdx >= variants.length - 1)) {
-        if (window.chatBusy) return;
+        if (chat.busy) return;
 
-        let newVariants = variants.length > 0 ? [...variants, msg.content] : [msg.content];
+        const newVariants = variants.length > 0 ? [...variants] : [msg.content];
 
-        // Find the last user message before this assistant message
-        const lastUser = [...tab.messages].reverse().find(m => m.role === 'user');
-        if (!lastUser) return;
-        const userMsgIdx = tab.messages.indexOf(lastUser);
+        // Find the user message immediately before this assistant message
+        let userMsgIdx = -1;
+        for (let i = msgIdx - 1; i >= 0; i--) {
+            if (tab.messages[i].role === 'user') { userMsgIdx = i; break; }
+        }
+        if (userMsgIdx === -1) return;
 
         // Truncate to include the user message, remove all subsequent
         tab.messages = tab.messages.slice(0, userMsgIdx + 1);
         tab.updated_at = Date.now();
 
         tab._pendingVariants = newVariants;
-        window.scheduleChatPersist();
+        scheduleChatPersist();
 
         // User message is already in tab.messages — use sendChatResend
-        window.sendChatResend(tab);
+        getTransport()?.sendChatResend(tab);
         return;
     }
 
@@ -587,17 +842,19 @@ function navigateVariant(btn, direction) {
     tab.updated_at = Date.now();
 
     renderChatMessages();
-    window.scheduleChatPersist();
+    scheduleChatPersist();
 }
 
 function regenerateFromMessage(btn) {
     const msgEl = btn.closest('.chat-message');
     const msgIdx = parseInt(msgEl.dataset.msgIdx);
-    const tab = window.activeChatTab();
+    const tab = activeChatTab();
     if (!tab || isNaN(msgIdx)) return;
 
     const msg = tab.messages[msgIdx];
     if (!msg || msg.role !== 'assistant') return;
+
+    const variants = msg._variants && msg._variants.length > 0 ? [...msg._variants] : [msg.content];
 
     // Find the last user message before this assistant message
     const lastUser = [...tab.messages].reverse().find(m => m.role === 'user');
@@ -607,35 +864,37 @@ function regenerateFromMessage(btn) {
     // Truncate to include the user message, remove all subsequent
     tab.messages = tab.messages.slice(0, userMsgIdx + 1);
     tab.updated_at = Date.now();
-    window.scheduleChatPersist();
+    tab._pendingVariants = variants;
+    scheduleChatPersist();
 
     // User message is already in tab.messages — use sendChatResend
-    window.sendChatResend(tab);
+    getTransport()?.sendChatResend(tab);
 }
 
 function editMessageContent(btn) {
     const msgEl = btn.closest('.chat-message');
     const body = msgEl.querySelector('.chat-msg-body');
     const msgIdx = parseInt(msgEl.dataset.msgIdx);
-    const tab = window.activeChatTab();
+    const tab = activeChatTab();
     if (!tab || isNaN(msgIdx)) return;
 
     const msg = tab.messages[msgIdx];
     if (!msg) return;
 
-    const isLastUserMsg = msg.role === 'user' &&
-        tab.messages.slice(msgIdx + 1).every(m => m.role !== 'user');
-
-    const resendBtn = isLastUserMsg
-        ? `<button class="chat-edit-btn chat-edit-btn-resend" data-chat-edit="resend">Resend</button>`
+    // Show "Resend from here" for ALL user messages, not just the last one
+    const resendBtn = msg.role === 'user'
+        ? `<button class="chat-edit-btn chat-edit-btn-resend" data-chat-edit="resend">Resend from here</button>`
         : '';
-    body.innerHTML = `<textarea class="chat-msg-edit-area" rows="6">${window.escapeHtml(msg.content)}</textarea>
+    // eslint-disable-next-line no-unsanitized/property -- msg.content wrapped in escapeHtml() for textarea value; resendBtn is a hardcoded button element
+    body.innerHTML = `<textarea class="chat-msg-edit-area" rows="6">${escapeHtml(msg.content)}</textarea>
       <div class="chat-msg-edit-actions">
         ${resendBtn}
         <button class="chat-edit-btn chat-edit-btn-save" data-chat-edit="save">Save</button>
         <button class="chat-edit-btn chat-edit-btn-cancel" data-chat-edit="cancel">Cancel</button>
       </div>`;
     const textarea = body.querySelector('.chat-msg-edit-area');
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, window.innerHeight * 0.6) + 'px';
     textarea.focus();
     textarea.selectionStart = textarea.value.length;
 }
@@ -645,7 +904,7 @@ function resendMessageEdit(btn) {
     const body = msgEl.querySelector('.chat-msg-body');
     const textarea = body.querySelector('.chat-msg-edit-area');
     const msgIdx = parseInt(msgEl.dataset.msgIdx);
-    const tab = window.activeChatTab();
+    const tab = activeChatTab();
     if (!tab || !textarea || isNaN(msgIdx)) return;
 
     const msg = tab.messages[msgIdx];
@@ -659,10 +918,10 @@ function resendMessageEdit(btn) {
 
     // Truncate to include the user message, remove all subsequent messages
     tab.messages = tab.messages.slice(0, msgIdx + 1);
-    window.scheduleChatPersist();
+    scheduleChatPersist();
 
     // Use sendChatResend — the user message is already in tab.messages
-    window.sendChatResend(tab);
+    getTransport()?.sendChatResend(tab);
 }
 
 function saveMessageEdit(btn) {
@@ -670,7 +929,7 @@ function saveMessageEdit(btn) {
     const body = msgEl.querySelector('.chat-msg-body');
     const textarea = body.querySelector('.chat-msg-edit-area');
     const msgIdx = parseInt(msgEl.dataset.msgIdx);
-    const tab = window.activeChatTab();
+    const tab = activeChatTab();
     if (!tab || !textarea || isNaN(msgIdx)) return;
 
     const msg = tab.messages[msgIdx];
@@ -680,7 +939,7 @@ function saveMessageEdit(btn) {
     if (newContent !== msg.content) {
         msg.content = newContent;
         tab.updated_at = Date.now();
-        window.scheduleChatPersist();
+        scheduleChatPersist();
     }
     renderChatMessages();
 }
@@ -693,20 +952,57 @@ function deleteMessage(btn) {
     if (!confirm('Delete this message?')) return;
     const msgEl = btn.closest('.chat-message');
     const msgIdx = parseInt(msgEl.dataset.msgIdx);
-    const tab = window.activeChatTab();
+    const tab = activeChatTab();
     if (!tab || isNaN(msgIdx) || msgIdx < 0 || msgIdx >= tab.messages.length) return;
 
     tab.messages.splice(msgIdx, 1);
     tab.updated_at = Date.now();
     renderChatMessages();
-    window.scheduleChatPersist();
+    scheduleChatPersist();
+}
+
+function openTimeoutSetting() {
+    const panel = document.getElementById('chat-params-panel');
+    if (!panel?.classList.contains('open')) {
+        document.getElementById('btn-model-params')?.click();
+    }
+    setTimeout(() => {
+        const el = document.getElementById('param-stream-timeout');
+        el?.scrollIntoView({ block: 'nearest' });
+        el?.focus();
+        el?.select();
+    }, 50);
+}
+
+function retrySend(btn) {
+    const msgEl = btn.closest('.chat-message');
+    const tab = activeChatTab();
+    if (!tab) return;
+    msgEl.remove();
+    getTransport()?.sendChatResend(tab);
+}
+
+function dismissError(btn) {
+    btn.closest('.chat-message').remove();
 }
 
 // ── Export / Import ───────────────────────────────────────────────────────────
 
-function exportChatTab() {
-    const tab = window.activeChatTab();
+export function exportChatTab(format = 'md') {
+    const tab = activeChatTab();
     if (!tab) return;
+
+    if (format === 'json') {
+        const data = JSON.stringify([normalizeTabForSave(tab)], null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${tab.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        return;
+    }
+
     const md = tab.messages
         .filter(m => m.role !== 'system')
         .map(m => `**${m.role === 'user' ? 'You' : 'Assistant'}**\n\n${m.content}`)
@@ -719,7 +1015,7 @@ function exportChatTab() {
     URL.revokeObjectURL(a.href);
 }
 
-function importChatTab() {
+export function importChatTab() {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json,.md';
@@ -736,10 +1032,10 @@ function importChatTab() {
                         newTab.id = crypto.randomUUID();
                         newTab.created_at = Date.now();
                         newTab.updated_at = Date.now();
-                        window.chatTabs.push(newTab);
-                        window.switchChatTab(newTab.id);
-                        window.scheduleChatPersist();
-                        window.showToast('Conversation imported', 'success');
+                        chat.tabs.push(newTab);
+                        switchChatTab(newTab.id);
+                        scheduleChatPersist();
+                        showToast('Conversation imported', 'success');
                     }
                 } else {
                     const lines = ev.target.result.split(/\n---\n/);
@@ -755,16 +1051,16 @@ function importChatTab() {
                         }
                     }
                     if (messages.length > 0) {
-                        const tab = window.activeChatTab();
+                        const tab = activeChatTab();
                         tab.messages = [...tab.messages, ...messages];
                         tab.updated_at = Date.now();
                         renderChatMessages();
-                        window.scheduleChatPersist();
-                        window.showToast(`Imported ${messages.length} messages`, 'success');
+                        scheduleChatPersist();
+                        showToast(`Imported ${messages.length} messages`, 'success');
                     }
                 }
             } catch (err) {
-                window.showToast('Import failed: ' + err.message, 'error');
+                showToast('Import failed: ' + err.message, 'error');
             }
         };
         reader.readAsText(file);
@@ -774,7 +1070,7 @@ function importChatTab() {
 
 // ── Tab rename ────────────────────────────────────────────────────────────────
 
-function startRenameTab(id) {
+export function startRenameTab(id) {
     const tabEl = document.querySelector(`.chat-tab[data-tab-id="${id}"] .chat-tab-name`);
     if (!tabEl) return;
     const orig = tabEl.textContent;
@@ -786,7 +1082,7 @@ function startRenameTab(id) {
     window.getSelection().addRange(range);
     const finish = () => {
         tabEl.contentEditable = 'false';
-        window.renameChatTab(id, tabEl.textContent || orig);
+        renameChatTab(id, tabEl.textContent || orig);
     };
     tabEl.addEventListener('blur', finish, { once: true });
     tabEl.addEventListener('keydown', e => {
@@ -797,26 +1093,106 @@ function startRenameTab(id) {
 
 // ── Badge ─────────────────────────────────────────────────────────────────────
 
-function updateChatTabBadge() {
+export function updateChatTabBadge() {
     ensureChatElements();
-    const tab = window.activeChatTab();
+    const tab = activeChatTab();
     const count = tab ? tab.messages.filter(m => m.role !== 'system').length : 0;
     if (sidebarBadgeChat) sidebarBadgeChat.textContent = count > 0 ? count : '';
+}
+
+// ── Persona Strip (Section 4B-C) ────────────────────────────────────────────────
+
+const PERSONA_RECENT_KEY = 'llama-persona-recent';
+
+function getPersonaIcon(personaName) {
+    const name = personaName.toLowerCase();
+    if (name.includes('assistant') || name.includes('default') || name.includes('helpful')) return '💬';
+    if (name.includes('creative') || name.includes('writing') || name.includes('story')) return '✨';
+    if (name.includes('code') || name.includes('dev') || name.includes('programming')) return '💻';
+    if (name.includes('technical') || name.includes('analysis') || name.includes('research')) return '🔬';
+    if (name.includes('business') || name.includes('professional')) return '💼';
+    if (name.includes('roleplay') || name.includes('rp')) return '🎭';
+    if (name.includes('educational') || name.includes('learning') || name.includes('teach')) return '📚';
+    if (name.includes('creative writing')) return '🎨';
+    return '🤖';
+}
+
+export function renderPersonaStrip() {
+    const strip = document.getElementById('chat-persona-strip');
+    if (!strip) return;
+    
+    // Remove existing chips to avoid duplicate event handlers
+    strip.innerHTML = '';
+    
+    const recent = JSON.parse(localStorage.getItem(PERSONA_RECENT_KEY) || '[]');
+    const recentLimited = recent.slice(0, 5);
+    const activeTemplateId = activeChatTab()?.active_template_id || '';
+    
+   recentLimited.forEach(persona => {
+        const btn = document.createElement('button');
+        btn.className = 'chat-persona-chip' + (persona.id === activeTemplateId ? ' active' : '');
+        btn.dataset.personaId = persona.id;
+        // ICONS: Hardcoded safe emoji strings only
+        const personaName = persona.name.toLowerCase();
+        let icon = '🤖';
+        if (personaName.includes('assistant') || personaName.includes('default')) icon = '💬';
+        else if (personaName.includes('creative') || personaName.includes('writing')) icon = '✨';
+        else if (personaName.includes('code') || personaName.includes('dev')) icon = '💻';
+        else if (personaName.includes('technical') || personaName.includes('analysis')) icon = '🔬';
+        else if (personaName.includes('business') || personaName.includes('professional')) icon = '💼';
+        else if (personaName.includes('roleplay')) icon = '🎭';
+        else if (personaName.includes('educational') || personaName.includes('learning')) icon = '📚';
+        btn.innerHTML = `<span class="chat-persona-chip-icon">${icon}</span><span class="chat-persona-chip-name">${escapeHtml(persona.name)}</span>`;
+        btn.addEventListener('click', () => applyPersona(persona.id));
+        strip.appendChild(btn);
+    });
+    
+    if (recent.length > 5) {
+        const moreBtn = document.createElement('button');
+        moreBtn.className = 'chat-persona-chip-more';
+        moreBtn.textContent = '⋯';
+        moreBtn.title = 'More personas...';
+        moreBtn.addEventListener('click', () => openTemplateManager());
+        strip.appendChild(moreBtn);
+    }
+}
+
+export async function applyPersona(templateId) {
+    const templates = await window.loadTemplates?.();
+    const template = templates?.find(t => t.id === templateId);
+    if (!template) return;
+    
+    const tab = activeChatTab();
+    if (!tab) return;
+    
+    tab.system_prompt = template.prompt;
+    tab.active_template_id = template.id;
+    
+    // Update recent usage
+    const recent = JSON.parse(localStorage.getItem(PERSONA_RECENT_KEY) || '[]');
+    const filtered = recent.filter(p => p.id !== templateId);
+    const newRecent = [{ id: template.id, name: template.name, timestamp: Date.now() }, ...filtered].slice(0, 5);
+    localStorage.setItem(PERSONA_RECENT_KEY, JSON.stringify(newRecent));
+    
+    // Refresh UI
+    renderPersonaStrip();
+    renderChatMessages();
+    scheduleChatPersist();
+    showToast(`Applied persona: ${template.name}`, 'info');
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initChatRender() {
-    window.startRenameTab = startRenameTab;
-
     // Call setup functions that bind DOM event listeners
     initChatScrollButton();
+    renderPersonaStrip();
 
     // Event delegation for chat tab close buttons
     document.getElementById('chat-tab-bar')?.addEventListener('click', (e) => {
         const closeBtn = e.target.closest('.chat-tab-close');
         if (closeBtn) {
-            window.closeChatTab(closeBtn.dataset.chatTabClose);
+            closeChatTab(closeBtn.dataset.chatTabClose);
         }
     });
 
@@ -824,7 +1200,7 @@ export function initChatRender() {
     document.getElementById('chat-tab-bar')?.addEventListener('dblclick', (e) => {
         const renameEl = e.target.closest('[data-chat-tab-rename]');
         if (renameEl) {
-            window.startRenameTab(renameEl.dataset.chatTabRename);
+            startRenameTab(renameEl.dataset.chatTabRename);
         }
     });
 
@@ -838,6 +1214,8 @@ export function initChatRender() {
         else if (action === 'nav-variant') navigateVariant(actionBtn, +actionBtn.dataset.variantDir);
         else if (action === 'edit') editMessageContent(actionBtn);
         else if (action === 'delete') deleteMessage(actionBtn);
+        else if (action === 'retry-send') retrySend(actionBtn);
+        else if (action === 'dismiss-error') dismissError(actionBtn);
     });
 
     // Event delegation for chat message edit buttons
@@ -854,7 +1232,7 @@ export function initChatRender() {
     document.getElementById('chat-messages')?.addEventListener('click', (e) => {
         const promptBtn = e.target.closest('[data-prompt-text]');
         if (promptBtn) {
-            window.sendSuggestedPrompt(promptBtn.dataset.promptText);
+            getTransport()?.sendSuggestedPrompt?.(promptBtn.dataset.promptText);
         }
     });
 
@@ -871,17 +1249,9 @@ export function initChatRender() {
         marker.dataset.expanded = isExpanded ? 'false' : 'true';
     });
 
-    // Register functions on window for cross-module calls
-    window.renderMd = renderMd;
-    window.renderMdStreaming = renderMdStreaming;
-    window.chatScroll = chatScroll;
-    window.incrementUnreadCount = incrementUnreadCount;
-    window.renderChatTabs = renderChatTabs;
-    window.updateTabBarOverflowMask = updateTabBarOverflowMask;
-    window.renderChatMessages = renderChatMessages;
-    window.appendAssistantPlaceholder = appendAssistantPlaceholder;
-    window.appendThinkingBlock = appendThinkingBlock;
-    window.finalizeAssistantMessage = finalizeAssistantMessage;
-    window.exportChatTab = exportChatTab;
-    window.updateChatTabBadge = updateChatTabBadge;
+    registerChatViewBindings({
+        renderChatTabs,
+        renderChatMessages,
+        updateChatTabBadge,
+    });
 }

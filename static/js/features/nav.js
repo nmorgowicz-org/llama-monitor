@@ -3,7 +3,23 @@
 
 function switchTab(name) {
     const page = document.getElementById('page-' + name);
-    if (!page) return;
+
+    // Handle modal tabs (no corresponding page div)
+    if (!page) {
+        document.querySelectorAll('.sidebar-btn').forEach(b => b.classList.remove('active'));
+        const sidebarButton = document.querySelector(`.sidebar-btn[data-tab="${name}"]`);
+        if (sidebarButton) sidebarButton.classList.add('active');
+
+        // Trigger modal open handlers
+        if (name === 'settings') {
+            window.openSettingsModal?.();
+        } else if (name === 'models') {
+            window.openModelsModal?.();
+        } else if (name === 'sessions') {
+            window.openSessionModal?.();
+        }
+        return;
+    }
 
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.sidebar-btn').forEach(b => b.classList.remove('active'));

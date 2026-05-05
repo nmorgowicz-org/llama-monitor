@@ -2,6 +2,40 @@
 
 Date: 2026-05-02
 
+Status Update: 2026-05-02 evening
+
+Phases 1-5 are now complete in code on `feature/window-architecture-context-metrics`.
+
+Phase 6 status:
+
+- Phase 6a is effectively complete
+- Phase 6b is now complete
+
+Phase 7 status:
+
+- Phase 7 is now complete
+- setup-view, updates, LHM, shortcuts, and nav all live in dedicated modules
+- setup-view and shortcuts no longer expose their module APIs through `window.*` for cross-module coordination
+
+Phase 8 status:
+
+- Phase 8 is now complete
+- app-owned cross-module `window.*` bridges have been removed from the feature modules
+- the remaining facade is limited to formatting compatibility in `compat/globals.js` plus normal browser globals
+
+The earlier review correctly found that the docs were ahead of the implementation. That gap has now been closed:
+
+- bootstrap no longer mirrors shared frontend state onto `window.*`
+- dashboard transport/render wiring now uses imported module contracts
+- chat internal coordination now uses imports and narrow registration hooks instead of `window.*` as the internal bus
+- setup-view coordination is imported directly by dashboard and attach/detach flows
+- remote-agent now consumes imported config/settings/app-state APIs instead of broad globals for those paths
+
+The remaining `window.*` usage is now primarily deliberate compatibility surface for:
+
+- browser-native APIs
+- formatting helpers kept in `compat/globals.js`
+
 ## Purpose
 
 This document is a supplemental follow-up to the `app.js` breakup and the 2026-05-01 performance optimization work.
@@ -14,9 +48,9 @@ This document defines what remains, why it matters, and how a future AI agent sh
 
 This plan builds on:
 
-- [`docs/20260430-appjs_refactor.md`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/20260430-appjs_refactor.md:1)
-- [`docs/20260430-phase9_window_facade_cleanup.md`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/20260430-phase9_window_facade_cleanup.md:1)
-- [`docs/20260501-appjs_performance_optimization.md`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/20260501-appjs_performance_optimization.md:1)
+- [`docs/architecture/20260430-appjs_refactor.md`](20260430-appjs_refactor.md)
+- [`docs/architecture/20260430-phase9_window_facade_cleanup.md`](20260430-phase9_window_facade_cleanup.md)
+- [`docs/architecture/20260501-appjs_performance_optimization.md`](20260501-appjs_performance_optimization.md)
 
 Those earlier phases got the frontend to a workable modular state. This document covers the next phase: turning the modular state into a cleaner architecture with explicit ownership and fewer global contracts.
 
@@ -24,10 +58,10 @@ Those earlier phases got the frontend to a workable modular state. This document
 
 The frontend no longer depends on one monolithic `static/app.js`, but it still behaves like a monolith in several important ways:
 
-1. `window.*` is still used as a broad shared state and function bus.
-2. `bootstrap.js` still acts as a central orchestrator for many feature relationships.
-3. Some feature modules still combine transport logic, state mutation, and render-side behavior.
-4. Several cross-feature contracts are implicit, stringly typed, and difficult to validate.
+1. some `window.*` shims still exist for compatibility and legacy HTML hooks
+2. `bootstrap.js` still acts as the top-level startup orchestrator, even though it no longer mirrors app state onto `window`
+3. some feature modules still combine transport logic, state mutation, and render-side behavior
+4. several cross-feature contracts are improved, but not all are yet owned by dedicated controller modules
 
 The result is that the code is better than before, but still not at the desired end-state.
 
@@ -41,22 +75,22 @@ The end-state should be:
 
 ## What Is Still Wrong
 
-## A. `window.*` is still acting as an application bus
+## A. `window.*` is no longer the primary application bus, but compatibility shims remain
 
-Examples in the current codebase:
+Examples that were fixed in the current codebase:
 
-- [`static/js/bootstrap.js`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/js/bootstrap.js:14) copies significant shared state onto `window`
-- [`static/js/features/dashboard-ws.js`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/js/features/dashboard-ws.js:1) reads and writes dashboard data via `window.prevValues`, `window.metricSeries`, and many render helpers on `window`
-- [`static/js/features/chat-render.js`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/js/features/chat-render.js:1) still calls many chat functions and state lookups through `window.*`
-- [`static/js/features/remote-agent.js`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/js/features/remote-agent.js:1) exposes shared functionality on `window` for cross-module use
+- [`static/js/bootstrap.js`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/js/bootstrap.js:1) no longer copies shared frontend state into `window`
+- [`static/js/features/dashboard-ws.js`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/js/features/dashboard-ws.js:1) now imports dashboard render helpers and app state directly
+- [`static/js/features/chat-state.js`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/js/features/chat-state.js:1), [`chat-render.js`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/js/features/chat-render.js:1), [`chat-transport.js`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/js/features/chat-transport.js:1), [`chat-params.js`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/js/features/chat-params.js:1), and [`chat-templates.js`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/js/features/chat-templates.js:1) now coordinate through imports and narrow registration hooks instead of using `window.*` as their internal bus
+- [`static/js/features/remote-agent.js`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/js/features/remote-agent.js:1) now imports settings/config/app-state dependencies directly for the main cross-feature paths
 
-Problems caused by this:
+Remaining problems:
 
-- dependencies are hidden
+- some dependencies are still hidden where inline HTML handlers or browser-global shims remain
 - import graphs do not reflect real contracts
 - refactors are riskier because many consumers are coupled by global names
 - static checks are weaker
-- lazy loading can fail in subtle ways when a global bridge is assumed to exist
+- lazy loading still relies on a few explicit `window.*` entrypoints such as file-browser and modal hooks
 
 ## B. Some feature slices still mix too many concerns
 

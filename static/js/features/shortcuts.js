@@ -1,6 +1,10 @@
 // ── Shortcuts ─────────────────────────────────────────────────────────────────
 // Global keyboard shortcuts: modal toggle, chat tab switching.
 
+import { chat } from '../core/app-state.js';
+import { switchChatTab } from './chat-state.js';
+import { updateTabBarOverflowMask } from './chat-render.js';
+
 // ── Keyboard Shortcuts Modal ──────────────────────────────────────────────────
 
 function openKeyboardShortcutsModal() {
@@ -34,27 +38,29 @@ function initChatKeyboardShortcuts() {
         if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9') {
             e.preventDefault();
             const idx = parseInt(e.key) - 1;
-            if (window.chatTabs[idx]) window.switchChatTab(window.chatTabs[idx].id);
+            if (chat.tabs[idx]) switchChatTab(chat.tabs[idx].id);
         }
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'ArrowRight') {
             e.preventDefault();
-            const idx = window.chatTabs.findIndex(t => t.id === window.activeChatTabId);
-            const next = window.chatTabs[(idx + 1) % window.chatTabs.length];
-            if (next) window.switchChatTab(next.id);
+            const idx = chat.tabs.findIndex(t => t.id === chat.activeTabId);
+            const next = chat.tabs[(idx + 1) % chat.tabs.length];
+            if (next) switchChatTab(next.id);
         }
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'ArrowLeft') {
             e.preventDefault();
-            const idx = window.chatTabs.findIndex(t => t.id === window.activeChatTabId);
-            const prev = window.chatTabs[(idx - 1 + window.chatTabs.length) % window.chatTabs.length];
-            if (prev) window.switchChatTab(prev.id);
+            const idx = chat.tabs.findIndex(t => t.id === chat.activeTabId);
+            const prev = chat.tabs[(idx - 1 + chat.tabs.length) % chat.tabs.length];
+            if (prev) switchChatTab(prev.id);
         }
     });
     window.addEventListener('resize', () => {
-        window.updateTabBarOverflowMask();
+        updateTabBarOverflowMask();
     });
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
+
+export { openKeyboardShortcutsModal };
 
 export function initShortcuts() {
     // Call setup functions that bind DOM event listeners
@@ -66,7 +72,4 @@ export function initShortcuts() {
         closeBtn.addEventListener('click', closeKeyboardShortcutsModal);
     }
 
-    // Keep on window for cross-module calls
-    window.openKeyboardShortcutsModal = openKeyboardShortcutsModal;
-    window.closeKeyboardShortcutsModal = closeKeyboardShortcutsModal;
 }
