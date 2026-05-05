@@ -505,6 +505,11 @@
   50% { transform: scale(1.08); }
 }
 
+@keyframes mesh-drift {
+  0%   { background-position: 0% 0%, 100% 0%, 50% 100%, 0% 0%, 0% 0%; }
+  100% { background-position: 8% 4%, 96% -4%, 46% 96%, 0% 0%, 0% 0%; }
+}
+
 .metric-footnote {
   color: var(--color-text-muted);
   font-family: var(--font-mono);
@@ -687,9 +692,13 @@
   overflow: visible;
   border-radius: 10px;
   background:
-    radial-gradient(circle at 84% 18%, rgba(255, 255, 255, 0.04), transparent 20%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)),
+    radial-gradient(ellipse at 20% 50%, rgba(99, 179, 237, 0.07) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, rgba(163, 190, 140, 0.05) 0%, transparent 40%),
+    radial-gradient(ellipse at 50% 80%, rgba(143, 188, 187, 0.04) 0%, transparent 45%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)),
     repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.02) 0 1px, transparent 1px 16px);
+  background-size: 100% 100%, 100% 100%, 100% 100%, 100% 100%, 100% 100%;
+  animation: mesh-drift 12s ease-in-out infinite alternate;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.04),
     inset 0 -1px 0 rgba(0, 0, 0, 0.14);
@@ -705,9 +714,7 @@
 }
 
 .sparkline-fill {
-  opacity: 0.22;
-  animation: spark-fill-drift 8s linear infinite;
-  filter: saturate(1.04) brightness(1);
+  fill: url(#spark-shimmer);
 }
 
 .sparkline-line.prompt {
@@ -716,7 +723,7 @@
 }
 
 .sparkline-fill.prompt {
-  fill: #88c0d1;
+  color: #88c0d1;
 }
 
 .sparkline-line.generation {
@@ -725,7 +732,7 @@
 }
 
 .sparkline-fill.generation {
-  fill: #a3be8c;
+  color: #a3be8c;
 }
 
 .sparkline-current-trace {
@@ -741,6 +748,7 @@
 .sparkline-current-halo {
   fill: currentColor;
   opacity: 0.22;
+  filter: url(#spark-pulse-glow);
   animation: spark-current-halo 2s ease-in-out infinite;
   transform-origin: center;
   transform-box: fill-box;
@@ -748,7 +756,7 @@
 
 .sparkline-current {
   fill: currentColor;
-  filter: drop-shadow(0 0 12px currentColor);
+  filter: url(#spark-rich-glow);
   animation: spark-current-dot 2s ease-in-out infinite;
   transform-origin: center;
   transform-box: fill-box;
@@ -1391,9 +1399,7 @@
 }
 
 .sparkline-fill.live-output {
-  fill: #8fbcbb;
-  opacity: 0.18;
-  animation: spark-fill-drift 7.4s linear infinite;
+  color: #8fbcbb;
 }
 
 .sparkline-peak.live-output {
@@ -1863,5 +1869,10 @@
   /* slot-sweep — transform (applied to ::after) */
   .slot-tile.busy::after {
     animation: none !important;
+  }
+
+  /* mesh-drift — background-position */
+  @keyframes mesh-drift {
+    0%, 100% { background-position: 0% 0%, 100% 0%, 50% 100%, 0% 0%, 0% 0%; }
   }
 }
