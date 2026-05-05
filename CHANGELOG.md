@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.14.0...v0.15.0) (2026-05-05)
+
+
+### Features
+
+* **agent:** auto-save remote agent token on install and start ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **chat:** add chat tab pinning, drag-to-reorder, persona/template menus, export/import flows, and edit/regenerate ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **chat:** add message timestamps with dates and SillyTavern integration link ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **chat:** add timeout adjustment actions and retry/dismiss recovery for chat failures ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **chat:** improve compaction with dynamic budgets, auto-compact post-response trigger, overflow guard, and structured summaries ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **ui:** add model metadata (param count, trained context) to decoding config card ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **ui:** add remote logs empty-state messaging and refresh README screenshots ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **ui:** redesign context window card with gauge/fleet views, chat-derived pressure, and most-recent-chat gauge ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **ui:** refresh dashboard cards, hardware metrics, sparkline indicators, navigation, and status treatments ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **ui:** replace agent dropdown menu with hover status tooltip ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+
+
+### Bug Fixes
+
+* **agent:** write remote agent tokens to user home dirs and preserve unrelated settings on setup finish ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **api:** rename chat tab fields to camelCase to prevent duplicate-field panic ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **chat:** fix nav arrows visibility, settings panel opening, textarea auto-size, and unread message badge ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **chat:** preserve persona state, fix resend/edit flows, timeout rollback, and full-width edit layouts ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **security:** implement DOMPurify XSS sanitization and escape HTML in unsafe render paths ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **ui:** correct context usage calculations, persist pressure, and improve derived-context fallbacks ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **ui:** format GPU SCLK values, fix clock card spacing, and tighten sidebar layout ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **ui:** resolve modal navigation, export menu bugs, and visual regressions after ES module refactor ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+* **ui:** restore endpoint status, active button states, scroll button position, and hide empty sidebar badge ([790d673](https://github.com/nmorgowicz-org/llama-monitor/commit/790d6739f6f2b28836cbacda948ce2e72e93a3e2))
+
 ## [0.14.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.13.0...v0.14.0) (2026-05-02)
 
 
