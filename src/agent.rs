@@ -701,20 +701,22 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                                             *state.remote_agent_version.lock().unwrap() =
                                                 Some(ver.to_string());
                                             // Check if update is available
-                                            match latest_release_info().await {
-                                                Ok(latest) => {
-                                                    let needs_update = ver != latest.tag_name;
-                                                    *state
-                                                        .remote_agent_update_available
-                                                        .lock()
-                                                        .unwrap() = needs_update;
-                                                    if needs_update {
-                                                        eprintln!(
-                                                            "[agent] Update available: running {}, latest {}",
-                                                            ver, latest.tag_name
-                                                        );
-                                                    }
-                                                }
+                                                   match latest_release_info().await {
+                                                        Ok(latest) => {
+                                                            let needs_update = ver != latest.tag_name;
+                                                            let mut update_avail = state
+                                                                .remote_agent_update_available
+                                                                .lock()
+                                                                .unwrap();
+                                                            let was_available = *update_avail;
+                                                            *update_avail = needs_update;
+                                                            if needs_update && !was_available {
+                                                                eprintln!(
+                                                                    "[agent] Update available: running {}, latest {}",
+                                                                    ver, latest.tag_name
+                                                                );
+                                                            }
+                                                        }
                                                 Err(e) => {
                                                     eprintln!(
                                                         "[agent] Could not check latest release: {e}"
