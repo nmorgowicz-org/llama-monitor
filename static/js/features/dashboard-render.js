@@ -586,6 +586,16 @@ function getMetricTone(kind) {
     }
 }
 
+function getClockTone(kind) {
+    switch (kind) {
+    case 'memory':
+        return { start: '#60a5fa', end: '#7dd3fc', line: '#60a5fa' };
+    case 'core':
+    default:
+        return { start: '#5eead4', end: '#99f6e4', line: '#8fbcbb' };
+    }
+}
+
 function getTempSeverityColor(temp) {
     if (temp >= 90) return '#f43f5e';
     if (temp >= 75) return '#f59e0b';
@@ -708,8 +718,8 @@ function renderHwDualRing(container, sclk, mclk) {
     if (!container) return;
     var sclkBand = computeClockBand(gpuHistory.sclk, sclk);
     var mclkBand = computeClockBand(gpuHistory.mclk, mclk);
-    var sclkColor = getMetricTone('clock').line;
-    var mclkColor = '#60a5fa';
+    var sclkColor = getClockTone('core').line;
+    var mclkColor = getClockTone('memory').line;
     var sclkPulse = (3.4 - Math.min(sclkBand.pct, 100) * 0.014).toFixed(2) + 's';
     var mclkPulse = (3.8 - Math.min(mclkBand.pct, 100) * 0.016).toFixed(2) + 's';
     setVizContent(container,
@@ -771,7 +781,7 @@ function renderHwClockRing(container, clock) {
     if (!container) return;
     var band = computeClockBand(sysHistory.cpuClock, clock);
     var display = formatClockReadout(clock);
-    var color = getMetricTone('clock').line;
+    var color = getClockTone('core').line;
     var pulse = (3.6 - Math.min(band.pct, 100) * 0.016).toFixed(2) + 's';
     var footerSpark = sysHistory.cpuClock.length > 1
         ? '<div class="hw-clock-footer sparkline-only"><div class="hw-clock-footer-spark">' + buildSparklineSVG(sysHistory.cpuClock, 'hw-clock-footer-spark', color) + '</div></div>'
