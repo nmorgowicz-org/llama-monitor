@@ -34,7 +34,10 @@ fn main() {
 }
 
 fn mark_rerun(dir: &str) {
-    for e in fs::read_dir(dir).unwrap_or_else(|_| panic!("Failed to read: {}", dir)).flatten() {
+    for e in fs::read_dir(dir)
+        .unwrap_or_else(|_| panic!("Failed to read: {}", dir))
+        .flatten()
+    {
         let path = e.path();
         if path.is_dir() {
             mark_rerun(path.to_string_lossy().as_ref());
@@ -45,7 +48,8 @@ fn mark_rerun(dir: &str) {
 }
 
 fn collect_files(base: &Path, prefix: &str, files: &mut Vec<(String, String, String)>) {
-    let entries = fs::read_dir(prefix).unwrap_or_else(|_| panic!("Failed to read directory: {}", prefix));
+    let entries =
+        fs::read_dir(prefix).unwrap_or_else(|_| panic!("Failed to read directory: {}", prefix));
     for e in entries.flatten() {
         let path = e.path();
         if path.is_file() {
