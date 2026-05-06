@@ -2,7 +2,7 @@
 // Model parameter panel, system prompt panel, style/font/enter-to-send controls,
 // and compaction settings.
 
-import { chat, lastLlamaMetrics } from '../core/app-state.js';
+import { chat, lastLlamaMetrics, monitorState, wsData } from '../core/app-state.js';
 import {
     activeChatTab,
     registerChatViewBindings,
@@ -25,6 +25,8 @@ import { showToast, showToastWithActions } from './toast.js';
 let chatFont = parseInt(localStorage.getItem('llama-monitor-chat-font') || '100');
 let enterToSend = localStorage.getItem('llama-monitor-enter-to-send') !== 'false';
 let paramToastTimer = null;
+let chatTelemetryPopoverOpen = false;
+let chatTelemetryPinned = localStorage.getItem('llama-monitor-chat-telemetry-pinned') === 'true';
 
 // ── Model params panel ────────────────────────────────────────────────────────
 
@@ -416,6 +418,148 @@ function updateCtxPressureBar(pct) {
     }
 }
 
+function setChatTelemetryPopover(open) {
+    chatTelemetryPopoverOpen = open;
+    const popover = document.getElementById('chat-telemetry-popover');
+    const btn = document.getElementById('chat-telemetry-btn');
+    popover?.classList.toggle('hidden', !open);
+    btn?.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function applyChatTelemetryMode() {
+    const rail = document.getElementById('chat-telemetry-rail');
+    const inlineHost = document.getElementById('chat-telemetry-inline-host');
+    const popoverBody = document.getElementById('chat-telemetry-popover-body');
+    const pinBtn = document.getElementById('chat-telemetry-pin-btn');
+    const pinLabel = document.getElementById('chat-telemetry-pin-label');
+    const pinHint = document.getElementById('chat-telemetry-pin-hint');
+    const note = document.getElementById('chat-telemetry-popover-note');
+
+    if (rail && inlineHost && popoverBody) {
+        rail.classList.toggle('chat-telemetry-rail-floating', !chatTelemetryPinned);
+        if (chatTelemetryPinned) {
+            inlineHost.appendChild(rail);
+        } else {
+            popoverBody.insertBefore(rail, note || null);
+        }
+    }
+
+    inlineHost?.classList.toggle('hidden', !chatTelemetryPinned);
+    note?.classList.toggle('hidden', !chatTelemetryPinned);
+
+    if (pinBtn) pinBtn.setAttribute('aria-pressed', chatTelemetryPinned ? 'true' : 'false');
+    if (pinLabel) pinLabel.textContent = chatTelemetryPinned ? 'Pinned Inline' : 'Popup Mode';
+    if (pinHint) pinHint.textContent = chatTelemetryPinned ? 'Collapse back to popup' : 'Pin below toolbar';
+}
+
+function setChatTelemetryPinned(nextPinned) {
+    chatTelemetryPinned = !!nextPinned;
+    localStorage.setItem('llama-monitor-chat-telemetry-pinned', chatTelemetryPinned ? 'true' : 'false');
+    applyChatTelemetryMode();
+    if (chatTelemetryPinned) {
+        setChatTelemetryPopover(false);
+    } else {
+        refreshChatTelemetry();
+    }
+}
+
+export function refreshChatTelemetry() {
+    const hasActiveEndpoint = !!wsData?.active_session_id;
+    const l = hasActiveEndpoint ? lastLlamaMetrics : null;
+    const tab = activeChatTab();
+    const stateEl = document.getElementById('chat-telemetry-state');
+    const promptStage = document.getElementById('chat-telemetry-stage-prompt');
+    const outputStage = document.getElementById('chat-telemetry-stage-output');
+    const promptValue = document.getElementById('chat-telemetry-prompt-value');
+    const genValue = document.getElementById('chat-telemetry-gen-value');
+    const promptBar = document.getElementById('chat-telemetry-prompt-bar');
+    const genBar = document.getElementById('chat-telemetry-gen-bar');
+    const contextValue = document.getElementById('chat-telemetry-context-value');
+    const contextRing = document.getElementById('chat-telemetry-context-ring');
+    const liveRate = document.getElementById('chat-telemetry-live-rate');
+    const telemetryBtn = document.getElementById('chat-telemetry-btn');
+
+    const promptRate = hasActiveEndpoint ? (l?.prompt_tokens_per_sec || 0) : 0;
+    const genRate = l?.generation_tokens_per_sec || 0;
+    const promptDisplayRate = promptRate > 0 ? promptRate : (l?.last_prompt_tokens_per_sec || 0);
+    const genDisplayRate = genRate > 0 ? genRate : (l?.last_generation_tokens_per_sec || 0);
+    const generationAvailable = !!l?.slot_generation_available;
+    const generationActive = !!l?.slot_generation_active || (l?.slots_processing || 0) > 0;
+    const generated = l?.slot_generation_tokens || 0;
+    let label = 'idle';
+    let stateClass = 'idle';
+    if (!hasActiveEndpoint) {
+        label = 'attach';
+    } else if (chat.compactionInProgress) {
+        label = 'compact';
+        stateClass = 'warning';
+    } else if (promptRate > 0 && genRate <= 0) {
+        label = 'prompting';
+        stateClass = 'live';
+    } else if (generationActive || genRate > 0) {
+        label = 'generating';
+        stateClass = 'live';
+    } else if (chat.busy) {
+        label = 'waiting';
+        stateClass = 'warning';
+    } else if (promptDisplayRate > 0 || genDisplayRate > 0) {
+        label = 'retained';
+        stateClass = 'idle';
+    }
+
+    if (stateEl) {
+        stateEl.textContent = label;
+        stateEl.className = 'metric-live-chip ' + stateClass;
+    }
+    if (telemetryBtn) {
+        telemetryBtn.classList.remove('idle', 'live');
+        telemetryBtn.classList.add(stateClass === 'live' ? 'live' : 'idle');
+    }
+
+    const useThroughputFallback = !generationAvailable;
+    const isPromptPhase = useThroughputFallback
+        ? !!(l?.prompt_throughput_active && !l?.generation_throughput_active)
+        : generationActive && generated <= 1;
+    const isOutputPhase = useThroughputFallback
+        ? !!l?.generation_throughput_active
+        : generationActive && generated > 1;
+
+    promptStage?.classList.toggle('active', isPromptPhase);
+    promptStage?.classList.toggle('idle', !isPromptPhase && !generationActive);
+    outputStage?.classList.toggle('active', isOutputPhase);
+    outputStage?.classList.toggle('idle', !isOutputPhase && !generationActive);
+
+    if (promptValue) promptValue.textContent = promptDisplayRate > 0 ? promptDisplayRate.toFixed(1) : '\u2014';
+    if (genValue) genValue.textContent = genDisplayRate > 0 ? genDisplayRate.toFixed(1) : '\u2014';
+    if (liveRate) {
+        liveRate.textContent = genDisplayRate > 0 ? genDisplayRate.toFixed(1) + ' t/s' : (generationActive ? 'warming' : '\u2014');
+    }
+    if (promptBar) {
+        const promptPct = monitorState.speedMax.prompt > 0 && promptDisplayRate > 0
+            ? Math.max(4, (promptDisplayRate / monitorState.speedMax.prompt) * 100)
+            : 0;
+        promptBar.style.width = promptPct + '%';
+    }
+    if (genBar) {
+        const genPct = monitorState.speedMax.generation > 0 && genDisplayRate > 0
+            ? Math.max(4, (genDisplayRate / monitorState.speedMax.generation) * 100)
+            : 0;
+        genBar.style.width = genPct + '%';
+    }
+
+    const capacity = hasActiveEndpoint ? (l?.context_capacity_tokens || l?.kv_cache_max || 0) : 0;
+    const ctxPct = tab && capacity ? estimateCtxPct(tab, capacity) : 0;
+    updateCtxPressureBar(ctxPct || 0);
+    if (tab && hasActiveEndpoint) tab.lastCtxPct = ctxPct || 0;
+    if (contextValue) contextValue.textContent = ctxPct > 0 ? Math.round(ctxPct) + '%' : '\u2014';
+    if (contextRing) {
+        const pct = Math.max(0, Math.min(100, Math.round(ctxPct || 0)));
+        const color = pct >= 90 ? '#f87171' : pct >= 75 ? '#fbbf24' : '#5eead4';
+        contextRing.style.setProperty('--progress', String(pct));
+        contextRing.style.setProperty('--chat-telemetry-context-color', color);
+    }
+}
+
 function syncCompactSettingsUI(tab) {
     const autoToggle = document.getElementById('chat-auto-compact');
     const thresholdSlider = document.getElementById('chat-compact-threshold');
@@ -591,6 +735,25 @@ export function initChatParams() {
     initChatStyle();
     initChatInputHandler();
     initChatResizeHandle();
+    applyChatTelemetryMode();
+    setChatTelemetryPopover(false);
+    document.getElementById('chat-telemetry-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setChatTelemetryPopover(!chatTelemetryPopoverOpen);
+        refreshChatTelemetry();
+    });
+    document.getElementById('chat-telemetry-pin-btn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setChatTelemetryPinned(!chatTelemetryPinned);
+    });
+    document.addEventListener('click', e => {
+        if (!e.target.closest('#chat-telemetry-btn') && !e.target.closest('#chat-telemetry-popover')) {
+            setChatTelemetryPopover(false);
+        }
+    });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') setChatTelemetryPopover(false);
+    });
 
     // Bind chat header buttons
     document.getElementById('btn-system-prompt')?.addEventListener('click', (e) => {
@@ -724,9 +887,11 @@ export function initChatParams() {
         syncCompactSettingsUI,
         syncMessageLimitInput,
         updateCtxPressureBar,
+        refreshChatTelemetry,
         updateParamsDirtyIndicator,
         checkAutoCompact,
     });
+    refreshChatTelemetry();
 }
 
 // ── Chat Input Resize Handle ─────────────────────────────────────────────────

@@ -44,6 +44,15 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
+.nav-btn,
+.nav-user-btn {
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 0.84rem;
+  font-weight: 750;
+}
+
 .btn-agent-fix {
   display: inline-flex;
   align-items: center;

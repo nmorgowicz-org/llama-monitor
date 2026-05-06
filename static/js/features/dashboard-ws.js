@@ -51,7 +51,9 @@ import {
     renderSystemCard,
 } from './dashboard-render.js';
 import { animateNumber } from './animate.js';
+import { refreshChatTelemetry } from './chat-params.js';
 import { updateContextCard, updateContextCardFromChatTabs } from './context-card.js';
+import { refreshTopCockpit } from './nav.js';
 import { activeChatTab } from './chat-state.js';
 import { setRemoteAgentStatus } from './remote-agent.js';
 import { hideConnectingState, switchView } from './setup-view.js';
@@ -173,6 +175,8 @@ function updateDashboard(d) {
 
     // Inference metrics
     updateInferenceMetrics(d);
+    refreshChatTelemetry();
+    refreshTopCockpit();
 
     // GPU card
     updateGpuCard(d);

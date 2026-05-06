@@ -105,14 +105,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 5px 14px;
-  margin-left: 10px;
+  min-height: 24px;
+  padding: 3px 9px;
+  margin-left: 6px;
   border: 1px solid rgba(191, 97, 106, 0.4);
   border-radius: 999px;
   background: rgba(191, 97, 106, 0.15);
   color: #bf616a;
-  font-size: var(--text-xs);
-  font-weight: 700;
+  font-size: 0.68rem;
+  font-weight: 750;
   cursor: pointer;
   transition: all 150ms ease;
 }

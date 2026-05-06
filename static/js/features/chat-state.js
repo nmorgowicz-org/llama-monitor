@@ -2,6 +2,7 @@
 // Tab collection, active tab, busy flags, persistence scheduling, tab CRUD.
 
 import { chat } from '../core/app-state.js';
+import { refreshTopCockpit } from './nav.js';
 import { showToast, showToastWithActions } from './toast.js';
 
 const CHAT_TABS_PERSIST_DEBOUNCE_MS = 500;
@@ -16,6 +17,7 @@ const chatViewBindings = {
     syncMessageLimitInput: null,
     syncCompactSettingsUI: null,
     updateCtxPressureBar: null,
+    refreshChatTelemetry: null,
     updateChatTabBadge: null,
     checkAutoCompact: null,
 };
@@ -102,6 +104,8 @@ export async function initChatTabs() {
     chatViewBindings.updateParamsDirtyIndicator?.();
     chatViewBindings.syncMessageLimitInput?.();
     chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
+    chatViewBindings.refreshChatTelemetry?.();
+    refreshTopCockpit();
 
    // Trigger context card update - mark that chat tabs loaded so dashboard can poll
      if (typeof window.onChatTabsLoaded === 'function') {
@@ -172,6 +176,8 @@ export function restoreTabFromTrash(id) {
     chatViewBindings.updateExplicitToggleUI?.();
     chatViewBindings.syncMessageLimitInput?.();
     chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
+    chatViewBindings.refreshChatTelemetry?.();
+    refreshTopCockpit();
     scheduleChatPersist();
 }
 
@@ -186,6 +192,8 @@ export function switchChatTab(id) {
     chatViewBindings.syncMessageLimitInput?.();
     chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
     chatViewBindings.updateCtxPressureBar?.(0);
+    chatViewBindings.refreshChatTelemetry?.();
+    refreshTopCockpit();
 }
 
 export function renameChatTab(id, newName) {
@@ -215,6 +223,8 @@ export function clearChat() {
     tab.updated_at = Date.now();
     chatViewBindings.renderChatMessages?.();
     chatViewBindings.updateChatTabBadge?.();
+    chatViewBindings.refreshChatTelemetry?.();
+    refreshTopCockpit();
     scheduleChatPersist();
 }
 
@@ -328,6 +338,8 @@ export function setChatBusyUI(busy) {
 
     const input = document.getElementById('chat-input');
     if (input) input.disabled = busy;
+    chatViewBindings.refreshChatTelemetry?.();
+    refreshTopCockpit();
 }
 
 // ── Input ──────────────────────────────────────────────────────────────────────
