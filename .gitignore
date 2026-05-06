@@ -46,3 +46,6 @@ sensor_bridge/publish/
 
 # Test scripts
 test-*.ps1
+
+# Local troubleshooting scripts
+scripts/*.sh
