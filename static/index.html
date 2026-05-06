@@ -31,6 +31,30 @@
     <script>const APP_VERSION = '{{ VERSION }}'; const APP_PLATFORM = '{{ PLATFORM }}';</script>
 </head>
 <body>
+      <!-- Shared SVG filters for sparkline visualizations -->
+      <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
+        <defs>
+          <!-- Subtle glow filter — single small blur for current position dot -->
+          <filter id="spark-rich-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="1" result="blur"/>
+            <feMerge>
+              <feMergeNode in="blur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+
+          <!-- Animated pulse glow — breathing glow via animated stdDeviation -->
+          <filter id="spark-pulse-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="1.5" result="blur">
+              <animate attributeName="stdDeviation" values="1;2;1" dur="2.5s" repeatCount="indefinite"/>
+            </feGaussianBlur>
+            <feMerge>
+              <feMergeNode in="blur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+      </svg>
       <div class="endpoint-health-strip" aria-label="Active endpoint status.">
         <div class="endpoint-health-strip-setup" id="endpoint-strip-setup">
             <span class="connecting-dots" id="connecting-dots" style="display:none;">Connecting</span>
@@ -78,10 +102,13 @@
             <h1 class="nav-title">Llama Monitor</h1>
         </div>
         <div class="nav-center">
-            <div class="nav-search">
-                <input id="search-input" type="text" placeholder="Search sessions, presets, settings...">
-                <button class="nav-search-btn">🔍</button>
-            </div>
+            <button class="nav-cockpit" id="nav-cockpit" type="button" title="Global telemetry — click to open Server">
+                <span class="metric-live-chip idle nav-cockpit-state" id="nav-cockpit-state">idle</span>
+                <span class="nav-cockpit-chip nav-cockpit-throughput" id="nav-cockpit-throughput" title="Prompt and generation throughput">P &mdash; · G &mdash;</span>
+                <span class="nav-cockpit-chip nav-cockpit-context" id="nav-cockpit-context" title="Highest chat context pressure">Ctx &mdash;</span>
+                <span class="nav-cockpit-chip nav-cockpit-gpu" id="nav-cockpit-gpu" title="Hottest GPU temperature">GPU &mdash;</span>
+                <svg class="metric-sparkline nav-cockpit-spark" id="nav-cockpit-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+            </button>
         </div>
         <div class="nav-right">
             <div id="session-controls">
@@ -95,8 +122,8 @@
                 <span id="update-pill-text"></span>
             </button>
             <div class="nav-user" id="user-menu">
-                <button class="nav-user-btn" id="nav-user-btn">👤 User</button>
-                <div class="nav-user-menu" id="nav-user-menu-items">
+                <button class="nav-user-btn" id="nav-user-btn" type="button" aria-expanded="false" aria-controls="nav-user-menu-items">👤 User</button>
+                <div class="nav-user-menu" id="nav-user-menu-items" role="menu">
                     <a href="#" class="nav-user-menu-item" id="user-menu-profile">Profile</a>
                     <a href="#" class="nav-user-menu-item" id="user-menu-preferences">Preferences</a>
                     <a href="#" class="nav-user-menu-item" id="user-menu-theme">Toggle Theme</a>
@@ -595,6 +622,35 @@
             <!-- Chat header -->
             <div class="chat-header" id="chat-header">
                 <div class="chat-header-left">
+                    <div class="chat-telemetry-menu">
+                        <button class="chat-telemetry-trigger" id="chat-telemetry-btn" type="button" aria-expanded="false" aria-controls="chat-telemetry-popover" title="Show chat telemetry">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M4 16l4-4 3 3 5-6 4 3"/>
+                            </svg>
+                        </button>
+                        <div class="chat-telemetry-popover hidden" id="chat-telemetry-popover" role="dialog" aria-label="Chat telemetry">
+                            <div class="chat-telemetry-popover-topbar">
+                                <div class="chat-telemetry-popover-title">
+                                    <span class="chat-telemetry-popover-title-dot" aria-hidden="true"></span>
+                                    <span>Chat Telemetry</span>
+                                </div>
+                                <button class="chat-telemetry-pin-toggle" id="chat-telemetry-pin-btn" type="button" aria-pressed="false" title="Pin metrics below the chat toolbar">
+                                    <span class="chat-telemetry-pin-track" aria-hidden="true">
+                                        <span class="chat-telemetry-pin-thumb"></span>
+                                    </span>
+                                    <span class="chat-telemetry-pin-copy">
+                                        <strong id="chat-telemetry-pin-label">Popup Mode</strong>
+                                        <span id="chat-telemetry-pin-hint">Pin below toolbar</span>
+                                    </span>
+                                </button>
+                            </div>
+                            <div class="chat-telemetry-popover-body" id="chat-telemetry-popover-body">
+                                <div class="chat-telemetry-popover-note hidden" id="chat-telemetry-popover-note">
+                                    Metrics are pinned below the toolbar. Use the toggle to return to popup mode.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     <button class="chat-header-btn" id="btn-system-prompt" title="Change assistant behavior">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
@@ -677,6 +733,45 @@
                         </div>
                         <div class="chat-persona-menu-list" id="chat-persona-menu-list">
                             <div class="chat-persona-menu-loading">Loading personas...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-telemetry-inline-host hidden" id="chat-telemetry-inline-host">
+                <div class="chat-telemetry-rail" id="chat-telemetry-rail">
+                    <div class="chat-telemetry-summary">
+                        <div class="metric-live-chip idle" id="chat-telemetry-state">idle</div>
+                        <div class="generation-stage chat-telemetry-stage" id="chat-telemetry-stage" title="Prompt ingest and output generation state.">
+                            <span class="stage-segment" id="chat-telemetry-stage-prompt">Prompt</span>
+                            <span class="stage-segment" id="chat-telemetry-stage-output">Output</span>
+                        </div>
+                        <div class="chat-telemetry-throughput chat-telemetry-throughput-inline" aria-label="Live throughput">
+                            <div class="chat-telemetry-metric">
+                                <span class="chat-telemetry-metric-label">P</span>
+                                <span class="chat-telemetry-metric-value" id="chat-telemetry-prompt-value">&mdash;</span>
+                                <div class="chat-telemetry-mini-bar">
+                                    <div class="chat-telemetry-mini-fill prompt-bar" id="chat-telemetry-prompt-bar"></div>
+                                </div>
+                            </div>
+                            <div class="chat-telemetry-metric">
+                                <span class="chat-telemetry-metric-label">G</span>
+                                <span class="chat-telemetry-metric-value" id="chat-telemetry-gen-value">&mdash;</span>
+                                <div class="chat-telemetry-mini-bar">
+                                    <div class="chat-telemetry-mini-fill gen-bar" id="chat-telemetry-gen-bar"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chat-telemetry-live-chip" id="chat-telemetry-live-chip" title="Live generation rate">
+                            <span class="chat-telemetry-live-label">Live</span>
+                            <strong id="chat-telemetry-live-rate">&mdash;</strong>
+                        </div>
+                        <div class="chat-telemetry-context" id="chat-telemetry-context" title="Current tab context pressure">
+                            <div class="chat-telemetry-context-ring" id="chat-telemetry-context-ring" style="--progress:0;"></div>
+                            <div class="chat-telemetry-context-copy">
+                                <span class="chat-telemetry-context-label">Ctx</span>
+                                <strong id="chat-telemetry-context-value">&mdash;</strong>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1726,6 +1821,10 @@
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="19" cy="13.5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><path d="M13 9.5c2 1 4 3 4 6"/><path d="M9 9.5C7 10.5 5 12.5 5 15.5"/></svg>
                     Appearance
                 </button>
+                <button class="settings-tab" data-tab="performance">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    Performance
+                </button>
                 <button class="settings-tab" data-tab="advanced">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4"/><path d="M12 19v4"/><path d="M4.22 4.22l2.83 2.83"/><path d="M16.95 16.95l2.83 2.83"/><path d="M1 12h4"/><path d="M19 12h4"/><path d="M4.22 19.78l2.83-2.83"/><path d="M16.95 7.05l2.83-2.83"/></svg>
                     Advanced
@@ -1814,6 +1913,26 @@
                             <label class="chk"><input type="checkbox" id="settings-widget-memory" checked> Memory</label>
                         </div>
                     </label>
+                </div>
+                <div class="settings-pane" id="settings-performance">
+                    <h3>Performance &amp; Connection</h3>
+                    <p class="settings-help">
+                        Control how frequently the dashboard refreshes metrics. Lower intervals give smoother real-time updates but use more bandwidth and battery. On slow or metered connections, a higher interval reduces network usage.
+                    </p>
+                    <label class="modal-field">
+                        Dashboard Refresh Rate
+                        <select id="settings-ws-push-interval">
+                            <option value="auto">Auto — Adjusts to your connection speed</option>
+                            <option value="500">Normal (500ms) — Smooth real-time updates</option>
+                            <option value="1000">Balanced (1s) — Good for most connections</option>
+                            <option value="2000">Battery Saver (2s) — 75% less bandwidth</option>
+                            <option value="5000">Slow Connection (5s) — Minimum updates</option>
+                        </select>
+                    </label>
+                    <div id="network-status-indicator" class="network-status-indicator" style="display:none;">
+                        <span class="network-status-icon" id="network-status-icon"></span>
+                        <span class="network-status-text" id="network-status-text"></span>
+                    </div>
                 </div>
                 <div class="settings-pane" id="settings-advanced">
                     <h3>Advanced Settings</h3>

@@ -10,15 +10,27 @@ import { openKeyboardShortcutsModal } from './shortcuts.js';
 function toggleUserMenu(event) {
     event.preventDefault();
     event.stopPropagation();
-    document.querySelector('.nav-user-menu')?.classList.toggle('open');
+    const menu = document.getElementById('nav-user-menu-items');
+    const btn = document.getElementById('nav-user-btn');
+    if (!menu || !btn) return;
+    const nextOpen = !menu.classList.contains('open');
+    menu.classList.toggle('open', nextOpen);
+    btn.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
 }
 
 function closeUserMenu() {
-    document.querySelector('.nav-user-menu')?.classList.remove('open');
+    document.getElementById('nav-user-menu-items')?.classList.remove('open');
+    document.getElementById('nav-user-btn')?.setAttribute('aria-expanded', 'false');
 }
 
 document.addEventListener('click', event => {
     if (!event.target.closest('.nav-user')) {
+        closeUserMenu();
+    }
+});
+
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
         closeUserMenu();
     }
 });

@@ -7,13 +7,22 @@
  *           .agent-setup-status, .agent-setup-timeline,
  *           @keyframes agentAlertSlideIn
  */
-/* Remote Agent Setup Modal */
+/* Remote Agent Setup Modal — modern widget-card styling */
 .remote-agent-setup-modal {
   width: min(580px, 85vw);
   max-height: 85vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.03), transparent 22%),
+    linear-gradient(145deg, rgba(32, 40, 50, 0.97), rgba(22, 28, 36, 0.99));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.5),
+    0 8px 24px rgba(0, 0, 0, 0.36),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(16px);
 }
 
 .remote-agent-setup-modal .modal-header {
@@ -39,27 +48,56 @@
   padding: 20px;
 }
 
-/* Status Alert */
+/* Status Alert — modern widget-card styling */
 .agent-setup-status-alert {
   display: flex;
   gap: 12px;
-  padding: 14px 16px;
+  padding: 16px 18px;
   margin-bottom: 16px;
   border-radius: var(--radius-card);
   border: 1px solid rgba(191, 97, 106, 0.3);
-  background: linear-gradient(135deg, rgba(191, 97, 106, 0.08), rgba(214, 120, 120, 0.04));
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.02), transparent 22%),
+    linear-gradient(135deg, rgba(191, 97, 106, 0.1), rgba(214, 120, 120, 0.05));
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
   backdrop-filter: blur(8px);
   animation: agentAlertSlideIn 0.3s ease-out;
+  position: relative;
+  overflow: hidden;
+}
+
+.agent-setup-status-alert::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(191, 97, 106, 0.4), transparent);
 }
 
 .agent-setup-status-alert.warning {
   border-color: rgba(235, 203, 131, 0.3);
-  background: linear-gradient(135deg, rgba(235, 203, 131, 0.08), rgba(235, 203, 131, 0.04));
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.02), transparent 22%),
+    linear-gradient(135deg, rgba(235, 203, 131, 0.1), rgba(235, 203, 131, 0.05));
+}
+
+.agent-setup-status-alert.warning::before {
+  background: linear-gradient(90deg, transparent, rgba(235, 203, 131, 0.4), transparent);
 }
 
 .agent-setup-status-alert.success {
   border-color: rgba(163, 190, 139, 0.3);
-  background: linear-gradient(135deg, rgba(163, 190, 139, 0.08), rgba(163, 190, 139, 0.04));
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.02), transparent 22%),
+    linear-gradient(135deg, rgba(163, 190, 139, 0.1), rgba(163, 190, 139, 0.05));
+}
+
+.agent-setup-status-alert.success::before {
+  background: linear-gradient(90deg, transparent, rgba(163, 190, 139, 0.4), transparent);
 }
 
 .agent-setup-status-alert-icon {
@@ -109,28 +147,46 @@
   }
 }
 
-/* Hero Section */
+/* Hero Section — modern widget-card styling */
 .agent-setup-hero {
   display: grid;
   gap: 14px;
-  padding: 20px;
+  padding: 22px;
   margin-bottom: 18px;
   border-radius: var(--radius-card);
-  background: linear-gradient(135deg, rgba(136, 192, 209, 0.06) 0%, rgba(143, 188, 187, 0.04) 50%, rgba(136, 192, 209, 0.06) 100%);
-  border: 1px solid rgba(136, 192, 209, 0.18);
+  background:
+    radial-gradient(circle at 84% 16%, rgba(129, 140, 248, 0.11), transparent 22%),
+    radial-gradient(circle at 12% 88%, rgba(99, 102, 241, 0.07), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.014));
+  border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    0 16px 40px rgba(0, 0, 0, 0.36),
+    0 4px 16px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+    inset 0 40px 60px -20px rgba(99, 102, 241, 0.04);
   position: relative;
   overflow: hidden;
+  transition: border-color 250ms ease, box-shadow 250ms ease, transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .agent-setup-hero::before {
   content: '';
   position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.45), transparent);
+}
+
+.agent-setup-hero::after {
+  content: '';
+  position: absolute;
   inset: -50%;
   background: linear-gradient(120deg, transparent 30%, rgba(136, 192, 209, 0.08) 50%, transparent 70%);
   animation: hero-sweep 3s ease-in-out infinite;
+  pointer-events: none;
 }
 
 @keyframes hero-sweep {
@@ -187,20 +243,75 @@
   font-weight: 700;
 }
 
-/* Sections */
+/* Sections — modern widget-card styling */
 .agent-setup-section {
   display: grid;
   gap: 14px;
   margin-bottom: 18px;
-  padding: 16px;
+  padding: 20px;
   border-radius: var(--radius-card);
-  background: linear-gradient(145deg, rgba(40, 48, 58, 0.72), rgba(30, 36, 43, 0.82));
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.04), transparent 22%),
+    linear-gradient(145deg, rgba(40, 48, 58, 0.94), rgba(27, 33, 41, 0.99));
+  border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.25),
-    inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  animation: section-fade-in 0.4s ease forwards;
+    0 16px 40px rgba(0, 0, 0, 0.36),
+    0 4px 16px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+    inset 0 36px 80px -38px rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+  position: relative;
+  transition: border-color 250ms ease, box-shadow 250ms ease, transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: section-fade-in 0.4s ease forwards, agent-section-float 4s ease-in-out infinite;
 }
+
+.agent-setup-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(136, 192, 209, 0.4), transparent);
+}
+
+.agent-setup-section::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-card);
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), transparent 40%, transparent 60%, rgba(99, 102, 241, 0.15));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 250ms ease;
+  pointer-events: none;
+}
+
+.agent-setup-section:hover::after {
+  opacity: 1;
+}
+
+.agent-setup-section:hover {
+  border-color: rgba(99, 102, 241, 0.45);
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.45),
+    0 4px 16px rgba(0, 0, 0, 0.32),
+    0 0 40px rgba(99, 102, 241, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+  transform: translateY(-2px) scale(1.005);
+}
+
+/* Per-section accent colors */
+.agent-setup-section:nth-child(1)::before { background: linear-gradient(90deg, transparent, rgba(136, 192, 209, 0.5), transparent); }
+.agent-setup-section:nth-child(2)::before { background: linear-gradient(90deg, transparent, rgba(149, 188, 122, 0.5), transparent); }
+.agent-setup-section:nth-child(3)::before { background: linear-gradient(90deg, transparent, rgba(136, 192, 209, 0.5), transparent); }
+.agent-setup-section:nth-child(4)::before { background: linear-gradient(90deg, transparent, rgba(235, 203, 131, 0.5), transparent); }
 
 @keyframes section-fade-in {
   from { opacity: 0; transform: translateY(8px); }
@@ -347,6 +458,17 @@
   transform: translateY(-1px);
 }
 
+.btn-agent-upgrade {
+  color: #16191e;
+  background: linear-gradient(135deg, #ebcb8b, #d5a10b);
+  box-shadow: 0 2px 15px rgba(235, 203, 139, 0.35);
+}
+
+.btn-agent-upgrade:hover {
+  box-shadow: 0 4px 25px rgba(235, 203, 139, 0.5);
+  transform: translateY(-1px);
+}
+
 .btn-agent-start {
   color: #16191e;
   background: linear-gradient(135deg, #ebcb8b, #d5a10b);
@@ -396,13 +518,38 @@
 .version-card {
   display: grid;
   gap: 4px;
-  padding: 12px;
-  border-radius: var(--radius-sm);
-  background: linear-gradient(145deg, rgba(40, 48, 58, 0.68), rgba(30, 36, 43, 0.78));
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 14px;
+  border-radius: var(--radius-card);
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.03), transparent 22%),
+    linear-gradient(145deg, rgba(40, 48, 58, 0.88), rgba(27, 33, 41, 0.95));
+  border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.3),
     0 2px 8px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.15);
+  position: relative;
+  overflow: hidden;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.version-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+}
+
+.version-card:hover {
+  border-color: rgba(99, 102, 241, 0.35);
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.38),
+    0 0 24px rgba(99, 102, 241, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .version-label {
@@ -419,14 +566,31 @@
   font-weight: 750;
 }
 
-/* Progress */
+/* Progress — modern widget-card styling */
 .agent-setup-progress {
   display: grid;
   gap: 8px;
-  padding: 14px;
+  padding: 16px;
   border: 1px solid rgba(136, 192, 209, 0.2);
-  border-radius: var(--radius-sm);
-  background: rgba(136, 192, 209, 0.05);
+  border-radius: var(--radius-card);
+  background:
+    radial-gradient(circle at top right, rgba(136, 192, 209, 0.06), transparent 22%),
+    linear-gradient(145deg, rgba(40, 48, 58, 0.88), rgba(27, 33, 41, 0.95));
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  position: relative;
+  overflow: hidden;
+}
+
+.agent-setup-progress::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(136, 192, 209, 0.35), transparent);
 }
 
 .progress-bar-container {
@@ -693,5 +857,209 @@
   0% { transform: translateX(-40%); opacity: 0; }
   35%, 65% { opacity: 1; }
   100% { transform: translateX(40%); opacity: 0; }
+}
+
+/* --- Modal Shell Premium Enhancements --- */
+
+/* Breathing gradient border on modal shell */
+.remote-agent-setup-modal::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-card);
+  padding: 1px;
+  background: linear-gradient(160deg, rgba(99, 102, 241, 0.35), transparent 35%, transparent 65%, rgba(6, 182, 212, 0.2));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.6;
+  transition: opacity 400ms ease;
+}
+
+.remote-agent-setup-modal.open::after,
+.remote-agent-setup-modal.active::after {
+  opacity: 1;
+  animation: agent-border-breathe 3s ease-in-out infinite;
+}
+
+@keyframes agent-border-breathe {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+/* Ambient glow orb behind modal */
+#remote-agent-setup-overlay::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 500px;
+  height: 500px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.18) 0%, rgba(6, 182, 212, 0.08) 40%, transparent 70%);
+  filter: blur(60px);
+  pointer-events: none;
+  animation: agent-ambient-drift 8s ease-in-out infinite;
+  z-index: 0;
+}
+
+@keyframes agent-ambient-drift {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.7; }
+  33% { transform: translate(-45%, -55%) scale(1.1); opacity: 1; }
+  66% { transform: translate(-55%, -45%) scale(0.95); opacity: 0.8; }
+}
+
+/* Idle float animation on sections (staggered delays) */
+.agent-setup-section:nth-child(1) { --float-delay: 0s; }
+.agent-setup-section:nth-child(2) { --float-delay: 0.4s; }
+.agent-setup-section:nth-child(3) { --float-delay: 0.8s; }
+.agent-setup-section:nth-child(4) { --float-delay: 1.2s; }
+.agent-setup-section:nth-child(5) { --float-delay: 1.6s; }
+
+@keyframes agent-section-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1.5px); }
+}
+
+.agent-setup-section:hover {
+  animation: none;
+  transform: translateY(-2px) scale(1.005);
+}
+
+/* Elevated form controls */
+.agent-setup-field input:hover,
+.agent-setup-field select:hover {
+  border-color: rgba(136, 192, 209, 0.35);
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.25),
+    0 0 16px rgba(136, 192, 209, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.agent-setup-field input:focus,
+.agent-setup-field select:focus {
+  border-color: rgba(136, 192, 209, 0.5);
+  box-shadow:
+    0 0 0 3px rgba(136, 192, 209, 0.12),
+    0 0 24px rgba(136, 192, 209, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* --- Reduced Motion --- */
+
+@media (prefers-reduced-motion: reduce) {
+  .remote-agent-setup-modal,
+  .remote-agent-setup-modal::after,
+  .agent-setup-hero,
+  .agent-setup-hero::before,
+  .agent-setup-hero-icon,
+  .agent-setup-section,
+  .agent-setup-section::after,
+  .agent-setup-status-alert,
+  .agent-setup-progress #agent-setup-progress-bar {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* --- Light Theme Overrides --- */
+
+[data-theme="light"] .remote-agent-setup-modal {
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.6), transparent 22%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(240, 244, 248, 0.96));
+  border-color: rgba(17, 24, 39, 0.1);
+  box-shadow:
+    0 24px 64px rgba(15, 23, 42, 0.15),
+    0 8px 24px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="light"] .agent-setup-hero {
+  background:
+    radial-gradient(circle at 84% 16%, rgba(99, 102, 241, 0.06), transparent 22%),
+    radial-gradient(circle at 12% 88%, rgba(99, 102, 241, 0.04), transparent 28%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(248, 250, 252, 0.7));
+  border-color: rgba(17, 24, 39, 0.08);
+  box-shadow:
+    0 12px 32px rgba(15, 23, 42, 0.08),
+    0 4px 12px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+[data-theme="light"] .agent-setup-section {
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 22%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(240, 244, 248, 0.9));
+  border-color: rgba(17, 24, 39, 0.08);
+  box-shadow:
+    0 12px 32px rgba(15, 23, 42, 0.08),
+    0 4px 12px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+[data-theme="light"] .agent-setup-section:hover {
+  border-color: rgba(99, 102, 241, 0.3);
+  box-shadow:
+    0 16px 40px rgba(15, 23, 42, 0.12),
+    0 0 24px rgba(99, 102, 241, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+[data-theme="light"] .agent-setup-field input,
+[data-theme="light"] .agent-setup-field select {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(17, 24, 39, 0.1);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .agent-setup-field input:focus,
+[data-theme="light"] .agent-setup-field select:focus {
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow:
+    0 0 0 3px rgba(99, 102, 241, 0.1),
+    inset 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .agent-setup-status-alert {
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.4), transparent 22%),
+    linear-gradient(135deg, rgba(191, 97, 106, 0.06), rgba(214, 120, 120, 0.03));
+  border-color: rgba(191, 97, 106, 0.2);
+}
+
+[data-theme="light"] .agent-setup-status-alert.warning {
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.4), transparent 22%),
+    linear-gradient(135deg, rgba(235, 203, 131, 0.08), rgba(235, 203, 131, 0.04));
+  border-color: rgba(235, 203, 131, 0.25);
+}
+
+[data-theme="light"] .agent-setup-status-alert.success {
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.4), transparent 22%),
+    linear-gradient(135deg, rgba(163, 190, 139, 0.08), rgba(163, 190, 139, 0.04));
+  border-color: rgba(163, 190, 139, 0.25);
+}
+
+[data-theme="light"] .agent-setup-progress {
+  background:
+    radial-gradient(circle at top right, rgba(136, 192, 209, 0.04), transparent 22%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.8), rgba(240, 244, 248, 0.9));
+  border-color: rgba(136, 192, 209, 0.15);
+}
+
+[data-theme="light"] .version-card {
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 22%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(240, 244, 248, 0.9));
+  border-color: rgba(17, 24, 39, 0.08);
+  box-shadow:
+    0 8px 24px rgba(15, 23, 42, 0.08),
+    0 2px 8px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 

@@ -5,7 +5,14 @@ use warp::ws::{Message, Ws};
 
 use crate::state::AppState;
 
-const WS_PUSH_INTERVAL: Duration = Duration::from_millis(500);
+const WS_PUSH_INTERVAL_DEFAULT_MS: u64 = 500;
+const WS_PUSH_INTERVAL_MIN_MS: u64 = 200;
+const WS_PUSH_INTERVAL_MAX_MS: u64 = 10000;
+
+fn clamped_push_interval_ms(settings: &crate::state::UiSettings) -> u64 {
+    let val = settings.ws_push_interval_ms;
+    val.clamp(WS_PUSH_INTERVAL_MIN_MS, WS_PUSH_INTERVAL_MAX_MS)
+}
 
 pub fn ws_route(
     state: AppState,
@@ -19,14 +26,22 @@ pub fn ws_route(
                 let (mut ws_tx, mut ws_rx) = socket.split();
 
                 let update_task = tokio::spawn(async move {
-                    let mut interval = tokio::time::interval(WS_PUSH_INTERVAL);
+                    let mut last_interval_ms = WS_PUSH_INTERVAL_DEFAULT_MS;
                     loop {
                         if state.active_session_id.lock().unwrap().is_empty() {
                             state.llama_poll_notify.notified().await;
                             continue;
                         }
 
-                        interval.tick().await;
+                        // Check if the push interval has changed in settings
+                        let current_ms = {
+                            let settings = state.ui_settings.lock().unwrap();
+                            clamped_push_interval_ms(&settings)
+                        };
+                        if current_ms != last_interval_ms {
+                            last_interval_ms = current_ms;
+                        }
+                        tokio::time::sleep(Duration::from_millis(last_interval_ms)).await;
 
                         let running = *state.server_running.lock().unwrap();
                         let local_running = *state.local_server_running.lock().unwrap();
@@ -36,6 +51,10 @@ pub fn ws_route(
                             let host_metrics_available = state.host_metrics_available();
                             let remote_agent_connected = state.remote_agent_connected();
                             let remote_agent_url = state.remote_agent_url.lock().unwrap().clone();
+                            let remote_agent_version =
+                                state.remote_agent_version.lock().unwrap().clone();
+                            let remote_agent_update_available =
+                                *state.remote_agent_update_available.lock().unwrap();
                             let gpu = if host_metrics_available {
                                 state.gpu_metrics.lock().unwrap().clone()
                             } else {
@@ -92,6 +111,8 @@ pub fn ws_route(
                                 "remote_agent_connected": remote_agent_connected,
                                 "remote_agent_health_reachable": remote_agent_connected,
                                 "remote_agent_url": remote_agent_url,
+                                "remote_agent_version": remote_agent_version,
+                                "remote_agent_update_available": remote_agent_update_available,
                                 "capabilities": capabilities,
                                 "endpoint_kind": endpoint_kind,
                                 "session_kind": session_kind,

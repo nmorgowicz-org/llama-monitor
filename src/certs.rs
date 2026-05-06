@@ -59,7 +59,8 @@ impl Cert {
 
 /// Generates a self-signed certificate for testing.
 pub fn generate_self_signed(sans: Vec<String>) -> Cert {
-    let rcgen::CertifiedKey { cert, signing_key } = rcgen::generate_simple_self_signed(sans).unwrap();
+    let rcgen::CertifiedKey { cert, signing_key } =
+        rcgen::generate_simple_self_signed(sans).unwrap();
     Cert {
         pem: cert.pem(),
         key: signing_key.serialize_pem(),

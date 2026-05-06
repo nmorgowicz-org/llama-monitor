@@ -239,6 +239,18 @@ async function captureChat(page) {
     await waitForChatResponse(page);
     await sleep(1500);
     await page.screenshot({ path: `${OUTPUT_DIR}/03-chat.png`, fullPage: true });
+    const telemetryToggle = await page.$('#chat-telemetry-btn');
+    if (telemetryToggle) {
+        await telemetryToggle.click();
+        await sleep(500);
+        await page.screenshot({ path: `${OUTPUT_DIR}/03b-chat-telemetry.png`, fullPage: true });
+        const telemetryPin = await page.$('#chat-telemetry-pin-btn');
+        if (telemetryPin) {
+            await telemetryPin.click();
+            await sleep(500);
+            await page.screenshot({ path: `${OUTPUT_DIR}/03c-chat-telemetry-pinned.png`, fullPage: true });
+        }
+    }
     await cleanupScreenshotTabs(page);
 }
 

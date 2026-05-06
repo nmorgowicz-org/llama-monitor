@@ -105,6 +105,12 @@ export function openRemoteAgentSetup() {
     document.getElementById('btn-agent-setup-stop')?.style.setProperty('display', 'none');
     document.getElementById('btn-agent-setup-remove')?.style.setProperty('display', 'none');
 
+    // Pre-fill version info from WebSocket data if available
+    const installedEl = document.getElementById('agent-setup-installed-version');
+    if (installedEl && wsData?.remote_agent_version) {
+        installedEl.textContent = wsData.remote_agent_version;
+    }
+
     // Check latest version
     checkRemoteAgentVersions();
 
@@ -134,6 +140,8 @@ function updateAgentSetupStatusAlert() {
     const isConnected = wsData.remote_agent_connected;
     const isFirewallBlocked = wsData.remote_agent_connected && !wsData.remote_agent_health_reachable;
     const hasRemoteEndpoint = wsData.session_mode === 'attach' && wsData.endpoint_kind === 'Remote';
+    const updateAvailable = wsData.remote_agent_update_available === true;
+    const agentVersion = wsData.remote_agent_version || 'unknown';
     const sys = wsData.system || {};
     const hasCpuTemp = sys.cpu_temp_available && sys.cpu_temp > 0;
 
@@ -143,6 +151,16 @@ function updateAgentSetupStatusAlert() {
         icon.textContent = '\u2139\ufe0f';
         title.textContent = 'No Remote Endpoint';
         message.textContent = 'Configure a remote endpoint in Settings to enable agent management.';
+        return;
+    }
+
+    // Update available takes priority
+    if (isConnected && updateAvailable) {
+        alert.style.display = 'flex';
+        alert.className = 'agent-setup-status-alert warning';
+        icon.textContent = '\u2191\ufe0f';
+        title.textContent = 'Agent Update Available';
+        message.textContent = 'Running v' + agentVersion + ' — a newer version is available. Click Upgrade to install it.';
         return;
     }
 
@@ -186,7 +204,7 @@ function updateAgentSetupStatusAlert() {
     alert.className = 'agent-setup-status-alert success';
     icon.textContent = '\u2705';
     title.textContent = 'Agent Running';
-    message.textContent = 'Remote agent is connected and reporting all metrics.';
+    message.textContent = 'Remote agent v' + agentVersion + ' is connected and reporting all metrics.';
 }
 
 function prepareAgentSetupFromEndpoint() {
@@ -328,6 +346,10 @@ async function trustRemoteAgentHostKey() {
 async function checkRemoteAgentVersions() {
     const latestEl = document.getElementById('agent-setup-latest-version');
     const installedEl = document.getElementById('agent-setup-installed-version');
+    const installBtn = document.getElementById('btn-agent-setup-install');
+    const startBtn = document.getElementById('btn-agent-setup-start');
+    const stopBtn = document.getElementById('btn-agent-setup-stop');
+    const removeBtn = document.getElementById('btn-agent-setup-remove');
 
     if (latestEl) latestEl.textContent = 'Checking\u2026';
 
@@ -344,7 +366,34 @@ async function checkRemoteAgentVersions() {
         if (latestEl) latestEl.textContent = 'Unavailable';
     }
 
-    // Check installed version
+    // If agent is connected via WebSocket, we already have version info
+    const wsVersion = wsData?.remote_agent_version;
+    const wsUpdateAvailable = wsData?.remote_agent_update_available === true;
+
+    if (wsVersion) {
+        remoteAgentSetupState.installedVersion = wsVersion;
+        if (installedEl) installedEl.textContent = wsVersion;
+
+        if (wsUpdateAvailable) {
+            // Show upgrade button
+            if (installBtn) {
+                installBtn.style.display = '';
+                installBtn.innerHTML = '<span class="btn-icon">\u2191</span> Upgrade Agent';
+                installBtn.className = 'btn btn-agent-upgrade';
+            }
+            if (startBtn) startBtn.style.display = 'none';
+            if (stopBtn) stopBtn.style.display = '';
+            if (removeBtn) removeBtn.style.display = '';
+        } else {
+            if (installBtn) installBtn.style.display = 'none';
+            if (startBtn) startBtn.style.display = 'none';
+            if (stopBtn) stopBtn.style.display = '';
+            if (removeBtn) removeBtn.style.display = '';
+        }
+        return;
+    }
+
+    // Check installed version via SSH detect
     const { connection } = collectRemoteAgentSetupConnection();
     if (!connection.host || !remoteAgentSetupState.hostKey) {
         if (installedEl) installedEl.textContent = '\u2014';
@@ -366,10 +415,19 @@ async function checkRemoteAgentVersions() {
             remoteAgentSetupState.installedVersion = data.installed_version || null;
             if (installedEl) installedEl.textContent = data.installed_version || 'Not installed';
             if (data.installed_version) {
-                document.getElementById('btn-agent-setup-install')?.style.setProperty('display', 'none');
-                document.getElementById('btn-agent-setup-start')?.style.setProperty('display', data.reachable ? 'none' : '');
-                document.getElementById('btn-agent-setup-stop')?.style.setProperty('display', data.reachable ? '' : 'none');
-                document.getElementById('btn-agent-setup-remove')?.style.setProperty('display', '');
+                if (data.update_available) {
+                    // Show upgrade button
+                    if (installBtn) {
+                        installBtn.style.display = '';
+                        installBtn.innerHTML = '<span class="btn-icon">\u2191</span> Upgrade Agent';
+                        installBtn.className = 'btn btn-agent-upgrade';
+                    }
+                } else {
+                    if (installBtn) installBtn.style.display = 'none';
+                }
+                if (startBtn) startBtn.style.display = data.reachable ? 'none' : '';
+                if (stopBtn) stopBtn.style.display = data.reachable ? '' : 'none';
+                if (removeBtn) removeBtn.style.display = '';
             }
         } else {
             remoteAgentSetupState.installedVersion = null;
@@ -607,6 +665,129 @@ async function installRemoteAgent() {
         await startRemoteAgent();
     } catch (err) {
         showAgentSetupStatus('Install failed: ' + err.message, 'error');
+        hideAgentSetupProgress();
+    }
+}
+
+async function upgradeRemoteAgent() {
+    const { connection } = collectRemoteAgentSetupConnection();
+    if (!connection.host) {
+        showAgentSetupStatus('Enter an SSH host first.', 'error');
+        return;
+    }
+
+    // Auto-scan host key if not done
+    if (!remoteAgentSetupState.hostKey) {
+        showAgentSetupProgress('Scanning host key\u2026', 5);
+        try {
+            const resp = await fetch('/api/remote-agent/ssh/host-key', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ssh_target: sshTargetFromSetup(),
+                    ssh_connection: connection,
+                })
+            });
+            const data = await resp.json();
+            if (!data.ok) {
+                showAgentSetupStatus('Failed to scan host key: ' + (data.error || 'unknown'), 'error');
+                return;
+            }
+            remoteAgentSetupState.hostKey = data.host_key;
+        } catch (err) {
+            showAgentSetupStatus('Failed to scan host key: ' + err.message, 'error');
+            return;
+        }
+    }
+
+    // Auto-trust host key if not trusted
+    if (!remoteAgentSetupState.hostKey.trusted) {
+        showAgentSetupProgress('Trusting host key\u2026', 10);
+        try {
+            const resp = await fetch('/api/remote-agent/ssh/trust', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ssh_target: sshTargetFromSetup(),
+                    ssh_connection: connection,
+                    key_hex: remoteAgentSetupState.hostKey.key_hex,
+                })
+            });
+            const data = await resp.json();
+            if (!data.ok) {
+                showAgentSetupStatus('Failed to trust host key: ' + (data.error || 'unknown'), 'error');
+                return;
+            }
+            remoteAgentSetupState.hostKey.trusted = true;
+        } catch (err) {
+            showAgentSetupStatus('Failed to trust host key: ' + err.message, 'error');
+            return;
+        }
+    }
+
+    showAgentSetupProgress('Detecting remote OS\u2026', 15);
+
+    try {
+        const detectResp = await fetch('/api/remote-agent/detect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ssh_target: sshTargetFromSetup(),
+                ssh_connection: connection,
+                agent_url: document.getElementById('agent-setup-agent-url')?.value.trim() || null,
+            })
+        });
+        const detectData = await detectResp.json();
+        if (!detectData.ok) {
+            showAgentSetupStatus('Failed to detect remote OS: ' + (detectData.error || 'unknown'), 'error');
+            return;
+        }
+
+        const asset = detectData.matching_asset;
+        if (!asset) {
+            showAgentSetupStatus('No compatible asset found for upgrade: ' + (detectData.error || ''), 'error');
+            return;
+        }
+
+        showAgentSetupProgress('Upgrading agent\u2026', 30);
+
+        const resp = await fetch('/api/remote-agent/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ssh_target: sshTargetFromSetup(),
+                ssh_connection: connection,
+                agent_url: document.getElementById('agent-setup-agent-url')?.value.trim() || null,
+            })
+        });
+
+        const data = await resp.json();
+        if (!data.ok) {
+            showAgentSetupStatus('Upgrade failed: ' + (data.error || 'unknown'), 'error');
+            return;
+        }
+
+        remoteAgentSetupState.installedVersion = data.new_version || remoteAgentSetupState.latestVersion;
+        document.getElementById('agent-setup-installed-version').textContent = remoteAgentSetupState.installedVersion;
+
+        // Reset install button to normal state
+        const installBtn = document.getElementById('btn-agent-setup-install');
+        if (installBtn) {
+            installBtn.style.display = 'none';
+            installBtn.className = 'btn btn-agent-install';
+            installBtn.innerHTML = '<span class="btn-icon">\u2b07</span> Install / Repair';
+        }
+
+        maybeAutoSaveAgentToken(data.agent_token);
+        showAgentSetupProgress('Agent upgraded successfully', 100);
+
+        setTimeout(() => {
+            hideAgentSetupProgress();
+            showAgentSetupStatus('Agent upgraded to ' + (data.new_version || 'latest') + '. ' + (data.health_reachable ? 'Connected and reporting metrics.' : 'Started but HTTP not reachable.'), data.health_reachable ? 'ok' : 'warning');
+            document.getElementById('btn-agent-setup-done').style.display = '';
+        }, 800);
+    } catch (err) {
+        showAgentSetupStatus('Upgrade failed: ' + err.message, 'error');
         hideAgentSetupProgress();
     }
 }
@@ -1072,22 +1253,6 @@ function setRemoteAgentButtonsDisabled(disabled) {
 
 function updateAgentStatusIndicator(connected, firewallBlocked) {
     const el = document.getElementById('agent-status');
-    const menuDot = document.getElementById('agent-menu-dot');
-    const menuSubtitle = document.getElementById('agent-menu-subtitle');
-
-    if (menuDot) {
-        menuDot.className = 'agent-menu-dot' + (connected ? (firewallBlocked ? ' warning' : ' connected') : '');
-    }
-    if (menuSubtitle) {
-        if (firewallBlocked) {
-            menuSubtitle.textContent = 'Agent started, HTTP blocked';
-        } else if (connected) {
-            menuSubtitle.textContent = 'Connected to remote metrics';
-        } else {
-            const host = remoteEndpointHost();
-            menuSubtitle.textContent = host ? 'Manage agent for ' + host : 'No remote endpoint attached';
-        }
-    }
     if (el) updateAgentStatusPill(el, connected, firewallBlocked);
 }
 
@@ -1816,7 +1981,14 @@ export function initRemoteAgent() {
     document.getElementById('btn-agent-setup-scan')?.addEventListener('click', scanRemoteAgentHostKey);
     document.getElementById('btn-agent-setup-trust')?.addEventListener('click', trustRemoteAgentHostKey);
     document.getElementById('btn-agent-setup-status')?.addEventListener('click', checkManagedRemoteAgent);
-    document.getElementById('btn-agent-setup-install')?.addEventListener('click', installRemoteAgent);
+    document.getElementById('btn-agent-setup-install')?.addEventListener('click', () => {
+        const btn = document.getElementById('btn-agent-setup-install');
+        if (btn && btn.classList.contains('btn-agent-upgrade')) {
+            upgradeRemoteAgent();
+        } else {
+            installRemoteAgent();
+        }
+    });
     document.getElementById('btn-agent-setup-start')?.addEventListener('click', startRemoteAgent);
     document.getElementById('btn-agent-setup-stop')?.addEventListener('click', stopManagedRemoteAgent);
     document.getElementById('btn-agent-setup-remove')?.addEventListener('click', removeManagedRemoteAgent);

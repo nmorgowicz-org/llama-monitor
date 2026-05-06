@@ -33,15 +33,24 @@
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.035));
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.022));
   color: var(--color-text-primary);
   font-weight: 700;
   text-decoration: none;
   cursor: pointer;
   transition: background 160ms ease, border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
   box-shadow:
-    0 10px 22px rgba(0, 0, 0, 0.16),
+    0 8px 18px rgba(0, 0, 0, 0.14),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.nav-btn,
+.nav-user-btn {
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 0.84rem;
+  font-weight: 750;
 }
 
 .btn-agent-fix {
@@ -91,35 +100,32 @@
 .btn-modal-cancel:hover,
 .btn-preset:hover,
 .btn-preset-reset:hover {
-  border-color: rgba(99, 102, 241, 0.45);
+  border-color: var(--surface-card-line);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.05));
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.032));
   box-shadow:
-    0 16px 30px rgba(0, 0, 0, 0.2),
+    0 12px 24px rgba(0, 0, 0, 0.18),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
   transform: translateY(-1px);
 }
 
 /* Distinctive hover effects for preset action buttons */
 .btn-preset:nth-child(1):hover {
-  /* New - green */
-  border-color: rgba(157, 188, 122, 0.5);
-  background: rgba(157, 188, 122, 0.12);
-  box-shadow: 0 0 15px rgba(157, 188, 122, 0.25), var(--shadow-surface);
+  border-color: rgba(45, 212, 191, 0.32);
+  background: rgba(45, 212, 191, 0.08);
+  box-shadow: 0 0 12px rgba(8, 145, 178, 0.14), var(--shadow-surface);
 }
 
 .btn-preset:nth-child(2):hover {
-  /* Edit - blue */
-  border-color: rgba(136, 192, 209, 0.5);
-  background: rgba(136, 192, 209, 0.12);
-  box-shadow: 0 0 15px rgba(136, 192, 209, 0.25), var(--shadow-surface);
+  border-color: rgba(103, 232, 249, 0.32);
+  background: rgba(103, 232, 249, 0.08);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.14), var(--shadow-surface);
 }
 
 .btn-preset:nth-child(3):hover {
-  /* Copy - cyan */
-  border-color: rgba(143, 188, 187, 0.5);
-  background: rgba(143, 188, 187, 0.12);
-  box-shadow: 0 0 15px rgba(143, 188, 187, 0.25), var(--shadow-surface);
+  border-color: rgba(45, 212, 191, 0.32);
+  background: rgba(45, 212, 191, 0.08);
+  box-shadow: 0 0 12px rgba(45, 212, 191, 0.14), var(--shadow-surface);
 }
 
 .btn-preset-delete:hover {
@@ -146,8 +152,6 @@
 .btn-preset-reset:hover {
   transform: translateY(-2px);
 }
-  transform: translateY(-1px);
-}
 
 .btn:disabled,
 .btn-sm:disabled,
@@ -161,36 +165,36 @@ button:disabled {
 .btn-primary,
 .btn-start,
 .btn-modal-save {
-  border-color: transparent;
+  border-color: rgba(45, 212, 191, 0.24);
   background:
-    radial-gradient(circle at 25% 20%, rgba(255, 255, 255, 0.14), transparent 24%),
-    var(--gradient-primary);
+    radial-gradient(circle at 25% 20%, rgba(255, 255, 255, 0.1), transparent 24%),
+    linear-gradient(180deg, rgba(45, 212, 191, 0.22), rgba(8, 145, 178, 0.16));
   color: white;
   box-shadow:
-    0 16px 34px rgba(79, 70, 229, 0.28),
+    0 12px 26px rgba(8, 145, 178, 0.16),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .btn-secondary,
 .btn-attach {
-  border-color: rgba(6, 182, 212, 0.32);
+  border-color: rgba(34, 211, 238, 0.24);
   background:
-    radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.08), transparent 22%),
-    linear-gradient(180deg, rgba(6, 182, 212, 0.18), rgba(6, 182, 212, 0.10));
+    radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.06), transparent 22%),
+    linear-gradient(180deg, rgba(34, 211, 238, 0.14), rgba(8, 145, 178, 0.08));
   box-shadow:
-    0 12px 28px rgba(8, 145, 178, 0.18),
+    0 10px 22px rgba(8, 145, 178, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .btn-stop,
 .btn-kill,
 .btn-preset-delete {
-  border-color: rgba(244, 63, 94, 0.32);
+  border-color: rgba(244, 63, 94, 0.22);
   background:
-    radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.08), transparent 22%),
-    linear-gradient(180deg, rgba(244, 63, 94, 0.18), rgba(244, 63, 94, 0.10));
+    radial-gradient(circle at 24% 20%, rgba(255, 255, 255, 0.05), transparent 22%),
+    linear-gradient(180deg, rgba(244, 63, 94, 0.12), rgba(244, 63, 94, 0.06));
   box-shadow:
-    0 12px 28px rgba(225, 29, 72, 0.16),
+    0 10px 22px rgba(225, 29, 72, 0.10),
     inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
@@ -459,4 +463,56 @@ button:disabled {
 .fb-entries {
   max-height: 360px;
   overflow: auto;
+}
+
+/* ── Reduced Motion ─────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  /* fix-btn-pulse — box-shadow */
+  .btn-agent-fix {
+    animation: none !important;
+  }
+
+  /* btn hover — transform translateY */
+  .btn:hover,
+  .btn-sm:hover,
+  .nav-btn:hover,
+  .nav-user-btn:hover,
+  .btn-modal-save:hover,
+  .btn-modal-cancel:hover {
+    transform: none !important;
+  }
+  .btn,
+  .btn-sm,
+  .nav-btn,
+  .nav-user-btn,
+  .btn-modal-save,
+  .btn-modal-cancel,
+  .btn-preset,
+  .btn-preset-reset,
+  .btn-firewall-fix,
+  .btn-lhm-inline,
+  .btn-session-new {
+    transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease !important;
+  }
+
+  /* btn-agent-fix hover — transform translateY */
+  .btn-agent-fix:hover {
+    transform: none !important;
+  }
+  .btn-agent-fix {
+    transition: all 200ms ease !important;
+  }
+
+  /* btn-preset hover — transform translateY */
+  .btn-preset:hover,
+  .btn-preset-reset:hover {
+    transform: none !important;
+  }
+  .btn-preset,
+  .btn-preset-reset {
+    transition: all 180ms ease !important;
+  }
+
+  /* remote-agent-progress-bar — width transition (visual, keep) */
 }

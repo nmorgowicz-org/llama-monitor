@@ -4,6 +4,7 @@
 import { settingsState } from '../core/app-state.js';
 import { setContextCardViewPreference } from './context-card.js';
 import { renderChatMessages } from './chat-render.js';
+import { getAutoPollingInterval } from './network-detection.js';
 
 const DATE_FORMAT_KEY = 'llama-monitor-date-format';
 
@@ -16,6 +17,14 @@ export function markSettingsDirty() {
 
 function clearSettingsDirty() {
     settingsState.isDirty = false;
+}
+
+function resolveWsPushInterval() {
+    const raw = document.getElementById('settings-ws-push-interval')?.value || 'auto';
+    if (raw === 'auto') {
+        return getAutoPollingInterval();
+    }
+    return parseInt(raw) || 500;
 }
 
 // ── Collect / Save / Apply ────────────────────────────────────────────────────
@@ -47,6 +56,7 @@ export function collectSettings() {
         remote_agent_ssh_command: document.getElementById('set-remote-agent-ssh-command')?.value.trim() || '',
         explicit_mode_policy: document.getElementById('explicit-policy-input')?.value || '',
         context_card_view: document.getElementById('context-view-toggle-fleet')?.classList.contains('active') ? 'fleet' : 'gauge',
+        ws_push_interval_ms: resolveWsPushInterval(),
     };
 }
 
@@ -143,6 +153,29 @@ export function applySettings(s) {
     if (s.context_card_view !== undefined) {
         setContextCardViewPreference(s.context_card_view);
     }
+
+    if (s.ws_push_interval_ms !== undefined) {
+        const el = document.getElementById('settings-ws-push-interval');
+        if (el) el.value = String(s.ws_push_interval_ms);
+    }
+}
+
+// ── Live WS interval update ──────────────────────────────────────────────────
+// When the polling interval setting changes, apply it immediately via settings API.
+
+let lastAppliedInterval = null;
+
+function applyWsIntervalLive() {
+    const interval = resolveWsPushInterval();
+    if (interval === lastAppliedInterval) return;
+    lastAppliedInterval = interval;
+
+    // Send just the interval change to the backend
+    fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ws_push_interval_ms: interval }),
+    }).catch(() => {});
 }
 
 // ── Modal open/close ──────────────────────────────────────────────────────────
@@ -220,6 +253,13 @@ function _bindSettingsEvents() {
             tab.classList.add('active');
             document.getElementById('settings-' + target)?.classList.add('active');
         });
+    });
+
+    // WS push interval — apply live on change
+    document.getElementById('settings-ws-push-interval')?.addEventListener('change', () => {
+        applyWsIntervalLive();
+        markSettingsDirty();
+        saveSettings();
     });
 }
 

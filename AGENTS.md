@@ -153,12 +153,91 @@ cargo fmt
 npm run lint
 ```
 
-**Important:** Always run `npm run lint` after modifying any `.js` files under `static/js/`. This runs ESLint with three rules:
+## Static Asset Registration (AUTO-GENERATED)
+
+All static files (JS, CSS, HTML, etc.) are embedded at compile time via `include_str!` macros. **Registration is automatic** — `build.rs` scans `static/` and generates:
+
+- `src/gen/static_assets.rs` — `include_str!` constants for each file
+- `src/gen/routes.rs` — warp route filters for each file
+
+### Adding a New Static File
+
+1. Add the file to `static/` (e.g. `static/js/features/new-file.js`)
+2. Run `cargo build` — `build.rs` regenerates the constants and routes automatically
+3. Commit both your new file AND the updated `src/gen/*.rs` files
+
+**That's it.** No manual registration needed. The build system handles everything.
+
+### Constant Naming Convention
+
+The generator follows this convention (match it when referencing constants):
+
+| File Path | Generated Constant |
+|-----------|-------------------|
+| `css/tokens.css` | `CSS_TOKENS` |
+| `css/cards-inference.css` | `CSS_CARDS_INFERENCE` |
+| `js/bootstrap.js` | `BOOTSTRAP_JS` |
+| `js/compat/globals.js` | `COMPAT_GLOBALS_JS` |
+| `js/features/nav.js` | `FEATURES_NAV_JS` |
+| `js/features/chat-render.js` | `FEATURES_CHAT_RENDER_JS` |
+| `index.html` | `INDEX_HTML` |
+| `manifest.json` | `MANIFEST_JSON` |
+| `icon.svg` | `ICON_SVG` |
+
+Rules:
+- **CSS**: `CSS_` + filename stem, hyphens → underscores, uppercase
+- **JS**: skip `js/` prefix, join remaining path parts with `_`, replace `.` and `-` with `_`, uppercase
+- **Root files**: filename with `.` and `-` replaced by `_`, uppercase
+
+### Special Cases
+
+- **index.html**: Constant generated, but route handled specially in `mod.rs` (version/platform injection)
+- **Generated files**: Committed to git for code review and incremental builds. Marked with `// AUTO-GENERATED` header.
+
+### JavaScript Linting
+
+Always run `npm run lint` after modifying any `.js` files under `static/js/`. This runs ESLint with three rules:
 - `no-import-assign` — catches assignment to ES module namespace bindings (the `TypeError: Assignment to constant variable` class of error)
 - `no-undef` — catches bare references to functions no longer on `window` after ES module extraction
 - `no-unsanitized/property` and `/method` — catches `innerHTML`/`insertAdjacentHTML` with unescaped user data (XSS); `escapeHtml()` is the approved sanitizer
 
 The lint job runs automatically in CI on every PR push that touches `static/**` or `tests/ui/**`, without requiring the `ready-to-test` label. Also run `./scripts/validate-js.sh` for syntax-only validation on all JS files.
+
+## Pre-PR Validation
+
+Before creating a PR, the agent **must** run a cross-cutting validation pass using a sub-agent (Task tool) to catch issues that automated checks miss. This is mandatory for any PR that touches multiple files or introduces new features.
+
+### Validation Checklist
+
+The sub-agent must verify:
+
+1. **CSS integrity**: No duplicate selectors, duplicate `@keyframes`, or specificity conflicts where new styles are silently overridden
+2. **Cross-module wiring**: All new JS functions have callers, all new HTML elements have CSS rules, all new CSS classes are used in HTML
+3. **Accessibility**: All new animations have `@media (prefers-reduced-motion: reduce)` overrides
+4. **Theme coverage**: All new styled elements have `[data-theme="light"]` overrides
+5. **Backend-frontend contract**: New API fields are serialized, deserialized, and consumed on the frontend; new WebSocket messages are handled
+6. **No stale code**: No leftover blocks from refactoring (e.g., duplicate rules, commented-out sections that should be deleted)
+
+### Validation Command
+
+Use the Task tool with a prompt like:
+
+```
+Use a sub-agent to validate all changes in the current branch. Check for:
+- CSS selector duplication and specificity conflicts
+- Missing prefers-reduced-motion overrides for new animations
+- Missing light theme overrides for new styled elements
+- Broken cross-module references (JS → HTML → CSS)
+- Backend-frontend contract mismatches
+- Stale code from refactoring
+Return a detailed report of any issues found with file:line references.
+```
+
+### Action on Findings
+
+- **Critical issues** (broken functionality, silent CSS overrides): Must fix before PR
+- **Medium issues** (missing accessibility, incomplete theme coverage): Should fix before PR
+- **Low issues** (cosmetic, minor cleanup): Can note in PR description as follow-up
 
 ## CI/CD Workflow
 

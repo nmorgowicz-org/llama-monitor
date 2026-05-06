@@ -448,8 +448,10 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   padding: var(--gap-xl);
+  padding-top: clamp(28px, 6vh, 72px);
+  padding-bottom: clamp(28px, 6vh, 72px);
   gap: var(--gap-xl);
   z-index: 1;
 }
@@ -997,4 +999,3 @@ body.setup-active .sidebar-nav {
     padding: var(--gap-sm) var(--gap-md);
   }
 }
-

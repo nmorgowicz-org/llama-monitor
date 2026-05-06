@@ -15,6 +15,12 @@ const SCREENSHOT_PORT = parseInt(process.env.SCREENSHOT_PORT || '8891', 10);
 const FPS = 10;
 const DURATION_SEC = 6;
 const TOTAL_FRAMES = FPS * DURATION_SEC;
+const CAPTURE_GPU_ONLY = process.argv.includes('--gpu-only');
+const CAPTURE_INFERENCE_ONLY = process.argv.includes('--inference-only');
+
+if (CAPTURE_GPU_ONLY && CAPTURE_INFERENCE_ONLY) {
+    throw new Error('Use only one of --gpu-only or --inference-only');
+}
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -170,24 +176,30 @@ function cleanupFrames() {
         await page.goto(server.url, { waitUntil: 'networkidle0' });
         await attachToServer(page, REMOTE_SERVER);
 
-        console.log('Capturing inference metrics GIF...');
-        await switchTab(page, 'server');
-        const generationPromise = startLiveGeneration();
-        await sleep(1500);
-        await captureFrames(page, 'inference');
-        await generationPromise;
-        framesToGif('inference', `${SCREENSHOTS_DIR}/02-inference-metrics.gif`);
+        if (!CAPTURE_GPU_ONLY) {
+            console.log('Capturing inference metrics GIF...');
+            await switchTab(page, 'server');
+            const generationPromise = startLiveGeneration();
+            await sleep(1500);
+            await captureFrames(page, 'inference');
+            await generationPromise;
+            framesToGif('inference', `${SCREENSHOTS_DIR}/02-inference-metrics.gif`);
+            cleanupFrames();
+        }
 
-        console.log('Capturing GPU/system metrics GIF...');
-        await page.evaluate(() => {
-            const gpuSection = document.getElementById('gpu-section') || document.getElementById('system-section');
-            gpuSection?.scrollIntoView({ behavior: 'instant', block: 'start' });
-        });
-        await sleep(1200);
-        await captureFrames(page, 'gpu');
-        framesToGif('gpu', `${SCREENSHOTS_DIR}/04-gpu-metrics.gif`);
+        if (!CAPTURE_INFERENCE_ONLY) {
+            console.log('Capturing GPU/system metrics GIF...');
+            await switchTab(page, 'server');
+            await page.evaluate(() => {
+                const gpuSection = document.getElementById('gpu-section') || document.getElementById('system-section');
+                gpuSection?.scrollIntoView({ behavior: 'instant', block: 'start' });
+            });
+            await sleep(1200);
+            await captureFrames(page, 'gpu');
+            framesToGif('gpu', `${SCREENSHOTS_DIR}/04-gpu-metrics.gif`);
+            cleanupFrames();
+        }
 
-        cleanupFrames();
         console.log(`GIFs saved to ${SCREENSHOTS_DIR}`);
     } catch (err) {
         console.error(err.stack || err.message);

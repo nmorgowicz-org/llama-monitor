@@ -1254,20 +1254,48 @@ fn api_put_settings(
         .and(warp::put())
         .and(warp::body::json())
         .map(move |updated: UiSettings| {
-            let old_dir = state.ui_settings.lock().unwrap().models_dir.clone();
-            let new_dir = updated.models_dir.clone();
-
-            let old_token = state.ui_settings.lock().unwrap().remote_agent_token.clone();
-            let token_changed =
-                updated.remote_agent_token != old_token && !updated.remote_agent_token.is_empty();
+            // Detect if this is a partial update (only ws_push_interval_ms set, rest are defaults)
+            let is_partial = updated.preset_id.is_empty()
+                && updated.port == 8001
+                && updated.llama_server_path.is_empty()
+                && updated.llama_server_cwd.is_empty()
+                && updated.models_dir.is_empty()
+                && updated.server_endpoint.is_empty()
+                && updated.llama_poll_interval == 1
+                && updated.remote_agent_url.is_empty()
+                && updated.remote_agent_token.is_empty()
+                && !updated.remote_agent_ssh_autostart
+                && updated.remote_agent_ssh_target.is_empty()
+                && updated.remote_agent_ssh_command.is_empty()
+                && updated.explicit_mode_policy.is_empty()
+                && updated.context_card_view == "gauge";
 
             let mut settings = state.ui_settings.lock().unwrap();
-            *settings = updated;
+            let old_dir = settings.models_dir.clone();
+            let old_token = settings.remote_agent_token.clone();
+            let old_push_interval = settings.ws_push_interval_ms;
+
+            if is_partial {
+                // Partial update: only apply ws_push_interval_ms
+                settings.ws_push_interval_ms = updated.ws_push_interval_ms;
+            } else {
+                // Full update: replace all settings
+                *settings = updated;
+            }
+
+            let new_dir = settings.models_dir.clone();
+            let token_changed =
+                settings.remote_agent_token != old_token && !settings.remote_agent_token.is_empty();
+            let push_interval_changed = settings.ws_push_interval_ms != old_push_interval;
+
             let _ = app_state::save_ui_settings(&state.ui_settings_path, &settings);
             drop(settings);
 
             if token_changed {
                 state.agent_poll_notify.notify_waiters();
+            }
+            if push_interval_changed {
+                state.llama_poll_notify.notify_waiters();
             }
 
             if new_dir != old_dir

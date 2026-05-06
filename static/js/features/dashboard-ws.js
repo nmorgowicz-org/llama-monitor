@@ -51,7 +51,9 @@ import {
     renderSystemCard,
 } from './dashboard-render.js';
 import { animateNumber } from './animate.js';
+import { refreshChatTelemetry } from './chat-params.js';
 import { updateContextCard, updateContextCardFromChatTabs } from './context-card.js';
+import { refreshTopCockpit } from './nav.js';
 import { activeChatTab } from './chat-state.js';
 import { setRemoteAgentStatus } from './remote-agent.js';
 import { hideConnectingState, switchView } from './setup-view.js';
@@ -173,6 +175,8 @@ function updateDashboard(d) {
 
     // Inference metrics
     updateInferenceMetrics(d);
+    refreshChatTelemetry();
+    refreshTopCockpit();
 
     // GPU card
     updateGpuCard(d);
@@ -249,13 +253,20 @@ function updateAgentStatus(d) {
     const agentStatus = d.remote_agent_connected ? 'connected' : 'disconnected';
     const remoteAgentHealthReachable = d.remote_agent_health_reachable !== false;
     const firewallBlocked = d.remote_agent_connected && !remoteAgentHealthReachable;
+    const updateAvailable = d.remote_agent_update_available === true;
 
-    agentStatusEl.className = 'agent-status ' + (firewallBlocked ? 'firewall-blocked' : agentStatus);
+    if (updateAvailable) {
+        agentStatusEl.className = 'agent-status update-available';
+    } else {
+        agentStatusEl.className = 'agent-status ' + (firewallBlocked ? 'firewall-blocked' : agentStatus);
+    }
 
     const textEl = agentStatusEl.querySelector('.agent-text');
     const fixBtn = agentStatusEl.querySelector('.btn-agent-fix');
     if (textEl) {
-        if (firewallBlocked) {
+        if (updateAvailable) {
+            textEl.textContent = 'Update Available';
+        } else if (firewallBlocked) {
             textEl.textContent = 'Firewall blocked';
         } else if (d.remote_agent_connected) {
             textEl.textContent = 'Remote Agent';
@@ -265,9 +276,47 @@ function updateAgentStatus(d) {
     }
     if (fixBtn) {
         const hasRemoteEndpoint = d.session_mode === 'attach' && d.endpoint_kind === 'Remote';
-        const needsFix = hasRemoteEndpoint && (!d.remote_agent_connected || firewallBlocked);
+        const needsFix = hasRemoteEndpoint && (!d.remote_agent_connected || firewallBlocked || updateAvailable);
         fixBtn.style.display = needsFix ? '' : 'none';
-        fixBtn.title = firewallBlocked ? 'Repair remote agent connectivity' : 'Set up remote agent';
+        if (updateAvailable) {
+            fixBtn.textContent = '\u26a1 Upgrade';
+            fixBtn.title = 'Upgrade remote agent to latest version';
+        } else if (firewallBlocked) {
+            fixBtn.textContent = '\u26a1 Fix';
+            fixBtn.title = 'Repair remote agent connectivity';
+        } else {
+            fixBtn.textContent = '\u26a1 Fix';
+            fixBtn.title = 'Set up remote agent';
+        }
+    }
+
+    // Update tooltip
+    const tooltipStatus = document.getElementById('agent-tooltip-status');
+    const tooltipDetails = document.getElementById('agent-tooltip-details');
+    if (tooltipStatus) {
+        if (updateAvailable) {
+            tooltipStatus.textContent = 'Update available';
+            tooltipStatus.className = 'agent-tooltip-status warning';
+        } else if (firewallBlocked) {
+            tooltipStatus.textContent = 'Firewall blocked';
+            tooltipStatus.className = 'agent-tooltip-status warning';
+        } else if (d.remote_agent_connected) {
+            tooltipStatus.textContent = 'Connected';
+            tooltipStatus.className = 'agent-tooltip-status connected';
+        } else {
+            tooltipStatus.textContent = 'Not connected';
+            tooltipStatus.className = 'agent-tooltip-status disconnected';
+        }
+    }
+    if (tooltipDetails) {
+        let details = '';
+        if (d.remote_agent_version) {
+            details = 'Running v' + d.remote_agent_version;
+        }
+        if (d.remote_agent_url) {
+            details += (details ? ' | ' : '') + d.remote_agent_url;
+        }
+        tooltipDetails.textContent = details;
     }
 
     if (d.remote_agent_connected && !remoteAgentHealthReachable) {
@@ -276,19 +325,6 @@ function updateAgentStatus(d) {
 
     if (agentLatencyEl) {
         agentLatencyEl.textContent = '';
-    }
-    
-    // Update agent menu subtitle
-    const menuSubtitle = document.getElementById('agent-menu-subtitle');
-    if (menuSubtitle) {
-        const hasRemoteEndpoint = d.session_mode === 'attach' && d.endpoint_kind === 'Remote';
-        if (!hasRemoteEndpoint) {
-            menuSubtitle.textContent = 'No remote endpoint attached';
-        } else if (d.remote_agent_connected) {
-            menuSubtitle.textContent = 'Connected to remote metrics';
-        } else {
-            menuSubtitle.textContent = 'Manage agent for ' + (d.endpoint_host || '');
-        }
     }
 }
 
