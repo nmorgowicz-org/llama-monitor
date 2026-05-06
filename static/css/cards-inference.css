@@ -264,21 +264,16 @@
     0 0 40px var(--surface-card-glow),
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     inset 0 -1px 0 rgba(0, 0, 0, 0.25);
-  transform: translateY(-4px) scale(1.015);
+  animation: card-float 3s ease-in-out infinite;
 }
 
-.widget-card:active {
-  transform: translateY(-2px) scale(0.99);
-}
-
-/* Subtle floating animation for cards */
 @keyframes card-float {
   0%, 100% { transform: translateY(0) scale(1.015); }
   50% { transform: translateY(-2px) scale(1.015); }
 }
 
-.widget-card:hover {
-  animation: card-float 3s ease-in-out infinite;
+.widget-card:active {
+  transform: translateY(-2px) scale(0.99);
 }
 
 .widget-card.is-live {
@@ -1071,12 +1066,7 @@
 
 .context-pill.idle {
   background: linear-gradient(135deg, rgba(34, 197, 94, 0.12), rgba(17, 24, 39, 0.12));
-  animation: pill-fade 5s ease-in-out infinite;
-}
-
-@keyframes pill-fade {
-  0%, 100% { opacity: 0.85; }
-  50% { opacity: 1; }
+  animation: context-pill-scan 4s ease-in-out infinite;
 }
 
 .context-pill.warm {
@@ -1127,7 +1117,7 @@
 
 .context-fleet-rows {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   max-height: 320px;
   overflow-y: auto;
 }
@@ -1152,11 +1142,6 @@
   margin-top: 10px;
   white-space: normal;
   line-height: 1.4;
-}
-
-.context-fleet-rows {
-  display: grid;
-  gap: 10px;
 }
 
 .context-fleet-row {
@@ -1504,19 +1489,10 @@
   50% { box-shadow: inset 0 0 0 1px rgba(143, 188, 187, 0.2), 0 0 36px rgba(136, 192, 209, 0.22); }
 }
 
-@keyframes ambient-glow {
-  0%, 100% { opacity: 0; transform: scale(1); }
-  50% { opacity: 0.45; transform: scale(1.05); }
-}
-
 @keyframes context-pill-scan {
   0% { box-shadow: inset 0 0 0 1px rgba(104, 211, 145, 0.12); }
   50% { box-shadow: inset 0 0 0 1px rgba(104, 211, 145, 0.35); }
   100% { box-shadow: inset 0 0 0 1px rgba(104, 211, 145, 0.12); }
-}
-
-.context-pill.idle {
-  animation: context-pill-scan 4s ease-in-out infinite;
 }
 
 .inference-detail-grid {

@@ -123,9 +123,6 @@ function resetParamsToDefaults() {
 }
 
 export function updateParamsDirtyIndicator() {
-    const tab = activeChatTab();
-    if (!tab) return;
-    // Dirty indicator removed - use active state for visual feedback
 }
 
 // ── Copy settings between tabs ────────────────────────────────────────────────
@@ -1106,8 +1103,8 @@ async function loadPersonaMenuItems() {
                 document.getElementById('chat-persona-menu-name').textContent = persona.name;
                 document.getElementById('chat-persona-menu').classList.add('hidden');
                 const tab = activeChatTab();
-                if (tab && window.loadTemplates) {
-                    const templates = window.loadTemplates();
+                if (tab) {
+                    const templates = loadTemplates();
                     templates.then(ts => {
                         const t = ts?.find(x => x.name === persona.name);
                         if (t) {
@@ -1146,10 +1143,3 @@ export function setPersonaMenuActive(personaName) {
     }
 }
 
-// ── Template Menu Bindings ──────────────────────────────────────────────────
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}

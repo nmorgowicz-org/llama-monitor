@@ -207,95 +207,7 @@
   animation: none;
 }
 
-/* Agent Menu - Removed in consolidation with Remote Agent pill (styles kept for reference) */
-
-/* .agent-menu {
-     position: relative;
-     display: inline-flex;
-   }
-   
-   .agent-menu-btn {
-     gap: 8px;
-   }
-   
-   .agent-menu-dot {
-     width: 6px;
-     height: 8px;
-     border-radius: 999px;
-     background: #8899aa;
-     box-shadow: 0 0 0 2px rgba(136, 153, 170, 0.16);
-   }
-   
-   .agent-menu-dot.connected {
-     background: #a3be8b;
-     box-shadow: 0 0 0 2px rgba(163, 190, 139, 0.18);
-   }
-   
-   .agent-menu-dot.warning {
-     background: #ebcb8b;
-     box-shadow: 0 0 0 2px rgba(235, 203, 139, 0.18);
-   }
-   
-   .agent-menu-panel {
-     position: absolute;
-     top: calc(100% + 8px);
-     right: 0;
-     z-index: 260;
-     display: none;
-     min-width: 230px;
-     padding: 8px;
-     border: 1px solid var(--border-subtle);
-     border-radius: 8px;
-     background: rgba(30, 36, 48, 0.98);
-     box-shadow: 0 18px 42px rgba(0, 0, 0, 0.36);
-   }
-   
-   .agent-menu-panel.open {
-     display: block;
-   }
-   
-   .agent-menu-header {
-     padding: 8px 10px 10px;
-     border-bottom: 1px solid var(--border-subtle);
-     margin-bottom: 6px;
-   }
-   
-   .agent-menu-title {
-     color: var(--color-text);
-     font-weight: 750;
-     font-size: var(--text-sm);
-   }
-   
-   .agent-menu-subtitle {
-     margin-top: 3px;
-     color: var(--color-text-secondary);
-     font-size: var(--text-xs);
-     line-height: 1.35;
-   }
-   
-   .agent-menu-item {
-     display: block;
-     width: 100%;
-     border: 0;
-     border-radius: 6px;
-     padding: 8px 10px;
-     background: transparent;
-     color: var(--color-text);
-     font: inherit;
-     font-size: var(--text-sm);
-     text-align: left;
-     cursor: pointer;
-   }
-   
-   .agent-menu-item:hover {
-     background: rgba(255, 255, 255, 0.07);
-   }
-   
-   .agent-menu-item.danger {
-     color: #f0a4a8;
-   } */
-
-.capability-popover {
+ .capability-popover {
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
@@ -688,7 +600,6 @@
   }
 }
 
-.nav-search input,
 #server-endpoint,
 #preset-select,
 .modal-field input,
@@ -726,11 +637,6 @@
   font-weight: 650;
 }
 
-.nav-search input {
-  padding-right: 44px;
-}
-
-.nav-search input:focus,
 #server-endpoint:focus,
 #preset-select:focus,
 .modal-field input:focus,
@@ -739,23 +645,6 @@
 .fb-path-input:focus {
   border-color: rgba(99, 102, 241, 0.64);
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
-}
-
-.nav-search-btn {
-  position: absolute;
-  top: 50%;
-  right: 6px;
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-sm);
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transform: translateY(-50%);
 }
 
 .nav-user {

@@ -1253,22 +1253,6 @@ function setRemoteAgentButtonsDisabled(disabled) {
 
 function updateAgentStatusIndicator(connected, firewallBlocked) {
     const el = document.getElementById('agent-status');
-    const menuDot = document.getElementById('agent-menu-dot');
-    const menuSubtitle = document.getElementById('agent-menu-subtitle');
-
-    if (menuDot) {
-        menuDot.className = 'agent-menu-dot' + (connected ? (firewallBlocked ? ' warning' : ' connected') : '');
-    }
-    if (menuSubtitle) {
-        if (firewallBlocked) {
-            menuSubtitle.textContent = 'Agent started, HTTP blocked';
-        } else if (connected) {
-            menuSubtitle.textContent = 'Connected to remote metrics';
-        } else {
-            const host = remoteEndpointHost();
-            menuSubtitle.textContent = host ? 'Manage agent for ' + host : 'No remote endpoint attached';
-        }
-    }
     if (el) updateAgentStatusPill(el, connected, firewallBlocked);
 }
 
