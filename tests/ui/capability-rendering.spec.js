@@ -129,7 +129,9 @@ test.describe('modal controls', () => {
 
   test('configuration explains local executable, GPU, and explicit SSH flow', async ({ page }) => {
     await page.getByRole('button', { name: /settings/i }).first().click();
+    await expect(page.locator('#settings-modal')).toHaveClass(/open/);
     await page.getByRole('button', { name: 'Advanced' }).click();
+    await expect(page.locator('#settings-advanced')).toBeVisible();
     await page.getByRole('button', { name: /open runtime configuration/i }).click();
 
     await expect(page.locator('#config-modal')).toHaveClass(/open/);
@@ -170,7 +172,9 @@ test.describe('modal controls', () => {
     });
 
     await page.getByRole('button', { name: /settings/i }).first().click();
+    await expect(page.locator('#settings-modal')).toHaveClass(/open/);
     await page.getByRole('button', { name: 'Advanced' }).click();
+    await expect(page.locator('#settings-advanced')).toBeVisible();
     await page.getByRole('button', { name: /open runtime configuration/i }).click();
     await page.getByRole('button', { name: 'Guided SSH Setup' }).click();
     await page.locator('#ssh-guide-host').fill('192.0.2.16');
@@ -210,7 +214,9 @@ test.describe('modal controls', () => {
     });
 
     await page.getByRole('button', { name: /settings/i }).first().click();
+    await expect(page.locator('#settings-modal')).toHaveClass(/open/);
     await page.getByRole('button', { name: 'Advanced' }).click();
+    await expect(page.locator('#settings-advanced')).toBeVisible();
     await page.getByRole('button', { name: /open runtime configuration/i }).click();
     await page.getByText('SSH and Agent Details').click();
     await page.locator('#set-remote-agent-ssh-target').fill('user@192.0.2.16');

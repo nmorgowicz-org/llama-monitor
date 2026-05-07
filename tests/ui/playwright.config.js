@@ -10,8 +10,10 @@ const config = {
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: process.env.LLAMA_MONITOR_UI_URL || 'http://127.0.0.1:7778',
+    actionTimeout: 15000,
     screenshot: 'only-on-failure',
     trace: 'on-first-retry',
+    reducedMotion: 'reduce',
   },
   webServer: process.env.LLAMA_MONITOR_UI_URL ? undefined : {
     // Wrapper script creates a fresh temp config dir so tests run with a clean slate,

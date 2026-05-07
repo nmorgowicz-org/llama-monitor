@@ -1,18 +1,55 @@
-# WebSocket Schema
+# Real-Time Communication
 
-The WebSocket endpoint streams the full dashboard state to every connected client every 500 ms.
+Llama Monitor uses a WebSocket connection to push live dashboard state from the server to the browser. The connection is supplemented by client-side network quality detection that can auto-adjust polling intervals.
 
-## Connection
+## WebSocket Connection
 
 ```
 ws://localhost:7778/ws
 ```
 
-The server pushes messages on a fixed 500 ms interval. The client never sends messages; the connection is receive-only. When no active session exists the server waits silently until one is established before resuming pushes.
+The server pushes messages on a configurable interval (default 500ms). The client never sends messages; the connection is receive-only. When no active session exists, the server waits silently until one is established before resuming pushes.
+
+### Polling Interval
+
+Configurable from 200ms to 10s via Settings > Performance. The interval controls how often the server pushes updated metrics to all connected clients.
+
+| Interval | Use Case |
+|----------|----------|
+| 200ms | Maximum responsiveness, higher CPU/network usage |
+| 500ms | Default — balanced responsiveness and resource usage |
+| 1000ms | Moderate updates, lower resource usage |
+| 2000ms+ | Slow networks, minimal resource usage |
+
+## Network Quality Detection
+
+The browser's [Network Information API](https://developer.mozilla.org/en-US/docs/Web/API/NetworkInformation) is used to detect connection quality and suggest appropriate polling intervals.
+
+### Auto-Detection Mapping
+
+| Connection Type | Auto Interval | Label |
+|----------------|---------------|-------|
+| `slow-2g` | 5000ms | Very Slow (2G) |
+| `2g` | 5000ms | Slow (2G) |
+| `3g` | 2000ms | Moderate (3G) |
+| `4g` | 500ms | Good (4G) |
+| `saveData` enabled | 2000ms | Data Saver |
+| RTT > 500ms | 5000ms | High Latency |
+| RTT > 300ms | 2000ms | Moderate Latency |
+| RTT > 100ms | 1000ms | Elevated Latency |
+| Unknown / API unavailable | 500ms | Detected |
+
+When a slow network is detected, the dashboard shows a toast notification suggesting the user adjust the polling rate. The suggestion is shown once per session.
+
+### Browser Support
+
+The Network Information API is supported in Chromium-based browsers (Chrome, Edge, Brave). Firefox and Safari fall back to the default 500ms interval. The API is optional — the dashboard works normally without it.
 
 ---
 
-## Top-Level Message Shape
+## WebSocket Message Schema
+
+### Top-Level Message Shape
 
 ```json
 {
@@ -32,7 +69,7 @@ The server pushes messages on a fixed 500 ms interval. The client never sends me
   "remote_agent_url":          "http://...",
   "capabilities":              { ...MetricsCapabilities },
   "endpoint_kind":             "Local" | "Remote" | "Unknown",
-  "session_kind":              "spawn" | "attach" | "none",  // lowercase from Serde #[serde(rename_all = "lowercase")]
+  "session_kind":              "spawn" | "attach" | "none",
   "availability": {
     "system":   "Available" | "RemoteEndpoint" | ...,
     "gpu":      "Available" | "BackendUnavailable" | ...,
@@ -41,12 +78,10 @@ The server pushes messages on a fixed 500 ms interval. The client never sends me
 }
 ```
 
-`system` is `null` when `host_metrics_available` is false.  
+`system` is `null` when `host_metrics_available` is false.
 `gpu` is an empty object (`{}`) when `host_metrics_available` is false.
 
----
-
-## LlamaMetrics (`llama`)
+### LlamaMetrics (`llama`)
 
 Populated by polling the llama.cpp server's `/metrics`, `/slots`, and `/v1/models` endpoints.
 
@@ -84,7 +119,7 @@ Populated by polling the llama.cpp server's `/metrics`, `/slots`, and `/v1/model
 | `model_ctx_train` | `u64 \| null` | Training context length from model metadata |
 | `slots` | `SlotSnapshot[]` | Per-slot detail (see below) |
 
-### SlotSnapshot
+#### SlotSnapshot
 
 One entry per slot returned by `/slots`.
 
@@ -100,16 +135,14 @@ One entry per slot returned by `/slots`.
 | `output_active` | `bool` | Generation in progress on this slot |
 | `output_available` | `bool` | True when `next_token` progress data present |
 | `context_live_tokens` | `u64 \| null` | Current KV cache tokens for this slot |
-| `context_live_tokens_source` | `string \| null` | Source field name (see `context_live_tokens_source` above) |
+| `context_live_tokens_source` | `string \| null` | Source field name |
 | `speculative_enabled` | `bool` | Whether speculative decoding is active |
 | `speculative_type` | `string \| null` | e.g. `"ngram_map_k"` |
 | `speculative_config` | `{label, value}[]` | Speculative decoding parameters |
 | `sampler_stack` | `string[]` | Active sampler names in order |
 | `sampler_config` | `{label, value}[]` | Key sampler parameter values |
 
----
-
-## GpuMetrics (`gpu`)
+### GpuMetrics (`gpu`)
 
 Empty object when `host_metrics_available` is false.
 
@@ -126,9 +159,7 @@ Empty object when `host_metrics_available` is false.
 
 `gpu` is a `BTreeMap<String, GpuMetrics>` keyed by device name (e.g. `"Apple M3 Max"`). Most setups have a single key.
 
----
-
-## SystemMetrics (`system`)
+### SystemMetrics (`system`)
 
 `null` when `host_metrics_available` is false.
 
@@ -143,9 +174,7 @@ Empty object when `host_metrics_available` is false.
 | `ram_used_gb` | `f64` | RAM in use (GB) |
 | `motherboard` | `string` | Board name (empty string when unavailable) |
 
----
-
-## Availability Reasons
+### Availability Reasons
 
 Used in `availability.system`, `availability.gpu`, and `availability.cpu_temp`.
 
@@ -155,20 +184,18 @@ Used in `availability.system`, `availability.gpu`, and `availability.cpu_temp`.
 | `"RemoteEndpoint"` | No host metrics over remote connection without agent |
 | `"NoDisplay"` | No graphical session (headless system) |
 | `"TrayUnavailable"` | Tray not supported on this build |
-| `"SensorUnavailable` | Hardware sensor not present |
+| `"SensorUnavailable"` | Hardware sensor not present |
 | `"BackendUnavailable"` | GPU backend not detected |
-| `"CommandMissing` | Required system utility not installed |
+| `"CommandMissing"` | Required system utility not installed |
 | `"PermissionDenied"` | Insufficient OS permissions |
-| `"MetricsUnreachable` | Metrics endpoint not responding |
+| `"MetricsUnreachable"` | Metrics endpoint not responding |
 | `"NotApplicable"` | Metric does not apply in this configuration |
 
-**Note:** The enum values are PascalCase strings (e.g., `"Available"` not `"available"`).
+**Note:** Enum values are PascalCase strings (e.g., `"Available"` not `"available"`).
 
----
+### Notes
 
-## Notes
-
-- **Push interval:** 500 ms fixed. There is no on-demand request mechanism.
+- **Push interval:** Configurable via Settings > Performance (200ms to 10s). Default 500ms.
 - **Host metrics gating:** `gpu` and `system` are only populated when `host_metrics_available` is `true`. This is true for local spawn/attach sessions and remote sessions where the remote agent is connected.
-- **Context live tokens:** `context_live_tokens_available` is only `true` when the llama.cpp server exposes per-slot token counts (`n_tokens`, `n_past`, `n_ctx_used`, or `n_cache_tokens` in the `/slots` response). Many servers expose `n_ctx` (capacity) but not current usage.
+- **Context live tokens:** `context_live_tokens_available` is only `true` when the llama.cpp server exposes per-slot token counts. Many servers expose `n_ctx` (capacity) but not current usage.
 - **kv_cache_* fields:** Internal fields on the Rust side. They are NOT serialized into the WebSocket message; only the `context_*` equivalents are.
