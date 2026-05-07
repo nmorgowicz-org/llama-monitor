@@ -348,8 +348,6 @@
     inset 0 -1px 0 rgba(0, 0, 0, 0.2),
     inset 0 40px 60px -20px rgba(99, 102, 241, 0.04);
   transition: border-color 250ms ease, box-shadow 250ms ease, transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
-  animation: settings-field-float 4s ease-in-out infinite;
-  animation-delay: var(--field-float-delay, 0s);
 }
 
 #settings-modal .settings-pane > .modal-field::before {
@@ -391,18 +389,6 @@
     inset 0 -1px 0 rgba(0, 0, 0, 0.25);
   transform: translateY(-2px);
 }
-
-@keyframes settings-field-float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-1.5px); }
-}
-
-/* Per-field staggered float animation delays */
-#settings-modal .settings-pane > .modal-field:nth-child(1) { --field-float-delay: 0s; }
-#settings-modal .settings-pane > .modal-field:nth-child(2) { --field-float-delay: 0.4s; }
-#settings-modal .settings-pane > .modal-field:nth-child(3) { --field-float-delay: 0.8s; }
-#settings-modal .settings-pane > .modal-field:nth-child(4) { --field-float-delay: 1.2s; }
-#settings-modal .settings-pane > .modal-field:nth-child(5) { --field-float-delay: 1.6s; }
 
 /* Per-pane accent colors for top-line gradient */
 #settings-session > .modal-field::before {
@@ -879,7 +865,6 @@
   backdrop-filter: blur(12px);
   overflow: hidden;
   transition: border-color 250ms ease, box-shadow 250ms ease, transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
-  animation: settings-section-float 5s ease-in-out infinite;
 }
 
 #settings-modal .modal-section::before {
@@ -920,11 +905,6 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.08),
     inset 0 -1px 0 rgba(0, 0, 0, 0.25);
   transform: translateY(-2px);
-}
-
-@keyframes settings-section-float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-1.5px); }
 }
 
 #settings-modal .modal-section h3 {
