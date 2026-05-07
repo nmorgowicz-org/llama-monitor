@@ -530,7 +530,7 @@ function buildMessageElement(msg, idx, allMessages) {
                 const curIdx = msg._variantIndex || 0;
                 const total = variants.length || 1;
                 const canGoLeft = variants.length > 1 && curIdx > 0;
-                const canGoRight = variants.length > 1 ? curIdx < variants.length - 1 : true;
+                const canGoRight = true;
                 return `
             <button class="chat-action-btn" data-chat-action="nav-variant" data-variant-dir="-1" title="Previous response" ${canGoLeft ? '' : 'disabled'}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -694,7 +694,7 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
         const variantIdx = msg?._variantIndex || 0;
         const total = msgVariants.length || 1;
         const canGoLeft = msgVariants.length > 1 && variantIdx > 0;
-        const canGoRight = msgVariants.length > 1 ? variantIdx < msgVariants.length - 1 : true;
+        const canGoRight = true;
 
         // eslint-disable-next-line no-unsanitized/property -- hardcoded SVG action buttons; variant counts are numeric; disabled attribute is boolean
         actions.innerHTML = `
