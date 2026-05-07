@@ -83,6 +83,75 @@ The telemetry panel can float as a popover or pin inline below the chat toolbar.
 ![Chat Telemetry](../screenshots/03b-chat-telemetry.png)
 ![Chat Telemetry Pinned](../screenshots/03c-chat-telemetry-pinned.png)
 
+## Chat Style
+
+The style panel (gear icon in chat header) controls the visual appearance of messages.
+
+| Style | Description |
+|-------|-------------|
+| **Rounded** | Default — rounded message bubbles with subtle shadows |
+| **Compact** | Tighter spacing, thinner borders, reduced padding |
+| **Minimal** | Flat design, no shadows, minimal chrome |
+| **Bubbly** | Larger bubbles with gradient backgrounds |
+
+Style selection persists in `localStorage` key `llama-monitor-chat-style`.
+
+### Font Scaling
+
+Adjust message font size from 70% to 150% in 10% increments via the style panel. Stored as CSS variable `--chat-font-scale`.
+
+### Date Format
+
+Control how timestamps appear on messages via Settings > Appearance > Date Format:
+
+| Format | Example |
+|--------|---------|
+| `MM/DD/YY` | 05/06/26 |
+| `DD/MM/YY` | 06/05/26 |
+| `YYYY-MM-DD` | 2026-05-06 |
+| `locale` | Browser locale default |
+
+### Enter Behavior
+
+Toggle whether Enter sends the message or inserts a newline. When off, use Ctrl+Enter to send. Persists per-user in preferences.
+
+## Model Parameters (Extended)
+
+Additional per-tab parameters beyond the core sampling controls:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `stream_timeout` | 120s | Maximum time to wait for a streaming response before timing out |
+
+## Context Compaction (Extended)
+
+Two compaction modes control how the chat recovers from full context windows:
+
+| Mode | Behavior |
+|------|----------|
+| **Percent** | Triggers when context usage exceeds a configurable threshold (default 80%) |
+| **Optimized** | Triggers when fewer than 25,000 tokens remain in the context window |
+
+- **Auto-summarize** — When enabled, dropped messages are sent to the LLM for summarization instead of simple truncation
+- **Threshold slider** — Adjust auto-compact trigger from 0% to 100% per tab
+- **Context pressure bar** — Visual indicator in the chat header showing current context usage
+
+## Message Management
+
+| Feature | Description |
+|---------|-------------|
+| **Message limit** | Control how many messages are rendered (5–200, default 15). Tabs with long conversations render only the most recent N messages; click "Load More" for older batches |
+| **Copy settings** | Copy system prompt and model parameters from any other tab to the active tab via the copy settings dropdown |
+| **AI/You names** | Customize the display names for assistant and user roles per tab |
+| **Tab trash** | Deleted tabs are retained for 24 hours and can be restored via the tab trash menu |
+
+## Export & Import
+
+| Format | Export | Import |
+|--------|--------|--------|
+| **Markdown** | Formats as `**Role**: content` blocks with token counts and timestamps | Parses role/content pairs and appends to active tab |
+| **JSON** | Raw message array as `{tab-name}.json` | Parses `{role, content}` objects and appends to active tab |
+
 ## Data Flow
 
 ```

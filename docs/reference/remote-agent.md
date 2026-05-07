@@ -46,8 +46,23 @@ The dashboard can manage the agent lifecycle on remote machines over SSH:
 
 1. Open Settings > Advanced > Remote Agent
 2. Enter SSH target (`user@host`) and optionally a custom command
-3. The dashboard builds a structured target without contacting the host
-4. Guided setup walks through install, start, and verification
+3. Scan host key to verify server identity (see SSH Host Key Verification below)
+4. Guided setup walks through install, start, and verification with a progress bar
+
+### Guided Setup Wizard
+
+The remote agent setup wizard automates the full installation process:
+
+1. **Enter SSH host** — Target `user@host` and port
+2. **Scan host key** — Establishes TCP connection, performs SSH handshake, extracts host key fingerprint
+3. **Trust key** — Persists fingerprint to local trusted host store
+4. **Detect OS/arch** — Identifies remote platform for correct binary download
+5. **Download release** — Fetches matching binary from GitHub releases
+6. **SCP install** — Transfers binary to remote host
+7. **Start agent** — Launches agent process in background
+8. **Verify health** — Confirms agent HTTP endpoint is reachable
+
+The wizard shows a scrollable progress log and auto-trusts the host key during install. Agent tokens from detect/start responses are auto-saved.
 
 ### Auto-Start
 
@@ -86,6 +101,25 @@ On the dashboard side:
 | `--remote-agent-ssh-target` | SSH target for autostart (`user@host`) |
 | `--remote-agent-ssh-command` | Custom remote command to start the agent |
 
+## SSH Host Key Verification
+
+Llama Monitor verifies remote server identity before establishing SSH connections, protecting against man-in-the-middle attacks:
+
+1. **Scan** — Click the scan button to open a TCP connection, perform an SSH handshake, and extract the host key
+2. **Fingerprint** — The key is displayed as colon-separated hex (e.g., `aa:bb:cc:...`)
+3. **Trust** — Click Trust to persist the fingerprint in the local trusted host store (`host:port` keyed)
+4. **Verification** — On subsequent connections, the actual key is compared against the trusted key using constant-time comparison
+5. **Mismatch** — If a trusted key exists but doesn't match, the connection is rejected with "SSH host key changed"
+6. **Untrusted** — If no trusted key exists, the connection is rejected with a prompt to use the guided setup
+
+## Firewall Detection
+
+The dashboard detects when the remote agent is running but its HTTP port is unreachable:
+
+- **Detection** — Agent process is connected (SSH tunnel works) but health endpoint on port 7779 is unreachable
+- **UI** — Warning alert: "Firewall Blocking Agent — Agent running but HTTP port 7779 unreachable — check Windows Firewall inbound rules"
+- **Priority** — Firewall warning takes priority over "not connected" status but lower priority than "update available"
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -94,6 +128,7 @@ On the dashboard side:
 | Status pill orange (Limited) | Agent connected but sensors unavailable | Check GPU tools are installed |
 | Temperature unavailable on Windows | `sensor_bridge.exe` not running | Dashboard shows Fix button to start it |
 | "Firewall blocked" | Agent started but HTTP port blocked | Open agent port in firewall |
+| SSH host key changed | Remote server key differs from trusted key | Re-scan and re-trust the host key |
 | Update available | Installed version behind latest | Click indicator to upgrade |
 
 ## Benefits
