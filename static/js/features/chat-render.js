@@ -594,7 +594,7 @@ export function appendAssistantPlaceholder() {
         </div>
       </div>`;
     container.appendChild(wrapper);
-    chatScroll(true);
+    chatScroll(false);
     return wrapper;
 }
 
@@ -941,11 +941,12 @@ function saveMessageEdit(btn) {
         tab.updated_at = Date.now();
         scheduleChatPersist();
     }
-    renderChatMessages();
+    // Do not re-render if AI is busy (would wipe streaming message from DOM)
+    if (!chat.busy) renderChatMessages();
 }
 
 function cancelMessageEdit(btn) {
-    renderChatMessages();
+    if (!chat.busy) renderChatMessages();
 }
 
 function deleteMessage(btn) {
@@ -957,8 +958,9 @@ function deleteMessage(btn) {
 
     tab.messages.splice(msgIdx, 1);
     tab.updated_at = Date.now();
-    renderChatMessages();
     scheduleChatPersist();
+    // Do not re-render if AI is busy (would wipe streaming message from DOM)
+    if (!chat.busy) renderChatMessages();
 }
 
 function openTimeoutSetting() {
