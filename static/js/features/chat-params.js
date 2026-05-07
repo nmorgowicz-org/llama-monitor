@@ -9,6 +9,7 @@ import {
     scheduleChatPersist,
     updateChatName,
 } from './chat-state.js';
+import { saveSettings } from './settings.js';
 import { exportChatTab, importChatTab, renderChatMessages } from './chat-render.js';
 import { fetchSummary, sendChat } from './chat-transport.js';
 import { renderPersonaStrip } from './chat-render.js';
@@ -909,13 +910,6 @@ function initChatResizeHandle() {
     
     if (!inputRowEl || !textareaEl) return;
     
-    // Restore saved height
-    const savedHeight = localStorage.getItem('llama-monitor-input-height');
-    if (savedHeight) {
-        textareaEl.style.height = savedHeight;
-        updateResizeHandleUI();
-    }
-    
     handle.addEventListener('mousedown', startResize);
     document.addEventListener('mousemove', doResize);
     document.addEventListener('mouseup', stopResize);
@@ -952,9 +946,7 @@ function stopResize() {
     isResizing = false;
     const handle = document.getElementById('chat-resize-handle');
     if (handle) handle.classList.remove('active');
-    if (textareaEl) {
-        localStorage.setItem('llama-monitor-input-height', textareaEl.style.height || '42px');
-    }
+    saveSettings();
 }
 
 function updateResizeHandleUI() {
@@ -972,8 +964,8 @@ export function resetChatInputHeight() {
     if (textareaEl) {
         textareaEl.style.height = '';
         textareaEl.rows = 1;
-        localStorage.removeItem('llama-monitor-input-height');
         updateResizeHandleUI();
+        saveSettings();
     }
 }
 
