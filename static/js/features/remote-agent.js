@@ -1840,8 +1840,7 @@ function updateRemoteAgentPanelState(data) {
 
     const updateIndicator = document.getElementById('remote-agent-update-indicator');
     if (updateIndicator) {
-        updateIndicator.style.display = isUpdateAvailable ? 'inline' : 'none';
-        updateIndicator.textContent = '\u25cf Update available';
+        updateIndicator.style.display = isUpdateAvailable ? 'flex' : 'none';
         updateIndicator.style.color = '#ebcb8b';
     }
 
