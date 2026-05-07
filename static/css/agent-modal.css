@@ -924,7 +924,7 @@
 }
 
 .agent-setup-section:hover {
-  animation: none;
+  animation-play-state: paused;
   transform: translateY(-2px) scale(1.005);
 }
 
