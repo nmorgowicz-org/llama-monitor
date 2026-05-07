@@ -712,8 +712,8 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                                             if should_check {
                                                 match latest_release_info().await {
                                                     Ok(latest) => {
-                                                        let needs_update =
-                                                            version_str != latest.tag_name;
+                                                        let latest_ver = latest.tag_name.strip_prefix('v').unwrap_or(&latest.tag_name);
+                                                        let needs_update = version_str != latest_ver;
                                                         let mut update_avail = state
                                                             .remote_agent_update_available
                                                             .lock()
