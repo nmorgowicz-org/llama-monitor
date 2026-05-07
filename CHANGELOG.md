@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.15.0...v0.16.0) (2026-05-07)
+
+
+### Features
+
+* add automatic network quality detection with polling adjustment ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* add configurable dashboard WebSocket refresh rate (200ms-10s) ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **agent:** add remote agent upgrade flow with host key and OS detection ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **agent:** add remote agent version tracking and update detection ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **ui:** add chat telemetry popover with pin-to-inline toggle, throughput bars, context ring, and activity rail ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **ui:** add nav cockpit with live inference state, throughput, context pressure, GPU temp, and sparkline ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **ui:** add Performance settings tab with refresh rate and network indicator ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **ui:** elevate dashboard with ambient gradient orbs, typography hierarchy, and gap token standardization ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **ui:** refresh agent and settings modal styling with widget-card treatment ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+
+
+### Bug Fixes
+
+* **agent:** log update available message only once on state transition ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **agent:** only check GitHub releases once per session to prevent rate limit errors ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **chat:** align chat tabs and accents with dashboard styling ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **ui:** add prefers-reduced-motion overrides for all dashboard animations ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **ui:** convert hardcoded Nord colors to CSS variables with light theme coverage ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **ui:** correct GPU core clock color mapping across clock visuals ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **ui:** fix spawn local server button on logs empty state ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **ui:** improve sparkline visibility and stabilize validation captures ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **ui:** reserve warning styling for health states instead of normal utilization spikes ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+* **ui:** standardize dashboard metric cards around a shared surface palette ([b725c81](https://github.com/nmorgowicz-org/llama-monitor/commit/b725c81a1c85315fe068d90a09f9fff06377e972))
+
 ## [0.15.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.14.0...v0.15.0) (2026-05-05)
 
 
