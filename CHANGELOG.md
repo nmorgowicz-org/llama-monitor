@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.16.0...v0.17.0) (2026-05-07)
+
+
+### Features
+
+* **agent:** add quick upgrade button to remote agent update indicator ([27618bf](https://github.com/nmorgowicz-org/llama-monitor/commit/27618bf3ad70bc0355446ca4efd9c7e25548b6db))
+* **ui:** add breathing glow to chat telemetry trigger button ([27618bf](https://github.com/nmorgowicz-org/llama-monitor/commit/27618bf3ad70bc0355446ca4efd9c7e25548b6db))
+
+
+### Bug Fixes
+
+* **agent:** normalize version comparison to strip v prefix from GitHub tag ([27618bf](https://github.com/nmorgowicz-org/llama-monitor/commit/27618bf3ad70bc0355446ca4efd9c7e25548b6db))
+* **ui:** pause infinite animations on hover instead of stopping them ([27618bf](https://github.com/nmorgowicz-org/llama-monitor/commit/27618bf3ad70bc0355446ca4efd9c7e25548b6db))
+
 ## [0.16.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.15.0...v0.16.0) (2026-05-07)
 
 
