@@ -147,27 +147,28 @@
   }
 }
 
-/* Hero Section — modern widget-card styling */
+/* Hero Section — matches section card styling */
 .agent-setup-hero {
   display: grid;
   gap: 14px;
-  padding: 22px;
+  padding: 20px;
   margin-bottom: 18px;
   border-radius: var(--radius-card);
   background:
-    radial-gradient(circle at 84% 16%, rgba(129, 140, 248, 0.11), transparent 22%),
-    radial-gradient(circle at 12% 88%, rgba(99, 102, 241, 0.07), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.014));
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.04), transparent 22%),
+    linear-gradient(145deg, rgba(40, 48, 58, 0.94), rgba(27, 33, 41, 0.99));
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
     0 16px 40px rgba(0, 0, 0, 0.36),
     0 4px 16px rgba(0, 0, 0, 0.28),
     inset 0 1px 0 rgba(255, 255, 255, 0.06),
     inset 0 -1px 0 rgba(0, 0, 0, 0.2),
-    inset 0 40px 60px -20px rgba(99, 102, 241, 0.04);
-  position: relative;
+    inset 0 36px 80px -38px rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
   overflow: hidden;
+  position: relative;
   transition: border-color 250ms ease, box-shadow 250ms ease, transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: section-fade-in 0.4s ease forwards;
 }
 
 .agent-setup-hero::before {
@@ -177,21 +178,37 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.45), transparent);
+  background: linear-gradient(90deg, transparent, rgba(136, 192, 209, 0.5), transparent);
 }
 
 .agent-setup-hero::after {
   content: '';
   position: absolute;
-  inset: -50%;
-  background: linear-gradient(120deg, transparent 30%, rgba(136, 192, 209, 0.08) 50%, transparent 70%);
-  animation: hero-sweep 3s ease-in-out infinite;
+  inset: 0;
+  border-radius: var(--radius-card);
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), transparent 40%, transparent 60%, rgba(99, 102, 241, 0.15));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 250ms ease;
   pointer-events: none;
 }
 
-@keyframes hero-sweep {
-  0%, 100% { transform: translateX(-100%) translateY(-20%); }
-  50% { transform: translateX(100%) translateY(20%); }
+.agent-setup-hero:hover::after {
+  opacity: 1;
+}
+
+.agent-setup-hero:hover {
+  border-color: rgba(99, 102, 241, 0.45);
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.45),
+    0 4px 16px rgba(0, 0, 0, 0.32),
+    0 0 40px rgba(99, 102, 241, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+  transform: translateY(-2px) scale(1.005);
 }
 
 .agent-setup-hero-icon {
@@ -201,14 +218,8 @@
   height: 48px;
   margin: 0 auto;
   border-radius: 50%;
-  background: linear-gradient(135deg, rgba(136, 192, 209, 0.15), rgba(143, 188, 187, 0.12));
-  box-shadow: 0 0 30px rgba(136, 192, 209, 0.25), inset 0 0 0 1px rgba(136, 192, 209, 0.2);
-  animation: hero-icon-pulse 2s ease-in-out infinite;
-}
-
-@keyframes hero-icon-pulse {
-  0%, 100% { transform: scale(1); box-shadow: 0 0 30px rgba(136, 192, 209, 0.25), inset 0 0 0 1px rgba(136, 192, 209, 0.2); }
-  50% { transform: scale(1.05); box-shadow: 0 0 40px rgba(136, 192, 209, 0.35), inset 0 0 0 1px rgba(136, 192, 209, 0.3); }
+  background: linear-gradient(135deg, rgba(136, 192, 209, 0.12), rgba(143, 188, 187, 0.08));
+  border: 1px solid rgba(136, 192, 209, 0.15);
 }
 
 .agent-setup-hero-icon svg {
@@ -223,8 +234,6 @@
   color: #88c0d1;
   font-size: 1.05rem;
   font-weight: 750;
-  position: relative;
-  z-index: 1;
 }
 
 .agent-setup-hero-desc {
@@ -233,8 +242,6 @@
   color: var(--color-text-muted);
   font-size: var(--text-sm);
   line-height: 1.55;
-  position: relative;
-  z-index: 1;
 }
 
 .agent-endpoint-url {
@@ -924,7 +931,7 @@
 }
 
 .agent-setup-section:hover {
-  animation: none;
+  animation-play-state: paused;
   transform: translateY(-2px) scale(1.005);
 }
 
@@ -980,9 +987,8 @@
 
 [data-theme="light"] .agent-setup-hero {
   background:
-    radial-gradient(circle at 84% 16%, rgba(99, 102, 241, 0.06), transparent 22%),
-    radial-gradient(circle at 12% 88%, rgba(99, 102, 241, 0.04), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(248, 250, 252, 0.7));
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 22%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(240, 244, 248, 0.9));
   border-color: rgba(17, 24, 39, 0.08);
   box-shadow:
     0 12px 32px rgba(15, 23, 42, 0.08),

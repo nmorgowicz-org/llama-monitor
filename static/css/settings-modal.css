@@ -1019,7 +1019,7 @@
   background: linear-gradient(160deg, #7577f5 0%, #9b6ff7 52%, #12c4dc 100%);
   box-shadow: 0 4px 20px rgba(99, 102, 241, 0.45);
   transform: translateY(-1px);
-  animation: none;
+  animation-play-state: paused;
 }
 
 #settings-modal .btn-modal-save:active {

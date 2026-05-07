@@ -2000,6 +2000,13 @@ export function initRemoteAgent() {
     document.getElementById('btn-remote-agent-install')?.addEventListener('click', remoteAgentInstall);
     document.getElementById('btn-remote-agent-start')?.addEventListener('click', remoteAgentStart);
     document.getElementById('btn-remote-agent-update')?.addEventListener('click', remoteAgentUpdate);
+    document.getElementById('btn-remote-agent-quick-update')?.addEventListener('click', e => {
+        e.stopPropagation();
+        document.getElementById('btn-remote-agent-update')?.click();
+        setTimeout(() => {
+            document.getElementById('remote-agent-progress')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 200);
+    });
     document.getElementById('btn-remote-agent-stop')?.addEventListener('click', remoteAgentStop);
     document.getElementById('btn-remote-agent-restart')?.addEventListener('click', remoteAgentRestart);
     document.getElementById('btn-remote-agent-remove')?.addEventListener('click', remoteAgentRemove);

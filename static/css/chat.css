@@ -285,40 +285,67 @@
   justify-content: center;
   width: 30px;
   height: 30px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(136, 192, 209, 0.2);
   border-radius: 8px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
-  color: var(--text-muted);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(136, 192, 209, 0.08), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+  backdrop-filter: blur(8px);
+  color: #88c0d1;
   cursor: pointer;
   transition: all 0.18s ease;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 0 8px rgba(136, 192, 209, 0.06);
+  animation: telemetry-btn-breathe 3s ease-in-out infinite;
+}
+@keyframes telemetry-btn-breathe {
+  0%, 100% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 8px rgba(136, 192, 209, 0.06); }
+  50% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 14px rgba(136, 192, 209, 0.12); }
 }
 .chat-telemetry-trigger::after {
   content: '';
   position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 5px;
-  height: 5px;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
   border-radius: 999px;
   background: currentColor;
-  opacity: 0.45;
+  opacity: 0.7;
+  box-shadow: 0 0 4px currentColor;
 }
 .chat-telemetry-trigger:hover,
 .chat-telemetry-trigger[aria-expanded="true"] {
-  color: var(--text-primary);
-  border-color: rgba(255, 255, 255, 0.12);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.035) 100%);
+  color: #d8dee9;
+  border-color: rgba(136, 192, 209, 0.4);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(136, 192, 209, 0.14), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.04) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 0 16px rgba(136, 192, 209, 0.18);
 }
 .chat-telemetry-trigger.idle {
-  color: #8c96a8;
+  color: #88c0d1;
 }
 .chat-telemetry-trigger.live {
   color: #67e8f9;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 14px rgba(103, 232, 249, 0.12);
+  border-color: rgba(103, 232, 249, 0.35);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(103, 232, 249, 0.12), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 0 10px rgba(103, 232, 249, 0.15);
+  animation: telemetry-btn-live 2s ease-in-out infinite;
+}
+@keyframes telemetry-btn-live {
+  0%, 100% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 10px rgba(103, 232, 249, 0.15); }
+  50% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 16px rgba(103, 232, 249, 0.25); }
 }
 .chat-telemetry-trigger.live::after {
-  opacity: 0.95;
+  opacity: 1;
   box-shadow: 0 0 8px currentColor;
   animation: dot-pulse 1.7s ease-in-out infinite;
 }
@@ -2302,7 +2329,37 @@
 [data-theme="light"] .chat-telemetry-context-ring {
   --chat-telemetry-context-core: rgba(255, 255, 255, 0.92);
 }
-[data-theme="light"] .chat-telemetry-trigger,
+[data-theme="light"] .chat-telemetry-trigger {
+  border-color: rgba(56, 120, 180, 0.2);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(56, 120, 180, 0.08), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.8) 0%, rgba(240, 244, 248, 0.7) 100%);
+  color: #3878b4;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 0 8px rgba(56, 120, 180, 0.06);
+}
+[data-theme="light"] .chat-telemetry-trigger::after {
+  background: currentColor;
+  box-shadow: 0 0 4px currentColor;
+}
+[data-theme="light"] .chat-telemetry-trigger:hover {
+  border-color: rgba(56, 120, 180, 0.4);
+  color: #1e293b;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    0 0 16px rgba(56, 120, 180, 0.15);
+}
+[data-theme="light"] .chat-telemetry-trigger.live {
+  border-color: rgba(14, 165, 233, 0.35);
+  color: #0ea5e9;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(14, 165, 233, 0.1), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.8) 0%, rgba(240, 244, 248, 0.7) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    0 0 10px rgba(14, 165, 233, 0.15);
+}
 [data-theme="light"] .chat-telemetry-popover {
   border-color: rgba(0, 0, 0, 0.08);
 }
@@ -2411,8 +2468,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .chat-telemetry-trigger,
+  .chat-telemetry-trigger::after,
   .chat-telemetry-mini-fill {
-    transition: none !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

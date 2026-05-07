@@ -1165,7 +1165,10 @@
                               <div style="font-size:0.68rem;color:#8899aa;text-transform:uppercase;">Installed</div>
                               <div style="font-family:monospace;font-size:0.85rem;color:#d8dee9;" id="remote-agent-installed-version">Not checked</div>
                           </div>
-                          <div id="remote-agent-update-indicator" style="font-size:0.72rem;color:#ebcb8b;padding:8px 12px;display:none;">● Update available</div>
+                          <div id="remote-agent-update-indicator" style="font-size:0.72rem;color:#ebcb8b;padding:8px 12px;display:none;cursor:pointer;align-items:center;gap:8px;">
+                              <span>● Update available</span>
+                              <button type="button" id="btn-remote-agent-quick-update" class="btn-sm" style="background:#ebcb8b;color:#2e3440;border:none;padding:3px 10px;border-radius:4px;font-size:0.72rem;font-weight:600;cursor:pointer;">Upgrade</button>
+                          </div>
                       </div>
                       
                       <div class="remote-agent-buttons" id="remote-agent-buttons" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">

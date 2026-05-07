@@ -47,5 +47,9 @@ sensor_bridge/publish/
 # Test scripts
 test-*.ps1
 
-# Local troubleshooting scripts
+# Local troubleshooting scripts (build scripts are tracked below)
 scripts/*.sh
+!scripts/build-release-targets.sh
+!scripts/build-single-target.sh
+!scripts/release-preflight.sh
+!scripts/validate-js.sh
