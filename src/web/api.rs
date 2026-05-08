@@ -1722,7 +1722,11 @@ fn parse_suggestions(text: &str) -> Vec<String> {
     let mut suggestions = Vec::new();
 
     for block in blocks {
-        let lines: Vec<&str> = block.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+        let lines: Vec<&str> = block
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect();
         if lines.len() >= 2 {
             // First line is title with emoji, rest is description
             let title = lines[0];
@@ -1770,7 +1774,8 @@ fn parse_suggestions(text: &str) -> Vec<String> {
 
     // Fallback: split by newlines, filter empty and short lines
     if suggestions.is_empty() {
-        suggestions = text.lines()
+        suggestions = text
+            .lines()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty() && s.len() > 2)
             .filter(|s| !s.starts_with('['))

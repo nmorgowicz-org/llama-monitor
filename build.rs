@@ -279,12 +279,21 @@ fn generate_routes(files: &[(String, String, String)], output: &str) {
     // Group routes into chunks and chain them hierarchically
     let total_routes = route_files.len();
     if total_routes == 0 {
-        writeln!(f, "    warp::path({:?}).and(warp::get()).map(|| panic!(\"No routes\"))", "placeholder").unwrap();
+        writeln!(
+            f,
+            "    warp::path({:?}).and(warp::get()).map(|| panic!(\"No routes\"))",
+            "placeholder"
+        )
+        .unwrap();
     } else if total_routes == 1 {
         writeln!(f, "    route_0").unwrap();
     } else {
         // Create a balanced binary tree of .or() chains
-        let mut current_level: Vec<String> = route_files.iter().enumerate().map(|(i, _)| format!("route_{}", i)).collect();
+        let mut current_level: Vec<String> = route_files
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("route_{}", i))
+            .collect();
 
         while current_level.len() > 1 {
             let mut next_level = Vec::new();
