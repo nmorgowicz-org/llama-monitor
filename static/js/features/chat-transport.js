@@ -493,7 +493,7 @@ export function showConnectionLostModal() {
     modal.classList.add('open');
 
     // Wire up buttons
-    document.getElementById('connection-lost-go-welcome-btn')?.addEventListener('click', () => {
+    document.getElementById('connection-lost-go-welcome-btn')?.addEventListener('click', async () => {
         const { switchView } = await import('./setup-view.js');
         switchView('setup');
         closeModal();

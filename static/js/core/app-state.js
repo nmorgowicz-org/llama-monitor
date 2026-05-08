@@ -159,6 +159,7 @@ export const setupViewState = {
     view: 'setup',
     sessionActive: false,
     lastSessionData: null,
+    previousPosition: null,
 };
 
 /** Monitor metrics UI state */

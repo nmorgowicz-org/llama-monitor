@@ -4,7 +4,7 @@
 import { sessionState } from '../core/app-state.js';
 import { updateActiveSessionInfo } from './sessions.js';
 import { showToast } from './toast.js';
-import { hideConnectingState, saveLastSessionData, showConnectingState, switchView } from './setup-view.js';
+import { hideConnectingState, saveLastSessionData, showConnectingState, switchView, restorePreviousPosition } from './setup-view.js';
 import { monitorState } from '../core/app-state.js';
 
 // ── Config ─────────────────────────────────────────────────────────────────────
@@ -79,6 +79,9 @@ export async function doStart() {
     } else {
         switchView('monitor');
         hideConnectingState();
+        
+        // Restore previous position after view switch
+        setTimeout(() => restorePreviousPosition(), 600);
     }
 }
 
@@ -153,6 +156,9 @@ export async function doAttach() {
 
         monitorState.speedMax = { prompt: 0, generation: 0 };
         switchView('monitor');
+        
+        // Restore previous position after view switch
+        setTimeout(() => restorePreviousPosition(), 600);
     }
 
     updateActiveSessionInfo();
