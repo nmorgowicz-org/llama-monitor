@@ -530,7 +530,7 @@ function buildMessageElement(msg, idx, allMessages) {
                 const curIdx = msg._variantIndex || 0;
                 const total = variants.length || 1;
                 const canGoLeft = variants.length > 1 && curIdx > 0;
-                const canGoRight = variants.length > 1 ? curIdx < variants.length - 1 : true;
+                const canGoRight = true;
                 return `
             <button class="chat-action-btn" data-chat-action="nav-variant" data-variant-dir="-1" title="Previous response" ${canGoLeft ? '' : 'disabled'}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -594,7 +594,7 @@ export function appendAssistantPlaceholder() {
         </div>
       </div>`;
     container.appendChild(wrapper);
-    chatScroll(true);
+    chatScroll(false);
     return wrapper;
 }
 
@@ -694,7 +694,7 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
         const variantIdx = msg?._variantIndex || 0;
         const total = msgVariants.length || 1;
         const canGoLeft = msgVariants.length > 1 && variantIdx > 0;
-        const canGoRight = msgVariants.length > 1 ? variantIdx < msgVariants.length - 1 : true;
+        const canGoRight = true;
 
         // eslint-disable-next-line no-unsanitized/property -- hardcoded SVG action buttons; variant counts are numeric; disabled attribute is boolean
         actions.innerHTML = `
@@ -941,11 +941,23 @@ function saveMessageEdit(btn) {
         tab.updated_at = Date.now();
         scheduleChatPersist();
     }
-    renderChatMessages();
+    // Update message in-place (safe during streaming — doesn't wipe other messages)
+    // eslint-disable-next-line no-unsanitized/property -- msg.content is user-editable local data, rendered via trusted renderMd
+    body.innerHTML = typeof renderMd === 'function' ? renderMd(msg.content) : escapeHtml(msg.content);
+    body.classList.add('chat-msg-body-rendered');
 }
 
 function cancelMessageEdit(btn) {
-    renderChatMessages();
+    const msgEl = btn.closest('.chat-message');
+    const body = msgEl.querySelector('.chat-msg-body');
+    const msgIdx = parseInt(msgEl.dataset.msgIdx);
+    const msg = activeChatTab()?.messages[msgIdx];
+    if (msg && body) {
+        // Restore original content in-place (safe during streaming)
+        // eslint-disable-next-line no-unsanitized/property -- msg.content is user-editable local data, rendered via trusted renderMd
+        body.innerHTML = typeof renderMd === 'function' ? renderMd(msg.content) : escapeHtml(msg.content);
+        body.classList.add('chat-msg-body-rendered');
+    }
 }
 
 function deleteMessage(btn) {
@@ -957,8 +969,9 @@ function deleteMessage(btn) {
 
     tab.messages.splice(msgIdx, 1);
     tab.updated_at = Date.now();
-    renderChatMessages();
     scheduleChatPersist();
+    // Do not re-render if AI is busy (would wipe streaming message from DOM)
+    if (!chat.busy) renderChatMessages();
 }
 
 function openTimeoutSetting() {

@@ -111,6 +111,9 @@ pub struct UiSettings {
     /// Presets: 500 (Normal), 1000 (Balanced), 2000 (Battery Saver), 5000 (Slow Connection).
     #[serde(default = "default_ws_push_interval_ms")]
     pub ws_push_interval_ms: u64,
+    /// Persisted chat input textarea height (CSS value, e.g. "80px").
+    #[serde(default)]
+    pub chat_input_height: String,
 }
 
 fn default_ws_push_interval_ms() -> u64 {
@@ -225,6 +228,7 @@ impl Default for UiSettings {
             explicit_mode_policy: String::new(),
             context_card_view: default_context_card_view(),
             ws_push_interval_ms: default_ws_push_interval_ms(),
+            chat_input_height: String::new(),
         }
     }
 }

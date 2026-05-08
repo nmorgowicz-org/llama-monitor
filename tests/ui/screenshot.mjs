@@ -7,7 +7,7 @@ import net from 'net';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const OUTPUT_DIR = join(__dirname, '../../docs/screenshots');
+const OUTPUT_DIR = join(__dirname, '../../docs/screenshots/artifacts');
 
 const REMOTE_SERVER = process.env.REMOTE_SERVER || 'http://192.168.2.16:8001';
 const CHAT_ONLY = process.argv.includes('--chat-only');

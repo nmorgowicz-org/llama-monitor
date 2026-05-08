@@ -57,6 +57,7 @@ export function collectSettings() {
         explicit_mode_policy: document.getElementById('explicit-policy-input')?.value || '',
         context_card_view: document.getElementById('context-view-toggle-fleet')?.classList.contains('active') ? 'fleet' : 'gauge',
         ws_push_interval_ms: resolveWsPushInterval(),
+        chat_input_height: document.getElementById('chat-input')?.style.height || '',
     };
 }
 
@@ -157,6 +158,11 @@ export function applySettings(s) {
     if (s.ws_push_interval_ms !== undefined) {
         const el = document.getElementById('settings-ws-push-interval');
         if (el) el.value = String(s.ws_push_interval_ms);
+    }
+
+    if (s.chat_input_height) {
+        const el = document.getElementById('chat-input');
+        if (el) el.style.height = s.chat_input_height;
     }
 }
 
