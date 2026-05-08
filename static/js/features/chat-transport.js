@@ -150,6 +150,12 @@ export async function sendChatResend(tab) {
 
     if (typeof renderChatMessages === 'function') renderChatMessages();
 
+    // Ensure user is at bottom so auto-scroll works during AI response
+    // Use requestAnimationFrame to ensure DOM is fully updated before scrolling
+    requestAnimationFrame(() => {
+        if (typeof chatScroll === 'function') chatScroll(true);
+    });
+
     _doSendChat(tab);
 }
 
@@ -175,7 +181,10 @@ export async function sendChat() {
     if (typeof renderChatMessages === 'function') renderChatMessages();
 
     // Ensure user is at bottom so auto-scroll works during AI response
-    if (typeof chatScroll === 'function') chatScroll(true);
+    // Use requestAnimationFrame to ensure DOM is fully updated before scrolling
+    requestAnimationFrame(() => {
+        if (typeof chatScroll === 'function') chatScroll(true);
+    });
 
     await _doSendChat(tab);
 }
@@ -331,9 +340,20 @@ export async function _doSendChat(tab) {
                         }
                         if (msgEl && !thinkEl && typeof appendThinkingBlock === 'function') {
                             thinkEl = appendThinkingBlock(msgEl);
+                            // Scroll to show the thinking block as soon as it appears
+                            requestAnimationFrame(() => {
+                                if (typeof chatScroll === 'function') chatScroll(true);
+                            });
                         }
                         if (thinkEl) {
                             thinkEl.querySelector('.chat-thinking-body').textContent = thinkContent;
+                            // Update token count in header
+                            const tokenCountEl = thinkEl.querySelector('.chat-thinking-token-count');
+                            if (tokenCountEl) {
+                                // Rough token count: characters / 4 (average English token)
+                                const tokenCount = Math.round(thinkContent.length / 4);
+                                tokenCountEl.textContent = `(${tokenCount} tokens)`;
+                            }
                         }
                     }
 
@@ -361,6 +381,9 @@ export async function _doSendChat(tab) {
         }
 
     } catch (err) {
+        // Detect connection/network errors (404, 503, network failures, etc.)
+        const isConnectionError = /HTTP (404|503)|Failed to fetch|network/i.test(err.message);
+        
         if (!msgContent && tab._pendingVariants && err.name !== 'AbortError') {
             regenReverted = true;
             regenRevertReason = `Request failed — restored previous response`;
@@ -378,6 +401,10 @@ export async function _doSendChat(tab) {
                 } else {
                     body.innerHTML = `<span class="chat-error">[error] ${escapeHtml(err.message)}</span>`;
                 }
+            }
+            // Show modal for connection errors on non-regenerate sends (resend, initial send, etc.)
+            if (isConnectionError && !regenReverted) {
+                showConnectionLostModal();
             }
         }
     }
@@ -406,7 +433,8 @@ export async function _doSendChat(tab) {
                 handler: () => { openTimeoutSetting(); toast?.remove(); },
             }]);
         } else {
-            showToast(regenRevertReason, 'warning');
+            // Show modal for connection errors (server restarted, network issue, etc.)
+            showConnectionLostModal();
         }
         renderChatMessages();
         if (typeof updateChatTabBadge === 'function') updateChatTabBadge();
@@ -473,6 +501,34 @@ export function stopChat() {
     }
     chat.busy = false;
     setChatBusyUI(false);
+}
+
+// ── Connection Lost Modal ──────────────────────────────────────────────────────
+
+let connectionLostModalShown = false;
+
+export function showConnectionLostModal() {
+    if (connectionLostModalShown) return;
+    connectionLostModalShown = true;
+
+    const modal = document.getElementById('connection-lost-modal');
+    if (!modal) return;
+
+    modal.classList.add('open');
+
+    // Wire up buttons
+    document.getElementById('connection-lost-go-welcome-btn')?.addEventListener('click', async () => {
+        const { switchView } = await import('./setup-view.js');
+        switchView('setup');
+        closeModal();
+    });
+    document.getElementById('connection-lost-dismiss-btn')?.addEventListener('click', closeModal);
+    document.getElementById('connection-lost-modal-close')?.addEventListener('click', closeModal);
+
+    function closeModal() {
+        modal.classList.remove('open');
+        connectionLostModalShown = false;
+    }
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────────

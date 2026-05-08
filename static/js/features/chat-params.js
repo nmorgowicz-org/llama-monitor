@@ -1026,98 +1026,121 @@ async function loadPersonaMenuItems() {
         
         personaMenuListEl.innerHTML = '';
         
-        // Check if we have both built-in and user templates
-        const hasBuiltIn = personas.some(p => p._isDefault);
-        const hasUser = personas.some(p => !p._isDefault);
+        const tab = activeChatTab();
+        const activeTemplateId = tab?.active_template_id || null;
         
-        // Add section header for built-in templates
-        if (hasBuiltIn && hasUser) {
-            const header = document.createElement('div');
-            header.className = 'chat-persona-menu-section';
-            header.textContent = 'Built-in Personas';
-            personaMenuListEl.appendChild(header);
+        // Separate into active, user (non-active), and built-in
+        const activePersona = activeTemplateId ? personas.find(p => p.id === activeTemplateId) : null;
+        const userPersonas = personas.filter(p => !p._isDefault && p.id !== activeTemplateId);
+        const builtInPersonas = personas.filter(p => p._isDefault);
+        
+        // Show active persona at the top if exists
+        if (activePersona) {
+            const activeSection = document.createElement('div');
+            activeSection.className = 'chat-persona-menu-section';
+            activeSection.textContent = 'Active Persona';
+            personaMenuListEl.appendChild(activeSection);
+            
+            personaMenuListEl.appendChild(createPersonaItem(activePersona, true));
         }
         
-        personas.forEach((persona, index) => {
-            // Add separator before user templates section
-            if (hasBuiltIn && hasUser && !persona._isDefault) {
-                const firstUserIndex = personas.findIndex(p => !p._isDefault);
-                if (index === firstUserIndex) {
-                    const header = document.createElement('div');
-                    header.className = 'chat-persona-menu-section';
-                    header.textContent = 'Your Personas';
-                    personaMenuListEl.appendChild(header);
-                }
-            }
+        // Show user personas (edited or new)
+        if (userPersonas.length > 0) {
+            const userSection = document.createElement('div');
+            userSection.className = 'chat-persona-menu-section';
+            userSection.textContent = 'Your Personas';
+            personaMenuListEl.appendChild(userSection);
             
-            const item = document.createElement('button');
-            item.className = 'chat-persona-menu-item';
-            const tab = activeChatTab();
-            if (tab && tab.active_template_id === persona.id) {
-                item.classList.add('active');
-            }
-            
-            const icon = document.createElement('span');
-            icon.className = 'chat-persona-menu-item-icon';
-            icon.textContent = persona._isDefault ? '🎭' : '✨';
-            
-            const content = document.createElement('div');
-            content.className = 'chat-persona-menu-item-content';
-            
-            const nameEl = document.createElement('div');
-            nameEl.className = 'chat-persona-menu-item-name';
-            nameEl.textContent = persona.name;
-            
-            // Add badge for built-in templates
-            if (persona._isDefault) {
-                const badge = document.createElement('span');
-                badge.className = 'chat-persona-menu-item-badge';
-                badge.textContent = 'Built-in';
-                nameEl.appendChild(badge);
-            }
-            
-            content.appendChild(nameEl);
-            
-            // Show description or first 60 chars of prompt as meta text
-            const metaText = persona.description || (persona.prompt ? persona.prompt.substring(0, 60) + '...' : '');
-            if (metaText) {
-                const meta = document.createElement('div');
-                meta.className = 'chat-persona-menu-item-meta';
-                meta.textContent = metaText;
-                content.appendChild(meta);
-            }
-            
-            item.appendChild(icon);
-            item.appendChild(content);
-            
-            item.addEventListener('click', () => {
-                window.currentPersona = persona;
-                document.getElementById('chat-persona-menu-name').textContent = persona.name;
-                document.getElementById('chat-persona-menu').classList.add('hidden');
-                const tab = activeChatTab();
-                if (tab) {
-                    const templates = loadTemplates();
-                    templates.then(ts => {
-                        const t = ts?.find(x => x.name === persona.name);
-                        if (t) {
-                            tab.system_prompt = t.prompt;
-                            tab.active_template_id = t.id;
-                            tab.updated_at = Date.now();
-                            renderPersonaStrip?.();
-                            scheduleChatPersist?.();
-                        }
-                    });
-                }
+            userPersonas.forEach(persona => {
+                personaMenuListEl.appendChild(createPersonaItem(persona, false));
             });
+        }
+        
+        // Show built-in personas
+        if (builtInPersonas.length > 0) {
+            const builtInSection = document.createElement('div');
+            builtInSection.className = 'chat-persona-menu-section';
+            builtInSection.textContent = 'Built-in Personas';
+            personaMenuListEl.appendChild(builtInSection);
             
-            personaMenuListEl.appendChild(item);
-        });
+            builtInPersonas.forEach(persona => {
+                personaMenuListEl.appendChild(createPersonaItem(persona, false));
+            });
+        }
     } catch (err) {
         const errorEl = document.createElement('div');
         errorEl.className = 'chat-persona-menu-loading';
         errorEl.textContent = 'Error: ' + err.message;
         personaMenuListEl.appendChild(errorEl);
     }
+}
+
+function createPersonaItem(persona, isActive) {
+    const item = document.createElement('div');
+    item.className = 'chat-persona-menu-item';
+    if (isActive) item.classList.add('active');
+    
+    const icon = document.createElement('span');
+    icon.className = 'chat-persona-menu-item-icon';
+    icon.textContent = persona._isDefault ? '🎭' : '✨';
+    
+    const content = document.createElement('div');
+    content.className = 'chat-persona-menu-item-content';
+    
+    const nameEl = document.createElement('div');
+    nameEl.className = 'chat-persona-menu-item-name';
+    nameEl.textContent = persona.name;
+    
+    // Add badge for built-in templates
+    if (persona._isDefault && !isActive) {
+        const badge = document.createElement('span');
+        badge.className = 'chat-persona-menu-item-badge';
+        badge.textContent = 'Built-in';
+        nameEl.appendChild(badge);
+    }
+    
+    content.appendChild(nameEl);
+    
+    // Show description or first 60 chars of prompt as meta text
+    const metaText = persona.description || (persona.prompt ? persona.prompt.substring(0, 60) + '...' : '');
+    if (metaText) {
+        const meta = document.createElement('div');
+        meta.className = 'chat-persona-menu-item-meta';
+        meta.textContent = metaText;
+        content.appendChild(meta);
+    }
+    
+    // Add edit button
+    const editBtn = document.createElement('button');
+    editBtn.className = 'chat-persona-menu-item-edit';
+    editBtn.title = 'Edit persona';
+    editBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+    editBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.getElementById('chat-persona-menu').classList.add('hidden');
+        openTemplateManager(persona.id);
+    });
+    
+    item.appendChild(icon);
+    item.appendChild(content);
+    item.appendChild(editBtn);
+    
+    // Click to select (only on the item, not the edit button)
+    item.addEventListener('click', () => {
+        window.currentPersona = persona;
+        document.getElementById('chat-persona-menu-name').textContent = persona.name;
+        document.getElementById('chat-persona-menu').classList.add('hidden');
+        const tab = activeChatTab();
+        if (tab) {
+            tab.system_prompt = persona.prompt;
+            tab.active_template_id = persona.id;
+            tab.updated_at = Date.now();
+            renderPersonaStrip?.();
+            scheduleChatPersist?.();
+        }
+    });
+    
+    return item;
 }
 
 export function setPersonaMenuActive(personaName) {

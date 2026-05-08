@@ -144,6 +144,8 @@ export const chat = {
     tabTrash: [],
     /** Interval ID for periodic trash purge (24h) */
     trashPurgeTimer: null,
+    /** Whether auto-scroll is disabled (user scrolled up during generation) */
+    disableAutoScroll: false,
 };
 
 // ── LHM (Windows Hardware Monitor) ───────────────────────────────────────────
@@ -159,6 +161,7 @@ export const setupViewState = {
     view: 'setup',
     sessionActive: false,
     lastSessionData: null,
+    previousPosition: null,
 };
 
 /** Monitor metrics UI state */

@@ -924,24 +924,32 @@
                         </button>
                     </div>
                 </div>
-                <div class="chat-params-grid">
-                    <label>
-                        <span class="chat-param-label">
-                            Creativity <span class="chat-param-technical">temperature</span>
-                            <span class="chat-param-tooltip" title="How random or focused the responses are (0 = focused, 2 = creative)">?</span>
-                        </span>
-                        <input type="range" id="param-temperature" min="0" max="2" step="0.05">
-                        <span id="param-temperature-val">0.7</span>
-                    </label>
-                    <label>
-                        <span class="chat-param-label">
-                            Variety <span class="chat-param-technical">top_p</span>
-                            <span class="chat-param-tooltip" title="Controls the range of words the model considers (0.9 = good balance)">?</span>
-                        </span>
-                        <input type="range" id="param-top-p" min="0" max="1" step="0.01">
-                        <span id="param-top-p-val">0.9</span>
-                    </label>
-                </div>
+<div class="chat-params-grid">
+                     <label>
+                         <span class="chat-param-label">
+                             Creativity <span class="chat-param-technical">temperature</span>
+                             <span class="chat-param-tooltip" title="How random or focused the responses are (0 = focused, 2 = creative)">?</span>
+                         </span>
+                         <input type="range" id="param-temperature" min="0" max="2" step="0.05">
+                         <span id="param-temperature-val">0.7</span>
+                     </label>
+                     <label>
+                         <span class="chat-param-label">
+                             Variety <span class="chat-param-technical">top_p</span>
+                             <span class="chat-param-tooltip" title="Controls the range of words the model considers (0.9 = good balance)">?</span>
+                         </span>
+                         <input type="range" id="param-top-p" min="0" max="1" step="0.01">
+                         <span id="param-top-p-val">0.9</span>
+                     </label>
+                     <label class="chat-param-label chat-param-timer">
+                         <span>
+                             Timeout
+                             <span class="chat-param-tooltip" title="Auto-stop if no visible response for this many seconds (0 = disabled)">?</span>
+                         </span>
+                         <input type="number" id="param-stream-timeout" min="0" step="10" placeholder="120">
+                         <span>s</span>
+                     </label>
+                 </div>
                 <div class="chat-params-advanced" id="chat-params-advanced" style="display:none;">
                     <div class="chat-params-divider"></div>
                     <div class="chat-params-grid">
@@ -969,21 +977,14 @@
                             <input type="range" id="param-repeat-penalty" min="1" max="2" step="0.01">
                             <span id="param-repeat-penalty-val">1.0</span>
                         </label>
-                        <label>
-                            <span class="chat-param-label">
-                                Max Length
-                                <span class="chat-param-tooltip" title="Maximum response length in tokens (leave empty for unlimited)">?</span>
-                            </span>
-                            <input type="number" id="param-max-tokens" min="0" step="64" placeholder="Unlimited">
-                        </label>
-                        <label class="chat-param-label">
-                            <span>
-                                Stream Timeout
-                                <span class="chat-param-tooltip" title="Auto-stop if no visible response for this many seconds (0 = disabled). Catches models stuck in thinking loops.">?</span>
-                            </span>
-                            <input type="number" id="param-stream-timeout" min="0" step="10" placeholder="120">
-                        </label>
-                    </div>
+<label>
+                             <span class="chat-param-label">
+                                 Max Length
+                                 <span class="chat-param-tooltip" title="Maximum response length in tokens (leave empty for unlimited)">?</span>
+                             </span>
+                             <input type="number" id="param-max-tokens" min="0" step="64" placeholder="Unlimited">
+                         </label>
+                     </div>
                 </div>
             </div>
 
@@ -1063,11 +1064,45 @@
         </div>
     </main>
 
+<!-- Connection Lost Modal -->
+<div class="modal-overlay" id="connection-lost-modal" style="z-index:1400;">
+    <div class="modal" style="width:600px;">
+        <div class="modal-header">
+            <h2>Server Restarted</h2>
+            <button type="button" class="modal-close" id="connection-lost-modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body" style="padding:24px;">
+            <div style="text-align:center;">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:#f87171; margin-bottom:12px;">
+                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                </svg>
+                <h3 style="margin:0 0 8px 0; color:var(--color-text-primary);">Llama Monitor has restarted</h3>
+                <p style="color:var(--text-muted); line-height:1.5; margin:0 0 8px 0;">
+                    The llama-monitor instance you were connected to has been restarted. A fresh instance does not auto-connect to previous sessions.
+                </p>
+                <p style="color:var(--text-muted); line-height:1.5; margin:0 0 20px 0;">
+                    You can either go back to the welcome screen to attach to a remote endpoint or spawn a new server, or dismiss this and stay on the current page.
+                </p>
+                <div style="display:flex; gap:12px; justify-content:center;">
+                    <button class="btn btn-primary" id="connection-lost-go-welcome-btn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+                            <polyline points="9,22 9,12 15,12 15,22"/>
+                        </svg>
+                        Go to Welcome Screen
+                    </button>
+                    <button class="btn btn-secondary" id="connection-lost-dismiss-btn">Dismiss</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Template Manager Modal -->
 <div class="modal-overlay" id="template-manager-modal" style="z-index:1300;">
     <div class="modal template-manager-modal" style="width:720px;">
         <div class="modal-header">
-            <h2>System Prompt Templates</h2>
+            <h2>Personas (System Prompt Templates)</h2>
             <button type="button" class="modal-close" id="template-manager-close" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body template-manager-body">

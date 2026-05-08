@@ -3,7 +3,7 @@
 
 import { escapeHtml } from '../core/format.js';
 
-const TOAST_AUTO_DISMISS = 3500;
+const TOAST_AUTO_DISMISS = 6000;
 
 function getToastIcon(type) {
     const icons = {
