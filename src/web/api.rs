@@ -50,6 +50,15 @@ pub struct ChatMessage {
     pub compaction_marker: Option<bool>,
 }
 
+/// Context note for guided generation (character details, setting info, etc.)
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct ContextNote {
+    pub section: String,
+    pub content: String,
+    #[serde(default)]
+    pub created_at: u64,
+}
+
 /// Model parameters for a chat tab
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct ChatModelParams {
@@ -106,6 +115,32 @@ pub struct ChatTab {
     pub last_ctx_pct: Option<f32>,
     #[serde(rename = "activeTemplateId", default)]
     pub active_template_id: Option<String>,
+    /// Guided generation: persistent context notes (character, setting, plot details)
+    #[serde(default)]
+    pub context_notes: Vec<ContextNote>,
+    /// Guided generation: remembered sidebar width in pixels (default: 280)
+    #[serde(default, rename = "sidebarWidth")]
+    pub sidebar_width: u32,
+}
+
+/// Suggestion request for guided generation
+#[derive(serde::Deserialize, Debug)]
+pub struct SuggestionRequest {
+    pub tab_id: String,
+    pub category: String,
+    #[serde(default)]
+    pub count: Option<u32>,
+    #[serde(default)]
+    pub context_depth: Option<u32>,
+    pub prompt: Option<String>,
+}
+
+/// Suggestion response
+#[derive(serde::Serialize, Debug)]
+pub struct SuggestionResponse {
+    pub suggestions: Vec<String>,
+    pub category: String,
+    pub count: u32,
 }
 
 static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -456,6 +491,7 @@ pub fn api_routes(
     let browse = api_browse();
     let chat = api_chat(state.clone());
     let chat_abort = api_chat_abort(state.clone());
+    let chat_suggestions = api_chat_suggestions(state.clone());
     let get_chat_tabs = api_get_chat_tabs();
     let put_chat_tabs = api_put_chat_tabs();
     let get_sessions = api_get_sessions(state.clone());
@@ -504,6 +540,7 @@ pub fn api_routes(
     let chat_routes = browse
         .or(chat)
         .or(chat_abort)
+        .or(chat_suggestions)
         .or(get_chat_tabs)
         .or(put_chat_tabs);
     let session_routes = get_sessions
@@ -1527,6 +1564,163 @@ fn api_chat_abort(
         .and_then(move || async move {
             Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
         })
+}
+
+fn api_chat_suggestions(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "suggestions")
+        .and(warp::post())
+        .and(warp::body::json::<SuggestionRequest>())
+        .and_then(move |req: SuggestionRequest| {
+            let state = state.clone();
+            async move {
+                // Get tabs and find the requested one
+                let path = chat_tabs_path();
+                let tabs: Vec<ChatTab> = tokio::fs::read_to_string(&path).await
+                    .ok()
+                    .and_then(|raw| serde_json::from_str(&raw).ok())
+                    .unwrap_or_default();
+
+                let tab = tabs.iter().find(|t| t.id == req.tab_id)
+                    .ok_or(warp::reject::not_found())?;
+
+                // Get last N messages
+                let depth = req.context_depth.unwrap_or(10) as usize;
+                let messages: Vec<ChatMessage> = tab.messages.iter()
+                    .rev()
+                    .take(depth)
+                    .cloned()
+                    .collect();
+
+                // Build conversation context
+                let mut context = String::new();
+                for msg in &messages {
+                    let role = if msg.role == "user" { "User" } else { "Assistant" };
+                    context.push_str(&format!("{}: {}\n", role, msg.content));
+                }
+
+                // Get or use default prompt
+                let default_prompt = match req.category.as_str() {
+                    "plot-twist" => "You are a plot twist specialist. Based on the conversation below, suggest {} unexpected, surprising events that could happen next.\n\nFormat as a numbered list. Prioritize: betrayals, revelations, power reversals, unexpected arrivals, hidden truths.\n\n[conversation context]",
+                    "new-character" => "You are a character introduction specialist. Based on the conversation below, suggest {} new characters that could enter the story.\n\nFormat as: [Character Name]: [Brief description and how they connect to current story]\n\n[conversation context]",
+                    _ => "You are a creative brainstorming partner. Based on the conversation below, suggest {} varied, actionable next steps the user could take.\n\nFormat as a numbered list. Prioritize variety: dialogue, action, investigation, social, creative approaches.\n\n[conversation context]",
+                };
+
+                let count = req.count.unwrap_or(5);
+                let prompt = req.prompt
+                    .unwrap_or(default_prompt.to_string())
+                    .replace("{count}", &count.to_string())
+                    .replace("[conversation context]", &context);
+
+                // Build messages for suggestion request
+                let suggestion_messages = vec![
+                    serde_json::json!({"role": "system", "content": "You are a helpful creative writing assistant. Generate suggestions in a numbered list format. Be concise and actionable."}),
+                    serde_json::json!({"role": "user", "content": prompt}),
+                ];
+
+                // Call llama.cpp
+                let session = state.get_active_session()
+                    .ok_or(warp::reject::not_found())?;
+
+                let url = match &session.mode {
+                    crate::state::SessionMode::Spawn { port } => {
+                        format!("http://127.0.0.1:{port}/v1/chat/completions")
+                    }
+                    crate::state::SessionMode::Attach { endpoint } => {
+                        format!("{endpoint}/v1/chat/completions")
+                    }
+                };
+
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .build()
+                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+
+                let response = client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .json(&serde_json::json!({
+                        "messages": suggestion_messages,
+                        "stream": false,
+                        "temperature": 0.8,
+                        "max_tokens": 512,
+                    }))
+                    .send()
+                    .await
+                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+
+                if !response.status().is_success() {
+                    let status = response.status();
+                    let err_body = response.text().await.unwrap_or_default();
+                    return Err(warp::reject::custom(ApiError(format!(
+                        "upstream {}: {}",
+                        status, err_body
+                    ))));
+                }
+
+                let response_json: serde_json::Value = response.json()
+                    .await
+                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+
+                // Extract and parse suggestions
+                let content = response_json.get("choices")
+                    .and_then(|c| c.as_array())
+                    .and_then(|c| c.first())
+                    .and_then(|c| c.get("message"))
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_str())
+                    .ok_or(warp::reject::not_found())?;
+
+                let suggestions = parse_suggestions(content);
+                let count = suggestions.len() as u32;
+
+                Ok::<_, warp::Rejection>(warp::reply::json(&SuggestionResponse {
+                    suggestions,
+                    category: req.category,
+                    count,
+                }))
+            }
+        })
+}
+
+fn parse_suggestions(text: &str) -> Vec<String> {
+    // Try numbered list first: "1. Option" or "1) Option"
+    let numbered = regex::Regex::new(r"^\d+[\.\)]\s*(.+)$").ok();
+    if let Some(re) = numbered {
+        let suggestions: Vec<String> = text
+            .lines()
+            .filter_map(|line| re.captures(line))
+            .filter_map(|caps| caps.get(1))
+            .map(|m| m.as_str().trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !suggestions.is_empty() {
+            return suggestions;
+        }
+    }
+
+    // Try bullet list: "- Option" or "* Option"
+    let bullets = regex::Regex::new(r"^[-*]\s+(.+)$").ok();
+    if let Some(re) = bullets {
+        let suggestions: Vec<String> = text
+            .lines()
+            .filter_map(|line| re.captures(line))
+            .filter_map(|caps| caps.get(1))
+            .map(|m| m.as_str().trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !suggestions.is_empty() {
+            return suggestions;
+        }
+    }
+
+    // Fallback: split by newlines, filter empty and short lines
+    text.lines()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && s.len() > 2)
+        .filter(|s| !s.starts_with('[') && !s.starts_with('['))
+        .collect()
 }
 
 fn compute_chat_tab_totals(mut tab: ChatTab) -> ChatTab {

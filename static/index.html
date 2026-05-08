@@ -19,6 +19,7 @@
     <link rel="stylesheet" href="/css/cards-hardware.css">
     <link rel="stylesheet" href="/css/components.css">
     <link rel="stylesheet" href="/css/chat.css">
+    <link rel="stylesheet" href="/css/chat-guided-generation.css">
     <link rel="stylesheet" href="/css/setup-view.css">
     <link rel="stylesheet" href="/css/settings-modal.css">
     <link rel="stylesheet" href="/css/logs.css">
@@ -1010,6 +1011,41 @@
                     <textarea id="chat-input" rows="1" placeholder="Send a message…"></textarea>
                     <span class="chat-char-count" id="chat-char-count" title="Approximate token count (chars ÷ 4)"></span>
                 </div>
+                <div class="chat-context-controls">
+                    <button class="context-toggle-btn" id="context-sidebar-toggle" title="Context Notes" aria-expanded="false" aria-controls="chat-sidebar">📋</button>
+                    <div class="suggestions-wrapper">
+                        <button class="context-toggle-btn" id="suggestions-toggle" title="Suggestions" aria-expanded="false" aria-controls="suggestions-dropdown">💡</button>
+                        <div class="suggestions-dropdown" id="suggestions-dropdown">
+                            <div class="suggestions-categories">
+                                <button class="suggestion-category-btn active" data-category="general">General</button>
+                                <button class="suggestion-category-btn" data-category="plot-twist">Plot Twist</button>
+                                <button class="suggestion-category-btn" data-category="new-character">New Character</button>
+                            </div>
+                            <div class="suggestions-list" id="suggestions-list"></div>
+                            <div class="suggestions-actions">
+                                <button class="suggestions-generate-btn" id="suggestions-generate-btn">Generate</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="quick-guide-wrapper">
+                        <button class="context-toggle-btn" id="quick-guide-toggle" title="Quick Guide" aria-expanded="false" aria-controls="quick-guide-container">🧭</button>
+                        <div class="quick-guide-container" id="quick-guide-container">
+                            <div class="quick-guide-header">
+                                <div>
+                                    <div class="quick-guide-title">Quick Guide</div>
+                                    <div class="quick-guide-last-used" id="quick-guide-last-used"></div>
+                                </div>
+                            </div>
+                            <div class="quick-guide-body">
+                                <textarea class="quick-guide-input" id="quick-guide-input" placeholder="Add a one-time instruction (e.g., 'Write in a noir style', 'Focus on dialogue')..."></textarea>
+                                <div class="quick-guide-footer">
+                                    <button class="quick-guide-btn quick-guide-submit-btn" id="quick-guide-submit-btn">Apply</button>
+                                    <button class="quick-guide-btn quick-guide-clear-btn" id="quick-guide-clear-btn">Clear</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <label class="chat-enter-toggle" data-tooltip="Enter sends message" title="Toggle: Enter sends message">
                     <input type="checkbox" id="chat-enter-toggle-input">
                     <span class="chat-enter-toggle-label">↵</span>
@@ -1019,6 +1055,26 @@
                         <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
                     </svg>
                 </button>
+            </div>
+
+            <!-- Context Sidebar -->
+            <div class="chat-sidebar" id="chat-sidebar">
+                <div class="chat-sidebar-header">
+                    <h3>Context Notes</h3>
+                </div>
+                <div class="sidebar-notes-list" id="sidebar-notes-list"></div>
+                <form class="sidebar-add-note-form" id="sidebar-add-note-form">
+                    <div class="sidebar-form-group">
+                        <label class="sidebar-form-label" for="sidebar-note-section">Section</label>
+                        <input type="text" class="sidebar-form-input" id="sidebar-note-section" placeholder="Character, Setting, Plot...">
+                    </div>
+                    <div class="sidebar-form-group">
+                        <label class="sidebar-form-label" for="sidebar-note-content">Note</label>
+                        <textarea class="sidebar-form-textarea" id="sidebar-note-content" placeholder="Add details here..." required></textarea>
+                    </div>
+                    <button type="submit" class="sidebar-form-btn">Add Note</button>
+                </form>
+                <div class="sidebar-resize-handle" id="sidebar-resize-handle"></div>
             </div>
 
         </div>

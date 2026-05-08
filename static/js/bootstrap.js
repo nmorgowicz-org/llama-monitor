@@ -26,6 +26,9 @@ import { initModels } from './features/models.js';
 import { initSensorBridge } from './features/sensor-bridge.js';
 import { initToast } from './features/toast.js';
 import { initNetworkDetection } from './features/network-detection.js';
+import { initContextSidebar } from './features/chat-notes.js';
+import { initSuggestionsDropdown } from './features/chat-suggestions.js';
+import { initQuickGuide } from './features/chat-quick-guide.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
@@ -114,9 +117,51 @@ initSettings();
 initUserMenu();
 initConfig();
 initModels();
- initSensorBridge();
+initSensorBridge();
 initToast();
 initNetworkDetection();
+
+// Phase 9: Guided generation features
+initContextSidebar();
+initSuggestionsDropdown();
+initQuickGuide();
+
+// Wire up guided generation event handlers
+document.getElementById('context-sidebar-toggle')?.addEventListener('click', () => {
+    import('./features/chat-notes.js').then(({ toggleContextSidebar }) => toggleContextSidebar());
+});
+
+document.getElementById('suggestions-toggle')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    import('./features/chat-suggestions.js').then(({ toggleSuggestionsDropdown }) => toggleSuggestionsDropdown());
+});
+
+document.getElementById('quick-guide-toggle')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    import('./features/chat-quick-guide.js').then(({ toggleQuickGuide }) => toggleQuickGuide());
+});
+
+// Handle suggestion selection
+window.addEventListener('suggestionSelected', (e) => {
+    const { text } = e.detail;
+    const input = document.getElementById('chat-input');
+    if (input) {
+        input.value = text;
+        input.focus();
+    }
+});
+
+// Handle quick guide submission (ephemeral instruction)
+window.addEventListener('quickGuideSubmitted', (e) => {
+    const { instruction } = e.detail;
+    // Store in tab for next message send
+    import('./features/chat-state.js').then(({ activeChatTab }) => {
+        const tab = activeChatTab();
+        if (tab) {
+            tab._quickGuideInstruction = instruction;
+        }
+    });
+});
 
 // ── Deferred feature initialization ──────────────────────────────────────────
 // These features are loaded on first use to reduce startup cost.

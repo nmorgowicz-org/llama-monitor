@@ -61,6 +61,8 @@ export function newChatTab(name = 'New Chat') {
             max_tokens: null,
             stream_timeout: 120,
         },
+        context_notes: [],
+        sidebar_width: 280,
         created_at: Date.now(),
         updated_at: Date.now(),
         pinned: false,
@@ -78,6 +80,8 @@ function normalizeChatTab(tab) {
         lastCtxPct: tab.lastCtxPct ?? 0,
         totalInputTokens: tab.totalInputTokens ?? totalInputTokens,
         totalOutputTokens: tab.totalOutputTokens ?? totalOutputTokens,
+        context_notes: tab.context_notes ?? [],
+        sidebar_width: tab.sidebar_width ?? 280,
         pinned: tab.pinned ?? false,
     };
 }

@@ -241,6 +241,36 @@ export async function _doSendChat(tab) {
     if (systemPrompt) {
         messages.push({ role: 'system', content: systemPrompt });
     }
+
+    // Inject context notes as separate system messages (SillyTavern-style)
+    if (tab.context_notes && tab.context_notes.length > 0) {
+        const notesBySection = {};
+        tab.context_notes.forEach(note => {
+            if (!notesBySection[note.section]) {
+                notesBySection[note.section] = [];
+            }
+            notesBySection[note.section].push(note.content);
+        });
+
+        Object.entries(notesBySection).forEach(([section, contents]) => {
+            const sectionContent = contents.join('\n\n');
+            messages.push({
+                role: 'system',
+                content: `### ${section.toUpperCase()} NOTES ###\n\n${sectionContent}`,
+            });
+        });
+    }
+
+    // Inject quick guide instruction (ephemeral, one-time use)
+    if (tab._quickGuideInstruction) {
+        messages.push({
+            role: 'system',
+            content: `### QUICK GUIDE ###\n\n${tab._quickGuideInstruction}`,
+        });
+        // Clear after use
+        delete tab._quickGuideInstruction;
+    }
+
     messages.push(...tab.messages.map(m => ({ role: m.role, content: m.content })));
 
     chat.busy = true;
