@@ -2,7 +2,7 @@
 // Collapsible inline input for ephemeral instructions (one-time context injection).
 
 import { activeChatTab } from './chat-state.js';
-import { escapeHtml } from '../core/sanitization.js';
+import { escapeHtml } from '../core/format.js';
 import { showToast } from './toast.js';
 
 let quickGuideState = {

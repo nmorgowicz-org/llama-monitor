@@ -1,9 +1,9 @@
 // ── Fix Last Response ────────────────────────────────────────────────────────
 // Regenerate last assistant message with correction instruction.
 
-import { activeChatTab, saveChatTabs } from './chat-state.js';
+import { activeChatTab, persistChatTabs } from './chat-state.js';
 import { showToast } from './toast.js';
-import { sendChatMessage } from './chat-transport.js';
+import { sendChat } from './chat-transport.js';
 
 let fixLastState = {
     isOpen: false,
@@ -104,7 +104,7 @@ async function regenerateWithFix() {
     instructionMsg._pending_fix = true;
 
     // Save and regenerate
-    await saveChatTabs();
+    await persistChatTabs();
 
     // Trigger regeneration by "sending" the user message again
     // This will include the correction instruction in the context
@@ -112,14 +112,14 @@ async function regenerateWithFix() {
     userMsg.content = `[With correction: ${instruction}] ${originalContent}`;
 
     // Use chat transport to send
-    await sendChatMessage();
+    await sendChat();
 
     // Cleanup: remove the temporary instruction message
     tab.messages.pop(); // Remove instructionMsg
     // Restore original user message content
     tab.messages[userMsgIndex].content = originalContent;
 
-    await saveChatTabs();
+    await persistChatTabs();
 
     closeFixLastModal();
     showToast('Regenerating with correction...', 'success');

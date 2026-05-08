@@ -1,8 +1,8 @@
 // ── Context Notes (Sidebar) ─────────────────────────────────────────────────
 // Right sidebar for persistent context notes (character, setting, plot details).
 
-import { activeChatTab, saveChatTabs } from './chat-state.js';
-import { escapeHtml } from '../core/sanitization.js';
+import { activeChatTab, persistChatTabs } from './chat-state.js';
+import { escapeHtml } from '../core/format.js';
 import { showToast } from './toast.js';
 
 const SIDEBAR_STORAGE_KEY = 'llama_monitor_sidebar_width';
@@ -139,7 +139,7 @@ export function addNote(section, content) {
     tab.context_notes.push(note);
     tab.updated_at = Date.now();
 
-    saveChatTabs().then(() => {
+    persistChatTabs().then(() => {
         renderNotesList();
         updateContextInjection();
     }).catch(err => {
@@ -157,7 +157,7 @@ function deleteNote(index) {
     tab.context_notes.splice(index, 1);
     tab.updated_at = Date.now();
 
-    saveChatTabs().then(() => {
+    persistChatTabs().then(() => {
         renderNotesList();
         updateContextInjection();
     }).catch(err => {
@@ -176,7 +176,7 @@ export function updateNote(index, section, content) {
     };
     tab.updated_at = Date.now();
 
-    saveChatTabs().then(() => {
+    persistChatTabs().then(() => {
         renderNotesList();
         updateContextInjection();
     }).catch(err => {
@@ -224,7 +224,7 @@ function setupResizeHandle() {
             const tab = activeChatTab();
             if (tab) {
                 tab.sidebar_width = width;
-                saveChatTabs().catch(() => {});
+                persistChatTabs().catch(() => {});
             }
             localStorage.setItem(SIDEBAR_STORAGE_KEY, width.toString());
 

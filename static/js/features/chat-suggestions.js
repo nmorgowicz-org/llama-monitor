@@ -1,7 +1,7 @@
 // ── Suggestions (Dropdown) ──────────────────────────────────────────────────
 // Dropdown menu with AI-generated suggestions (General, Plot Twist, New Character).
 
-import { activeChatTab, saveChatTabs } from './chat-state.js';
+import { activeChatTab, persistChatTabs } from './chat-state.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { toggleExplicitMode } from './chat-templates.js';
@@ -219,7 +219,7 @@ function addRecentSuggestion(suggestion) {
     }
 
     // Save
-    saveChatTabs().catch(() => {});
+    persistChatTabs().catch(() => {});
     renderRecentSuggestions();
 }
 
@@ -244,7 +244,7 @@ function clearRecentSuggestions() {
     if (!tab) return;
 
     tab._suggestion_history = [];
-    saveChatTabs().catch(() => {});
+    persistChatTabs().catch(() => {});
     renderRecentSuggestions();
 }
 
