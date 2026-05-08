@@ -615,6 +615,7 @@ export function appendThinkingBlock(afterEl) {
         <svg class="chat-thinking-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
         <span class="chat-thinking-label">Thinking</span>
         <span class="chat-thinking-dots"><span>.</span><span>.</span><span>.</span></span>
+        <span class="chat-thinking-token-count" style="margin:0 8px; color:var(--text-muted);"></span>
         <span class="chat-thinking-hint">(click to expand)</span>
       </summary>
       <div class="chat-thinking-body"></div>`;

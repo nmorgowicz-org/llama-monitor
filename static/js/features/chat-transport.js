@@ -343,6 +343,13 @@ export async function _doSendChat(tab) {
                         }
                         if (thinkEl) {
                             thinkEl.querySelector('.chat-thinking-body').textContent = thinkContent;
+                            // Update token count in header
+                            const tokenCountEl = thinkEl.querySelector('.chat-thinking-token-count');
+                            if (tokenCountEl) {
+                                // Rough token count: characters / 4 (average English token)
+                                const tokenCount = Math.round(thinkContent.length / 4);
+                                tokenCountEl.textContent = `(${tokenCount} tokens)`;
+                            }
                         }
                     }
 
@@ -370,6 +377,9 @@ export async function _doSendChat(tab) {
         }
 
     } catch (err) {
+        // Detect connection/network errors (404, 503, network failures, etc.)
+        const isConnectionError = /HTTP (404|503)|Failed to fetch|network/i.test(err.message);
+        
         if (!msgContent && tab._pendingVariants && err.name !== 'AbortError') {
             regenReverted = true;
             regenRevertReason = `Request failed — restored previous response`;
@@ -387,6 +397,10 @@ export async function _doSendChat(tab) {
                 } else {
                     body.innerHTML = `<span class="chat-error">[error] ${escapeHtml(err.message)}</span>`;
                 }
+            }
+            // Show modal for connection errors on non-regenerate sends (resend, initial send, etc.)
+            if (isConnectionError && !regenReverted) {
+                showConnectionLostModal();
             }
         }
     }
