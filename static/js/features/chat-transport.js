@@ -174,6 +174,9 @@ export async function sendChat() {
 
     if (typeof renderChatMessages === 'function') renderChatMessages();
 
+    // Ensure user is at bottom so auto-scroll works during AI response
+    if (typeof chatScroll === 'function') chatScroll(true);
+
     await _doSendChat(tab);
 }
 
