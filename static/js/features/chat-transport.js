@@ -409,7 +409,8 @@ export async function _doSendChat(tab) {
                 handler: () => { openTimeoutSetting(); toast?.remove(); },
             }]);
         } else {
-            showToast(regenRevertReason, 'warning');
+            // Show modal for connection errors (server restarted, network issue, etc.)
+            showConnectionLostModal();
         }
         renderChatMessages();
         if (typeof updateChatTabBadge === 'function') updateChatTabBadge();
@@ -476,6 +477,34 @@ export function stopChat() {
     }
     chat.busy = false;
     setChatBusyUI(false);
+}
+
+// ── Connection Lost Modal ──────────────────────────────────────────────────────
+
+let connectionLostModalShown = false;
+
+export function showConnectionLostModal() {
+    if (connectionLostModalShown) return;
+    connectionLostModalShown = true;
+
+    const modal = document.getElementById('connection-lost-modal');
+    if (!modal) return;
+
+    modal.classList.add('open');
+
+    // Wire up buttons
+    document.getElementById('connection-lost-go-welcome-btn')?.addEventListener('click', () => {
+        const { switchView } = await import('./setup-view.js');
+        switchView('setup');
+        closeModal();
+    });
+    document.getElementById('connection-lost-dismiss-btn')?.addEventListener('click', closeModal);
+    document.getElementById('connection-lost-modal-close')?.addEventListener('click', closeModal);
+
+    function closeModal() {
+        modal.classList.remove('open');
+        connectionLostModalShown = false;
+    }
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────────
