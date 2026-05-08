@@ -110,6 +110,48 @@ test.describe('system prompt panel', () => {
     await expect(page.locator('#chat-persona-menu')).toBeVisible();
     await expect(page.locator('#chat-persona-menu-list')).toBeVisible();
   });
+
+  test('persona menu items have edit buttons', async ({ page }) => {
+    await page.locator('#chat-persona-btn').click();
+    await expect(page.locator('#chat-persona-menu')).toBeVisible();
+    
+    // Wait for personas to load
+    await page.waitForSelector('.chat-persona-menu-item', { state: 'visible', timeout: 5000 });
+    
+    // Check that persona items exist
+    const items = await page.locator('.chat-persona-menu-item').count();
+    expect(items).toBeGreaterThan(0);
+    
+    // Check that each item has an edit button
+    const editButtons = await page.locator('.chat-persona-menu-item-edit').count();
+    expect(editButtons).toBeGreaterThan(0);
+  });
+
+  test('clicking edit button opens template manager', async ({ page }) => {
+    await page.locator('#chat-persona-btn').click();
+    await expect(page.locator('#chat-persona-menu')).toBeVisible();
+    
+    // Wait for personas to load
+    await page.waitForSelector('.chat-persona-menu-item-edit', { state: 'visible', timeout: 5000 });
+    
+    // Click the first edit button
+    await page.locator('.chat-persona-menu-item-edit').first().click();
+    
+    // Check that template manager opened
+    await expect(page.locator('#template-manager-modal')).toHaveClass(/active/);
+  });
+
+  test('persona menu shows section headers', async ({ page }) => {
+    await page.locator('#chat-persona-btn').click();
+    await expect(page.locator('#chat-persona-menu')).toBeVisible();
+    
+    // Wait for personas to load
+    await page.waitForSelector('.chat-persona-menu-section', { state: 'visible', timeout: 5000 });
+    
+    // Check that section headers exist
+    const sections = await page.locator('.chat-persona-menu-section').count();
+    expect(sections).toBeGreaterThan(0);
+  });
 });
 
 test.describe('explicit mode toggle', () => {

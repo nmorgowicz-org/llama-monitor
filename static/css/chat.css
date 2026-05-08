@@ -914,6 +914,23 @@
 .chat-persona-menu-item.active .chat-persona-menu-item-name {
     color: #b6f3f9;
 }
+.chat-persona-menu-item-edit {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+.chat-persona-menu-item-edit:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+}
 .chat-persona-menu-loading {
     padding: 20px;
     text-align: center;
