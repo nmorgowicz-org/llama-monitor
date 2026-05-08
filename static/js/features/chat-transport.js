@@ -340,6 +340,10 @@ export async function _doSendChat(tab) {
                         }
                         if (msgEl && !thinkEl && typeof appendThinkingBlock === 'function') {
                             thinkEl = appendThinkingBlock(msgEl);
+                            // Scroll to show the thinking block as soon as it appears
+                            requestAnimationFrame(() => {
+                                if (typeof chatScroll === 'function') chatScroll(true);
+                            });
                         }
                         if (thinkEl) {
                             thinkEl.querySelector('.chat-thinking-body').textContent = thinkContent;

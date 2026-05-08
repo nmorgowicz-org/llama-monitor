@@ -2024,6 +2024,15 @@
 .chat-thinking-summary:hover .chat-thinking-hint {
   opacity: 0.8;
 }
+.chat-thinking-token-count {
+  font-size: 10px;
+  color: rgba(139, 92, 246, 0.6);
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+.chat-thinking-summary:hover .chat-thinking-token-count {
+  opacity: 0.8;
+}
 .chat-thinking[open] .chat-thinking-hint {
   display: none;
 }
