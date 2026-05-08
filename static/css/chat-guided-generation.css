@@ -304,11 +304,19 @@
     background: var(--bg-quaternary);
 }
 
+.suggestion-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+    word-wrap: break-word;
+}
+
 .suggestion-content {
     flex: 1;
     font-size: 13px;
     line-height: 1.4;
-    color: var(--text-primary);
+    color: var(--text-secondary);
     word-wrap: break-word;
 }
 
@@ -638,4 +646,90 @@
 
 [data-theme="light"] .quick-guide-input {
     background: #ffffff;
+}
+
+/* ── Category Management Modal ─────────────────────────────────────────────── */
+
+.category-item {
+    animation: fadeIn 0.2s ease-out;
+}
+
+.category-item:hover {
+    background: var(--bg-quaternary);
+}
+
+.category-prompt {
+    font-style: italic;
+}
+
+.add-category-form {
+    animation: slideUp 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ── Loading States ────────────────────────────────────────────────────────── */
+
+.suggestions-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    gap: 12px;
+}
+
+.suggestions-empty-state {
+    padding: 24px;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+.suggestions-empty-state p {
+    margin: 4px 0;
+}
+
+.text-sm {
+    font-size: 12px;
+}
+
+/* ── Accessibility Focus States ───────────────────────────────────────────── */
+
+.suggestion-item:focus {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
+}
+
+.suggestion-category-btn:focus {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
+}
+
+/* ── Reduced Motion ────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+    .suggestions-dropdown,
+    .category-item,
+    .add-category-form {
+        transition: none;
+        animation: none;
+    }
 }

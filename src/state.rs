@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -126,6 +126,15 @@ pub struct UiSettings {
     /// Guided generation: default sidebar width in pixels
     #[serde(default = "default_sidebar_width")]
     pub default_sidebar_width: u32,
+    /// Guided generation: suggestion prompts by category
+    #[serde(default = "default_suggestion_prompts")]
+    pub suggestion_prompts: HashMap<String, String>,
+    /// Guided generation: number of suggestions to generate
+    #[serde(default = "default_suggestion_count")]
+    pub suggestion_count: u32,
+    /// Guided generation: context depth (number of messages to include)
+    #[serde(default = "default_context_depth")]
+    pub context_depth: u32,
 }
 
 fn default_true() -> bool {
@@ -134,6 +143,18 @@ fn default_true() -> bool {
 
 fn default_sidebar_width() -> u32 {
     280
+}
+
+fn default_suggestion_prompts() -> HashMap<String, String> {
+    HashMap::new()
+}
+
+fn default_suggestion_count() -> u32 {
+    5
+}
+
+fn default_context_depth() -> u32 {
+    10
 }
 
 fn default_ws_push_interval_ms() -> u64 {
@@ -253,6 +274,9 @@ impl Default for UiSettings {
             enabled_suggestions: default_true(),
             enabled_quick_guide: default_true(),
             default_sidebar_width: default_sidebar_width(),
+            suggestion_prompts: default_suggestion_prompts(),
+            suggestion_count: default_suggestion_count(),
+            context_depth: default_context_depth(),
         }
     }
 }

@@ -1029,11 +1029,24 @@
                                 </div>
                                 <div class="suggestions-recent-list" id="suggestions-recent-list"></div>
                             </div>
-                            <div class="suggestions-categories">
-                                <button class="suggestion-category-btn active" data-category="general">General</button>
-                                <button class="suggestion-category-btn" data-category="plot-twist">Plot Twist</button>
-                                <button class="suggestion-category-btn" data-category="new-character">New Character</button>
-                            </div>
+                         <div class="suggestions-categories">
+                                  <button class="suggestion-category-btn active" data-category="general">General</button>
+                                  <button class="suggestion-category-btn" data-category="context">Context</button>
+                                  <button class="suggestion-category-btn" data-category="plot-twist">Plot Twist</button>
+                                  <button class="suggestion-category-btn" data-category="new-character">New Character</button>
+                                  <button class="suggestion-category-btn" data-category="director">Director</button>
+                                  <button class="suggestion-category-btn" data-category="explicit">Explicit 🔥</button>
+                                  <button class="suggestion-category-btn" data-category="action">Action</button>
+                                  <button class="suggestion-category-btn" data-category="comedy">Comedy</button>
+                                  <button class="suggestion-category-btn" data-category="fantasy">Fantasy</button>
+                                  <button class="suggestion-category-btn" data-category="horror">Horror</button>
+                                  <button class="suggestion-category-btn" data-category="mystery">Mystery</button>
+                                  <button class="suggestion-category-btn" data-category="noir">Noir</button>
+                                  <button class="suggestion-category-btn" data-category="romance">Romance</button>
+                                  <button class="suggestion-category-btn" data-category="sci-fi">Sci-Fi</button>
+                                  <button class="suggestion-category-btn" data-category="thriller">Thriller</button>
+                                  <button class="suggestion-category-btn" data-category="manage" id="suggestions-manage-categories" title="Manage custom categories">⚙️</button>
+                              </div>
                             <div class="suggestions-list" id="suggestions-list"></div>
                             <div class="suggestions-actions">
                                 <button class="suggestions-generate-btn" id="suggestions-generate-btn">Generate</button>
@@ -2061,11 +2074,88 @@
                          </div>
                      </label>
                      <label class="modal-field">
-                         Default Sidebar Width
-                         <input type="range" id="settings-sidebar-width" min="200" max="500" value="280" style="width:200px;">
-                         <span id="settings-sidebar-width-value" style="color:var(--text-muted);font-size:12px;">280px</span>
-                     </label>
-                 </div>
+                          Default Sidebar Width
+                          <input type="range" id="settings-sidebar-width" min="200" max="500" value="280" style="width:200px;">
+                          <span id="settings-sidebar-width-value" style="color:var(--text-muted);font-size:12px;">280px</span>
+                      </label>
+                      <hr style="border:none;border-top:1px solid var(--border-color);margin:16px 0;">
+                      <h4 style="margin:0 0 12px 0;">Suggestion Settings</h4>
+                      <label class="modal-field">
+                          Suggestion Count
+                          <div style="display:flex;align-items:center;gap:12px;">
+                              <input type="range" id="settings-suggestion-count" min="3" max="8" value="5" style="width:150px;">
+                              <span id="settings-suggestion-count-value" style="color:var(--text-muted);font-size:12px;min-width:20px;text-align:center;">5</span>
+                          </div>
+                      </label>
+                      <label class="modal-field">
+                          Context Depth
+                          <div style="display:flex;align-items:center;gap:12px;">
+                              <input type="range" id="settings-context-depth" min="5" max="20" value="10" style="width:150px;">
+                              <span id="settings-context-depth-value" style="color:var(--text-muted);font-size:12px;min-width:24px;text-align:center;">10</span>
+                          </div>
+                      </label>
+                      <label class="modal-field">
+                          General Prompt
+                          <textarea id="settings-prompt-general" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                      </label>
+                      <label class="modal-field">
+                          Plot Twist Prompt
+                          <textarea id="settings-prompt-plot-twist" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                      </label>
+                      <label class="modal-field">
+                           New Character Prompt
+                           <textarea id="settings-prompt-new-character" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Context Prompt
+                           <textarea id="settings-prompt-context" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Director Prompt
+                           <textarea id="settings-prompt-director" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Explicit Prompt
+                           <textarea id="settings-prompt-explicit" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Action Prompt
+                           <textarea id="settings-prompt-action" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Comedy Prompt
+                           <textarea id="settings-prompt-comedy" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Fantasy Prompt
+                           <textarea id="settings-prompt-fantasy" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Horror Prompt
+                           <textarea id="settings-prompt-horror" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Mystery Prompt
+                           <textarea id="settings-prompt-mystery" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Noir Prompt
+                           <textarea id="settings-prompt-noir" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Romance Prompt
+                           <textarea id="settings-prompt-romance" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Sci-Fi Prompt
+                           <textarea id="settings-prompt-sci-fi" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Thriller Prompt
+                           <textarea id="settings-prompt-thriller" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <button type="button" id="settings-reset-prompts" class="btn btn-secondary" style="margin-top:8px;font-size:12px;padding:6px 12px;">Reset Prompts to Defaults</button>
+                  </div>
                  <div class="settings-pane" id="settings-performance">
                     <h3>Performance &amp; Connection</h3>
                     <p class="settings-help">
@@ -2216,6 +2306,41 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Manage Categories Modal -->
+<div class="modal-overlay" id="manage-categories-modal" aria-hidden="true" inert>
+    <div class="modal" style="width:720px;">
+        <div class="modal-header">
+            <h2>Manage Suggestion Categories</h2>
+            <button type="button" class="modal-close" id="manage-categories-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body" style="padding:24px;">
+            <p style="color:var(--text-muted);margin-bottom:16px;">
+                Create custom suggestion categories with your own prompts.
+            </p>
+            <div id="categories-list" style="margin-bottom:20px;">
+                <div class="category-item" style="display:flex;align-items:center;justify-content:space-between;padding:12px;border:1px solid var(--border-color);border-radius:6px;margin-bottom:8px;background:var(--bg-secondary);">
+                    <div>
+                        <strong class="category-name">General</strong>
+                        <div class="category-prompt" style="font-size:12px;color:var(--text-muted);margin-top:4px;"></div>
+                    </div>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn-sm btn-preset" data-action="edit" title="Edit prompt">Edit</button>
+                        <button class="btn-sm btn-secondary" data-action="delete" title="Remove category">Remove</button>
+                    </div>
+                </div>
+            </div>
+            <div class="add-category-form" style="border-top:1px solid var(--border-color);padding-top:16px;">
+                <h4 style="margin:0 0 12px 0;">Add New Category</h4>
+                <div style="display:flex;flex-direction:column;gap:12px;">
+                    <input type="text" id="new-category-name" placeholder="Category name (e.g., 'World Building')" style="padding:10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);color:var(--text-primary);">
+                    <textarea id="new-category-prompt" rows="4" placeholder="Prompt template (use {count} for number of suggestions, [conversation context] for context)" style="width:100%;padding:10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;font-size:13px;resize:vertical;"></textarea>
+                    <button type="button" id="add-category-btn" class="btn btn-primary" style="align-self:flex-start;">Add Category</button>
                 </div>
             </div>
         </div>

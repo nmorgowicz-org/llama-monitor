@@ -2,8 +2,9 @@
 // Dropdown menu with AI-generated suggestions (General, Plot Twist, New Character).
 
 import { activeChatTab, saveChatTabs } from './chat-state.js';
-import { escapeHtml } from '../core/sanitization.js';
-import { showToast } from './toast.js';
+import { escapeHtml } from '../core/format.js';
+import { showToast, showToastWithActions } from './toast.js';
+import { toggleExplicitMode } from './chat-templates.js';
 
 let suggestionsState = {
     expanded: false,
@@ -11,7 +12,15 @@ let suggestionsState = {
     isLoading: false,
     suggestions: [],
     recentSuggestions: [],
+    customCategories: new Map(),
+    retryCount: 0,
+    maxRetries: 3,
+    lastError: null,
+    isOffline: false,
 };
+
+const DEBOUNCE_DELAY = 300;
+let categorySwitchTimeout = null;
 
 // ── Dropdown Toggle ──────────────────────────────────────────────────────────
 
@@ -71,10 +80,36 @@ function updateDropdownUI() {
 // ── Category Switching ───────────────────────────────────────────────────────
 
 export function setSuggestionCategory(category) {
-    suggestionsState.currentCategory = category;
-    suggestionsState.suggestions = [];
-    updateDropdownUI();
-    fetchSuggestions();
+    if (category === 'manage') {
+        manageCategories();
+        return;
+    }
+
+    // Check for explicit mode dependency
+    if (category === 'explicit') {
+        const tab = activeChatTab();
+        const explicitMode = tab?.explicit_mode ?? false;
+        if (!explicitMode) {
+            showToastWithActions(
+                'Explicit suggestions work best with Explicit Mode enabled',
+                'warning',
+                '',
+                [
+                    { id: 'enable', label: 'Enable Explicit Mode', handler: () => toggleExplicitMode() },
+                    { id: 'continue', label: 'Use Anyway' },
+                ]
+            );
+            return;
+        }
+    }
+
+    clearTimeout(categorySwitchTimeout);
+    categorySwitchTimeout = setTimeout(() => {
+        suggestionsState.currentCategory = category;
+        suggestionsState.suggestions = [];
+        updateDropdownUI();
+        fetchSuggestions();
+    }, DEBOUNCE_DELAY);
 }
 
 // ── Suggestions List Rendering ───────────────────────────────────────────────
@@ -85,8 +120,8 @@ function renderSuggestionsList() {
 
     if (suggestionsState.isLoading) {
         container.innerHTML = `
-            <div class="suggestions-loading">
-                <div class="spinner"></div>
+            <div class="suggestions-loading" role="status" aria-live="polite">
+                <div class="spinner" aria-hidden="true"></div>
                 <p>Generating suggestions...</p>
             </div>
         `;
@@ -97,7 +132,7 @@ function renderSuggestionsList() {
 
     if (suggestions.length === 0) {
         container.innerHTML = `
-            <div class="suggestions-empty-state">
+            <div class="suggestions-empty-state" role="status" aria-live="polite">
                 <p>No suggestions yet</p>
                 <p class="text-sm">Click "Generate" to get AI-powered suggestions based on your conversation.</p>
             </div>
@@ -106,12 +141,20 @@ function renderSuggestionsList() {
     }
 
     // eslint-disable-next-line no-unsanitized/property -- User content escaped via escapeHtml()
-    container.innerHTML = suggestions.map((suggestion, index) => `
-        <div class="suggestion-item" data-index="${index}">
-            <div class="suggestion-content">${escapeHtml(suggestion)}</div>
-            <button class="suggestion-btn suggestion-btn-use" title="Use this suggestion">Use</button>
+    container.innerHTML = suggestions.map((suggestion, index) => {
+        // Parse Pathweaver format: "TITLE\nDESCRIPTION"
+        const parts = suggestion.split('\n');
+        const title = parts[0] || suggestion;
+        const description = parts.slice(1).join('\n') || '';
+
+        return `
+        <div class="suggestion-item" data-index="${index}" role="option" aria-selected="false" tabindex="0">
+            ${description ? `<div class="suggestion-title">${escapeHtml(title)}</div>` : ''}
+            <div class="suggestion-content">${escapeHtml(description || title)}</div>
+            <button class="suggestion-btn suggestion-btn-use" title="Use this suggestion" aria-label="Use suggestion: ${escapeHtml(title)}">Use</button>
         </div>
-    `).join('');
+    `;
+    }).join('');
 
     // Attach use handlers
     container.querySelectorAll('.suggestion-btn-use').forEach(btn => {
@@ -141,9 +184,9 @@ function renderRecentSuggestions() {
     container.style.display = 'block';
     // eslint-disable-next-line no-unsanitized/property -- User content escaped via escapeHtml()
     list.innerHTML = recent.map((suggestion, index) => `
-        <div class="suggestion-item" data-recent-index="${index}">
+        <div class="suggestion-item" data-recent-index="${index}" role="option" aria-selected="false" tabindex="0">
             <div class="suggestion-content">${escapeHtml(suggestion)}</div>
-            <button class="suggestion-btn suggestion-btn-use" title="Reuse this suggestion">Use</button>
+            <button class="suggestion-btn suggestion-btn-use" title="Reuse this suggestion" aria-label="Reuse suggestion: ${escapeHtml(suggestion)}">Use</button>
         </div>
     `).join('');
 
@@ -207,12 +250,32 @@ function clearRecentSuggestions() {
 
 // ── Fetch Suggestions from API ───────────────────────────────────────────────
 
+function getSettingsValue() {
+    try {
+        return JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
+    } catch {
+        return {};
+    }
+}
+
 async function fetchSuggestions() {
     const tab = activeChatTab();
     if (!tab) return;
 
+    if (suggestionsState.isOffline) {
+        showToast('Offline: suggestions unavailable until connection restored', 'error');
+        return;
+    }
+
     suggestionsState.isLoading = true;
+    suggestionsState.retryCount = 0;
     updateDropdownUI();
+
+    const settings = getSettingsValue();
+    const contextDepth = settings.context_depth ?? 10;
+    const prompts = settings.suggestion_prompts ?? {};
+
+    let prompt = prompts[suggestionsState.currentCategory];
 
     try {
         const response = await fetch('/api/chat/suggestions', {
@@ -223,8 +286,8 @@ async function fetchSuggestions() {
             body: JSON.stringify({
                 tab_id: tab.id,
                 category: suggestionsState.currentCategory,
-                count: 5,
-                context_depth: 10,
+                context_depth: contextDepth,
+                prompt: prompt,
             }),
         });
 
@@ -235,12 +298,23 @@ async function fetchSuggestions() {
         const data = await response.json();
         suggestionsState.suggestions = data.suggestions || [];
         suggestionsState.isLoading = false;
+        suggestionsState.lastError = null;
         updateDropdownUI();
     } catch (error) {
-        suggestionsState.isLoading = false;
-        suggestionsState.suggestions = [];
-        updateDropdownUI();
-        showToast(`Failed to fetch suggestions: ${error.message}`, 'error');
+        suggestionsState.lastError = error;
+        if (suggestionsState.retryCount < suggestionsState.maxRetries) {
+            suggestionsState.retryCount++;
+            const delay = 1000 * suggestionsState.retryCount;
+            setTimeout(() => {
+                fetchSuggestions();
+            }, delay);
+            showToast(`Retrying... (${suggestionsState.retryCount}/${suggestionsState.maxRetries})`, 'warning');
+        } else {
+            suggestionsState.isLoading = false;
+            suggestionsState.suggestions = [];
+            updateDropdownUI();
+            showToast(`Failed to fetch suggestions: ${error.message}`, 'error');
+        }
     }
 }
 
@@ -263,6 +337,125 @@ function useSuggestion(index) {
     updateDropdownUI();
 }
 
+// ── Category Management ──────────────────────────────────────────────────────
+
+function manageCategories() {
+    const modal = document.getElementById('manage-categories-modal');
+    if (!modal) return;
+
+    modal.removeAttribute('aria-hidden');
+    modal.inert = false;
+    modal.classList.add('open');
+
+    renderCategoriesList();
+}
+
+function renderCategoriesList() {
+    const list = document.getElementById('categories-list');
+    if (!list) return;
+
+    const defaults = {
+        general: document.getElementById('settings-prompt-general')?.value || '',
+        'plot-twist': document.getElementById('settings-prompt-plot-twist')?.value || '',
+        'new-character': document.getElementById('settings-prompt-new-character')?.value || '',
+    };
+
+    const categories = [
+        { name: 'General', key: 'general', prompt: defaults.general, isDefault: true },
+        { name: 'Plot Twist', key: 'plot-twist', prompt: defaults['plot-twist'], isDefault: true },
+        { name: 'New Character', key: 'new-character', prompt: defaults['new-character'], isDefault: true },
+        ...Array.from(suggestionsState.customCategories.entries()).map(([key, prompt]) => ({
+            name: key.charAt(0).toUpperCase() + key.slice(1),
+            key,
+            prompt,
+            isDefault: false,
+        })),
+    ];
+
+    // eslint-disable-next-line no-unsanitized/property -- User content escaped via escapeHtml()
+    list.innerHTML = categories.map(cat => `
+        <div class="category-item" data-key="${escapeHtml(cat.key)}" style="display:flex;align-items:center;justify-content:space-between;padding:12px;border:1px solid var(--border-color);border-radius:6px;margin-bottom:8px;background:var(--bg-secondary);">
+            <div>
+                <strong class="category-name">${escapeHtml(cat.name)}${cat.isDefault ? ' (Default)' : ''}</strong>
+                <div class="category-prompt" style="font-size:12px;color:var(--text-muted);margin-top:4px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(cat.prompt.substring(0, 100))}${cat.prompt.length > 100 ? '...' : ''}</div>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <button class="btn-sm btn-preset category-action-btn" data-action="edit" data-key="${escapeHtml(cat.key)}" title="Edit prompt">Edit</button>
+                ${!cat.isDefault ? `<button class="btn-sm btn-secondary category-action-btn" data-action="delete" data-key="${escapeHtml(cat.key)}" title="Remove category">Remove</button>` : ''}
+            </div>
+        </div>
+    `).join('');
+
+    list.querySelectorAll('.category-action-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const action = e.target.dataset.action;
+            const key = e.target.dataset.key;
+            if (action === 'edit') {
+                editCategoryPrompt(key);
+            } else if (action === 'delete') {
+                removeCategory(key);
+            }
+        });
+    });
+}
+
+function addCategory(name, prompt) {
+    if (!name || !prompt) {
+        showToast('Please provide both a name and prompt', 'error');
+        return;
+    }
+
+    const key = name.toLowerCase().replace(/\s+/g, '-');
+    suggestionsState.customCategories.set(key, prompt);
+    saveCustomCategories();
+    renderCategoriesList();
+    showToast(`Category "${name}" added`, 'success');
+}
+
+function removeCategory(key) {
+    if (suggestionsState.customCategories.delete(key)) {
+        saveCustomCategories();
+        renderCategoriesList();
+        showToast('Category removed', 'success');
+    }
+}
+
+function editCategoryPrompt(key) {
+    const existingPrompt = suggestionsState.customCategories.get(key) ||
+        document.getElementById(`settings-prompt-${key}`)?.value || '';
+
+    const newPrompt = prompt('Edit prompt for category:', existingPrompt);
+    if (newPrompt !== null) {
+        if (key === 'general' || key === 'plot-twist' || key === 'new-character') {
+            const el = document.getElementById(`settings-prompt-${key}`);
+            if (el) el.value = newPrompt;
+        } else {
+            suggestionsState.customCategories.set(key, newPrompt);
+            saveCustomCategories();
+        }
+        renderCategoriesList();
+        showToast('Category updated', 'success');
+    }
+}
+
+function saveCustomCategories() {
+    try {
+        const data = Object.fromEntries(suggestionsState.customCategories);
+        localStorage.setItem('suggestions_custom_categories', JSON.stringify(data));
+    } catch (e) {
+        console.error('Failed to save custom categories:', e);
+    }
+}
+
+function loadCustomCategories() {
+    try {
+        const data = JSON.parse(localStorage.getItem('suggestions_custom_categories') || '{}');
+        suggestionsState.customCategories = new Map(Object.entries(data));
+    } catch (e) {
+        console.error('Failed to load custom categories:', e);
+    }
+}
+
 // ── Generate Button ──────────────────────────────────────────────────────────
 
 function setupGenerateButton() {
@@ -278,11 +471,40 @@ function setupGenerateButton() {
 
 function setupCategoryButtons() {
     document.querySelectorAll('.suggestion-category-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
             const category = btn.dataset.category;
             setSuggestionCategory(category);
         });
     });
+
+    // Manage categories modal
+    const manageModal = document.getElementById('manage-categories-modal');
+    const manageClose = document.getElementById('manage-categories-close');
+    const addCategoryBtn = document.getElementById('add-category-btn');
+
+    if (manageClose) {
+        manageClose.addEventListener('click', () => {
+            manageModal.classList.remove('open');
+            manageModal.setAttribute('aria-hidden', 'true');
+            manageModal.inert = true;
+        });
+    }
+
+    if (addCategoryBtn) {
+        addCategoryBtn.addEventListener('click', () => {
+            const nameInput = document.getElementById('new-category-name');
+            const promptInput = document.getElementById('new-category-prompt');
+            const name = nameInput?.value.trim();
+            const prompt = promptInput?.value.trim();
+
+            if (name && prompt) {
+                addCategory(name, prompt);
+                nameInput.value = '';
+                promptInput.value = '';
+            }
+        });
+    }
 }
 
 // ── Clear Recent Button ─────────────────────────────────────────────────────
@@ -309,27 +531,59 @@ function setupKeyboardNav() {
 
         if (e.key === 'ArrowDown') {
             e.preventDefault();
-            items.forEach(item => item.classList.remove('active'));
+            items.forEach(item => {
+                item.classList.remove('active');
+                item.setAttribute('aria-selected', 'false');
+            });
             const nextIndex = Math.min(currentIndex + 1, items.length - 1);
             if (nextIndex >= 0) {
                 items[nextIndex].classList.add('active');
+                items[nextIndex].setAttribute('aria-selected', 'true');
+                items[nextIndex].focus();
                 items[nextIndex].scrollIntoView({ block: 'nearest' });
             }
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
-            items.forEach(item => item.classList.remove('active'));
+            items.forEach(item => {
+                item.classList.remove('active');
+                item.setAttribute('aria-selected', 'false');
+            });
             const prevIndex = Math.max(currentIndex - 1, 0);
             if (prevIndex >= 0) {
                 items[prevIndex].classList.add('active');
+                items[prevIndex].setAttribute('aria-selected', 'true');
+                items[prevIndex].focus();
                 items[prevIndex].scrollIntoView({ block: 'nearest' });
             }
         } else if (e.key === 'Enter' && activeItem) {
             e.preventDefault();
-            useSuggestion(currentIndex);
+            const index = activeItem.dataset.index || activeItem.dataset.recentIndex;
+            useSuggestion(parseInt(index, 10));
+        } else if (e.key === 'Tab' && activeItem) {
+            e.preventDefault();
+            const index = activeItem.dataset.index || activeItem.dataset.recentIndex;
+            useSuggestion(parseInt(index, 10));
         } else if (e.key === 'Escape') {
             suggestionsState.expanded = false;
             updateDropdownUI();
+            document.getElementById('suggestions-toggle')?.focus();
         }
+    });
+}
+
+// ── Offline Detection ───────────────────────────────────────────────────────
+
+function setupOfflineDetection() {
+    window.addEventListener('online', () => {
+        suggestionsState.isOffline = false;
+        if (suggestionsState.expanded) {
+            showToast('Back online!', 'success');
+        }
+    });
+
+    window.addEventListener('offline', () => {
+        suggestionsState.isOffline = true;
+        showToast('You are offline', 'warning');
     });
 }
 
@@ -354,11 +608,13 @@ function setupClickOutside() {
 // ── Initialization ───────────────────────────────────────────────────────────
 
 export function initSuggestionsDropdown() {
+    loadCustomCategories();
     setupGenerateButton();
     setupCategoryButtons();
     setupClearRecentButton();
     setupKeyboardNav();
     setupClickOutside();
+    setupOfflineDetection();
     updateDropdownUI();
     renderRecentSuggestions();
 }

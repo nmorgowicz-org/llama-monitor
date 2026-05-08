@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::fmt;
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
@@ -148,6 +150,28 @@ static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 /// Set the config directory (called once at startup from AppConfig).
 pub fn set_config_dir(path: PathBuf) {
     CONFIG_DIR.set(path).ok();
+}
+
+/// Load prompts from static/prompts directory
+fn load_prompts_from_files() -> HashMap<String, String> {
+    let mut prompts = HashMap::new();
+
+    // Try to load from static/prompts directory relative to executable
+    let prompts_dir = PathBuf::from("static/prompts");
+
+    if let Ok(entries) = fs::read_dir(&prompts_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "md")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                && let Ok(content) = fs::read_to_string(&path)
+            {
+                prompts.insert(stem.to_string(), content);
+            }
+        }
+    }
+
+    prompts
 }
 
 fn chat_tabs_path() -> PathBuf {
@@ -1600,16 +1624,23 @@ fn api_chat_suggestions(
                     context.push_str(&format!("{}: {}\n", role, msg.content));
                 }
 
-                // Get or use default prompt
-                let default_prompt = match req.category.as_str() {
-                    "plot-twist" => "You are a plot twist specialist. Based on the conversation below, suggest {} unexpected, surprising events that could happen next.\n\nFormat as a numbered list. Prioritize: betrayals, revelations, power reversals, unexpected arrivals, hidden truths.\n\n[conversation context]",
-                    "new-character" => "You are a character introduction specialist. Based on the conversation below, suggest {} new characters that could enter the story.\n\nFormat as: [Character Name]: [Brief description and how they connect to current story]\n\n[conversation context]",
-                    _ => "You are a creative brainstorming partner. Based on the conversation below, suggest {} varied, actionable next steps the user could take.\n\nFormat as a numbered list. Prioritize variety: dialogue, action, investigation, social, creative approaches.\n\n[conversation context]",
-                };
+                // Load prompts from files
+                let file_prompts = load_prompts_from_files();
+
+                // Get or use default prompt (file-based or hardcoded fallback)
+                let default_prompt = req.prompt.or_else(|| {
+                    file_prompts.get(&req.category).cloned().or_else(|| {
+                        match req.category.as_str() {
+                            "plot-twist" => Some("You are a plot twist specialist. Based on the conversation below, suggest {} unexpected, surprising events that could happen next.\n\nFormat as a numbered list. Prioritize: betrayals, revelations, power reversals, unexpected arrivals, hidden truths.\n\n[conversation context]".to_string()),
+                            "new-character" => Some("You are a character introduction specialist. Based on the conversation below, suggest {} new characters that could enter the story.\n\nFormat as: [Character Name]: [Brief description and how they connect to current story]\n\n[conversation context]".to_string()),
+                            _ => Some("You are a creative brainstorming partner. Based on the conversation below, suggest {} varied, actionable next steps the user could take.\n\nFormat as a numbered list. Prioritize variety: dialogue, action, investigation, social, creative approaches.\n\n[conversation context]".to_string()),
+                        }
+                    })
+                });
 
                 let count = req.count.unwrap_or(5);
-                let prompt = req.prompt
-                    .unwrap_or(default_prompt.to_string())
+                let prompt = default_prompt
+                    .unwrap_or_default()
                     .replace("{count}", &count.to_string())
                     .replace("[conversation context]", &context);
 
@@ -1685,42 +1716,68 @@ fn api_chat_suggestions(
 }
 
 fn parse_suggestions(text: &str) -> Vec<String> {
-    // Try numbered list first: "1. Option" or "1) Option"
-    let numbered = regex::Regex::new(r"^\d+[\.\)]\s*(.+)$").ok();
-    if let Some(re) = numbered {
-        let suggestions: Vec<String> = text
-            .lines()
-            .filter_map(|line| re.captures(line))
-            .filter_map(|caps| caps.get(1))
-            .map(|m| m.as_str().trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        if !suggestions.is_empty() {
-            return suggestions;
+    // Pathweaver format: [EMOJI] TITLE\nDESCRIPTION with --- separators
+    // Split by --- separator and parse each block
+    let blocks: Vec<&str> = text.split("---").collect();
+    let mut suggestions = Vec::new();
+
+    for block in blocks {
+        let lines: Vec<&str> = block.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+        if lines.len() >= 2 {
+            // First line is title with emoji, rest is description
+            let title = lines[0];
+            let description = lines[1..].join(" ");
+            if !title.is_empty() && !description.is_empty() {
+                // Combine title and description with newline
+                suggestions.push(format!("{}\n{}", title, description));
+            }
+        }
+    }
+
+    // If Pathweaver format yielded nothing, try numbered list: "1. Option" or "1) Option"
+    if suggestions.is_empty() {
+        let numbered = regex::Regex::new(r"^\d+[\.\)]\s*(.+)$").ok();
+        if let Some(re) = numbered {
+            let numbered_suggestions: Vec<String> = text
+                .lines()
+                .filter_map(|line| re.captures(line))
+                .filter_map(|caps| caps.get(1))
+                .map(|m| m.as_str().trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !numbered_suggestions.is_empty() {
+                return numbered_suggestions;
+            }
         }
     }
 
     // Try bullet list: "- Option" or "* Option"
-    let bullets = regex::Regex::new(r"^[-*]\s+(.+)$").ok();
-    if let Some(re) = bullets {
-        let suggestions: Vec<String> = text
-            .lines()
-            .filter_map(|line| re.captures(line))
-            .filter_map(|caps| caps.get(1))
-            .map(|m| m.as_str().trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        if !suggestions.is_empty() {
-            return suggestions;
+    if suggestions.is_empty() {
+        let bullets = regex::Regex::new(r"^[-*]\s+(.+)$").ok();
+        if let Some(re) = bullets {
+            let bullet_suggestions: Vec<String> = text
+                .lines()
+                .filter_map(|line| re.captures(line))
+                .filter_map(|caps| caps.get(1))
+                .map(|m| m.as_str().trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !bullet_suggestions.is_empty() {
+                return bullet_suggestions;
+            }
         }
     }
 
     // Fallback: split by newlines, filter empty and short lines
-    text.lines()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty() && s.len() > 2)
-        .filter(|s| !s.starts_with('[') && !s.starts_with('['))
-        .collect()
+    if suggestions.is_empty() {
+        suggestions = text.lines()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty() && s.len() > 2)
+            .filter(|s| !s.starts_with('['))
+            .collect();
+    }
+
+    suggestions
 }
 
 fn compute_chat_tab_totals(mut tab: ChatTab) -> ChatTab {

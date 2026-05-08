@@ -62,6 +62,25 @@ export function collectSettings() {
         enabled_suggestions: !!document.getElementById('settings-enabled-suggestions')?.checked,
         enabled_quick_guide: !!document.getElementById('settings-enabled-quick-guide')?.checked,
         default_sidebar_width: parseInt(document.getElementById('settings-sidebar-width')?.value || '280', 10),
+        suggestion_count: parseInt(document.getElementById('settings-suggestion-count')?.value || '5', 10),
+        context_depth: parseInt(document.getElementById('settings-context-depth')?.value || '10', 10),
+        suggestion_prompts: {
+            general: document.getElementById('settings-prompt-general')?.value || '',
+            'plot-twist': document.getElementById('settings-prompt-plot-twist')?.value || '',
+            'new-character': document.getElementById('settings-prompt-new-character')?.value || '',
+            context: document.getElementById('settings-prompt-context')?.value || '',
+            director: document.getElementById('settings-prompt-director')?.value || '',
+            explicit: document.getElementById('settings-prompt-explicit')?.value || '',
+            action: document.getElementById('settings-prompt-action')?.value || '',
+            comedy: document.getElementById('settings-prompt-comedy')?.value || '',
+            fantasy: document.getElementById('settings-prompt-fantasy')?.value || '',
+            horror: document.getElementById('settings-prompt-horror')?.value || '',
+            mystery: document.getElementById('settings-prompt-mystery')?.value || '',
+            noir: document.getElementById('settings-prompt-noir')?.value || '',
+            romance: document.getElementById('settings-prompt-romance')?.value || '',
+            'sci-fi': document.getElementById('settings-prompt-sci-fi')?.value || '',
+            thriller: document.getElementById('settings-prompt-thriller')?.value || '',
+        },
     };
 }
 
@@ -184,11 +203,35 @@ export function applySettings(s) {
         if (el) el.checked = !!s.enabled_quick_guide;
     }
 
-    if (s.default_sidebar_width !== undefined) {
+      if (s.default_sidebar_width !== undefined) {
         const el = document.getElementById('settings-sidebar-width');
         const valueEl = document.getElementById('settings-sidebar-width-value');
         if (el) el.value = s.default_sidebar_width;
         if (valueEl) valueEl.textContent = `${s.default_sidebar_width}px`;
+    }
+
+    if (s.suggestion_count !== undefined) {
+        const el = document.getElementById('settings-suggestion-count');
+        const valueEl = document.getElementById('settings-suggestion-count-value');
+        if (el) el.value = s.suggestion_count;
+        if (valueEl) valueEl.textContent = String(s.suggestion_count);
+    }
+
+    if (s.context_depth !== undefined) {
+        const el = document.getElementById('settings-context-depth');
+        const valueEl = document.getElementById('settings-context-depth-value');
+        if (el) el.value = s.context_depth;
+        if (valueEl) valueEl.textContent = String(s.context_depth);
+    }
+
+    if (s.suggestion_prompts) {
+        const prompts = s.suggestion_prompts;
+        const generalEl = document.getElementById('settings-prompt-general');
+        const plotTwistEl = document.getElementById('settings-prompt-plot-twist');
+        const newCharEl = document.getElementById('settings-prompt-new-character');
+        if (generalEl && prompts.general) generalEl.value = prompts.general;
+        if (plotTwistEl && prompts['plot-twist']) plotTwistEl.value = prompts['plot-twist'];
+        if (newCharEl && prompts['new-character']) newCharEl.value = prompts['new-character'];
     }
 }
 
@@ -298,6 +341,34 @@ function _bindSettingsEvents() {
     document.getElementById('settings-sidebar-width')?.addEventListener('input', (e) => {
         const valueEl = document.getElementById('settings-sidebar-width-value');
         if (valueEl) valueEl.textContent = `${e.target.value}px`;
+    });
+
+    // Suggestion count range — update display value
+    document.getElementById('settings-suggestion-count')?.addEventListener('input', (e) => {
+        const valueEl = document.getElementById('settings-suggestion-count-value');
+        if (valueEl) valueEl.textContent = String(e.target.value);
+    });
+
+    // Context depth range — update display value
+    document.getElementById('settings-context-depth')?.addEventListener('input', (e) => {
+        const valueEl = document.getElementById('settings-context-depth-value');
+        if (valueEl) valueEl.textContent = String(e.target.value);
+    });
+
+    // Reset prompts to defaults
+    document.getElementById('settings-reset-prompts')?.addEventListener('click', () => {
+        const defaults = {
+            general: "You are a creative brainstorming partner. Based on the conversation below, suggest {count} varied, actionable next steps the user could take.\n\nFormat as a numbered list. Prioritize variety: dialogue, action, investigation, social, creative approaches.\n\n[conversation context]",
+            'plot-twist': "You are a plot twist specialist. Based on the conversation below, suggest {count} unexpected, surprising events that could happen next.\n\nFormat as a numbered list. Prioritize: betrayals, revelations, power reversals, unexpected arrivals, hidden truths.\n\n[conversation context]",
+            'new-character': "You are a character introduction specialist. Based on the conversation below, suggest {count} new characters that could enter the story.\n\nFormat as: [Character Name]: [Brief description and how they connect to current story]\n\n[conversation context]",
+        };
+        const generalEl = document.getElementById('settings-prompt-general');
+        const plotTwistEl = document.getElementById('settings-prompt-plot-twist');
+        const newCharEl = document.getElementById('settings-prompt-new-character');
+        if (generalEl) generalEl.value = defaults.general;
+        if (plotTwistEl) plotTwistEl.value = defaults['plot-twist'];
+        if (newCharEl) newCharEl.value = defaults['new-character'];
+        markSettingsDirty();
     });
 }
 

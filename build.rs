@@ -272,14 +272,32 @@ fn generate_routes(files: &[(String, String, String)], output: &str) {
         }
     }
 
-    // Chain all routes with .or()
+    // Chain all routes with .or() using a balanced tree structure to avoid compiler overflow
     writeln!(f).unwrap();
-    writeln!(f, "    // Chain all routes").unwrap();
-    writeln!(f, "    route_0").unwrap();
-    for (i, (_, _, _)) in route_files.iter().enumerate() {
-        if i > 0 {
-            writeln!(f, "        .or(route_{})", i).unwrap();
+    writeln!(f, "    // Chain all routes using balanced tree structure").unwrap();
+
+    // Group routes into chunks and chain them hierarchically
+    let total_routes = route_files.len();
+    if total_routes == 0 {
+        writeln!(f, "    warp::path({:?}).and(warp::get()).map(|| panic!(\"No routes\"))", "placeholder").unwrap();
+    } else if total_routes == 1 {
+        writeln!(f, "    route_0").unwrap();
+    } else {
+        // Create a balanced binary tree of .or() chains
+        let mut current_level: Vec<String> = route_files.iter().enumerate().map(|(i, _)| format!("route_{}", i)).collect();
+
+        while current_level.len() > 1 {
+            let mut next_level = Vec::new();
+            for chunk in current_level.chunks(2) {
+                if chunk.len() == 1 {
+                    next_level.push(chunk[0].clone());
+                } else {
+                    next_level.push(format!("{} .or({})", chunk[0], chunk[1]));
+                }
+            }
+            current_level = next_level;
         }
+        writeln!(f, "    {}", current_level[0]).unwrap();
     }
     writeln!(f, "}}").unwrap();
 
