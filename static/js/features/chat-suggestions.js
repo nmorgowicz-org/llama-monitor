@@ -15,8 +15,16 @@ let suggestionsState = {
 // ── Dropdown Toggle ──────────────────────────────────────────────────────────
 
 export function toggleSuggestionsDropdown() {
+    const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
+    if (!settings.enabled_suggestions) return;
+
     suggestionsState.expanded = !suggestionsState.expanded;
     updateDropdownUI();
+}
+
+export function isSuggestionsEnabled() {
+    const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
+    return settings.enabled_suggestions !== false;
 }
 
 export function getSuggestionsState() {

@@ -114,6 +114,26 @@ pub struct UiSettings {
     /// Persisted chat input textarea height (CSS value, e.g. "80px").
     #[serde(default)]
     pub chat_input_height: String,
+    /// Guided generation: context notes sidebar enabled
+    #[serde(default = "default_true")]
+    pub enabled_context_notes: bool,
+    /// Guided generation: suggestions dropdown enabled
+    #[serde(default = "default_true")]
+    pub enabled_suggestions: bool,
+    /// Guided generation: quick guide input enabled
+    #[serde(default = "default_true")]
+    pub enabled_quick_guide: bool,
+    /// Guided generation: default sidebar width in pixels
+    #[serde(default = "default_sidebar_width")]
+    pub default_sidebar_width: u32,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_sidebar_width() -> u32 {
+    280
 }
 
 fn default_ws_push_interval_ms() -> u64 {
@@ -229,6 +249,10 @@ impl Default for UiSettings {
             context_card_view: default_context_card_view(),
             ws_push_interval_ms: default_ws_push_interval_ms(),
             chat_input_height: String::new(),
+            enabled_context_notes: default_true(),
+            enabled_suggestions: default_true(),
+            enabled_quick_guide: default_true(),
+            default_sidebar_width: default_sidebar_width(),
         }
     }
 }

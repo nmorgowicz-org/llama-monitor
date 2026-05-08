@@ -1915,6 +1915,10 @@
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="19" cy="13.5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><path d="M13 9.5c2 1 4 3 4 6"/><path d="M9 9.5C7 10.5 5 12.5 5 15.5"/></svg>
                     Appearance
                 </button>
+                <button class="settings-tab" data-tab="chat">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    Chat
+                </button>
                 <button class="settings-tab" data-tab="performance">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                     Performance
@@ -1982,33 +1986,74 @@
                     </label>
                 </div>
                 <div class="settings-pane" id="settings-appearance">
-                    <h3>Appearance</h3>
-                    <label class="modal-field">
-                        Theme
-                        <select id="settings-theme">
-                            <option value="auto">Auto (System)</option>
-                            <option value="light">Light</option>
-                            <option value="dark">Dark</option>
-                        </select>
-                    </label>
-                    <label class="modal-field">
-                        Font Size
-                        <select id="settings-font-size">
-                            <option value="small">Small (14px)</option>
-                            <option value="medium" selected>Medium (16px)</option>
-                            <option value="large">Large (18px)</option>
-                        </select>
-                    </label>
-                    <label class="modal-field">
-                        Dashboard Widgets
-                        <div class="modal-row">
-                            <label class="chk"><input type="checkbox" id="settings-widget-cpu" checked> CPU Usage</label>
-                            <label class="chk"><input type="checkbox" id="settings-widget-gpu" checked> GPU Usage</label>
-                            <label class="chk"><input type="checkbox" id="settings-widget-memory" checked> Memory</label>
-                        </div>
-                    </label>
-                </div>
-                <div class="settings-pane" id="settings-performance">
+                     <h3>Appearance</h3>
+                     <label class="modal-field">
+                         Theme
+                         <select id="settings-theme">
+                             <option value="auto">Auto (System)</option>
+                             <option value="light">Light</option>
+                             <option value="dark">Dark</option>
+                         </select>
+                     </label>
+                     <label class="modal-field">
+                         Font Size
+                         <select id="settings-font-size">
+                             <option value="small">Small (14px)</option>
+                             <option value="medium" selected>Medium (16px)</option>
+                             <option value="large">Large (18px)</option>
+                         </select>
+                     </label>
+                     <label class="modal-field">
+                         Dashboard Widgets
+                         <div class="modal-row">
+                             <label class="chk"><input type="checkbox" id="settings-widget-cpu" checked> CPU Usage</label>
+                             <label class="chk"><input type="checkbox" id="settings-widget-gpu" checked> GPU Usage</label>
+                             <label class="chk"><input type="checkbox" id="settings-widget-memory" checked> Memory</label>
+                         </div>
+                     </label>
+                 </div>
+                 <div class="settings-pane" id="settings-chat">
+                     <h3>Guided Generation</h3>
+                     <p class="settings-help">
+                        Tools to help with creative writing, roleplay, and structured conversations.
+                     </p>
+                     <label class="modal-field">
+                         Context Notes Sidebar
+                         <div style="display:flex;align-items:center;gap:12px;">
+                             <label class="toggle-switch">
+                                 <input type="checkbox" id="settings-enabled-context-notes" checked>
+                                 <span class="toggle-slider"></span>
+                             </label>
+                             <span class="toggle-label">Enable persistent context notes (character, setting, plot details)</span>
+                         </div>
+                     </label>
+                     <label class="modal-field">
+                         AI Suggestions
+                         <div style="display:flex;align-items:center;gap:12px;">
+                             <label class="toggle-switch">
+                                 <input type="checkbox" id="settings-enabled-suggestions" checked>
+                                 <span class="toggle-slider"></span>
+                             </label>
+                             <span class="toggle-label">Enable AI-powered suggestion dropdown</span>
+                         </div>
+                     </label>
+                     <label class="modal-field">
+                         Quick Guide
+                         <div style="display:flex;align-items:center;gap:12px;">
+                             <label class="toggle-switch">
+                                 <input type="checkbox" id="settings-enabled-quick-guide" checked>
+                                 <span class="toggle-slider"></span>
+                             </label>
+                             <span class="toggle-label">Enable one-time instruction input</span>
+                         </div>
+                     </label>
+                     <label class="modal-field">
+                         Default Sidebar Width
+                         <input type="range" id="settings-sidebar-width" min="200" max="500" value="280" style="width:200px;">
+                         <span id="settings-sidebar-width-value" style="color:var(--text-muted);font-size:12px;">280px</span>
+                     </label>
+                 </div>
+                 <div class="settings-pane" id="settings-performance">
                     <h3>Performance &amp; Connection</h3>
                     <p class="settings-help">
                         Control how frequently the dashboard refreshes metrics. Lower intervals give smoother real-time updates but use more bandwidth and battery. On slow or metered connections, a higher interval reduces network usage.

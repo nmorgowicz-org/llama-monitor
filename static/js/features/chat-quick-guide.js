@@ -14,8 +14,16 @@ let quickGuideState = {
 // ── Toggle ───────────────────────────────────────────────────────────────────
 
 export function toggleQuickGuide() {
+    const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
+    if (!settings.enabled_quick_guide) return;
+
     quickGuideState.expanded = !quickGuideState.expanded;
     updateQuickGuideUI();
+}
+
+export function isQuickGuideEnabled() {
+    const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
+    return settings.enabled_quick_guide !== false;
 }
 
 export function getQuickGuideState() {

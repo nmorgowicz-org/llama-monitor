@@ -58,6 +58,10 @@ export function collectSettings() {
         context_card_view: document.getElementById('context-view-toggle-fleet')?.classList.contains('active') ? 'fleet' : 'gauge',
         ws_push_interval_ms: resolveWsPushInterval(),
         chat_input_height: document.getElementById('chat-input')?.style.height || '',
+        enabled_context_notes: !!document.getElementById('settings-enabled-context-notes')?.checked,
+        enabled_suggestions: !!document.getElementById('settings-enabled-suggestions')?.checked,
+        enabled_quick_guide: !!document.getElementById('settings-enabled-quick-guide')?.checked,
+        default_sidebar_width: parseInt(document.getElementById('settings-sidebar-width')?.value || '280', 10),
     };
 }
 
@@ -164,6 +168,28 @@ export function applySettings(s) {
         const el = document.getElementById('chat-input');
         if (el) el.style.height = s.chat_input_height;
     }
+
+    if (s.enabled_context_notes !== undefined) {
+        const el = document.getElementById('settings-enabled-context-notes');
+        if (el) el.checked = !!s.enabled_context_notes;
+    }
+
+    if (s.enabled_suggestions !== undefined) {
+        const el = document.getElementById('settings-enabled-suggestions');
+        if (el) el.checked = !!s.enabled_suggestions;
+    }
+
+    if (s.enabled_quick_guide !== undefined) {
+        const el = document.getElementById('settings-enabled-quick-guide');
+        if (el) el.checked = !!s.enabled_quick_guide;
+    }
+
+    if (s.default_sidebar_width !== undefined) {
+        const el = document.getElementById('settings-sidebar-width');
+        const valueEl = document.getElementById('settings-sidebar-width-value');
+        if (el) el.value = s.default_sidebar_width;
+        if (valueEl) valueEl.textContent = `${s.default_sidebar_width}px`;
+    }
 }
 
 // ── Live WS interval update ──────────────────────────────────────────────────
@@ -266,6 +292,12 @@ function _bindSettingsEvents() {
         applyWsIntervalLive();
         markSettingsDirty();
         saveSettings();
+    });
+
+    // Sidebar width range — update display value
+    document.getElementById('settings-sidebar-width')?.addEventListener('input', (e) => {
+        const valueEl = document.getElementById('settings-sidebar-width-value');
+        if (valueEl) valueEl.textContent = `${e.target.value}px`;
     });
 }
 

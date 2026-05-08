@@ -17,8 +17,16 @@ let sidebarState = {
 // ── Sidebar Toggle ────────────────────────────────────────────────────────────
 
 export function toggleContextSidebar() {
+    const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
+    if (!settings.enabled_context_notes) return;
+
     sidebarState.expanded = !sidebarState.expanded;
     updateSidebarUI();
+}
+
+export function isContextSidebarEnabled() {
+    const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
+    return settings.enabled_context_notes !== false;
 }
 
 export function getContextSidebarState() {
