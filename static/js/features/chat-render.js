@@ -943,7 +943,7 @@ function saveMessageEdit(btn) {
     }
     // Update message in-place (safe during streaming — doesn't wipe other messages)
     // eslint-disable-next-line no-unsanitized/property -- msg.content is user-editable local data, rendered via trusted renderMd
-    body.innerHTML = typeof renderMd === 'function' ? renderMd(msg.content) : msg.content;
+    body.innerHTML = typeof renderMd === 'function' ? renderMd(msg.content) : escapeHtml(msg.content);
     body.classList.add('chat-msg-body-rendered');
 }
 
@@ -955,7 +955,7 @@ function cancelMessageEdit(btn) {
     if (msg && body) {
         // Restore original content in-place (safe during streaming)
         // eslint-disable-next-line no-unsanitized/property -- msg.content is user-editable local data, rendered via trusted renderMd
-        body.innerHTML = typeof renderMd === 'function' ? renderMd(msg.content) : msg.content;
+        body.innerHTML = typeof renderMd === 'function' ? renderMd(msg.content) : escapeHtml(msg.content);
         body.classList.add('chat-msg-body-rendered');
     }
 }
