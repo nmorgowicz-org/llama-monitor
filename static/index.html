@@ -924,24 +924,32 @@
                         </button>
                     </div>
                 </div>
-                <div class="chat-params-grid">
-                    <label>
-                        <span class="chat-param-label">
-                            Creativity <span class="chat-param-technical">temperature</span>
-                            <span class="chat-param-tooltip" title="How random or focused the responses are (0 = focused, 2 = creative)">?</span>
-                        </span>
-                        <input type="range" id="param-temperature" min="0" max="2" step="0.05">
-                        <span id="param-temperature-val">0.7</span>
-                    </label>
-                    <label>
-                        <span class="chat-param-label">
-                            Variety <span class="chat-param-technical">top_p</span>
-                            <span class="chat-param-tooltip" title="Controls the range of words the model considers (0.9 = good balance)">?</span>
-                        </span>
-                        <input type="range" id="param-top-p" min="0" max="1" step="0.01">
-                        <span id="param-top-p-val">0.9</span>
-                    </label>
-                </div>
+<div class="chat-params-grid">
+                     <label>
+                         <span class="chat-param-label">
+                             Creativity <span class="chat-param-technical">temperature</span>
+                             <span class="chat-param-tooltip" title="How random or focused the responses are (0 = focused, 2 = creative)">?</span>
+                         </span>
+                         <input type="range" id="param-temperature" min="0" max="2" step="0.05">
+                         <span id="param-temperature-val">0.7</span>
+                     </label>
+                     <label>
+                         <span class="chat-param-label">
+                             Variety <span class="chat-param-technical">top_p</span>
+                             <span class="chat-param-tooltip" title="Controls the range of words the model considers (0.9 = good balance)">?</span>
+                         </span>
+                         <input type="range" id="param-top-p" min="0" max="1" step="0.01">
+                         <span id="param-top-p-val">0.9</span>
+                     </label>
+                     <label class="chat-param-label chat-param-timer">
+                         <span>
+                             Timeout
+                             <span class="chat-param-tooltip" title="Auto-stop if no visible response for this many seconds (0 = disabled)">?</span>
+                         </span>
+                         <input type="number" id="param-stream-timeout" min="0" step="10" placeholder="120">
+                         <span>s</span>
+                     </label>
+                 </div>
                 <div class="chat-params-advanced" id="chat-params-advanced" style="display:none;">
                     <div class="chat-params-divider"></div>
                     <div class="chat-params-grid">
@@ -969,21 +977,14 @@
                             <input type="range" id="param-repeat-penalty" min="1" max="2" step="0.01">
                             <span id="param-repeat-penalty-val">1.0</span>
                         </label>
-                        <label>
-                            <span class="chat-param-label">
-                                Max Length
-                                <span class="chat-param-tooltip" title="Maximum response length in tokens (leave empty for unlimited)">?</span>
-                            </span>
-                            <input type="number" id="param-max-tokens" min="0" step="64" placeholder="Unlimited">
-                        </label>
-                        <label class="chat-param-label">
-                            <span>
-                                Stream Timeout
-                                <span class="chat-param-tooltip" title="Auto-stop if no visible response for this many seconds (0 = disabled). Catches models stuck in thinking loops.">?</span>
-                            </span>
-                            <input type="number" id="param-stream-timeout" min="0" step="10" placeholder="120">
-                        </label>
-                    </div>
+<label>
+                             <span class="chat-param-label">
+                                 Max Length
+                                 <span class="chat-param-tooltip" title="Maximum response length in tokens (leave empty for unlimited)">?</span>
+                             </span>
+                             <input type="number" id="param-max-tokens" min="0" step="64" placeholder="Unlimited">
+                         </label>
+                     </div>
                 </div>
             </div>
 
