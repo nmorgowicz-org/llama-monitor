@@ -1,3 +1,20 @@
+/* ── CSS Variable Aliases (map to --color-* tokens) ────────────────────────── */
+
+:root {
+    --bg-primary: var(--color-bg-surface);
+    --bg-secondary: var(--color-bg-elevated);
+    --bg-tertiary: var(--color-bg-floating);
+    --bg-quaternary: var(--surface-card-base);
+    --text-primary: var(--color-text-primary);
+    --text-secondary: var(--color-text-secondary);
+    --text-tertiary: var(--color-text-muted);
+    --text-muted: var(--color-text-muted);
+    --border-color: var(--border-subtle);
+    --accent-color: var(--color-primary);
+    --accent-color-dark: var(--color-primary-dark);
+    --error-color: var(--color-error);
+}
+
 /* ── Chat Context Controls Wrapper ────────────────────────────────────────── */
 
 .chat-context-controls {
@@ -684,27 +701,6 @@
         opacity: 1;
         transform: translateY(0);
     }
-}
-
-/* ── Loading States ────────────────────────────────────────────────────────── */
-
-.suggestions-loading {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-    gap: 12px;
-}
-
-.suggestions-empty-state {
-    padding: 24px;
-    text-align: center;
-    color: var(--text-muted);
-}
-
-.suggestions-empty-state p {
-    margin: 4px 0;
 }
 
 .text-sm {
