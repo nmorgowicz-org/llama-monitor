@@ -92,6 +92,10 @@ export function chatScroll(force = false) {
     ensureChatElements();
     const c = chatMessagesEl;
     if (!c) return;
+    
+    // Don't auto-scroll if user has manually scrolled up during generation
+    if (!force && chat.disableAutoScroll) return;
+    
     const distFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
     if (force || distFromBottom < 80) {
         c.scrollTop = c.scrollHeight;
@@ -99,6 +103,8 @@ export function chatScroll(force = false) {
     if (force) {
         chat.unreadChatCount = 0;
         if (chatScrollBadge) chatScrollBadge.style.display = 'none';
+        // Reset auto-scroll disable flag after forced scroll
+        chat.disableAutoScroll = false;
     }
 }
 
@@ -111,6 +117,11 @@ function initChatScrollButton() {
     const checkScroll = () => {
         const distFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
         btn.classList.toggle('visible', distFromBottom > 100);
+        
+        // Disable auto-scroll if user scrolls up more than 100px during generation
+        if (distFromBottom > 100 && chat.busy) {
+            chat.disableAutoScroll = true;
+        }
     };
 
     container.addEventListener('scroll', checkScroll, { passive: true });
