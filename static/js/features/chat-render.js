@@ -477,6 +477,8 @@ function buildMessageElement(msg, idx, allMessages) {
     }
 
     wrapper.className = `chat-message chat-message-${msg.role}`;
+    wrapper.dataset.role = msg.role;
+    wrapper.dataset.msgIdx = idx;
 
     const ts = formatMessageDateTime(msg.timestamp_ms);
     const aiLabel = tab?.ai_name || 'AI';
@@ -525,6 +527,13 @@ function buildMessageElement(msg, idx, allMessages) {
                 <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012-2v1"/>
               </svg>
             </button>
+            ${isUser ? `
+            <button class="chat-action-btn" data-chat-action="retry-send" title="Resend">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 4v6h-6M1 20v-6h6"/>
+                <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+              </svg>
+            </button>` : ''}
             ${!isUser ? (() => {
                 const variants = msg._variants || [];
                 const curIdx = msg._variantIndex || 0;
@@ -881,9 +890,9 @@ function editMessageContent(btn) {
     const msg = tab.messages[msgIdx];
     if (!msg) return;
 
-    // Show "Resend from here" for ALL user messages, not just the last one
+    // Show "Save and Resend" for ALL user messages, not just the last one
     const resendBtn = msg.role === 'user'
-        ? `<button class="chat-edit-btn chat-edit-btn-resend" data-chat-edit="resend">Resend from here</button>`
+        ? `<button class="chat-edit-btn chat-edit-btn-resend" data-chat-edit="resend">Save and Resend</button>`
         : '';
     // eslint-disable-next-line no-unsanitized/property -- msg.content wrapped in escapeHtml() for textarea value; resendBtn is a hardcoded button element
     body.innerHTML = `<textarea class="chat-msg-edit-area" rows="6">${escapeHtml(msg.content)}</textarea>
@@ -990,8 +999,23 @@ function openTimeoutSetting() {
 function retrySend(btn) {
     const msgEl = btn.closest('.chat-message');
     const tab = activeChatTab();
-    if (!tab) return;
-    msgEl.remove();
+    if (!tab || !msgEl) return;
+    
+    // Only remove error placeholder messages, not regular user messages
+    if (msgEl.dataset.role === 'error') {
+        msgEl.remove();
+        getTransport()?.sendChatResend(tab);
+        return;
+    }
+    
+    // For user messages, truncate to this message and resend
+    const msgIdx = parseInt(msgEl.dataset.msgIdx);
+    if (!isNaN(msgIdx)) {
+        tab.messages = tab.messages.slice(0, msgIdx + 1);
+        tab.updated_at = Date.now();
+        scheduleChatPersist();
+    }
+    
     getTransport()?.sendChatResend(tab);
 }
 
@@ -1222,12 +1246,17 @@ export function initChatRender() {
         const actionBtn = e.target.closest('[data-chat-action]');
         if (!actionBtn) return;
         const action = actionBtn.dataset.chatAction;
+        const msgEl = actionBtn.closest('.chat-message');
+        const isUserMessage = msgEl?.dataset.role === 'user';
+        
         if (action === 'copy') copyMessageContent(actionBtn);
         else if (action === 'regenerate') regenerateFromMessage(actionBtn);
         else if (action === 'nav-variant') navigateVariant(actionBtn, +actionBtn.dataset.variantDir);
         else if (action === 'edit') editMessageContent(actionBtn);
         else if (action === 'delete') deleteMessage(actionBtn);
-        else if (action === 'retry-send') retrySend(actionBtn);
+        else if (action === 'retry-send') {
+            if (isUserMessage) retrySend(actionBtn);
+        }
         else if (action === 'dismiss-error') dismissError(actionBtn);
     });
 

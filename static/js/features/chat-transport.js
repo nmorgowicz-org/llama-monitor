@@ -150,6 +150,12 @@ export async function sendChatResend(tab) {
 
     if (typeof renderChatMessages === 'function') renderChatMessages();
 
+    // Ensure user is at bottom so auto-scroll works during AI response
+    // Use requestAnimationFrame to ensure DOM is fully updated before scrolling
+    requestAnimationFrame(() => {
+        if (typeof chatScroll === 'function') chatScroll(true);
+    });
+
     _doSendChat(tab);
 }
 
