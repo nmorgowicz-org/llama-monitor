@@ -550,7 +550,8 @@ export function showConnectionLostModal() {
     document.getElementById('connection-lost-go-welcome-btn')?.addEventListener('click', async () => {
         const { switchView } = await import('./setup-view.js');
         switchView('setup');
-        closeModal();
+        // Wait for view transition to complete before closing modal
+        setTimeout(closeModal, 600);
     });
     document.getElementById('connection-lost-dismiss-btn')?.addEventListener('click', closeModal);
     document.getElementById('connection-lost-modal-close')?.addEventListener('click', closeModal);
