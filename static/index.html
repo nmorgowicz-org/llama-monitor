@@ -678,6 +678,12 @@
                         </svg>
                         <span class="chat-header-label">Compact</span>
                     </button>
+                    <button class="chat-header-btn" id="btn-fix-last" title="Fix last response" style="display:none;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                        </svg>
+                        <span class="chat-header-label">Fix</span>
+                    </button>
                     <div class="chat-name-inputs">
                         <div class="chat-name-pill"><span class="chat-name-label">AI</span><input type="text" class="chat-name-input" id="chat-ai-name" placeholder="Name" /></div>
                         <div class="chat-name-pill"><span class="chat-name-label">You</span><input type="text" class="chat-name-input" id="chat-user-name" placeholder="Name" /></div>
@@ -1016,6 +1022,13 @@
                     <div class="suggestions-wrapper">
                         <button class="context-toggle-btn" id="suggestions-toggle" title="Suggestions" aria-expanded="false" aria-controls="suggestions-dropdown">💡</button>
                         <div class="suggestions-dropdown" id="suggestions-dropdown">
+                            <div class="suggestions-recent" id="suggestions-recent" style="display:none;">
+                                <div class="suggestions-recent-header">
+                                    <span>Recently Used</span>
+                                    <button class="suggestions-clear-recent" id="suggestions-clear-recent" title="Clear history">✕</button>
+                                </div>
+                                <div class="suggestions-recent-list" id="suggestions-recent-list"></div>
+                            </div>
                             <div class="suggestions-categories">
                                 <button class="suggestion-category-btn active" data-category="general">General</button>
                                 <button class="suggestion-category-btn" data-category="plot-twist">Plot Twist</button>
@@ -2108,6 +2121,29 @@
             </span>
             <button type="button" class="btn btn-modal-cancel" id="settings-modal-cancel">Cancel</button>
             <button type="button" class="btn btn-modal-save" id="settings-modal-save">Save Settings</button>
+        </div>
+    </div>
+</div>
+
+<!-- Fix Last Response Modal -->
+<div class="modal-overlay" id="fix-last-modal" aria-hidden="true" inert>
+    <div class="modal" style="width:600px;">
+        <div class="modal-header">
+            <h2>Fix Last Response</h2>
+            <button type="button" class="modal-close" id="fix-last-modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body" style="padding:24px;">
+            <p style="color:var(--text-muted);margin-bottom:16px;">
+                Add instructions to fix or improve the last response. The model will regenerate with your correction.
+            </p>
+            <div class="modal-field">
+                <label style="display:block;font-weight:600;margin-bottom:8px;">Correction</label>
+                <textarea id="fix-last-instruction" rows="4" style="width:100%;padding:12px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);color:var(--text-primary);font-family:inherit;font-size:14px;resize:vertical;" placeholder="e.g., 'Use more formal language', 'Include more technical details', 'Write from a different perspective'"></textarea>
+            </div>
+            <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:24px;">
+                <button type="button" class="btn btn-secondary" id="fix-last-cancel">Cancel</button>
+                <button type="button" class="btn btn-primary" id="fix-last-regenerate">Regenerate</button>
+            </div>
         </div>
     </div>
 </div>

@@ -1,7 +1,7 @@
 // ── Suggestions (Dropdown) ──────────────────────────────────────────────────
 // Dropdown menu with AI-generated suggestions (General, Plot Twist, New Character).
 
-import { activeChatTab } from './chat-state.js';
+import { activeChatTab, saveChatTabs } from './chat-state.js';
 import { escapeHtml } from '../core/sanitization.js';
 import { showToast } from './toast.js';
 
@@ -10,6 +10,7 @@ let suggestionsState = {
     currentCategory: 'general',
     isLoading: false,
     suggestions: [],
+    recentSuggestions: [],
 };
 
 // ── Dropdown Toggle ──────────────────────────────────────────────────────────
@@ -62,6 +63,9 @@ function updateDropdownUI() {
     if (listContainer) {
         renderSuggestionsList();
     }
+
+    // Always render recent suggestions
+    renderRecentSuggestions();
 }
 
 // ── Category Switching ───────────────────────────────────────────────────────
@@ -120,6 +124,87 @@ function renderSuggestionsList() {
     });
 }
 
+function renderRecentSuggestions() {
+    const container = document.getElementById('suggestions-recent');
+    const list = document.getElementById('suggestions-recent-list');
+    const tab = activeChatTab();
+
+    if (!container || !list || !tab) return;
+
+    const recent = tab._suggestion_history || [];
+
+    if (recent.length === 0) {
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = 'block';
+    // eslint-disable-next-line no-unsanitized/property -- User content escaped via escapeHtml()
+    list.innerHTML = recent.map((suggestion, index) => `
+        <div class="suggestion-item" data-recent-index="${index}">
+            <div class="suggestion-content">${escapeHtml(suggestion)}</div>
+            <button class="suggestion-btn suggestion-btn-use" title="Reuse this suggestion">Use</button>
+        </div>
+    `).join('');
+
+    // Attach reuse handlers
+    list.querySelectorAll('.suggestion-btn-use').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const item = e.target.closest('.suggestion-item');
+            const index = parseInt(item.dataset.recentIndex, 10);
+            reuseRecentSuggestion(index);
+        });
+    });
+}
+
+function addRecentSuggestion(suggestion) {
+    const tab = activeChatTab();
+    if (!tab) return;
+
+    tab._suggestion_history = tab._suggestion_history || [];
+
+    // Remove if already exists to avoid duplicates
+    tab._suggestion_history = tab._suggestion_history.filter(s => s !== suggestion);
+
+    // Add to beginning
+    tab._suggestion_history.unshift(suggestion);
+
+    // Limit to 10
+    if (tab._suggestion_history.length > 10) {
+        tab._suggestion_history = tab._suggestion_history.slice(0, 10);
+    }
+
+    // Save
+    saveChatTabs().catch(() => {});
+    renderRecentSuggestions();
+}
+
+function reuseRecentSuggestion(index) {
+    const tab = activeChatTab();
+    if (!tab || !tab._suggestion_history || index < 0 || index >= tab._suggestion_history.length) return;
+
+    const suggestion = tab._suggestion_history[index];
+
+    // Dispatch event for chat-input to handle
+    window.dispatchEvent(new CustomEvent('suggestionSelected', {
+        detail: { text: suggestion },
+    }));
+
+    // Close dropdown
+    suggestionsState.expanded = false;
+    updateDropdownUI();
+}
+
+function clearRecentSuggestions() {
+    const tab = activeChatTab();
+    if (!tab) return;
+
+    tab._suggestion_history = [];
+    saveChatTabs().catch(() => {});
+    renderRecentSuggestions();
+}
+
 // ── Fetch Suggestions from API ───────────────────────────────────────────────
 
 async function fetchSuggestions() {
@@ -165,6 +250,9 @@ function useSuggestion(index) {
     const suggestion = suggestionsState.suggestions[index];
     if (!suggestion) return;
 
+    // Track in history
+    addRecentSuggestion(suggestion);
+
     // Dispatch event for chat-input to handle
     window.dispatchEvent(new CustomEvent('suggestionSelected', {
         detail: { text: suggestion },
@@ -194,6 +282,18 @@ function setupCategoryButtons() {
             const category = btn.dataset.category;
             setSuggestionCategory(category);
         });
+    });
+}
+
+// ── Clear Recent Button ─────────────────────────────────────────────────────
+
+function setupClearRecentButton() {
+    const clearBtn = document.getElementById('suggestions-clear-recent');
+    if (!clearBtn) return;
+
+    clearBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        clearRecentSuggestions();
     });
 }
 
@@ -256,7 +356,9 @@ function setupClickOutside() {
 export function initSuggestionsDropdown() {
     setupGenerateButton();
     setupCategoryButtons();
+    setupClearRecentButton();
     setupKeyboardNav();
     setupClickOutside();
     updateDropdownUI();
+    renderRecentSuggestions();
 }

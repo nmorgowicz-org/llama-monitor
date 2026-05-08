@@ -29,6 +29,7 @@ import { initNetworkDetection } from './features/network-detection.js';
 import { initContextSidebar } from './features/chat-notes.js';
 import { initSuggestionsDropdown } from './features/chat-suggestions.js';
 import { initQuickGuide } from './features/chat-quick-guide.js';
+import { initFixLastResponse } from './features/chat-fix-last.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
@@ -125,6 +126,7 @@ initNetworkDetection();
 initContextSidebar();
 initSuggestionsDropdown();
 initQuickGuide();
+initFixLastResponse();
 
 // Wire up guided generation event handlers
 document.getElementById('context-sidebar-toggle')?.addEventListener('click', () => {
