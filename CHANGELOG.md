@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.17.0...v0.17.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* **agent:** preserve quick upgrade button in update indicator ([47768f1](https://github.com/nmorgowicz-org/llama-monitor/commit/47768f1375eb93eb49bcb1e2507d83fff348be48))
+* **chat:** add real-time token counter to thinking block header ([49c9898](https://github.com/nmorgowicz-org/llama-monitor/commit/49c98981a2d47e9601bead370d79eee55bbcb7a5))
+* **chat:** add resend button to user messages for quick retry ([49c9898](https://github.com/nmorgowicz-org/llama-monitor/commit/49c98981a2d47e9601bead370d79eee55bbcb7a5))
+* **chat:** allow inline edit save during AI generation ([9ad98c2](https://github.com/nmorgowicz-org/llama-monitor/commit/9ad98c2454d1c33f577feff3ed7aeaa480682e83))
+* **chat:** allow regeneration from last variant in navigation ([9ad98c2](https://github.com/nmorgowicz-org/llama-monitor/commit/9ad98c2454d1c33f577feff3ed7aeaa480682e83))
+* **chat:** disable auto-scroll when user scrolls up during generation ([49c9898](https://github.com/nmorgowicz-org/llama-monitor/commit/49c98981a2d47e9601bead370d79eee55bbcb7a5))
+* **chat:** ensure auto-scroll resumes after sending message ([9ad98c2](https://github.com/nmorgowicz-org/llama-monitor/commit/9ad98c2454d1c33f577feff3ed7aeaa480682e83))
+* **chat:** move timeout setting to main panel, improve toast duration ([49c9898](https://github.com/nmorgowicz-org/llama-monitor/commit/49c98981a2d47e9601bead370d79eee55bbcb7a5))
+* **chat:** persist input resize to settings instead of localStorage ([9ad98c2](https://github.com/nmorgowicz-org/llama-monitor/commit/9ad98c2454d1c33f577feff3ed7aeaa480682e83))
+* **chat:** prevent scroll force and DOM wipe during streaming ([9ad98c2](https://github.com/nmorgowicz-org/llama-monitor/commit/9ad98c2454d1c33f577feff3ed7aeaa480682e83))
+* **chat:** reorder persona menu with active at top, add edit buttons ([49c9898](https://github.com/nmorgowicz-org/llama-monitor/commit/49c98981a2d47e9601bead370d79eee55bbcb7a5))
+* **chat:** restore user position after reconnecting to server ([49c9898](https://github.com/nmorgowicz-org/llama-monitor/commit/49c98981a2d47e9601bead370d79eee55bbcb7a5))
+* **chat:** scroll to thinking block when it appears during generation ([49c9898](https://github.com/nmorgowicz-org/llama-monitor/commit/49c98981a2d47e9601bead370d79eee55bbcb7a5))
+* **chat:** show connection lost modal on all errors, not just regenerate ([49c9898](https://github.com/nmorgowicz-org/llama-monitor/commit/49c98981a2d47e9601bead370d79eee55bbcb7a5))
+* **chat:** update erotic storyteller system prompt ([49c9898](https://github.com/nmorgowicz-org/llama-monitor/commit/49c98981a2d47e9601bead370d79eee55bbcb7a5))
+* **ui:** fix connection lost modal spacing ([49c9898](https://github.com/nmorgowicz-org/llama-monitor/commit/49c98981a2d47e9601bead370d79eee55bbcb7a5))
+* **ui:** remove infinite animations from settings modal fields ([47768f1](https://github.com/nmorgowicz-org/llama-monitor/commit/47768f1375eb93eb49bcb1e2507d83fff348be48))
+* **ui:** restore min-height to allow content expansion ([9ad98c2](https://github.com/nmorgowicz-org/llama-monitor/commit/9ad98c2454d1c33f577feff3ed7aeaa480682e83))
+
 ## [0.17.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.16.0...v0.17.0) (2026-05-07)
 
 
