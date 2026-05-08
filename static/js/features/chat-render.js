@@ -941,12 +941,23 @@ function saveMessageEdit(btn) {
         tab.updated_at = Date.now();
         scheduleChatPersist();
     }
-    // Do not re-render if AI is busy (would wipe streaming message from DOM)
-    if (!chat.busy) renderChatMessages();
+    // Update message in-place (safe during streaming — doesn't wipe other messages)
+    // eslint-disable-next-line no-unsanitized/property -- msg.content is user-editable local data, rendered via trusted renderMd
+    body.innerHTML = typeof renderMd === 'function' ? renderMd(msg.content) : msg.content;
+    body.classList.add('chat-msg-body-rendered');
 }
 
 function cancelMessageEdit(btn) {
-    if (!chat.busy) renderChatMessages();
+    const msgEl = btn.closest('.chat-message');
+    const body = msgEl.querySelector('.chat-msg-body');
+    const msgIdx = parseInt(msgEl.dataset.msgIdx);
+    const msg = activeChatTab()?.messages[msgIdx];
+    if (msg && body) {
+        // Restore original content in-place (safe during streaming)
+        // eslint-disable-next-line no-unsanitized/property -- msg.content is user-editable local data, rendered via trusted renderMd
+        body.innerHTML = typeof renderMd === 'function' ? renderMd(msg.content) : msg.content;
+        body.classList.add('chat-msg-body-rendered');
+    }
 }
 
 function deleteMessage(btn) {
