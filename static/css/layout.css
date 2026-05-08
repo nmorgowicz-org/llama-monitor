@@ -872,8 +872,7 @@
 }
 
 .content-area {
-  flex: 1;
-  min-height: 0;
+  min-height: calc(100vh - var(--shell-top));
   overflow: hidden;
   display: flex;
   flex-direction: column;
