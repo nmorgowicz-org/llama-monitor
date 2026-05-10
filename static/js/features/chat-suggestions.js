@@ -159,7 +159,7 @@ function renderSuggestionsList() {
         container.innerHTML = `
             <div class="suggestions-empty-state" role="status" aria-live="polite">
                 <p>No suggestions yet</p>
-                <p class="text-sm">Click "Generate" to get AI-powered suggestions based on your conversation.</p>
+                <p class="text-sm">Select a category above, then hit **Generate** to ask the AI for writing prompts tailored to your conversation.</p>
             </div>
         `;
         return;
@@ -176,7 +176,7 @@ function renderSuggestionsList() {
         <div class="suggestion-item" data-index="${index}" role="option" aria-selected="false" tabindex="0">
             ${description ? `<div class="suggestion-title">${escapeHtml(title)}</div>` : ''}
             <div class="suggestion-content">${escapeHtml(description || title)}</div>
-            <button class="suggestion-btn suggestion-btn-use" title="Use this suggestion" aria-label="Use suggestion: ${escapeHtml(title)}">Use</button>
+            <button class="suggestion-btn suggestion-btn-use" title="Insert this prompt into the chat input" aria-label="Use suggestion: ${escapeHtml(title)}">Use</button>
         </div>
     `;
     }).join('');

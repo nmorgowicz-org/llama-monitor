@@ -11,10 +11,10 @@ const MIN_WIDTH = 240;
 const MAX_WIDTH = 600;
 
 const PREDEFINED_SECTIONS = [
-    { id: 'character', name: 'Character', icon: '👤', placeholder: 'Add character details...' },
-    { id: 'setting', name: 'Setting', icon: '🌍', placeholder: 'Add setting info...' },
-    { id: 'plot', name: 'Plot', icon: '📖', placeholder: 'Add plot points...' },
-    { id: 'tone', name: 'Tone', icon: '🎭', placeholder: 'Add tone/style notes...' },
+    { id: 'character', name: 'Character', icon: '👤', placeholder: 'e.g. "Kira, 28, cynical detective with a dry wit. Secretly writes poetry."' },
+    { id: 'setting', name: 'Setting', icon: '🌍', placeholder: 'e.g. "Neo-Tokyo, 2087. Acid rain, neon signs, the Yakuza run everything."' },
+    { id: 'plot', name: 'Plot', icon: '📖', placeholder: 'e.g. "The murder victim was Kira\'s mentor. The suspect list includes her partner."' },
+    { id: 'tone', name: 'Tone', icon: '🎭', placeholder: 'e.g. "Noir atmosphere. Wry humor. Short punchy sentences. No melodrama."' },
 ];
 
 let sidebarResizing = false;
@@ -399,6 +399,7 @@ function setupResizeHandle() {
 
     handle.addEventListener('mousedown', (e) => {
         sidebarResizing = true;
+        handle.classList.add('active');
         e.preventDefault();
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
@@ -414,6 +415,7 @@ function setupResizeHandle() {
 
         const onMouseUp = () => {
             sidebarResizing = false;
+            handle.classList.remove('active');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
 

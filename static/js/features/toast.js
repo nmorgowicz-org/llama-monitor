@@ -16,7 +16,7 @@ function getToastIcon(type) {
     return icons[type] || 'ℹ';
 }
 
-const EXPLICIT_LEVEL_ICONS = { 0: 'G', 1: '17+', 2: '18+' };
+const EXPLICIT_LEVEL_ICONS = { 0: '🔒', 1: '🔓', 2: '🔥' };
 
 export function showToast(title, type = 'error', message = '', options = {}) {
     const container = document.getElementById('toast-container');
@@ -67,7 +67,7 @@ export function showToast(title, type = 'error', message = '', options = {}) {
         setTimeout(() => {
             toast.classList.remove('show');
             setTimeout(() => toast.remove(), 300);
-        }, TOAST_AUTO_DISMISS);
+        }, options.duration || TOAST_AUTO_DISMISS);
         return null;
     }
 }

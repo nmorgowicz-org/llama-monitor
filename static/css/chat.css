@@ -2599,26 +2599,7 @@
   color: #1a1f24;
 }
 
-/* Explicit toast icons — rating badge style */
-.toast.toast-explicit .toast-icon {
-  width: 26px;
-  height: 26px;
-  font-size: 11px;
-  font-weight: 800;
-  font-family: var(--font-mono, monospace);
-  letter-spacing: -0.5px;
-  border-radius: 4px;
-  background: linear-gradient(135deg, #b48ead, #c9a5c4);
-  color: #1a1f24;
-}
-
-.toast.toast-explicit.explicit-level-1 .toast-icon {
-  background: linear-gradient(135deg, #fb923c, #fdba74);
-}
-
-.toast.toast-explicit.explicit-level-2 .toast-icon {
-  background: linear-gradient(135deg, #ef4444, #f87171);
-}
+/* Explicit toast icons — emoji, no custom styling needed */
 
 .toast-content {
   flex: 1;

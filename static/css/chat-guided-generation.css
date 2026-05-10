@@ -177,17 +177,62 @@
 
 .sidebar-resize-handle {
     position: absolute;
-    left: -4px;
+    left: 0;
     top: 0;
-    width: 8px;
+    width: 16px;
     height: 100%;
     cursor: col-resize;
     background: transparent;
     transition: background 0.2s;
+    z-index: 10;
+}
+
+/* Visible grip dots — always present at subtle opacity */
+.sidebar-resize-handle::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 2px;
+    height: 20px;
+    background: repeating-linear-gradient(
+        to bottom,
+        rgba(255, 255, 255, 0.15) 0px,
+        rgba(255, 255, 255, 0.15) 2px,
+        transparent 2px,
+        transparent 5px
+    );
+    border-radius: 1px;
+    transition: background 0.2s;
 }
 
 .sidebar-resize-handle:hover {
-    background: var(--accent-color);
+    background: rgba(99, 102, 241, 0.08);
+}
+
+.sidebar-resize-handle:hover::after {
+    background: repeating-linear-gradient(
+        to bottom,
+        rgba(99, 102, 241, 0.6) 0px,
+        rgba(99, 102, 241, 0.6) 2px,
+        transparent 2px,
+        transparent 5px
+    );
+}
+
+.sidebar-resize-handle.active {
+    background: rgba(99, 102, 241, 0.15);
+}
+
+.sidebar-resize-handle.active::after {
+    background: repeating-linear-gradient(
+        to bottom,
+        rgba(99, 102, 241, 0.8) 0px,
+        rgba(99, 102, 241, 0.8) 2px,
+        transparent 2px,
+        transparent 5px
+    );
 }
 
 .sidebar-notes-list {
@@ -616,6 +661,14 @@
     pointer-events: none;
 }
 
+.suggestions-intro {
+    padding: 12px 14px 8px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-muted);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
 .quick-guide-container {
     position: absolute;
     bottom: calc(100% + 8px);
@@ -981,6 +1034,12 @@
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.5px;
+}
+
+.quick-guide-subtitle {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-top: 3px;
 }
 
 .quick-guide-last-used {

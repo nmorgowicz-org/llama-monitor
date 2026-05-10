@@ -270,24 +270,23 @@ async function cleanupServer(server) {
     console.error('[NEW FEATURES] Error:', err.message);
     console.error(err.stack);
   } finally {
-    // Clean up test tabs
+    // Clean up test tabs — keep only the first tab, persist to disk
     console.log('[NEW FEATURES] Cleaning up test tabs...');
-    await page.evaluate(() => {
-      const tabs = window.chatTabs || [];
-      // Keep only the first tab, remove the rest
-      if (tabs.length > 1) {
-        const tabsToRemove = tabs.slice(1);
-        tabsToRemove.forEach(tab => {
-          const index = tabs.findIndex(t => t.id === tab.id);
-          if (index > -1) tabs.splice(index, 1);
-        });
-        // Trigger persistence
-        if (typeof window.persistChatTabs === 'function') {
-          window.persistChatTabs();
-        }
+    await page.evaluate(async () => {
+      const { chat } = await import('/js/core/app-state.js');
+      const { newChatTab, flushChatPersist } = await import('/js/features/chat-state.js');
+      const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+
+      if (chat.tabs.length > 1) {
+        chat.tabs = [chat.tabs[0]];
+        chat.activeTabId = chat.tabs[0].id;
+        chat.tabsDirty = true;
+        renderChatTabs();
+        renderChatMessages();
+        flushChatPersist();
       }
     });
-    await sleep(500);
+    await sleep(1000);
 
     await browser.close();
     await cleanupServer(server);

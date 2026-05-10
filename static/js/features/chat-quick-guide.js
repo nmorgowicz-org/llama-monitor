@@ -98,7 +98,7 @@ function submitQuickGuide() {
     updateQuickGuideUI();
 
     // Show confirmation
-    showToast('Quick guide instruction added to context', 'success');
+    showToast('Instruction saved — will apply to next AI reply', 'success');
 }
 
 // ── Submit Button ────────────────────────────────────────────────────────────

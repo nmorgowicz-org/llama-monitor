@@ -266,6 +266,24 @@ fs.mkdirSync(OUTPUT_DIR, { recursive: true });
     } catch (error) {
       console.error('[FULL UI REVIEW] Error during capture:', error.message);
     } finally {
+      // Clean up test tabs — keep only the first tab
+      console.log('[FULL UI REVIEW] Cleaning up test tabs...');
+      try {
+        await page.evaluate(async () => {
+          const { chat } = await import('/js/core/app-state.js');
+          const { flushChatPersist } = await import('/js/features/chat-state.js');
+          const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+          if (chat.tabs.length > 1) {
+            chat.tabs = [chat.tabs[0]];
+            chat.activeTabId = chat.tabs[0].id;
+            chat.tabsDirty = true;
+            renderChatTabs();
+            renderChatMessages();
+            flushChatPersist();
+          }
+        });
+        await sleep(1000);
+      } catch (_) {}
       await browser.close();
       console.log('[FULL UI REVIEW] Browser closed');
     }
