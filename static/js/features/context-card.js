@@ -183,7 +183,8 @@ function renderOverflowButton(className, overflow) {
 
 function renderChatStrip(model) {
     const { strip, stripMeta } = ensureElements();
-    const source = model.nonStaleChats.length ? model.nonStaleChats : model.chatSummaries;
+    // Show all chats with messages — stale ones are dimmed but visible
+    const source = model.chatSummaries.filter(c => c.messageCount > 0);
     const visible = expanded ? source : source.slice(0, MAX_VISIBLE_CHATS);
     const overflow = Math.max(0, source.length - visible.length);
     strip.innerHTML = '';
@@ -198,17 +199,17 @@ function renderChatStrip(model) {
 
     for (const item of visible) {
         const pill = document.createElement('div');
-        pill.className = `context-pill ${item.state}`;
-        pill.title = item.name;
+        pill.className = `context-pill ${item.state}${item.isStale ? ' stale' : ''}`;
+        pill.title = item.isStale ? `${item.name} (stale)` : item.name;
         pill.innerHTML = `
             <span class="context-pill-name">${escapeHtml(item.name)}</span>
             <span class="context-pill-value">${escapeHtml(item.ctxPct != null ? Math.round(item.ctxPct) + '%' : '—')}</span>
         `;
         strip.appendChild(pill);
         const nameEl = pill.querySelector('.context-pill-name');
-        const overflow = nameEl.scrollWidth - nameEl.offsetWidth;
-        if (overflow > 0) {
-            nameEl.style.setProperty('--scroll-dist', `${overflow}px`);
+        const nameOverflow = nameEl.scrollWidth - nameEl.offsetWidth;
+        if (nameOverflow > 0) {
+            nameEl.style.setProperty('--scroll-dist', `${nameOverflow}px`);
             nameEl.classList.add('scrollable');
         }
     }
@@ -218,12 +219,9 @@ function renderChatStrip(model) {
         strip.appendChild(more);
     }
 
-    // Only show meta when it adds info the pills don't already convey
-    stripMeta.textContent = model.staleChatCount > 0
-        ? `${model.staleChatCount} stale chat${model.staleChatCount !== 1 ? 's' : ''}`
-        : model.capacityTokens > 0
-            ? `${formatMetricNumber(model.capacityTokens)} ctx window`
-            : '';
+    stripMeta.textContent = model.capacityTokens > 0
+        ? `${formatMetricNumber(model.capacityTokens)} ctx window`
+        : '';
 }
 
 const GAUGE_CIRCUMFERENCE = 402; // 2π × r64
@@ -265,7 +263,8 @@ function renderGaugeView(model) {
 
 function renderFleetView(model) {
     const { fleetSummary, fleetRows, fleetFooter } = ensureElements();
-    const source = model.nonStaleChats.length ? model.nonStaleChats : model.chatSummaries;
+    // Show all chats with messages — stale ones are dimmed but visible
+    const source = model.chatSummaries.filter(c => c.messageCount > 0);
     const rows = expanded ? source : source.slice(0, MAX_VISIBLE_FLEET_ROWS);
 
     fleetSummary.textContent = model.mode === 'live-runtime'
@@ -286,17 +285,16 @@ function renderFleetView(model) {
     fleetRows.innerHTML = rows.map(item => {
         const pct = item.ctxPct != null ? Math.round(item.ctxPct) : null;
         const state = escapeHtml(item.state);
+        const staleClass = item.isStale ? ' stale' : '';
         const pctLabel = escapeHtml(pct != null ? pct + '%' : '—');
         const width = escapeHtml(String(pct != null ? Math.min(100, pct) : 0));
         return `
-            <div class="context-fleet-row ${state}">
-                <div class="context-fleet-row-top">
-                    <span class="context-fleet-name">${escapeHtml(item.name)}</span>
-                    <span class="context-fleet-value">${pctLabel}</span>
-                </div>
+            <div class="context-fleet-row ${state}${staleClass}">
+                <span class="context-fleet-name">${escapeHtml(item.name)}</span>
                 <div class="context-fleet-bar">
                     <div class="context-fleet-fill ${state}" style="width:${width}%"></div>
                 </div>
+                <span class="context-fleet-value">${pctLabel}</span>
             </div>
         `;
     }).join('');
