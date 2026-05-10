@@ -33,41 +33,32 @@ We are **NOT** building a SillyTavern clone. We're building a **simple, premium 
 **Current State:**
 - Only 4 categories visible: General, Plot Twist, New Character, Director
 - 17 prompts exist but most are hidden
-- Explicit category exists but no Explicit Mode toggle
-- No visual differentiation for explicit content
+- Explicit category exists but gated behind per-tab Explicit Mode toggle
 
 **Target State:**
 - All 17 categories discoverable without scrolling
-- Explicit Mode toggle in settings (opt-in)
-- Explicit categories visible when enabled, hidden when disabled
+- Explicit categories visible when Explicit Mode is enabled (per-tab toggle in chat footer)
 - Premium UI that doesn't feel "seedy" or cluttered
 
 ---
 
-### Research Findings
+### Existing Explicit Mode Implementation
 
-#### SillyTavern Extensions Analysis
+**Already exists in codebase:** Per-tab toggle button in chat footer (`chat-explicit-toggle-footer`)
 
-| Extension | Explicit Handling | Category Display |
-|-----------|-------------------|------------------|
-| **Guided Generations** | No explicit handling | Single button, dropdown |
-| **Roadway** | No explicit handling | 6 suggestions, single category |
-| **Pathweaver** | Toggle in settings | 4 main + 9 genre dropdown |
+**How it works:**
+1. User clicks 🔒/🔓 button in chat footer
+2. `tab.explicit_mode` boolean flips
+3. Explicit policy appended to system prompt on next message send
+4. Explicit suggestions category becomes accessible
 
-#### Industry Best Practices
+**Explicit Policy:** Stored in `chat-templates.js`, injected into system prompt when enabled
 
-| Platform | Approach | Verdict |
-|----------|----------|---------|
-| **Reddit** | Opt-in toggle + visual indicators | ✅ Gold standard |
-| **Discord** | Server-level NSFW toggle | Too granular for us |
-| **Character.AI** | Hard filter (no explicit) | ❌ Too restrictive |
-| **SillyTavern** | No filtering (user autonomy) | ✅ Good philosophy |
+**Suggestions Gate:** `chat-suggestions.js` shows toast offering to enable Explicit Mode when user tries to access explicit category
 
 ---
 
-### Proposed UI/UX Approaches
-
-#### Approach A: Tag Cloud with Filter Chips (RECOMMENDED)
+### Decision: Tag Cloud with Filter Chips
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -94,92 +85,24 @@ We are **NOT** building a SillyTavern clone. We're building a **simple, premium 
 └─────────────────────────────────────────────────┘
 ```
 
-**Pros:**
-- Maximum discoverability — everything visible at once
-- Fits existing design language (chips, gradients)
-- Search handles the long tail
-- Explicit is visible but contextualized
-- Easy to implement with existing CSS patterns
-
-**Cons:**
-- Dropdown is taller (~280px for categories alone)
-- Could feel dense on small screens
-
-#### Approach B: Grouped Accordion
-
-```
-┌─────────────────────────────────────────────────┐
-│  💡 Suggestions                          [×]    │
-├─────────────────────────────────────────────────┤
-│  ▼ Story & Genre                    [Search...] │
-│  ┌─────────────────────────────────────────────┐│
-│  │ General  Plot Twist  New Character  Director││
-│  │ Action  Comedy  Fantasy  Horror  Mystery    ││
-│  │ Noir  Romance  Sci-Fi  Thriller             ││
-│  └─────────────────────────────────────────────┘│
-│  ▸ Explicit (1)                                 │
-│  ▸ Manage Categories (⚙️)                       │
-├─────────────────────────────────────────────────┤
-│  [Suggestion items...]                          │
-├─────────────────────────────────────────────────┤
-│  [Generate]                                     │
-└─────────────────────────────────────────────────┘
-```
-
-**Pros:**
-- All categories discoverable without scrolling
-- Cognitive grouping reduces overwhelm
-- Search handles edge cases
-
-**Cons:**
-- More complex state management
-- Extra click to reach collapsed categories
-- Taller dropdown footprint
-
-#### Approach C: Side-Scroll Carousel
-
-```
-┌─────────────────────────────────────────────────┐
-│  💡 Suggestions                          [×]    │
-├─────────────────────────────────────────────────┤
-│  ◀ [General] [Plot Twist] [New Char] [Director] ▶│
-│     ──────────────────────────────────────      │
-│  ◀ [Action] [Comedy] [Fantasy] [Horror] [Mystery]▶│
-│     ──────────────────────────────────────      │
-│  ◀ [Noir] [Romance] [Sci-Fi] [Thriller] [Explicit]▶│
-├─────────────────────────────────────────────────┤
-│  [Suggestion items...]                          │
-├─────────────────────────────────────────────────┤
-│  [Generate]                                     │
-└─────────────────────────────────────────────────┘
-```
-
-**Pros:**
-- Compact vertical footprint
-- Familiar carousel pattern
-- Works well on mobile
-
-**Cons:**
-- Hidden categories are undiscoverable without interaction
-- Arrow buttons add visual noise
-- Explicit is not differentiated at all
+**Why This Approach:**
+1. **Zero hidden state** — all 17+ categories visible without interaction
+2. **Search fallback** — handles future category additions gracefully
+3. **Explicit treatment** — labeled group provides context without stigma
+4. **Low implementation cost** — leverages existing chip styles and gradient tokens
+5. **Future-proof** — adding categories is trivial; search handles overflow
 
 ---
 
-### Explicit Mode Implementation
+### Explicit Mode Integration
 
-#### Settings Toggle
+**Use existing per-tab toggle** — No new settings needed.
 
-```html
-<!-- In Settings → Chat tab -->
-<label class="modal-field">
-    <input type="checkbox" id="settings-explicit-mode">
-    <span>Explicit Content</span>
-    <span class="modal-help">Show explicit suggestion categories and prompts</span>
-</label>
-```
+**Behavior:**
+- Explicit Mode OFF: Explicit category hidden from dropdown
+- Explicit Mode ON: Explicit category visible with 🔞 badge
 
-#### Visual Treatment
+**Visual Treatment:**
 
 ```css
 /* Explicit category chip */
@@ -199,18 +122,6 @@ We are **NOT** building a SillyTavern clone. We're building a **simple, premium 
     display: none;
 }
 ```
-
----
-
-### Recommended Approach
-
-**Approach A (Tag Cloud)** with the following modifications:
-
-1. **Explicit Mode Toggle** — Settings → Chat → "Explicit Content" checkbox
-2. **Conditional Rendering** — Explicit category hidden when toggle is off
-3. **Visual Badge** — 🔞 emoji on explicit category (always visible when shown)
-4. **No Shame Design** — Explicit category sits alongside others, not isolated
-5. **Search Filter** — Real-time search across all categories
 
 ---
 

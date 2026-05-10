@@ -144,9 +144,12 @@ async function cleanupServer(server) {
       const personaStrip = document.querySelector('.chat-persona-strip');
       if (personaStrip) {
         personaStrip.scrollIntoView({ behavior: 'instant', block: 'start' });
+        // Click first persona chip if exists
+        const firstChip = personaStrip.querySelector('.chat-persona-chip');
+        if (firstChip) firstChip.click();
       }
     });
-    await sleep(500);
+    await sleep(1000);
     await page.screenshot({ path: `${OUTPUT_DIR}/07-persona-strip.png`, fullPage: true });
     console.log('[NEW FEATURES] Done: 07-persona-strip.png');
 
@@ -225,6 +228,25 @@ async function cleanupServer(server) {
     console.error('[NEW FEATURES] Error:', err.message);
     console.error(err.stack);
   } finally {
+    // Clean up test tabs
+    console.log('[NEW FEATURES] Cleaning up test tabs...');
+    await page.evaluate(() => {
+      const tabs = window.chatTabs || [];
+      // Keep only the first tab, remove the rest
+      if (tabs.length > 1) {
+        const tabsToRemove = tabs.slice(1);
+        tabsToRemove.forEach(tab => {
+          const index = tabs.findIndex(t => t.id === tab.id);
+          if (index > -1) tabs.splice(index, 1);
+        });
+        // Trigger persistence
+        if (typeof window.persistChatTabs === 'function') {
+          window.persistChatTabs();
+        }
+      }
+    });
+    await sleep(500);
+
     await browser.close();
     await cleanupServer(server);
     console.log('[NEW FEATURES] Server cleaned up.');
