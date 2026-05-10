@@ -222,6 +222,62 @@ async function cleanupServer(server) {
     await page.screenshot({ path: `${OUTPUT_DIR}/11-chat-input-buttons.png`, fullPage: true });
     console.log('[NEW FEATURES] Done: 11-chat-input-buttons.png');
 
+    // ====================================
+    // 12. EXPLICIT MODE TOGGLE CYCLING
+    // ====================================
+    console.log('[NEW FEATURES] Testing explicit mode toggle cycling...');
+
+    // Step 12a: Click toggle → unlocked (level 1, 🔓 badge)
+    console.log('[NEW FEATURES] Step 12a: Enabling explicit mode (unlocked)...');
+    await page.click('#chat-explicit-toggle-footer');
+    await sleep(500);
+    await page.screenshot({ path: `${OUTPUT_DIR}/12a-explicit-unlocked.png`, fullPage: false });
+    console.log('[NEW FEATURES] Done: 12a-explicit-unlocked.png');
+
+    // Step 12b: Click again → unrestricted (level 2, 🔥 badge)
+    console.log('[NEW FEATURES] Step 12b: Enabling unrestricted mode...');
+    await page.click('#chat-explicit-toggle-footer');
+    await sleep(500);
+    await page.screenshot({ path: `${OUTPUT_DIR}/12b-explicit-unrestricted.png`, fullPage: false });
+    console.log('[NEW FEATURES] Done: 12b-explicit-unrestricted.png');
+
+    // Step 12c: Click again → locked (level 0, badge gone)
+    console.log('[NEW FEATURES] Step 12c: Disabling explicit mode...');
+    await page.click('#chat-explicit-toggle-footer');
+    await sleep(500);
+    await page.screenshot({ path: `${OUTPUT_DIR}/12c-explicit-locked.png`, fullPage: false });
+    console.log('[NEW FEATURES] Done: 12c-explicit-locked.png');
+
+    // ====================================
+    // 13. SUGGESTIONS TAG CLOUD
+    // ====================================
+    console.log('[NEW FEATURES] Testing suggestions tag cloud...');
+
+    // Step 13a: Open suggestions dropdown → capture tag cloud
+    console.log('[NEW FEATURES] Step 13a: Opening suggestions dropdown for tag cloud...');
+    await page.evaluate(async () => {
+      const { toggleSuggestionsDropdown } = await import('./js/features/chat-suggestions.js');
+      toggleSuggestionsDropdown();
+    });
+    await sleep(1000);
+    await page.screenshot({ path: `${OUTPUT_DIR}/13a-suggestions-tag-cloud.png`, fullPage: false });
+    console.log('[NEW FEATURES] Done: 13a-suggestions-tag-cloud.png');
+
+    // Step 13b: Type "horror" in search → capture filtered view
+    console.log('[NEW FEATURES] Step 13b: Filtering suggestions with "horror"...');
+    await page.focus('#suggestion-search-input');
+    await page.type('#suggestion-search-input', 'horror');
+    await sleep(500);
+    await page.screenshot({ path: `${OUTPUT_DIR}/13b-suggestions-search-filter.png`, fullPage: false });
+    console.log('[NEW FEATURES] Done: 13b-suggestions-search-filter.png');
+
+    // Close suggestions dropdown
+    await page.evaluate(async () => {
+      const { toggleSuggestionsDropdown } = await import('./js/features/chat-suggestions.js');
+      toggleSuggestionsDropdown();
+    });
+    await sleep(500);
+
     console.log('\n[NEW FEATURES] All screenshots saved to docs/screenshots/');
 
   } catch (err) {

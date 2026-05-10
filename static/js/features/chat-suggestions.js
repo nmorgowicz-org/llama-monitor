@@ -48,6 +48,7 @@ function updateDropdownUI() {
     const toggleBtn = document.getElementById('suggestions-toggle');
     const categoryBtns = document.querySelectorAll('.suggestion-category-btn');
     const listContainer = document.getElementById('suggestions-list');
+    const explicitGroup = document.getElementById('suggestions-explicit-group');
 
     if (!dropdown || !toggleBtn) return;
 
@@ -63,6 +64,16 @@ function updateDropdownUI() {
         toggleBtn.innerHTML = '💡';
     }
 
+    // Toggle explicit group visibility based on explicit_level
+    if (explicitGroup) {
+        const tab = activeChatTab();
+        const explicitEnabled = (tab?.explicit_level ?? 0) > 0;
+        explicitGroup.classList.toggle('explicit-enabled', explicitEnabled);
+    }
+
+    // Apply search filter
+    applySearchFilter();
+
     // Update category buttons
     categoryBtns.forEach(btn => {
         const category = btn.dataset.category;
@@ -75,6 +86,27 @@ function updateDropdownUI() {
 
     // Always render recent suggestions
     renderRecentSuggestions();
+}
+
+function applySearchFilter() {
+    const searchInput = document.getElementById('suggestion-search-input');
+    if (!searchInput) return;
+
+    const query = searchInput.value.toLowerCase().trim();
+    const chips = document.querySelectorAll('.suggestion-category-btn');
+    const groups = document.querySelectorAll('.category-group');
+
+    chips.forEach(chip => {
+        const text = chip.textContent.toLowerCase();
+        const visible = !query || text.includes(query);
+        chip.style.display = visible ? '' : 'none';
+    });
+
+    groups.forEach(group => {
+        const visibleChips = group.querySelectorAll('.suggestion-category-btn:not([style*="display: none"])');
+        const hasVisible = visibleChips.length > 0;
+        group.style.display = hasVisible ? '' : 'none';
+    });
 }
 
 // ── Category Switching ───────────────────────────────────────────────────────
@@ -600,6 +632,22 @@ function setupClickOutside() {
 
 // ── Initialization ───────────────────────────────────────────────────────────
 
+function setupTagCloudUI() {
+    const searchInput = document.getElementById('suggestion-search-input');
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            applySearchFilter();
+        });
+    }
+
+    document.querySelectorAll('.category-group-header').forEach(header => {
+        header.addEventListener('click', () => {
+            const expanded = header.getAttribute('aria-expanded') === 'true';
+            header.setAttribute('aria-expanded', String(!expanded));
+        });
+    });
+}
+
 export function initSuggestionsDropdown() {
     loadCustomCategories();
     setupGenerateButton();
@@ -608,6 +656,7 @@ export function initSuggestionsDropdown() {
     setupKeyboardNav();
     setupClickOutside();
     setupOfflineDetection();
+    setupTagCloudUI();
     updateDropdownUI();
     renderRecentSuggestions();
 }

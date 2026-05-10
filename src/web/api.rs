@@ -95,7 +95,7 @@ pub struct ChatTab {
     pub ai_name: Option<String>,
     #[serde(default)]
     pub user_name: Option<String>,
-    #[serde(default)]
+    #[serde(default, rename = "explicitLevel", alias = "explicit_mode")]
     pub explicit_level: Option<u8>,
     pub messages: Vec<ChatMessage>,
     // Serialized as camelCase so GET responses and PUT bodies use identical names.
@@ -2440,4 +2440,161 @@ fn api_self_update() -> impl Filter<Extract = (impl warp::Reply,), Error = warp:
                 }))),
             }
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_minimal_chat_tab() -> ChatTab {
+        ChatTab {
+            id: "tab-1".to_string(),
+            name: "Test Tab".to_string(),
+            system_prompt: "You are helpful.".to_string(),
+            ai_name: None,
+            user_name: None,
+            explicit_level: None,
+            messages: vec![],
+            total_input_tokens: None,
+            total_output_tokens: None,
+            model_params: ChatModelParams::default(),
+            created_at: 0,
+            updated_at: 0,
+            auto_compact: None,
+            compact_threshold: None,
+            last_ctx_pct: None,
+            active_template_id: None,
+            context_notes: vec![],
+            sidebar_width: 0,
+        }
+    }
+
+    #[test]
+    fn chat_tab_explicit_level_serialization() {
+        let mut tab = make_minimal_chat_tab();
+        tab.explicit_level = Some(1);
+
+        let json = serde_json::to_string(&tab).expect("ChatTab should serialize");
+
+        // Verify camelCase key in JSON
+        assert!(
+            json.contains("\"explicitLevel\""),
+            "JSON should contain camelCase 'explicitLevel' field, got: {}",
+            json
+        );
+
+        // Verify value is correct
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json).expect("JSON should parse to Value");
+        assert_eq!(
+            parsed.get("explicitLevel").and_then(|v| v.as_u64()),
+            Some(1),
+            "explicitLevel should be 1"
+        );
+
+        // Deserialize back and verify
+        let deserialized: ChatTab =
+            serde_json::from_str(&json).expect("ChatTab should deserialize from own JSON");
+        assert_eq!(
+            deserialized.explicit_level,
+            Some(1),
+            "explicit_level should round-trip to Some(1)"
+        );
+    }
+
+    #[test]
+    fn chat_tab_explicit_level_default() {
+        let json = r#"{
+            "id": "tab-1",
+            "name": "Test Tab",
+            "system_prompt": "You are helpful.",
+            "messages": [],
+            "model_params": {
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "top_k": 40,
+                "min_p": 0.01,
+                "repeat_penalty": 1.0
+            },
+            "created_at": 0,
+            "updated_at": 0
+        }"#;
+
+        let result = serde_json::from_str::<ChatTab>(json);
+        assert!(
+            result.is_ok(),
+            "Should deserialize without explicitLevel field"
+        );
+
+        let tab = result.unwrap();
+        assert!(
+            tab.explicit_level.is_none(),
+            "explicit_level should default to None when field is absent"
+        );
+    }
+
+    #[test]
+    fn chat_tab_explicit_mode_alias_migration() {
+        // The serde alias "explicit_mode" allows deserialization of JSON that uses
+        // the legacy field name (instead of camelCase "explicitLevel").
+        // The value must still be a u8 to match the explicit_level type.
+        let json = r#"{
+            "id": "tab-1",
+            "name": "Test Tab",
+            "system_prompt": "You are helpful.",
+            "explicit_mode": 2,
+            "messages": [],
+            "model_params": {
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "top_k": 40,
+                "min_p": 0.01,
+                "repeat_penalty": 1.0
+            },
+            "created_at": 0,
+            "updated_at": 0
+        }"#;
+
+        let result = serde_json::from_str::<ChatTab>(json);
+        assert!(
+            result.is_ok(),
+            "Should deserialize legacy 'explicit_mode' field via alias"
+        );
+
+        let tab = result.unwrap();
+        assert_eq!(
+            tab.explicit_level,
+            Some(2),
+            "explicit_mode alias should map to explicit_level"
+        );
+    }
+
+    #[test]
+    fn chat_tab_explicit_level_all_states() {
+        for level in [0u8, 1, 2] {
+            let mut tab = make_minimal_chat_tab();
+            tab.explicit_level = Some(level);
+
+            let json = serde_json::to_string(&tab)
+                .unwrap_or_else(|e| panic!("ChatTab should serialize for level {}: {}", level, e));
+
+            // Verify the camelCase key is present
+            assert!(
+                json.contains("\"explicitLevel\""),
+                "JSON for level {} should contain 'explicitLevel'",
+                level
+            );
+
+            // Deserialize back and verify value
+            let deserialized: ChatTab = serde_json::from_str(&json).unwrap_or_else(|e| {
+                panic!("ChatTab should deserialize for level {}: {}", level, e)
+            });
+            assert_eq!(
+                deserialized.explicit_level,
+                Some(level),
+                "explicit_level should round-trip for state {}",
+                level
+            );
+        }
+    }
 }

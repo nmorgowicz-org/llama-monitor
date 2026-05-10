@@ -1061,12 +1061,50 @@
                       <div class="suggestions-wrapper">
                           <button class="context-toggle-btn" id="suggestions-toggle" title="Suggestions" aria-expanded="false" aria-controls="suggestions-dropdown">💡</button>
                           <div class="suggestions-dropdown" id="suggestions-dropdown">
-                              <div class="suggestions-categories">
-                              <button class="suggestion-category-btn active" data-category="general">General</button>
-                                   <button class="suggestion-category-btn" data-category="plot-twist">Plot Twist</button>
-                                   <button class="suggestion-category-btn" data-category="new-character">New Character</button>
-                                   <button class="suggestion-category-btn" data-category="director">Director</button>
-                              </div>
+                              <div class="suggestions-tag-cloud">
+                                   <div class="suggestions-search-wrap">
+                                       <input type="text" class="suggestion-search-input" id="suggestion-search-input" placeholder="Search categories…" aria-label="Search suggestion categories">
+                                   </div>
+                                   <div class="category-group" data-group="story-tools">
+                                       <button type="button" class="category-group-header" aria-expanded="true">
+                                           <span class="category-group-chevron" aria-hidden="true">▸</span>
+                                           <span>Story Tools</span>
+                                       </button>
+                                       <div class="category-group-chips">
+                                           <button class="suggestion-category-btn active" data-category="general">General</button>
+                                           <button class="suggestion-category-btn" data-category="plot-twist">Plot Twist</button>
+                                           <button class="suggestion-category-btn" data-category="new-character">New Character</button>
+                                           <button class="suggestion-category-btn" data-category="director">Director</button>
+                                       </div>
+                                   </div>
+                                   <div class="category-group" data-group="genres">
+                                       <button type="button" class="category-group-header" aria-expanded="true">
+                                           <span class="category-group-chevron" aria-hidden="true">▸</span>
+                                           <span>Genres</span>
+                                       </button>
+                                       <div class="category-group-chips">
+                                           <button class="suggestion-category-btn" data-category="action">Action</button>
+                                           <button class="suggestion-category-btn" data-category="comedy">Comedy</button>
+                                           <button class="suggestion-category-btn" data-category="fantasy">Fantasy</button>
+                                           <button class="suggestion-category-btn" data-category="horror">Horror</button>
+                                           <button class="suggestion-category-btn" data-category="mystery">Mystery</button>
+                                           <button class="suggestion-category-btn" data-category="noir">Noir</button>
+                                           <button class="suggestion-category-btn" data-category="romance">Romance</button>
+                                           <button class="suggestion-category-btn" data-category="sci-fi">Sci-Fi</button>
+                                           <button class="suggestion-category-btn" data-category="thriller">Thriller</button>
+                                           <button class="suggestion-category-btn" data-category="character">Character</button>
+                                       </div>
+                                   </div>
+                                   <div class="category-group category-group-explicit" data-group="explicit" id="suggestions-explicit-group">
+                                       <button type="button" class="category-group-header" aria-expanded="true">
+                                           <span class="category-group-chevron" aria-hidden="true">▸</span>
+                                           <span>Explicit</span>
+                                       </button>
+                                       <div class="category-group-chips">
+                                           <button class="suggestion-category-btn" data-category="explicit">Explicit 🔞</button>
+                                       </div>
+                                   </div>
+                               </div>
                               <div class="suggestions-list" id="suggestions-list"></div>
                               <div class="suggestions-actions">
                                   <button class="suggestions-generate-btn" id="suggestions-generate-btn">Generate</button>

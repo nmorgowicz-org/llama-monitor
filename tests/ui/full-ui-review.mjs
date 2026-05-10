@@ -172,6 +172,12 @@ fs.mkdirSync(OUTPUT_DIR, { recursive: true });
     console.log('[FULL UI REVIEW] Capturing chat input area...');
     await page.click('button[onclick="switchTab(\'chat\')"]');
     await sleep(1000);
+
+    // Enable explicit mode for documentation screenshot
+    console.log('[FULL UI REVIEW] Enabling explicit mode (unlocked) for documentation...');
+    await page.click('#chat-explicit-toggle-footer');
+    await sleep(500);
+
     await page.evaluate(() => {
       const input = document.getElementById('chat-input');
       if (input) {
