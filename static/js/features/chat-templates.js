@@ -1,7 +1,7 @@
 // ── Chat Templates ────────────────────────────────────────────────────────────
 // System prompt templates, template manager, and explicit-mode policy.
 
-import { activeChatTab, registerChatViewBindings, scheduleChatPersist } from './chat-state.js';
+import { activeChatTab, getChatViewBindings, registerChatViewBindings, scheduleChatPersist } from './chat-state.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast } from './toast.js';
 
@@ -1145,6 +1145,7 @@ export function toggleExplicitMode(forceValue) {
     tab.updated_at = Date.now();
     scheduleChatPersist();
     updateExplicitToggleUI();
+    getChatViewBindings().renderChatTabs?.();
 
     const levelNames = { 0: 'Locked', 1: 'Unlocked', 2: 'Unrestricted' };
     const level = tab.explicit_level ?? 0;
