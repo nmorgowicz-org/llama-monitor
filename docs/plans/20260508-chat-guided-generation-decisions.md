@@ -26,6 +26,194 @@ We are **NOT** building a SillyTavern clone. We're building a **simple, premium 
 
 ---
 
+## 🔄 Phase 8: Suggestions Variety & Explicit Handling (PLANNED)
+
+### Problem Statement (2026-05-10)
+
+**Current State:**
+- Only 4 categories visible: General, Plot Twist, New Character, Director
+- 17 prompts exist but most are hidden
+- Explicit category exists but no Explicit Mode toggle
+- No visual differentiation for explicit content
+
+**Target State:**
+- All 17 categories discoverable without scrolling
+- Explicit Mode toggle in settings (opt-in)
+- Explicit categories visible when enabled, hidden when disabled
+- Premium UI that doesn't feel "seedy" or cluttered
+
+---
+
+### Research Findings
+
+#### SillyTavern Extensions Analysis
+
+| Extension | Explicit Handling | Category Display |
+|-----------|-------------------|------------------|
+| **Guided Generations** | No explicit handling | Single button, dropdown |
+| **Roadway** | No explicit handling | 6 suggestions, single category |
+| **Pathweaver** | Toggle in settings | 4 main + 9 genre dropdown |
+
+#### Industry Best Practices
+
+| Platform | Approach | Verdict |
+|----------|----------|---------|
+| **Reddit** | Opt-in toggle + visual indicators | ✅ Gold standard |
+| **Discord** | Server-level NSFW toggle | Too granular for us |
+| **Character.AI** | Hard filter (no explicit) | ❌ Too restrictive |
+| **SillyTavern** | No filtering (user autonomy) | ✅ Good philosophy |
+
+---
+
+### Proposed UI/UX Approaches
+
+#### Approach A: Tag Cloud with Filter Chips (RECOMMENDED)
+
+```
+┌─────────────────────────────────────────────────┐
+│  💡 Suggestions                          [×]    │
+├─────────────────────────────────────────────────┤
+│  [🔍 Search categories...]                       │
+├─────────────────────────────────────────────────┤
+│  ▸ Story Tools:                                 │
+│  [General] [Plot Twist] [New Character] [Director]│
+│                                                 │
+│  ▸ Genres:                                      │
+│  [Action] [Comedy] [Fantasy] [Horror] [Mystery] │
+│  [Noir] [Romance] [Sci-Fi] [Thriller]           │
+│                                                 │
+│  ▸ Explicit:                                    │
+│  [Explicit 🔞]                                  │
+│                                                 │
+│  ─────────────────────────────────────────      │
+│  [+ Manage Categories]                          │
+├─────────────────────────────────────────────────┤
+│  [Suggestion items...]                          │
+├─────────────────────────────────────────────────┤
+│  [Generate]                                     │
+└─────────────────────────────────────────────────┘
+```
+
+**Pros:**
+- Maximum discoverability — everything visible at once
+- Fits existing design language (chips, gradients)
+- Search handles the long tail
+- Explicit is visible but contextualized
+- Easy to implement with existing CSS patterns
+
+**Cons:**
+- Dropdown is taller (~280px for categories alone)
+- Could feel dense on small screens
+
+#### Approach B: Grouped Accordion
+
+```
+┌─────────────────────────────────────────────────┐
+│  💡 Suggestions                          [×]    │
+├─────────────────────────────────────────────────┤
+│  ▼ Story & Genre                    [Search...] │
+│  ┌─────────────────────────────────────────────┐│
+│  │ General  Plot Twist  New Character  Director││
+│  │ Action  Comedy  Fantasy  Horror  Mystery    ││
+│  │ Noir  Romance  Sci-Fi  Thriller             ││
+│  └─────────────────────────────────────────────┘│
+│  ▸ Explicit (1)                                 │
+│  ▸ Manage Categories (⚙️)                       │
+├─────────────────────────────────────────────────┤
+│  [Suggestion items...]                          │
+├─────────────────────────────────────────────────┤
+│  [Generate]                                     │
+└─────────────────────────────────────────────────┘
+```
+
+**Pros:**
+- All categories discoverable without scrolling
+- Cognitive grouping reduces overwhelm
+- Search handles edge cases
+
+**Cons:**
+- More complex state management
+- Extra click to reach collapsed categories
+- Taller dropdown footprint
+
+#### Approach C: Side-Scroll Carousel
+
+```
+┌─────────────────────────────────────────────────┐
+│  💡 Suggestions                          [×]    │
+├─────────────────────────────────────────────────┤
+│  ◀ [General] [Plot Twist] [New Char] [Director] ▶│
+│     ──────────────────────────────────────      │
+│  ◀ [Action] [Comedy] [Fantasy] [Horror] [Mystery]▶│
+│     ──────────────────────────────────────      │
+│  ◀ [Noir] [Romance] [Sci-Fi] [Thriller] [Explicit]▶│
+├─────────────────────────────────────────────────┤
+│  [Suggestion items...]                          │
+├─────────────────────────────────────────────────┤
+│  [Generate]                                     │
+└─────────────────────────────────────────────────┘
+```
+
+**Pros:**
+- Compact vertical footprint
+- Familiar carousel pattern
+- Works well on mobile
+
+**Cons:**
+- Hidden categories are undiscoverable without interaction
+- Arrow buttons add visual noise
+- Explicit is not differentiated at all
+
+---
+
+### Explicit Mode Implementation
+
+#### Settings Toggle
+
+```html
+<!-- In Settings → Chat tab -->
+<label class="modal-field">
+    <input type="checkbox" id="settings-explicit-mode">
+    <span>Explicit Content</span>
+    <span class="modal-help">Show explicit suggestion categories and prompts</span>
+</label>
+```
+
+#### Visual Treatment
+
+```css
+/* Explicit category chip */
+.suggestion-category-btn[data-category="explicit"] {
+    border-color: rgba(244, 63, 94, 0.3);
+    background: rgba(244, 63, 94, 0.08);
+}
+
+.suggestion-category-btn[data-category="explicit"]::after {
+    content: '🔞';
+    margin-left: 4px;
+    font-size: 10px;
+}
+
+/* Hidden when explicit mode disabled */
+.suggestion-category-btn[data-category="explicit"].hidden {
+    display: none;
+}
+```
+
+---
+
+### Recommended Approach
+
+**Approach A (Tag Cloud)** with the following modifications:
+
+1. **Explicit Mode Toggle** — Settings → Chat → "Explicit Content" checkbox
+2. **Conditional Rendering** — Explicit category hidden when toggle is off
+3. **Visual Badge** — 🔞 emoji on explicit category (always visible when shown)
+4. **No Shame Design** — Explicit category sits alongside others, not isolated
+5. **Search Filter** — Real-time search across all categories
+
+---
+
 ## ✅ Implementation Progress
 
 ### Completed Phases
@@ -39,9 +227,15 @@ We are **NOT** building a SillyTavern clone. We're building a **simple, premium 
 | **Phase 6** | Pathweaver Integration (17 prompts, new format, Director Mode, Explicit) | ✅ Complete | 2026-05-08 | `38c1039` |
 | **Phase 7** | UI Fixes (dropdown clipping, button placement) | ✅ Complete | 2026-05-10 | `b51f5a2` |
 
+### In Progress
+
+| Phase | Feature | Status | Date |
+|-------|---------|--------|------|
+| **Phase 8** | Suggestions Variety & Explicit Handling | 🔄 Planned | 2026-05-10 |
+
 ### Implementation Summary
 
-**All 6 phases completed. Phase 7 (polish) in progress.**
+**All 7 phases completed. Phase 8 (variety + explicit) pending approval.**
 
 **Deliverables:**
 - ✅ Context Notes Sidebar (persistent, resizable, section-based)
