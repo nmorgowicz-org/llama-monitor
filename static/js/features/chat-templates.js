@@ -1148,7 +1148,7 @@ export function toggleExplicitMode(forceValue) {
 
     const levelNames = { 0: 'Locked', 1: 'Unlocked', 2: 'Unrestricted' };
     const level = tab.explicit_level ?? 0;
-    showToast(`Explicit mode: ${levelNames[level] ?? 'unknown'}`);
+    showToast(`Explicit mode: ${levelNames[level] ?? 'unknown'}`, 'explicit', '', { level });
 }
 
 export function enableExplicitMode() {

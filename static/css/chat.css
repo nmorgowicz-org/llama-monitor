@@ -2647,9 +2647,29 @@
   background: linear-gradient(145deg, rgba(47, 43, 35, 0.95), rgba(38, 35, 28, 0.98));
 }
 
-.toast.toast-info {
+ .toast.toast-info {
   border-color: rgba(136, 192, 209, 0.4);
   background: linear-gradient(145deg, rgba(35, 43, 47, 0.95), rgba(28, 35, 38, 0.98));
+}
+
+/* ── Explicit mode toast ─────────────────────────────────────────── */
+
+/* Level 0: Locked — subtle purple */
+.toast.toast-explicit {
+  border-color: rgba(180, 142, 173, 0.35);
+  background: linear-gradient(145deg, rgba(42, 38, 46, 0.95), rgba(34, 30, 38, 0.98));
+}
+
+/* Level 1: Unlocked — warm orange (matches toggle .active) */
+.toast.toast-explicit.explicit-level-1 {
+  border-color: rgba(251, 146, 60, 0.4);
+  background: linear-gradient(145deg, rgba(48, 40, 34, 0.95), rgba(40, 34, 28, 0.98));
+}
+
+/* Level 2: Unrestricted — bold red (matches toggle .unrestricted) */
+.toast.toast-explicit.explicit-level-2 {
+  border-color: rgba(239, 68, 68, 0.45);
+  background: linear-gradient(145deg, rgba(50, 30, 30, 0.95), rgba(42, 24, 24, 0.98));
 }
 
 .toast-icon {
@@ -2682,6 +2702,27 @@
 .toast.toast-info .toast-icon {
   background: linear-gradient(135deg, #88c0d1, #9fd3e5);
   color: #1a1f24;
+}
+
+/* Explicit toast icons — rating badge style */
+.toast.toast-explicit .toast-icon {
+  width: 26px;
+  height: 26px;
+  font-size: 11px;
+  font-weight: 800;
+  font-family: var(--font-mono, monospace);
+  letter-spacing: -0.5px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #b48ead, #c9a5c4);
+  color: #1a1f24;
+}
+
+.toast.toast-explicit.explicit-level-1 .toast-icon {
+  background: linear-gradient(135deg, #fb923c, #fdba74);
+}
+
+.toast.toast-explicit.explicit-level-2 .toast-icon {
+  background: linear-gradient(135deg, #ef4444, #f87171);
 }
 
 .toast-content {

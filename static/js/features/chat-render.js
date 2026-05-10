@@ -446,7 +446,7 @@ export function renderChatMessages() {
     }
     chatScroll(true);
     getChatViewBindings().syncCompactSettingsUI?.(activeChatTab());
-    renderPersonaStrip();
+    renderPersonaStrip?.();
 }
 
 function loadMoreMessages(tab, currentLimit) {
@@ -1187,18 +1187,25 @@ function getPersonaIcon(personaName) {
     return '🤖';
 }
 
-export function renderPersonaStrip() {
+export async function renderPersonaStrip() {
     const strip = document.getElementById('chat-persona-strip');
     if (!strip) return;
-    
+
     // Remove existing chips to avoid duplicate event handlers
     strip.innerHTML = '';
-    
-    const recent = JSON.parse(localStorage.getItem(PERSONA_RECENT_KEY) || '[]');
-    const recentLimited = recent.slice(0, 5);
+
+    let personas = JSON.parse(localStorage.getItem(PERSONA_RECENT_KEY) || '[]');
+
+    // Fallback: if no recent personas, show defaults from template registry
+    if (personas.length === 0) {
+        const templates = await window.loadTemplates?.();
+        personas = (templates || []).slice(0, 5).map(t => ({ id: t.id, name: t.name }));
+    }
+
+    const recentLimited = personas.slice(0, 5);
     const activeTemplateId = activeChatTab()?.active_template_id || '';
-    
-   recentLimited.forEach(persona => {
+
+    recentLimited.forEach(persona => {
         const btn = document.createElement('button');
         btn.className = 'chat-persona-chip' + (persona.id === activeTemplateId ? ' active' : '');
         btn.dataset.personaId = persona.id;
@@ -1217,7 +1224,7 @@ export function renderPersonaStrip() {
         strip.appendChild(btn);
     });
     
-    if (recent.length > 5) {
+    if (personas.length > 5) {
         const moreBtn = document.createElement('button');
         moreBtn.className = 'chat-persona-chip-more';
         moreBtn.textContent = '⋯';
@@ -1252,7 +1259,7 @@ export async function applyPersona(templateId) {
     localStorage.setItem(PERSONA_RECENT_KEY, JSON.stringify(newRecent));
 
     // Refresh UI
-    renderPersonaStrip();
+    await renderPersonaStrip();
     renderChatMessages();
     scheduleChatPersist();
     showToast(`Applied persona: ${template.name}`, 'info');
@@ -1263,7 +1270,7 @@ export async function applyPersona(templateId) {
 export function initChatRender() {
     // Call setup functions that bind DOM event listeners
     initChatScrollButton();
-    renderPersonaStrip();
+    renderPersonaStrip?.();
 
     // Event delegation for chat tab close buttons
     document.getElementById('chat-tab-bar')?.addEventListener('click', (e) => {

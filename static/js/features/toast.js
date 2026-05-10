@@ -10,12 +10,15 @@ function getToastIcon(type) {
         success: '✓',
         error: '✗',
         warning: '⚠',
-        info: 'ℹ'
+        info: 'ℹ',
+        explicit: '🔒'
     };
     return icons[type] || 'ℹ';
 }
 
-export function showToast(title, type = 'error', message = '') {
+const EXPLICIT_LEVEL_ICONS = { 0: 'G', 1: '17+', 2: '18+' };
+
+export function showToast(title, type = 'error', message = '', options = {}) {
     const container = document.getElementById('toast-container');
     if (!container) return null;
 
@@ -31,7 +34,8 @@ export function showToast(title, type = 'error', message = '') {
             success: 'success',
             error: 'error',
             warning: 'warning',
-            info: 'info'
+            info: 'info',
+            explicit: 'explicit'
         };
         const iconType = iconMap[type] || 'info';
         content = `
@@ -46,6 +50,14 @@ export function showToast(title, type = 'error', message = '') {
 
     // eslint-disable-next-line no-unsanitized/property -- content is built from hardcoded template; type is a caller-controlled enum used only in CSS class; title/message wrapped in escapeHtml()
     toast.innerHTML = content;
+
+    // Set explicit-level icon and class
+    if (type === 'explicit' && options.level !== undefined) {
+        const iconEl = toast.querySelector('.toast-icon');
+        if (iconEl) iconEl.textContent = EXPLICIT_LEVEL_ICONS[options.level] || 'G';
+        toast.classList.add('explicit-level-' + options.level);
+    }
+
     container.appendChild(toast);
     requestAnimationFrame(() => { toast.classList.add('show'); });
 
@@ -81,7 +93,8 @@ export function showToastWithActions(title, type, message, actions = []) {
         success: 'success',
         error: 'error',
         warning: 'warning',
-        info: 'info'
+        info: 'info',
+        explicit: 'explicit'
     };
     const iconType = iconMap[type] || 'info';
 
