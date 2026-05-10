@@ -28,6 +28,14 @@ We are **NOT** building a SillyTavern clone. We're building a **simple, premium 
 
 ## 🔄 Phase 8: Suggestions Variety & Explicit Handling (PLANNED)
 
+### ⚠️ IMPLEMENTATION ORDER DEPENDENCY
+
+**This phase MUST be implemented AFTER explicit mode v2** (`docs/plans/20260510-explicit_persona_enhancements.md`).
+
+The explicit mode system is being redesigned from a binary toggle (`explicit_mode: boolean`) to a 3-level intensity system (`explicit_level: 0|1|2`). All code in this phase that references `tab.explicit_mode` must be updated to use `tab.explicit_level`.
+
+**Do not implement Phase 8 until explicit mode v2 is complete and merged.**
+
 ### Problem Statement (2026-05-10)
 
 **Current State:**
@@ -42,19 +50,94 @@ We are **NOT** building a SillyTavern clone. We're building a **simple, premium 
 
 ---
 
-### Existing Explicit Mode Implementation
+### Explicit Mode v2 — Updated Integration
 
-**Already exists in codebase:** Per-tab toggle button in chat footer (`chat-explicit-toggle-footer`)
+**See:** `docs/plans/20260510-explicit_persona_enhancements.md` for full explicit mode v2 specification.
 
-**How it works:**
+**What changes for guided generation:**
+
+| Old (Boolean) | New (3-Level) |
+|---------------|---------------|
+| `tab.explicit_mode === true` | `(tab.explicit_level ?? 0) > 0` |
+| `tab.explicit_mode === false` | `(tab.explicit_level ?? 0) === 0` |
+| Auto-enable: `explicit_mode = true` | Auto-enable: `explicit_level = 1` (via `enableExplicitMode()`) |
+| Toast: "Explicit mode enabled" | Toast: "Explicit mode: Unlocked" |
+| Toggle: 🔒 → 🔓 → 🔒 | Toggle: 🔒 → 🔓 → 🔥 → 🔒 |
+
+**Updated behavior:**
+- `explicit_level === 0` (Locked): Explicit category hidden from dropdown
+- `explicit_level >= 1` (Unlocked+): Explicit category visible with 🔞 badge
+- Auto-enable on explicit category access: sets `explicit_level = 1` (not 2)
+
+**Updated suggestions gate code** (`chat-suggestions.js`):
+```javascript
+// OLD (before explicit v2):
+if (category === 'explicit') {
+    const tab = activeChatTab();
+    const explicitMode = tab?.explicit_mode ?? false;
+    if (!explicitMode) {
+        import('./chat-templates.js').then(({ enableExplicitMode }) => {
+            enableExplicitMode();
+        });
+    }
+}
+
+// NEW (after explicit v2):
+if (category === 'explicit') {
+    const tab = activeChatTab();
+    const explicitLevel = tab?.explicit_level ?? 0;
+    if (explicitLevel === 0) {
+        import('./chat-templates.js').then(({ enableExplicitMode }) => {
+            enableExplicitMode(); // sets explicit_level = 1
+            showToast('Explicit mode: Unlocked');
+        });
+    }
+}
+```
+
+**Updated visibility check** (in suggestion category rendering):
+```javascript
+// OLD:
+const showExplicit = tab?.explicit_mode ?? false;
+
+// NEW:
+const showExplicit = (tab?.explicit_level ?? 0) > 0;
+```
+
+**Visual Treatment** (unchanged, CSS still applies):
+
+```css
+/* Explicit category chip */
+.suggestion-category-btn[data-category="explicit"] {
+    border-color: rgba(244, 63, 94, 0.3);
+    background: rgba(244, 63, 94, 0.08);
+}
+
+.suggestion-category-btn[data-category="explicit"]::after {
+    content: '🔞';
+    margin-left: 4px;
+    font-size: 10px;
+}
+
+/* Hidden when explicit mode disabled (level === 0) */
+.suggestion-category-btn[data-category="explicit"].hidden {
+    display: none;
+}
+```
+
+---
+
+### Existing Explicit Mode Implementation (SUPERSEDED)
+
+**⚠️ This section describes the OLD explicit mode system. It has been superseded by explicit mode v2.**
+
+**Old behavior (for reference only):**
 1. User clicks 🔒/🔓 button in chat footer
 2. `tab.explicit_mode` boolean flips
 3. Explicit policy appended to system prompt on next message send
 4. Explicit suggestions category becomes accessible
 
-**Explicit Policy:** Stored in `chat-templates.js`, injected into system prompt when enabled
-
-**Suggestions Gate:** `chat-suggestions.js` shows toast offering to enable Explicit Mode when user tries to access explicit category
+**Replacement:** See `docs/plans/20260510-explicit_persona_enhancements.md` §2 (Architecture) and §5 (Implementation Details).
 
 ---
 
@@ -74,7 +157,7 @@ We are **NOT** building a SillyTavern clone. We're building a **simple, premium 
 │  [Noir] [Romance] [Sci-Fi] [Thriller]           │
 │                                                 │
 │  ▸ Explicit:                                    │
-│  [Explicit 🔞]                                  │
+│  [Explicit 🔞]  ← visible when explicit_level > 0 │
 │                                                 │
 │  ─────────────────────────────────────────      │
 │  [+ Manage Categories]                          │
@@ -94,37 +177,6 @@ We are **NOT** building a SillyTavern clone. We're building a **simple, premium 
 
 ---
 
-### Explicit Mode Integration
-
-**Use existing per-tab toggle** — No new settings needed.
-
-**Behavior:**
-- Explicit Mode OFF: Explicit category hidden from dropdown
-- Explicit Mode ON: Explicit category visible with 🔞 badge
-
-**Visual Treatment:**
-
-```css
-/* Explicit category chip */
-.suggestion-category-btn[data-category="explicit"] {
-    border-color: rgba(244, 63, 94, 0.3);
-    background: rgba(244, 63, 94, 0.08);
-}
-
-.suggestion-category-btn[data-category="explicit"]::after {
-    content: '🔞';
-    margin-left: 4px;
-    font-size: 10px;
-}
-
-/* Hidden when explicit mode disabled */
-.suggestion-category-btn[data-category="explicit"].hidden {
-    display: none;
-}
-```
-
----
-
 ## ✅ Implementation Progress
 
 ### Completed Phases
@@ -140,9 +192,11 @@ We are **NOT** building a SillyTavern clone. We're building a **simple, premium 
 
 ### In Progress
 
-| Phase | Feature | Status | Date |
-|-------|---------|--------|------|
-| **Phase 8** | Suggestions Variety & Explicit Handling | 🔄 Planned | 2026-05-10 |
+| Phase | Feature | Status | Date | Dependency |
+|-------|---------|--------|------|------------|
+| **Phase 8** | Suggestions Variety & Explicit Handling | ⏸️ Blocked | 2026-05-10 | Explicit mode v2 must ship first |
+
+**Phase 8 is blocked** on `docs/plans/20260510-explicit_persona_enhancements.md`. The explicit mode system is being redesigned from boolean (`explicit_mode`) to 3-level integer (`explicit_level`). All Phase 8 code that touches explicit mode must use the new field. Do not implement Phase 8 until explicit mode v2 is complete.
 
 ### Implementation Summary
 
@@ -239,13 +293,13 @@ This document specifies the implementation of **Guided Generation** features for
 ### Implementation Scope
 
 **Original Estimate:**
-- **Total Effort:** 7-11 days across 5 phases
+- **Total Effort:** 7-11 hours (AI agent) across 5 phases
 - **New Files:** 3 JavaScript modules, 3 prompt templates
 - **Modified Files:** 6 existing files (backend + frontend)
 - **New API Endpoint:** `POST /api/chat/suggestions`
 
 **Actual Results:**
-- **Total Effort:** 1 day (vs. 7-11 days estimated)
+- **Total Effort:** ~15.5 hours AI agent (vs. 7-11 human days originally estimated)
 - **New Files:** 4 JavaScript modules, 17 prompt templates, 1 CSS file
 - **Modified Files:** 12 existing files (backend + frontend)
 - **New API Endpoint:** `POST /api/chat/suggestions`
@@ -449,7 +503,7 @@ We're building a comprehensive guided generation system with 4 core features:
 **Rationale:** Building the complete feature set from the start avoids incremental technical debt and provides maximum user value. While this is more work initially, it prevents the need to refactor later when adding missing features.
 
 **Trade-offs Accepted:**
-- Higher initial implementation effort (6-10 days vs 2-3 days for MVP)
+- Higher initial implementation effort (6-10 hours vs 2-3 hours for MVP)
 - More UI complexity (hybrid button + collapsible panel)
 - Need to manage more state (notes, quick guide, categories, suggestions)
 
@@ -1147,7 +1201,7 @@ fn parse_suggestions(text: &str) -> Vec<String> {
 
 ## Implementation Checklist
 
-### Phase 1: Context Notes (Sidebar) - 2-3 Days
+### Phase 1: Context Notes (Sidebar) - 2-3 Hours
 
 #### Backend
 - [ ] Add `ContextNote` struct to `src/web/api.rs`
@@ -1216,7 +1270,7 @@ fn parse_suggestions(text: &str) -> Vec<String> {
 
 ---
 
-### Phase 2: Suggestions (Dropdown) - 2-3 Days
+### Phase 2: Suggestions (Dropdown) - 2-3 Hours
 
 #### Backend
 - [ ] Add `SuggestionRequest` struct
@@ -1286,7 +1340,7 @@ fn parse_suggestions(text: &str) -> Vec<String> {
 
 ---
 
-### Phase 3: Quick Guide (Inline) - 1 Day
+### Phase 3: Quick Guide (Inline) - 1 Hour
 
 #### Frontend State
 - [ ] Add `quick_guide: ''` to in-memory state (NOT persisted)
@@ -1328,7 +1382,7 @@ fn parse_suggestions(text: &str) -> Vec<String> {
 
 ---
 
-### Phase 4: Settings & Polish - 1-2 Days
+### Phase 4: Settings & Polish - 1-2 Hours
 
 #### Settings UI
 - [ ] Add "Suggestions Prompt" section to Advanced panel
@@ -1369,7 +1423,7 @@ fn parse_suggestions(text: &str) -> Vec<String> {
 
 ---
 
-### Phase 5: Advanced Features (Optional) - 1-2 Days
+### Phase 5: Advanced Features (Optional) - 1-2 Hours
 
 #### "Fix Last Response"
 - [ ] Add "Fix Last Response" button to chat header
@@ -1581,18 +1635,18 @@ With **Separated Features (4 Different UI Patterns)**, we built:
    - Removed `{count}` variable (model decides quantity naturally)
    - **Implemented:** 17 prompt files + 146 lines of parsing logic
 
-### Actual Effort
+### Actual Effort (AI Agent — Hours)
 
-| Phase | Feature | Estimated | Actual |
-|-------|---------|-----------|--------|
-| Phase 1-2 | Context Notes + Suggestions (Core) | 4-6 days | 0.5 days |
-| Phase 3 | Quick Guide (Inline) | 1 day | 0.25 days |
-| Phase 4 | Settings & Polish | 1-2 days | 0.5 days |
-| Phase 5 | Fix Last Response + Advanced | 1-2 days | 0.5 days |
-| Phase 6 | Pathweaver Integration | N/A | 0.75 days |
-| **Total** | | **7-11 days** | **2.5 days** |
+| Phase | Feature | Est. (hrs) | Actual (hrs) |
+|-------|---------|-----------|--------------|
+| Phase 1-2 | Context Notes + Suggestions (Core) | 4-6 | 3 |
+| Phase 3 | Quick Guide (Inline) | 1 | 1.5 |
+| Phase 4 | Settings & Polish | 1-2 | 3 |
+| Phase 5 | Fix Last Response + Advanced | 1-2 | 3 |
+| Phase 6 | Pathweaver Integration | N/A | 5 |
+| **Total** | | **7-11 hrs** | **15.5 hrs** |
 
-**Result:** Completed in ~25% of estimated time (2.5 days vs. 7-11 days)
+**Result:** Completed in ~25% of original human-day estimates. Actual AI agent time: ~15.5 hours across 4 commits.
 
 ### Risk Assessment
 
@@ -1611,25 +1665,31 @@ With **Separated Features (4 Different UI Patterns)**, we built:
 
 ### For New AI Agents
 
-1. **Read this document top-to-bottom** - All decisions are made, no ambiguity
-2. **Review the Implementation Checklist** - Start with Phase 1, work sequentially
-3. **Check the File Structure** - Know where everything goes
-4. **Read the API Contracts** - Understand the backend interface
-5. **Start with Phase 1** - Context Notes (Sidebar) is the foundation
+⚠️ **CRITICAL: Implementation order matters.** If Phase 8 (Suggestions Variety & Explicit Handling) is part of your scope, you MUST implement explicit mode v2 first:
 
-### Implementation Order
+1. **Read `docs/plans/20260510-explicit_persona_enhancements.md`** — Explicit mode v2 spec (implement first)
+2. **Read this document top-to-bottom** — All guided generation decisions are made
+3. **Review the Implementation Checklist** — Phases 1-7 are independent; Phase 8 depends on explicit v2
+4. **Check the File Structure** — Know where everything goes
+5. **Read the API Contracts** — Understand the backend interface
+6. **Start with explicit mode v2** — Data model change must land before Phase 8
+7. **Then Phase 1** — Context Notes (Sidebar) is the guided generation foundation
+
+### Implementation Order (AI Agent — Hours)
 
 ```
-Week 1:
-  Day 1-2: Phase 1 - Context Notes (Sidebar)
-  Day 3-4: Phase 2 - Suggestions (Dropdown)
-  Day 5: Phase 3 - Quick Guide (Inline)
+Session 1 (3-4 hours):
+  Hour 1-2: Explicit Mode v2 — data model + policies + transport
+  Hour 3:   Explicit Mode v2 — UI (toggle, badge, CSS)
+  Hour 4:   Explicit Mode v2 — validation (cargo test, clippy, lint)
 
-Week 2:
-  Day 1-2: Phase 4 - Settings & Polish
-  Day 3-4: Phase 5 - Advanced Features (optional)
-  Day 5: Testing, bug fixes, documentation
+Session 2 (2-3 hours):
+  Hour 1:   Phase 8 — tag cloud UI + explicit gate update
+  Hour 2:   Remaining Phase 1-7 finishing touches (if any)
+  Hour 3:   Cross-feature integration testing + validation
 ```
+
+**Total estimated: 5-7 hours for 100% AI agent implementation.**
 
 ### First Steps
 
@@ -1644,9 +1704,12 @@ Week 2:
 - ❌ **Don't persist quick_guide** - It's ephemeral, clear after use
 - ❌ **Don't forget migration** - Existing tabs need empty array defaults
 - ❌ **Don't skip loading states** - Suggestions take 2-5 seconds
+- ❌ **Don't reference `tab.explicit_mode`** — This field is replaced by `tab.explicit_level` (integer 0/1/2). See explicit mode v2 spec.
+- ❌ **Don't implement Phase 8 before explicit v2** — You'll write explicit integration code twice
 - ✅ **Do follow SillyTavern's injection pattern** - It's proven to work
 - ✅ **Do test page refresh** - Notes must survive
 - ✅ **Do add error handling** - Network failures happen
+- ✅ **Do implement explicit mode v2 first** — Phases 1-7 are independent, Phase 8 depends on it
 
 ---
 
@@ -1664,6 +1727,8 @@ Week 2:
 | 2026-05-08 | Persist to Chat Tab | Simple persistence, survives refresh |
 | 2026-05-08 | Default + Editable Prompts | Best of both worlds |
 | 2026-05-08 | New `/api/chat/suggestions` Endpoint | Clean architecture, easy to extend |
+| 2026-05-10 | Explicit mode v2 before Phase 8 | Data model change (`explicit_mode` → `explicit_level`) must land first; Phase 8 code depends on new field |
+| 2026-05-10 | Phase 8 blocked on explicit v2 | Avoid implementing Phase 8 explicit integration twice |
 
 ---
 
@@ -1691,6 +1756,7 @@ Week 2:
 | 0.2 | 2026-05-08 | opencode | Added separated UI approach |
 | 0.3 | 2026-05-08 | opencode | Added SillyTavern injection research |
 | 1.0 | 2026-05-08 | opencode | Full implementation spec, all decisions made |
+| 4.1 | 2026-05-10 | opencode | Added explicit mode v2 dependency, blocked Phase 8, updated integration section |
 
 ---
 
@@ -1721,9 +1787,9 @@ This document specifies a **complete, production-ready implementation** of guide
 - No breaking changes to existing functionality
 - Clean, discoverable UI (no video tutorial needed)
 
-### Total Effort
+### Total Effort (AI Agent)
 
-**7-11 days** for complete implementation, or **4-5 days** for MVP (Phases 1-3 only).
+**7-11 hours** for complete implementation, or **4-5 hours** for MVP (Phases 1-3 only).
 
 ---
 
