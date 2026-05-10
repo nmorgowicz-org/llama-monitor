@@ -259,12 +259,20 @@ export function renderChatTabs() {
 
         // Populate persona label
         const personaLabel = el.querySelector('.chat-tab-persona');
+        const nameWrapper = el.querySelector('.chat-tab-name-wrapper');
         if (personaLabel && tab.active_template_id) {
             getTemplateNameById(tab.active_template_id).then(name => {
                 if (personaLabel && name) {
                     personaLabel.textContent = name;
                 }
             });
+        }
+        if (tab.explicit_level > 0 && nameWrapper) {
+            const badge = document.createElement('span');
+            badge.className = 'chat-tab-explicit-badge';
+            badge.textContent = tab.explicit_level >= 2 ? '\uD83D\uDD25' : '\uD83D\uDD13';
+            badge.title = tab.explicit_level >= 2 ? 'Unrestricted mode' : 'Explicit mode';
+            nameWrapper.appendChild(badge);
         }
 
         bar.insertBefore(el, addBtn);
@@ -1230,10 +1238,10 @@ export async function applyPersona(templateId) {
     tab.system_prompt = template.prompt;
     tab.active_template_id = template.id;
 
-    // Auto-enable explicit mode for Erotic Storyteller persona
+    // Auto-enable explicit mode (level 1) for Erotic Storyteller persona
     if (template.name === 'Erotic Storyteller') {
         import('./chat-templates.js').then(({ enableExplicitMode }) => {
-            enableExplicitMode();
+            enableExplicitMode(); // sets level 1
         });
     }
 

@@ -24,7 +24,7 @@ import {
 } from './chat-render.js';
 import { escapeHtml, formatMetricNumber } from '../core/format.js';
 import { autoResizeChatInput } from './chat-state.js';
-import { getExplicitModePolicy } from './chat-templates.js';
+import { getExplicitModePolicy, resolveActiveTemplate } from './chat-templates.js';
 import { showToast, showToastWithActions } from './toast.js';
 
 // ── Summarization ──────────────────────────────────────────────────────────────
@@ -231,11 +231,24 @@ export async function _doSendChat(tab) {
     const params = tab.model_params;
     const messages = [];
     let systemPrompt = tab.system_prompt ? substituteNames(tab.system_prompt, tab.ai_name, tab.user_name) : '';
-    if (tab.explicit_mode) {
-        const explicitPolicy = typeof getExplicitModePolicy === 'function'
-            ? getExplicitModePolicy() : '';
-        if (explicitPolicy) {
-            systemPrompt += `\n\n${explicitPolicy}`;
+    if (tab.explicit_level > 0) {
+        const template = typeof resolveActiveTemplate === 'function'
+            ? resolveActiveTemplate(tab.active_template_id) : null;
+        const policies = template?.explicit_policies;
+
+        if (policies) {
+            if (tab.explicit_level >= 1 && policies.level1) {
+                systemPrompt += `\n\n${policies.level1}`;
+            }
+            if (tab.explicit_level >= 2 && policies.level2) {
+                systemPrompt += `\n\n${policies.level2}`;
+            }
+        } else {
+            const explicitPolicy = typeof getExplicitModePolicy === 'function'
+                ? getExplicitModePolicy() : '';
+            if (explicitPolicy) {
+                systemPrompt += `\n\n${explicitPolicy}`;
+            }
         }
     }
     if (systemPrompt) {

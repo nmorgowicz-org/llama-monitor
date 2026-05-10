@@ -46,7 +46,7 @@ export function newChatTab(name = 'New Chat') {
         active_template_id: '',
         ai_name: '',
         user_name: '',
-        explicit_mode: false,
+        explicit_level: 0,
         auto_compact: true,
         messages: [],
         totalInputTokens: 0,
@@ -73,8 +73,13 @@ function normalizeChatTab(tab) {
     const messages = tab.messages || [];
     const totalInputTokens = messages.reduce((sum, m) => sum + (m.input_tokens || 0), 0);
     const totalOutputTokens = messages.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
+    let explicitLevel = tab.explicit_level ?? 0;
+    if (tab.explicit_mode !== undefined && tab.explicit_level === undefined) {
+        explicitLevel = tab.explicit_mode ? 1 : 0;
+    }
     return {
         ...tab,
+        explicit_level: explicitLevel,
         active_template_id: tab.active_template_id ?? '',
         auto_compact: tab.auto_compact ?? true,
         lastCtxPct: tab.lastCtxPct ?? 0,

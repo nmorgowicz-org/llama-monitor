@@ -3600,12 +3600,21 @@
   border-color: rgba(251, 146, 60, 0.3);
   color: #fdba74;
 }
+.chat-explicit-toggle.unrestricted {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #f87171;
+}
 .chat-explicit-icon-locked,
-.chat-explicit-icon-unlocked {
+.chat-explicit-icon-unlocked,
+.chat-explicit-icon-fire {
   position: absolute;
   transition: opacity 0.2s;
 }
 .chat-explicit-icon-unlocked {
+  opacity: 0;
+}
+.chat-explicit-icon-fire {
   opacity: 0;
 }
 .chat-explicit-toggle.active .chat-explicit-icon-locked {
@@ -3613,6 +3622,40 @@
 }
 .chat-explicit-toggle.active .chat-explicit-icon-unlocked {
   opacity: 1;
+}
+.chat-explicit-toggle.active .chat-explicit-icon-fire {
+  opacity: 0;
+}
+.chat-explicit-toggle.unrestricted .chat-explicit-icon-locked {
+  opacity: 0;
+}
+.chat-explicit-toggle.unrestricted .chat-explicit-icon-unlocked {
+  opacity: 0;
+}
+.chat-explicit-toggle.unrestricted .chat-explicit-icon-fire {
+  opacity: 1;
+}
+[data-theme="light"] .chat-explicit-toggle.active {
+  background: rgba(251, 146, 60, 0.15);
+  border-color: rgba(251, 146, 60, 0.5);
+  color: #ea580c;
+}
+[data-theme="light"] .chat-explicit-toggle.unrestricted {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #dc2626;
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-explicit-icon-locked,
+  .chat-explicit-icon-unlocked,
+  .chat-explicit-icon-fire {
+    transition: none;
+  }
+}
+.chat-tab-explicit-badge {
+  font-size: 0.6rem;
+  margin-left: 4px;
+  opacity: 0.8;
 }
 
 /* ── SillyTavern footnote ─────────────────────────────────────────────────── */

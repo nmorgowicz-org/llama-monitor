@@ -96,7 +96,7 @@ pub struct ChatTab {
     #[serde(default)]
     pub user_name: Option<String>,
     #[serde(default)]
-    pub explicit_mode: Option<bool>,
+    pub explicit_level: Option<u8>,
     pub messages: Vec<ChatMessage>,
     // Serialized as camelCase so GET responses and PUT bodies use identical names.
     // Alias keeps existing disk files readable if they were written as snake_case.

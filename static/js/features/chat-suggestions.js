@@ -88,7 +88,7 @@ export function setSuggestionCategory(category) {
     // Silently prevent explicit category access when explicit mode is off
     if (category === 'explicit') {
         const tab = activeChatTab();
-        const explicitMode = tab?.explicit_mode ?? false;
+        const explicitMode = (tab?.explicit_level ?? 0) > 0;
         if (!explicitMode) {
             import('./chat-templates.js').then(({ enableExplicitMode }) => {
                 enableExplicitMode();
