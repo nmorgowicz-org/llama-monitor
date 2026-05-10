@@ -1139,7 +1139,7 @@ export function toggleExplicitMode(forceValue) {
     if (forceValue !== undefined) {
         tab.explicit_level = forceValue;
     } else {
-        tab.explicit_level = (tab.explicit_level + 1) % 3;
+        tab.explicit_level = ((tab.explicit_level ?? 0) + 1) % 3;
     }
 
     tab.updated_at = Date.now();
