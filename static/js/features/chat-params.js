@@ -12,7 +12,6 @@ import {
 import { saveSettings } from './settings.js';
 import { exportChatTab, importChatTab, renderChatMessages } from './chat-render.js';
 import { fetchSummary, sendChat } from './chat-transport.js';
-import { renderPersonaStrip } from './chat-render.js';
 import {
     loadTemplates,
     onSystemPromptChange,
@@ -1135,7 +1134,6 @@ function createPersonaItem(persona, isActive) {
             tab.system_prompt = persona.prompt;
             tab.active_template_id = persona.id;
             tab.updated_at = Date.now();
-            renderPersonaStrip?.();
             scheduleChatPersist?.();
         }
     });

@@ -139,23 +139,8 @@ async function cleanupServer(server) {
     await page.screenshot({ path: `${OUTPUT_DIR}/06-chat-tabs.png`, fullPage: true });
     console.log('[NEW FEATURES] Done: 06-chat-tabs.png');
 
-    // Capture persona strip
-    console.log('[NEW FEATURES] Capturing persona strip...');
-    await page.evaluate(() => {
-      const personaStrip = document.querySelector('.chat-persona-strip');
-      if (personaStrip) {
-        personaStrip.scrollIntoView({ behavior: 'instant', block: 'start' });
-        // Click first persona chip if exists
-        const firstChip = personaStrip.querySelector('.chat-persona-chip');
-        if (firstChip) firstChip.click();
-      }
-    });
-    await sleep(1000);
-    await page.screenshot({ path: `${OUTPUT_DIR}/07-persona-strip.png`, fullPage: true });
-    console.log('[NEW FEATURES] Done: 07-persona-strip.png');
-
     // ====================================
-    // 8. CONTEXT NOTES BUTTON
+    // 7. CONTEXT NOTES BUTTON
     // ====================================
     console.log('[NEW FEATURES] Testing Context Notes button...');
     await page.evaluate(async () => {

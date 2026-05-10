@@ -446,7 +446,6 @@ export function renderChatMessages() {
     }
     chatScroll(true);
     getChatViewBindings().syncCompactSettingsUI?.(activeChatTab());
-    renderPersonaStrip?.();
 }
 
 function loadMoreMessages(tab, currentLimit) {
@@ -1170,107 +1169,11 @@ export function updateChatTabBadge() {
     if (sidebarBadgeChat) sidebarBadgeChat.textContent = count > 0 ? count : '';
 }
 
-// ── Persona Strip (Section 4B-C) ────────────────────────────────────────────────
-
-const PERSONA_RECENT_KEY = 'llama-persona-recent';
-
-function getPersonaIcon(personaName) {
-    const name = personaName.toLowerCase();
-    if (name.includes('assistant') || name.includes('default') || name.includes('helpful')) return '💬';
-    if (name.includes('creative') || name.includes('writing') || name.includes('story')) return '✨';
-    if (name.includes('code') || name.includes('dev') || name.includes('programming')) return '💻';
-    if (name.includes('technical') || name.includes('analysis') || name.includes('research')) return '🔬';
-    if (name.includes('business') || name.includes('professional')) return '💼';
-    if (name.includes('roleplay') || name.includes('rp')) return '🎭';
-    if (name.includes('educational') || name.includes('learning') || name.includes('teach')) return '📚';
-    if (name.includes('creative writing')) return '🎨';
-    return '🤖';
-}
-
-export async function renderPersonaStrip() {
-    const strip = document.getElementById('chat-persona-strip');
-    if (!strip) return;
-
-    // Remove existing chips to avoid duplicate event handlers
-    strip.innerHTML = '';
-
-    let personas = JSON.parse(localStorage.getItem(PERSONA_RECENT_KEY) || '[]');
-
-    // Fallback: if no recent personas, show defaults from template registry
-    if (personas.length === 0) {
-        const templates = await window.loadTemplates?.();
-        personas = (templates || []).slice(0, 5).map(t => ({ id: t.id, name: t.name }));
-    }
-
-    const recentLimited = personas.slice(0, 5);
-    const activeTemplateId = activeChatTab()?.active_template_id || '';
-
-    recentLimited.forEach(persona => {
-        const btn = document.createElement('button');
-        btn.className = 'chat-persona-chip' + (persona.id === activeTemplateId ? ' active' : '');
-        btn.dataset.personaId = persona.id;
-        // ICONS: Hardcoded safe emoji strings only
-        const personaName = persona.name.toLowerCase();
-        let icon = '🤖';
-        if (personaName.includes('assistant') || personaName.includes('default')) icon = '💬';
-        else if (personaName.includes('creative') || personaName.includes('writing')) icon = '✨';
-        else if (personaName.includes('code') || personaName.includes('dev')) icon = '💻';
-        else if (personaName.includes('technical') || personaName.includes('analysis')) icon = '🔬';
-        else if (personaName.includes('business') || personaName.includes('professional')) icon = '💼';
-        else if (personaName.includes('roleplay')) icon = '🎭';
-        else if (personaName.includes('educational') || personaName.includes('learning')) icon = '📚';
-        btn.innerHTML = `<span class="chat-persona-chip-icon">${icon}</span><span class="chat-persona-chip-name">${escapeHtml(persona.name)}</span>`;
-        btn.addEventListener('click', () => applyPersona(persona.id));
-        strip.appendChild(btn);
-    });
-    
-    if (personas.length > 5) {
-        const moreBtn = document.createElement('button');
-        moreBtn.className = 'chat-persona-chip-more';
-        moreBtn.textContent = '⋯';
-        moreBtn.title = 'More personas...';
-        moreBtn.addEventListener('click', () => openTemplateManager());
-        strip.appendChild(moreBtn);
-    }
-}
-
-export async function applyPersona(templateId) {
-    const templates = await window.loadTemplates?.();
-    const template = templates?.find(t => t.id === templateId);
-    if (!template) return;
-
-    const tab = activeChatTab();
-    if (!tab) return;
-
-    tab.system_prompt = template.prompt;
-    tab.active_template_id = template.id;
-
-    // Auto-enable explicit mode (level 1) for Erotic Storyteller persona
-    if (template.name === 'Erotic Storyteller') {
-        import('./chat-templates.js').then(({ enableExplicitMode }) => {
-            enableExplicitMode(); // sets level 1
-        });
-    }
-
-    // Update recent usage
-    const recent = JSON.parse(localStorage.getItem(PERSONA_RECENT_KEY) || '[]');
-    const filtered = recent.filter(p => p.id !== templateId);
-    const newRecent = [{ id: template.id, name: template.name, timestamp: Date.now() }, ...filtered].slice(0, 5);
-    localStorage.setItem(PERSONA_RECENT_KEY, JSON.stringify(newRecent));
-
-    // Refresh UI
-    await renderPersonaStrip();
-    renderChatMessages();
-    scheduleChatPersist();
-    showToast(`Applied persona: ${template.name}`, 'info');
-}
-
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initChatRender() {
     // Call setup functions that bind DOM event listeners
     initChatScrollButton();
-    renderPersonaStrip?.();
 
     // Event delegation for chat tab close buttons
     document.getElementById('chat-tab-bar')?.addEventListener('click', (e) => {

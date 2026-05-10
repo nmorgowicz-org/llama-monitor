@@ -195,7 +195,6 @@ export function switchChatTab(id) {
     chat.activeTabId = id;
     chatViewBindings.renderChatTabs?.();
     chatViewBindings.renderChatMessages?.();
-    window.renderPersonaStrip?.();
     chatViewBindings.loadChatNames?.();
     chatViewBindings.updateExplicitToggleUI?.();
     chatViewBindings.syncMessageLimitInput?.();

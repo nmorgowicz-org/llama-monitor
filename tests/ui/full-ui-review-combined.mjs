@@ -194,21 +194,7 @@ fs.mkdirSync(OUTPUT_DIR, { recursive: true });
       console.log('[FULL UI REVIEW] ✓ full-10-tab-pinning.png');
 
       // ====================================
-      // 12. PERSONA STRIP
-      // ====================================
-      console.log('[FULL UI REVIEW] Capturing persona strip...');
-      await page.evaluate(() => {
-        const personas = document.querySelectorAll('.persona-chip');
-        personas.forEach((chip, i) => {
-          if (i < 3) chip.click();
-        });
-      });
-      await sleep(2000);
-      await page.screenshot({ path: `${OUTPUT_DIR}/full-11-persona-strip.png`, fullPage: true });
-      console.log('[FULL UI REVIEW] ✓ full-11-persona-strip.png');
-
-      // ====================================
-      // 13. MESSAGE ACTIONS (Edit/Regenerate)
+      // 12. MESSAGE ACTIONS (Edit/Regenerate)
       // ====================================
       console.log('[FULL UI REVIEW] Capturing message actions...');
       await page.evaluate(() => {
