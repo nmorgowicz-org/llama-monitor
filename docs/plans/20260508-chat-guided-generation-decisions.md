@@ -1,9 +1,28 @@
 # Chat Guided Generation - Implementation Specification
 
 **Date:** 2026-05-08  
+**Last Updated:** 2026-05-10  
 **Branch:** `feature/chat-guided-generations`  
-**Status:** ✅ **FULLY IMPLEMENTED & VALIDATED**  
-**Version:** 3.0 (Complete - 2026-05-08)
+**Status:** 🔄 **ACTIVE DEVELOPMENT**  
+**Version:** 4.0 (In Progress - 2026-05-10)
+
+---
+
+## 📋 Current Architecture (AS-IS - 2026-05-10)
+
+### Core Design Philosophy
+We are **NOT** building a SillyTavern clone. We're building a **simple, premium chat system** with guided generation features that fit our established UI/UX:
+- **Minimal UI** - No clutter, no hidden menus, no video tutorials needed
+- **Premium aesthetic** - Modern gradients, backdrop-filter blur, layered shadows
+- **Discoverable** - Features are obvious, not buried in settings
+- **Simple** - We have a chat system, not a full roleplay platform
+
+### Source Extensions (Reference Only)
+| Extension | Author | Purpose | What We Take |
+|-----------|--------|---------|--------------|
+| **Guided Generations** | Samueras | Context injection + persistent notes | Context Notes sidebar, Quick Guide ephemeral instruction |
+| **Roadway** | bmen25124 | Action suggestions | "Use" button pattern, suggestion history |
+| **Pathweaver** | mattjaybe | Genre-based story directions | 17 prompt templates, Director Mode, category tabs |
 
 ---
 
@@ -18,19 +37,21 @@
 | **Phase 4** | Settings & Polish | ✅ Complete | 2026-05-08 | `00cde1c` |
 | **Phase 5** | Advanced Features (Fix Last, History, Custom Categories) | ✅ Complete | 2026-05-08 | `e3cc9a5` |
 | **Phase 6** | Pathweaver Integration (17 prompts, new format, Director Mode, Explicit) | ✅ Complete | 2026-05-08 | `38c1039` |
+| **Phase 7** | UI Fixes (dropdown clipping, button placement) | ✅ Complete | 2026-05-10 | `b51f5a2` |
 
 ### Implementation Summary
 
-**All 5 phases completed in 1 day** (vs. estimated 7-11 days)
+**All 6 phases completed. Phase 7 (polish) in progress.**
 
 **Deliverables:**
 - ✅ Context Notes Sidebar (persistent, resizable, section-based)
-- ✅ Suggestions Dropdown (3 categories, AI-powered, smart parsing)
-- ✅ Quick Guide (ephemeral inline instruction)
-- ✅ Settings UI (toggles, default sidebar width)
-- ✅ Suggestion History (recently used, limit 10)
+- ✅ Suggestions Dropdown (4 categories, AI-powered, smart parsing)
+- ✅ Quick Guide (ephemeral inline instruction, auto-clears after generation)
+- ✅ Settings UI (toggles, default sidebar width, 17 editable prompts)
+- ✅ Suggestion History (recently used, limit 10, per-tab)
 - ✅ Fix Last Response (correction modal, regeneration)
 - ✅ Context Injection (SillyTavern-style system messages)
+- ✅ Custom Categories (add/remove/edit unlimited categories)
 
 **Files Created:**
 - `static/js/features/chat-notes.js` - Sidebar management
