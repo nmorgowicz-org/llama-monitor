@@ -35,6 +35,10 @@ function ensureElements() {
         gaugeRing: document.getElementById('m-context-gauge-ring'),
         strip: document.getElementById('m-context-chat-strip'),
         stripMeta: document.getElementById('m-context-chat-strip-meta'),
+        gaugeFooter: document.getElementById('m-context-gauge-footer'),
+        fleetHeader: document.getElementById('m-context-fleet-header'),
+        fleetAggFill: document.getElementById('m-context-fleet-agg-fill'),
+        fleetAggLabel: document.getElementById('m-context-fleet-agg-label'),
         fleetSummary: document.getElementById('m-context-fleet-summary'),
         fleetRows: document.getElementById('m-context-fleet-rows'),
         fleetFooter: document.getElementById('m-context-fleet-footer'),
@@ -226,6 +230,22 @@ function renderChatStrip(model) {
 
 const GAUGE_CIRCUMFERENCE = 402; // 2π × r64
 
+function renderGaugeFooter(model) {
+    const { gaugeFooter } = ensureElements();
+    if (!gaugeFooter) return;
+    const parts = [];
+    if (model.aggregateChatPressure.avgPct != null) {
+        parts.push(`avg ${Math.round(model.aggregateChatPressure.avgPct)}%`);
+    }
+    if (model.activeChatCount > 0) {
+        parts.push(`${model.activeChatCount} chat${model.activeChatCount !== 1 ? 's' : ''}`);
+    }
+    if (model.capacityTokens > 0) {
+        parts.push(`${formatMetricNumber(model.capacityTokens)} window`);
+    }
+    gaugeFooter.textContent = parts.join(' · ');
+}
+
 function renderGaugeView(model) {
     const { gaugeValue, gaugeSecondary, gaugeRing } = ensureElements();
     const heroPct = model.mode === 'live-runtime'
@@ -259,13 +279,30 @@ function renderGaugeView(model) {
     }
 
     renderChatStrip(model);
+    renderGaugeFooter(model);
 }
 
 function renderFleetView(model) {
-    const { fleetSummary, fleetRows, fleetFooter } = ensureElements();
+    const { fleetSummary, fleetRows, fleetFooter, fleetAggFill, fleetAggLabel } = ensureElements();
     // Show all chats with messages — stale ones are dimmed but visible
     const source = model.chatSummaries.filter(c => c.messageCount > 0);
     const rows = expanded ? source : source.slice(0, MAX_VISIBLE_FLEET_ROWS);
+
+    // Fleet header: aggregate utilization bar
+    const avgPct = model.aggregateChatPressure.avgPct;
+    if (fleetAggFill) {
+        const fillWidth = avgPct != null ? Math.min(100, Math.max(0, avgPct)) : 0;
+        fleetAggFill.style.width = `${fillWidth}%`;
+        fleetAggFill.className = `context-fleet-agg-fill ${pctState(avgPct)}`;
+    }
+    if (fleetAggLabel) {
+        const labelParts = [];
+        if (avgPct != null) labelParts.push(`${Math.round(avgPct)}% avg`);
+        const maxPct = model.aggregateChatPressure.maxPct;
+        if (maxPct != null && maxPct !== avgPct) labelParts.push(`${Math.round(maxPct)}% peak`);
+        if (model.capacityTokens > 0) labelParts.push(`${formatMetricNumber(model.capacityTokens)} ctx`);
+        fleetAggLabel.textContent = labelParts.join(' · ') || 'fleet utilization';
+    }
 
     fleetSummary.textContent = model.mode === 'live-runtime'
         ? `${model.activeChatCount} chat${model.activeChatCount !== 1 ? 's' : ''} · runtime live`
@@ -290,11 +327,13 @@ function renderFleetView(model) {
         const width = escapeHtml(String(pct != null ? Math.min(100, pct) : 0));
         return `
             <div class="context-fleet-row ${state}${staleClass}">
-                <span class="context-fleet-name">${escapeHtml(item.name)}</span>
+                <div class="context-fleet-row-top">
+                    <span class="context-fleet-name">${escapeHtml(item.name)}</span>
+                    <span class="context-fleet-value">${pctLabel}</span>
+                </div>
                 <div class="context-fleet-bar">
                     <div class="context-fleet-fill ${state}" style="width:${width}%"></div>
                 </div>
-                <span class="context-fleet-value">${pctLabel}</span>
             </div>
         `;
     }).join('');
