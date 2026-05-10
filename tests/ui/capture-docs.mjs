@@ -3,7 +3,7 @@ import fs from 'fs';
 import { spawn } from 'child_process';
 import net from 'net';
 
-const OUTPUT_DIR = '/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots';
+const OUTPUT_DIR = '/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots/artifacts';
 const BINARY = '/Users/nick/SCRIPTS/CLAUDE/llama-monitor/target/release/llama-monitor';
 const REMOTE_SERVER = 'http://192.168.2.16:8001';
 const sleep = ms => new Promise(r => setTimeout(r, ms));

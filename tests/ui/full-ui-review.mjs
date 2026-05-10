@@ -2,7 +2,7 @@ import puppeteer from 'puppeteer';
 import fs from 'fs';
 
 const BASE_URL = process.env.LLAMA_MONITOR_URL || 'http://127.0.0.1:7778';
-const OUTPUT_DIR = '../../docs/screenshots';
+const OUTPUT_DIR = '../../docs/screenshots/artifacts';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 

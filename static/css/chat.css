@@ -1575,6 +1575,7 @@
 
 /* ── Chat Style Variables (default: rounded) ─────────── */
 .chat-page {
+  position: relative;
   --chat-avatar-size: 30px;
   --chat-avatar-radius: 8px;
   --chat-avatar-opacity: 1;
@@ -2161,7 +2162,6 @@
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   flex-shrink: 0;
   position: relative;
-  overflow: hidden;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 .chat-input-row::after {

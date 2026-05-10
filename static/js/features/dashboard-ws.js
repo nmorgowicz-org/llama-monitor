@@ -612,10 +612,9 @@ function updateLogs(d) {
         sessionState.prevLogLen = logs.length;
     }
 
-    // Remote attach sessions never have local console output, so keep the empty
-    // state accurate even when the log length remains at zero across updates.
+    // Show empty state whenever there are no logs (attach or spawn mode).
     if (emptyState) {
-        if (isAttached && logs.length === 0) {
+        if (logs.length === 0) {
             emptyState.classList.add('visible');
             logsPage?.classList.add('logs-empty-mode');
         } else {

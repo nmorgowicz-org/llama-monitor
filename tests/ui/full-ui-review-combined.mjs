@@ -3,7 +3,7 @@ import fs from 'fs';
 import { spawn } from 'child_process';
 
 const BASE_URL = process.env.LLAMA_MONITOR_URL || 'http://127.0.0.1:7778';
-const OUTPUT_DIR = '../../docs/screenshots';
+const OUTPUT_DIR = '../../docs/screenshots/artifacts';
 const SERVER_LOG = '/tmp/llama-monitor-ui-review.log';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));

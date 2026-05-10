@@ -442,6 +442,7 @@
   position: absolute;
   inset: 0;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .view-setup {
@@ -464,11 +465,12 @@
 
 /* Ambient background */
 .setup-bg {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: -1;
   overflow: hidden;
   pointer-events: none;
+  contain: strict;
 }
 
 .setup-bg::before,
