@@ -1010,35 +1010,34 @@
                 </div>
             </div>
 
-            <!-- Message thread -->
+            <!-- Message thread + context notes sidebar (contained within messages area) -->
             <div class="chat-messages" id="chat-messages">
-            </div>
-
-            <!-- Context Notes (outside chat-messages so it doesn't scroll with content) -->
-            <div class="chat-context-bar" id="chat-context-bar">
-                <button class="chat-context-bar-toggle" id="context-sidebar-toggle" title="Context Notes" aria-expanded="false" aria-controls="chat-sidebar">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                        <polyline points="14,2 14,8 20,8"/>
-                        <line x1="16" y1="13" x2="8" y2="13"/>
-                        <line x1="16" y1="17" x2="8" y2="17"/>
-                    </svg>
-                </button>
-                <div class="sidebar-resize-handle" id="chat-context-bar-resize"></div>
-                <div class="chat-sidebar" id="chat-sidebar">
-                    <div class="chat-sidebar-header">
-                        <h3>Context Notes</h3>
-                        <button class="chat-sidebar-close" id="chat-sidebar-close" title="Close">&times;</button>
-                    </div>
-                    <div class="sidebar-notes-list" id="sidebar-notes-list"></div>
-                    <div class="sidebar-section-management" id="sidebar-section-management">
-                        <div class="sidebar-add-section-container">
-                            <button class="sidebar-add-section-trigger" id="sidebar-add-section-trigger" title="Add custom section">+ Add Section</button>
-                            <div class="sidebar-add-section-input hidden" id="sidebar-add-section-input">
-                                <input type="text" class="sidebar-section-name-input" id="sidebar-section-name-input" placeholder="Section name..." autocomplete="off">
-                                <div class="sidebar-section-input-actions">
-                                    <button class="sidebar-section-confirm-btn" id="sidebar-section-confirm-btn">✓</button>
-                                    <button class="sidebar-section-cancel-btn" id="sidebar-section-cancel-btn">✕</button>
+                <div class="chat-messages-inner" id="chat-messages-inner"></div>
+                <div class="chat-context-bar" id="chat-context-bar">
+                    <button class="chat-context-bar-toggle" id="context-sidebar-toggle" title="Context Notes" aria-expanded="false" aria-controls="chat-sidebar">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                            <polyline points="14,2 14,8 20,8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                        </svg>
+                    </button>
+                    <div class="sidebar-resize-handle" id="chat-context-bar-resize"></div>
+                    <div class="chat-sidebar" id="chat-sidebar">
+                        <div class="chat-sidebar-header">
+                            <h3>Context Notes</h3>
+                            <button class="chat-sidebar-close" id="chat-sidebar-close" title="Close">&times;</button>
+                        </div>
+                        <div class="sidebar-notes-list" id="sidebar-notes-list"></div>
+                        <div class="sidebar-section-management" id="sidebar-section-management">
+                            <div class="sidebar-add-section-container">
+                                <button class="sidebar-add-section-trigger" id="sidebar-add-section-trigger" title="Add custom section">+ Add Section</button>
+                                <div class="sidebar-add-section-input hidden" id="sidebar-add-section-input">
+                                    <input type="text" class="sidebar-section-name-input" id="sidebar-section-name-input" placeholder="Section name..." autocomplete="off">
+                                    <div class="sidebar-section-input-actions">
+                                        <button class="sidebar-section-confirm-btn" id="sidebar-section-confirm-btn">✓</button>
+                                        <button class="sidebar-section-cancel-btn" id="sidebar-section-cancel-btn">✕</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>

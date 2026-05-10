@@ -63,7 +63,7 @@ let sidebarBadgeChat = null;
 
 function ensureChatElements() {
     if (chatMessagesEl) return;
-    chatMessagesEl = document.getElementById('chat-messages');
+    chatMessagesEl = document.getElementById('chat-messages-inner');
     chatTabBarEl = document.getElementById('chat-tab-bar');
     chatScrollBottomBtn = document.getElementById('chat-scroll-bottom');
     chatScrollBadge = document.getElementById('chat-scroll-badge');
@@ -267,12 +267,17 @@ export function renderChatTabs() {
                 }
             });
         }
-        if (tab.explicit_level > 0 && nameWrapper) {
+        if (tab.explicit_level > 0) {
             const badge = document.createElement('span');
             badge.className = 'chat-tab-explicit-badge';
             badge.textContent = tab.explicit_level >= 2 ? '\uD83D\uDD25' : '\uD83D\uDD13';
             badge.title = tab.explicit_level >= 2 ? 'Unrestricted mode' : 'Explicit mode';
-            nameWrapper.appendChild(badge);
+            const countEl = el.querySelector('.chat-tab-count');
+            if (countEl) {
+                countEl.parentNode.insertBefore(badge, countEl.nextSibling);
+            } else {
+                el.appendChild(badge);
+            }
         }
 
         bar.insertBefore(el, addBtn);

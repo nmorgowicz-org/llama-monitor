@@ -47,7 +47,7 @@
     }
 }
 
-/* ── Context Notes Stretchable Bar (outside chat-messages, overlays as fixed panel) ── */
+/* ── Context Notes Stretchable Bar (inside chat-messages, contained within messages area) ── */
 
 .chat-context-bar {
     position: absolute;
@@ -74,7 +74,7 @@
 
 .chat-context-bar.expanded {
     width: 320px;
-    background: transparent;
+    background: rgba(20, 20, 30, 0.98);
     border-left: none;
     pointer-events: auto;
 }
@@ -94,6 +94,8 @@
     padding: 0;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     pointer-events: auto;
+    position: relative;
+    z-index: 20;
 }
 
 .chat-context-bar-toggle:hover {
@@ -181,9 +183,9 @@
 .sidebar-resize-handle {
     position: absolute;
     left: 0;
-    top: 0;
-    width: 16px;
-    height: 100%;
+    top: 48px;
+    width: 8px;
+    height: calc(100% - 48px);
     cursor: col-resize;
     background: transparent;
     transition: background 0.2s;
@@ -1175,6 +1177,15 @@
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(250, 251, 252, 0.98) 100%);
     border-color: rgba(0, 0, 0, 0.08);
     box-shadow: -8px 0 32px rgba(0, 0, 0, 0.08), -4px 0 16px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .chat-context-bar {
+    background: rgba(250, 251, 252, 0.95);
+    border-left-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .chat-context-bar.expanded {
+    background: rgba(250, 251, 252, 0.98);
 }
 
 [data-theme="light"] .chat-sidebar-header {

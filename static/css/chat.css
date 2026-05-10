@@ -1031,13 +1031,19 @@
 /* ── Chat Messages ──────────────────────────────────── */
 .chat-messages {
   flex: 1;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.chat-messages-inner {
+  flex: 1;
   overflow-y: auto;
   padding: calc(var(--gap-md) + 2px) calc(var(--gap-lg) + 24px) 72px;
   display: flex;
   flex-direction: column;
   gap: calc(var(--gap-md) + 2px);
   scroll-behavior: smooth;
-  position: relative;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
   background:
@@ -1158,18 +1164,18 @@
   border-color: rgba(34, 211, 238, 0.26);
   background: rgba(8, 145, 178, 0.1);
 }
-.chat-messages::-webkit-scrollbar { width: 8px; }
-.chat-messages::-webkit-scrollbar-track {
+.chat-messages-inner::-webkit-scrollbar { width: 8px; }
+.chat-messages-inner::-webkit-scrollbar-track {
   background: transparent;
 }
-.chat-messages::-webkit-scrollbar-thumb {
+.chat-messages-inner::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.1);
   border-radius: 4px;
   border: 2px solid transparent;
   background-clip: content-box;
   transition: background 0.2s;
 }
-.chat-messages::-webkit-scrollbar-thumb:hover {
+.chat-messages-inner::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.18);
   background-clip: content-box;
 }
@@ -2345,7 +2351,7 @@
   .chat-empty-title {
     font-size: var(--text-base);
   }
-  .chat-messages {
+  .chat-messages-inner {
     padding: var(--gap-sm) var(--gap-sm) 60px;
   }
   .chat-input-row {
@@ -2377,7 +2383,7 @@
     display: none;
   }
   .chat-message { max-width: 96%; }
-  .chat-messages { padding: var(--gap-sm); }
+  .chat-messages-inner { padding: var(--gap-sm); }
   .chat-params-grid { grid-template-columns: 1fr 1fr; }
   .chat-scroll-bottom {
     bottom: 70px;
@@ -3571,8 +3577,8 @@
 }
 .chat-tab-explicit-badge {
   font-size: 0.6rem;
-  margin-left: 4px;
   opacity: 0.8;
+  flex-shrink: 0;
 }
 
 /* ── SillyTavern footnote ─────────────────────────────────────────────────── */

@@ -159,7 +159,7 @@ function renderSuggestionsList() {
         container.innerHTML = `
             <div class="suggestions-empty-state" role="status" aria-live="polite">
                 <p>No suggestions yet</p>
-                <p class="text-sm">Select a category above, then hit **Generate** to ask the AI for writing prompts tailored to your conversation.</p>
+                <p class="text-sm">Start a conversation first, then hit **Generate** to get AI-powered writing prompts.</p>
             </div>
         `;
         return;

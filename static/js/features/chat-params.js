@@ -240,7 +240,7 @@ export async function compactChatTab(tab, keepTail = null, summarize = true) {
 
     let placeholderEl = null;
     if (summarize) {
-        const chatMsgs = document.getElementById('chat-messages');
+        const chatMsgs = document.getElementById('chat-messages-inner');
         if (chatMsgs) {
             placeholderEl = document.createElement('div');
             placeholderEl.className = 'chat-message chat-compact-marker compact-marker-summarizing';

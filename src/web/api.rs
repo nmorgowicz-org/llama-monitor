@@ -1677,7 +1677,7 @@ fn api_chat_suggestions(
                 let prompt = default_prompt
                     .unwrap_or_default()
                     .replace("{count}", &count.to_string())
-                    .replace("[conversation context]", &context);
+                    .replace("[STORY CONTEXT]", &context);
 
                 // Build messages for suggestion request
                 let suggestion_messages = vec![
