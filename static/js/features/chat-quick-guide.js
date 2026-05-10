@@ -15,7 +15,7 @@ let quickGuideState = {
 
 export function toggleQuickGuide() {
     const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
-    if (!settings.enabled_quick_guide) return;
+    if (settings.enabled_quick_guide === false) return;
 
     quickGuideState.expanded = !quickGuideState.expanded;
     updateQuickGuideUI();

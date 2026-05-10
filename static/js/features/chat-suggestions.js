@@ -26,7 +26,7 @@ let categorySwitchTimeout = null;
 
 export function toggleSuggestionsDropdown() {
     const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
-    if (!settings.enabled_suggestions) return;
+    if (settings.enabled_suggestions === false) return;
 
     suggestionsState.expanded = !suggestionsState.expanded;
     updateDropdownUI();
