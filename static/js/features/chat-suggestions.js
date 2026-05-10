@@ -85,21 +85,14 @@ export function setSuggestionCategory(category) {
         return;
     }
 
-    // Check for explicit mode dependency
+    // Silently prevent explicit category access when explicit mode is off
     if (category === 'explicit') {
         const tab = activeChatTab();
         const explicitMode = tab?.explicit_mode ?? false;
         if (!explicitMode) {
-            showToastWithActions(
-                'Explicit suggestions work best with Explicit Mode enabled',
-                'warning',
-                '',
-                [
-                    { id: 'enable', label: 'Enable Explicit Mode', handler: () => toggleExplicitMode() },
-                    { id: 'continue', label: 'Use Anyway' },
-                ]
-            );
-            return;
+            import('./chat-templates.js').then(({ enableExplicitMode }) => {
+                enableExplicitMode();
+            });
         }
     }
 

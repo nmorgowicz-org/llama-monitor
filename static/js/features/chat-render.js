@@ -1223,19 +1223,26 @@ export async function applyPersona(templateId) {
     const templates = await window.loadTemplates?.();
     const template = templates?.find(t => t.id === templateId);
     if (!template) return;
-    
+
     const tab = activeChatTab();
     if (!tab) return;
-    
+
     tab.system_prompt = template.prompt;
     tab.active_template_id = template.id;
-    
+
+    // Auto-enable explicit mode for Erotic Storyteller persona
+    if (template.name === 'Erotic Storyteller') {
+        import('./chat-templates.js').then(({ enableExplicitMode }) => {
+            enableExplicitMode();
+        });
+    }
+
     // Update recent usage
     const recent = JSON.parse(localStorage.getItem(PERSONA_RECENT_KEY) || '[]');
     const filtered = recent.filter(p => p.id !== templateId);
     const newRecent = [{ id: template.id, name: template.name, timestamp: Date.now() }, ...filtered].slice(0, 5);
     localStorage.setItem(PERSONA_RECENT_KEY, JSON.stringify(newRecent));
-    
+
     // Refresh UI
     renderPersonaStrip();
     renderChatMessages();

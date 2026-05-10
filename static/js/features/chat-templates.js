@@ -505,13 +505,17 @@ export function applySystemPromptTemplate(templateValue) {
 
 // ── Explicit mode ─────────────────────────────────────────────────────────────
 
-export function toggleExplicitMode() {
+export function toggleExplicitMode(forceValue) {
     const tab = activeChatTab();
     if (!tab) return;
-    tab.explicit_mode = !tab.explicit_mode;
+    tab.explicit_mode = forceValue !== undefined ? forceValue : !tab.explicit_mode;
     tab.updated_at = Date.now();
     scheduleChatPersist();
     updateExplicitToggleUI();
+}
+
+export function enableExplicitMode() {
+    toggleExplicitMode(true);
 }
 
 export function updateExplicitToggleUI() {
