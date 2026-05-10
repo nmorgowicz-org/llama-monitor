@@ -73,7 +73,7 @@ function normalizeChatTab(tab) {
     const messages = tab.messages || [];
     const totalInputTokens = messages.reduce((sum, m) => sum + (m.input_tokens || 0), 0);
     const totalOutputTokens = messages.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
-    let explicitLevel = tab.explicit_level ?? 0;
+    let explicitLevel = tab.explicit_level ?? tab.explicitLevel ?? 0;
     if (tab.explicit_mode !== undefined && tab.explicit_level === undefined) {
         explicitLevel = tab.explicit_mode ? 1 : 0;
     }
@@ -176,7 +176,7 @@ export function restoreTabFromTrash(id) {
     if (trashIdx === -1) return;
 
     const [trashEntry] = chat.tabTrash.splice(trashIdx, 1);
-    chat.tabs.push(trashEntry.tab);
+    chat.tabs.push(normalizeChatTab(trashEntry.tab));
     chat.activeTabId = trashEntry.tab.id;
 
     chatViewBindings.renderChatTabs?.();
@@ -260,6 +260,8 @@ export function updateChatName(field, value) {
 
 export function normalizeTabForSave(tab) {
     const t = { ...tab };
+    delete t.explicit_mode;
+    delete t.explicitLevel;
     t.messages = (t.messages || []).map(m => {
         const msg = { ...m };
         delete msg.cumulativeInputTokens;

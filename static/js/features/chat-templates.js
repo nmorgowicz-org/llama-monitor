@@ -1136,10 +1136,10 @@ export function toggleExplicitMode(forceValue) {
     const tab = activeChatTab();
     if (!tab) return;
 
-    if (forceValue !== undefined) {
+    if (forceValue != null && typeof forceValue === 'number') {
         tab.explicit_level = forceValue;
     } else {
-        tab.explicit_level = ((tab.explicit_level ?? 0) + 1) % 3;
+        tab.explicit_level = ((tab.explicit_level || 0) + 1) % 3;
     }
 
     tab.updated_at = Date.now();
@@ -1147,7 +1147,8 @@ export function toggleExplicitMode(forceValue) {
     updateExplicitToggleUI();
 
     const levelNames = { 0: 'Locked', 1: 'Unlocked', 2: 'Unrestricted' };
-    showToast(`Explicit mode: ${levelNames[tab.explicit_level]}`);
+    const level = tab.explicit_level ?? 0;
+    showToast(`Explicit mode: ${levelNames[level] ?? 'unknown'}`);
 }
 
 export function enableExplicitMode() {

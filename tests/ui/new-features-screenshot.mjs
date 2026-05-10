@@ -87,10 +87,11 @@ async function cleanupServer(server) {
   console.log('[NEW FEATURES] Launching browser...');
   const browser = await puppeteer.launch({
     headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-cache', '--disable-service-workers'],
   });
 
   const page = await browser.newPage();
+  await page.setCacheEnabled(false);
   await page.setViewport({ width: 1440, height: 900 });
 
   try {

@@ -85,6 +85,32 @@ impl Default for ChatModelParams {
     }
 }
 
+/// Deserialize explicit_level from bool (legacy), u8, or null.
+/// Tolerates corrupted disk data by defaulting to 0.
+fn deserialize_explicit_level<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = <Option<serde_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+    match value {
+        Some(v) if v.is_null() => Ok(None),
+        Some(v) => {
+            if let Some(n) = v.as_u64() {
+                return Ok(Some(n as u8));
+            }
+            if let Some(b) = v.as_bool() {
+                return Ok(Some(if b { 1 } else { 0 }));
+            }
+            if let Some(n) = v.as_i64() {
+                return Ok(Some(n as u8));
+            }
+            // Tolerate corrupted data: default to unlocked (1)
+            Ok(Some(0))
+        }
+        None => Ok(None),
+    }
+}
+
 /// Chat tab structure for persistence
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct ChatTab {
@@ -95,7 +121,13 @@ pub struct ChatTab {
     pub ai_name: Option<String>,
     #[serde(default)]
     pub user_name: Option<String>,
-    #[serde(default, rename = "explicitLevel", alias = "explicit_mode")]
+    #[serde(
+        default,
+        rename = "explicitLevel",
+        alias = "explicit_mode",
+        alias = "explicit_level",
+        deserialize_with = "deserialize_explicit_level"
+    )]
     pub explicit_level: Option<u8>,
     pub messages: Vec<ChatMessage>,
     // Serialized as camelCase so GET responses and PUT bodies use identical names.
@@ -104,8 +136,11 @@ pub struct ChatTab {
     pub total_input_tokens: Option<u64>,
     #[serde(rename = "totalOutputTokens", alias = "total_output_tokens", default)]
     pub total_output_tokens: Option<u64>,
+    #[serde(default)]
     pub model_params: ChatModelParams,
+    #[serde(default)]
     pub created_at: u64,
+    #[serde(default)]
     pub updated_at: u64,
     #[serde(default)]
     pub auto_compact: Option<bool>,
