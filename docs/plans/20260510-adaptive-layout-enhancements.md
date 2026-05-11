@@ -4,6 +4,7 @@
 **Status:** Planning
 **Priority:** High
 **Scope:** Chat toolbar responsiveness, shell width model, left sidebar resizing, Chat Focus Mode
+**Depends on:** `docs/plans/20260510-chat-system-evolution.md` should be implemented first. Several sections in this plan reference post-evolution DOM structure (`.chat-sessions-panel`, `.chat-main-area`). Implementing adaptive layout before the evolution is possible but will require re-validation of DOM targets after the evolution lands. See the App Architecture Reference section for pre- vs. post-evolution structural differences.
 
 ---
 
@@ -13,7 +14,7 @@ The layout architecture needs improvements across two dimensions: **width** and 
 
 **Width dimension:** The current chat toolbar is built as a desktop-first, non-wrapping row that only falls back to compact behavior at the mobile breakpoint. When the main left sidebar is expanded, the shell immediately loses 140px of width, but the chat header does not enter any intermediate compact state. The result is control clipping on medium-width desktop layouts, most visibly around the `Persona` button.
 
-**Height/immersion dimension:** There is currently no way for a user engaged in active chat to remove the persistent structural chrome — the "Llama Monitor" title bar, cockpit metrics, and the endpoint/agent status strip — from view. These elements consume significant vertical space and visual attention that is irrelevant to the act of chatting. A **Chat Focus Mode** should allow the user to enter an immersive writing/reading experience that collapses all non-chat structural chrome, leaving only the chat tab bar, chat header controls, the message thread, and the input area.
+**Height/immersion dimension:** There is currently no way for a user engaged in active chat to remove the persistent structural chrome — the "Llama Monitor" title bar, cockpit metrics, and the endpoint/agent status strip — from view. These elements consume significant vertical space and visual attention that is irrelevant to the act of chatting. A **Chat Focus Mode** should allow the user to enter a full-screen-style chat experience: the app-level chrome collapses (top strip, title bar, left nav sidebar), leaving the chat session panel (for switching between conversations), the chat header controls, the message thread, and the input area. The goal is to maximize visible message content — the user should see more of their conversation at once, with the app chrome out of the way, while retaining the ability to switch chats without exiting Focus Mode.
 
 Neither dimension should be fixed in isolation. Both share the same underlying philosophy: measure available space, respond progressively, and let the user control their own environment.
 
@@ -100,6 +101,10 @@ This is a **Tauri/Rust desktop application** with a vanilla JavaScript frontend.
 
 The following elements are the ones this plan touches most. Understand their relationships before editing anything.
 
+> ⚠️ **Two structural states exist depending on which feature branch has landed.** This plan is written to be implemented *after* `docs/plans/20260510-chat-system-evolution.md`. Verify which state the codebase is in before starting any work.
+
+**Pre-evolution (current `feature/chat-guided-generations` branch):**
+
 ```
 <body>
   ├── .endpoint-health-strip          ← TOP STATUS BAR (endpoint + agent info)
@@ -107,16 +112,45 @@ The following elements are the ones this plan touches most. Understand their rel
   │     └── .endpoint-health-strip-monitor (monitor state: URL, status, agent, latency, badges)
   ├── .top-nav-bar                    ← TITLE BAR (Llama Monitor logo, h1, cockpit metrics, user menu)
   ├── .main-layout                    ← WRAPPER containing sidebar + content
-  │     ├── .sidebar-nav              ← LEFT NAVIGATION (Server, Chat, Logs, Sessions, Models, Settings buttons)
+  │     ├── .sidebar-nav              ← LEFT NAVIGATION (Server, Chat, Logs, Settings buttons)
   │     └── .content-area             ← ALL PAGE CONTENT (tabs switch inside here)
   │           └── .page.chat-page     ← CHAT SECTION
-  │                 ├── #chat-tab-bar
+  │                 ├── #chat-tab-bar         ← horizontal tab bar (REMOVED post-evolution)
   │                 ├── #chat-header
   │                 ├── #chat-telemetry-inline-host
   │                 ├── #ctx-pressure-bar
   │                 ├── .chat-messages (with .chat-sidebar overlay)
   │                 └── #chat-input-row
 ```
+
+**Post-evolution (after `chat-system-evolution` plan lands — target structure for this plan):**
+
+```
+<body>
+  ├── .endpoint-health-strip          ← TOP STATUS BAR (same as above)
+  ├── .top-nav-bar                    ← TITLE BAR (same as above)
+  ├── .main-layout
+  │     ├── .sidebar-nav              ← LEFT NAVIGATION (Sessions/Models removed; Server, Chat, Logs, Settings remain)
+  │     └── .content-area             ← ALL PAGE CONTENT
+  │           └── .page.chat-page     ← CHAT SECTION (flex-direction: row post-evolution)
+  │                 ├── .chat-sessions-panel  ← 240px Discord-style session list (replaces #chat-tab-bar)
+  │                 │     ├── .csp-header (title + collapse btn)
+  │                 │     ├── .csp-actions (New Chat btn)
+  │                 │     ├── .csp-search (search input)
+  │                 │     └── .csp-list (session items with ctx pressure bars)
+  │                 └── .chat-main-area       ← flex:1, all remaining chat content
+  │                       ├── #chat-header
+  │                       ├── #chat-telemetry-inline-host
+  │                       ├── #ctx-pressure-bar
+  │                       ├── .chat-messages (with .chat-sidebar overlay)
+  │                       └── #chat-input-row
+```
+
+**Key structural differences to keep in mind:**
+- `#chat-tab-bar` is gone post-evolution; session switching happens via `.chat-sessions-panel`
+- `#page-chat` becomes a flex row (session panel + main area side by side) instead of a flex column
+- The `ResizeObserver` for width density should target `.chat-main-area` post-evolution, not `.content-area`
+- `.sidebar-nav` no longer has Sessions or Models buttons post-evolution (they move to Server tab modals)
 
 ### Layout CSS variables (current state — pre-refactor)
 
@@ -259,7 +293,7 @@ Chat Focus Mode is not a "feature on/off" switch. It is a deliberate shift in th
 
 ### 6. Focus mode interacts with the width system correctly
 
-When Focus Mode is active, the sidebar nav is fully removed from layout flow. This gives the chat significantly more horizontal space. The `ResizeObserver` will fire and detect the new width, likely moving into the `comfortable` density tier or an even more spacious variant. Focus Mode should be treated as a special case that pins density to `comfortable` regardless of actual viewport width, since the intent is a premium immersive experience, not a cramped one.
+When Focus Mode is active, the left nav sidebar is removed from layout flow, giving the chat area 140–208px of additional horizontal space. The `ResizeObserver` will detect this and would normally re-evaluate density. Focus Mode should pin density to `comfortable` regardless of measured width, since the intent is a premium immersive experience. The session panel (`.chat-sessions-panel`) remains in flow and continues to occupy its 240px — this is intentional and does not need special handling by the width observer.
 
 ---
 
@@ -273,9 +307,9 @@ Introduce width-density classes derived from actual measured width.
 
 Use a `ResizeObserver` on one of:
 
-- `.content-area`
-- `#chat-header`
-- or the chat page container if that proves more stable
+- `.chat-main-area` — **preferred post-evolution** (measures only the actual chat writing area, excluding the session panel)
+- `#chat-header` — acceptable alternative; same width as `.chat-main-area` in the post-evolution layout
+- `.content-area` — **pre-evolution only**; post-evolution this includes the session panel width and will produce incorrect density thresholds
 
 The observer should compute width and apply density classes to `body` or to the chat root, for example:
 
@@ -541,31 +575,35 @@ The telemetry popover has `min-width: 520px` in [static/css/chat.css](/Users/nic
 
 ## 9. Chat Focus Mode Overview
 
-Chat Focus Mode is an immersive view that removes all structural application chrome and presents only the chat interface. It is analogous to a "distraction-free" or "composition" mode in premium writing apps.
+Chat Focus Mode is an immersive view that removes all structural application chrome and presents the chat interface at maximum size. It is analogous to a "distraction-free" mode in premium writing apps — but it retains session switching so the user is never locked into a single conversation.
 
 ### What stays visible
 
-Every element that is intrinsic to chatting remains fully visible and functional:
+Everything that is intrinsic to the chat experience remains fully functional:
 
-- `#chat-tab-bar` — tab management, add/close/switch tabs
-- `#chat-header` — all controls: Behavior, Settings, Style, Compact, Fix, name inputs, explicit toggle, font controls, export/import (or File), Persona
+- `.chat-sessions-panel` — session list for switching between conversations (post-evolution). Pre-evolution equivalent: `#chat-tab-bar`. **This stays visible.** The user needs to be able to switch chats without exiting Focus Mode.
+- `#chat-header` — all controls: Behavior, Settings, Style, Compact, Fix, name inputs, explicit toggle, font controls, export/import (or File), Persona, Focus Mode toggle button
 - `#chat-telemetry-inline-host` — if the user has pinned telemetry inline, it remains
 - `#ctx-pressure-bar` — context pressure indicator
-- `.chat-messages` — the full message thread
+- `.chat-messages` — the full message thread (the primary beneficiary of Focus Mode — more vertical space means more visible messages)
 - `.chat-sidebar` — the context notes sidebar, if open (user controls this independently)
 - `#chat-input-row` — input textarea, suggestions, quick guide, enter toggle, send button
 
 ### What gets hidden
 
-All structural chrome that is irrelevant to active chatting:
+The app-level chrome that is irrelevant to the chatting task:
 
-- `.endpoint-health-strip` — the full top status bar (endpoint mode, URL, status, agent info, latency, badges). Defined in [static/index.html](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/index.html:59).
-- `.top-nav-bar` — the "Llama Monitor" title bar, cockpit metrics, user menu. Defined in [static/index.html](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/index.html:95).
-- `.sidebar-nav` — the entire left navigation sidebar. Defined in [static/index.html](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/index.html:138).
+- `.endpoint-health-strip` — the full top status bar (endpoint mode, URL, status, agent info, latency, badges). Defined in [static/index.html](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/index.html:59). **Hidden.**
+- `.top-nav-bar` — the "Llama Monitor" title bar, cockpit metrics, user menu. Defined in [static/index.html](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/index.html:95). **Hidden.**
+- `.sidebar-nav` — the entire left navigation sidebar (Server, Chat, Logs, Settings). Defined in [static/index.html](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/static/index.html:138). **Hidden.**
 
 ### What the layout becomes
 
-When focus mode is active, `.content-area` should expand to fill the entire viewport width and height — no sidebar margin, no header/strip vertical space. The chat section gets the full display.
+When Focus Mode is active:
+- `.sidebar-nav` collapses to width 0 and `.content-area` expands to fill the full viewport width
+- `.endpoint-health-strip` and `.top-nav-bar` collapse to height 0, giving the chat full vertical space
+- Inside `.content-area`, the session panel (`.chat-sessions-panel`) and `.chat-main-area` remain in their normal flex-row arrangement — the session panel just has more room since it no longer shares the viewport with app nav
+- Net result: the user gets the full screen minus 240px (session panel) dedicated to the message thread and input
 
 ---
 
@@ -911,10 +949,11 @@ Add the exit beacon and pill just before `</body>`:
   ▼
 [chat-focus-mode active]
   - body.chat-focus-mode applied
-  - .endpoint-health-strip hidden (animated)
-  - .top-nav-bar hidden (animated)
-  - .sidebar-nav width: 0 (animated)
-  - .content-area margin-left: 0 (animated)
+  - .endpoint-health-strip hidden (animated, height → 0)
+  - .top-nav-bar hidden (animated, height → 0)
+  - .sidebar-nav collapsed (width → 0, animated)
+  - .content-area expands (margin-left → 0, animated)
+  - .chat-sessions-panel REMAINS VISIBLE (user can still switch chats)
   - width observer pinned to 'comfortable'
   - localStorage persisted
   │
@@ -927,8 +966,10 @@ Add the exit beacon and pill just before `</body>`:
   ▼
 [Normal View restored]
   - body.chat-focus-mode removed
-  - all elements animate back in
-  - width observer resumes
+  - .endpoint-health-strip, .top-nav-bar animate back in
+  - .sidebar-nav restores its prior width (expanded or collapsed)
+  - .content-area margin restores
+  - width observer resumes normal density computation
   - localStorage cleared
 ```
 
@@ -954,11 +995,17 @@ This gives the user a persistent in-header signal that focus mode is active, com
 
 ---
 
-## 16. Focus Mode Interaction with Chat Notes Sidebar
+## 16. Focus Mode Interactions with Other Panels
 
-The context notes sidebar (`.chat-sidebar`) is part of the chat interface and should remain visible in Focus Mode if the user has it open. Focus Mode does not touch `.chat-sidebar`.
+### Session panel (`.chat-sessions-panel`)
 
-However, an open context notes sidebar in focus mode at a narrow viewport may feel cramped. This is acceptable — the user opened both intentionally. No special handling needed. The width observer will still be pinned to `comfortable` and the sidebar width can be adjusted by the user via the existing sidebar resize handle.
+The session panel remains fully visible and interactive in Focus Mode. This is intentional — the user must be able to switch between conversations without exiting Focus Mode. The 240px it occupies is part of the retained chat interface, not chrome.
+
+Post-evolution note: the session panel has its own collapse button (`.csp-collapse-btn`). The user can optionally collapse it from inside Focus Mode for even more space. Focus Mode does not force it open or closed — it simply leaves it in whatever state the user had it.
+
+### Context notes sidebar (`.chat-sidebar`)
+
+The context notes sidebar remains visible if the user has it open. Focus Mode does not touch `.chat-sidebar`. An open context notes sidebar in a narrow viewport may feel tight, but the user opened both intentionally. No special handling needed. The width observer is still pinned to `comfortable` and the sidebar width is user-adjustable via its existing resize handle.
 
 ---
 
@@ -1046,9 +1093,10 @@ This phase can be implemented independently of Phases 1–6. It does not require
 ### Step 2 — CSS
 
 - Add `body.chat-focus-mode` rules to `layout.css`:
-  - hide `.endpoint-health-strip` and `.top-nav-bar` with animated max-height and opacity
+  - collapse `.endpoint-health-strip` and `.top-nav-bar` via max-height + opacity transition
   - collapse `.sidebar-nav` width to 0 with opacity transition
   - expand `.content-area` to margin-left: 0
+  - **do not touch** `.chat-sessions-panel` — it remains visible so the user can switch chats
 - Add exit beacon and pill styles to `layout.css`
 - Add `#chat-focus-mode-btn.active` state to `chat.css`
 - Add `prefers-reduced-motion` overrides
@@ -1094,14 +1142,16 @@ This phase can be implemented independently of Phases 1–6. It does not require
 ### Focus Mode behavior
 
 - entering focus mode hides `.endpoint-health-strip`, `.top-nav-bar`, and `.sidebar-nav` smoothly
-- `.content-area` expands to fill full viewport width/height
+- `.content-area` expands to fill full viewport width
+- `.chat-sessions-panel` remains visible and fully interactive — session switching works inside Focus Mode
+- switching to a different session from the panel does not exit Focus Mode
 - all chat controls remain usable inside focus mode
 - hover over top edge reveals exit pill with animation
 - clicking exit pill exits focus mode
 - keyboard shortcut enters and exits focus mode
 - pressing the shortcut again while focus mode is active exits
 - `#chat-focus-mode-btn` shows active state while focus mode is on
-- switching to a non-chat tab auto-exits focus mode
+- switching to a non-chat tab (Server, Logs, etc.) auto-exits focus mode
 - focus mode state persists across page reload
 - restoring focus mode on load animates correctly (no flash of unstyled content)
 - context notes sidebar remains functional inside focus mode
