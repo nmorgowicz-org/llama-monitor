@@ -159,21 +159,48 @@ window.addEventListener('suggestionSelected', (e) => {
     }
 });
 
-// Handle quick guide submission (active reply guide)
-window.addEventListener('quickGuideSubmitted', (e) => {
+// Handle quick guide submission as an immediate guided follow-up.
+window.addEventListener('quickGuideSubmitted', async (e) => {
     const { instruction } = e.detail;
-    // Store on tab as active guide context
-    import('./features/chat-state.js').then(({ activeChatTab, scheduleChatPersist }) => {
-        const tab = activeChatTab();
-        if (tab) {
-            tab.quick_guide_active = instruction.trim();
-            tab.quick_guide_draft = '';
-            scheduleChatPersist();
-            window.dispatchEvent(new CustomEvent('quickGuideStateChanged', {
-                detail: { tabId: tab.id, guide: tab.quick_guide_active },
-            }));
+    const trimmedInstruction = instruction.trim();
+    const [{ activeChatTab, scheduleChatPersist }, { sendQuickGuideReply }] = await Promise.all([
+        import('./features/chat-state.js'),
+        import('./features/chat-transport.js'),
+    ]);
+
+    const tab = activeChatTab();
+    if (!tab) return;
+
+    tab.quick_guide_active = trimmedInstruction;
+    tab.quick_guide_draft = '';
+    tab._quickGuideInFlight = !!trimmedInstruction;
+    scheduleChatPersist();
+    window.dispatchEvent(new CustomEvent('quickGuideStateChanged', {
+        detail: { tabId: tab.id, guide: tab.quick_guide_active },
+    }));
+
+    if (trimmedInstruction) {
+        const result = await sendQuickGuideReply();
+        if (result?.message) {
+            result.message._quickGuideMeta = {
+                instruction: trimmedInstruction,
+                transientUserPrompt: result.transientUserPrompt ?? null,
+            };
+            tab._quickGuideLastRun = {
+                instruction: trimmedInstruction,
+                targetRole: result.message.role,
+                targetIndex: tab.messages.length - 1,
+                appliedAt: Date.now(),
+            };
         }
-    });
+    }
+
+    tab.quick_guide_active = '';
+    tab._quickGuideInFlight = false;
+    scheduleChatPersist();
+    window.dispatchEvent(new CustomEvent('quickGuideStateChanged', {
+        detail: { tabId: tab.id, guide: '' },
+    }));
 });
 
 // ── Deferred feature initialization ──────────────────────────────────────────

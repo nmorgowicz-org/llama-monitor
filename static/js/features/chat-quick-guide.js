@@ -1,7 +1,7 @@
 // ── Quick Guide (Inline Input) ──────────────────────────────────────────────
 // Collapsible inline input for an active reply guide that persists until changed.
 
-import { activeChatTab, scheduleChatPersist } from './chat-state.js';
+import { activeChatTab, getChatViewBindings, scheduleChatPersist } from './chat-state.js';
 import { showToast } from './toast.js';
 
 let quickGuideState = {
@@ -36,10 +36,11 @@ function updateQuickGuideUI() {
     const wrapper = toggleBtn?.closest('.guided-tool');
     const input = document.getElementById('quick-guide-input');
     const status = document.getElementById('quick-guide-status');
-    const pending = document.getElementById('quick-guide-pending');
+    const restoreBtn = document.getElementById('quick-guide-restore-btn');
     const tab = activeChatTab();
     const draft = tab?.quick_guide_draft || '';
-    const activeGuide = tab?.quick_guide_active || tab?.quick_guide_pending || '';
+    const activeGuide = tab?._quickGuideInFlight ? (tab.quick_guide_active || draft) : '';
+    const lastRevision = tab?._quickGuideLastRun || null;
 
     if (!container || !toggleBtn) return;
 
@@ -60,18 +61,16 @@ function updateQuickGuideUI() {
         wrapper?.classList.remove('is-open');
     }
 
-    toggleBtn.classList.toggle('guided-action-btn-attentive', !!activeGuide);
+    toggleBtn.classList.toggle('guided-action-btn-attentive', !!activeGuide || (!!draft && quickGuideState.expanded));
 
     if (status) {
-        status.textContent = activeGuide ? 'Active' : draft ? 'Draft' : 'Idle';
+        status.textContent = activeGuide ? 'Applying' : draft ? 'Draft' : 'Idle';
         status.hidden = !activeGuide && !quickGuideState.expanded;
     }
 
-    if (pending) {
-        pending.textContent = activeGuide
-            ? `Active reply guide: ${truncate(activeGuide, 96)}`
-            : 'No active reply guide.';
-        pending.classList.toggle('is-active', !!activeGuide);
+    if (restoreBtn) {
+        restoreBtn.disabled = !lastRevision;
+        restoreBtn.hidden = !lastRevision;
     }
 
     updateLastUsedDisplay();
@@ -84,10 +83,12 @@ function truncate(value, maxLength) {
 
 function updateLastUsedDisplay() {
     const lastUsed = document.getElementById('quick-guide-last-used');
+    const tab = activeChatTab();
+    const lastInstruction = tab?._quickGuideLastRun?.instruction || quickGuideState.lastUsedInstruction;
     if (!lastUsed) return;
 
-    if (quickGuideState.lastUsedInstruction) {
-        lastUsed.textContent = `Last applied: ${truncate(quickGuideState.lastUsedInstruction, 60)}`;
+    if (lastInstruction) {
+        lastUsed.textContent = `Last applied: ${truncate(lastInstruction, 60)}`;
         lastUsed.style.display = 'block';
         return;
     }
@@ -139,13 +140,50 @@ function submitQuickGuide() {
     showToast(instruction ? 'Reply guide applied' : 'Reply guide cleared', 'success');
 }
 
+function restorePreviousInstructionForEdit() {
+    const tab = activeChatTab();
+    const input = document.getElementById('quick-guide-input');
+    const lastRun = tab?._quickGuideLastRun;
+    if (!tab || !lastRun?.instruction) return;
+
+    const targetIndex = typeof lastRun.targetIndex === 'number' ? lastRun.targetIndex : -1;
+    const targetMsg = targetIndex >= 0 ? tab.messages[targetIndex] : null;
+    if (targetMsg && targetMsg.role === (lastRun.targetRole || 'assistant')) {
+        tab.messages.splice(targetIndex, 1);
+    } else {
+        for (let i = tab.messages.length - 1; i >= 0; i -= 1) {
+            if (tab.messages[i]?.role === (lastRun.targetRole || 'assistant')) {
+                tab.messages.splice(i, 1);
+                break;
+            }
+        }
+    }
+
+    tab.quick_guide_draft = lastRun.instruction;
+    tab.quick_guide_active = '';
+    tab.updated_at = Date.now();
+    quickGuideState.expanded = true;
+    getChatViewBindings().renderChatMessages?.();
+    scheduleChatPersist();
+    updateQuickGuideUI();
+    if (input) {
+        input.value = lastRun.instruction;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+    }
+
+    showToast('Previous guided reply removed. Edit and apply again.', 'info');
+}
+
 // ── Submit Button ────────────────────────────────────────────────────────────
 
 function setupSubmitButton() {
     const submitBtn = document.getElementById('quick-guide-submit-btn');
+    const restoreBtn = document.getElementById('quick-guide-restore-btn');
     if (!submitBtn) return;
 
     submitBtn.addEventListener('click', submitQuickGuide);
+    restoreBtn?.addEventListener('click', restorePreviousInstructionForEdit);
 }
 
 // ── Last Used Display ───────────────────────────────────────────────────────

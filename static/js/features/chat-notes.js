@@ -6,6 +6,7 @@ import { escapeHtml } from '../core/format.js';
 import { showToast } from './toast.js';
 
 const SIDEBAR_STORAGE_KEY = 'llama_monitor_sidebar_width';
+const SIDEBAR_INTRO_HIDDEN_KEY = 'llama_monitor_context_notes_intro_hidden';
 const DEFAULT_WIDTH = 280;
 const MIN_WIDTH = 240;
 const MAX_WIDTH = 600;
@@ -25,6 +26,28 @@ let sidebarState = {
     composerSection: null,
     composerDrafts: {},
 };
+
+function setSvgIcon(button, paths) {
+    if (!button) return;
+    const svgNs = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNs, 'svg');
+    svg.setAttribute('width', '12');
+    svg.setAttribute('height', '12');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2.2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+
+    paths.forEach((d) => {
+        const path = document.createElementNS(svgNs, 'path');
+        path.setAttribute('d', d);
+        svg.appendChild(path);
+    });
+
+    button.replaceChildren(svg);
+}
 
 // ── Sidebar Toggle ────────────────────────────────────────────────────────────
 
@@ -53,6 +76,9 @@ function updateSidebarUI() {
     const toggleBtn = document.getElementById('context-sidebar-toggle');
     const messages = document.getElementById('chat-messages');
     const countBadge = document.getElementById('context-sidebar-count');
+    const collapseBtn = document.getElementById('context-sidebar-collapse');
+    const subtitle = document.getElementById('chat-sidebar-subtitle');
+    const introToggle = document.getElementById('chat-sidebar-intro-toggle');
     const tab = activeChatTab();
 
     if (!sidebar || !contextBar || !toggleBtn || !messages || !tab) return;
@@ -63,6 +89,8 @@ function updateSidebarUI() {
     messages.style.setProperty('--chat-sidebar-current-width', sidebarState.expanded ? `${width}px` : '36px');
 
     const notesCount = (tab.context_notes || []).filter(note => note.content?.trim()).length;
+    const introHidden = localStorage.getItem(SIDEBAR_INTRO_HIDDEN_KEY) === 'true';
+
     if (countBadge) {
         if (notesCount > 0) {
             countBadge.hidden = false;
@@ -70,6 +98,20 @@ function updateSidebarUI() {
         } else {
             countBadge.hidden = true;
         }
+    }
+    if (subtitle) {
+        subtitle.hidden = introHidden;
+    }
+    if (introToggle) {
+        introToggle.classList.toggle('is-hidden-state', introHidden);
+        introToggle.setAttribute('title', introHidden ? 'Show context notes description' : 'Hide context notes description');
+        introToggle.setAttribute('aria-label', introHidden ? 'Show context notes description' : 'Hide context notes description');
+        setSvgIcon(
+            introToggle,
+            introHidden
+                ? ['M3 12s3.5-7 9-7 9 7 9 7-3.5 7-9 7-9-7-9-7z', 'M12 9a3 3 0 100 6 3 3 0 000-6z']
+                : ['M18 6L6 18', 'M6 6l12 12']
+        );
     }
 
     // Update expanded state
@@ -79,12 +121,14 @@ function updateSidebarUI() {
         toggleBtn.classList.add('active');
         toggleBtn.setAttribute('aria-expanded', 'true');
         toggleBtn.setAttribute('aria-label', 'Close context notes');
+        collapseBtn?.classList.add('visible');
     } else {
         sidebar.classList.remove('sidebar-expanded');
         contextBar.classList.remove('expanded');
         toggleBtn.classList.remove('active');
         toggleBtn.setAttribute('aria-expanded', 'false');
         toggleBtn.setAttribute('aria-label', 'Open context notes');
+        collapseBtn?.classList.remove('visible');
     }
 
     renderNotesList();
@@ -626,11 +670,24 @@ function addCustomSection(sectionName) {
 // ── Sidebar Close Handler ────────────────────────────────────────────────────
 
 function setupSidebarCloseHandler() {
-    const closeBtn = document.getElementById('chat-sidebar-close');
-    if (!closeBtn) return;
+    const collapseBtn = document.getElementById('context-sidebar-collapse');
+    if (collapseBtn) {
+        collapseBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            sidebarState.expanded = false;
+            updateSidebarUI();
+        });
+    }
+}
 
-    closeBtn.addEventListener('click', () => {
-        sidebarState.expanded = false;
+function setupSidebarIntroToggle() {
+    const introToggle = document.getElementById('chat-sidebar-intro-toggle');
+    if (!introToggle) return;
+
+    introToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const introHidden = localStorage.getItem(SIDEBAR_INTRO_HIDDEN_KEY) === 'true';
+        localStorage.setItem(SIDEBAR_INTRO_HIDDEN_KEY, introHidden ? 'false' : 'true');
         updateSidebarUI();
     });
 }
@@ -641,6 +698,7 @@ export function initContextSidebar() {
     setupResizeHandle();
     setupAddSectionHandler();
     setupSidebarCloseHandler();
+    setupSidebarIntroToggle();
     updateSidebarUI();
 
     // Listen for tab switches

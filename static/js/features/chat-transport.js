@@ -29,7 +29,129 @@ import { showToast, showToastWithActions } from './toast.js';
 
 // ── Summarization ──────────────────────────────────────────────────────────────
 
-export async function fetchSummary(messages) {
+function stripLegacyCompactionPrefix(content) {
+    return (content || '').replace(/^\[Context compacted[^\]]*\]\s*/i, '').trim();
+}
+
+function formatContextNotesForSummary(contextNotes) {
+    const notes = (contextNotes || []).filter(note => note?.content?.trim());
+    if (!notes.length) return '';
+
+    const notesBySection = {};
+    for (const note of notes) {
+        const section = (note.section || 'General').trim();
+        if (!notesBySection[section]) notesBySection[section] = [];
+        notesBySection[section].push(note.content.trim());
+    }
+
+    return Object.entries(notesBySection)
+        .map(([section, contents]) => `### ${section}\n- ${contents.join('\n- ')}`)
+        .join('\n\n');
+}
+
+function buildSummaryPrompt({
+    transcript,
+    previousMemory,
+    recentTail,
+    domain,
+    systemPrompt,
+    contextNotes,
+}) {
+    const domainInstructions = {
+        coding: `Prioritize project goals, files, functions, APIs, commands, error messages, fixes attempted, architectural decisions, constraints, and unresolved implementation tasks. Preserve exact filenames, endpoint names, config keys, and technical decisions whenever present.`,
+        creative: `Prioritize characters, relationships, setting, tone, plot beats, promises/foreshadowing, world rules, explicit boundaries, emotional state, and unresolved scene momentum. Preserve who knows what, where the scene ended, and what escalation is pending.`,
+        general: `Prioritize user goals, facts, commitments, constraints, decisions, unresolved questions, and the momentum of the latest exchange.`,
+    };
+
+    const requiredSections = domain === 'coding'
+        ? [
+            '## Objectives & Scope',
+            '## Persistent Facts',
+            '## Technical State',
+            '## Files & Artifacts',
+            '## Decisions & Constraints',
+            '## Open Work',
+            '## Recent Momentum',
+        ]
+        : domain === 'creative'
+            ? [
+                '## Participants & Dynamics',
+                '## World State',
+                '## Plot & Scene Memory',
+                '## Boundaries & Constraints',
+                '## Open Threads',
+                '## Recent Momentum',
+            ]
+            : [
+                '## Persistent Facts',
+                '## Decisions & Constraints',
+                '## Open Threads',
+                '## Recent Momentum',
+            ];
+
+    const previousMemoryBlock = previousMemory?.trim()
+        ? `EXISTING ROLLING MEMORY\n${previousMemory.trim()}`
+        : 'EXISTING ROLLING MEMORY\n(none)';
+    const systemPromptBlock = systemPrompt?.trim()
+        ? `SYSTEM / PERSONA PROMPT\n${systemPrompt.trim()}`
+        : 'SYSTEM / PERSONA PROMPT\n(none)';
+    const contextNotesBlock = contextNotes?.trim()
+        ? `PERSISTENT CONTEXT NOTES\n${contextNotes.trim()}`
+        : 'PERSISTENT CONTEXT NOTES\n(none)';
+    const recentTailBlock = recentTail?.trim()
+        ? `RECENT KEPT TAIL\n${recentTail.trim()}`
+        : 'RECENT KEPT TAIL\n(none)';
+
+    return `Refresh the rolling conversation memory for an ongoing chat.
+
+Domain: ${domain}
+
+Goal:
+- Merge the existing rolling memory with the newly compacted transcript.
+- Preserve facts that must remain true later.
+- Preserve unresolved threads and the momentum needed to continue naturally.
+- Avoid fluff, repetition, scene-by-scene retelling, and generic summaries.
+- Keep the output dense, specific, and directly reusable as memory.
+
+Special instructions:
+${domainInstructions[domain] || domainInstructions.general}
+
+Output rules:
+- Output only markdown.
+- Use the exact section headings below, in order.
+- If a section has nothing useful, write a short "(none)" line under it.
+- Be concrete. Prefer names, files, decisions, promises, and unresolved actions over vague prose.
+- Under "Recent Momentum", preserve the handoff needed for the next response.
+
+Required sections:
+${requiredSections.join('\n')}
+
+${systemPromptBlock}
+
+${contextNotesBlock}
+
+${previousMemoryBlock}
+
+${recentTailBlock}
+
+NEWLY COMPACTED TRANSCRIPT
+${transcript}`;
+}
+
+function buildRoleBoundaryInstruction(tab) {
+    const assistantName = (tab?.ai_name || '{{char}}').trim();
+    const userName = (tab?.user_name || '{{user}}').trim();
+    return `### ROLE BOUNDARY ###\n\nYou are ${assistantName}. By default, write only ${assistantName}'s reply. Do not speak as, write dialogue for, narrate actions for, or decide choices/thoughts for ${userName} unless the latest user instruction explicitly asks you to control or write both sides.`;
+}
+
+export async function fetchSummary(messages, options = {}) {
+    const {
+        previousMemory = '',
+        recentTailMessages = [],
+        domain = 'general',
+        systemPrompt = '',
+        contextNotes = [],
+    } = options;
     // Derive transcript budget from the model's context window so the summarization
     // request never overflows (small models) and doesn't under-use capacity (large models).
     // 65% of context for the transcript; 35% reserved for system prompt + summary output.
@@ -62,14 +184,28 @@ export async function fetchSummary(messages) {
             rawTranscript.slice(-tailChars);
     }
 
+    const recentTail = recentTailMessages
+        .filter(m => !m.compaction_marker && m.role !== 'system')
+        .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+        .join('\n\n');
+    const formattedContextNotes = formatContextNotesForSummary(contextNotes);
+    const prompt = buildSummaryPrompt({
+        transcript,
+        previousMemory: stripLegacyCompactionPrefix(previousMemory),
+        recentTail,
+        domain,
+        systemPrompt,
+        contextNotes: formattedContextNotes,
+    });
+
     const summaryMessages = [
         {
             role: 'system',
-            content: 'You are a precise context-preservation assistant. Your job is to write a dense, structured summary of a conversation that will be injected as memory when the conversation resumes. Be specific — names, numbers, decisions, and unresolved threads matter. Output only the summary with no preamble or commentary.',
+            content: 'You are a precise conversation-memory engine. Rewrite chat history into dense rolling memory for future model context. Output final markdown only. Do not include reasoning, notes about the task, or preamble.',
         },
         {
             role: 'user',
-            content: `${transcript}\n\n---\n\nWrite a comprehensive memory summary of the conversation above. This summary will replace the conversation history, so it must contain everything needed to continue naturally.\n\nStructure your summary with these sections (omit any that don't apply):\n\n**Participants & Personas**\n- Names, roles, and established character traits (especially important for roleplay or character conversations)\n- Relationship dynamics between participants\n- Any user preferences, communication style, or stated constraints\n\n**Established Facts & Context**\n- Key facts, figures, technical details, or domain knowledge introduced\n- Decisions or conclusions that were agreed upon\n- Any world-building, setting, or scenario details (for creative/roleplay contexts)\n\n**Conversation Arc**\n- What was being discussed, created, or built\n- Major milestones or turning points in the conversation\n- How the most recent exchange ended (tone, content, where things stand)\n\n**Open Threads**\n- Unanswered questions or unresolved topics\n- In-progress tasks or ongoing narrative threads\n- Next steps or things the user said they'd do\n\nBe thorough. Err on the side of too much detail rather than too little — this summary is the only memory the assistant will have.`,
+            content: prompt,
         },
     ];
 
@@ -77,7 +213,13 @@ export async function fetchSummary(messages) {
         const resp = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: summaryMessages, stream: true }),
+            body: JSON.stringify({
+                messages: summaryMessages,
+                stream: true,
+                temperature: 0.2,
+                thinking_budget_tokens: 0,
+                chat_template_kwargs: { enable_thinking: false },
+            }),
         });
 
         if (!resp.ok) return null;
@@ -189,7 +331,52 @@ export async function sendChat() {
     await _doSendChat(tab);
 }
 
-export async function _doSendChat(tab) {
+export async function sendQuickGuideReply() {
+    if (chat.busy || chat.compactionInProgress) return;
+    const tab = activeChatTab();
+    if (!tab) return;
+    if (!tab.messages?.length) {
+        showToast('Quick Guide needs existing chat context before it can respond', 'warning');
+        return;
+    }
+
+    const lastMsg = tab.messages.at(-1);
+    const transientUserPrompt = lastMsg?.role === 'user'
+        ? null
+        : 'Apply the active quick guide to the existing conversation and write the next assistant reply now. Continue naturally from the latest exchange. Write only the assistant reply. Do not write dialogue, actions, thoughts, or decisions for the user unless explicitly instructed. Do not mention the quick guide unless directly relevant.';
+
+    const result = await _doSendChat(tab, { transientUserPrompt });
+    if (result) result.transientUserPrompt = transientUserPrompt;
+    return result;
+}
+
+export async function regenerateQuickGuideReply(tab, msgIdx, quickGuideMeta, variants) {
+    if (chat.busy || chat.compactionInProgress) return null;
+    if (!tab || !quickGuideMeta?.instruction || typeof msgIdx !== 'number' || msgIdx < 0) return null;
+
+    tab.messages = tab.messages.slice(0, msgIdx);
+    tab.updated_at = Date.now();
+    tab._pendingVariants = variants?.length ? [...variants] : null;
+    renderChatMessages();
+
+    const previousGuide = tab.quick_guide_active || '';
+    tab.quick_guide_active = quickGuideMeta.instruction;
+    scheduleChatPersist();
+
+    try {
+        const result = await _doSendChat(tab, {
+            transientUserPrompt: quickGuideMeta.transientUserPrompt ?? null,
+        });
+        if (result) result.transientUserPrompt = quickGuideMeta.transientUserPrompt ?? null;
+        return result;
+    } finally {
+        tab.quick_guide_active = previousGuide;
+        scheduleChatPersist();
+    }
+}
+
+export async function _doSendChat(tab, options = {}) {
+    const { transientUserPrompt = null } = options;
     // Pre-send overflow guard: estimate token usage against current model capacity.
     // Uses the same formula as ctx%: cumulative output tokens + last input tokens.
     const capacity = lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
@@ -224,12 +411,13 @@ export async function _doSendChat(tab) {
                     },
                 }]
             );
-            return;
+            return null;
         }
     }
 
     const params = tab.model_params;
     const messages = [];
+    const systemParts = [];
     let systemPrompt = tab.system_prompt ? substituteNames(tab.system_prompt, tab.ai_name, tab.user_name) : '';
     if (tab.explicit_level > 0) {
         const template = typeof resolveActiveTemplate === 'function'
@@ -252,10 +440,11 @@ export async function _doSendChat(tab) {
         }
     }
     if (systemPrompt) {
-        messages.push({ role: 'system', content: systemPrompt });
+        systemParts.push(systemPrompt);
     }
 
-    // Inject context notes as separate system messages (SillyTavern-style)
+    // Fold all guidance into a single leading system message. Some llama.cpp
+    // chat templates reject any non-leading or repeated system messages.
     const contextNotes = (tab.context_notes || []).filter(note => note.content?.trim());
     if (contextNotes.length > 0) {
         const notesBySection = {};
@@ -268,23 +457,41 @@ export async function _doSendChat(tab) {
 
         Object.entries(notesBySection).forEach(([section, contents]) => {
             const sectionContent = contents.join('\n\n');
-            messages.push({
-                role: 'system',
-                content: `### ${section.toUpperCase()} NOTES ###\n\n${sectionContent}`,
-            });
+            systemParts.push(`### ${section.toUpperCase()} NOTES ###\n\n${sectionContent}`);
         });
     }
 
     // Inject active quick guide as persistent reply context until changed or cleared.
     const quickGuideInstruction = tab.quick_guide_active || tab.quick_guide_pending || tab._quickGuideInstruction;
     if (quickGuideInstruction) {
-        messages.push({
-            role: 'system',
-            content: `### QUICK GUIDE ###\n\n${quickGuideInstruction}`,
-        });
+        systemParts.push(`### QUICK GUIDE ###\n\n${quickGuideInstruction}`);
     }
 
-    messages.push(...tab.messages.map(m => ({ role: m.role, content: m.content })));
+    systemParts.push(buildRoleBoundaryInstruction(tab));
+
+    const compactionMarkers = (tab.messages || []).filter(m => m.compaction_marker && m.content?.trim());
+    if (compactionMarkers.length > 0) {
+        const compactedMemory = compactionMarkers
+            .map((marker, index) => `Memory ${index + 1}:\n${marker.content.trim()}`)
+            .join('\n\n');
+        systemParts.push(`### COMPACTED MEMORY ###\n\n${compactedMemory}`);
+    }
+
+    if (systemParts.length > 0) {
+        messages.push({ role: 'system', content: systemParts.join('\n\n') });
+    }
+
+    // Strip transient/legacy system entries from chat history before sending.
+    // The active system prompt, context notes, quick guide, and compaction
+    // summaries are injected into the single leading system message above.
+    const persistentHistory = (tab.messages || []).filter(m => m.role !== 'system' && !m.compaction_marker);
+    messages.push(...persistentHistory.map(m => ({ role: m.role, content: m.content })));
+    if (transientUserPrompt) {
+        messages.push({
+            role: 'user',
+            content: transientUserPrompt,
+        });
+    }
 
     chat.busy = true;
     setChatBusyUI(true);
@@ -481,15 +688,16 @@ export async function _doSendChat(tab) {
         }
         renderChatMessages();
         if (typeof updateChatTabBadge === 'function') updateChatTabBadge();
-        return;
+        return null;
     }
 
+    let finalMessage = null;
     if (msgContent) {
         const inp = tokenUsage ? (tokenUsage.prompt_tokens ?? 0) : 0;
         const out = tokenUsage ? (tokenUsage.completion_tokens ?? 0) : 0;
         tab.totalInputTokens = (tab.totalInputTokens || 0) + inp;
         tab.totalOutputTokens = (tab.totalOutputTokens || 0) + out;
-        tab.messages.push({
+        finalMessage = {
             role: 'assistant',
             content: msgContent,
             timestamp_ms: Date.now(),
@@ -497,7 +705,8 @@ export async function _doSendChat(tab) {
             output_tokens: out,
             cumulativeInputTokens: tab.totalInputTokens,
             cumulativeOutputTokens: tab.totalOutputTokens,
-        });
+        };
+        tab.messages.push(finalMessage);
         tab.updated_at = Date.now();
         scheduleChatPersist();
     } else if (!tab.messages.at(-1)?.content) {
@@ -518,6 +727,7 @@ export async function _doSendChat(tab) {
     // Trigger auto-compact if the tab has it enabled and the threshold was hit.
     // Runs after busy is cleared so compaction can proceed without being blocked.
     getChatViewBindings().checkAutoCompact?.(tab);
+    return finalMessage ? { message: finalMessage } : null;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -579,7 +789,7 @@ export function showConnectionLostModal() {
 
 export function initChatTransport() {
     // Wire up transport getter for chat-state and chat-render (avoids circular import)
-    const transport = () => ({ sendChat, sendChatResend, sendSuggestedPrompt, stopChat });
+    const transport = () => ({ sendChat, sendChatResend, sendSuggestedPrompt, sendQuickGuideReply, regenerateQuickGuideReply, stopChat });
     setTransportGetter(transport);
     setChatTransportGetter(transport);
     setChatBusyUI(chat.busy);

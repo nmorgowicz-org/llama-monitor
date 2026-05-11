@@ -93,8 +93,8 @@ function normalizeChatTab(tab) {
         context_custom_sections: tab.context_custom_sections ?? [],
         sidebar_width: tab.sidebar_width ?? 280,
         quick_guide_draft: tab.quick_guide_draft ?? '',
-        quick_guide_active: tab.quick_guide_active ?? tab.quick_guide_pending ?? tab._quickGuideInstruction ?? '',
-        quick_guide_pending: tab.quick_guide_pending ?? tab._quickGuideInstruction ?? '',
+        quick_guide_active: '',
+        quick_guide_pending: '',
         pinned: tab.pinned ?? false,
     };
 }

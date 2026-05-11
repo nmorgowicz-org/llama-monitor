@@ -7,6 +7,7 @@ import {
     activeChatTab,
     registerChatViewBindings,
     scheduleChatPersist,
+    substituteNames,
     updateChatName,
 } from './chat-state.js';
 import { saveSettings } from './settings.js';
@@ -212,8 +213,50 @@ function calcKeepTailForCapacity(conversational, capacity) {
         tokensUsed += t;
         keep++;
     }
-    // Must keep at least 1 and drop at least 1
-    return Math.max(1, Math.min(keep, conversational.length - 1));
+    const minRecentTurns = Math.min(conversational.length - 1, 6);
+    // Must keep enough recent turns for continuity and still drop at least 1.
+    return Math.max(1, Math.min(Math.max(keep, minRecentTurns), conversational.length - 1));
+}
+
+function buildTranscript(messages) {
+    return messages
+        .filter(m => !m.compaction_marker && m.role !== 'system')
+        .map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+        .join('\n\n');
+}
+
+function extractRollingMemory(msg) {
+    if (!msg?.content) return '';
+    return msg.content.replace(/^\[Context compacted[^\]]*\]\s*/i, '').trim();
+}
+
+function inferCompactionDomain(tab, dropped, kept) {
+    const haystack = [
+        tab?.system_prompt || '',
+        ...(tab?.context_notes || []).map(note => `${note.section} ${note.content}`),
+        ...dropped.map(m => m.content || ''),
+        ...kept.map(m => m.content || ''),
+    ].join('\n').toLowerCase();
+
+    const codingSignals = [
+        /```/,
+        /\b(src\/|static\/|tests\/|cargo\.toml|package\.json|dockerfile)\b/,
+        /\bfunction\b|\bclass\b|\bconst\b|\blet\b|\bvar\b|\basync\b/,
+        /\bapi\b|\bendpoint\b|\bjson\b|\bsql\b|\bregex\b/,
+        /\bbug\b|\berror\b|\btrace\b|\bexception\b|\bcompile\b|\bbuild\b|\blint\b|\btest\b/,
+        /\bfile\b|\bpath\b|\bmodule\b|\bcomponent\b|\brefactor\b|\bcommit\b/,
+    ];
+    if (codingSignals.some(rx => rx.test(haystack))) return 'coding';
+
+    const creativeSignals = [
+        /\bscene\b|\bchapter\b|\bplot\b|\bstory\b|\bcharacter\b|\bdialogue\b|\bsetting\b/,
+        /\bnoir\b|\bromance\b|\bhorror\b|\bthriller\b|\bfantasy\b|\bsci[- ]?fi\b/,
+        /\broleplay\b|\brp\b|\bworld\b|\btone\b|\batmosphere\b|\bemotion\b/,
+        /\bkiss\b|\bdesire\b|\bexplicit\b|\berotic\b/,
+    ];
+    if (creativeSignals.some(rx => rx.test(haystack))) return 'creative';
+
+    return 'general';
 }
 
 export async function compactChatTab(tab, keepTail = null, summarize = true) {
@@ -261,13 +304,29 @@ export async function compactChatTab(tab, keepTail = null, summarize = true) {
 
     let tombstoneContent;
     let isSummarized = false;
+    let memoryVersion = 1;
+    let memoryDomain = 'general';
+    let summaryKind = summarize ? 'snapshot-summary' : 'trim-only';
+    const existingMemory = tombstones
+        .map(extractRollingMemory)
+        .filter(Boolean)
+        .join('\n\n');
+    const totalPreviouslyCompacted = tombstones.reduce((sum, marker) => sum + (marker.dropped_count || 0), 0);
 
     if (summarize) {
-        const summary = await fetchSummary(dropped);
+        memoryDomain = inferCompactionDomain(tab, dropped, kept);
+        const summary = await fetchSummary(dropped, {
+            previousMemory: existingMemory,
+            recentTailMessages: kept.slice(-8),
+            domain: memoryDomain,
+            systemPrompt: substituteNames(tab.system_prompt || '', tab.ai_name, tab.user_name),
+            contextNotes: tab.context_notes || [],
+        });
         if (summary) {
-            const ctxNote = tab.lastCtxPct > 0 ? ` · was ${tab.lastCtxPct}% ctx` : '';
-            tombstoneContent = `[Context compacted — ${dropped.length} messages summarized${ctxNote}]\n\n${summary}`;
+            tombstoneContent = summary.trim();
             isSummarized = true;
+            memoryVersion = 2;
+            summaryKind = 'rolling-memory';
         } else {
             tombstoneContent = `[Context compacted — server unavailable for summarization; ${dropped.length} messages dropped]`;
         }
@@ -286,22 +345,23 @@ export async function compactChatTab(tab, keepTail = null, summarize = true) {
         dropped_preview: dropped.slice(0, 8).map(m => ({ role: m.role, snippet: m.content.slice(0, 80) })),
         tokens_freed_estimate: dropped.reduce((sum, m) => sum + Math.round((m.input_tokens || 0) + (m.output_tokens || 0)), 0),
         ctx_pct_before: tab.lastCtxPct || 0,
+        memory_version: memoryVersion,
+        memory_domain: memoryDomain,
+        summary_kind: summaryKind,
+        compacted_at: Date.now(),
+        compacted_message_count_total: totalPreviouslyCompacted + dropped.length,
+        recent_tail_kept: kept.length,
     };
 
     if (placeholderEl) placeholderEl.remove();
 
     tab.messages = [
         ...(systemMsg ? [systemMsg] : []),
-        ...tombstones,
         tombstone,
         ...kept,
     ];
     const finalTombstones = tab.messages.filter(m => m.compaction_marker);
     console.log('[COMPACT] done — final:', tab.messages.length, 'tombstones:', finalTombstones.length);
-    if (finalTombstones.length !== tombstones.length + 1) {
-        console.warn('[COMPACT] MISMATCH — expected', tombstones.length + 1, 'got', finalTombstones.length);
-        console.warn('[COMPACT] kept markers:', kept.filter(m => m.compaction_marker).length);
-    }
     tab.updated_at = Date.now();
     scheduleChatPersist();
     renderChatMessages();
@@ -590,7 +650,11 @@ function syncCompactSettingsUI(tab) {
     const btn = document.getElementById('btn-compact');
     if (btn && tab) {
         const conversational = tab.messages.filter(m => m.role !== 'system' && !m.compaction_marker);
-        const willDrop = Math.max(0, conversational.length - 15);
+        const capacity = lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
+        const resolvedKeepTail = capacity > 0
+            ? calcKeepTailForCapacity(conversational, capacity)
+            : 15;
+        const willDrop = Math.max(0, conversational.length - resolvedKeepTail);
         btn.title = willDrop > 0
             ? `Compact context — will remove ${willDrop} oldest messages`
             : 'Compact context — nothing to remove yet';
@@ -1155,4 +1219,3 @@ export function setPersonaMenuActive(personaName) {
         nameEl.textContent = personaName;
     }
 }
-

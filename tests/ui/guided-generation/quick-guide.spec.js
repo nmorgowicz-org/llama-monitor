@@ -1,7 +1,7 @@
 // ── Quick Guide Tests ────────────────────────────────────────────────────────
 
 import { test, expect } from '@playwright/test';
-import { switchToChat, enableGuidedGenFeatures } from './fixtures.js';
+import { switchToChat, enableGuidedGenFeatures, seedChatMessages } from './fixtures.js';
 
 test.describe('Quick Guide', () => {
   test.beforeEach(async ({ page }) => {
@@ -31,6 +31,10 @@ test.describe('Quick Guide', () => {
   });
 
   test('submit instruction with Enter', async ({ page }) => {
+    await seedChatMessages(page, [
+      { role: 'user', content: 'Describe the abandoned station platform.' },
+      { role: 'assistant', content: 'Rain ghosted across the cracked tiles as the platform lights buzzed in uneven intervals.' },
+    ]);
     await page.locator('#quick-guide-toggle').click();
     await page.waitForSelector('#quick-guide-input', { state: 'visible' });
 
@@ -42,9 +46,16 @@ test.describe('Quick Guide', () => {
 
     // Input should be cleared
     await expect(page.locator('#quick-guide-input')).toHaveValue('');
+
+    await expect(page.locator('.chat-error')).toHaveCount(0);
+    await expect.poll(async () => await page.locator('.chat-message-assistant').count()).toBeGreaterThan(1);
   });
 
   test('submit instruction with button', async ({ page }) => {
+    await seedChatMessages(page, [
+      { role: 'user', content: 'Write a tense hallway confrontation.' },
+      { role: 'assistant', content: 'The hallway hummed with bad fluorescent light while neither of them stepped aside.' },
+    ]);
     await page.locator('#quick-guide-toggle').click();
     await page.waitForSelector('#quick-guide-input', { state: 'visible' });
 
@@ -53,6 +64,7 @@ test.describe('Quick Guide', () => {
 
     // Should collapse
     await expect(page.locator('#quick-guide-container')).not.toHaveClass(/quick-guide-expanded/);
+    await expect(page.locator('.chat-error')).toHaveCount(0);
   });
 
   test('last used instruction displayed', async ({ page }) => {
@@ -84,7 +96,7 @@ test.describe('Quick Guide', () => {
     // Toggle again to inspect cleared state
     await page.locator('#quick-guide-toggle').click();
     await expect(page.locator('#quick-guide-input')).toHaveValue('');
-    await expect(page.locator('#quick-guide-pending')).toContainText('No active reply guide');
+    await expect(page.locator('#quick-guide-status')).toContainText('Idle');
   });
 
   test('Escape closes without submit', async ({ page }) => {
@@ -109,18 +121,4 @@ test.describe('Quick Guide', () => {
     await expect(page.locator('#quick-guide-container')).not.toHaveClass(/quick-guide-expanded/);
   });
 
-  test('empty instruction clears active guide', async ({ page }) => {
-    await page.locator('#quick-guide-toggle').click();
-    await page.waitForSelector('#quick-guide-input', { state: 'visible' });
-
-    await page.locator('#quick-guide-input').fill('Keep it terse');
-    await page.locator('#quick-guide-submit-btn').click();
-
-    await page.locator('#quick-guide-toggle').click();
-    await page.locator('#quick-guide-input').fill('');
-    await page.locator('#quick-guide-submit-btn').click();
-
-    await page.locator('#quick-guide-toggle').click();
-    await expect(page.locator('#quick-guide-pending')).toContainText('No active reply guide');
-  });
 });

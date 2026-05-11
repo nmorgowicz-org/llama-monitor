@@ -459,14 +459,22 @@ function buildMessageElement(msg, idx, allMessages) {
         wrapper.dataset.expanded = 'false';
 
         const isSummarized = !!msg.summarized;
+        const isRollingMemory = (msg.memory_version || 0) >= 2 || msg.summary_kind === 'rolling-memory';
         const droppedCount = msg.dropped_count || 0;
         const ctxBefore = msg.ctx_pct_before || 0;
+        const totalCompacted = msg.compacted_message_count_total || droppedCount;
+        const memoryDomain = msg.memory_domain || '';
 
-        let statsHtml = `${droppedCount} messages removed`;
+        let statsHtml = isRollingMemory
+            ? `${droppedCount} compacted now · ${totalCompacted} total`
+            : `${droppedCount} messages removed`;
+        if (memoryDomain) statsHtml += ` · ${escapeHtml(memoryDomain)}`;
         if (ctxBefore > 0) statsHtml += ` · was ${ctxBefore}% ctx`;
 
-        const labelText = isSummarized ? 'Context summarized' : 'Context trimmed';
-        const iconPath = isSummarized
+        const labelText = isRollingMemory ? 'Conversation memory' : isSummarized ? 'Context summarized' : 'Context trimmed';
+        const iconPath = isRollingMemory
+            ? '<path d="M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z"/><path d="M9 8h6M9 12h6M9 16h4"/>'
+            : isSummarized
             ? '<path d="M9 12h6M9 16h6M9 8h6M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/>'
             : '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>';
 
@@ -848,6 +856,17 @@ function navigateVariant(btn, direction) {
         if (chat.busy) return;
 
         const newVariants = variants.length > 0 ? [...variants] : [msg.content];
+
+        if (msg._quickGuideMeta && tab.messages[msgIdx - 1]?.role === 'assistant') {
+            scheduleChatPersist();
+            getTransport()?.regenerateQuickGuideReply?.(tab, msgIdx, msg._quickGuideMeta, newVariants)
+                ?.then((result) => {
+                    if (result?.message) {
+                        result.message._quickGuideMeta = { ...msg._quickGuideMeta };
+                    }
+                });
+            return;
+        }
 
         // Find the user message immediately before this assistant message
         let userMsgIdx = -1;

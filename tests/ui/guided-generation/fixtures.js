@@ -44,7 +44,10 @@ export async function enableGuidedGenFeatures(page, features = {}) {
 
 export async function seedChatMessages(page, messages) {
   await page.evaluate((msgs) => {
-    return import('/js/features/chat-state.js').then(({ activeChatTab, renderChatMessages }) => {
+    return Promise.all([
+      import('/js/features/chat-state.js'),
+      import('/js/features/chat-render.js'),
+    ]).then(([{ activeChatTab }, { renderChatMessages }]) => {
       const tab = activeChatTab();
       tab.messages = msgs;
       renderChatMessages();

@@ -357,6 +357,17 @@ async function waitForChatResponse(page, timeoutMs = 180000) {
     }, { timeout: timeoutMs });
 }
 
+async function waitForChatSettledOrError(page, timeoutMs = 180000) {
+    await page.waitForFunction(() => {
+        const streaming = document.querySelector('#chat-messages .chat-message-streaming');
+        if (streaming) return false;
+        const error = document.querySelector('#chat-messages .chat-error');
+        if (error) return true;
+        const assistantMessages = Array.from(document.querySelectorAll('#chat-messages .chat-message-assistant'));
+        return assistantMessages.length > 1;
+    }, { timeout: timeoutMs });
+}
+
 async function waitForSuggestionsSettled(page, timeoutMs = 60000) {
     await page.waitForFunction(() => {
         const dropdown = document.getElementById('suggestions-dropdown');
@@ -536,6 +547,22 @@ async function describePopover(page, toggleSelector, panelSelector) {
     }, { toggleSelector, panelSelector });
 }
 
+async function describeQuickGuideFlow(page) {
+    return page.evaluate(() => {
+        const errors = Array.from(document.querySelectorAll('#chat-messages .chat-error')).map(el => el.textContent?.trim()).filter(Boolean);
+        const assistantMessages = Array.from(document.querySelectorAll('#chat-messages .chat-message-assistant'));
+        const lastAssistant = assistantMessages.at(-1)?.querySelector('.chat-msg-body')?.textContent?.trim() ?? null;
+        const container = document.getElementById('quick-guide-container');
+        return {
+            assistantCount: assistantMessages.length,
+            lastAssistantPreview: lastAssistant?.slice(0, 240) ?? null,
+            errorCount: errors.length,
+            latestError: errors.at(-1) ?? null,
+            quickGuideExpanded: container?.classList.contains('quick-guide-expanded') ?? false,
+        };
+    });
+}
+
 async function enableGuidedGeneration(page) {
     await page.evaluate(() => {
         const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
@@ -662,6 +689,14 @@ async function scenarioNewFeatures(ctx) {
         await describePopover(page, '#quick-guide-toggle', '#quick-guide-container')
     ));
     await captureShot(page, '10-quick-guide-dropdown.png', { fullPage: true });
+    await page.type('#quick-guide-input', 'Make the next reply more ominous and cinematic while continuing directly from the latest exchange.');
+    await page.click('#quick-guide-submit-btn');
+    await waitForChatSettledOrError(page, 120000);
+    await sleep(1200);
+    console.log('[CAPTURE] Quick guide submit state:', JSON.stringify(
+        await describeQuickGuideFlow(page)
+    ));
+    await captureShot(page, '10b-quick-guide-response.png', { fullPage: true });
     await page.evaluate(async () => {
         const { toggleQuickGuide } = await import('./js/features/chat-quick-guide.js');
         toggleQuickGuide();

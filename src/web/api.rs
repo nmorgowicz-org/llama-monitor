@@ -36,6 +36,12 @@ use crate::state::{self as app_state, AppState, SessionStatus, UiSettings};
 
 /// Chat message structure for persistence
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct CompactionPreview {
+    pub role: String,
+    pub snippet: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
@@ -50,6 +56,28 @@ pub struct ChatMessage {
     pub cumulative_output_tokens: Option<u64>,
     #[serde(default)]
     pub compaction_marker: Option<bool>,
+    #[serde(default)]
+    pub summarized: Option<bool>,
+    #[serde(default)]
+    pub dropped_count: Option<u64>,
+    #[serde(default)]
+    pub dropped_preview: Option<Vec<CompactionPreview>>,
+    #[serde(default)]
+    pub tokens_freed_estimate: Option<u64>,
+    #[serde(default)]
+    pub ctx_pct_before: Option<f32>,
+    #[serde(default)]
+    pub memory_version: Option<u32>,
+    #[serde(default)]
+    pub memory_domain: Option<String>,
+    #[serde(default)]
+    pub summary_kind: Option<String>,
+    #[serde(default)]
+    pub compacted_at: Option<u64>,
+    #[serde(default)]
+    pub compacted_message_count_total: Option<u64>,
+    #[serde(default)]
+    pub recent_tail_kept: Option<u64>,
 }
 
 /// Context note for guided generation (character details, setting info, etc.)
@@ -195,6 +223,34 @@ pub struct SuggestionResponse {
     pub suggestions: Vec<String>,
     pub category: String,
     pub count: u32,
+}
+
+fn suggestions_output_contract(count: u32) -> String {
+    format!(
+        "\n\nFINAL OUTPUT REQUIREMENTS:\n\
+Return ONLY valid JSON. Do not include reasoning, planning, commentary, markdown, code fences, or preamble.\n\
+Return exactly {count} items in this shape:\n\
+{{\"suggestions\":[{{\"title\":\"Short Title\",\"description\":\"One concise actionable next beat.\"}}]}}\n\
+Rules:\n\
+- `title` must be plain text, under 8 words, and user-facing.\n\
+- `description` must be plain text, concise, specific, and actionable.\n\
+- Do not output keys other than `suggestions`, `title`, and `description`.\n\
+- Do not mention your thinking process.\n\
+- Do not number the suggestions.\n"
+    )
+}
+
+fn suggestion_temperature(category: &str) -> f32 {
+    match category {
+        "director" => 0.75,
+        "general" => 0.8,
+        "plot-twist" => 0.95,
+        "new-character" => 0.9,
+        "explicit" => 0.9,
+        "action" | "comedy" | "fantasy" | "horror" | "mystery" | "noir" | "romance" | "sci-fi"
+        | "thriller" | "character" => 0.85,
+        _ => 0.85,
+    }
 }
 
 static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -1753,11 +1809,13 @@ fn api_chat_suggestions(
                     .replace("{count}", &count.to_string())
                     .replace("[STORY CONTEXT]", &context)
                     .replace("[conversation context]", &context)
-                    .replace("[CONVERSATION CONTEXT]", &context);
+                    .replace("[CONVERSATION CONTEXT]", &context)
+                    + &suggestions_output_contract(count);
+                let temperature = suggestion_temperature(&req.category);
 
                 // Build messages for suggestion request
                 let suggestion_messages = vec![
-                    serde_json::json!({"role": "system", "content": "You are a helpful creative writing assistant. Generate suggestions in a numbered list format. Be concise and actionable."}),
+                    serde_json::json!({"role": "system", "content": "You are a helpful creative writing assistant. Keep all reasoning internal. Return only the final answer in the exact requested format with no preamble or analysis."}),
                     serde_json::json!({"role": "user", "content": prompt}),
                 ];
 
@@ -1785,7 +1843,11 @@ fn api_chat_suggestions(
                     .json(&serde_json::json!({
                         "messages": suggestion_messages,
                         "stream": true,
-                        "temperature": 0.8,
+                        "thinking_budget_tokens": 0,
+                        "chat_template_kwargs": {
+                            "enable_thinking": false
+                        },
+                        "temperature": temperature,
                         "max_tokens": 512,
                     }))
                     .send()
@@ -1891,6 +1953,47 @@ fn parse_suggestions(text: &str) -> Vec<String> {
             .replace('`', "")
             .trim()
             .to_string()
+    }
+
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
+        let suggestions_json = value
+            .get("suggestions")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .or_else(|| value.as_array().cloned());
+
+        if let Some(entries) = suggestions_json {
+            let extracted: Vec<String> = entries
+                .into_iter()
+                .filter_map(|entry| {
+                    if let Some(obj) = entry.as_object() {
+                        let title = obj
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .map(clean_fragment)
+                            .unwrap_or_default();
+                        let description = obj
+                            .get("description")
+                            .and_then(|v| v.as_str())
+                            .map(clean_fragment)
+                            .unwrap_or_default();
+                        if title.is_empty() || description.is_empty() {
+                            return None;
+                        }
+                        return Some(format!("{}\n{}", title, description));
+                    }
+
+                    entry
+                        .as_str()
+                        .map(clean_fragment)
+                        .and_then(|value| if value.is_empty() { None } else { Some(value) })
+                })
+                .collect();
+
+            if !extracted.is_empty() {
+                return extracted;
+            }
+        }
     }
 
     // Pathweaver format: [EMOJI] TITLE\nDESCRIPTION with --- separators
@@ -2731,6 +2834,7 @@ mod tests {
             active_template_id: None,
             context_notes: vec![],
             sidebar_width: 0,
+            quick_guide_active: String::new(),
         }
     }
 
@@ -2861,5 +2965,52 @@ mod tests {
                 level
             );
         }
+    }
+
+    #[test]
+    fn chat_message_compaction_metadata_round_trips() {
+        let msg = ChatMessage {
+            role: "system".to_string(),
+            content: "## Persistent Facts\n- Keeps rolling memory".to_string(),
+            timestamp_ms: 123,
+            input_tokens: None,
+            output_tokens: None,
+            cumulative_input_tokens: None,
+            cumulative_output_tokens: None,
+            compaction_marker: Some(true),
+            summarized: Some(true),
+            dropped_count: Some(42),
+            dropped_preview: Some(vec![CompactionPreview {
+                role: "user".to_string(),
+                snippet: "example".to_string(),
+            }]),
+            tokens_freed_estimate: Some(999),
+            ctx_pct_before: Some(87.5),
+            memory_version: Some(2),
+            memory_domain: Some("coding".to_string()),
+            summary_kind: Some("rolling-memory".to_string()),
+            compacted_at: Some(456),
+            compacted_message_count_total: Some(84),
+            recent_tail_kept: Some(8),
+        };
+
+        let json = serde_json::to_string(&msg).expect("ChatMessage should serialize");
+        let decoded: ChatMessage =
+            serde_json::from_str(&json).expect("ChatMessage should deserialize from own JSON");
+
+        assert_eq!(decoded.compaction_marker, Some(true));
+        assert_eq!(decoded.memory_version, Some(2));
+        assert_eq!(decoded.memory_domain.as_deref(), Some("coding"));
+        assert_eq!(decoded.summary_kind.as_deref(), Some("rolling-memory"));
+        assert_eq!(decoded.compacted_message_count_total, Some(84));
+        assert_eq!(decoded.recent_tail_kept, Some(8));
+        assert_eq!(
+            decoded
+                .dropped_preview
+                .as_ref()
+                .and_then(|rows| rows.first())
+                .map(|row| row.snippet.as_str()),
+            Some("example")
+        );
     }
 }

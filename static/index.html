@@ -1024,6 +1024,11 @@
                         <span class="chat-context-bar-toggle-label">Notes</span>
                         <span class="chat-context-bar-count" id="context-sidebar-count" hidden>0</span>
                     </button>
+                    <button class="chat-context-bar-collapse" id="context-sidebar-collapse" type="button" title="Collapse context notes" aria-label="Collapse context notes">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M15 18l-6-6 6-6"/>
+                        </svg>
+                    </button>
                     <div class="guided-hovercard guided-hovercard-rail">
                         <div class="guided-hovercard-title">Context Notes</div>
                         <div class="guided-hovercard-copy">Keep characters, setting, plot, and tone visible to the model while you chat.</div>
@@ -1033,9 +1038,16 @@
                         <div class="chat-sidebar-header">
                             <div class="chat-sidebar-heading">
                                 <h3>Context Notes</h3>
-                                <p class="chat-sidebar-subtitle">Persistent memory for the current chat tab.</p>
+                                <p class="chat-sidebar-subtitle" id="chat-sidebar-subtitle">Persistent memory for the current chat tab.</p>
                             </div>
-                            <button class="chat-sidebar-close" id="chat-sidebar-close" title="Close">&times;</button>
+                            <div class="chat-sidebar-header-actions">
+                                <button class="chat-sidebar-intro-toggle" id="chat-sidebar-intro-toggle" type="button" title="Hide context notes description" aria-label="Hide context notes description">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M18 6L6 18"/>
+                                        <path d="M6 6l12 12"/>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
                         <div class="sidebar-notes-list" id="sidebar-notes-list"></div>
                         <div class="sidebar-section-management" id="sidebar-section-management">
@@ -1175,14 +1187,14 @@
                                <div class="quick-guide-header">
                                    <div>
                                        <div class="quick-guide-title">Quick Guide</div>
-                                       <div class="quick-guide-subtitle">Keep an active reply guide in context until you change or clear it.</div>
+                                       <div class="quick-guide-subtitle">Give one instruction and the assistant responds to the current conversation immediately.</div>
                                        <div class="quick-guide-last-used" id="quick-guide-last-used"></div>
                                    </div>
                                </div>
                                <div class="quick-guide-body">
-                                   <div class="quick-guide-pending" id="quick-guide-pending"></div>
                                    <textarea class="quick-guide-input" id="quick-guide-input" placeholder="e.g. 'Write in a noir style', 'Have the character sneeze', 'Focus on dialogue, skip description'..."></textarea>
                                    <div class="quick-guide-footer">
+                                       <button class="quick-guide-btn quick-guide-restore-btn" id="quick-guide-restore-btn" type="button" hidden>Revise Last</button>
                                        <button class="quick-guide-btn quick-guide-submit-btn" id="quick-guide-submit-btn" type="button">Apply Guide</button>
                                    </div>
                                </div>
