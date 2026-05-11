@@ -2172,12 +2172,24 @@ drag-to-reorder, if implemented) or from any existing reorder handler.
 
 ### 3.2 `static/js/features/chat-render.js` — `data-msg-id` attribute
 
-In the message renderer, add `data-msg-id` to each `.chat-message` element so search results can
-scroll to them:
+The message renderer currently sets `data-msg-idx` (array index within `tab.messages`) on each
+`.chat-message` element. This attribute is used in 9+ places — edit, copy, regenerate, fix-last,
+variant cycling — and **must not be removed or renamed**. It will continue to work after Phase 3.
+
+**Add `data-msg-id` as a second, separate attribute** alongside the existing `data-msg-idx`. This
+is the SQLite `messages.id` rowid, returned by the Phase 2 API on `GET /api/chat/tabs/:id`. It is
+only needed for search result jump-to-message:
 
 ```js
-el.dataset.msgId = msg.id || '';   // msg.id is the SQLite messages.id rowid (populated by Phase 2)
+// KEEP the existing line:
+wrapper.dataset.msgIdx = idx;
+
+// ADD this line immediately after (msg.db_id populated by Phase 2 API response):
+wrapper.dataset.msgId = msg.db_id ?? '';
 ```
+
+The `msg.db_id` field will be `undefined` until Phase 2 is live, so `data-msg-id=""` is a safe
+no-op placeholder during Phase 1.
 
 Remove `updateTabBarOverflowMask()` entirely once Phase 1 tab bar removal is confirmed stable.
 
@@ -2261,7 +2273,7 @@ API). All session management works in new sidebar. Horizontal tab bar is gone.
 | `static/js/features/nav.js` | `switchTab` — remove dead `models`/`sessions` branches; add `showSessionPanel`/`hideSessionPanel` calls |
 | `static/js/bootstrap.js` | Add `initChatSessionsSidebar()` call; remove trash-btn event bindings |
 | `static/js/features/chat-state.js` | Add `renderChatSessionsSidebar` binding; update `addChatTab`, `closeChatTab`, `switchChatTab`, `scheduleChatPersist`, `initChatTabs` |
-| `static/js/features/chat-render.js` | Guard `renderChatTabs()` + `updateTabBarOverflowMask()`; add `renderChatSessionsSidebar` to bindings; add `data-msg-id` to message elements |
+| `static/js/features/chat-render.js` | Guard `renderChatTabs()` + `updateTabBarOverflowMask()`; add `renderChatSessionsSidebar` to bindings; add `data-msg-id` attribute alongside existing `data-msg-idx` (do not remove `data-msg-idx`) |
 | `src/web/api.rs` | Replace 2 flat-file endpoints with 9 SQLite-backed endpoints |
 | `src/state.rs` | Add `chat_storage: Arc<ChatStorage>` to `AppState` |
 | `src/main.rs` | Open `ChatStorage`, run migration, pass to `AppState::new` |
