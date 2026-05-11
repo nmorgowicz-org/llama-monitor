@@ -2,14 +2,35 @@
 // Dropdown menu with AI-generated suggestions (General, Plot Twist, New Character).
 
 import { activeChatTab, persistChatTabs } from './chat-state.js';
+import { chat } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { toggleExplicitMode } from './chat-templates.js';
 
+const CATEGORY_META = {
+    general: { label: 'General', description: 'Versatile next-step prompts that fit almost any conversation.' },
+    'plot-twist': { label: 'Plot Twist', description: 'Unexpected reversals, reveals, and pressure spikes that raise the stakes.' },
+    'new-character': { label: 'New Character', description: 'Fresh entrants who create conflict, chemistry, or new information.' },
+    director: { label: 'Director', description: 'High-level scene direction, pacing shifts, and cinematic steering.' },
+    action: { label: 'Action', description: 'Momentum, danger, movement, and immediate physical stakes.' },
+    comedy: { label: 'Comedy', description: 'Humor beats, awkward pivots, and playful escalation.' },
+    fantasy: { label: 'Fantasy', description: 'Magic, myth, wonder, and worldbuilding-driven next steps.' },
+    horror: { label: 'Horror', description: 'Dread, menace, and unsettling turns that tighten the atmosphere.' },
+    mystery: { label: 'Mystery', description: 'Clues, suspicion, revelations, and investigative momentum.' },
+    noir: { label: 'Noir', description: 'Shadowy motives, sharp dialogue, and morally messy developments.' },
+    romance: { label: 'Romance', description: 'Chemistry, vulnerability, longing, and emotional tension.' },
+    'sci-fi': { label: 'Sci-Fi', description: 'Futuristic complications, speculative ideas, and tech-driven stakes.' },
+    thriller: { label: 'Thriller', description: 'Urgency, pressure, danger, and escalating consequences.' },
+    character: { label: 'Character', description: 'Choices and beats that reveal personality, desire, or conflict.' },
+    explicit: { label: 'Explicit', description: 'Unfiltered prompts for adult-only scenes when explicit mode is enabled.' },
+};
+
 let suggestionsState = {
     expanded: false,
     currentCategory: 'general',
+    setupCollapsed: false,
     isLoading: false,
+    hasGenerated: false,
     suggestions: [],
     recentSuggestions: [],
     customCategories: new Map(),
@@ -17,10 +38,8 @@ let suggestionsState = {
     maxRetries: 3,
     lastError: null,
     isOffline: false,
+    previewCategory: null,
 };
-
-const DEBOUNCE_DELAY = 300;
-let categorySwitchTimeout = null;
 
 // ── Dropdown Toggle ──────────────────────────────────────────────────────────
 
@@ -46,9 +65,19 @@ export function getSuggestionsState() {
 function updateDropdownUI() {
     const dropdown = document.getElementById('suggestions-dropdown');
     const toggleBtn = document.getElementById('suggestions-toggle');
+    const wrapper = toggleBtn?.closest('.guided-tool');
     const categoryBtns = document.querySelectorAll('.suggestion-category-btn');
     const listContainer = document.getElementById('suggestions-list');
     const explicitGroup = document.getElementById('suggestions-explicit-group');
+    const status = document.getElementById('suggestions-toggle-status');
+    const description = document.getElementById('suggestions-category-description');
+    const preview = document.getElementById('suggestions-category-preview');
+    const setupToggle = document.getElementById('suggestions-view-toggle');
+    const meta = CATEGORY_META[suggestionsState.currentCategory] || {
+        label: suggestionsState.currentCategory,
+        description: 'Generate suggestions for the current conversation.',
+    };
+    const previewMeta = CATEGORY_META[suggestionsState.previewCategory || suggestionsState.currentCategory] || meta;
 
     if (!dropdown || !toggleBtn) return;
 
@@ -56,12 +85,32 @@ function updateDropdownUI() {
         dropdown.classList.add('dropdown-expanded');
         toggleBtn.classList.add('active');
         toggleBtn.setAttribute('aria-expanded', 'true');
-        toggleBtn.innerHTML = '▼';
+        wrapper?.classList.add('is-open');
     } else {
         dropdown.classList.remove('dropdown-expanded');
         toggleBtn.classList.remove('active');
         toggleBtn.setAttribute('aria-expanded', 'false');
-        toggleBtn.innerHTML = '💡';
+        wrapper?.classList.remove('is-open');
+    }
+
+    dropdown.classList.toggle('setup-collapsed', suggestionsState.setupCollapsed);
+
+    if (status) {
+        status.textContent = suggestionsState.isLoading ? 'Loading' : meta.label;
+        status.hidden = !suggestionsState.expanded;
+    }
+    if (description) {
+        description.hidden = !suggestionsState.isLoading;
+        description.textContent = suggestionsState.isLoading
+            ? `Generating ${meta.label.toLowerCase()} ideas from the current conversation…`
+            : '';
+    }
+    if (preview) {
+        preview.textContent = `${previewMeta.label}: ${previewMeta.description}`;
+    }
+    if (setupToggle) {
+        setupToggle.textContent = suggestionsState.setupCollapsed ? 'Show Setup' : 'Hide Setup';
+        setupToggle.setAttribute('aria-pressed', suggestionsState.setupCollapsed ? 'true' : 'false');
     }
 
     // Toggle explicit group visibility based on explicit_level
@@ -77,7 +126,13 @@ function updateDropdownUI() {
     // Update category buttons
     categoryBtns.forEach(btn => {
         const category = btn.dataset.category;
+        const categoryMeta = CATEGORY_META[category] || {
+            label: btn.textContent.trim(),
+            description: 'Generate suggestions for the current conversation.',
+        };
         btn.classList.toggle('active', category === suggestionsState.currentCategory);
+        btn.setAttribute('title', `${categoryMeta.label}: ${categoryMeta.description}`);
+        btn.setAttribute('aria-label', `${categoryMeta.label}. ${categoryMeta.description}`);
     });
 
     if (listContainer) {
@@ -128,13 +183,12 @@ export function setSuggestionCategory(category) {
         }
     }
 
-    clearTimeout(categorySwitchTimeout);
-    categorySwitchTimeout = setTimeout(() => {
-        suggestionsState.currentCategory = category;
-        suggestionsState.suggestions = [];
-        updateDropdownUI();
-        fetchSuggestions();
-    }, DEBOUNCE_DELAY);
+    suggestionsState.currentCategory = category;
+    suggestionsState.previewCategory = category;
+    suggestionsState.hasGenerated = false;
+    suggestionsState.suggestions = [];
+    suggestionsState.setupCollapsed = false;
+    updateDropdownUI();
 }
 
 // ── Suggestions List Rendering ───────────────────────────────────────────────
@@ -142,6 +196,11 @@ export function setSuggestionCategory(category) {
 function renderSuggestionsList() {
     const container = document.getElementById('suggestions-list');
     if (!container) return;
+
+    if (!suggestionsState.isLoading && !suggestionsState.hasGenerated) {
+        container.innerHTML = '';
+        return;
+    }
 
     if (suggestionsState.isLoading) {
         container.innerHTML = `
@@ -159,7 +218,7 @@ function renderSuggestionsList() {
         container.innerHTML = `
             <div class="suggestions-empty-state" role="status" aria-live="polite">
                 <p>No suggestions yet</p>
-                <p class="text-sm">Start a conversation first, then hit **Generate** to get AI-powered writing prompts.</p>
+                <p class="text-sm">Choose a category, then generate tailored prompts for this conversation.</p>
             </div>
         `;
         return;
@@ -174,20 +233,25 @@ function renderSuggestionsList() {
 
         return `
         <div class="suggestion-item" data-index="${index}" role="option" aria-selected="false" tabindex="0">
-            ${description ? `<div class="suggestion-title">${escapeHtml(title)}</div>` : ''}
-            <div class="suggestion-content">${escapeHtml(description || title)}</div>
-            <button class="suggestion-btn suggestion-btn-use" title="Insert this prompt into the chat input" aria-label="Use suggestion: ${escapeHtml(title)}">Use</button>
+            <div class="suggestion-main">
+                ${description ? `<div class="suggestion-title">${escapeHtml(title)}</div>` : ''}
+                <div class="suggestion-content">${escapeHtml(description || title)}</div>
+            </div>
+            <div class="suggestion-actions">
+                <button class="suggestion-btn suggestion-btn-append" data-mode="append" aria-label="Append suggestion: ${escapeHtml(title)}">Append</button>
+                <button class="suggestion-btn suggestion-btn-use" data-mode="replace" aria-label="Replace input with suggestion: ${escapeHtml(title)}">Replace</button>
+            </div>
         </div>
     `;
     }).join('');
 
     // Attach use handlers
-    container.querySelectorAll('.suggestion-btn-use').forEach(btn => {
+    container.querySelectorAll('.suggestion-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const item = e.target.closest('.suggestion-item');
             const index = parseInt(item.dataset.index, 10);
-            useSuggestion(index);
+            useSuggestion(index, btn.dataset.mode || 'replace');
         });
     });
 }
@@ -201,7 +265,7 @@ function renderRecentSuggestions() {
 
     const recent = tab._suggestion_history || [];
 
-    if (recent.length === 0) {
+    if (!suggestionsState.hasGenerated || recent.length === 0) {
         container.style.display = 'none';
         return;
     }
@@ -256,7 +320,7 @@ function reuseRecentSuggestion(index) {
 
     // Dispatch event for chat-input to handle
     window.dispatchEvent(new CustomEvent('suggestionSelected', {
-        detail: { text: suggestion },
+        detail: { text: suggestion, mode: 'replace' },
     }));
 
     // Close dropdown
@@ -283,9 +347,32 @@ function getSettingsValue() {
     }
 }
 
+function buildSuggestionContext(tab) {
+    return {
+        messages: (tab.messages || []).map(message => ({
+            role: message.role,
+            content: message.content,
+        })),
+        system_prompt: tab.system_prompt || '',
+        context_notes: (tab.context_notes || [])
+            .filter(note => note?.content?.trim())
+            .map(note => ({
+                section: note.section || 'context',
+                content: note.content,
+                created_at: note.created_at || 0,
+            })),
+        quick_guide_active: (tab.quick_guide_active || '').trim(),
+    };
+}
+
 async function fetchSuggestions() {
     const tab = activeChatTab();
     if (!tab) return;
+
+    if (chat.busy) {
+        showToast('Wait for the current reply to finish before generating suggestions', 'warning');
+        return;
+    }
 
     if (suggestionsState.isOffline) {
         showToast('Offline: suggestions unavailable until connection restored', 'error');
@@ -294,13 +381,44 @@ async function fetchSuggestions() {
 
     suggestionsState.isLoading = true;
     suggestionsState.retryCount = 0;
+    suggestionsState.hasGenerated = false;
+    suggestionsState.setupCollapsed = true;
     updateDropdownUI();
+
+    // Suggestions API currently reconstructs context from persisted tab state,
+    // so flush first to avoid missing the latest assistant turn or mode changes.
+    try {
+        await persistChatTabs();
+    } catch {
+        suggestionsState.isLoading = false;
+        suggestionsState.setupCollapsed = false;
+        updateDropdownUI();
+        showToast('Failed to save the latest chat state before generating suggestions', 'error');
+        return;
+    }
 
     const settings = getSettingsValue();
     const contextDepth = settings.context_depth ?? 10;
+    const suggestionCount = settings.suggestion_count ?? 5;
     const prompts = settings.suggestion_prompts ?? {};
+    const promptValue = prompts[suggestionsState.currentCategory];
+    const prompt = typeof promptValue === 'string' && promptValue.trim()
+        ? promptValue
+        : null;
 
-    let prompt = prompts[suggestionsState.currentCategory];
+    await requestSuggestions({
+        tabId: tab.id,
+        category: suggestionsState.currentCategory,
+        contextDepth,
+        suggestionCount,
+        prompt,
+        context: buildSuggestionContext(tab),
+        retryAttempt: 0,
+    });
+}
+
+async function requestSuggestions({ tabId, category, contextDepth, suggestionCount, prompt, context, retryAttempt }) {
+    suggestionsState.retryCount = retryAttempt;
 
     try {
         const response = await fetch('/api/chat/suggestions', {
@@ -309,10 +427,12 @@ async function fetchSuggestions() {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                tab_id: tab.id,
-                category: suggestionsState.currentCategory,
+                tab_id: tabId,
+                category,
                 context_depth: contextDepth,
-                prompt: prompt,
+                count: suggestionCount,
+                ...context,
+                ...(prompt ? { prompt } : {}),
             }),
         });
 
@@ -323,19 +443,31 @@ async function fetchSuggestions() {
         const data = await response.json();
         suggestionsState.suggestions = data.suggestions || [];
         suggestionsState.isLoading = false;
+        suggestionsState.hasGenerated = true;
         suggestionsState.lastError = null;
         updateDropdownUI();
     } catch (error) {
         suggestionsState.lastError = error;
-        if (suggestionsState.retryCount < suggestionsState.maxRetries) {
-            suggestionsState.retryCount++;
-            const delay = 1000 * suggestionsState.retryCount;
+        if (retryAttempt < suggestionsState.maxRetries) {
+            const nextAttempt = retryAttempt + 1;
+            suggestionsState.retryCount = nextAttempt;
+            const delay = 1000 * nextAttempt;
             setTimeout(() => {
-                fetchSuggestions();
+                requestSuggestions({
+                    tabId,
+                    category,
+                    contextDepth,
+                    suggestionCount,
+                    prompt,
+                    context,
+                    retryAttempt: nextAttempt,
+                });
             }, delay);
-            showToast(`Retrying... (${suggestionsState.retryCount}/${suggestionsState.maxRetries})`, 'warning');
+            showToast(`Retrying... (${nextAttempt}/${suggestionsState.maxRetries})`, 'warning');
         } else {
             suggestionsState.isLoading = false;
+            suggestionsState.hasGenerated = false;
+            suggestionsState.setupCollapsed = false;
             suggestionsState.suggestions = [];
             updateDropdownUI();
             showToast(`Failed to fetch suggestions: ${error.message}`, 'error');
@@ -345,7 +477,7 @@ async function fetchSuggestions() {
 
 // ── Use Suggestion ───────────────────────────────────────────────────────────
 
-function useSuggestion(index) {
+function useSuggestion(index, mode = 'replace') {
     const suggestion = suggestionsState.suggestions[index];
     if (!suggestion) return;
 
@@ -354,7 +486,7 @@ function useSuggestion(index) {
 
     // Dispatch event for chat-input to handle
     window.dispatchEvent(new CustomEvent('suggestionSelected', {
-        detail: { text: suggestion },
+        detail: { text: suggestion, mode },
     }));
 
     // Close dropdown
@@ -490,12 +622,34 @@ function setupGenerateButton() {
     generateBtn.addEventListener('click', () => {
         fetchSuggestions();
     });
+
+    const setupToggle = document.getElementById('suggestions-view-toggle');
+    if (setupToggle) {
+        setupToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            suggestionsState.setupCollapsed = !suggestionsState.setupCollapsed;
+            updateDropdownUI();
+        });
+    }
 }
 
 // ── Category Buttons ─────────────────────────────────────────────────────────
 
 function setupCategoryButtons() {
     document.querySelectorAll('.suggestion-category-btn').forEach(btn => {
+        const previewCategory = () => {
+            suggestionsState.previewCategory = btn.dataset.category;
+            updateDropdownUI();
+        };
+        const resetPreviewCategory = () => {
+            suggestionsState.previewCategory = suggestionsState.currentCategory;
+            updateDropdownUI();
+        };
+
+        btn.addEventListener('mouseenter', previewCategory);
+        btn.addEventListener('focus', previewCategory);
+        btn.addEventListener('mouseleave', resetPreviewCategory);
+        btn.addEventListener('blur', resetPreviewCategory);
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const category = btn.dataset.category;
@@ -530,6 +684,14 @@ function setupCategoryButtons() {
             }
         });
     }
+
+    const manageBtn = document.getElementById('suggestions-manage-btn');
+    if (manageBtn) {
+        manageBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            manageCategories();
+        });
+    }
 }
 
 // ── Clear Recent Button ─────────────────────────────────────────────────────
@@ -549,6 +711,8 @@ function setupClearRecentButton() {
 function setupKeyboardNav() {
     document.addEventListener('keydown', (e) => {
         if (!suggestionsState.expanded) return;
+        const searchInput = document.getElementById('suggestion-search-input');
+        if (document.activeElement === searchInput && !['Escape'].includes(e.key)) return;
 
         const items = document.querySelectorAll('.suggestion-item');
         const activeItem = document.querySelector('.suggestion-item.active');
@@ -583,11 +747,11 @@ function setupKeyboardNav() {
         } else if (e.key === 'Enter' && activeItem) {
             e.preventDefault();
             const index = activeItem.dataset.index || activeItem.dataset.recentIndex;
-            useSuggestion(parseInt(index, 10));
+            useSuggestion(parseInt(index, 10), 'replace');
         } else if (e.key === 'Tab' && activeItem) {
             e.preventDefault();
             const index = activeItem.dataset.index || activeItem.dataset.recentIndex;
-            useSuggestion(parseInt(index, 10));
+            useSuggestion(parseInt(index, 10), 'replace');
         } else if (e.key === 'Escape') {
             suggestionsState.expanded = false;
             updateDropdownUI();
@@ -625,6 +789,7 @@ function setupClickOutside() {
 
         if (!isClickInside && suggestionsState.expanded) {
             suggestionsState.expanded = false;
+            suggestionsState.previewCategory = suggestionsState.currentCategory;
             updateDropdownUI();
         }
     });
@@ -657,6 +822,8 @@ export function initSuggestionsDropdown() {
     setupClickOutside();
     setupOfflineDetection();
     setupTagCloudUI();
+    window.addEventListener('activeTabChanged', updateDropdownUI);
+    window.addEventListener('explicitModeChanged', updateDropdownUI);
     updateDropdownUI();
     renderRecentSuggestions();
 }

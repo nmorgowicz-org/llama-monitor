@@ -62,7 +62,11 @@ export function newChatTab(name = 'New Chat') {
             stream_timeout: 120,
         },
         context_notes: [],
+        context_custom_sections: [],
         sidebar_width: 280,
+        quick_guide_draft: '',
+        quick_guide_active: '',
+        quick_guide_pending: '',
         created_at: Date.now(),
         updated_at: Date.now(),
         pinned: false,
@@ -86,7 +90,11 @@ function normalizeChatTab(tab) {
         totalInputTokens: tab.totalInputTokens ?? totalInputTokens,
         totalOutputTokens: tab.totalOutputTokens ?? totalOutputTokens,
         context_notes: tab.context_notes ?? [],
+        context_custom_sections: tab.context_custom_sections ?? [],
         sidebar_width: tab.sidebar_width ?? 280,
+        quick_guide_draft: tab.quick_guide_draft ?? '',
+        quick_guide_active: tab.quick_guide_active ?? tab.quick_guide_pending ?? tab._quickGuideInstruction ?? '',
+        quick_guide_pending: tab.quick_guide_pending ?? tab._quickGuideInstruction ?? '',
         pinned: tab.pinned ?? false,
     };
 }
@@ -202,6 +210,9 @@ export function switchChatTab(id) {
     chatViewBindings.updateCtxPressureBar?.(0);
     chatViewBindings.refreshChatTelemetry?.();
     refreshTopCockpit();
+    window.dispatchEvent(new CustomEvent('activeTabChanged', {
+        detail: { tabId: id },
+    }));
 }
 
 export function renameChatTab(id, newName) {
@@ -261,6 +272,8 @@ export function normalizeTabForSave(tab) {
     const t = { ...tab };
     delete t.explicit_mode;
     delete t.explicitLevel;
+    delete t._quickGuideInstruction;
+    delete t.quick_guide_pending;
     t.messages = (t.messages || []).map(m => {
         const msg = { ...m };
         delete msg.cumulativeInputTokens;
@@ -299,12 +312,19 @@ export async function persistChatTabs() {
         if (totalMessages === 0 && tabsToSave.length > 0) {
             return;
         }
-        await fetch('/api/chat/tabs', {
+        const response = await fetch('/api/chat/tabs', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(tabsToSave),
         });
-    } catch (e) { console.error('persistChatTabs error:', e); }
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        chat.tabsDirty = false;
+    } catch (e) {
+        console.error('persistChatTabs error:', e);
+        throw e;
+    }
 }
 
 export function flushChatPersist() {

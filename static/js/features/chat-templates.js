@@ -1146,6 +1146,9 @@ export function toggleExplicitMode(forceValue) {
     scheduleChatPersist();
     updateExplicitToggleUI();
     getChatViewBindings().renderChatTabs?.();
+    window.dispatchEvent(new CustomEvent('explicitModeChanged', {
+        detail: { tabId: tab.id, level: tab.explicit_level ?? 0 },
+    }));
 
     const levelNames = { 0: 'Locked', 1: 'Unlocked', 2: 'Unrestricted' };
     const level = tab.explicit_level ?? 0;

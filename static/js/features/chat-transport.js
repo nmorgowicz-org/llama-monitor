@@ -256,9 +256,10 @@ export async function _doSendChat(tab) {
     }
 
     // Inject context notes as separate system messages (SillyTavern-style)
-    if (tab.context_notes && tab.context_notes.length > 0) {
+    const contextNotes = (tab.context_notes || []).filter(note => note.content?.trim());
+    if (contextNotes.length > 0) {
         const notesBySection = {};
-        tab.context_notes.forEach(note => {
+        contextNotes.forEach(note => {
             if (!notesBySection[note.section]) {
                 notesBySection[note.section] = [];
             }
@@ -274,14 +275,13 @@ export async function _doSendChat(tab) {
         });
     }
 
-    // Inject quick guide instruction (ephemeral, one-time use)
-    if (tab._quickGuideInstruction) {
+    // Inject active quick guide as persistent reply context until changed or cleared.
+    const quickGuideInstruction = tab.quick_guide_active || tab.quick_guide_pending || tab._quickGuideInstruction;
+    if (quickGuideInstruction) {
         messages.push({
             role: 'system',
-            content: `### QUICK GUIDE ###\n\n${tab._quickGuideInstruction}`,
+            content: `### QUICK GUIDE ###\n\n${quickGuideInstruction}`,
         });
-        // Clear after use
-        delete tab._quickGuideInstruction;
     }
 
     messages.push(...tab.messages.map(m => ({ role: m.role, content: m.content })));

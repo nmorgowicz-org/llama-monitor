@@ -64,6 +64,47 @@ open http://localhost:9999
 # 7. Test theme toggle
 ```
 
+## Capture Harness
+
+Use the consolidated capture harness for repo screenshots and GIF assets:
+
+```bash
+# List available scenarios
+node tests/ui/capture.mjs --list-scenarios
+
+# Core artifact screenshots
+SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario artifacts
+
+# Chat-only artifact refresh
+SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario artifacts --chat-only
+
+# Guided generation screenshots
+SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario new-features
+
+# Docs/review stills
+SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario docs
+
+# Sparkline validation captures
+SCREENSHOT_PORT=8898 node tests/ui/capture.mjs --scenario sparkline
+
+# Animated GIFs
+SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs
+SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
+SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --inference-only
+```
+
+When adding screenshots for a new feature:
+
+1. Add a new scenario function to `tests/ui/capture.mjs` or extend an existing one.
+2. Reuse the shared helpers there for boot, attach, screenshot tab cleanup, and capture logging.
+3. Register the scenario in the `SCENARIOS` map and add a usage example here.
+
+Troubleshooting:
+
+- If screenshots do not match your source edits, rebuild first with `cargo build --release`.
+- If remote metrics or agent connectivity are missing, verify `REMOTE_SERVER` and the local config/token state.
+- If a capture depends on a popup or hover surface, log geometry/state from the scenario so invisible/clipped UI is obvious in CI logs.
+
 ---
 
-**Last Updated**: 2026-04-20
+**Last Updated**: 2026-05-10

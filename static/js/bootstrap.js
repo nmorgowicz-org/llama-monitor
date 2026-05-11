@@ -145,22 +145,33 @@ document.getElementById('quick-guide-toggle')?.addEventListener('click', (e) => 
 
 // Handle suggestion selection
 window.addEventListener('suggestionSelected', (e) => {
-    const { text } = e.detail;
+    const { text, mode = 'replace' } = e.detail;
     const input = document.getElementById('chat-input');
     if (input) {
-        input.value = text;
+        if (mode === 'append' && input.value.trim()) {
+            const separator = input.value.endsWith('\n') ? '' : '\n';
+            input.value = `${input.value}${separator}${text}`;
+        } else {
+            input.value = text;
+        }
         input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
     }
 });
 
-// Handle quick guide submission (ephemeral instruction)
+// Handle quick guide submission (active reply guide)
 window.addEventListener('quickGuideSubmitted', (e) => {
     const { instruction } = e.detail;
-    // Store in tab for next message send
-    import('./features/chat-state.js').then(({ activeChatTab }) => {
+    // Store on tab as active guide context
+    import('./features/chat-state.js').then(({ activeChatTab, scheduleChatPersist }) => {
         const tab = activeChatTab();
         if (tab) {
-            tab._quickGuideInstruction = instruction;
+            tab.quick_guide_active = instruction.trim();
+            tab.quick_guide_draft = '';
+            scheduleChatPersist();
+            window.dispatchEvent(new CustomEvent('quickGuideStateChanged', {
+                detail: { tabId: tab.id, guide: tab.quick_guide_active },
+            }));
         }
     });
 });

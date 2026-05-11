@@ -7,7 +7,13 @@
     "test:ssh": "playwright test remote-agent-ssh.integration.spec.js",
     "test:headed": "playwright test --headless=false",
     "test:debug": "playwright test --debug",
-    "test:report": "playwright show-report"
+    "test:report": "playwright show-report",
+    "capture:list": "node capture.mjs --list-scenarios",
+    "capture:artifacts": "node capture.mjs --scenario artifacts",
+    "capture:new-features": "node capture.mjs --scenario new-features",
+    "capture:docs": "node capture.mjs --scenario docs",
+    "capture:sparkline": "node capture.mjs --scenario sparkline",
+    "capture:gifs": "node capture.mjs --scenario gifs"
   },
   "devDependencies": {
     "@playwright/test": "^1.40.0"

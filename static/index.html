@@ -1010,22 +1010,31 @@
                 </div>
             </div>
 
-            <!-- Message thread + context notes sidebar (contained within messages area) -->
+            <!-- Message thread + contained context notes rail -->
             <div class="chat-messages" id="chat-messages">
                 <div class="chat-messages-inner" id="chat-messages-inner"></div>
                 <div class="chat-context-bar" id="chat-context-bar">
-                    <button class="chat-context-bar-toggle" id="context-sidebar-toggle" title="Context Notes" aria-expanded="false" aria-controls="chat-sidebar">
+                    <button class="chat-context-bar-toggle" id="context-sidebar-toggle" aria-label="Open context notes" aria-expanded="false" aria-controls="chat-sidebar">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
                             <polyline points="14,2 14,8 20,8"/>
                             <line x1="16" y1="13" x2="8" y2="13"/>
                             <line x1="16" y1="17" x2="8" y2="17"/>
                         </svg>
+                        <span class="chat-context-bar-toggle-label">Notes</span>
+                        <span class="chat-context-bar-count" id="context-sidebar-count" hidden>0</span>
                     </button>
+                    <div class="guided-hovercard guided-hovercard-rail">
+                        <div class="guided-hovercard-title">Context Notes</div>
+                        <div class="guided-hovercard-copy">Keep characters, setting, plot, and tone visible to the model while you chat.</div>
+                    </div>
                     <div class="sidebar-resize-handle" id="chat-context-bar-resize"></div>
                     <div class="chat-sidebar" id="chat-sidebar">
                         <div class="chat-sidebar-header">
-                            <h3>Context Notes</h3>
+                            <div class="chat-sidebar-heading">
+                                <h3>Context Notes</h3>
+                                <p class="chat-sidebar-subtitle">Persistent memory for the current chat tab.</p>
+                            </div>
                             <button class="chat-sidebar-close" id="chat-sidebar-close" title="Close">&times;</button>
                         </div>
                         <div class="sidebar-notes-list" id="sidebar-notes-list"></div>
@@ -1057,29 +1066,53 @@
                           </svg>
                       </button>
                   </div>
-                  <div class="chat-textarea-wrap">
+                     <div class="chat-textarea-wrap">
                       <textarea id="chat-input" rows="1" placeholder="Send a message…"></textarea>
                       <span class="chat-char-count" id="chat-char-count" title="Approximate token count (chars ÷ 4)"></span>
                   </div>
                      <div class="chat-context-controls">
-                       <div class="suggestions-wrapper">
-                           <button class="context-toggle-btn" id="suggestions-toggle" title="AI writing suggestions" aria-expanded="false" aria-controls="suggestions-dropdown">💡</button>
+                       <div class="suggestions-wrapper guided-tool">
+                           <button class="guided-action-btn" id="suggestions-toggle" aria-expanded="false" aria-controls="suggestions-dropdown" aria-label="Open AI suggestions">
+                               <span class="guided-action-icon" aria-hidden="true">💡</span>
+                               <span class="guided-action-label">Ideas</span>
+                               <span class="guided-action-status" id="suggestions-toggle-status" hidden>General</span>
+                               <span class="guided-action-caret" aria-hidden="true">▾</span>
+                           </button>
+                           <div class="guided-hovercard">
+                               <div class="guided-hovercard-title">Suggestions</div>
+                               <div class="guided-hovercard-copy">Generate context-aware next-message ideas, twists, characters, or genre-specific prompts.</div>
+                           </div>
                            <div class="suggestions-dropdown" id="suggestions-dropdown">
-                               <div class="suggestions-intro">Pick a category below, then hit **Generate** to get AI-powered writing prompts for your conversation.</div>
+                               <div class="guided-popover-header">
+                                   <div class="guided-popover-kicker">AI PROMPTS</div>
+                                   <div class="guided-popover-title-row">
+                                       <div>
+                                           <div class="guided-popover-title">Suggestions</div>
+                                           <div class="guided-popover-copy suggestions-header-status" id="suggestions-category-description" hidden></div>
+                                       </div>
+                                       <div class="suggestions-header-actions">
+                                           <button class="suggestions-view-toggle" id="suggestions-view-toggle" type="button">Hide Setup</button>
+                                           <button class="suggestions-manage-btn" id="suggestions-manage-btn" type="button">Manage</button>
+                                       </div>
+                                   </div>
+                               </div>
                                <div class="suggestions-tag-cloud">
                                    <div class="suggestions-search-wrap">
                                        <input type="text" class="suggestion-search-input" id="suggestion-search-input" placeholder="Search categories…" aria-label="Search suggestion categories">
                                    </div>
+                                   <div class="suggestions-category-preview" id="suggestions-category-preview" aria-live="polite"></div>
                                    <div class="category-group" data-group="story-tools">
                                        <button type="button" class="category-group-header" aria-expanded="true">
                                            <span class="category-group-chevron" aria-hidden="true">▸</span>
                                            <span>Story Tools</span>
                                        </button>
                                        <div class="category-group-chips">
-                                           <button class="suggestion-category-btn active" data-category="general">General</button>
-                                           <button class="suggestion-category-btn" data-category="plot-twist">Plot Twist</button>
-                                           <button class="suggestion-category-btn" data-category="new-character">New Character</button>
-                                           <button class="suggestion-category-btn" data-category="director">Director</button>
+                                           <div class="category-group-chips-inner">
+                                               <button class="suggestion-category-btn active" data-category="general">General</button>
+                                               <button class="suggestion-category-btn" data-category="plot-twist">Plot Twist</button>
+                                               <button class="suggestion-category-btn" data-category="new-character">New Character</button>
+                                               <button class="suggestion-category-btn" data-category="director">Director</button>
+                                           </div>
                                        </div>
                                    </div>
                                    <div class="category-group" data-group="genres">
@@ -1088,16 +1121,18 @@
                                            <span>Genres</span>
                                        </button>
                                        <div class="category-group-chips">
-                                           <button class="suggestion-category-btn" data-category="action">Action</button>
-                                           <button class="suggestion-category-btn" data-category="comedy">Comedy</button>
-                                           <button class="suggestion-category-btn" data-category="fantasy">Fantasy</button>
-                                           <button class="suggestion-category-btn" data-category="horror">Horror</button>
-                                           <button class="suggestion-category-btn" data-category="mystery">Mystery</button>
-                                           <button class="suggestion-category-btn" data-category="noir">Noir</button>
-                                           <button class="suggestion-category-btn" data-category="romance">Romance</button>
-                                           <button class="suggestion-category-btn" data-category="sci-fi">Sci-Fi</button>
-                                           <button class="suggestion-category-btn" data-category="thriller">Thriller</button>
-                                           <button class="suggestion-category-btn" data-category="character">Character</button>
+                                           <div class="category-group-chips-inner">
+                                               <button class="suggestion-category-btn" data-category="action">Action</button>
+                                               <button class="suggestion-category-btn" data-category="comedy">Comedy</button>
+                                               <button class="suggestion-category-btn" data-category="fantasy">Fantasy</button>
+                                               <button class="suggestion-category-btn" data-category="horror">Horror</button>
+                                               <button class="suggestion-category-btn" data-category="mystery">Mystery</button>
+                                               <button class="suggestion-category-btn" data-category="noir">Noir</button>
+                                               <button class="suggestion-category-btn" data-category="romance">Romance</button>
+                                               <button class="suggestion-category-btn" data-category="sci-fi">Sci-Fi</button>
+                                               <button class="suggestion-category-btn" data-category="thriller">Thriller</button>
+                                               <button class="suggestion-category-btn" data-category="character">Character</button>
+                                           </div>
                                        </div>
                                    </div>
                                    <div class="category-group category-group-explicit" data-group="explicit" id="suggestions-explicit-group">
@@ -1106,31 +1141,49 @@
                                            <span>Explicit</span>
                                        </button>
                                        <div class="category-group-chips">
-                                           <button class="suggestion-category-btn" data-category="explicit">Explicit 🔞</button>
+                                           <div class="category-group-chips-inner">
+                                               <button class="suggestion-category-btn" data-category="explicit">Explicit 🔞</button>
+                                           </div>
                                        </div>
                                    </div>
                                </div>
                               <div class="suggestions-list" id="suggestions-list"></div>
+                              <div class="suggestions-recent" id="suggestions-recent" style="display:none;">
+                                  <div class="suggestions-recent-header">
+                                      <span>Recent</span>
+                                      <button class="suggestions-clear-recent" id="suggestions-clear-recent" type="button">Clear</button>
+                                  </div>
+                                  <div class="suggestions-recent-list" id="suggestions-recent-list"></div>
+                              </div>
                               <div class="suggestions-actions">
-                                  <button class="suggestions-generate-btn" id="suggestions-generate-btn" title="Ask the AI for writing prompts matching the selected category">Generate</button>
+                                  <button class="suggestions-generate-btn" id="suggestions-generate-btn" type="button">Generate Suggestions</button>
                               </div>
                           </div>
                       </div>
-                     <div class="quick-guide-wrapper">
-                           <button class="context-toggle-btn" id="quick-guide-toggle" title="Steer the AI's next response" aria-expanded="false" aria-controls="quick-guide-container">🧭</button>
+                     <div class="quick-guide-wrapper guided-tool">
+                           <button class="guided-action-btn" id="quick-guide-toggle" aria-expanded="false" aria-controls="quick-guide-container" aria-label="Guide the next AI reply">
+                               <span class="guided-action-icon" aria-hidden="true">🧭</span>
+                               <span class="guided-action-label">Guide</span>
+                               <span class="guided-action-status" id="quick-guide-status" hidden>Active</span>
+                               <span class="guided-action-caret" aria-hidden="true">▾</span>
+                           </button>
+                           <div class="guided-hovercard">
+                               <div class="guided-hovercard-title">Quick Guide</div>
+                               <div class="guided-hovercard-copy">Apply an active reply guide without rewriting your full system prompt.</div>
+                           </div>
                            <div class="quick-guide-container" id="quick-guide-container">
                                <div class="quick-guide-header">
                                    <div>
                                        <div class="quick-guide-title">Quick Guide</div>
-                                       <div class="quick-guide-subtitle">One-time instruction injected into the AI's next reply</div>
+                                       <div class="quick-guide-subtitle">Keep an active reply guide in context until you change or clear it.</div>
                                        <div class="quick-guide-last-used" id="quick-guide-last-used"></div>
                                    </div>
                                </div>
                                <div class="quick-guide-body">
+                                   <div class="quick-guide-pending" id="quick-guide-pending"></div>
                                    <textarea class="quick-guide-input" id="quick-guide-input" placeholder="e.g. 'Write in a noir style', 'Have the character sneeze', 'Focus on dialogue, skip description'..."></textarea>
                                    <div class="quick-guide-footer">
-                                       <button class="quick-guide-btn quick-guide-submit-btn" id="quick-guide-submit-btn" title="Apply to next AI response">Apply</button>
-                                       <button class="quick-guide-btn quick-guide-clear-btn" id="quick-guide-clear-btn" title="Clear instruction">Clear</button>
+                                       <button class="quick-guide-btn quick-guide-submit-btn" id="quick-guide-submit-btn" type="button">Apply Guide</button>
                                    </div>
                                </div>
                            </div>

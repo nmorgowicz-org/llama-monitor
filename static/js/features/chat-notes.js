@@ -6,7 +6,7 @@ import { escapeHtml } from '../core/format.js';
 import { showToast } from './toast.js';
 
 const SIDEBAR_STORAGE_KEY = 'llama_monitor_sidebar_width';
-const DEFAULT_WIDTH = 320;
+const DEFAULT_WIDTH = 280;
 const MIN_WIDTH = 240;
 const MAX_WIDTH = 600;
 
@@ -22,6 +22,8 @@ let sidebarState = {
     expanded: false,
     activeSection: null,
     editingNoteIndex: null,
+    composerSection: null,
+    composerDrafts: {},
 };
 
 // ── Sidebar Toggle ────────────────────────────────────────────────────────────
@@ -49,14 +51,26 @@ function updateSidebarUI() {
     const sidebar = document.getElementById('chat-sidebar');
     const contextBar = document.getElementById('chat-context-bar');
     const toggleBtn = document.getElementById('context-sidebar-toggle');
+    const messages = document.getElementById('chat-messages');
+    const countBadge = document.getElementById('context-sidebar-count');
     const tab = activeChatTab();
 
-    if (!sidebar || !contextBar || !toggleBtn || !tab) return;
+    if (!sidebar || !contextBar || !toggleBtn || !messages || !tab) return;
 
     // Update width from tab state or localStorage
     const savedWidth = localStorage.getItem(SIDEBAR_STORAGE_KEY);
     const width = tab.sidebar_width ?? (savedWidth ? parseInt(savedWidth, 10) : DEFAULT_WIDTH);
-    contextBar.style.width = sidebarState.expanded ? `${width}px` : '24px';
+    messages.style.setProperty('--chat-sidebar-current-width', sidebarState.expanded ? `${width}px` : '36px');
+
+    const notesCount = (tab.context_notes || []).filter(note => note.content?.trim()).length;
+    if (countBadge) {
+        if (notesCount > 0) {
+            countBadge.hidden = false;
+            countBadge.textContent = String(notesCount);
+        } else {
+            countBadge.hidden = true;
+        }
+    }
 
     // Update expanded state
     if (sidebarState.expanded) {
@@ -64,11 +78,13 @@ function updateSidebarUI() {
         contextBar.classList.add('expanded');
         toggleBtn.classList.add('active');
         toggleBtn.setAttribute('aria-expanded', 'true');
+        toggleBtn.setAttribute('aria-label', 'Close context notes');
     } else {
         sidebar.classList.remove('sidebar-expanded');
         contextBar.classList.remove('expanded');
         toggleBtn.classList.remove('active');
         toggleBtn.setAttribute('aria-expanded', 'false');
+        toggleBtn.setAttribute('aria-label', 'Open context notes');
     }
 
     renderNotesList();
@@ -82,13 +98,23 @@ function renderNotesList() {
 
     if (!container || !tab) return;
 
-    const notes = tab.context_notes || [];
+    const notes = (tab.context_notes || []).filter(note => note.content?.trim());
+    const customSections = [
+        ...new Set([
+            ...(tab.context_custom_sections || []),
+            ...notes
+                .filter(n => !PREDEFINED_SECTIONS.some(s => s.name === n.section))
+                .map(n => n.section),
+        ].filter(Boolean)),
+    ];
 
     // Render all predefined sections
     // eslint-disable-next-line no-unsanitized/property
     container.innerHTML = PREDEFINED_SECTIONS.map(sectionDef => {
         const sectionNotes = notes.filter(n => n.section === sectionDef.name);
         const hasNotes = sectionNotes.length > 0;
+        const isComposing = sidebarState.composerSection === sectionDef.name;
+        const draft = sidebarState.composerDrafts[sectionDef.name] || '';
 
         return `
             <div class="sidebar-section-wrapper" data-section="${escapeHtml(sectionDef.name)}">
@@ -98,7 +124,7 @@ function renderNotesList() {
                         ${escapeHtml(sectionDef.name)}
                     </div>
                     <div class="sidebar-section-actions">
-                        <button class="sidebar-add-note-btn" data-section="${escapeHtml(sectionDef.name)}" title="Add note to ${sectionDef.name}">+ Add Note</button>
+                        <button class="sidebar-add-note-btn" data-section="${escapeHtml(sectionDef.name)}" title="Add note to ${sectionDef.name}">${isComposing ? 'Writing…' : '+ Add Note'}</button>
                     </div>
                 </div>
                 <div class="sidebar-section-notes">
@@ -125,15 +151,32 @@ function renderNotesList() {
                     }).join('') :
                         `<div class="sidebar-section-empty">${escapeHtml(sectionDef.placeholder)}</div>`
                     }
+                    ${isComposing ? `
+                        <div class="sidebar-add-note-form" data-section-form="${escapeHtml(sectionDef.name)}">
+                            <div class="sidebar-form-group">
+                                <label class="sidebar-form-label">New ${escapeHtml(sectionDef.name)} note</label>
+                                <textarea class="sidebar-form-textarea sidebar-note-compose-input" data-section="${escapeHtml(sectionDef.name)}" placeholder="${escapeHtml(sectionDef.placeholder)}">${escapeHtml(draft)}</textarea>
+                            </div>
+                            <div class="sidebar-note-compose-chips">
+                                <button type="button" class="sidebar-note-chip" data-section-chip="${escapeHtml(sectionDef.name)}" data-template="${escapeHtml(sectionDef.placeholder)}">Use example</button>
+                                <button type="button" class="sidebar-note-chip" data-section-chip="${escapeHtml(sectionDef.name)}" data-template="Keep this concise and high-signal.">Concise</button>
+                            </div>
+                            <div class="sidebar-note-compose-actions">
+                                <button class="sidebar-form-btn sidebar-note-compose-save" data-section-save="${escapeHtml(sectionDef.name)}">Save Note</button>
+                                <button class="sidebar-note-btn sidebar-note-btn-cancel" data-section-cancel="${escapeHtml(sectionDef.name)}">Cancel</button>
+                            </div>
+                        </div>
+                    ` : ''}
                 </div>
             </div>
         `;
     }).join('');
 
     // Add custom sections if any
-    const customSections = [...new Set(notes.filter(n => !PREDEFINED_SECTIONS.some(s => s.name === n.section)).map(n => n.section))];
     customSections.forEach(sectionName => {
         const sectionNotes = notes.filter(n => n.section === sectionName);
+        const isComposing = sidebarState.composerSection === sectionName;
+        const draft = sidebarState.composerDrafts[sectionName] || '';
         const sectionWrapper = document.createElement('div');
         sectionWrapper.className = 'sidebar-section-wrapper';
         sectionWrapper.dataset.section = escapeHtml(sectionName);
@@ -145,11 +188,11 @@ function renderNotesList() {
                     ${escapeHtml(sectionName)}
                 </div>
                 <div class="sidebar-section-actions">
-                    <button class="sidebar-add-note-btn" data-section="${escapeHtml(sectionName)}" title="Add note to ${sectionName}">+ Add Note</button>
+                    <button class="sidebar-add-note-btn" data-section="${escapeHtml(sectionName)}" title="Add note to ${sectionName}">${isComposing ? 'Writing…' : '+ Add Note'}</button>
                 </div>
             </div>
             <div class="sidebar-section-notes">
-                ${sectionNotes.map((note, i) => {
+                ${sectionNotes.length ? sectionNotes.map((note, i) => {
                     const originalIndex = notes.indexOf(note);
                     const isEditing = sidebarState.editingNoteIndex === originalIndex;
                     return `
@@ -169,7 +212,19 @@ function renderNotesList() {
                             </div>
                         </div>
                     `;
-                }).join('')}
+                }).join('') : `<div class="sidebar-section-empty">Capture reusable details for this section.</div>`}
+                ${isComposing ? `
+                    <div class="sidebar-add-note-form" data-section-form="${escapeHtml(sectionName)}">
+                        <div class="sidebar-form-group">
+                            <label class="sidebar-form-label">New note</label>
+                            <textarea class="sidebar-form-textarea sidebar-note-compose-input" data-section="${escapeHtml(sectionName)}" placeholder="Add note...">${escapeHtml(draft)}</textarea>
+                        </div>
+                        <div class="sidebar-note-compose-actions">
+                            <button class="sidebar-form-btn sidebar-note-compose-save" data-section-save="${escapeHtml(sectionName)}">Save Note</button>
+                            <button class="sidebar-note-btn sidebar-note-btn-cancel" data-section-cancel="${escapeHtml(sectionName)}">Cancel</button>
+                        </div>
+                    </div>
+                ` : ''}
             </div>
         `;
         container.appendChild(sectionWrapper);
@@ -236,6 +291,40 @@ function setupNoteHandlers() {
             }
         });
     });
+
+    container.querySelectorAll('.sidebar-note-compose-input').forEach(textarea => {
+        textarea.addEventListener('input', () => {
+            sidebarState.composerDrafts[textarea.dataset.section] = textarea.value;
+        });
+        textarea.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                submitComposerSection(textarea.dataset.section);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancelComposerSection(textarea.dataset.section);
+            }
+        });
+    });
+
+    container.querySelectorAll('[data-section-save]').forEach(btn => {
+        btn.addEventListener('click', () => submitComposerSection(btn.dataset.sectionSave));
+    });
+
+    container.querySelectorAll('[data-section-cancel]').forEach(btn => {
+        btn.addEventListener('click', () => cancelComposerSection(btn.dataset.sectionCancel));
+    });
+
+    container.querySelectorAll('[data-section-chip]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const section = btn.dataset.sectionChip;
+            const input = container.querySelector(`.sidebar-note-compose-input[data-section="${CSS.escape(section)}"]`);
+            if (!input) return;
+            input.value = btn.dataset.template || '';
+            sidebarState.composerDrafts[section] = input.value;
+            input.focus();
+        });
+    });
 }
 
 function formatNoteTime(timestamp) {
@@ -256,12 +345,13 @@ function formatNoteTime(timestamp) {
 // ── Note CRUD Operations ─────────────────────────────────────────────────────
 
 function addNoteForSection(section) {
-    const sectionDef = PREDEFINED_SECTIONS.find(s => s.name === section);
-    const placeholder = sectionDef ? sectionDef.placeholder : 'Add note...';
-    const content = prompt(`Add ${section} note:`, '');
-    if (content && content.trim()) {
-        addNote(section, content);
-    }
+    sidebarState.composerSection = section;
+    sidebarState.composerDrafts[section] = sidebarState.composerDrafts[section] || '';
+    renderNotesList();
+    requestAnimationFrame(() => {
+        const textarea = document.querySelector(`.sidebar-note-compose-input[data-section="${CSS.escape(section)}"]`);
+        textarea?.focus();
+    });
 }
 
 export function addNote(section, content) {
@@ -287,6 +377,25 @@ export function addNote(section, content) {
     });
 
     return true;
+}
+
+function submitComposerSection(section) {
+    const content = (sidebarState.composerDrafts[section] || '').trim();
+    if (!content) {
+        showToast('Note content cannot be empty', 'error');
+        return;
+    }
+
+    const saved = addNote(section, content);
+    if (!saved) return;
+    sidebarState.composerDrafts[section] = '';
+    sidebarState.composerSection = null;
+}
+
+function cancelComposerSection(section) {
+    sidebarState.composerSection = null;
+    sidebarState.composerDrafts[section] = '';
+    renderNotesList();
 }
 
 function deleteNote(index) {
@@ -392,10 +501,10 @@ function updateContextInjection() {
 // ── Sidebar Resize ───────────────────────────────────────────────────────────
 
 function setupResizeHandle() {
-    const contextBar = document.getElementById('chat-context-bar');
+    const messages = document.getElementById('chat-messages');
     const handle = document.getElementById('chat-context-bar-resize');
 
-    if (!contextBar || !handle) return;
+    if (!messages || !handle) return;
 
     handle.addEventListener('mousedown', (e) => {
         sidebarResizing = true;
@@ -404,13 +513,14 @@ function setupResizeHandle() {
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
 
-        const startWidth = parseInt(contextBar.style.width || DEFAULT_WIDTH, 10);
+        const tab = activeChatTab();
+        const startWidth = tab?.sidebar_width ?? DEFAULT_WIDTH;
         const startX = e.clientX;
 
         const onMouseMove = (moveEvent) => {
             const delta = startX - moveEvent.clientX;
             const newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, startWidth + delta));
-            contextBar.style.width = `${newWidth}px`;
+            messages.style.setProperty('--chat-sidebar-current-width', `${newWidth}px`);
         };
 
         const onMouseUp = () => {
@@ -420,10 +530,10 @@ function setupResizeHandle() {
             document.body.style.userSelect = '';
 
             // Save width to tab and localStorage
-            const width = parseInt(contextBar.style.width, 10);
-            const tab = activeChatTab();
-            if (tab) {
-                tab.sidebar_width = width;
+            const width = parseInt(getComputedStyle(messages).getPropertyValue('--chat-sidebar-current-width'), 10);
+            const activeTab = activeChatTab();
+            if (activeTab) {
+                activeTab.sidebar_width = width;
                 persistChatTabs().catch(() => {});
             }
             localStorage.setItem(SIDEBAR_STORAGE_KEY, width.toString());
@@ -463,7 +573,7 @@ function setupAddSectionHandler() {
             // Check if section already exists
             const existingSections = PREDEFINED_SECTIONS.map(s => s.name);
             const tab = activeChatTab();
-            const customSections = tab?.context_notes?.filter(n => !existingSections.includes(n.section)).map(n => n.section) || [];
+            const customSections = tab?.context_custom_sections || [];
             
             if (existingSections.includes(sectionName) || customSections.includes(sectionName)) {
                 showToast('Section already exists', 'error');
@@ -497,13 +607,13 @@ function addCustomSection(sectionName) {
     const tab = activeChatTab();
     if (!tab) return;
 
-    tab.context_notes = tab.context_notes || [];
-    tab.context_notes.push({
-        section: sectionName,
-        content: '',
-        created_at: Date.now(),
-    });
+    tab.context_custom_sections = tab.context_custom_sections || [];
+    if (!tab.context_custom_sections.includes(sectionName)) {
+        tab.context_custom_sections.push(sectionName);
+    }
     tab.updated_at = Date.now();
+    sidebarState.composerSection = sectionName;
+    sidebarState.composerDrafts[sectionName] = '';
 
     persistChatTabs().then(() => {
         renderNotesList();

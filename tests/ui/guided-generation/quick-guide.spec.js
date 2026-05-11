@@ -49,7 +49,7 @@ test.describe('Quick Guide', () => {
     await page.waitForSelector('#quick-guide-input', { state: 'visible' });
 
     await page.locator('#quick-guide-input').fill('Add more dialogue');
-    await page.locator('#quick-guide-submit').click();
+    await page.locator('#quick-guide-submit-btn').click();
 
     // Should collapse
     await expect(page.locator('#quick-guide-container')).not.toHaveClass(/quick-guide-expanded/);
@@ -60,29 +60,31 @@ test.describe('Quick Guide', () => {
     await page.waitForSelector('#quick-guide-input', { state: 'visible' });
 
     await page.locator('#quick-guide-input').fill('Show, don\'t tell');
-    await page.locator('#quick-guide-submit').click();
+    await page.locator('#quick-guide-submit-btn').click();
 
     // Toggle again to see last used
     await page.locator('#quick-guide-toggle').click();
     await expect(page.locator('.quick-guide-last-used')).toContainText('Show, don\'t tell');
   });
 
-  test('clear button resets state', async ({ page }) => {
+  test('empty submit clears active guide', async ({ page }) => {
     await page.locator('#quick-guide-toggle').click();
     await page.waitForSelector('#quick-guide-input', { state: 'visible' });
 
     await page.locator('#quick-guide-input').fill('Test instruction');
-    await page.locator('#quick-guide-submit').click();
+    await page.locator('#quick-guide-submit-btn').click();
 
     // Toggle again
     await page.locator('#quick-guide-toggle').click();
 
-    // Click clear
-    await page.locator('#quick-guide-clear').click();
+    // Submit empty input to clear the active guide
+    await page.locator('#quick-guide-input').fill('');
+    await page.locator('#quick-guide-submit-btn').click();
 
-    // Should be cleared
+    // Toggle again to inspect cleared state
+    await page.locator('#quick-guide-toggle').click();
     await expect(page.locator('#quick-guide-input')).toHaveValue('');
-    await expect(page.locator('.quick-guide-last-used')).not.toBeVisible();
+    await expect(page.locator('#quick-guide-pending')).toContainText('No active reply guide');
   });
 
   test('Escape closes without submit', async ({ page }) => {
@@ -107,14 +109,18 @@ test.describe('Quick Guide', () => {
     await expect(page.locator('#quick-guide-container')).not.toHaveClass(/quick-guide-expanded/);
   });
 
-  test('empty instruction does not submit', async ({ page }) => {
+  test('empty instruction clears active guide', async ({ page }) => {
     await page.locator('#quick-guide-toggle').click();
     await page.waitForSelector('#quick-guide-input', { state: 'visible' });
 
-    // Leave empty and try to submit
-    await page.locator('#quick-guide-submit').click();
+    await page.locator('#quick-guide-input').fill('Keep it terse');
+    await page.locator('#quick-guide-submit-btn').click();
 
-    // Should remain open
-    await expect(page.locator('#quick-guide-container')).toHaveClass(/quick-guide-expanded/);
+    await page.locator('#quick-guide-toggle').click();
+    await page.locator('#quick-guide-input').fill('');
+    await page.locator('#quick-guide-submit-btn').click();
+
+    await page.locator('#quick-guide-toggle').click();
+    await expect(page.locator('#quick-guide-pending')).toContainText('No active reply guide');
   });
 });

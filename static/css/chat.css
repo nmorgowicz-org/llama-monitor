@@ -1030,14 +1030,19 @@
 
 /* ── Chat Messages ──────────────────────────────────── */
 .chat-messages {
+  --chat-sidebar-current-width: 36px;
   flex: 1;
-  overflow: visible;
-  display: flex;
-  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--chat-sidebar-current-width);
+  align-items: stretch;
   position: relative;
+  transition: grid-template-columns 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .chat-messages-inner {
-  flex: 1;
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   padding: calc(var(--gap-md) + 2px) calc(var(--gap-lg) + 24px) 72px;
   display: flex;

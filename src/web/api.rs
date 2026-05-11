@@ -158,6 +158,9 @@ pub struct ChatTab {
     /// Guided generation: remembered sidebar width in pixels (default: 280)
     #[serde(default, rename = "sidebarWidth")]
     pub sidebar_width: u32,
+    /// Guided generation: persistent quick guide applied to subsequent replies
+    #[serde(default)]
+    pub quick_guide_active: String,
 }
 
 /// Suggestion request for guided generation
@@ -169,7 +172,21 @@ pub struct SuggestionRequest {
     pub count: Option<u32>,
     #[serde(default)]
     pub context_depth: Option<u32>,
+    #[serde(default)]
+    pub messages: Option<Vec<SuggestionContextMessage>>,
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    #[serde(default)]
+    pub context_notes: Option<Vec<ContextNote>>,
+    #[serde(default)]
+    pub quick_guide_active: Option<String>,
     pub prompt: Option<String>,
+}
+
+#[derive(serde::Deserialize, Clone, Debug)]
+pub struct SuggestionContextMessage {
+    pub role: String,
+    pub content: String,
 }
 
 /// Suggestion response
@@ -1634,26 +1651,83 @@ fn api_chat_suggestions(
         .and_then(move |req: SuggestionRequest| {
             let state = state.clone();
             async move {
-                // Get tabs and find the requested one
-                let path = chat_tabs_path();
-                let tabs: Vec<ChatTab> = tokio::fs::read_to_string(&path).await
-                    .ok()
-                    .and_then(|raw| serde_json::from_str(&raw).ok())
-                    .unwrap_or_default();
+                let (all_messages, system_prompt, context_notes, quick_guide_active) =
+                    if let Some(messages) = req.messages.clone() {
+                        (
+                            messages,
+                            req.system_prompt.clone().unwrap_or_default(),
+                            req.context_notes.clone().unwrap_or_default(),
+                            req.quick_guide_active.clone().unwrap_or_default(),
+                        )
+                    } else {
+                        // Fallback for older clients: rebuild from persisted tabs on disk.
+                        let path = chat_tabs_path();
+                        let tabs: Vec<ChatTab> = tokio::fs::read_to_string(&path).await
+                            .ok()
+                            .and_then(|raw| serde_json::from_str(&raw).ok())
+                            .unwrap_or_default();
 
-                let tab = tabs.iter().find(|t| t.id == req.tab_id)
-                    .ok_or(warp::reject::not_found())?;
+                        let tab = tabs
+                            .iter()
+                            .find(|t| t.id == req.tab_id)
+                            .ok_or(warp::reject::not_found())?;
+
+                        (
+                            tab.messages
+                                .iter()
+                                .map(|msg| SuggestionContextMessage {
+                                    role: msg.role.clone(),
+                                    content: msg.content.clone(),
+                                })
+                                .collect(),
+                            tab.system_prompt.clone(),
+                            tab.context_notes.clone(),
+                            String::new(),
+                        )
+                    };
 
                 // Get last N messages
                 let depth = req.context_depth.unwrap_or(10) as usize;
-                let messages: Vec<ChatMessage> = tab.messages.iter()
+                let mut messages: Vec<SuggestionContextMessage> = all_messages
+                    .iter()
                     .rev()
                     .take(depth)
                     .cloned()
                     .collect();
+                messages.reverse();
 
                 // Build conversation context
                 let mut context = String::new();
+                let trimmed_system_prompt = system_prompt.trim();
+                if !trimmed_system_prompt.is_empty() {
+                    context.push_str("System Prompt:\n");
+                    context.push_str(trimmed_system_prompt);
+                    context.push_str("\n\n");
+                }
+
+                let filtered_notes: Vec<ContextNote> = context_notes
+                    .into_iter()
+                    .filter(|note| !note.content.trim().is_empty())
+                    .collect();
+                if !filtered_notes.is_empty() {
+                    context.push_str("Context Notes:\n");
+                    for note in filtered_notes {
+                        context.push_str(&format!(
+                            "- {}: {}\n",
+                            note.section.trim(),
+                            note.content.trim()
+                        ));
+                    }
+                    context.push('\n');
+                }
+
+                let trimmed_quick_guide = quick_guide_active.trim();
+                if !trimmed_quick_guide.is_empty() {
+                    context.push_str("Active Quick Guide:\n");
+                    context.push_str(trimmed_quick_guide);
+                    context.push_str("\n\n");
+                }
+
                 for msg in &messages {
                     let role = if msg.role == "user" { "User" } else { "Assistant" };
                     context.push_str(&format!("{}: {}\n", role, msg.content));
@@ -1677,7 +1751,9 @@ fn api_chat_suggestions(
                 let prompt = default_prompt
                     .unwrap_or_default()
                     .replace("{count}", &count.to_string())
-                    .replace("[STORY CONTEXT]", &context);
+                    .replace("[STORY CONTEXT]", &context)
+                    .replace("[conversation context]", &context)
+                    .replace("[CONVERSATION CONTEXT]", &context);
 
                 // Build messages for suggestion request
                 let suggestion_messages = vec![
@@ -1708,7 +1784,7 @@ fn api_chat_suggestions(
                     .header("Content-Type", "application/json")
                     .json(&serde_json::json!({
                         "messages": suggestion_messages,
-                        "stream": false,
+                        "stream": true,
                         "temperature": 0.8,
                         "max_tokens": 512,
                     }))
@@ -1725,20 +1801,77 @@ fn api_chat_suggestions(
                     ))));
                 }
 
-                let response_json: serde_json::Value = response.json()
-                    .await
-                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                use futures_util::StreamExt;
 
-                // Extract and parse suggestions
-                let content = response_json.get("choices")
-                    .and_then(|c| c.as_array())
-                    .and_then(|c| c.first())
-                    .and_then(|c| c.get("message"))
-                    .and_then(|m| m.get("content"))
-                    .and_then(|c| c.as_str())
-                    .ok_or(warp::reject::not_found())?;
+                let mut upstream = response.bytes_stream();
+                let mut buf = String::new();
+                let mut content = String::new();
+                let mut reasoning_content = String::new();
+
+                while let Some(chunk) = upstream.next().await {
+                    let chunk =
+                        chunk.map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                    buf.push_str(&String::from_utf8_lossy(&chunk));
+
+                    while let Some(pos) = buf.find('\n') {
+                        let line = buf[..pos].trim().to_string();
+                        buf = buf[pos + 1..].to_string();
+
+                        let Some(data) = line.strip_prefix("data: ") else {
+                            continue;
+                        };
+                        let data = data.trim();
+                        if data.is_empty() || data == "[DONE]" {
+                            continue;
+                        }
+
+                        let event: serde_json::Value = serde_json::from_str(data)
+                            .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                        if let Some(delta) = event.get("choices")
+                            .and_then(|c| c.as_array())
+                            .and_then(|c| c.first())
+                            .and_then(|c| c.get("delta"))
+                            .and_then(|d| d.get("content"))
+                            .and_then(|c| c.as_str())
+                        {
+                            content.push_str(delta);
+                        } else if let Some(reasoning) = event.get("choices")
+                            .and_then(|c| c.as_array())
+                            .and_then(|c| c.first())
+                            .and_then(|c| c.get("delta"))
+                            .and_then(|d| d.get("reasoning_content"))
+                            .and_then(|c| c.as_str())
+                        {
+                            reasoning_content.push_str(reasoning);
+                        } else if let Some(message) = event.get("choices")
+                            .and_then(|c| c.as_array())
+                            .and_then(|c| c.first())
+                            .and_then(|c| c.get("message"))
+                            .and_then(|m| m.get("content"))
+                            .and_then(|c| c.as_str())
+                        {
+                            content.push_str(message);
+                        }
+                    }
+                }
+
+                let content = if content.trim().is_empty() {
+                    reasoning_content.trim()
+                } else {
+                    content.trim()
+                };
+                if content.is_empty() {
+                    return Err(warp::reject::custom(ApiError(
+                        "upstream returned empty suggestion content".to_string(),
+                    )));
+                }
 
                 let suggestions = parse_suggestions(content);
+                if suggestions.is_empty() {
+                    return Err(warp::reject::custom(ApiError(
+                        "upstream returned no parseable suggestions".to_string(),
+                    )));
+                }
                 let count = suggestions.len() as u32;
 
                 Ok::<_, warp::Rejection>(warp::reply::json(&SuggestionResponse {
@@ -1751,6 +1884,15 @@ fn api_chat_suggestions(
 }
 
 fn parse_suggestions(text: &str) -> Vec<String> {
+    fn clean_fragment(value: &str) -> String {
+        value
+            .replace("**", "")
+            .replace('*', "")
+            .replace('`', "")
+            .trim()
+            .to_string()
+    }
+
     // Pathweaver format: [EMOJI] TITLE\nDESCRIPTION with --- separators
     // Split by --- separator and parse each block
     let blocks: Vec<&str> = text.split("---").collect();
@@ -1764,11 +1906,79 @@ fn parse_suggestions(text: &str) -> Vec<String> {
             .collect();
         if lines.len() >= 2 {
             // First line is title with emoji, rest is description
-            let title = lines[0];
-            let description = lines[1..].join(" ");
-            if !title.is_empty() && !description.is_empty() {
+            let title = clean_fragment(lines[0]);
+            let description = clean_fragment(&lines[1..].join(" "));
+            let title_lower = title.to_ascii_lowercase();
+            let description_lower = description.to_ascii_lowercase();
+            let is_meta = title_lower.contains("thinking process")
+                || description_lower.contains("analyze user input")
+                || description_lower.contains("output format")
+                || description_lower.contains("guidelines")
+                || description_lower.contains("deconstruct key elements");
+            if !title.is_empty() && !description.is_empty() && !is_meta {
                 // Combine title and description with newline
                 suggestions.push(format!("{}\n{}", title, description));
+            }
+        }
+    }
+
+    // Thinking-mode fallback: extract explicit "Idea N" / "Suggestion N" brainstorm bullets.
+    if suggestions.is_empty() {
+        let normalized = text.replace('\n', " ");
+        let brainstorm_slice = normalized
+            .split("Brainstorming Suggestions")
+            .nth(1)
+            .unwrap_or(&normalized);
+        let inline_ideas = regex::Regex::new(
+            r"(?:Idea|Suggestion)\s*\d+\s*(?:\(([^)]+)\))?:\s*(.+?)(?=\s+-\s+\*?(?:Idea|Suggestion)\s*\d+\s*(?:\(|:)|$)",
+        )
+        .ok();
+        if let Some(re) = inline_ideas {
+            let extracted: Vec<String> = re
+                .captures_iter(brainstorm_slice)
+                .filter_map(|caps| {
+                    let raw_description = caps.get(2)?.as_str();
+                    let description = clean_fragment(raw_description);
+                    if description.is_empty() {
+                        return None;
+                    }
+                    let raw_title = caps
+                        .get(1)
+                        .map(|m| m.as_str())
+                        .filter(|title| !title.trim().is_empty())
+                        .unwrap_or("Next Beat");
+                    Some(format!("{}\n{}", clean_fragment(raw_title), description))
+                })
+                .collect();
+            if !extracted.is_empty() {
+                return extracted;
+            }
+        }
+
+        let idea_bullets = regex::Regex::new(
+            r"(?m)^\s*[-*]\s*\*?(?:Idea|Suggestion)\s*\d+\s*(?:\(([^)]+)\))?:\*?\s*(.+)$",
+        )
+        .ok();
+        if let Some(re) = idea_bullets {
+            let extracted: Vec<String> = text
+                .lines()
+                .filter_map(|line| re.captures(line))
+                .filter_map(|caps| {
+                    let raw_description = caps.get(2)?.as_str();
+                    let description = clean_fragment(raw_description);
+                    if description.is_empty() {
+                        return None;
+                    }
+                    let raw_title = caps
+                        .get(1)
+                        .map(|m| m.as_str())
+                        .filter(|title| !title.trim().is_empty())
+                        .unwrap_or("Next Beat");
+                    Some(format!("{}\n{}", clean_fragment(raw_title), description))
+                })
+                .collect();
+            if !extracted.is_empty() {
+                return extracted;
             }
         }
     }
@@ -1781,8 +1991,14 @@ fn parse_suggestions(text: &str) -> Vec<String> {
                 .lines()
                 .filter_map(|line| re.captures(line))
                 .filter_map(|caps| caps.get(1))
-                .map(|m| m.as_str().trim().to_string())
+                .map(|m| clean_fragment(m.as_str()))
                 .filter(|s| !s.is_empty())
+                .filter(|s| {
+                    let lowercase = s.to_ascii_lowercase();
+                    !lowercase.contains("analyze user input")
+                        && !lowercase.contains("output format")
+                        && !lowercase.contains("guidelines")
+                })
                 .collect();
             if !numbered_suggestions.is_empty() {
                 return numbered_suggestions;
@@ -1798,8 +2014,15 @@ fn parse_suggestions(text: &str) -> Vec<String> {
                 .lines()
                 .filter_map(|line| re.captures(line))
                 .filter_map(|caps| caps.get(1))
-                .map(|m| m.as_str().trim().to_string())
+                .map(|m| clean_fragment(m.as_str()))
                 .filter(|s| !s.is_empty())
+                .filter(|s| {
+                    let lowercase = s.to_ascii_lowercase();
+                    !lowercase.starts_with("role:")
+                        && !lowercase.starts_with("task:")
+                        && !lowercase.starts_with("goal:")
+                        && !lowercase.starts_with("output format:")
+                })
                 .collect();
             if !bullet_suggestions.is_empty() {
                 return bullet_suggestions;
@@ -1811,9 +2034,16 @@ fn parse_suggestions(text: &str) -> Vec<String> {
     if suggestions.is_empty() {
         suggestions = text
             .lines()
-            .map(|s| s.trim().to_string())
+            .map(|s| clean_fragment(s))
             .filter(|s| !s.is_empty() && s.len() > 2)
             .filter(|s| !s.starts_with('['))
+            .filter(|s| {
+                let lowercase = s.to_ascii_lowercase();
+                !lowercase.contains("here's a thinking process")
+                    && !lowercase.contains("analyze user input")
+                    && !lowercase.contains("output format")
+                    && !lowercase.contains("guidelines")
+            })
             .collect();
     }
 

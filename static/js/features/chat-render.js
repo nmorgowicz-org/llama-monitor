@@ -389,10 +389,6 @@ export function renderChatMessages() {
             ? ` (${lastLlamaMetrics.model_name.split('/').pop().replace(/\.gguf$/i, '')})`
             : '';
 
-        // Preserve context bar during render
-        const contextBar = container.querySelector('.chat-context-bar');
-        if (contextBar) contextBar.remove();
-
         // eslint-disable-next-line no-unsanitized/property -- aiName and modelName wrapped in escapeHtml(); promptCards use escapeHtml(); SVG is hardcoded
         container.innerHTML = `
           <div class="chat-empty">
@@ -406,8 +402,6 @@ export function renderChatMessages() {
             <p class="chat-empty-hint">Ask anything, or try a suggestion below</p>
             <div class="chat-empty-prompts">${promptCards}</div>
           </div>`;
-        // Restore context bar after render
-        if (contextBar) container.appendChild(contextBar);
         return;
     }
 
@@ -416,14 +410,7 @@ export function renderChatMessages() {
     const isPaginated = allMessages.length > limit;
     const visibleMessages = isPaginated ? allMessages.slice(-limit) : allMessages;
 
-    // Preserve context bar during render
-    const contextBar = container.querySelector('.chat-context-bar');
-    if (contextBar) contextBar.remove();
-
     container.innerHTML = '';
-
-    // Restore context bar after render
-    if (contextBar) container.appendChild(contextBar);
 
     // Add "Load More" button if paginated
     if (isPaginated) {

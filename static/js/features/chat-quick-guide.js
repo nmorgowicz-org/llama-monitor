@@ -1,13 +1,11 @@
 // ── Quick Guide (Inline Input) ──────────────────────────────────────────────
-// Collapsible inline input for ephemeral instructions (one-time context injection).
+// Collapsible inline input for an active reply guide that persists until changed.
 
-import { activeChatTab } from './chat-state.js';
-import { escapeHtml } from '../core/format.js';
+import { activeChatTab, scheduleChatPersist } from './chat-state.js';
 import { showToast } from './toast.js';
 
 let quickGuideState = {
     expanded: false,
-    currentValue: '',
     lastUsedInstruction: null,
 };
 
@@ -35,7 +33,13 @@ export function getQuickGuideState() {
 function updateQuickGuideUI() {
     const container = document.getElementById('quick-guide-container');
     const toggleBtn = document.getElementById('quick-guide-toggle');
+    const wrapper = toggleBtn?.closest('.guided-tool');
     const input = document.getElementById('quick-guide-input');
+    const status = document.getElementById('quick-guide-status');
+    const pending = document.getElementById('quick-guide-pending');
+    const tab = activeChatTab();
+    const draft = tab?.quick_guide_draft || '';
+    const activeGuide = tab?.quick_guide_active || tab?.quick_guide_pending || '';
 
     if (!container || !toggleBtn) return;
 
@@ -43,18 +47,52 @@ function updateQuickGuideUI() {
         container.classList.add('quick-guide-expanded');
         toggleBtn.classList.add('active');
         toggleBtn.setAttribute('aria-expanded', 'true');
-        toggleBtn.innerHTML = '▼';
+        wrapper?.classList.add('is-open');
 
         if (input) {
             input.focus();
-            input.value = quickGuideState.currentValue;
+            input.value = draft;
         }
     } else {
         container.classList.remove('quick-guide-expanded');
         toggleBtn.classList.remove('active');
         toggleBtn.setAttribute('aria-expanded', 'false');
-        toggleBtn.innerHTML = '🧭';
+        wrapper?.classList.remove('is-open');
     }
+
+    toggleBtn.classList.toggle('guided-action-btn-attentive', !!activeGuide);
+
+    if (status) {
+        status.textContent = activeGuide ? 'Active' : draft ? 'Draft' : 'Idle';
+        status.hidden = !activeGuide && !quickGuideState.expanded;
+    }
+
+    if (pending) {
+        pending.textContent = activeGuide
+            ? `Active reply guide: ${truncate(activeGuide, 96)}`
+            : 'No active reply guide.';
+        pending.classList.toggle('is-active', !!activeGuide);
+    }
+
+    updateLastUsedDisplay();
+}
+
+function truncate(value, maxLength) {
+    if (!value) return '';
+    return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
+function updateLastUsedDisplay() {
+    const lastUsed = document.getElementById('quick-guide-last-used');
+    if (!lastUsed) return;
+
+    if (quickGuideState.lastUsedInstruction) {
+        lastUsed.textContent = `Last applied: ${truncate(quickGuideState.lastUsedInstruction, 60)}`;
+        lastUsed.style.display = 'block';
+        return;
+    }
+
+    lastUsed.style.display = 'none';
 }
 
 // ── Input Handling ───────────────────────────────────────────────────────────
@@ -64,7 +102,11 @@ function setupInputHandler() {
     if (!input) return;
 
     input.addEventListener('input', (e) => {
-        quickGuideState.currentValue = e.target.value;
+        const tab = activeChatTab();
+        if (tab) {
+            tab.quick_guide_draft = e.target.value;
+            scheduleChatPersist();
+        }
     });
 
     input.addEventListener('keydown', (e) => {
@@ -81,24 +123,20 @@ function setupInputHandler() {
 // ── Submit ───────────────────────────────────────────────────────────────────
 
 function submitQuickGuide() {
-    const instruction = quickGuideState.currentValue.trim();
-    if (!instruction) return;
+    const tab = activeChatTab();
+    const instruction = (tab?.quick_guide_draft || '').trim();
+    if (!tab) return;
 
-    // Save as last used
-    quickGuideState.lastUsedInstruction = instruction;
-
-    // Dispatch event for chat-transport to handle
+    quickGuideState.lastUsedInstruction = instruction || null;
     window.dispatchEvent(new CustomEvent('quickGuideSubmitted', {
         detail: { instruction },
     }));
 
-    // Clear and collapse
-    quickGuideState.currentValue = '';
+    tab.quick_guide_draft = '';
     quickGuideState.expanded = false;
     updateQuickGuideUI();
 
-    // Show confirmation
-    showToast('Instruction saved — will apply to next AI reply', 'success');
+    showToast(instruction ? 'Reply guide applied' : 'Reply guide cleared', 'success');
 }
 
 // ── Submit Button ────────────────────────────────────────────────────────────
@@ -110,37 +148,10 @@ function setupSubmitButton() {
     submitBtn.addEventListener('click', submitQuickGuide);
 }
 
-// ── Clear Button ─────────────────────────────────────────────────────────────
-
-function setupClearButton() {
-    const clearBtn = document.getElementById('quick-guide-clear-btn');
-    if (!clearBtn) return;
-
-    clearBtn.addEventListener('click', () => {
-        quickGuideState.currentValue = '';
-        quickGuideState.lastUsedInstruction = null;
-        const input = document.getElementById('quick-guide-input');
-        if (input) input.value = '';
-        updateQuickGuideUI();
-    });
-}
-
 // ── Last Used Display ───────────────────────────────────────────────────────
 
 function setupLastUsedDisplay() {
-    const lastUsed = document.getElementById('quick-guide-last-used');
-    if (!lastUsed) return;
-
-    function updateLastUsed() {
-        if (quickGuideState.lastUsedInstruction) {
-            lastUsed.textContent = `Last: ${escapeHtml(quickGuideState.lastUsedInstruction.substring(0, 50))}${quickGuideState.lastUsedInstruction.length > 50 ? '...' : ''}`;
-            lastUsed.style.display = 'block';
-        } else {
-            lastUsed.style.display = 'none';
-        }
-    }
-
-    updateLastUsed();
+    updateLastUsedDisplay();
 }
 
 // ── Click Outside to Close ──────────────────────────────────────────────────
@@ -166,8 +177,9 @@ function setupClickOutside() {
 export function initQuickGuide() {
     setupInputHandler();
     setupSubmitButton();
-    setupClearButton();
     setupLastUsedDisplay();
     setupClickOutside();
+    window.addEventListener('activeTabChanged', updateQuickGuideUI);
+    window.addEventListener('quickGuideStateChanged', updateQuickGuideUI);
     updateQuickGuideUI();
 }
