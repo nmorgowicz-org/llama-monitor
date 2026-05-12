@@ -44,7 +44,7 @@ export function newChatTab(name = 'New Chat') {
         id: crypto.randomUUID(),
         name,
         system_prompt: 'You are {{char}}, a helpful, concise assistant. You are talking to {{user}}. Provide clear, accurate answers.',
-        active_template_id: '',
+        activeTemplateId: '',
         ai_name: '',
         user_name: '',
         explicit_level: 0,
@@ -87,7 +87,7 @@ function normalizeChatTab(tab) {
     return {
         ...tab,
         explicit_level: explicitLevel,
-        active_template_id: tab.active_template_id ?? '',
+        activeTemplateId: tab.activeTemplateId ?? '',
         auto_compact: tab.auto_compact ?? true,
         auto_compact_summarize: tab.auto_compact_summarize ?? true,
         lastCtxPct: tab.lastCtxPct ?? 0,

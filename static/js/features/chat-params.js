@@ -1064,7 +1064,7 @@ export function registerPersonaMenuBindings() {
         menu.classList.add('hidden');
         const btnSystemPrompt = document.getElementById('btn-system-prompt');
         if (btnSystemPrompt) btnSystemPrompt.classList.add('active');
-        const activeId = activeChatTab()?.active_template_id || null;
+        const activeId = activeChatTab()?.activeTemplateId || null;
         openTemplateManager(activeId);
     });
     
@@ -1092,7 +1092,7 @@ async function loadPersonaMenuItems() {
         personaMenuListEl.innerHTML = '';
         
         const tab = activeChatTab();
-        const activeTemplateId = tab?.active_template_id || null;
+        const activeTemplateId = tab?.activeTemplateId || null;
         
         // Separate into active, user (non-active), and built-in
         const activePersona = activeTemplateId ? personas.find(p => p.id === activeTemplateId) : null;
@@ -1198,7 +1198,7 @@ function createPersonaItem(persona, isActive) {
         const tab = activeChatTab();
         if (tab) {
             tab.system_prompt = persona.prompt;
-            tab.active_template_id = persona.id;
+            tab.activeTemplateId = persona.id;
             tab.updated_at = Date.now();
             scheduleChatPersist?.();
         }
@@ -1228,7 +1228,7 @@ export function updatePersonaMenuName() {
     const nameEl = document.getElementById('chat-persona-menu-name');
     if (!nameEl) return;
 
-    const activeTemplateId = tab.active_template_id;
+    const activeTemplateId = tab.activeTemplateId;
     if (!activeTemplateId) {
         nameEl.textContent = 'None';
         return;

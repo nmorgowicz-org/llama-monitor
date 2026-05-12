@@ -199,7 +199,7 @@ pub struct ChatTab {
     /// persisted so the dashboard can show it on page load without a live session.
     #[serde(rename = "lastCtxPct", default)]
     pub last_ctx_pct: Option<f32>,
-    #[serde(rename = "activeTemplateId", alias = "active_template_id", default)]
+    #[serde(rename = "activeTemplateId", default)]
     pub active_template_id: Option<String>,
     /// Guided generation: persistent context notes (character, setting, plot details)
     #[serde(default)]
