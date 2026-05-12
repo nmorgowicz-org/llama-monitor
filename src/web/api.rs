@@ -205,7 +205,7 @@ pub struct ChatTab {
     #[serde(default)]
     pub context_notes: Vec<ContextNote>,
     /// Guided generation: remembered sidebar width in pixels (default: 280)
-    #[serde(default, rename = "sidebarWidth", alias = "sidebar_width")]
+    #[serde(default, rename = "sidebarWidth")]
     pub sidebar_width: u32,
     /// Guided generation: persistent quick guide applied to subsequent replies
     #[serde(default)]

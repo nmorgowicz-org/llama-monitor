@@ -462,9 +462,9 @@ export async function _doSendChat(tab, options = {}) {
     const systemParts = [];
     const armedBeat = getArmedStoryBeat(tab);
     let systemPrompt = tab.system_prompt ? substituteNames(tab.system_prompt, tab.ai_name, tab.user_name) : '';
-    if (tab.explicit_level > 0) {
+    if (tab.explicitLevel > 0) {
         const template = typeof resolveActiveTemplate === 'function'
-            ? resolveActiveTemplate(tab.active_template_id) : null;
+            ? resolveActiveTemplate(tab.activeTemplateId) : null;
         const policies = template?.explicit_policies;
 
         if (policies) {

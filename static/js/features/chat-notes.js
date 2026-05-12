@@ -85,7 +85,7 @@ function updateSidebarUI() {
 
     // Update width from tab state or localStorage
     const savedWidth = localStorage.getItem(SIDEBAR_STORAGE_KEY);
-    const width = tab.sidebar_width ?? (savedWidth ? parseInt(savedWidth, 10) : DEFAULT_WIDTH);
+    const width = tab.sidebarWidth ?? (savedWidth ? parseInt(savedWidth, 10) : DEFAULT_WIDTH);
     messages.style.setProperty('--chat-sidebar-current-width', sidebarState.expanded ? `${width}px` : '36px');
 
     const notesCount = (tab.context_notes || []).filter(note => note.content?.trim()).length;
@@ -558,7 +558,7 @@ function setupResizeHandle() {
         document.body.style.userSelect = 'none';
 
         const tab = activeChatTab();
-        const startWidth = tab?.sidebar_width ?? DEFAULT_WIDTH;
+        const startWidth = tab?.sidebarWidth ?? DEFAULT_WIDTH;
         const startX = e.clientX;
 
         const onMouseMove = (moveEvent) => {
@@ -577,7 +577,7 @@ function setupResizeHandle() {
             const width = parseInt(getComputedStyle(messages).getPropertyValue('--chat-sidebar-current-width'), 10);
             const activeTab = activeChatTab();
             if (activeTab) {
-                activeTab.sidebar_width = width;
+                activeTab.sidebarWidth = width;
                 persistChatTabs().catch(() => {});
             }
             localStorage.setItem(SIDEBAR_STORAGE_KEY, width.toString());

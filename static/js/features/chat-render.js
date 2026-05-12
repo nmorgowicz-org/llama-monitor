@@ -237,7 +237,7 @@ export function renderChatTabs() {
         el.innerHTML = `
           <div class="chat-tab-name-wrapper">
             <span class="chat-tab-name" data-chat-tab-rename="${tab.id}">${escapeHtml(tab.name)}</span>
-            ${tab.active_template_id ? `<span class="chat-tab-persona"></span>` : ''}
+            ${tab.activeTemplateId ? `<span class="chat-tab-persona"></span>` : ''}
           </div>
           <svg class="chat-tab-pin-icon ${tab.pinned ? 'pinned' : ''}" width="11" height="11" viewBox="0 0 24 24" fill="${tab.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" aria-hidden="true" data-tooltip="${tab.pinned ? 'Unpin tab' : 'Pin tab'}">
             <path d="M16 12V3h-3V2H8v1H5v9l-2 6 3 1 2-5v9h6v-9l2 5 3-1-2-6z"/>
@@ -310,14 +310,14 @@ export function renderChatTabs() {
         // Populate persona label
         const personaLabel = el.querySelector('.chat-tab-persona');
         const nameWrapper = el.querySelector('.chat-tab-name-wrapper');
-        if (personaLabel && tab.active_template_id) {
-            getTemplateNameById(tab.active_template_id).then(name => {
+        if (personaLabel && tab.activeTemplateId) {
+            getTemplateNameById(tab.activeTemplateId).then(name => {
                 if (personaLabel && name) {
                     personaLabel.textContent = name;
                 }
             });
         }
-        if (tab.explicit_level > 0) {
+        if (tab.explicitLevel > 0) {
             const badge = document.createElement('span');
             badge.className = 'chat-tab-explicit-badge';
             badge.textContent = tab.explicit_level >= 2 ? '\uD83D\uDD25' : '\uD83D\uDD13';

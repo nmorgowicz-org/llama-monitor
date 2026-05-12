@@ -137,7 +137,7 @@ function updateDropdownUI() {
     // Toggle explicit group visibility based on explicit_level
     if (explicitGroup) {
         const tab = activeChatTab();
-        const explicitEnabled = (tab?.explicit_level ?? 0) > 0;
+        const explicitEnabled = (tab?.explicitLevel ?? 0) > 0;
         explicitGroup.classList.toggle('explicit-enabled', explicitEnabled);
     }
 
@@ -196,7 +196,7 @@ export function setSuggestionCategory(category) {
     // Silently prevent explicit category access when explicit mode is off
     if (category === 'explicit') {
         const tab = activeChatTab();
-        const explicitMode = (tab?.explicit_level ?? 0) > 0;
+        const explicitMode = (tab?.explicitLevel ?? 0) > 0;
         if (!explicitMode) {
             import('./chat-templates.js').then(({ enableExplicitMode }) => {
                 enableExplicitMode();
