@@ -195,6 +195,23 @@ test.describe('explicit mode toggle v2 (3-state)', () => {
   });
 
   test('3-state badge cycling on tab', async ({ page }) => {
+    // Reset explicit mode to level 0 first (previous test may have left it on)
+    await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { updateExplicitToggleUI } = await import('/js/features/chat-templates.js');
+      const { getChatViewBindings } = await import('/js/core/app-state.js');
+      const tab = activeChatTab();
+      if (tab) {
+        tab.explicit_level = 0;
+        updateExplicitToggleUI();
+        getChatViewBindings().renderChatTabs?.();
+      }
+    });
+    // Wait for badge to disappear
+    await page.waitForFunction(() => {
+      return document.querySelector('.chat-tab-explicit-badge') === null;
+    }, { timeout: 5000 });
+
     // State 0: no badge
     const badge = page.locator('.chat-tab-explicit-badge');
     await expect(badge).toHaveCount(0);

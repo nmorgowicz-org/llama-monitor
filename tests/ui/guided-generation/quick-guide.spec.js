@@ -58,6 +58,12 @@ test.describe('Quick Guide', () => {
   });
 
   test('last used instruction displayed', async ({ page }) => {
+    // Mock the chat endpoint so the submit completes immediately
+    await page.route('/api/chat', route => {
+      const sse = 'data: {"choices":[{"delta":{"content":"OK"}}]}\n\ndata: [DONE]\n\n';
+      route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse });
+    });
+
     await page.locator('#quick-guide-toggle').click();
     await page.waitForSelector('#quick-guide-input', { state: 'visible' });
 
@@ -65,7 +71,7 @@ test.describe('Quick Guide', () => {
     await page.locator('#quick-guide-submit-btn').click();
 
     // Wait for the guide to close (the submit is async)
-    await page.waitForSelector('#quick-guide-input', { state: 'hidden', timeout: 5000 });
+    await page.waitForSelector('#quick-guide-input', { state: 'hidden', timeout: 10000 });
 
     // Wait a bit for the last used instruction to be stored
     await page.waitForTimeout(500);

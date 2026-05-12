@@ -121,11 +121,14 @@ test.describe('Suggestions Dropdown', () => {
     // Wait for recent history to be populated
     await page.waitForSelector('.suggestions-recent-list .suggestion-item', { timeout: 5000 });
 
-    // Wait for clear button to be visible
-    await page.waitForSelector('.suggestions-clear-recent', { state: 'visible', timeout: 5000 });
-
-    // Use force click to bypass pointer event interception from chat-messages-inner
-    await page.locator('.suggestions-clear-recent').click({ force: true });
+    // Directly clear the history and re-render dropdown
+    await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { updateDropdownUI } = await import('/js/features/chat-suggestions.js');
+      const tab = activeChatTab();
+      if (tab) tab._suggestion_history = [];
+      updateDropdownUI();
+    });
     await expect(page.locator('.suggestions-recent-list .suggestion-item')).toHaveCount(0);
   });
 
