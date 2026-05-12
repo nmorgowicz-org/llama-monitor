@@ -1400,9 +1400,11 @@ export function initChatTemplates() {
     // Bind per-persona explicit policy buttons
     document.getElementById('persona-explicit-level1-reset')?.addEventListener('click', () => resetPersonaExplicitPolicy(1));
     document.getElementById('persona-explicit-level1-clear')?.addEventListener('click', () => clearPersonaExplicitPolicy(1));
+    document.getElementById('persona-explicit-level1-save')?.addEventListener('click', savePersonaExplicitPolicies);
     document.getElementById('persona-explicit-level2-reset')?.addEventListener('click', () => resetPersonaExplicitPolicy(2));
     document.getElementById('persona-explicit-level2-clear')?.addEventListener('click', () => clearPersonaExplicitPolicy(2));
-    // Save on blur
+    document.getElementById('persona-explicit-level2-save')?.addEventListener('click', savePersonaExplicitPolicies);
+    // Save on blur (auto-save)
     document.getElementById('persona-explicit-level1-input')?.addEventListener('blur', savePersonaExplicitPolicies);
     document.getElementById('persona-explicit-level2-input')?.addEventListener('blur', savePersonaExplicitPolicies);
 
