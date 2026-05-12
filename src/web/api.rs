@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::fmt;
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
@@ -34,6 +36,12 @@ use crate::state::{self as app_state, AppState, SessionStatus, UiSettings};
 
 /// Chat message structure for persistence
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct CompactionPreview {
+    pub role: String,
+    pub snippet: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
@@ -48,6 +56,54 @@ pub struct ChatMessage {
     pub cumulative_output_tokens: Option<u64>,
     #[serde(default)]
     pub compaction_marker: Option<bool>,
+    #[serde(default)]
+    pub summarized: Option<bool>,
+    #[serde(default)]
+    pub dropped_count: Option<u64>,
+    #[serde(default)]
+    pub dropped_preview: Option<Vec<CompactionPreview>>,
+    #[serde(default)]
+    pub tokens_freed_estimate: Option<u64>,
+    #[serde(default)]
+    pub ctx_pct_before: Option<f32>,
+    #[serde(default)]
+    pub memory_version: Option<u32>,
+    #[serde(default)]
+    pub memory_domain: Option<String>,
+    #[serde(default)]
+    pub summary_kind: Option<String>,
+    #[serde(default)]
+    pub compacted_at: Option<u64>,
+    #[serde(default)]
+    pub compacted_message_count_total: Option<u64>,
+    #[serde(default)]
+    pub recent_tail_kept: Option<u64>,
+}
+
+/// Context note for guided generation (character details, setting info, etc.)
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct ContextNote {
+    pub section: String,
+    pub content: String,
+    #[serde(default)]
+    pub created_at: u64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct ArmedStoryBeat {
+    pub id: String,
+    pub kind: String,
+    pub instruction: String,
+    #[serde(default)]
+    pub remaining_turns: u32,
+    #[serde(default)]
+    pub created_at: u64,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Model parameters for a chat tab
@@ -74,6 +130,32 @@ impl Default for ChatModelParams {
     }
 }
 
+/// Deserialize explicit_level from bool (legacy), u8, or null.
+/// Tolerates corrupted disk data by defaulting to 0.
+fn deserialize_explicit_level<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = <Option<serde_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+    match value {
+        Some(v) if v.is_null() => Ok(None),
+        Some(v) => {
+            if let Some(n) = v.as_u64() {
+                return Ok(Some(n as u8));
+            }
+            if let Some(b) = v.as_bool() {
+                return Ok(Some(if b { 1 } else { 0 }));
+            }
+            if let Some(n) = v.as_i64() {
+                return Ok(Some(n as u8));
+            }
+            // Tolerate corrupted data: default to unlocked (1)
+            Ok(Some(0))
+        }
+        None => Ok(None),
+    }
+}
+
 /// Chat tab structure for persistence
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct ChatTab {
@@ -84,8 +166,14 @@ pub struct ChatTab {
     pub ai_name: Option<String>,
     #[serde(default)]
     pub user_name: Option<String>,
-    #[serde(default)]
-    pub explicit_mode: Option<bool>,
+    #[serde(
+        default,
+        rename = "explicitLevel",
+        alias = "explicit_mode",
+        alias = "explicit_level",
+        deserialize_with = "deserialize_explicit_level"
+    )]
+    pub explicit_level: Option<u8>,
     pub messages: Vec<ChatMessage>,
     // Serialized as camelCase so GET responses and PUT bodies use identical names.
     // Alias keeps existing disk files readable if they were written as snake_case.
@@ -93,8 +181,11 @@ pub struct ChatTab {
     pub total_input_tokens: Option<u64>,
     #[serde(rename = "totalOutputTokens", alias = "total_output_tokens", default)]
     pub total_output_tokens: Option<u64>,
+    #[serde(default)]
     pub model_params: ChatModelParams,
+    #[serde(default)]
     pub created_at: u64,
+    #[serde(default)]
     pub updated_at: u64,
     #[serde(default)]
     pub auto_compact: Option<bool>,
@@ -106,6 +197,117 @@ pub struct ChatTab {
     pub last_ctx_pct: Option<f32>,
     #[serde(rename = "activeTemplateId", default)]
     pub active_template_id: Option<String>,
+    /// Guided generation: persistent context notes (character, setting, plot details)
+    #[serde(default)]
+    pub context_notes: Vec<ContextNote>,
+    /// Guided generation: remembered sidebar width in pixels (default: 280)
+    #[serde(default, rename = "sidebarWidth")]
+    pub sidebar_width: u32,
+    /// Guided generation: persistent quick guide applied to subsequent replies
+    #[serde(default)]
+    pub quick_guide_active: String,
+    /// Guided generation: delayed hidden story beats for future assistant turns
+    #[serde(default)]
+    pub armed_story_beats: Vec<ArmedStoryBeat>,
+}
+
+/// Suggestion request for guided generation
+#[derive(serde::Deserialize, Debug)]
+pub struct SuggestionRequest {
+    pub tab_id: String,
+    pub category: String,
+    #[serde(default)]
+    pub count: Option<u32>,
+    #[serde(default)]
+    pub context_depth: Option<u32>,
+    #[serde(default)]
+    pub messages: Option<Vec<SuggestionContextMessage>>,
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    #[serde(default)]
+    pub context_notes: Option<Vec<ContextNote>>,
+    #[serde(default)]
+    pub quick_guide_active: Option<String>,
+    pub prompt: Option<String>,
+}
+
+#[derive(serde::Deserialize, Clone, Debug)]
+pub struct SuggestionContextMessage {
+    pub role: String,
+    pub content: String,
+}
+
+/// Suggestion response
+#[derive(serde::Serialize, Debug)]
+pub struct SuggestionResponse {
+    pub suggestions: Vec<String>,
+    #[serde(default)]
+    pub cards: Vec<SuggestionCard>,
+    pub category: String,
+    pub count: u32,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SuggestionCard {
+    #[serde(rename = "type")]
+    pub suggestion_type: String,
+    pub title: String,
+    pub effect: String,
+    #[serde(default)]
+    pub detail: String,
+}
+
+fn default_suggestions_output_contract(count: u32) -> String {
+    format!(
+        "\n\nFINAL OUTPUT REQUIREMENTS:\n\
+Return ONLY valid JSON. Do not include reasoning, planning, commentary, markdown, code fences, or preamble.\n\
+Return exactly {count} items in this shape:\n\
+{{\"suggestions\":[{{\"title\":\"Short Title\",\"description\":\"One concise actionable next beat.\"}}]}}\n\
+Rules:\n\
+- `title` must be plain text, under 8 words, and user-facing.\n\
+- `description` must be plain text, concise, specific, and actionable.\n\
+- Do not output keys other than `suggestions`, `title`, and `description`.\n\
+- Do not mention your thinking process.\n\
+- Do not number the suggestions.\n"
+    )
+}
+
+fn director_output_contract(count: u32) -> String {
+    format!(
+        "\n\nFINAL OUTPUT REQUIREMENTS:\n\
+Return ONLY valid JSON. Do not include reasoning, planning, commentary, markdown, code fences, or preamble.\n\
+Return exactly {count} items in this shape:\n\
+{{\"suggestions\":[{{\"type\":\"pressure\",\"title\":\"Short Title\",\"effect\":\"Short immediate effect line.\",\"detail\":\"One concise sentence explaining how the assistant should continue the scene.\"}}]}}\n\
+Rules:\n\
+- `type` must be one of: pressure, reveal, escalation, interruption, twist, tone-shift, reversal, intimacy, investigation, confrontation.\n\
+- `title` must be plain text, under 8 words, and user-facing.\n\
+- `effect` must be a compact summary line under 12 words.\n\
+- `detail` must be one concise actionable sentence.\n\
+- Do not output keys other than `suggestions`, `type`, `title`, `effect`, and `detail`.\n\
+- Do not mention your thinking process.\n\
+- Do not number the suggestions.\n"
+    )
+}
+
+fn suggestions_output_contract(category: &str, count: u32) -> String {
+    if category == "director" {
+        director_output_contract(count)
+    } else {
+        default_suggestions_output_contract(count)
+    }
+}
+
+fn suggestion_temperature(category: &str) -> f32 {
+    match category {
+        "director" => 0.75,
+        "general" => 0.8,
+        "plot-twist" => 0.95,
+        "new-character" => 0.9,
+        "explicit" => 0.9,
+        "action" | "comedy" | "fantasy" | "horror" | "mystery" | "noir" | "romance" | "sci-fi"
+        | "thriller" | "character" => 0.85,
+        _ => 0.85,
+    }
 }
 
 static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -113,6 +315,28 @@ static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
 /// Set the config directory (called once at startup from AppConfig).
 pub fn set_config_dir(path: PathBuf) {
     CONFIG_DIR.set(path).ok();
+}
+
+/// Load prompts from static/prompts directory
+fn load_prompts_from_files() -> HashMap<String, String> {
+    let mut prompts = HashMap::new();
+
+    // Try to load from static/prompts directory relative to executable
+    let prompts_dir = PathBuf::from("static/prompts");
+
+    if let Ok(entries) = fs::read_dir(&prompts_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "md")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                && let Ok(content) = fs::read_to_string(&path)
+            {
+                prompts.insert(stem.to_string(), content);
+            }
+        }
+    }
+
+    prompts
 }
 
 fn chat_tabs_path() -> PathBuf {
@@ -456,6 +680,7 @@ pub fn api_routes(
     let browse = api_browse();
     let chat = api_chat(state.clone());
     let chat_abort = api_chat_abort(state.clone());
+    let chat_suggestions = api_chat_suggestions(state.clone());
     let get_chat_tabs = api_get_chat_tabs();
     let put_chat_tabs = api_put_chat_tabs();
     let get_sessions = api_get_sessions(state.clone());
@@ -504,6 +729,7 @@ pub fn api_routes(
     let chat_routes = browse
         .or(chat)
         .or(chat_abort)
+        .or(chat_suggestions)
         .or(get_chat_tabs)
         .or(put_chat_tabs);
     let session_routes = get_sessions
@@ -1529,6 +1755,643 @@ fn api_chat_abort(
         })
 }
 
+fn api_chat_suggestions(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "suggestions")
+        .and(warp::post())
+        .and(warp::body::json::<SuggestionRequest>())
+        .and_then(move |req: SuggestionRequest| {
+            let state = state.clone();
+            async move {
+                let (all_messages, system_prompt, context_notes, quick_guide_active) =
+                    if let Some(messages) = req.messages.clone() {
+                        (
+                            messages,
+                            req.system_prompt.clone().unwrap_or_default(),
+                            req.context_notes.clone().unwrap_or_default(),
+                            req.quick_guide_active.clone().unwrap_or_default(),
+                        )
+                    } else {
+                        // Fallback for older clients: rebuild from persisted tabs on disk.
+                        let path = chat_tabs_path();
+                        let tabs: Vec<ChatTab> = tokio::fs::read_to_string(&path).await
+                            .ok()
+                            .and_then(|raw| serde_json::from_str(&raw).ok())
+                            .unwrap_or_default();
+
+                        let tab = tabs
+                            .iter()
+                            .find(|t| t.id == req.tab_id)
+                            .ok_or(warp::reject::not_found())?;
+
+                        (
+                            tab.messages
+                                .iter()
+                                .map(|msg| SuggestionContextMessage {
+                                    role: msg.role.clone(),
+                                    content: msg.content.clone(),
+                                })
+                                .collect(),
+                            tab.system_prompt.clone(),
+                            tab.context_notes.clone(),
+                            String::new(),
+                        )
+                    };
+
+                // Get last N messages
+                let depth = req.context_depth.unwrap_or(10) as usize;
+                let mut messages: Vec<SuggestionContextMessage> = all_messages
+                    .iter()
+                    .rev()
+                    .take(depth)
+                    .cloned()
+                    .collect();
+                messages.reverse();
+
+                // Build conversation context
+                let mut context = String::new();
+                let trimmed_system_prompt = system_prompt.trim();
+                if !trimmed_system_prompt.is_empty() {
+                    context.push_str("System Prompt:\n");
+                    context.push_str(trimmed_system_prompt);
+                    context.push_str("\n\n");
+                }
+
+                let filtered_notes: Vec<ContextNote> = context_notes
+                    .into_iter()
+                    .filter(|note| !note.content.trim().is_empty())
+                    .collect();
+                if !filtered_notes.is_empty() {
+                    context.push_str("Context Notes:\n");
+                    for note in filtered_notes {
+                        context.push_str(&format!(
+                            "- {}: {}\n",
+                            note.section.trim(),
+                            note.content.trim()
+                        ));
+                    }
+                    context.push('\n');
+                }
+
+                let trimmed_quick_guide = quick_guide_active.trim();
+                if !trimmed_quick_guide.is_empty() {
+                    context.push_str("Active Quick Guide:\n");
+                    context.push_str(trimmed_quick_guide);
+                    context.push_str("\n\n");
+                }
+
+                for msg in &messages {
+                    let role = if msg.role == "user" { "User" } else { "Assistant" };
+                    context.push_str(&format!("{}: {}\n", role, msg.content));
+                }
+
+                // Load prompts from files
+                let file_prompts = load_prompts_from_files();
+
+                // Get or use default prompt (file-based or hardcoded fallback)
+                let default_prompt = req.prompt.or_else(|| {
+                    file_prompts.get(&req.category).cloned().or_else(|| {
+                        match req.category.as_str() {
+                            "plot-twist" => Some("You are a plot twist specialist. Based on the conversation below, suggest {} unexpected, surprising events that could happen next.\n\nFormat as a numbered list. Prioritize: betrayals, revelations, power reversals, unexpected arrivals, hidden truths.\n\n[conversation context]".to_string()),
+                            "new-character" => Some("You are a character introduction specialist. Based on the conversation below, suggest {} new characters that could enter the story.\n\nFormat as: [Character Name]: [Brief description and how they connect to current story]\n\n[conversation context]".to_string()),
+                            _ => Some("You are a creative brainstorming partner. Based on the conversation below, suggest {} varied, actionable next steps the user could take.\n\nFormat as a numbered list. Prioritize variety: dialogue, action, investigation, social, creative approaches.\n\n[conversation context]".to_string()),
+                        }
+                    })
+                });
+
+                let count = req.count.unwrap_or(5);
+                let prompt = default_prompt
+                    .unwrap_or_default()
+                    .replace("{count}", &count.to_string())
+                    .replace("[STORY CONTEXT]", &context)
+                    .replace("[conversation context]", &context)
+                    .replace("[CONVERSATION CONTEXT]", &context)
+                    + &suggestions_output_contract(&req.category, count);
+                let temperature = suggestion_temperature(&req.category);
+
+                // Build messages for suggestion request
+                let suggestion_messages = vec![
+                    serde_json::json!({"role": "system", "content": "You are a helpful creative writing assistant. Keep all reasoning internal. Return only the final answer in the exact requested format with no preamble or analysis."}),
+                    serde_json::json!({"role": "user", "content": prompt}),
+                ];
+
+                // Call llama.cpp
+                let session = state.get_active_session()
+                    .ok_or(warp::reject::not_found())?;
+
+                let url = match &session.mode {
+                    crate::state::SessionMode::Spawn { port } => {
+                        format!("http://127.0.0.1:{port}/v1/chat/completions")
+                    }
+                    crate::state::SessionMode::Attach { endpoint } => {
+                        format!("{endpoint}/v1/chat/completions")
+                    }
+                };
+
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .build()
+                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+
+                let response = client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .json(&serde_json::json!({
+                        "messages": suggestion_messages,
+                        "stream": true,
+                        "thinking_budget_tokens": 0,
+                        "chat_template_kwargs": {
+                            "enable_thinking": false
+                        },
+                        "temperature": temperature,
+                        "max_tokens": 512,
+                    }))
+                    .send()
+                    .await
+                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+
+                if !response.status().is_success() {
+                    let status = response.status();
+                    let err_body = response.text().await.unwrap_or_default();
+                    return Err(warp::reject::custom(ApiError(format!(
+                        "upstream {}: {}",
+                        status, err_body
+                    ))));
+                }
+
+                use futures_util::StreamExt;
+
+                let mut upstream = response.bytes_stream();
+                let mut buf = String::new();
+                let mut content = String::new();
+                let mut reasoning_content = String::new();
+
+                while let Some(chunk) = upstream.next().await {
+                    let chunk =
+                        chunk.map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                    buf.push_str(&String::from_utf8_lossy(&chunk));
+
+                    while let Some(pos) = buf.find('\n') {
+                        let line = buf[..pos].trim().to_string();
+                        buf = buf[pos + 1..].to_string();
+
+                        let Some(data) = line.strip_prefix("data: ") else {
+                            continue;
+                        };
+                        let data = data.trim();
+                        if data.is_empty() || data == "[DONE]" {
+                            continue;
+                        }
+
+                        let event: serde_json::Value = serde_json::from_str(data)
+                            .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                        if let Some(delta) = event.get("choices")
+                            .and_then(|c| c.as_array())
+                            .and_then(|c| c.first())
+                            .and_then(|c| c.get("delta"))
+                            .and_then(|d| d.get("content"))
+                            .and_then(|c| c.as_str())
+                        {
+                            content.push_str(delta);
+                        } else if let Some(reasoning) = event.get("choices")
+                            .and_then(|c| c.as_array())
+                            .and_then(|c| c.first())
+                            .and_then(|c| c.get("delta"))
+                            .and_then(|d| d.get("reasoning_content"))
+                            .and_then(|c| c.as_str())
+                        {
+                            reasoning_content.push_str(reasoning);
+                        } else if let Some(message) = event.get("choices")
+                            .and_then(|c| c.as_array())
+                            .and_then(|c| c.first())
+                            .and_then(|c| c.get("message"))
+                            .and_then(|m| m.get("content"))
+                            .and_then(|c| c.as_str())
+                        {
+                            content.push_str(message);
+                        }
+                    }
+                }
+
+                let content = if content.trim().is_empty() {
+                    reasoning_content.trim()
+                } else {
+                    content.trim()
+                };
+                if content.is_empty() {
+                    return Err(warp::reject::custom(ApiError(
+                        "upstream returned empty suggestion content".to_string(),
+                    )));
+                }
+
+                let cards = if req.category == "director" {
+                    parse_director_cards(content)
+                } else {
+                    Vec::new()
+                };
+                let suggestions = if req.category == "director" && !cards.is_empty() {
+                    cards
+                        .iter()
+                        .map(|card| format!("{}\n{}", card.title, card.detail))
+                        .collect()
+                } else {
+                    parse_suggestions(content)
+                };
+                if suggestions.is_empty() {
+                    return Err(warp::reject::custom(ApiError(
+                        "upstream returned no parseable suggestions".to_string(),
+                    )));
+                }
+                let count = if req.category == "director" && !cards.is_empty() {
+                    cards.len() as u32
+                } else {
+                    suggestions.len() as u32
+                };
+
+                Ok::<_, warp::Rejection>(warp::reply::json(&SuggestionResponse {
+                    suggestions,
+                    cards,
+                    category: req.category,
+                    count,
+                }))
+            }
+        })
+}
+
+fn parse_suggestions(text: &str) -> Vec<String> {
+    fn clean_fragment(value: &str) -> String {
+        value
+            .replace("**", "")
+            .replace(['*', '`'], "")
+            .trim()
+            .to_string()
+    }
+
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
+        let suggestions_json = value
+            .get("suggestions")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .or_else(|| value.as_array().cloned());
+
+        if let Some(entries) = suggestions_json {
+            let extracted: Vec<String> = entries
+                .into_iter()
+                .filter_map(|entry| {
+                    if let Some(obj) = entry.as_object() {
+                        let title = obj
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .map(clean_fragment)
+                            .unwrap_or_default();
+                        let description = obj
+                            .get("description")
+                            .and_then(|v| v.as_str())
+                            .map(clean_fragment)
+                            .unwrap_or_default();
+                        if title.is_empty() || description.is_empty() {
+                            return None;
+                        }
+                        return Some(format!("{}\n{}", title, description));
+                    }
+
+                    entry
+                        .as_str()
+                        .map(clean_fragment)
+                        .and_then(|value| if value.is_empty() { None } else { Some(value) })
+                })
+                .collect();
+
+            if !extracted.is_empty() {
+                return extracted;
+            }
+        }
+    }
+
+    // Pathweaver format: [EMOJI] TITLE\nDESCRIPTION with --- separators
+    // Split by --- separator and parse each block
+    let blocks: Vec<&str> = text.split("---").collect();
+    let mut suggestions = Vec::new();
+
+    for block in blocks {
+        let lines: Vec<&str> = block
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect();
+        if lines.len() >= 2 {
+            // First line is title with emoji, rest is description
+            let title = clean_fragment(lines[0]);
+            let description = clean_fragment(&lines[1..].join(" "));
+            let title_lower = title.to_ascii_lowercase();
+            let description_lower = description.to_ascii_lowercase();
+            let is_meta = title_lower.contains("thinking process")
+                || description_lower.contains("analyze user input")
+                || description_lower.contains("output format")
+                || description_lower.contains("guidelines")
+                || description_lower.contains("deconstruct key elements");
+            if !title.is_empty() && !description.is_empty() && !is_meta {
+                // Combine title and description with newline
+                suggestions.push(format!("{}\n{}", title, description));
+            }
+        }
+    }
+
+    // Thinking-mode fallback: extract explicit "Idea N" / "Suggestion N" brainstorm bullets.
+    if suggestions.is_empty() {
+        let normalized = text.replace('\n', " ");
+        let brainstorm_slice = normalized
+            .split("Brainstorming Suggestions")
+            .nth(1)
+            .unwrap_or(&normalized);
+        let inline_ideas = regex::Regex::new(
+            r"(?:Idea|Suggestion)\s*\d+\s*(?:\(([^)]+)\))?:\s*(.+?)(?:\s+-\s+\*?(?:Idea|Suggestion)\s*\d+\s*(?:\(|:)|$)",
+        )
+        .ok();
+        if let Some(re) = inline_ideas {
+            let extracted: Vec<String> = re
+                .captures_iter(brainstorm_slice)
+                .filter_map(|caps| {
+                    let raw_description = caps.get(2)?.as_str();
+                    let description = clean_fragment(raw_description);
+                    if description.is_empty() {
+                        return None;
+                    }
+                    let raw_title = caps
+                        .get(1)
+                        .map(|m| m.as_str())
+                        .filter(|title| !title.trim().is_empty())
+                        .unwrap_or("Next Beat");
+                    Some(format!("{}\n{}", clean_fragment(raw_title), description))
+                })
+                .collect();
+            if !extracted.is_empty() {
+                return extracted;
+            }
+        }
+
+        let idea_bullets = regex::Regex::new(
+            r"(?m)^\s*[-*]\s*\*?(?:Idea|Suggestion)\s*\d+\s*(?:\(([^)]+)\))?:\*?\s*(.+)$",
+        )
+        .ok();
+        if let Some(re) = idea_bullets {
+            let extracted: Vec<String> = text
+                .lines()
+                .filter_map(|line| re.captures(line))
+                .filter_map(|caps| {
+                    let raw_description = caps.get(2)?.as_str();
+                    let description = clean_fragment(raw_description);
+                    if description.is_empty() {
+                        return None;
+                    }
+                    let raw_title = caps
+                        .get(1)
+                        .map(|m| m.as_str())
+                        .filter(|title| !title.trim().is_empty())
+                        .unwrap_or("Next Beat");
+                    Some(format!("{}\n{}", clean_fragment(raw_title), description))
+                })
+                .collect();
+            if !extracted.is_empty() {
+                return extracted;
+            }
+        }
+    }
+
+    // If Pathweaver format yielded nothing, try numbered list: "1. Option" or "1) Option"
+    if suggestions.is_empty() {
+        let numbered = regex::Regex::new(r"^\d+[\.\)]\s*(.+)$").ok();
+        if let Some(re) = numbered {
+            let numbered_suggestions: Vec<String> = text
+                .lines()
+                .filter_map(|line| re.captures(line))
+                .filter_map(|caps| caps.get(1))
+                .map(|m| clean_fragment(m.as_str()))
+                .filter(|s| !s.is_empty())
+                .filter(|s| {
+                    let lowercase = s.to_ascii_lowercase();
+                    !lowercase.contains("analyze user input")
+                        && !lowercase.contains("output format")
+                        && !lowercase.contains("guidelines")
+                })
+                .collect();
+            if !numbered_suggestions.is_empty() {
+                return numbered_suggestions;
+            }
+        }
+    }
+
+    // Try bullet list: "- Option" or "* Option"
+    if suggestions.is_empty() {
+        let bullets = regex::Regex::new(r"^[-*]\s+(.+)$").ok();
+        if let Some(re) = bullets {
+            let bullet_suggestions: Vec<String> = text
+                .lines()
+                .filter_map(|line| re.captures(line))
+                .filter_map(|caps| caps.get(1))
+                .map(|m| clean_fragment(m.as_str()))
+                .filter(|s| !s.is_empty())
+                .filter(|s| {
+                    let lowercase = s.to_ascii_lowercase();
+                    !lowercase.starts_with("role:")
+                        && !lowercase.starts_with("task:")
+                        && !lowercase.starts_with("goal:")
+                        && !lowercase.starts_with("output format:")
+                })
+                .collect();
+            if !bullet_suggestions.is_empty() {
+                return bullet_suggestions;
+            }
+        }
+    }
+
+    // Fallback: split by newlines, filter empty and short lines
+    if suggestions.is_empty() {
+        suggestions = text
+            .lines()
+            .map(clean_fragment)
+            .filter(|s| !s.is_empty() && s.len() > 2)
+            .filter(|s| !s.starts_with('['))
+            .filter(|s| {
+                let lowercase = s.to_ascii_lowercase();
+                !lowercase.contains("here's a thinking process")
+                    && !lowercase.contains("analyze user input")
+                    && !lowercase.contains("output format")
+                    && !lowercase.contains("guidelines")
+            })
+            .collect();
+    }
+
+    suggestions
+}
+
+fn parse_director_cards(text: &str) -> Vec<SuggestionCard> {
+    fn clean_fragment(value: &str) -> String {
+        value
+            .replace("**", "")
+            .replace(['*', '`'], "")
+            .trim()
+            .to_string()
+    }
+
+    fn normalize_type(value: &str) -> String {
+        let normalized = value.trim().to_ascii_lowercase().replace(['_', ' '], "-");
+        match normalized.as_str() {
+            "revelation" => "reveal".to_string(),
+            "pressure" | "reveal" | "escalation" | "interruption" | "twist" | "tone-shift"
+            | "reversal" | "intimacy" | "investigation" | "confrontation" => normalized,
+            _ => "pressure".to_string(),
+        }
+    }
+
+    fn infer_type(title: &str, body: &str) -> String {
+        let haystack = format!("{} {}", title, body).to_ascii_lowercase();
+        if haystack.contains("reveal") || haystack.contains("truth") || haystack.contains("secret")
+        {
+            return "reveal".to_string();
+        }
+        if haystack.contains("interrupt")
+            || haystack.contains("arrives")
+            || haystack.contains("appears")
+        {
+            return "interruption".to_string();
+        }
+        if haystack.contains("twist")
+            || haystack.contains("betray")
+            || haystack.contains("reversal")
+        {
+            return "twist".to_string();
+        }
+        if haystack.contains("close-quarters")
+            || haystack.contains("lunges")
+            || haystack.contains("fight")
+            || haystack.contains("draw")
+            || haystack.contains("gun")
+        {
+            return "confrontation".to_string();
+        }
+        if haystack.contains("intimate") || haystack.contains("quiet") || haystack.contains("soft")
+        {
+            return "intimacy".to_string();
+        }
+        if haystack.contains("investigate")
+            || haystack.contains("photo")
+            || haystack.contains("clue")
+        {
+            return "investigation".to_string();
+        }
+        if haystack.contains("escalate")
+            || haystack.contains("danger")
+            || haystack.contains("violence")
+            || haystack.contains("shot")
+        {
+            return "escalation".to_string();
+        }
+        "pressure".to_string()
+    }
+
+    fn split_effect_detail(description: &str) -> (String, String) {
+        let trimmed = clean_fragment(description);
+        if trimmed.is_empty() {
+            return (String::new(), String::new());
+        }
+        let mut parts = trimmed.splitn(2, ". ");
+        let first = parts.next().unwrap_or("").trim().trim_end_matches('.');
+        let rest = parts.next().unwrap_or("").trim();
+        let effect = first.to_string();
+        let detail = if rest.is_empty() {
+            first.to_string()
+        } else {
+            rest.to_string()
+        };
+        (effect, detail)
+    }
+
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
+        let suggestions_json = value
+            .get("suggestions")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .or_else(|| value.as_array().cloned());
+
+        if let Some(entries) = suggestions_json {
+            let cards: Vec<SuggestionCard> = entries
+                .into_iter()
+                .filter_map(|entry| {
+                    let obj = entry.as_object()?;
+                    let title = clean_fragment(obj.get("title")?.as_str()?);
+                    if title.is_empty() {
+                        return None;
+                    }
+                    let effect = obj
+                        .get("effect")
+                        .and_then(|v| v.as_str())
+                        .map(clean_fragment)
+                        .unwrap_or_default();
+                    let detail = obj
+                        .get("detail")
+                        .or_else(|| obj.get("description"))
+                        .and_then(|v| v.as_str())
+                        .map(clean_fragment)
+                        .unwrap_or_default();
+                    let suggestion_type = obj
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .map(normalize_type)
+                        .unwrap_or_else(|| infer_type(&title, &format!("{} {}", effect, detail)));
+                    let fallback_effect = if effect.is_empty() {
+                        title.clone()
+                    } else {
+                        effect
+                    };
+                    let fallback_detail = if detail.is_empty() {
+                        fallback_effect.clone()
+                    } else {
+                        detail
+                    };
+                    Some(SuggestionCard {
+                        suggestion_type,
+                        title,
+                        effect: fallback_effect,
+                        detail: fallback_detail,
+                    })
+                })
+                .collect();
+            if !cards.is_empty() {
+                return cards;
+            }
+        }
+    }
+
+    parse_suggestions(text)
+        .into_iter()
+        .filter_map(|entry| {
+            let mut parts = entry.splitn(2, '\n');
+            let title = clean_fragment(parts.next().unwrap_or(""));
+            if title.is_empty() {
+                return None;
+            }
+            let description = clean_fragment(parts.next().unwrap_or(""));
+            let (effect, detail) = split_effect_detail(&description);
+            Some(SuggestionCard {
+                suggestion_type: infer_type(&title, &description),
+                title,
+                effect: if effect.is_empty() {
+                    description.clone()
+                } else {
+                    effect
+                },
+                detail: if detail.is_empty() {
+                    description
+                } else {
+                    detail
+                },
+            })
+        })
+        .collect()
+}
+
 fn compute_chat_tab_totals(mut tab: ChatTab) -> ChatTab {
     if tab.total_input_tokens.is_none() || tab.total_output_tokens.is_none() {
         let mut total_input: u64 = 0;
@@ -2184,4 +3047,210 @@ fn api_self_update() -> impl Filter<Extract = (impl warp::Reply,), Error = warp:
                 }))),
             }
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_minimal_chat_tab() -> ChatTab {
+        ChatTab {
+            id: "tab-1".to_string(),
+            name: "Test Tab".to_string(),
+            system_prompt: "You are helpful.".to_string(),
+            ai_name: None,
+            user_name: None,
+            explicit_level: None,
+            messages: vec![],
+            total_input_tokens: None,
+            total_output_tokens: None,
+            model_params: ChatModelParams::default(),
+            created_at: 0,
+            updated_at: 0,
+            auto_compact: None,
+            compact_threshold: None,
+            last_ctx_pct: None,
+            active_template_id: None,
+            context_notes: vec![],
+            sidebar_width: 0,
+            quick_guide_active: String::new(),
+            armed_story_beats: vec![],
+        }
+    }
+
+    #[test]
+    fn chat_tab_explicit_level_serialization() {
+        let mut tab = make_minimal_chat_tab();
+        tab.explicit_level = Some(1);
+
+        let json = serde_json::to_string(&tab).expect("ChatTab should serialize");
+
+        // Verify camelCase key in JSON
+        assert!(
+            json.contains("\"explicitLevel\""),
+            "JSON should contain camelCase 'explicitLevel' field, got: {}",
+            json
+        );
+
+        // Verify value is correct
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json).expect("JSON should parse to Value");
+        assert_eq!(
+            parsed.get("explicitLevel").and_then(|v| v.as_u64()),
+            Some(1),
+            "explicitLevel should be 1"
+        );
+
+        // Deserialize back and verify
+        let deserialized: ChatTab =
+            serde_json::from_str(&json).expect("ChatTab should deserialize from own JSON");
+        assert_eq!(
+            deserialized.explicit_level,
+            Some(1),
+            "explicit_level should round-trip to Some(1)"
+        );
+    }
+
+    #[test]
+    fn chat_tab_explicit_level_default() {
+        let json = r#"{
+            "id": "tab-1",
+            "name": "Test Tab",
+            "system_prompt": "You are helpful.",
+            "messages": [],
+            "model_params": {
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "top_k": 40,
+                "min_p": 0.01,
+                "repeat_penalty": 1.0
+            },
+            "created_at": 0,
+            "updated_at": 0
+        }"#;
+
+        let result = serde_json::from_str::<ChatTab>(json);
+        assert!(
+            result.is_ok(),
+            "Should deserialize without explicitLevel field"
+        );
+
+        let tab = result.unwrap();
+        assert!(
+            tab.explicit_level.is_none(),
+            "explicit_level should default to None when field is absent"
+        );
+    }
+
+    #[test]
+    fn chat_tab_explicit_mode_alias_migration() {
+        // The serde alias "explicit_mode" allows deserialization of JSON that uses
+        // the legacy field name (instead of camelCase "explicitLevel").
+        // The value must still be a u8 to match the explicit_level type.
+        let json = r#"{
+            "id": "tab-1",
+            "name": "Test Tab",
+            "system_prompt": "You are helpful.",
+            "explicit_mode": 2,
+            "messages": [],
+            "model_params": {
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "top_k": 40,
+                "min_p": 0.01,
+                "repeat_penalty": 1.0
+            },
+            "created_at": 0,
+            "updated_at": 0
+        }"#;
+
+        let result = serde_json::from_str::<ChatTab>(json);
+        assert!(
+            result.is_ok(),
+            "Should deserialize legacy 'explicit_mode' field via alias"
+        );
+
+        let tab = result.unwrap();
+        assert_eq!(
+            tab.explicit_level,
+            Some(2),
+            "explicit_mode alias should map to explicit_level"
+        );
+    }
+
+    #[test]
+    fn chat_tab_explicit_level_all_states() {
+        for level in [0u8, 1, 2] {
+            let mut tab = make_minimal_chat_tab();
+            tab.explicit_level = Some(level);
+
+            let json = serde_json::to_string(&tab)
+                .unwrap_or_else(|e| panic!("ChatTab should serialize for level {}: {}", level, e));
+
+            // Verify the camelCase key is present
+            assert!(
+                json.contains("\"explicitLevel\""),
+                "JSON for level {} should contain 'explicitLevel'",
+                level
+            );
+
+            // Deserialize back and verify value
+            let deserialized: ChatTab = serde_json::from_str(&json).unwrap_or_else(|e| {
+                panic!("ChatTab should deserialize for level {}: {}", level, e)
+            });
+            assert_eq!(
+                deserialized.explicit_level,
+                Some(level),
+                "explicit_level should round-trip for state {}",
+                level
+            );
+        }
+    }
+
+    #[test]
+    fn chat_message_compaction_metadata_round_trips() {
+        let msg = ChatMessage {
+            role: "system".to_string(),
+            content: "## Persistent Facts\n- Keeps rolling memory".to_string(),
+            timestamp_ms: 123,
+            input_tokens: None,
+            output_tokens: None,
+            cumulative_input_tokens: None,
+            cumulative_output_tokens: None,
+            compaction_marker: Some(true),
+            summarized: Some(true),
+            dropped_count: Some(42),
+            dropped_preview: Some(vec![CompactionPreview {
+                role: "user".to_string(),
+                snippet: "example".to_string(),
+            }]),
+            tokens_freed_estimate: Some(999),
+            ctx_pct_before: Some(87.5),
+            memory_version: Some(2),
+            memory_domain: Some("coding".to_string()),
+            summary_kind: Some("rolling-memory".to_string()),
+            compacted_at: Some(456),
+            compacted_message_count_total: Some(84),
+            recent_tail_kept: Some(8),
+        };
+
+        let json = serde_json::to_string(&msg).expect("ChatMessage should serialize");
+        let decoded: ChatMessage =
+            serde_json::from_str(&json).expect("ChatMessage should deserialize from own JSON");
+
+        assert_eq!(decoded.compaction_marker, Some(true));
+        assert_eq!(decoded.memory_version, Some(2));
+        assert_eq!(decoded.memory_domain.as_deref(), Some("coding"));
+        assert_eq!(decoded.summary_kind.as_deref(), Some("rolling-memory"));
+        assert_eq!(decoded.compacted_message_count_total, Some(84));
+        assert_eq!(decoded.recent_tail_kept, Some(8));
+        assert_eq!(
+            decoded
+                .dropped_preview
+                .as_ref()
+                .and_then(|rows| rows.first())
+                .map(|row| row.snippet.as_str()),
+            Some("example")
+        );
+    }
 }

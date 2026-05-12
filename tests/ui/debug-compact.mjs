@@ -46,6 +46,10 @@ function printState(label, state) {
   console.log(`  total      : ${state.total}`);
   console.log(`  tombstones : ${state.tombstones}`);
   console.log(`  conversational: ${state.conversational}`);
+  if (state.memoryVersion) console.log(`  memory_version: ${state.memoryVersion}`);
+  if (state.memoryDomain) console.log(`  memory_domain : ${state.memoryDomain}`);
+  if (state.summaryKind) console.log(`  summary_kind  : ${state.summaryKind}`);
+  if (state.totalCompacted) console.log(`  compacted total: ${state.totalCompacted}`);
   if (state.tombstoneTexts?.length) {
     state.tombstoneTexts.forEach((t, i) => console.log(`  tombstone[${i}]: "${t}"`));
   }
@@ -74,6 +78,10 @@ function printState(label, state) {
       tombstones: tombstones.length,
       conversational: conversational.length,
       tombstoneTexts: tombstones.map(t => t.content.slice(0, 120)),
+      memoryVersion: tombstones[0]?.memory_version || null,
+      memoryDomain: tombstones[0]?.memory_domain || null,
+      summaryKind: tombstones[0]?.summary_kind || null,
+      totalCompacted: tombstones[0]?.compacted_message_count_total || null,
     };
   });
 
@@ -117,13 +125,13 @@ function printState(label, state) {
         willDrop: dropped.length,
         willKeep: kept.length,
         existingTombstones: tombstones.length,
-        expectedTotal: (systemMsg ? 1 : 0) + tombstones.length + 1 + kept.length,
+        expectedTotal: (systemMsg ? 1 : 0) + 1 + kept.length,
       };
     });
     console.log('\n[prediction — round 1 compact]');
     console.log(`  will drop  : ${prediction.willDrop} messages`);
     console.log(`  will keep  : ${prediction.willKeep} messages`);
-    console.log(`  new tombstones: ${prediction.existingTombstones} + 1 = ${prediction.existingTombstones + 1}`);
+    console.log('  rolling memory marker will be replaced with one refreshed marker');
     console.log(`  expected total: ${prediction.expectedTotal}`);
 
     const summarize = opts.summarize;
@@ -154,8 +162,8 @@ function printState(label, state) {
     const after2 = await getState();
     printState('after compact (round 2)', after2);
 
-    const ok2 = after2.tombstones === 2;
-    console.log(ok2 ? '\n✅ Round 2: both tombstones preserved' : `\n❌ Expected 2 tombstones, got ${after2.tombstones}`);
+    const ok2 = after2.tombstones === 1;
+    console.log(ok2 ? '\n✅ Round 2: rolling memory refreshed in place' : `\n❌ Expected 1 rolling memory marker, got ${after2.tombstones}`);
 
   } catch (err) {
     console.error('\n❌', err.message);

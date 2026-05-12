@@ -91,59 +91,6 @@ test.describe('pin and favorite tabs', () => {
   });
 });
 
-test.describe('persona template selection', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await page.waitForSelector('html.modules-ready');
-    await switchToMonitor(page);
-    await page.getByRole('button', { name: /chat/i }).click();
-
-    // Seed persona recent list so the strip renders chips
-    await page.evaluate(async () => {
-      localStorage.setItem('llama-persona-recent', JSON.stringify([
-        { id: 'default:coder', name: 'Coder', timestamp: Date.now() },
-        { id: 'default:concise-assistant', name: 'Concise Assistant', timestamp: Date.now() },
-        { id: 'default:helpful-assistant', name: 'Helpful Assistant', timestamp: Date.now() },
-        { id: 'default:creative-writer', name: 'Creative Writer', timestamp: Date.now() },
-        { id: 'default:analyst', name: 'Analyst', timestamp: Date.now() },
-      ]));
-      const { renderPersonaStrip } = await import('/js/features/chat-render.js');
-      renderPersonaStrip();
-    });
-  });
-
-  test('persona strip is visible in chat header', async ({ page }) => {
-    await expect(page.locator('#chat-persona-strip')).toBeVisible();
-    const personaChips = await page.locator('#chat-persona-strip .chat-persona-chip').count();
-    expect(personaChips).toBeGreaterThan(0);
-  });
-
-  test('clicking persona chip sets active template', async ({ page }) => {
-    const personaChips = await page.locator('#chat-persona-strip .chat-persona-chip').all();
-    expect(personaChips.length).toBeGreaterThan(0);
-
-    await personaChips[0].click();
-    await expect(personaChips[0]).toHaveClass(/active/);
-
-    const activeTemplateId = await page.evaluate(async () => {
-      const { activeChatTab } = await import('/js/features/chat-state.js');
-      return activeChatTab()?.active_template_id;
-    });
-
-    expect(activeTemplateId).toBeTruthy();
-  });
-
-  test('personas include non-roleplay options', async ({ page }) => {
-    const allPersonas = await page.locator('#chat-persona-strip .chat-persona-chip').allTextContents();
-    const nonRoleplayCount = allPersonas.filter(p =>
-      p.toLowerCase().includes('assistant') ||
-      p.toLowerCase().includes('chat') ||
-      p.toLowerCase().includes('default')
-    ).length;
-    expect(nonRoleplayCount).toBeGreaterThan(0);
-  });
-});
-
 test.describe('chat message export', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');

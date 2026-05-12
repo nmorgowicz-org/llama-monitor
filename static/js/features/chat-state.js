@@ -46,7 +46,7 @@ export function newChatTab(name = 'New Chat') {
         active_template_id: '',
         ai_name: '',
         user_name: '',
-        explicit_mode: false,
+        explicit_level: 0,
         auto_compact: true,
         messages: [],
         totalInputTokens: 0,
@@ -61,6 +61,13 @@ export function newChatTab(name = 'New Chat') {
             max_tokens: null,
             stream_timeout: 120,
         },
+        context_notes: [],
+        context_custom_sections: [],
+        sidebar_width: 280,
+        quick_guide_draft: '',
+        quick_guide_active: '',
+        quick_guide_pending: '',
+        armed_story_beats: [],
         created_at: Date.now(),
         updated_at: Date.now(),
         pinned: false,
@@ -71,13 +78,25 @@ function normalizeChatTab(tab) {
     const messages = tab.messages || [];
     const totalInputTokens = messages.reduce((sum, m) => sum + (m.input_tokens || 0), 0);
     const totalOutputTokens = messages.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
+    let explicitLevel = tab.explicit_level ?? tab.explicitLevel ?? 0;
+    if (tab.explicit_mode !== undefined && tab.explicit_level === undefined) {
+        explicitLevel = tab.explicit_mode ? 1 : 0;
+    }
     return {
         ...tab,
+        explicit_level: explicitLevel,
         active_template_id: tab.active_template_id ?? '',
         auto_compact: tab.auto_compact ?? true,
         lastCtxPct: tab.lastCtxPct ?? 0,
         totalInputTokens: tab.totalInputTokens ?? totalInputTokens,
         totalOutputTokens: tab.totalOutputTokens ?? totalOutputTokens,
+        context_notes: tab.context_notes ?? [],
+        context_custom_sections: tab.context_custom_sections ?? [],
+        sidebar_width: tab.sidebar_width ?? 280,
+        quick_guide_draft: tab.quick_guide_draft ?? '',
+        quick_guide_active: '',
+        quick_guide_pending: '',
+        armed_story_beats: tab.armed_story_beats ?? [],
         pinned: tab.pinned ?? false,
     };
 }
@@ -167,7 +186,7 @@ export function restoreTabFromTrash(id) {
     if (trashIdx === -1) return;
 
     const [trashEntry] = chat.tabTrash.splice(trashIdx, 1);
-    chat.tabs.push(trashEntry.tab);
+    chat.tabs.push(normalizeChatTab(trashEntry.tab));
     chat.activeTabId = trashEntry.tab.id;
 
     chatViewBindings.renderChatTabs?.();
@@ -186,7 +205,6 @@ export function switchChatTab(id) {
     chat.activeTabId = id;
     chatViewBindings.renderChatTabs?.();
     chatViewBindings.renderChatMessages?.();
-    window.renderPersonaStrip?.();
     chatViewBindings.loadChatNames?.();
     chatViewBindings.updateExplicitToggleUI?.();
     chatViewBindings.syncMessageLimitInput?.();
@@ -194,6 +212,9 @@ export function switchChatTab(id) {
     chatViewBindings.updateCtxPressureBar?.(0);
     chatViewBindings.refreshChatTelemetry?.();
     refreshTopCockpit();
+    window.dispatchEvent(new CustomEvent('activeTabChanged', {
+        detail: { tabId: id },
+    }));
 }
 
 export function renameChatTab(id, newName) {
@@ -251,6 +272,10 @@ export function updateChatName(field, value) {
 
 export function normalizeTabForSave(tab) {
     const t = { ...tab };
+    delete t.explicit_mode;
+    delete t.explicitLevel;
+    delete t._quickGuideInstruction;
+    delete t.quick_guide_pending;
     t.messages = (t.messages || []).map(m => {
         const msg = { ...m };
         delete msg.cumulativeInputTokens;
@@ -289,12 +314,19 @@ export async function persistChatTabs() {
         if (totalMessages === 0 && tabsToSave.length > 0) {
             return;
         }
-        await fetch('/api/chat/tabs', {
+        const response = await fetch('/api/chat/tabs', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(tabsToSave),
         });
-    } catch (e) { console.error('persistChatTabs error:', e); }
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        chat.tabsDirty = false;
+    } catch (e) {
+        console.error('persistChatTabs error:', e);
+        throw e;
+    }
 }
 
 export function flushChatPersist() {

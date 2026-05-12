@@ -1921,9 +1921,4 @@
   /* hw-metric-viz transitions — opacity only (visual, keep) */
 
   /* viz-gear-btn, viz-reset-btn, viz-option transitions — color/bg (visual, keep) */
-
-  /* mesh-drift — background-position */
-  @keyframes mesh-drift {
-    0%, 100% { background-position: 0% 0%, 100% 0%, 50% 100%, 0% 0%, 0% 0%; }
-  }
 }

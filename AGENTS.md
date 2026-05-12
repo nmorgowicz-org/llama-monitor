@@ -153,6 +153,37 @@ cargo fmt
 npm run lint
 ```
 
+## Screenshot Harness
+
+All repo-managed screenshots and animated UI captures should use the single harness:
+
+```bash
+node tests/ui/capture.mjs --scenario <name>
+```
+
+Current built-in scenarios:
+- `artifacts` — core setup/chat/logs stills
+- `new-features` — guided generation and chat-input feature stills
+- `docs` — settings/modal/docs stills
+- `sparkline` — sparkline validation stills
+- `gifs` — inference and GPU/system animated GIFs
+
+Rules for agents:
+1. **Do not create new one-off screenshot scripts** unless explicitly requested. Extend `tests/ui/capture.mjs` instead.
+2. **Rebuild release before trusting visual results** when UI code changed. The harness runs `target/release/llama-monitor`.
+3. **Preserve remote-agent connectivity**. The harness seeds a temp config from the user profile so captures do not dirty local state while still retaining needed settings/tokens.
+4. **Use scenario-specific logs for debugging**. If a popup, hovercard, or panel is invisible, log geometry/state in the scenario rather than guessing.
+5. **Clean up temporary chat tabs through the shared helpers** in the harness rather than ad hoc tab mutation.
+6. **Document new scenarios** in both `tests/ui/capture.mjs` usage text and `tests/ui/README.md`.
+
+Common examples:
+
+```bash
+SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario artifacts
+SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario new-features
+SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
+```
+
 ## Static Asset Registration (AUTO-GENERATED)
 
 All static files (JS, CSS, HTML, etc.) are embedded at compile time via `include_str!` macros. **Registration is automatic** — `build.rs` scans `static/` and generates:

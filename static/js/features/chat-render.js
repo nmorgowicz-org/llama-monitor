@@ -63,7 +63,7 @@ let sidebarBadgeChat = null;
 
 function ensureChatElements() {
     if (chatMessagesEl) return;
-    chatMessagesEl = document.getElementById('chat-messages');
+    chatMessagesEl = document.getElementById('chat-messages-inner');
     chatTabBarEl = document.getElementById('chat-tab-bar');
     chatScrollBottomBtn = document.getElementById('chat-scroll-bottom');
     chatScrollBadge = document.getElementById('chat-scroll-badge');
@@ -86,16 +86,53 @@ export function renderMdStreaming(src) {
     return src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>');
 }
 
+// ── Roleplay text colorization ────────────────────────────────────────────────
+// Walks text nodes inside `el` and wraps "quoted dialogue" in .rp-dialogue spans.
+// Skips code blocks. em tags (from *asterisks* markdown) get colour via CSS only.
+
+export function colorizeRpText(el) {
+    if (!el) return;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+    const textNodes = [];
+    let node;
+    while ((node = walker.nextNode())) textNodes.push(node);
+
+    // Match straight " " and curly " " / " " quote pairs — LLMs routinely use smart quotes.
+    const dialogueRe = /["“]([^"“”\r\n]{1,600})["”]/g;
+
+    for (const textNode of textNodes) {
+        const parent = textNode.parentNode;
+        if (!parent || parent.closest('pre, code')) continue;
+        const text = textNode.textContent;
+        if (!dialogueRe.test(text)) { dialogueRe.lastIndex = 0; continue; }
+        dialogueRe.lastIndex = 0;
+
+        const frag = document.createDocumentFragment();
+        let last = 0;
+        let m;
+        while ((m = dialogueRe.exec(text)) !== null) {
+            if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+            const span = document.createElement('span');
+            span.className = 'rp-dialogue';
+            span.textContent = m[0];
+            frag.appendChild(span);
+            last = m.index + m[0].length;
+        }
+        if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+        parent.replaceChild(frag, textNode);
+    }
+}
+
 // ── Scroll ────────────────────────────────────────────────────────────────────
 
 export function chatScroll(force = false) {
     ensureChatElements();
     const c = chatMessagesEl;
     if (!c) return;
-    
+
     // Don't auto-scroll if user has manually scrolled up during generation
     if (!force && chat.disableAutoScroll) return;
-    
+
     const distFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
     if (force || distFromBottom < 80) {
         c.scrollTop = c.scrollHeight;
@@ -106,6 +143,19 @@ export function chatScroll(force = false) {
         // Reset auto-scroll disable flag after forced scroll
         chat.disableAutoScroll = false;
     }
+}
+
+// Scroll so the top of `el` sits at the top of the chat viewport (+ 8px padding).
+// Used on first AI token: after the initial forced-to-bottom on submit, this
+// repositions so the response bubble starts at the top, giving maximum reading room.
+export function chatScrollToEl(el) {
+    ensureChatElements();
+    const c = chatMessagesEl;
+    if (!c || !el) return;
+    if (chat.disableAutoScroll) return;
+    const containerTop = c.getBoundingClientRect().top;
+    const elTop = el.getBoundingClientRect().top;
+    c.scrollTop = c.scrollTop + (elTop - containerTop) - 8;
 }
 
 function initChatScrollButton() {
@@ -259,12 +309,25 @@ export function renderChatTabs() {
 
         // Populate persona label
         const personaLabel = el.querySelector('.chat-tab-persona');
+        const nameWrapper = el.querySelector('.chat-tab-name-wrapper');
         if (personaLabel && tab.active_template_id) {
             getTemplateNameById(tab.active_template_id).then(name => {
                 if (personaLabel && name) {
                     personaLabel.textContent = name;
                 }
             });
+        }
+        if (tab.explicit_level > 0) {
+            const badge = document.createElement('span');
+            badge.className = 'chat-tab-explicit-badge';
+            badge.textContent = tab.explicit_level >= 2 ? '\uD83D\uDD25' : '\uD83D\uDD13';
+            badge.title = tab.explicit_level >= 2 ? 'Unrestricted mode' : 'Explicit mode';
+            const countEl = el.querySelector('.chat-tab-count');
+            if (countEl) {
+                countEl.parentNode.insertBefore(badge, countEl.nextSibling);
+            } else {
+                el.appendChild(badge);
+            }
         }
 
         bar.insertBefore(el, addBtn);
@@ -425,7 +488,6 @@ export function renderChatMessages() {
     }
     chatScroll(true);
     getChatViewBindings().syncCompactSettingsUI?.(activeChatTab());
-    renderPersonaStrip();
 }
 
 function loadMoreMessages(tab, currentLimit) {
@@ -447,14 +509,22 @@ function buildMessageElement(msg, idx, allMessages) {
         wrapper.dataset.expanded = 'false';
 
         const isSummarized = !!msg.summarized;
+        const isRollingMemory = (msg.memory_version || 0) >= 2 || msg.summary_kind === 'rolling-memory';
         const droppedCount = msg.dropped_count || 0;
         const ctxBefore = msg.ctx_pct_before || 0;
+        const totalCompacted = msg.compacted_message_count_total || droppedCount;
+        const memoryDomain = msg.memory_domain || '';
 
-        let statsHtml = `${droppedCount} messages removed`;
+        let statsHtml = isRollingMemory
+            ? `${droppedCount} compacted now · ${totalCompacted} total`
+            : `${droppedCount} messages removed`;
+        if (memoryDomain) statsHtml += ` · ${escapeHtml(memoryDomain)}`;
         if (ctxBefore > 0) statsHtml += ` · was ${ctxBefore}% ctx`;
 
-        const labelText = isSummarized ? 'Context summarized' : 'Context trimmed';
-        const iconPath = isSummarized
+        const labelText = isRollingMemory ? 'Conversation memory' : isSummarized ? 'Context summarized' : 'Context trimmed';
+        const iconPath = isRollingMemory
+            ? '<path d="M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z"/><path d="M9 8h6M9 12h6M9 16h4"/>'
+            : isSummarized
             ? '<path d="M9 12h6M9 16h6M9 8h6M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z"/>'
             : '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>';
 
@@ -582,6 +652,7 @@ function buildMessageElement(msg, idx, allMessages) {
       </div>`;
     // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
     wrapper.innerHTML = window.DOMPurify.sanitize(html);
+    colorizeRpText(wrapper.querySelector('.chat-msg-body'));
 
     return wrapper;
 }
@@ -640,6 +711,7 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
     if (content) {
         // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context
         body.innerHTML = renderMd(content);
+        colorizeRpText(body);
         if (typeof hljs !== 'undefined') {
             body.querySelectorAll('pre code:not(.hljs)').forEach(codeEl => {
                 hljs.highlightElement(codeEl);
@@ -837,6 +909,17 @@ function navigateVariant(btn, direction) {
 
         const newVariants = variants.length > 0 ? [...variants] : [msg.content];
 
+        if (msg._quickGuideMeta && tab.messages[msgIdx - 1]?.role === 'assistant') {
+            scheduleChatPersist();
+            getTransport()?.regenerateQuickGuideReply?.(tab, msgIdx, msg._quickGuideMeta, newVariants)
+                ?.then((result) => {
+                    if (result?.message) {
+                        result.message._quickGuideMeta = { ...msg._quickGuideMeta };
+                    }
+                });
+            return;
+        }
+
         // Find the user message immediately before this assistant message
         let userMsgIdx = -1;
         for (let i = msgIdx - 1; i >= 0; i--) {
@@ -965,6 +1048,7 @@ function saveMessageEdit(btn) {
     // Update message in-place (safe during streaming — doesn't wipe other messages)
     // eslint-disable-next-line no-unsanitized/property -- msg.content is user-editable local data, rendered via trusted renderMd
     body.innerHTML = typeof renderMd === 'function' ? renderMd(msg.content) : escapeHtml(msg.content);
+    if (msg.role === 'assistant') colorizeRpText(body);
     body.classList.add('chat-msg-body-rendered');
 }
 
@@ -977,6 +1061,7 @@ function cancelMessageEdit(btn) {
         // Restore original content in-place (safe during streaming)
         // eslint-disable-next-line no-unsanitized/property -- msg.content is user-editable local data, rendered via trusted renderMd
         body.innerHTML = typeof renderMd === 'function' ? renderMd(msg.content) : escapeHtml(msg.content);
+        if (msg.role === 'assistant') colorizeRpText(body);
         body.classList.add('chat-msg-body-rendered');
     }
 }
@@ -1149,93 +1234,11 @@ export function updateChatTabBadge() {
     if (sidebarBadgeChat) sidebarBadgeChat.textContent = count > 0 ? count : '';
 }
 
-// ── Persona Strip (Section 4B-C) ────────────────────────────────────────────────
-
-const PERSONA_RECENT_KEY = 'llama-persona-recent';
-
-function getPersonaIcon(personaName) {
-    const name = personaName.toLowerCase();
-    if (name.includes('assistant') || name.includes('default') || name.includes('helpful')) return '💬';
-    if (name.includes('creative') || name.includes('writing') || name.includes('story')) return '✨';
-    if (name.includes('code') || name.includes('dev') || name.includes('programming')) return '💻';
-    if (name.includes('technical') || name.includes('analysis') || name.includes('research')) return '🔬';
-    if (name.includes('business') || name.includes('professional')) return '💼';
-    if (name.includes('roleplay') || name.includes('rp')) return '🎭';
-    if (name.includes('educational') || name.includes('learning') || name.includes('teach')) return '📚';
-    if (name.includes('creative writing')) return '🎨';
-    return '🤖';
-}
-
-export function renderPersonaStrip() {
-    const strip = document.getElementById('chat-persona-strip');
-    if (!strip) return;
-    
-    // Remove existing chips to avoid duplicate event handlers
-    strip.innerHTML = '';
-    
-    const recent = JSON.parse(localStorage.getItem(PERSONA_RECENT_KEY) || '[]');
-    const recentLimited = recent.slice(0, 5);
-    const activeTemplateId = activeChatTab()?.active_template_id || '';
-    
-   recentLimited.forEach(persona => {
-        const btn = document.createElement('button');
-        btn.className = 'chat-persona-chip' + (persona.id === activeTemplateId ? ' active' : '');
-        btn.dataset.personaId = persona.id;
-        // ICONS: Hardcoded safe emoji strings only
-        const personaName = persona.name.toLowerCase();
-        let icon = '🤖';
-        if (personaName.includes('assistant') || personaName.includes('default')) icon = '💬';
-        else if (personaName.includes('creative') || personaName.includes('writing')) icon = '✨';
-        else if (personaName.includes('code') || personaName.includes('dev')) icon = '💻';
-        else if (personaName.includes('technical') || personaName.includes('analysis')) icon = '🔬';
-        else if (personaName.includes('business') || personaName.includes('professional')) icon = '💼';
-        else if (personaName.includes('roleplay')) icon = '🎭';
-        else if (personaName.includes('educational') || personaName.includes('learning')) icon = '📚';
-        btn.innerHTML = `<span class="chat-persona-chip-icon">${icon}</span><span class="chat-persona-chip-name">${escapeHtml(persona.name)}</span>`;
-        btn.addEventListener('click', () => applyPersona(persona.id));
-        strip.appendChild(btn);
-    });
-    
-    if (recent.length > 5) {
-        const moreBtn = document.createElement('button');
-        moreBtn.className = 'chat-persona-chip-more';
-        moreBtn.textContent = '⋯';
-        moreBtn.title = 'More personas...';
-        moreBtn.addEventListener('click', () => openTemplateManager());
-        strip.appendChild(moreBtn);
-    }
-}
-
-export async function applyPersona(templateId) {
-    const templates = await window.loadTemplates?.();
-    const template = templates?.find(t => t.id === templateId);
-    if (!template) return;
-    
-    const tab = activeChatTab();
-    if (!tab) return;
-    
-    tab.system_prompt = template.prompt;
-    tab.active_template_id = template.id;
-    
-    // Update recent usage
-    const recent = JSON.parse(localStorage.getItem(PERSONA_RECENT_KEY) || '[]');
-    const filtered = recent.filter(p => p.id !== templateId);
-    const newRecent = [{ id: template.id, name: template.name, timestamp: Date.now() }, ...filtered].slice(0, 5);
-    localStorage.setItem(PERSONA_RECENT_KEY, JSON.stringify(newRecent));
-    
-    // Refresh UI
-    renderPersonaStrip();
-    renderChatMessages();
-    scheduleChatPersist();
-    showToast(`Applied persona: ${template.name}`, 'info');
-}
-
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initChatRender() {
     // Call setup functions that bind DOM event listeners
     initChatScrollButton();
-    renderPersonaStrip();
 
     // Event delegation for chat tab close buttons
     document.getElementById('chat-tab-bar')?.addEventListener('click', (e) => {

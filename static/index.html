@@ -19,6 +19,7 @@
     <link rel="stylesheet" href="/css/cards-hardware.css">
     <link rel="stylesheet" href="/css/components.css">
     <link rel="stylesheet" href="/css/chat.css">
+    <link rel="stylesheet" href="/css/chat-guided-generation.css">
     <link rel="stylesheet" href="/css/setup-view.css">
     <link rel="stylesheet" href="/css/settings-modal.css">
     <link rel="stylesheet" href="/css/logs.css">
@@ -366,22 +367,31 @@
                             <div class="context-subtitle" id="m-context-subtitle">&mdash;</div>
                             <div class="context-body">
                                 <div class="context-card-view active" id="context-view-gauge">
-                                    <div class="context-gauge-shell">
-                                        <svg class="context-gauge-svg" viewBox="0 0 160 160" aria-hidden="true">
-                                            <circle class="context-gauge-track" cx="80" cy="80" r="64"/>
-                                            <circle class="context-gauge-ring idle" id="m-context-gauge-ring" cx="80" cy="80" r="64"/>
-                                        </svg>
-                                        <div class="context-gauge-center">
-                                            <div class="context-gauge-value" id="m-context-gauge-value">&mdash;</div>
-                                            <div class="context-gauge-secondary" id="m-context-gauge-secondary">&mdash;</div>
+                                    <div class="context-gauge-layout">
+                                        <div class="context-gauge-shell">
+                                            <svg class="context-gauge-svg" viewBox="0 0 160 160" aria-hidden="true">
+                                                <circle class="context-gauge-track" cx="80" cy="80" r="64"/>
+                                                <circle class="context-gauge-ring idle" id="m-context-gauge-ring" cx="80" cy="80" r="64"/>
+                                            </svg>
+                                            <div class="context-gauge-center">
+                                                <div class="context-gauge-value" id="m-context-gauge-value">&mdash;</div>
+                                                <div class="context-gauge-secondary" id="m-context-gauge-secondary">&mdash;</div>
+                                            </div>
+                                        </div>
+                                        <div class="context-chat-strip-wrap">
+                                            <div class="context-chat-strip" id="m-context-chat-strip"></div>
+                                            <div class="context-chat-strip-meta" id="m-context-chat-strip-meta">&mdash;</div>
                                         </div>
                                     </div>
-                                    <div class="context-chat-strip-wrap">
-                                        <div class="context-chat-strip" id="m-context-chat-strip"></div>
-                                        <div class="context-chat-strip-meta" id="m-context-chat-strip-meta">&mdash;</div>
-                                    </div>
+                                    <div class="context-gauge-footer" id="m-context-gauge-footer"></div>
                                 </div>
                                 <div class="context-card-view hidden" id="context-view-fleet">
+                                    <div class="context-fleet-header" id="m-context-fleet-header">
+                                        <div class="context-fleet-agg-label" id="m-context-fleet-agg-label">fleet utilization</div>
+                                        <div class="context-fleet-agg-track">
+                                            <div class="context-fleet-agg-fill unknown" id="m-context-fleet-agg-fill" style="width:0%"></div>
+                                        </div>
+                                    </div>
                                     <div class="context-fleet-summary" id="m-context-fleet-summary">&mdash;</div>
                                     <div class="context-fleet-rows" id="m-context-fleet-rows"></div>
                                     <div class="context-fleet-footer" id="m-context-fleet-footer">&mdash;</div>
@@ -687,6 +697,9 @@
                             <svg class="chat-explicit-icon-unlocked" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 019.9-1"/>
                             </svg>
+                            <svg class="chat-explicit-icon-fire" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2c0 4-4 6-4 10a4 4 0 008 0c0-4-4-6-4-10z"/>
+                            </svg>
                         </button>
                     </div>
                 </div>
@@ -839,6 +852,9 @@
                             <svg class="chat-explicit-icon-unlocked" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 019.9-1"/>
                             </svg>
+                            <svg class="chat-explicit-icon-fire" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2c0 4-4 6-4 10a4 4 0 008 0c0-4-4-6-4-10z"/>
+                            </svg>
                         </button>
                     </div>
                 </div>
@@ -988,39 +1004,253 @@
                 </div>
             </div>
 
-            <!-- Message thread -->
-            <div class="chat-messages" id="chat-messages"></div>
-
-            <!-- Persona strip -->
-            <div id="chat-persona-strip" class="chat-persona-strip"></div>
+            <!-- Message thread + contained context notes rail -->
+            <div class="chat-messages" id="chat-messages">
+                <div class="chat-messages-inner" id="chat-messages-inner"></div>
+                <div class="chat-context-bar" id="chat-context-bar">
+                    <button class="chat-context-bar-toggle" id="context-sidebar-toggle" aria-label="Open context notes" aria-expanded="false" aria-controls="chat-sidebar">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+                            <polyline points="14,2 14,8 20,8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                        </svg>
+                        <span class="chat-context-bar-toggle-label">Notes</span>
+                        <span class="chat-context-bar-count" id="context-sidebar-count" hidden>0</span>
+                    </button>
+                    <button class="chat-context-bar-collapse" id="context-sidebar-collapse" type="button" title="Collapse context notes" aria-label="Collapse context notes">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M15 18l-6-6 6-6"/>
+                        </svg>
+                    </button>
+                    <div class="guided-hovercard guided-hovercard-rail">
+                        <div class="guided-hovercard-title">Context Notes</div>
+                        <div class="guided-hovercard-copy">Keep characters, setting, plot, and tone visible to the model while you chat.</div>
+                    </div>
+                    <div class="sidebar-resize-handle" id="chat-context-bar-resize"></div>
+                    <div class="chat-sidebar" id="chat-sidebar">
+                        <div class="chat-sidebar-header">
+                            <div class="chat-sidebar-heading">
+                                <h3>Context Notes</h3>
+                                <p class="chat-sidebar-subtitle" id="chat-sidebar-subtitle">Persistent memory for the current chat tab.</p>
+                            </div>
+                            <div class="chat-sidebar-header-actions">
+                                <button class="chat-sidebar-intro-toggle" id="chat-sidebar-intro-toggle" type="button" title="Hide context notes description" aria-label="Hide context notes description">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M18 6L6 18"/>
+                                        <path d="M6 6l12 12"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="sidebar-notes-list" id="sidebar-notes-list"></div>
+                        <div class="sidebar-section-management" id="sidebar-section-management">
+                            <div class="sidebar-add-section-container">
+                                <button class="sidebar-add-section-trigger" id="sidebar-add-section-trigger" title="Add custom section">+ Add Section</button>
+                                <div class="sidebar-add-section-input hidden" id="sidebar-add-section-input">
+                                    <input type="text" class="sidebar-section-name-input" id="sidebar-section-name-input" placeholder="Section name..." autocomplete="off">
+                                    <div class="sidebar-section-input-actions">
+                                        <button class="sidebar-section-confirm-btn" id="sidebar-section-confirm-btn">✓</button>
+                                        <button class="sidebar-section-cancel-btn" id="sidebar-section-cancel-btn">✕</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <!-- Resize handle -->
             <div class="chat-resize-handle" id="chat-resize-handle" title="Drag to resize input area"></div>
 
             <!-- Input area -->
-            <div class="chat-input-row" id="chat-input-row">
-                <div class="chat-controls">
-                    <button class="btn-chat-control" id="btn-clear" title="Clear chat">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m5 0V4a2 2 0 012-2h2a2 2 0 012 2v2"/>
-                        </svg>
-                    </button>
-                </div>
-                <div class="chat-textarea-wrap">
-                    <textarea id="chat-input" rows="1" placeholder="Send a message…"></textarea>
-                    <span class="chat-char-count" id="chat-char-count" title="Approximate token count (chars ÷ 4)"></span>
-                </div>
-                <label class="chat-enter-toggle" data-tooltip="Enter sends message" title="Toggle: Enter sends message">
-                    <input type="checkbox" id="chat-enter-toggle-input">
-                    <span class="chat-enter-toggle-label">↵</span>
-                </label>
-                <button class="btn-chat-send" id="btn-send">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
-                    </svg>
-                </button>
-            </div>
-
+             <div class="chat-input-row" id="chat-input-row">
+                  <div class="chat-controls">
+                      <button class="btn-chat-control" id="btn-clear" title="Clear chat">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                              <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m5 0V4a2 2 0 012-2h2a2 2 0 012 2v2"/>
+                          </svg>
+                      </button>
+                  </div>
+                     <div class="chat-textarea-wrap">
+                      <textarea id="chat-input" rows="1" placeholder="Send a message…"></textarea>
+                      <span class="chat-char-count" id="chat-char-count" title="Approximate token count (chars ÷ 4)"></span>
+                  </div>
+                     <div class="chat-context-controls">
+                       <div class="suggestions-wrapper guided-tool">
+                           <button class="guided-action-btn" id="suggestions-toggle" aria-expanded="false" aria-controls="suggestions-dropdown" aria-label="Open AI suggestions">
+                               <span class="guided-action-icon" aria-hidden="true">💡</span>
+                               <span class="guided-action-label">Ideas</span>
+                               <span class="guided-action-status" id="suggestions-toggle-status" hidden>General</span>
+                               <span class="guided-action-caret" aria-hidden="true">▾</span>
+                           </button>
+                           <div class="guided-hovercard">
+                               <div class="guided-hovercard-title">Suggestions</div>
+                               <div class="guided-hovercard-copy">Generate context-aware next-message ideas, twists, characters, or genre-specific prompts.</div>
+                           </div>
+                           <div class="suggestions-dropdown" id="suggestions-dropdown">
+                               <div class="guided-popover-header">
+                                   <div class="guided-popover-kicker">AI PROMPTS</div>
+                                   <div class="guided-popover-title-row">
+                                       <div>
+                                           <div class="guided-popover-title">Suggestions</div>
+                                           <div class="guided-popover-copy suggestions-header-status" id="suggestions-category-description" hidden></div>
+                                       </div>
+                                       <div class="suggestions-header-actions">
+                                           <button class="suggestions-view-toggle" id="suggestions-editor-back" type="button" hidden>Back</button>
+                                           <button class="suggestions-view-toggle" id="suggestions-view-toggle" type="button">Hide Setup</button>
+                                           <button class="suggestions-manage-btn" id="suggestions-manage-btn" type="button">Manage</button>
+                                       </div>
+                                   </div>
+                               </div>
+                               <div class="suggestions-tag-cloud">
+                                   <div class="suggestions-search-wrap">
+                                       <input type="text" class="suggestion-search-input" id="suggestion-search-input" placeholder="Search categories…" aria-label="Search suggestion categories">
+                                   </div>
+                                   <div class="suggestions-category-preview" id="suggestions-category-preview" aria-live="polite"></div>
+                                   <div class="category-group" data-group="story-tools">
+                                       <button type="button" class="category-group-header" aria-expanded="true">
+                                           <span class="category-group-chevron" aria-hidden="true">▸</span>
+                                           <span>Story Tools</span>
+                                       </button>
+                                       <div class="category-group-chips">
+                                           <div class="category-group-chips-inner">
+                                               <button class="suggestion-category-btn active" data-category="general">General</button>
+                                               <button class="suggestion-category-btn" data-category="plot-twist">Plot Twist</button>
+                                               <button class="suggestion-category-btn" data-category="new-character">New Character</button>
+                                               <button class="suggestion-category-btn" data-category="director">Director</button>
+                                           </div>
+                                       </div>
+                                   </div>
+                                   <div class="category-group" data-group="genres">
+                                       <button type="button" class="category-group-header" aria-expanded="true">
+                                           <span class="category-group-chevron" aria-hidden="true">▸</span>
+                                           <span>Genres</span>
+                                       </button>
+                                       <div class="category-group-chips">
+                                           <div class="category-group-chips-inner">
+                                               <button class="suggestion-category-btn" data-category="action">Action</button>
+                                               <button class="suggestion-category-btn" data-category="comedy">Comedy</button>
+                                               <button class="suggestion-category-btn" data-category="fantasy">Fantasy</button>
+                                               <button class="suggestion-category-btn" data-category="horror">Horror</button>
+                                               <button class="suggestion-category-btn" data-category="mystery">Mystery</button>
+                                               <button class="suggestion-category-btn" data-category="noir">Noir</button>
+                                               <button class="suggestion-category-btn" data-category="romance">Romance</button>
+                                               <button class="suggestion-category-btn" data-category="sci-fi">Sci-Fi</button>
+                                               <button class="suggestion-category-btn" data-category="thriller">Thriller</button>
+                                               <button class="suggestion-category-btn" data-category="character">Character</button>
+                                           </div>
+                                       </div>
+                                   </div>
+                                   <div class="category-group category-group-explicit" data-group="explicit" id="suggestions-explicit-group">
+                                       <button type="button" class="category-group-header" aria-expanded="true">
+                                           <span class="category-group-chevron" aria-hidden="true">▸</span>
+                                           <span>Explicit</span>
+                                       </button>
+                                       <div class="category-group-chips">
+                                           <div class="category-group-chips-inner">
+                                               <button class="suggestion-category-btn" data-category="explicit">Explicit 🔞</button>
+                                           </div>
+                                       </div>
+                                   </div>
+                               </div>
+                              <div class="suggestions-list" id="suggestions-list"></div>
+                              <div class="suggestions-recent" id="suggestions-recent" style="display:none;">
+                                  <div class="suggestions-recent-header">
+                                      <span>Recent</span>
+                                      <button class="suggestions-clear-recent" id="suggestions-clear-recent" type="button">Clear</button>
+                                  </div>
+                                  <div class="suggestions-recent-list" id="suggestions-recent-list"></div>
+                              </div>
+                              <div class="suggestions-actions">
+                                  <button class="suggestions-generate-btn" id="suggestions-generate-btn" type="button">Generate Suggestions</button>
+                              </div>
+                          </div>
+                      </div>
+                     <div class="quick-guide-wrapper guided-tool">
+                           <button class="guided-action-btn" id="quick-guide-toggle" aria-expanded="false" aria-controls="quick-guide-container" aria-label="Guide the AI">
+                               <span class="guided-action-icon" aria-hidden="true">🧭</span>
+                               <span class="guided-action-label">Guide AI</span>
+                               <span class="guided-action-status" id="quick-guide-status" hidden>Active</span>
+                               <span class="guided-action-caret" aria-hidden="true">▾</span>
+                           </button>
+                           <div class="guided-hovercard">
+                               <div class="guided-hovercard-title">Guide the AI</div>
+                               <div class="guided-hovercard-copy">Steer the assistant immediately, generate director-style options, or arm a delayed hidden beat.</div>
+                           </div>
+                           <div class="quick-guide-container" id="quick-guide-container">
+                               <div class="quick-guide-header">
+                                   <div>
+                                       <div class="quick-guide-title">Guide the AI</div>
+                                       <div class="quick-guide-subtitle" id="quick-guide-subtitle">Steer the next assistant reply without touching the main chat flow.</div>
+                                       <div class="quick-guide-last-used" id="quick-guide-last-used"></div>
+                                   </div>
+                               </div>
+                               <div class="quick-guide-mode-switch" id="quick-guide-mode-switch" role="tablist" aria-label="Guide AI modes">
+                                   <button class="quick-guide-mode-btn active" id="quick-guide-mode-quick" data-guide-mode="quick" type="button" role="tab" aria-selected="true">Quick</button>
+                                   <button class="quick-guide-mode-btn" id="quick-guide-mode-director" data-guide-mode="director" type="button" role="tab" aria-selected="false">Director</button>
+                                   <button class="quick-guide-mode-btn" id="quick-guide-mode-surprise" data-guide-mode="surprise" type="button" role="tab" aria-selected="false">Surprise</button>
+                               </div>
+                               <div class="quick-guide-body">
+                                   <div class="quick-guide-mode-panel quick-guide-mode-panel-active" id="quick-guide-panel-quick" data-guide-panel="quick">
+                                       <textarea class="quick-guide-input" id="quick-guide-input" placeholder="e.g. 'Write in a noir style', 'Have the character sneeze', 'Focus on dialogue, skip description'..."></textarea>
+                                       <div class="quick-guide-footer">
+                                           <button class="quick-guide-btn quick-guide-restore-btn" id="quick-guide-restore-btn" type="button" hidden>Revise Last</button>
+                                           <button class="quick-guide-btn quick-guide-submit-btn" id="quick-guide-submit-btn" type="button">Apply Guide</button>
+                                       </div>
+                                   </div>
+                                   <div class="quick-guide-mode-panel" id="quick-guide-panel-director" data-guide-panel="director" hidden>
+                                       <textarea class="quick-guide-input quick-guide-input-compact quick-guide-director-input" id="quick-guide-director-input" placeholder="e.g. 'Escalate this into a confrontation, but keep it intimate and restrained.'"></textarea>
+                                       <div class="quick-guide-footer">
+                                           <button class="quick-guide-btn quick-guide-submit-btn" id="quick-guide-director-generate-btn" type="button">Generate Options</button>
+                                       </div>
+                                       <div class="quick-guide-director-results" id="quick-guide-director-results"></div>
+                                   </div>
+                                   <div class="quick-guide-mode-panel" id="quick-guide-panel-surprise" data-guide-panel="surprise" hidden>
+                                       <div class="quick-guide-surprise-grid">
+                                           <label class="quick-guide-field">
+                                               <span class="quick-guide-field-label">Beat Type</span>
+                                               <select class="quick-guide-select" id="quick-guide-surprise-kind">
+                                                   <option value="twist">Twist</option>
+                                                   <option value="interruption">Interruption</option>
+                                                   <option value="reveal">Reveal</option>
+                                                   <option value="escalation">Escalation</option>
+                                                   <option value="tone-shift">Tone Shift</option>
+                                                   <option value="custom">Custom</option>
+                                               </select>
+                                           </label>
+                                           <label class="quick-guide-field">
+                                               <span class="quick-guide-field-label">Trigger</span>
+                                               <select class="quick-guide-select" id="quick-guide-surprise-delay">
+                                                   <option value="0">Next Reply</option>
+                                                   <option value="1">After 1 Reply</option>
+                                                   <option value="2">After 2 Replies</option>
+                                               </select>
+                                           </label>
+                                       </div>
+                                       <textarea class="quick-guide-input quick-guide-input-compact quick-guide-surprise-input" id="quick-guide-surprise-input" placeholder="e.g. 'Introduce a soft betrayal that changes the power balance.'"></textarea>
+                                       <div class="quick-guide-footer">
+                                           <button class="quick-guide-btn quick-guide-submit-btn" id="quick-guide-surprise-arm-btn" type="button">Arm Surprise</button>
+                                       </div>
+                                       <div class="quick-guide-armed-list" id="quick-guide-armed-list"></div>
+                                   </div>
+                                   <div class="quick-guide-status-row" id="quick-guide-status-row" hidden>
+                                       <span class="quick-guide-status-chip" id="quick-guide-status-chip"></span>
+                                   </div>
+                               </div>
+                           </div>
+                       </div>
+                  </div>
+                 <label class="chat-enter-toggle" data-tooltip="Enter sends message" title="Toggle: Enter sends message">
+                     <input type="checkbox" id="chat-enter-toggle-input">
+                     <span class="chat-enter-toggle-label">↵</span>
+                 </label>
+                 <button class="btn-chat-send" id="btn-send">
+                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                         <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                     </svg>
+                 </button>
+             </div>
         </div>
 
         <!-- Page: Logs -->
@@ -1056,9 +1286,6 @@
                             Spawn Local Server
                         </button>
                     </div>
-                </div>
-            </div>
-        </div>
                 </div>
             </div>
         </div>
@@ -1859,6 +2086,10 @@
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="19" cy="13.5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><path d="M13 9.5c2 1 4 3 4 6"/><path d="M9 9.5C7 10.5 5 12.5 5 15.5"/></svg>
                     Appearance
                 </button>
+                <button class="settings-tab" data-tab="chat">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    Chat
+                </button>
                 <button class="settings-tab" data-tab="performance">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                     Performance
@@ -1926,33 +2157,151 @@
                     </label>
                 </div>
                 <div class="settings-pane" id="settings-appearance">
-                    <h3>Appearance</h3>
-                    <label class="modal-field">
-                        Theme
-                        <select id="settings-theme">
-                            <option value="auto">Auto (System)</option>
-                            <option value="light">Light</option>
-                            <option value="dark">Dark</option>
-                        </select>
-                    </label>
-                    <label class="modal-field">
-                        Font Size
-                        <select id="settings-font-size">
-                            <option value="small">Small (14px)</option>
-                            <option value="medium" selected>Medium (16px)</option>
-                            <option value="large">Large (18px)</option>
-                        </select>
-                    </label>
-                    <label class="modal-field">
-                        Dashboard Widgets
-                        <div class="modal-row">
-                            <label class="chk"><input type="checkbox" id="settings-widget-cpu" checked> CPU Usage</label>
-                            <label class="chk"><input type="checkbox" id="settings-widget-gpu" checked> GPU Usage</label>
-                            <label class="chk"><input type="checkbox" id="settings-widget-memory" checked> Memory</label>
-                        </div>
-                    </label>
-                </div>
-                <div class="settings-pane" id="settings-performance">
+                     <h3>Appearance</h3>
+                     <label class="modal-field">
+                         Theme
+                         <select id="settings-theme">
+                             <option value="auto">Auto (System)</option>
+                             <option value="light">Light</option>
+                             <option value="dark">Dark</option>
+                         </select>
+                     </label>
+                     <label class="modal-field">
+                         Font Size
+                         <select id="settings-font-size">
+                             <option value="small">Small (14px)</option>
+                             <option value="medium" selected>Medium (16px)</option>
+                             <option value="large">Large (18px)</option>
+                         </select>
+                     </label>
+                     <label class="modal-field">
+                         Dashboard Widgets
+                         <div class="modal-row">
+                             <label class="chk"><input type="checkbox" id="settings-widget-cpu" checked> CPU Usage</label>
+                             <label class="chk"><input type="checkbox" id="settings-widget-gpu" checked> GPU Usage</label>
+                             <label class="chk"><input type="checkbox" id="settings-widget-memory" checked> Memory</label>
+                         </div>
+                     </label>
+                 </div>
+                 <div class="settings-pane" id="settings-chat">
+                     <h3>Guided Generation</h3>
+                     <p class="settings-help">
+                        Tools to help with creative writing, roleplay, and structured conversations.
+                     </p>
+                     <label class="modal-field">
+                         Context Notes Sidebar
+                         <div style="display:flex;align-items:center;gap:12px;">
+                             <label class="toggle-switch">
+                                 <input type="checkbox" id="settings-enabled-context-notes" checked>
+                                 <span class="toggle-slider"></span>
+                             </label>
+                             <span class="toggle-label">Enable persistent context notes (character, setting, plot details)</span>
+                         </div>
+                     </label>
+                     <label class="modal-field">
+                         AI Suggestions
+                         <div style="display:flex;align-items:center;gap:12px;">
+                             <label class="toggle-switch">
+                                 <input type="checkbox" id="settings-enabled-suggestions" checked>
+                                 <span class="toggle-slider"></span>
+                             </label>
+                             <span class="toggle-label">Enable AI-powered suggestion dropdown</span>
+                         </div>
+                     </label>
+                     <label class="modal-field">
+                         Quick Guide
+                         <div style="display:flex;align-items:center;gap:12px;">
+                             <label class="toggle-switch">
+                                 <input type="checkbox" id="settings-enabled-quick-guide" checked>
+                                 <span class="toggle-slider"></span>
+                             </label>
+                             <span class="toggle-label">Enable one-time instruction input</span>
+                         </div>
+                     </label>
+                     <label class="modal-field">
+                          Default Sidebar Width
+                          <input type="range" id="settings-sidebar-width" min="200" max="500" value="280" style="width:200px;">
+                          <span id="settings-sidebar-width-value" style="color:var(--text-muted);font-size:12px;">280px</span>
+                      </label>
+                      <hr style="border:none;border-top:1px solid var(--border-color);margin:16px 0;">
+                      <h4 style="margin:0 0 12px 0;">Suggestion Settings</h4>
+                      <label class="modal-field">
+                          Suggestion Count
+                          <div style="display:flex;align-items:center;gap:12px;">
+                              <input type="range" id="settings-suggestion-count" min="3" max="8" value="5" style="width:150px;">
+                              <span id="settings-suggestion-count-value" style="color:var(--text-muted);font-size:12px;min-width:20px;text-align:center;">5</span>
+                          </div>
+                      </label>
+                      <label class="modal-field">
+                          Context Depth
+                          <div style="display:flex;align-items:center;gap:12px;">
+                              <input type="range" id="settings-context-depth" min="5" max="20" value="10" style="width:150px;">
+                              <span id="settings-context-depth-value" style="color:var(--text-muted);font-size:12px;min-width:24px;text-align:center;">10</span>
+                          </div>
+                      </label>
+                      <label class="modal-field">
+                          General Prompt
+                          <textarea id="settings-prompt-general" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                      </label>
+                      <label class="modal-field">
+                          Plot Twist Prompt
+                          <textarea id="settings-prompt-plot-twist" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                      </label>
+                      <label class="modal-field">
+                           New Character Prompt
+                           <textarea id="settings-prompt-new-character" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Context Prompt
+                           <textarea id="settings-prompt-context" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Director Prompt
+                           <textarea id="settings-prompt-director" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Explicit Prompt
+                           <textarea id="settings-prompt-explicit" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Action Prompt
+                           <textarea id="settings-prompt-action" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Comedy Prompt
+                           <textarea id="settings-prompt-comedy" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Fantasy Prompt
+                           <textarea id="settings-prompt-fantasy" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Horror Prompt
+                           <textarea id="settings-prompt-horror" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Mystery Prompt
+                           <textarea id="settings-prompt-mystery" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Noir Prompt
+                           <textarea id="settings-prompt-noir" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Romance Prompt
+                           <textarea id="settings-prompt-romance" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Sci-Fi Prompt
+                           <textarea id="settings-prompt-sci-fi" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <label class="modal-field">
+                           Thriller Prompt
+                           <textarea id="settings-prompt-thriller" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                       </label>
+                       <button type="button" id="settings-reset-prompts" class="btn btn-secondary" style="margin-top:8px;font-size:12px;padding:6px 12px;">Reset Prompts to Defaults</button>
+                  </div>
+                 <div class="settings-pane" id="settings-performance">
                     <h3>Performance &amp; Connection</h3>
                     <p class="settings-help">
                         Control how frequently the dashboard refreshes metrics. Lower intervals give smoother real-time updates but use more bandwidth and battery. On slow or metered connections, a higher interval reduces network usage.
@@ -2079,6 +2428,49 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Manage Categories Modal -->
+<div class="modal-overlay cat-mgr-overlay" id="manage-categories-modal" aria-hidden="true" inert>
+    <div class="cat-mgr-panel">
+        <div class="cat-mgr-header">
+            <div class="cat-mgr-header-text">
+                <div class="cat-mgr-kicker">Story Suggestions</div>
+                <h2 class="cat-mgr-title">Manage Categories</h2>
+                <p class="cat-mgr-subtitle">Each category steers the AI toward a different kind of story beat. Built-ins work out of the box — customize their prompts to shape the output style. Add your own for genres or themes not covered.</p>
+            </div>
+            <button type="button" class="cat-mgr-close" id="manage-categories-close" aria-label="Close">&#x2715;</button>
+        </div>
+        <div class="cat-mgr-body">
+            <div class="cat-mgr-col">
+                <div class="cat-mgr-col-header">
+                    <span class="cat-mgr-col-label">Built-in</span>
+                    <span class="cat-mgr-col-hint">Override any prompt — leave blank to restore the default</span>
+                </div>
+                <div id="categories-builtin-list" class="cat-mgr-list"></div>
+            </div>
+            <div class="cat-mgr-col cat-mgr-col-custom">
+                <div class="cat-mgr-col-header">
+                    <span class="cat-mgr-col-label">Custom</span>
+                    <span class="cat-mgr-col-hint">Your categories appear alongside the built-ins as chips</span>
+                </div>
+                <div id="categories-custom-list" class="cat-mgr-list"></div>
+                <div class="cat-mgr-add-section">
+                    <div class="cat-mgr-add-label">New Category</div>
+                    <input type="text" id="new-category-name" class="cat-mgr-field" placeholder="Name (e.g., Western, Spy Thriller, Slice of Life)">
+                    <textarea id="new-category-prompt" class="cat-mgr-field cat-mgr-textarea" rows="6" placeholder="Tell the AI what kind of beats to generate.
+
+Example:
+Generate {count} western-themed story beats. Focus on frontier tension, lawman vs. outlaw dynamics, high-noon confrontations, and the harsh beauty of open plains. Build naturally from the current conversation.
+
+Format each as:
+TITLE
+One-sentence description of the beat."></textarea>
+                    <button type="button" id="add-category-btn" class="cat-mgr-add-btn">Add Category</button>
                 </div>
             </div>
         </div>
@@ -2402,7 +2794,6 @@
     </div>
     <div class="slide-panel-body" id="release-notes-body"></div>
     <div class="slide-panel-footer">
-        <a id="release-notes-link" href="#" target="_blank" rel="noopener">Open on GitHub ↗</a>
         <div class="slide-panel-footer-actions">
             <button type="button" id="release-notes-update-btn" class="btn-sm btn-update-action"></button>
             <button type="button" class="btn-sm btn-preset" id="release-notes-dismiss">Later</button>

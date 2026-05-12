@@ -8,6 +8,8 @@ pub const CSS_AGENT_MODAL: &str = include_str!("../../static/css/agent-modal.css
 pub const CSS_BASE: &str = include_str!("../../static/css/base.css");
 pub const CSS_CARDS_HARDWARE: &str = include_str!("../../static/css/cards-hardware.css");
 pub const CSS_CARDS_INFERENCE: &str = include_str!("../../static/css/cards-inference.css");
+pub const CSS_CHAT_GUIDED_GENERATION: &str =
+    include_str!("../../static/css/chat-guided-generation.css");
 pub const CSS_CHAT: &str = include_str!("../../static/css/chat.css");
 pub const CSS_COMPONENTS: &str = include_str!("../../static/css/components.css");
 pub const CSS_LAYOUT: &str = include_str!("../../static/css/layout.css");
@@ -24,9 +26,14 @@ pub const CORE_FORMAT_JS: &str = include_str!("../../static/js/core/format.js");
 pub const FEATURES_ANIMATE_JS: &str = include_str!("../../static/js/features/animate.js");
 pub const FEATURES_ATTACH_DETACH_JS: &str =
     include_str!("../../static/js/features/attach-detach.js");
+pub const FEATURES_CHAT_NOTES_JS: &str = include_str!("../../static/js/features/chat-notes.js");
 pub const FEATURES_CHAT_PARAMS_JS: &str = include_str!("../../static/js/features/chat-params.js");
+pub const FEATURES_CHAT_QUICK_GUIDE_JS: &str =
+    include_str!("../../static/js/features/chat-quick-guide.js");
 pub const FEATURES_CHAT_RENDER_JS: &str = include_str!("../../static/js/features/chat-render.js");
 pub const FEATURES_CHAT_STATE_JS: &str = include_str!("../../static/js/features/chat-state.js");
+pub const FEATURES_CHAT_SUGGESTIONS_JS: &str =
+    include_str!("../../static/js/features/chat-suggestions.js");
 pub const FEATURES_CHAT_TEMPLATES_JS: &str =
     include_str!("../../static/js/features/chat-templates.js");
 pub const FEATURES_CHAT_TRANSPORT_JS: &str =
@@ -56,4 +63,21 @@ pub const FEATURES_TOAST_JS: &str = include_str!("../../static/js/features/toast
 pub const FEATURES_UPDATES_JS: &str = include_str!("../../static/js/features/updates.js");
 pub const FEATURES_USER_MENU_JS: &str = include_str!("../../static/js/features/user-menu.js");
 pub const MANIFEST_JSON: &str = include_str!("../../static/manifest.json");
+pub const ACTION_MD: &str = include_str!("../../static/prompts/action.md");
+pub const CHARACTER_MD: &str = include_str!("../../static/prompts/character.md");
+pub const COMEDY_MD: &str = include_str!("../../static/prompts/comedy.md");
+pub const CONTEXT_MD: &str = include_str!("../../static/prompts/context.md");
+pub const DIRECTOR_MD: &str = include_str!("../../static/prompts/director.md");
+pub const EXPLICIT_MD: &str = include_str!("../../static/prompts/explicit.md");
+pub const FANTASY_MD: &str = include_str!("../../static/prompts/fantasy.md");
+pub const GENERAL_MD: &str = include_str!("../../static/prompts/general.md");
+pub const HORROR_MD: &str = include_str!("../../static/prompts/horror.md");
+pub const MYSTERY_MD: &str = include_str!("../../static/prompts/mystery.md");
+pub const NEW_CHARACTER_MD: &str = include_str!("../../static/prompts/new-character.md");
+pub const NOIR_MD: &str = include_str!("../../static/prompts/noir.md");
+pub const PLOT_TWIST_MD: &str = include_str!("../../static/prompts/plot-twist.md");
+pub const ROMANCE_MD: &str = include_str!("../../static/prompts/romance.md");
+pub const SCI_FI_MD: &str = include_str!("../../static/prompts/sci-fi.md");
+pub const TEMPLATE_MD: &str = include_str!("../../static/prompts/template.md");
+pub const THRILLER_MD: &str = include_str!("../../static/prompts/thriller.md");
 pub const SW_JS: &str = include_str!("../../static/sw.js");

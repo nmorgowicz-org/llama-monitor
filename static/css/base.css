@@ -6,12 +6,18 @@
   box-sizing: border-box;
 }
 
-html,
+html {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
 body {
   height: 100%;
   margin: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 body {

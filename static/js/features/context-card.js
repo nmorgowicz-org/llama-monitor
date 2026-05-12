@@ -35,6 +35,10 @@ function ensureElements() {
         gaugeRing: document.getElementById('m-context-gauge-ring'),
         strip: document.getElementById('m-context-chat-strip'),
         stripMeta: document.getElementById('m-context-chat-strip-meta'),
+        gaugeFooter: document.getElementById('m-context-gauge-footer'),
+        fleetHeader: document.getElementById('m-context-fleet-header'),
+        fleetAggFill: document.getElementById('m-context-fleet-agg-fill'),
+        fleetAggLabel: document.getElementById('m-context-fleet-agg-label'),
         fleetSummary: document.getElementById('m-context-fleet-summary'),
         fleetRows: document.getElementById('m-context-fleet-rows'),
         fleetFooter: document.getElementById('m-context-fleet-footer'),
@@ -183,7 +187,8 @@ function renderOverflowButton(className, overflow) {
 
 function renderChatStrip(model) {
     const { strip, stripMeta } = ensureElements();
-    const source = model.nonStaleChats.length ? model.nonStaleChats : model.chatSummaries;
+    // Show all chats with messages — stale ones are dimmed but visible
+    const source = model.chatSummaries.filter(c => c.messageCount > 0);
     const visible = expanded ? source : source.slice(0, MAX_VISIBLE_CHATS);
     const overflow = Math.max(0, source.length - visible.length);
     strip.innerHTML = '';
@@ -198,17 +203,17 @@ function renderChatStrip(model) {
 
     for (const item of visible) {
         const pill = document.createElement('div');
-        pill.className = `context-pill ${item.state}`;
-        pill.title = item.name;
+        pill.className = `context-pill ${item.state}${item.isStale ? ' stale' : ''}`;
+        pill.title = item.isStale ? `${item.name} (stale)` : item.name;
         pill.innerHTML = `
             <span class="context-pill-name">${escapeHtml(item.name)}</span>
             <span class="context-pill-value">${escapeHtml(item.ctxPct != null ? Math.round(item.ctxPct) + '%' : '—')}</span>
         `;
         strip.appendChild(pill);
         const nameEl = pill.querySelector('.context-pill-name');
-        const overflow = nameEl.scrollWidth - nameEl.offsetWidth;
-        if (overflow > 0) {
-            nameEl.style.setProperty('--scroll-dist', `${overflow}px`);
+        const nameOverflow = nameEl.scrollWidth - nameEl.offsetWidth;
+        if (nameOverflow > 0) {
+            nameEl.style.setProperty('--scroll-dist', `${nameOverflow}px`);
             nameEl.classList.add('scrollable');
         }
     }
@@ -218,15 +223,28 @@ function renderChatStrip(model) {
         strip.appendChild(more);
     }
 
-    // Only show meta when it adds info the pills don't already convey
-    stripMeta.textContent = model.staleChatCount > 0
-        ? `${model.staleChatCount} stale chat${model.staleChatCount !== 1 ? 's' : ''}`
-        : model.capacityTokens > 0
-            ? `${formatMetricNumber(model.capacityTokens)} ctx window`
-            : '';
+    stripMeta.textContent = model.capacityTokens > 0
+        ? `${formatMetricNumber(model.capacityTokens)} ctx window`
+        : '';
 }
 
 const GAUGE_CIRCUMFERENCE = 402; // 2π × r64
+
+function renderGaugeFooter(model) {
+    const { gaugeFooter } = ensureElements();
+    if (!gaugeFooter) return;
+    const parts = [];
+    if (model.aggregateChatPressure.avgPct != null) {
+        parts.push(`avg ${Math.round(model.aggregateChatPressure.avgPct)}%`);
+    }
+    if (model.activeChatCount > 0) {
+        parts.push(`${model.activeChatCount} chat${model.activeChatCount !== 1 ? 's' : ''}`);
+    }
+    if (model.capacityTokens > 0) {
+        parts.push(`${formatMetricNumber(model.capacityTokens)} window`);
+    }
+    gaugeFooter.textContent = parts.join(' · ');
+}
 
 function renderGaugeView(model) {
     const { gaugeValue, gaugeSecondary, gaugeRing } = ensureElements();
@@ -261,12 +279,30 @@ function renderGaugeView(model) {
     }
 
     renderChatStrip(model);
+    renderGaugeFooter(model);
 }
 
 function renderFleetView(model) {
-    const { fleetSummary, fleetRows, fleetFooter } = ensureElements();
-    const source = model.nonStaleChats.length ? model.nonStaleChats : model.chatSummaries;
+    const { fleetSummary, fleetRows, fleetFooter, fleetAggFill, fleetAggLabel } = ensureElements();
+    // Show all chats with messages — stale ones are dimmed but visible
+    const source = model.chatSummaries.filter(c => c.messageCount > 0);
     const rows = expanded ? source : source.slice(0, MAX_VISIBLE_FLEET_ROWS);
+
+    // Fleet header: aggregate utilization bar
+    const avgPct = model.aggregateChatPressure.avgPct;
+    if (fleetAggFill) {
+        const fillWidth = avgPct != null ? Math.min(100, Math.max(0, avgPct)) : 0;
+        fleetAggFill.style.width = `${fillWidth}%`;
+        fleetAggFill.className = `context-fleet-agg-fill ${pctState(avgPct)}`;
+    }
+    if (fleetAggLabel) {
+        const labelParts = [];
+        if (avgPct != null) labelParts.push(`${Math.round(avgPct)}% avg`);
+        const maxPct = model.aggregateChatPressure.maxPct;
+        if (maxPct != null && maxPct !== avgPct) labelParts.push(`${Math.round(maxPct)}% peak`);
+        if (model.capacityTokens > 0) labelParts.push(`${formatMetricNumber(model.capacityTokens)} ctx`);
+        fleetAggLabel.textContent = labelParts.join(' · ') || 'fleet utilization';
+    }
 
     fleetSummary.textContent = model.mode === 'live-runtime'
         ? `${model.activeChatCount} chat${model.activeChatCount !== 1 ? 's' : ''} · runtime live`
@@ -286,10 +322,11 @@ function renderFleetView(model) {
     fleetRows.innerHTML = rows.map(item => {
         const pct = item.ctxPct != null ? Math.round(item.ctxPct) : null;
         const state = escapeHtml(item.state);
+        const staleClass = item.isStale ? ' stale' : '';
         const pctLabel = escapeHtml(pct != null ? pct + '%' : '—');
         const width = escapeHtml(String(pct != null ? Math.min(100, pct) : 0));
         return `
-            <div class="context-fleet-row ${state}">
+            <div class="context-fleet-row ${state}${staleClass}">
                 <div class="context-fleet-row-top">
                     <span class="context-fleet-name">${escapeHtml(item.name)}</span>
                     <span class="context-fleet-value">${pctLabel}</span>

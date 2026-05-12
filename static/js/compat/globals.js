@@ -24,11 +24,6 @@ window.openSettingsModal = openSettingsModal;
 window.openModelsModal = openModelsModal;
 window.openSessionModal = openSessionModal;
 
-// Persona quick-switch chips (Section 4B-C) - functions will be exposed on window after module init
-// window.applyPersona = applyPersona;
-// window.renderPersonaStrip = renderPersonaStrip;
-// window.scheduleChatPersist = scheduleChatPersist;
-
 // ── Functions to be migrated as features are extracted ─────────────────────────
 // Each function below is referenced from an inline handler in index.html.
 // Once the owning feature is extracted, import it here and assign to window.
