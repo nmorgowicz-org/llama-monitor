@@ -909,7 +909,9 @@ async function renderTemplateList() {
         const name = escapeHtml(t.name);
         const id = escapeHtml(t.id);
         const isDefault = t._isDefault;
-        const resetBtn = isDefault ? `<button class="template-list-btn" data-template-action="reset" data-template-id="${id}" title="Reset to Default">
+        // Show reset button for built-in personas AND for user templates that were created from built-in personas
+        const hasBuiltin = DEFAULT_TEMPLATES.some(d => d.name === t.name);
+        const resetBtn = (isDefault || hasBuiltin) ? `<button class="template-list-btn" data-template-action="reset" data-template-id="${id}" title="Reset to Default">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
                         <path d="M3 3v5h5"/>
@@ -1268,7 +1270,7 @@ function updatePersonaExplicitPolicies() {
     const templates = _userTemplates || [];
     const t = templates.find(x => x.id === selectedTemplateId);
     if (!t) {
-        // Show none section
+        // No template selected - show none section
         document.getElementById('persona-explicit-level1').style.display = 'none';
         document.getElementById('persona-explicit-level2').style.display = 'none';
         document.getElementById('persona-explicit-none').style.display = 'block';
@@ -1280,16 +1282,31 @@ function updatePersonaExplicitPolicies() {
     const level1El = document.getElementById('persona-explicit-level1');
     const level2El = document.getElementById('persona-explicit-level2');
     const noneEl = document.getElementById('persona-explicit-none');
-    if (level1 || level2) {
-        level1El.style.display = level1 ? 'block' : 'none';
-        level2El.style.display = level2 ? 'block' : 'none';
+    const level1ResetBtn = document.getElementById('persona-explicit-level1-reset');
+    const level2ResetBtn = document.getElementById('persona-explicit-level2-reset');
+    // Always show level 1 and level 2 textareas (even if empty)
+    // Only show "none" section for new personas that don't have a corresponding built-in persona
+    const hasBuiltin = DEFAULT_TEMPLATES.some(d => d.name === t.name);
+    if (hasBuiltin) {
+        // For built-in personas and their user copies, always show level 1 and level 2
+        level1El.style.display = 'block';
+        level2El.style.display = 'block';
         noneEl.style.display = 'none';
         document.getElementById('persona-explicit-level1-input').value = level1;
         document.getElementById('persona-explicit-level2-input').value = level2;
+        // Enable reset buttons
+        if (level1ResetBtn) level1ResetBtn.disabled = false;
+        if (level2ResetBtn) level2ResetBtn.disabled = false;
     } else {
-        level1El.style.display = 'none';
-        level2El.style.display = 'none';
-        noneEl.style.display = 'block';
+        // For new personas, show level 1 and level 2 textareas (empty) with "Reset to Default" disabled
+        level1El.style.display = 'block';
+        level2El.style.display = 'block';
+        noneEl.style.display = 'none';
+        document.getElementById('persona-explicit-level1-input').value = level1;
+        document.getElementById('persona-explicit-level2-input').value = level2;
+        // Disable reset buttons for new personas
+        if (level1ResetBtn) level1ResetBtn.disabled = true;
+        if (level2ResetBtn) level2ResetBtn.disabled = true;
     }
 }
 
