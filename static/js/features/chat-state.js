@@ -124,6 +124,7 @@ export async function initChatTabs() {
     chatViewBindings.syncMessageLimitInput?.();
     chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
     chatViewBindings.refreshChatTelemetry?.();
+    chatViewBindings.updatePersonaMenuName?.();
     refreshTopCockpit();
 
    // Trigger context card update - mark that chat tabs loaded so dashboard can poll
@@ -196,6 +197,7 @@ export function restoreTabFromTrash(id) {
     chatViewBindings.syncMessageLimitInput?.();
     chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
     chatViewBindings.refreshChatTelemetry?.();
+    chatViewBindings.updatePersonaMenuName?.();
     refreshTopCockpit();
     scheduleChatPersist();
 }
@@ -211,6 +213,7 @@ export function switchChatTab(id) {
     chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
     chatViewBindings.updateCtxPressureBar?.(0);
     chatViewBindings.refreshChatTelemetry?.();
+    chatViewBindings.updatePersonaMenuName?.();
     refreshTopCockpit();
     window.dispatchEvent(new CustomEvent('activeTabChanged', {
         detail: { tabId: id },

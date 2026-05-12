@@ -952,6 +952,7 @@ export function initChatParams() {
         refreshChatTelemetry,
         updateParamsDirtyIndicator,
         checkAutoCompact,
+        updatePersonaMenuName,
     });
     refreshChatTelemetry();
 }
@@ -1219,4 +1220,27 @@ export function setPersonaMenuActive(personaName) {
     if (nameEl && personaName) {
         nameEl.textContent = personaName;
     }
+}
+
+export function updatePersonaMenuName() {
+    const tab = activeChatTab();
+    if (!tab) return;
+    const nameEl = document.getElementById('chat-persona-menu-name');
+    if (!nameEl) return;
+
+    const activeTemplateId = tab.active_template_id;
+    if (!activeTemplateId) {
+        nameEl.textContent = 'None';
+        return;
+    }
+
+    // Resolve the template name from the ID
+    loadTemplates().then(personas => {
+        const found = personas.find(p => p.id === activeTemplateId);
+        if (found) {
+            nameEl.textContent = found.name;
+        } else {
+            nameEl.textContent = '(Unknown)';
+        }
+    });
 }
