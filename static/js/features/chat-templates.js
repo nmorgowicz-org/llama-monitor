@@ -880,6 +880,7 @@ export async function openTemplateManager(editId = null) {
     selectedTemplateId = editId;
     await renderTemplateList();
     await renderTemplatePreview();
+    updatePersonaExplicitPolicies();
     const modal = document.getElementById('template-manager-modal');
     if (modal) modal.classList.add('active');
     const btn = document.getElementById('btn-system-prompt');
@@ -907,6 +908,13 @@ async function renderTemplateList() {
     list.innerHTML = templates.map(t => {
         const name = escapeHtml(t.name);
         const id = escapeHtml(t.id);
+        const isDefault = t._isDefault;
+        const resetBtn = isDefault ? `<button class="template-list-btn" data-template-action="reset" data-template-id="${id}" title="Reset to Default">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                        <path d="M3 3v5h5"/>
+                    </svg>
+                </button>` : '';
         return `<div class="template-list-item ${selectedTemplateId === t.id ? 'selected' : ''} ${editingTemplateId === t.id ? 'editing' : ''}" data-template-id="${id}">
             <span class="template-list-name">${name}</span>
             <div class="template-list-actions">
@@ -921,6 +929,7 @@ async function renderTemplateList() {
                         <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
                     </svg>
                 </button>
+                ${resetBtn}
                 <button class="template-list-btn delete" data-template-action="delete" data-template-id="${id}" title="Delete">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
@@ -935,6 +944,7 @@ async function selectTemplate(id) {
     selectedTemplateId = id;
     await renderTemplateList();
     await renderTemplatePreview();
+    updatePersonaExplicitPolicies();
 }
 
 async function renderTemplatePreview() {
@@ -1083,6 +1093,7 @@ async function saveTemplate() {
     editingTemplateId = null;
     await renderTemplateList();
     await renderTemplatePreview();
+    updatePersonaExplicitPolicies();
     showToast('Template saved', 'success');
 }
 
@@ -1105,6 +1116,41 @@ async function deleteTemplate(id) {
     } catch (e) {
         console.error('Failed to delete template:', e);
         showToast('Failed to delete template', 'error');
+    }
+}
+
+async function resetTemplateToDefault(id) {
+    const templates = await loadTemplates();
+    const t = templates.find(x => x.id === id);
+    if (!t || !t._isDefault) return;
+    // Find the built-in template by name
+    const builtin = DEFAULT_TEMPLATES.find(d => d.name === t.name);
+    if (!builtin) {
+        showToast('Built-in template not found', 'error');
+        return;
+    }
+    // Update the user's copy with the default values
+    try {
+        const res = await fetch(`/api/templates/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id: id,
+                name: builtin.name,
+                prompt: builtin.prompt,
+                explicit_policies: builtin.explicit_policies
+            })
+        });
+        if ((await res.json()).ok) {
+            _userTemplates = null;
+            await renderTemplateList();
+            await renderTemplatePreview();
+            updatePersonaExplicitPolicies();
+            showToast('Template reset to default', 'success');
+        }
+    } catch (e) {
+        console.error('Failed to reset template:', e);
+        showToast('Failed to reset template', 'error');
     }
 }
 
@@ -1212,6 +1258,82 @@ function clearExplicitPolicy() {
     }
 }
 
+// ── Per-persona explicit policy management ────────────────────────────────────
+
+function notifyPersonaPolicyChanged(el) {
+    el?.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function updatePersonaExplicitPolicies() {
+    const templates = _userTemplates || [];
+    const t = templates.find(x => x.id === selectedTemplateId);
+    if (!t) {
+        // Show none section
+        document.getElementById('persona-explicit-level1').style.display = 'none';
+        document.getElementById('persona-explicit-level2').style.display = 'none';
+        document.getElementById('persona-explicit-none').style.display = 'block';
+        return;
+    }
+    const policies = t.explicit_policies || {};
+    const level1 = policies.level1 || '';
+    const level2 = policies.level2 || '';
+    const level1El = document.getElementById('persona-explicit-level1');
+    const level2El = document.getElementById('persona-explicit-level2');
+    const noneEl = document.getElementById('persona-explicit-none');
+    if (level1 || level2) {
+        level1El.style.display = level1 ? 'block' : 'none';
+        level2El.style.display = level2 ? 'block' : 'none';
+        noneEl.style.display = 'none';
+        document.getElementById('persona-explicit-level1-input').value = level1;
+        document.getElementById('persona-explicit-level2-input').value = level2;
+    } else {
+        level1El.style.display = 'none';
+        level2El.style.display = 'none';
+        noneEl.style.display = 'block';
+    }
+}
+
+function resetPersonaExplicitPolicy(level) {
+    const templates = _userTemplates || [];
+    const t = templates.find(x => x.id === selectedTemplateId);
+    if (!t) return;
+    const builtin = DEFAULT_TEMPLATES.find(d => d.name === t.name);
+    if (!builtin || !builtin.explicit_policies) return;
+    const defaultPolicy = level === 1 ? builtin.explicit_policies.level1 : builtin.explicit_policies.level2;
+    if (!defaultPolicy) return;
+    const el = level === 1 ? document.getElementById('persona-explicit-level1-input') : document.getElementById('persona-explicit-level2-input');
+    el.value = defaultPolicy;
+    notifyPersonaPolicyChanged(el);
+}
+
+function clearPersonaExplicitPolicy(level) {
+    const el = level === 1 ? document.getElementById('persona-explicit-level1-input') : document.getElementById('persona-explicit-level2-input');
+    el.value = '';
+    notifyPersonaPolicyChanged(el);
+}
+
+function savePersonaExplicitPolicies() {
+    const templates = _userTemplates || [];
+    const t = templates.find(x => x.id === selectedTemplateId);
+    if (!t) return;
+    const level1 = document.getElementById('persona-explicit-level1-input').value.trim();
+    const level2 = document.getElementById('persona-explicit-level2-input').value.trim();
+    t.explicit_policies = { level1, level2 };
+    // Save to backend
+    fetch(`/api/templates/${t.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: t.id, name: t.name, prompt: t.prompt, explicit_policies: t.explicit_policies })
+    }).then(res => res.json()).then(data => {
+        if (data.ok) {
+            showToast('Explicit policies saved', 'success');
+        }
+    }).catch(err => {
+        console.error('Failed to save explicit policies:', err);
+        showToast('Failed to save explicit policies', 'error');
+    });
+}
+
 // ── System prompt panel ───────────────────────────────────────────────────────
 
 export function toggleSystemPromptPanel() {
@@ -1256,9 +1378,14 @@ export function initChatTemplates() {
     document.getElementById('template-manager-close')?.addEventListener('click', closeTemplateManager);
     document.getElementById('template-new-btn')?.addEventListener('click', newTemplate);
 
-    // Bind explicit policy buttons
-    document.getElementById('explicit-policy-reset')?.addEventListener('click', resetExplicitPolicy);
-    document.getElementById('explicit-policy-clear')?.addEventListener('click', clearExplicitPolicy);
+    // Bind per-persona explicit policy buttons
+    document.getElementById('persona-explicit-level1-reset')?.addEventListener('click', () => resetPersonaExplicitPolicy(1));
+    document.getElementById('persona-explicit-level1-clear')?.addEventListener('click', () => clearPersonaExplicitPolicy(1));
+    document.getElementById('persona-explicit-level2-reset')?.addEventListener('click', () => resetPersonaExplicitPolicy(2));
+    document.getElementById('persona-explicit-level2-clear')?.addEventListener('click', () => clearPersonaExplicitPolicy(2));
+    // Save on blur
+    document.getElementById('persona-explicit-level1-input')?.addEventListener('blur', savePersonaExplicitPolicies);
+    document.getElementById('persona-explicit-level2-input')?.addEventListener('blur', savePersonaExplicitPolicies);
 
     // Event delegation for template list
     const templateList = document.getElementById('template-list');
@@ -1272,6 +1399,7 @@ export function initChatTemplates() {
                 if (action === 'apply') applyTemplateById(id);
                 else if (action === 'edit') editTemplate(id);
                 else if (action === 'delete') deleteTemplate(id);
+                else if (action === 'reset') resetTemplateToDefault(id);
                 return;
             }
             const listItem = e.target.closest('.template-list-item');
