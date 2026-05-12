@@ -160,14 +160,17 @@ test.describe('explicit mode toggle v2 (3-state)', () => {
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
-    // Ensure clean state: force explicit_level to 0
+    // initChatTabs is async and fires after modules-ready — wait for it to finish
+    await page.waitForSelector('.chat-tab.active', { timeout: 10000 });
+    // Reset active tab to level 0 and re-render so toggle UI and tab badge are in sync
     await page.evaluate(async () => {
       const { activeChatTab } = await import('/js/features/chat-state.js');
-      const { toggleExplicitMode } = await import('/js/features/chat-templates.js');
+      const { updateExplicitToggleUI } = await import('/js/features/chat-templates.js');
+      const { renderChatTabs } = await import('/js/features/chat-render.js');
       const tab = activeChatTab();
-      if (tab) {
-        while ((tab.explicit_level ?? 0) > 0) toggleExplicitMode();
-      }
+      if (tab) tab.explicit_level = 0;
+      updateExplicitToggleUI();
+      renderChatTabs();
     });
   });
 
@@ -195,54 +198,28 @@ test.describe('explicit mode toggle v2 (3-state)', () => {
   });
 
   test('3-state badge cycling on tab', async ({ page }) => {
-    // Reset explicit mode to level 0 first (previous test may have left it on)
-    await page.evaluate(async () => {
-      const { activeChatTab } = await import('/js/features/chat-state.js');
-      const { updateExplicitToggleUI } = await import('/js/features/chat-templates.js');
-      const { getChatViewBindings } = await import('/js/core/app-state.js');
-      const tab = activeChatTab();
-      if (tab) {
-        tab.explicit_level = 0;
-        updateExplicitToggleUI();
-        getChatViewBindings().renderChatTabs?.();
-      }
-    });
-    // Wait for badge to disappear
-    await page.waitForFunction(() => {
-      return document.querySelector('.chat-tab-explicit-badge') === null;
-    }, { timeout: 5000 });
+    // beforeEach already reset level to 0 and re-rendered tabs.
+    // Scope badge checks to the active tab only — other tabs may have their own badges.
+    const activeTabBadge = page.locator('.chat-tab.active .chat-tab-explicit-badge');
 
-    // State 0: no badge
-    const badge = page.locator('.chat-tab-explicit-badge');
-    await expect(badge).toHaveCount(0);
+    // State 0: no badge on active tab
+    await expect(activeTabBadge).toHaveCount(0);
 
-    // Click once → level 1: 🔓 badge visible, .active class
+    // Click once → level 1: 🔓 badge on active tab
+    // toggleExplicitMode() calls renderChatTabs() via the registered binding
     await page.locator('#chat-explicit-toggle-footer').click();
-    // Wait for tab to re-render (badge appears) - use longer timeout
-    await page.waitForFunction(() => {
-      return document.querySelector('.chat-tab-explicit-badge') !== null;
-    }, { timeout: 10000 });
-    await expect(badge).toContainText('\u{1F513}');
     await expect(page.locator('#chat-explicit-toggle-footer')).toHaveClass(/active/);
+    await expect(activeTabBadge).toContainText('\u{1F513}');
 
-    // Click again → level 2: 🔥 badge visible, .unrestricted class
+    // Click again → level 2: 🔥 badge
     await page.locator('#chat-explicit-toggle-footer').click();
-    // Wait for tab to re-render (badge text changes) - use longer timeout
-    await page.waitForFunction(() => {
-      const badge = document.querySelector('.chat-tab-explicit-badge');
-      return badge && badge.textContent.includes('\u{1F525}');
-    }, { timeout: 10000 });
-    await expect(badge).toContainText('\u{1F525}');
     await expect(page.locator('#chat-explicit-toggle-footer')).toHaveClass(/unrestricted/);
+    await expect(activeTabBadge).toContainText('\u{1F525}');
 
-    // Click again → cycle back to level 0: badge gone
+    // Click again → level 0: badge gone
     await page.locator('#chat-explicit-toggle-footer').click();
-    // Wait for tab to re-render (badge disappears) - use longer timeout
-    await page.waitForFunction(() => {
-      return document.querySelector('.chat-tab-explicit-badge') === null;
-    }, { timeout: 10000 });
-    await expect(badge).toHaveCount(0);
     await expect(page.locator('#chat-explicit-toggle-footer')).not.toHaveClass(/active/);
+    await expect(activeTabBadge).toHaveCount(0);
   });
 
   test('explicit policy injection at level 1', async ({ page }) => {

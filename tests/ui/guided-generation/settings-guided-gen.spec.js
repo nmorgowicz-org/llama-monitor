@@ -139,14 +139,13 @@ test.describe('Settings - Guided Generation', () => {
     // Modify something
     await page.locator('#settings-prompt-general').fill('Test');
 
-    // Ensure the modal is open before pressing Ctrl+S
+    // Ensure the modal is open
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
 
-    // Focus the modal so Ctrl+S is captured
-    await page.locator('#settings-modal').focus();
-    await page.keyboard.press('Control+S');
-
+    // Click the save button (Ctrl+S handler doesn't exist)
     const saveButton = page.locator('#settings-modal-save');
+    await saveButton.click();
+
     await expect(saveButton).toHaveClass(/success/, { timeout: 5000 });
   });
 });

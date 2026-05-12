@@ -642,7 +642,7 @@ function reuseRecentSuggestion(index) {
     updateDropdownUI();
 }
 
-function clearRecentSuggestions() {
+export function clearRecentSuggestions() {
     const tab = activeChatTab();
     if (!tab) return;
 

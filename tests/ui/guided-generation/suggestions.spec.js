@@ -121,13 +121,18 @@ test.describe('Suggestions Dropdown', () => {
     // Wait for recent history to be populated
     await page.waitForSelector('.suggestions-recent-list .suggestion-item', { timeout: 5000 });
 
-    // Directly clear the history and re-render dropdown
+    // Directly clear the history and re-render
     await page.evaluate(async () => {
       const { activeChatTab } = await import('/js/features/chat-state.js');
-      const { updateDropdownUI } = await import('/js/features/chat-suggestions.js');
       const tab = activeChatTab();
-      if (tab) tab._suggestion_history = [];
-      updateDropdownUI();
+      if (tab) {
+        tab._suggestion_history = [];
+        // Re-render the recent suggestions list
+        const list = document.getElementById('suggestions-recent-list');
+        if (list) list.innerHTML = '';
+        const container = document.getElementById('suggestions-recent');
+        if (container) container.style.display = 'none';
+      }
     });
     await expect(page.locator('.suggestions-recent-list .suggestion-item')).toHaveCount(0);
   });

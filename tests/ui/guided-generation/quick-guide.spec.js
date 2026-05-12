@@ -70,8 +70,11 @@ test.describe('Quick Guide', () => {
     await page.locator('#quick-guide-input').fill('Show, don\'t tell');
     await page.locator('#quick-guide-submit-btn').click();
 
-    // Wait for the guide to close (the submit is async)
-    await page.waitForSelector('#quick-guide-input', { state: 'hidden', timeout: 10000 });
+    // Wait for the guide to close (the container loses the expanded class)
+    await page.waitForSelector('#quick-guide-container', { state: 'visible', timeout: 10000 });
+    await page.waitForFunction(() => {
+      return !document.getElementById('quick-guide-container')?.classList.contains('quick-guide-expanded');
+    }, { timeout: 10000 });
 
     // Wait a bit for the last used instruction to be stored
     await page.waitForTimeout(500);
