@@ -117,11 +117,21 @@ pub fn save_presets(path: &Path, presets: &[ModelPreset]) -> Result<()> {
 /// User-created or user-modified system prompt templates.
 /// Stored on disk; merged with frontend defaults at runtime.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ExplicitPolicies {
+    #[serde(default)]
+    pub level1: Option<String>,
+    #[serde(default)]
+    pub level2: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SystemPromptTemplate {
     #[serde(default = "template_next_id")]
     pub id: String,
     pub name: String,
     pub prompt: String,
+    #[serde(default)]
+    pub explicit_policies: Option<ExplicitPolicies>,
 }
 
 fn template_next_id() -> String {

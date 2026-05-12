@@ -863,7 +863,7 @@ async function saveUserTemplates(templates) {
             await fetch('/api/templates', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: t.id, name: t.name, prompt: t.prompt })
+                body: JSON.stringify({ id: t.id, name: t.name, prompt: t.prompt, explicit_policies: t.explicit_policies })
             });
         }
         _userTemplates = templates;
@@ -1033,7 +1033,7 @@ async function saveTemplate() {
             const res = await fetch('/api/templates', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: crypto.randomUUID(), name, prompt })
+                body: JSON.stringify({ id: crypto.randomUUID(), name, prompt, explicit_policies: { level1: '', level2: '' } })
             });
             const data = await res.json();
             if (data.ok) {
@@ -1057,7 +1057,7 @@ async function saveTemplate() {
                 const res = await fetch('/api/templates', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: crypto.randomUUID(), name, prompt })
+                    body: JSON.stringify({ id: crypto.randomUUID(), name, prompt, explicit_policies: t.explicit_policies })
                 });
                 if (!(await res.json()).ok) {
                     showToast('Failed to save template', 'error');
@@ -1073,7 +1073,7 @@ async function saveTemplate() {
                 const res = await fetch(`/api/templates/${editingTemplateId}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: editingTemplateId, name, prompt })
+                    body: JSON.stringify({ id: editingTemplateId, name, prompt, explicit_policies: t.explicit_policies })
                 });
                 if (!(await res.json()).ok) {
                     showToast('Failed to save template', 'error');
