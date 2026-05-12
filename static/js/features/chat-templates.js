@@ -908,15 +908,6 @@ async function renderTemplateList() {
     list.innerHTML = templates.map(t => {
         const name = escapeHtml(t.name);
         const id = escapeHtml(t.id);
-        const isDefault = t._isDefault;
-        // Show reset button for built-in personas AND for user templates that were created from built-in personas
-        const hasBuiltin = DEFAULT_TEMPLATES.some(d => d.name === t.name);
-        const resetBtn = (isDefault || hasBuiltin) ? `<button class="template-list-btn" data-template-action="reset" data-template-id="${id}" title="Reset to Default">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                        <path d="M3 3v5h5"/>
-                    </svg>
-                </button>` : '';
         return `<div class="template-list-item ${selectedTemplateId === t.id ? 'selected' : ''} ${editingTemplateId === t.id ? 'editing' : ''}" data-template-id="${id}">
             <span class="template-list-name">${name}</span>
             <div class="template-list-actions">
@@ -931,7 +922,6 @@ async function renderTemplateList() {
                         <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
                     </svg>
                 </button>
-                ${resetBtn}
                 <button class="template-list-btn delete" data-template-action="delete" data-template-id="${id}" title="Delete">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
@@ -996,12 +986,17 @@ async function renderTemplatePreview() {
                 <button class="template-cancel-btn" data-template-editor="cancel">Cancel</button>
             </div>`;
     } else {
+        // Show reset button for built-in personas and their user copies
+        const hasBuiltin = DEFAULT_TEMPLATES.some(d => d.name === t.name);
+        const resetBtn = hasBuiltin ? `<button class="template-preview-btn reset" data-template-id="${escapeHtml(t.id)}" data-template-preview-action="reset">Reset to Default</button>` : '';
+        // eslint-disable-next-line no-unsanitized/property -- t.name and t.id wrapped in escapeHtml(); resetBtn uses escapeHtml(t.id)
         preview.innerHTML = `
             <div class="template-preview-header">
                 <h3>${escapeHtml(t.name)}</h3>
                 <div class="template-preview-actions">
                     <button class="template-preview-btn" data-template-id="${escapeHtml(t.id)}" data-template-preview-action="edit">Edit</button>
                     <button class="template-preview-btn apply" data-template-id="${escapeHtml(t.id)}" data-template-preview-action="apply">Apply</button>
+                    ${resetBtn}
                 </div>
             </div>
             <div class="template-preview-content">${escapeHtml(t.prompt)}</div>`;
@@ -1440,6 +1435,7 @@ export function initChatTemplates() {
                 const id = previewBtn.dataset.templateId;
                 if (action === 'edit') editTemplate(id);
                 else if (action === 'apply') applyTemplateById(id);
+                else if (action === 'reset') resetTemplateToDefault(id);
             }
         });
     }
