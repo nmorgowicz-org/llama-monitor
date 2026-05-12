@@ -1,6 +1,6 @@
 # Llama Monitor Documentation
 
-This is the documentation index for Llama Monitor — a local LLM inference and GPU monitoring tool.
+Documentation index for Llama Monitor — a local LLM inference and GPU monitoring tool.
 
 ## Reference Guides
 
@@ -21,21 +21,3 @@ This is the documentation index for Llama Monitor — a local LLM inference and 
 - **plans/** — Temporary planning documents for active feature development
 - **archive/** — Old build docs and historical notes
 - **screenshots/** — All project screenshots and GIFs
-
-## UI Screenshots
-
-### Main Chat Interface
-
-![Main chat interface](screenshots/03-chat.png)
-
-### Suggestions Dropdown
-
-![Suggestions dropdown](screenshots/09-suggestions-dropdown.png)
-
-### Context Notes Sidebar
-
-![Context notes sidebar](screenshots/08-context-notes-expanded.png)
-
-### Director Mode
-
-![Director mode](screenshots/10c-guide-ai-director.png)

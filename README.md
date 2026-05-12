@@ -1,6 +1,6 @@
 # Llama Monitor
 
-Web dashboard for managing [llama.cpp](https://github.com/ggml-org/llama.cpp) servers with real-time GPU and system monitoring. Supports local and remote deployments, multi-session management, and a lightweight agent mode for headless machines.
+Web dashboard for managing [llama.cpp](https://github.com/ggml-org/llama.cpp) servers with real-time GPU monitoring, multi-session management, and AI-powered creative chat.
 
 ## Quick Start
 
@@ -9,15 +9,11 @@ Web dashboard for managing [llama.cpp](https://github.com/ggml-org/llama.cpp) se
 # Open http://localhost:7778
 ```
 
-On first launch, attach to an existing server or spawn a new one:
-
-![Welcome Screen](docs/screenshots/01-welcome.png)
-
 ## Features
 
 ### Monitoring
 
-GPU metrics (temperature, load, VRAM, power, clocks) for AMD ROCm, NVIDIA, Apple Silicon. System metrics (CPU, RAM, motherboard). Inference metrics with live context window gauge.
+GPU metrics (temperature, load, VRAM, power, clocks) for AMD ROCm, NVIDIA, Apple Silicon. System metrics (CPU, RAM). Live inference context window gauge.
 
 ![Inference Metrics](docs/screenshots/02-inference-metrics.gif)
 
@@ -27,31 +23,26 @@ Multi-tab streaming conversations with system prompts, per-tab model parameters,
 
 ![Chat Interface](docs/screenshots/03-chat.png)
 
-- **Tag cloud search** — Browse and filter suggestions by category (15+ topics)
-- **Director mode** — AI-directed multi-step generation with plan-and-execute
-- **Persona dropdown** — Switch conversation styles with built-in templates
-- **Message actions** — Edit, regenerate, copy, export, import
+### AI-Generated Suggestions
 
-### Guided Generation
+Real, creative suggestions from the model — not canned templates. The AI reads your context and generates story ideas, plot twists, and scene directions.
 
-Structured workflow for creative and technical writing. The context notes sidebar sets project goals, tone, and constraints. The suggestions dropdown offers 15+ categories from brainstorming to code review.
+![Suggestions Results](docs/screenshots/09b-suggestions-results.png)
 
-![Context Notes](docs/screenshots/08-context-notes-expanded.png)
-![Suggestions Dropdown](docs/screenshots/09-suggestions-dropdown.png)
+### Director Mode
 
-The quick guide feature provides step-by-step assistance: **Director** (AI plans then executes) or **Surprise** (AI takes creative liberties).
+AI-directed multi-step generation. The model plans a scene, then executes it with dramatic reversals and cinematic pacing.
 
-![Director Mode](docs/screenshots/10c-guide-ai-director.png)
+![Director Mode Results](docs/screenshots/10d-guide-ai-director-results.png)
 
-*Full details in [docs/reference/chat.md](docs/reference/chat.md)*
+### Surprise Mode
 
-### Explicit Mode
+Arm the AI to deliver an unexpected reveal after a set number of replies. Perfect for interactive fiction and roleplay.
 
-Three-level content policy system with persona-aware guardrails: **Off** (default safety), **Unlocked** (relaxed for adult themes), **Unrestricted** (no filtering).
+![Surprise Mode](docs/screenshots/10e-guide-ai-surprise.png)
 
-![Explicit Mode](docs/screenshots/12b-explicit-unrestricted.png)
-
-*Full details in [docs/reference/chat.md](docs/reference/chat.md)*
+**Guided Generation** — AI-powered story beats, scene direction, and timed surprises — [details](docs/reference/chat.md)
+**Explicit Mode** — Three-level content policy (Off/Unlocked/Unrestricted) with persona-aware guardrails — [details](docs/reference/chat.md)
 
 ## Supported Hardware
 
@@ -60,7 +51,7 @@ Three-level content policy system with persona-aware guardrails: **Off** (defaul
 | AMD | `rocm-smi` | Auto-detected |
 | NVIDIA | `nvidia-smi` | Auto-detected |
 | Apple Silicon | `mactop` | Auto-detected |
-| Windows (CPU temp) | `sensor_bridge.exe` | Bundled with release |
+| Windows (CPU temp) | `sensor_bridge.exe` | Bundled |
 
 ## Installation
 

@@ -2236,10 +2236,7 @@ fn parse_director_cards(text: &str) -> Vec<SuggestionCard> {
     }
 
     fn normalize_type(value: &str) -> String {
-        let normalized = value
-            .trim()
-            .to_ascii_lowercase()
-            .replace(['_', ' '], "-");
+        let normalized = value.trim().to_ascii_lowercase().replace(['_', ' '], "-");
         match normalized.as_str() {
             "revelation" => "reveal".to_string(),
             "pressure" | "reveal" | "escalation" | "interruption" | "twist" | "tone-shift"
@@ -2254,10 +2251,16 @@ fn parse_director_cards(text: &str) -> Vec<SuggestionCard> {
         {
             return "reveal".to_string();
         }
-        if haystack.contains("interrupt") || haystack.contains("arrives") || haystack.contains("appears") {
+        if haystack.contains("interrupt")
+            || haystack.contains("arrives")
+            || haystack.contains("appears")
+        {
             return "interruption".to_string();
         }
-        if haystack.contains("twist") || haystack.contains("betray") || haystack.contains("reversal") {
+        if haystack.contains("twist")
+            || haystack.contains("betray")
+            || haystack.contains("reversal")
+        {
             return "twist".to_string();
         }
         if haystack.contains("close-quarters")
@@ -2268,10 +2271,14 @@ fn parse_director_cards(text: &str) -> Vec<SuggestionCard> {
         {
             return "confrontation".to_string();
         }
-        if haystack.contains("intimate") || haystack.contains("quiet") || haystack.contains("soft") {
+        if haystack.contains("intimate") || haystack.contains("quiet") || haystack.contains("soft")
+        {
             return "intimacy".to_string();
         }
-        if haystack.contains("investigate") || haystack.contains("photo") || haystack.contains("clue") {
+        if haystack.contains("investigate")
+            || haystack.contains("photo")
+            || haystack.contains("clue")
+        {
             return "investigation".to_string();
         }
         if haystack.contains("escalate")
@@ -2370,8 +2377,16 @@ fn parse_director_cards(text: &str) -> Vec<SuggestionCard> {
             Some(SuggestionCard {
                 suggestion_type: infer_type(&title, &description),
                 title,
-                effect: if effect.is_empty() { description.clone() } else { effect },
-                detail: if detail.is_empty() { description } else { detail },
+                effect: if effect.is_empty() {
+                    description.clone()
+                } else {
+                    effect
+                },
+                detail: if detail.is_empty() {
+                    description
+                } else {
+                    detail
+                },
             })
         })
         .collect()

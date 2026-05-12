@@ -144,7 +144,10 @@ An AI-powered suggestion system with 15+ category chips organized in collapsible
 The dropdown includes a search filter for quick access to specific suggestion types.
 
 ![Suggestions Dropdown](../screenshots/09-suggestions-dropdown.png)
-![Suggestions Tag Cloud](../screenshots/13a-suggestions-tag-cloud.png)
+
+Suggestions are AI-generated based on the active persona and context notes. Each suggestion is a ready-to-send prompt that steers the conversation in a specific direction.
+
+![Suggestions Results](../screenshots/09b-suggestions-results.png)
 
 ### Quick Guide
 
@@ -159,9 +162,42 @@ An inline instruction panel with three modes for controlling generation:
 ![Quick Guide Dropdown](../screenshots/10-quick-guide-dropdown.png)
 ![Quick Guide AI Director](../screenshots/10c-guide-ai-director.png)
 
+Director mode results show the AI following your detailed scene instructions.
+
+![Quick Guide Director Results](../screenshots/10d-guide-ai-director-results.png)
+
+### Surprise Mode
+
+Surprise mode arms a timed injection that fires after a set number of subsequent messages. The armed indicator shows the countdown and the scheduled prompt text.
+
+![Surprise Mode Armed](../screenshots/10e-guide-ai-surprise.png)
+
 ### Suggestion History
 
 Recently used suggestions are tracked per-tab for quick reuse. The history panel shows the last 20 suggestions with timestamps.
+
+### Manage Categories
+
+The Manage Categories modal lets you customize the built-in suggestion prompts and add your own custom categories. Open it from the suggestions dropdown menu.
+
+- **Built-in prompts** — Edit, disable, or reorder the 15+ pre-built prompts in each category (Story Tools, Genres, Explicit)
+- **Custom categories** — Create new category groups with your own prompts; they appear alongside built-in categories
+- **Prompt editing** — Each prompt has a name, description, and the actual suggestion text. Changes persist in `~/.config/llama-monitor/suggestion-categories.json`
+- **Enable/disable** — Toggle individual prompts on or off without deleting them
+
+![Manage Categories Modal](../screenshots/14-manage-categories.png)
+
+### Tag Cloud
+
+The tag cloud displays 15+ category chips organized in collapsible groups for quick visual browsing. Groups include:
+
+- **Story Tools** — Scene transitions, dialogue prompts, conflict generators, pacing controls
+- **Genres** — Action, Comedy, Fantasy, Horror, Mystery, Romance, Sci-Fi, Thriller, Drama
+- **Explicit** — Mature content suggestions with persona-aware filtering
+
+Each group has a collapsible header. A search filter at the top lets you narrow to specific tags by name. Clicking a tag opens the corresponding suggestion dropdown.
+
+![Tag Cloud](../screenshots/13a-suggestions-tag-cloud.png)
 
 ### Pathweaver Prompts
 
@@ -208,6 +244,7 @@ Each persona has its own default explicit mode setting:
 
 ![Explicit Unlocked](../screenshots/12a-explicit-unlocked.png)
 ![Explicit Unrestricted](../screenshots/12b-explicit-unrestricted.png)
+![Explicit Locked](../screenshots/12c-explicit-locked.png)
 
 ## Model Parameters (Extended)
 
