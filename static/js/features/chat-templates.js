@@ -849,7 +849,7 @@ export async function loadTemplates() {
     const userNames = new Set(_userTemplates.map(t => t.name));
     const merged = DEFAULT_TEMPLATES
         .filter(d => !userNames.has(d.name))
-        .map(d => ({ id: _defaultId(d.name), name: d.name, prompt: d.prompt, _isDefault: true }));
+        .map(d => ({ id: _defaultId(d.name), name: d.name, prompt: d.prompt, explicit_policies: d.explicit_policies, _isDefault: true }));
     return merged.concat(_userTemplates.map(t => ({ ...t, _isDefault: false })));
 }
 
@@ -1263,7 +1263,14 @@ function notifyPersonaPolicyChanged(el) {
 
 function updatePersonaExplicitPolicies() {
     const templates = _userTemplates || [];
-    const t = templates.find(x => x.id === selectedTemplateId);
+    let t = templates.find(x => x.id === selectedTemplateId);
+    // If template not found in user templates, check if it's a built-in persona
+    if (!t && selectedTemplateId) {
+        const builtin = DEFAULT_TEMPLATES.find(d => d.name === selectedTemplateId.replace('default:', ''));
+        if (builtin) {
+            t = { id: selectedTemplateId, name: builtin.name, prompt: builtin.prompt, explicit_policies: builtin.explicit_policies };
+        }
+    }
     if (!t) {
         // No template selected - show none section
         document.getElementById('persona-explicit-level1').style.display = 'none';
