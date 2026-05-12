@@ -331,7 +331,7 @@ export async function compactChatTab(tab, keepTail = null, summarize = true) {
             tombstoneContent = `[Context compacted — server unavailable for summarization; ${dropped.length} messages dropped]`;
         }
     } else {
-        const ctxNote = tab.lastCtxPct > 0 ? ` · was ${tab.lastCtxPct}% ctx` : '';
+        const ctxNote = tab.last_ctx_pct > 0 ? ` · was ${tab.last_ctx_pct}% ctx` : '';
         tombstoneContent = `[Context compacted — ${dropped.length} messages removed${ctxNote}]`;
     }
 
@@ -344,7 +344,7 @@ export async function compactChatTab(tab, keepTail = null, summarize = true) {
         dropped_count: dropped.length,
         dropped_preview: dropped.slice(0, 8).map(m => ({ role: m.role, snippet: m.content.slice(0, 80) })),
         tokens_freed_estimate: dropped.reduce((sum, m) => sum + Math.round((m.input_tokens || 0) + (m.output_tokens || 0)), 0),
-        ctx_pct_before: tab.lastCtxPct || 0,
+        ctx_pct_before: tab.last_ctx_pct || 0,
         memory_version: memoryVersion,
         memory_domain: memoryDomain,
         summary_kind: summaryKind,
@@ -608,7 +608,7 @@ export function refreshChatTelemetry() {
     const capacity = hasActiveEndpoint ? (l?.context_capacity_tokens || l?.kv_cache_max || 0) : 0;
     const ctxPct = tab && capacity ? estimateCtxPct(tab, capacity) : 0;
     updateCtxPressureBar(ctxPct || 0);
-    if (tab && hasActiveEndpoint) tab.lastCtxPct = ctxPct || 0;
+    if (tab && hasActiveEndpoint) tab.last_ctx_pct = ctxPct || 0;
     if (contextValue) contextValue.textContent = ctxPct > 0 ? Math.round(ctxPct) + '%' : '\u2014';
     if (contextRing) {
         const pct = Math.max(0, Math.min(100, Math.round(ctxPct || 0)));
@@ -1064,7 +1064,7 @@ export function registerPersonaMenuBindings() {
         menu.classList.add('hidden');
         const btnSystemPrompt = document.getElementById('btn-system-prompt');
         if (btnSystemPrompt) btnSystemPrompt.classList.add('active');
-        const activeId = activeChatTab()?.activeTemplateId || null;
+        const activeId = activeChatTab()?.active_template_id || null;
         openTemplateManager(activeId);
     });
     
@@ -1092,7 +1092,7 @@ async function loadPersonaMenuItems() {
         personaMenuListEl.innerHTML = '';
         
         const tab = activeChatTab();
-        const activeTemplateId = tab?.activeTemplateId || null;
+        const activeTemplateId = tab?.active_template_id || null;
         
         // Separate into active, user (non-active), and built-in
         const activePersona = activeTemplateId ? personas.find(p => p.id === activeTemplateId) : null;
@@ -1198,7 +1198,7 @@ function createPersonaItem(persona, isActive) {
         const tab = activeChatTab();
         if (tab) {
             tab.system_prompt = persona.prompt;
-            tab.activeTemplateId = persona.id;
+            tab.active_template_id = persona.id;
             tab.updated_at = Date.now();
             scheduleChatPersist?.();
         }
@@ -1228,7 +1228,7 @@ export function updatePersonaMenuName() {
     const nameEl = document.getElementById('chat-persona-menu-name');
     if (!nameEl) return;
 
-    const activeTemplateId = tab.activeTemplateId;
+    const activeTemplateId = tab.active_template_id;
     if (!activeTemplateId) {
         nameEl.textContent = 'None';
         return;

@@ -308,7 +308,7 @@ export function renderChatTabs() {
             });
         }
 
-        if (tab.explicitLevel > 0) {
+        if (tab.explicit_level > 0) {
             const badge = document.createElement('span');
             badge.className = 'chat-tab-explicit-badge';
             badge.textContent = tab.explicit_level >= 2 ? '\uD83D\uDD25' : '\uD83D\uDD13';
@@ -849,8 +849,8 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
         const modelName = lastLlamaMetrics?.model_name || '';
         const inp = usage ? (usage.prompt_tokens ?? 0) : 0;
         const out = usage ? (usage.completion_tokens ?? 0) : 0;
-        const totalInput = tab ? (tab.totalInputTokens || 0) : inp;
-        const totalOutput = tab ? (tab.totalOutputTokens || 0) : out;
+        const totalInput = tab ? (tab.total_input_tokens || 0) : inp;
+        const totalOutput = tab ? (tab.total_output_tokens || 0) : out;
         const total = totalInput + totalOutput;
         const capacity = lastLlamaMetrics?.context_capacity_tokens || 0;
         // ctx% = (all generated output tokens in this chat + current request's input tokens) / capacity.
@@ -860,7 +860,7 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
         const ctxTokens = totalOutput + inp;
         const ctxPct = capacity > 0 && ctxTokens > 0 ? Math.min(100, Math.round((ctxTokens / capacity) * 100)) : 0;
 
-        if (tab) tab.lastCtxPct = ctxPct;
+        if (tab) tab.last_ctx_pct = ctxPct;
 
         const parts = [];
         if (inp > 0) parts.push(`↓${formatTokenCount(inp)}`);

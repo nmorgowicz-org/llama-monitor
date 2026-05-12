@@ -462,9 +462,9 @@ export async function _doSendChat(tab, options = {}) {
     const systemParts = [];
     const armedBeat = getArmedStoryBeat(tab);
     let systemPrompt = tab.system_prompt ? substituteNames(tab.system_prompt, tab.ai_name, tab.user_name) : '';
-    if (tab.explicitLevel > 0) {
+    if (tab.explicit_level > 0) {
         const template = typeof resolveActiveTemplate === 'function'
-            ? resolveActiveTemplate(tab.activeTemplateId) : null;
+            ? resolveActiveTemplate(tab.active_template_id) : null;
         const policies = template?.explicit_policies;
 
         if (policies) {
@@ -747,16 +747,16 @@ export async function _doSendChat(tab, options = {}) {
     if (msgContent) {
         const inp = tokenUsage ? (tokenUsage.prompt_tokens ?? 0) : 0;
         const out = tokenUsage ? (tokenUsage.completion_tokens ?? 0) : 0;
-        tab.totalInputTokens = (tab.totalInputTokens || 0) + inp;
-        tab.totalOutputTokens = (tab.totalOutputTokens || 0) + out;
+        tab.total_input_tokens = (tab.total_input_tokens || 0) + inp;
+        tab.total_output_tokens = (tab.total_output_tokens || 0) + out;
         finalMessage = {
             role: 'assistant',
             content: msgContent,
             timestamp_ms: Date.now(),
             input_tokens: inp,
             output_tokens: out,
-            cumulativeInputTokens: tab.totalInputTokens,
-            cumulativeOutputTokens: tab.totalOutputTokens,
+            cumulativeInputTokens: tab.total_input_tokens,
+            cumulativeOutputTokens: tab.total_output_tokens,
         };
         tab.messages.push(finalMessage);
         tab.updated_at = Date.now();

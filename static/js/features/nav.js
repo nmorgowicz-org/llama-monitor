@@ -83,7 +83,7 @@ function initEndpointStatus() {
 function deriveTabCtxPct(tab, capacity) {
     if (!tab || !capacity) return 0;
     const asst = (tab.messages || []).filter(m => m.role === 'assistant' && !m.compaction_marker);
-    if (!asst.length) return tab.lastCtxPct || 0;
+    if (!asst.length) return tab.last_ctx_pct || 0;
     const totalOutput = asst.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
     const lastInput = asst.at(-1)?.input_tokens || 0;
     return Math.min(200, (totalOutput + lastInput) / capacity * 100);

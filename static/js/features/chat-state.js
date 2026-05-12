@@ -44,16 +44,16 @@ export function newChatTab(name = 'New Chat') {
         id: crypto.randomUUID(),
         name,
         system_prompt: 'You are {{char}}, a helpful, concise assistant. You are talking to {{user}}. Provide clear, accurate answers.',
-        activeTemplateId: '',
+        active_template_id: '',
         ai_name: '',
         user_name: '',
-        explicitLevel: 0,
+        explicit_level: 0,
         auto_compact: true,
         auto_compact_summarize: true,
         messages: [],
-        totalInputTokens: 0,
-        totalOutputTokens: 0,
-        lastCtxPct: 0,
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+        last_ctx_pct: 0,
         model_params: {
             temperature: 0.7,
             top_p: 0.9,
@@ -65,7 +65,7 @@ export function newChatTab(name = 'New Chat') {
         },
         context_notes: [],
         context_custom_sections: [],
-        sidebarWidth: 280,
+        sidebar_width: 280,
         quick_guide_draft: '',
         quick_guide_active: '',
         quick_guide_pending: '',
@@ -78,24 +78,24 @@ export function newChatTab(name = 'New Chat') {
 
 function normalizeChatTab(tab) {
     const messages = tab.messages || [];
-    const totalInputTokens = messages.reduce((sum, m) => sum + (m.input_tokens || 0), 0);
-    const totalOutputTokens = messages.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
-    let explicitLevel = tab.explicit_level ?? tab.explicitLevel ?? 0;
+    const total_input_tokens = messages.reduce((sum, m) => sum + (m.input_tokens || 0), 0);
+    const total_output_tokens = messages.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
+    let explicit_level = tab.explicit_level ?? tab.explicitLevel ?? 0;
     if (tab.explicit_mode !== undefined && tab.explicit_level === undefined) {
-        explicitLevel = tab.explicit_mode ? 1 : 0;
+        explicit_level = tab.explicit_mode ? 1 : 0;
     }
     return {
         ...tab,
-        explicitLevel: explicitLevel,
-        activeTemplateId: tab.activeTemplateId ?? '',
+        explicit_level: explicit_level,
+        active_template_id: tab.active_template_id ?? tab.activeTemplateId ?? '',
         auto_compact: tab.auto_compact ?? true,
         auto_compact_summarize: tab.auto_compact_summarize ?? true,
-        lastCtxPct: tab.lastCtxPct ?? 0,
-        totalInputTokens: tab.totalInputTokens ?? totalInputTokens,
-        totalOutputTokens: tab.totalOutputTokens ?? totalOutputTokens,
+        last_ctx_pct: tab.last_ctx_pct ?? tab.lastCtxPct ?? 0,
+        total_input_tokens: tab.total_input_tokens ?? tab.totalInputTokens ?? total_input_tokens,
+        total_output_tokens: tab.total_output_tokens ?? tab.totalOutputTokens ?? total_output_tokens,
         context_notes: tab.context_notes ?? [],
         context_custom_sections: tab.context_custom_sections ?? [],
-        sidebarWidth: tab.sidebarWidth ?? 280,
+        sidebar_width: tab.sidebar_width ?? tab.sidebarWidth ?? 280,
         quick_guide_draft: tab.quick_guide_draft ?? '',
         quick_guide_active: '',
         quick_guide_pending: '',
@@ -279,7 +279,7 @@ export function updateChatName(field, value) {
 export function normalizeTabForSave(tab) {
     const t = { ...tab };
     delete t.explicit_mode;
-    delete t.explicitLevel;
+    delete t.explicitLevel; // legacy camelCase
     delete t._quickGuideInstruction;
     delete t.quick_guide_pending;
     t.messages = (t.messages || []).map(m => {
