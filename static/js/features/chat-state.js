@@ -6,6 +6,7 @@ import { refreshTopCockpit } from './nav.js';
 import { showToast, showToastWithActions } from './toast.js';
 
 const CHAT_TABS_PERSIST_DEBOUNCE_MS = 500;
+const CHAT_TABS_PERIODIC_SAVE_MS = 30_000; // 30 seconds
 const TRASH_AUTO_PURGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 const TRASH_PURGE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // check every hour
 const chatViewBindings = {
@@ -334,6 +335,7 @@ export async function persistChatTabs() {
 
 export function flushChatPersist() {
     clearTimeout(chat.persistTimer);
+    clearInterval(chat.periodicSaveTimer);
     if (chat.tabs && chat.tabs.length) {
         fetch('/api/chat/tabs', {
             method: 'PUT',
@@ -392,4 +394,10 @@ export function initChatState() {
     window.addEventListener('beforeunload', flushChatPersist);
     chat.trashPurgeTimer = setInterval(purgeOldTrash, TRASH_PURGE_CHECK_INTERVAL_MS);
     purgeOldTrash();
+    // Periodic save to prevent data loss on force-kill
+    chat.periodicSaveTimer = setInterval(() => {
+        if (chat.tabsDirty) {
+            persistChatTabs();
+        }
+    }, CHAT_TABS_PERIODIC_SAVE_MS);
 }
