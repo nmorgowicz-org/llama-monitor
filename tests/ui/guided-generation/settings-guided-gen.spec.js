@@ -139,6 +139,9 @@ test.describe('Settings - Guided Generation', () => {
     // Modify something
     await page.locator('#settings-prompt-general').fill('Test');
 
+    // Ensure the modal is open before pressing Ctrl+S
+    await expect(page.locator('#settings-modal')).toHaveClass(/open/);
+
     // Focus the modal so Ctrl+S is captured
     await page.locator('#settings-modal').focus();
     await page.keyboard.press('Control+S');

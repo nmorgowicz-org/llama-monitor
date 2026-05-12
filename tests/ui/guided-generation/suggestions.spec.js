@@ -121,6 +121,9 @@ test.describe('Suggestions Dropdown', () => {
     // Wait for recent history to be populated
     await page.waitForSelector('.suggestions-recent-list .suggestion-item', { timeout: 5000 });
 
+    // Wait for clear button to be visible
+    await page.waitForSelector('.suggestions-clear-recent', { state: 'visible', timeout: 5000 });
+
     // Use force click to bypass pointer event interception from chat-messages-inner
     await page.locator('.suggestions-clear-recent').click({ force: true });
     await expect(page.locator('.suggestions-recent-list .suggestion-item')).toHaveCount(0);

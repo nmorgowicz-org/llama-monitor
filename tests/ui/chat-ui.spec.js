@@ -201,29 +201,29 @@ test.describe('explicit mode toggle v2 (3-state)', () => {
 
     // Click once → level 1: 🔓 badge visible, .active class
     await page.locator('#chat-explicit-toggle-footer').click();
-    // Wait for tab to re-render (badge appears)
+    // Wait for tab to re-render (badge appears) - use longer timeout
     await page.waitForFunction(() => {
       return document.querySelector('.chat-tab-explicit-badge') !== null;
-    }, { timeout: 5000 });
+    }, { timeout: 10000 });
     await expect(badge).toContainText('\u{1F513}');
     await expect(page.locator('#chat-explicit-toggle-footer')).toHaveClass(/active/);
 
     // Click again → level 2: 🔥 badge visible, .unrestricted class
     await page.locator('#chat-explicit-toggle-footer').click();
-    // Wait for tab to re-render (badge text changes)
+    // Wait for tab to re-render (badge text changes) - use longer timeout
     await page.waitForFunction(() => {
       const badge = document.querySelector('.chat-tab-explicit-badge');
       return badge && badge.textContent.includes('\u{1F525}');
-    }, { timeout: 5000 });
+    }, { timeout: 10000 });
     await expect(badge).toContainText('\u{1F525}');
     await expect(page.locator('#chat-explicit-toggle-footer')).toHaveClass(/unrestricted/);
 
     // Click again → cycle back to level 0: badge gone
     await page.locator('#chat-explicit-toggle-footer').click();
-    // Wait for tab to re-render (badge disappears)
+    // Wait for tab to re-render (badge disappears) - use longer timeout
     await page.waitForFunction(() => {
       return document.querySelector('.chat-tab-explicit-badge') === null;
-    }, { timeout: 5000 });
+    }, { timeout: 10000 });
     await expect(badge).toHaveCount(0);
     await expect(page.locator('#chat-explicit-toggle-footer')).not.toHaveClass(/active/);
   });

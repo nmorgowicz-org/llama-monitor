@@ -73,6 +73,11 @@ test.describe('Quick Guide', () => {
     // Toggle again to see last used
     await page.locator('#quick-guide-toggle').click();
     await page.waitForSelector('#quick-guide-input', { state: 'visible' });
+    // Wait for the last used instruction to be displayed
+    await page.waitForFunction(() => {
+      const lastUsed = document.getElementById('quick-guide-last-used');
+      return lastUsed && lastUsed.style.display !== 'none';
+    }, { timeout: 5000 });
     await expect(page.locator('.quick-guide-last-used')).toContainText('Show, don\'t tell');
   });
 
