@@ -160,11 +160,8 @@ function updateDropdownUI() {
         renderSuggestionsList();
     }
 
-    // Always render recent suggestions
-    renderRecentSuggestions();
-    if (recentContainer) {
-        recentContainer.hidden = suggestionsState.mode !== 'browse';
-    }
+   // Always render recent suggestions
+    // (removed - no longer needed)
 }
 
 function applySearchFilter() {
@@ -458,6 +455,7 @@ Task: Expand the draft notes into polished prose in ${userName}'s established vo
 
 Rules:
 - Output ONLY ${userName}'s message — no labels, no explanations, no meta-language.
+- Strip any leading label (e.g., "Next story beat:", "Plot twist:") from the suggestion. Write the actual prose only.
 - Do not mention "beat", "draft", "suggestion", "POV", or any planning terms.
 - Do not write as ${charName} or continue the scene from ${charName}'s perspective.
 - Match ${userName}'s voice closely using the samples below.
@@ -568,87 +566,6 @@ async function rewriteSuggestionDraft() {
         suggestionsState.rewriteLoading = false;
         updateDropdownUI();
     }
-}
-
-function renderRecentSuggestions() {
-    const container = document.getElementById('suggestions-recent');
-    const list = document.getElementById('suggestions-recent-list');
-    const tab = activeChatTab();
-
-    if (!container || !list || !tab) return;
-
-    const recent = tab._suggestion_history || [];
-
-    if (!suggestionsState.hasGenerated || recent.length === 0) {
-        container.style.display = 'none';
-        return;
-    }
-
-    container.style.display = 'block';
-    // eslint-disable-next-line no-unsanitized/property -- User content escaped via escapeHtml()
-    list.innerHTML = recent.map((suggestion, index) => `
-        <div class="suggestion-item" data-recent-index="${index}" role="option" aria-selected="false" tabindex="0">
-            <div class="suggestion-content">${escapeHtml(suggestion)}</div>
-            <button class="suggestion-btn suggestion-btn-use" title="Reuse this suggestion" aria-label="Reuse suggestion: ${escapeHtml(suggestion)}">Use</button>
-        </div>
-    `).join('');
-
-    // Attach reuse handlers
-    list.querySelectorAll('.suggestion-btn-use').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const item = e.target.closest('.suggestion-item');
-            const index = parseInt(item.dataset.recentIndex, 10);
-            reuseRecentSuggestion(index);
-        });
-    });
-}
-
-function addRecentSuggestion(suggestion) {
-    const tab = activeChatTab();
-    if (!tab) return;
-
-    tab._suggestion_history = tab._suggestion_history || [];
-
-    // Remove if already exists to avoid duplicates
-    tab._suggestion_history = tab._suggestion_history.filter(s => s !== suggestion);
-
-    // Add to beginning
-    tab._suggestion_history.unshift(suggestion);
-
-    // Limit to 10
-    if (tab._suggestion_history.length > 10) {
-        tab._suggestion_history = tab._suggestion_history.slice(0, 10);
-    }
-
-    // Save
-    persistChatTabs().catch(() => {});
-    renderRecentSuggestions();
-}
-
-function reuseRecentSuggestion(index) {
-    const tab = activeChatTab();
-    if (!tab || !tab._suggestion_history || index < 0 || index >= tab._suggestion_history.length) return;
-
-    const suggestion = tab._suggestion_history[index];
-
-    // Dispatch event for chat-input to handle
-    window.dispatchEvent(new CustomEvent('suggestionSelected', {
-        detail: { text: suggestion, mode: 'send' },
-    }));
-
-    // Close dropdown
-    suggestionsState.expanded = false;
-    updateDropdownUI();
-}
-
-export function clearRecentSuggestions() {
-    const tab = activeChatTab();
-    if (!tab) return;
-
-    tab._suggestion_history = [];
-    persistChatTabs().catch(() => {});
-    renderRecentSuggestions();
 }
 
 // ── Fetch Suggestions from API ───────────────────────────────────────────────
@@ -806,12 +723,14 @@ async function useSuggestion(index, mode = 'send') {
     const tab = activeChatTab();
     if (!tab) return;
 
-    addRecentSuggestion(suggestion);
     suggestionsState.rewriteLoading = true;
     updateDropdownUI();
 
     try {
-        const prompt = buildSuggestionRewritePrompt(tab, suggestion, suggestion);
+        // Parse the suggestion to extract just the content, stripping any leading label like "Next story beat:" or "Plot twist:"
+        const { title, description } = parseSuggestionText(suggestion);
+        const beat = [title, description].filter(Boolean).join('. ');
+        const prompt = buildSuggestionRewritePrompt(tab, beat, beat);
         const rewritten = await fetchSuggestionRewrite(prompt);
         if (!rewritten) throw new Error('rewrite returned empty content');
 
@@ -1173,18 +1092,6 @@ function setupCategoryButtons() {
     }
 }
 
-// ── Clear Recent Button ─────────────────────────────────────────────────────
-
-function setupClearRecentButton() {
-    const clearBtn = document.getElementById('suggestions-clear-recent');
-    if (!clearBtn) return;
-
-    clearBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        clearRecentSuggestions();
-    });
-}
-
 // ── Keyboard Navigation ─────────────────────────────────────────────────────
 
 function setupKeyboardNav() {
@@ -1299,7 +1206,6 @@ export function initSuggestionsDropdown() {
     loadCustomCategories();
     setupGenerateButton();
     setupCategoryButtons();
-    setupClearRecentButton();
     setupKeyboardNav();
     setupClickOutside();
     setupOfflineDetection();
@@ -1315,5 +1221,4 @@ export function initSuggestionsDropdown() {
         }
     });
     updateDropdownUI();
-    renderRecentSuggestions();
 }
