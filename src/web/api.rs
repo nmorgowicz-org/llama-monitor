@@ -190,7 +190,11 @@ pub struct ChatTab {
     #[serde(default)]
     pub auto_compact: Option<bool>,
     #[serde(default)]
+    pub auto_compact_summarize: Option<bool>,
+    #[serde(default)]
     pub compact_threshold: Option<f32>,
+    #[serde(default)]
+    pub compact_mode: Option<String>,
     /// Last known context window percentage (0–100). Derived client-side and
     /// persisted so the dashboard can show it on page load without a live session.
     #[serde(rename = "lastCtxPct", default)]
@@ -3068,7 +3072,9 @@ mod tests {
             created_at: 0,
             updated_at: 0,
             auto_compact: None,
+            auto_compact_summarize: None,
             compact_threshold: None,
+            compact_mode: None,
             last_ctx_pct: None,
             active_template_id: None,
             context_notes: vec![],
