@@ -1,10 +1,10 @@
 # Chat Guided Generation - Implementation Specification
 
 **Date:** 2026-05-08  
-**Last Updated:** 2026-05-10  
+**Last Updated:** 2026-05-11  
 **Branch:** `feature/chat-guided-generations`  
 **Status:** 🔄 **ACTIVE DEVELOPMENT**  
-**Version:** 4.0 (In Progress - 2026-05-10)
+**Version:** 4.1 (Supplemental Planning - 2026-05-11)
 
 ---
 
@@ -23,6 +23,341 @@ We are **NOT** building a SillyTavern clone. We're building a **simple, premium 
 | **Guided Generations** | Samueras | Context injection + persistent notes | Context Notes sidebar, Quick Guide ephemeral instruction |
 | **Roadway** | bmen25124 | Action suggestions | "Use" button pattern, suggestion history |
 | **Pathweaver** | mattjaybe | Genre-based story directions | 17 prompt templates, Director Mode, category tabs |
+
+---
+
+## Supplemental Addendum: Director + Surprise Modes (2026-05-11)
+
+This section captures the next-wave design direction for guided generation after the current `Context Notes`, `Suggestions`, and `Quick Guide` work. It is intended to let a fresh agent pick up implementation later without needing prior thread context.
+
+### Fresh Visual Baseline
+
+Fresh screenshots were captured on **2026-05-11** with:
+
+```bash
+SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario new-features
+```
+
+Artifacts:
+- [08-context-notes-expanded.png](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots/artifacts/08-context-notes-expanded.png)
+- [09-suggestions-dropdown.png](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots/artifacts/09-suggestions-dropdown.png)
+- [09b-suggestions-results.png](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots/artifacts/09b-suggestions-results.png)
+- [10-quick-guide-dropdown.png](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots/artifacts/10-quick-guide-dropdown.png)
+- [10b-quick-guide-response.png](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots/artifacts/10b-quick-guide-response.png)
+- [11-chat-input-buttons.png](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots/artifacts/11-chat-input-buttons.png)
+- [13a-suggestions-tag-cloud.png](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots/artifacts/13a-suggestions-tag-cloud.png)
+
+Observed current suggestions-panel geometry from capture logs:
+- Pre-generate panel width: `380px`
+- Pre-generate panel height: `392px`
+- Panel opens upward and is already visually dense on smaller screens
+- Results mode is workable because setup collapses after generation
+
+### Current Suggestions Semantics (Post-Adjustments)
+
+Suggestions now behave as **user-side story direction**, not hidden assistant-side steering:
+- Primary action: `Send Now`
+- Secondary action: `Insert Draft`
+
+`Send Now`:
+- creates a visible user message in chat history
+- adapts phrasing based on recent user-message style
+- preserves the assistant’s normal response turn after the user direction
+
+`Insert Draft`:
+- adapts the selected beat into composer text
+- gives the user manual editing control before send
+
+This is intentionally different from `Quick Guide`, which is hidden one-shot steering for the assistant’s own next reply.
+
+### Important UX Constraint
+
+Do **not** simply add more controls into the existing suggestions dropdown header/body stack.
+
+Why:
+- the suggestions panel is already constrained vertically
+- mobile/smaller desktop heights are sensitive to even 1-2 extra rows
+- the current setup/results split only works because setup collapses away after generation
+- adding inline director inputs and surprise controls naively will recreate the earlier cramped UI regression
+
+### Product Model Going Forward
+
+We now have three distinct guidance types:
+
+1. **Visible user-side story direction**
+- source: Suggestions
+- result: a user message or editable user draft
+- best for: “what should I tell the AI to do next?”
+
+2. **Immediate hidden assistant steering**
+- source: Quick Guide
+- result: one-shot hidden guidance for the assistant’s next reply
+- best for: “change how the AI answers right now”
+
+3. **Persistent context shaping**
+- source: Context Notes
+- result: always-on contextual memory injected into generation
+- best for: “keep these facts/style rules in scope”
+
+`Director` and `Surprise Me` must fit into that structure cleanly.
+
+---
+
+### Director Mode - Proposed Product Definition
+
+#### What It Is
+
+`Director` is **not** just another category chip.
+
+It is a focused mode for:
+- user enters a short directing note
+- app generates several candidate story directions constrained by that note
+- user then either sends one as a visible direction or inserts one as a draft
+
+Examples:
+- `push this toward confrontation`
+- `slow it down and make it intimate`
+- `escalate into betrayal`
+- `keep it noir but reveal a new clue`
+
+#### Why It Should Not Be Just Another Chip
+
+The existing category-chip layout assumes:
+- category selection
+- optional search
+- generate button
+
+`Director` adds:
+- freeform note input
+- stateful generation context
+- stronger expectation that results are custom-tailored to the note
+
+That means it needs a **mode-specific setup surface**, not just one more chip in the cloud.
+
+#### Recommended UI Pattern
+
+Use a **two-state setup area inside Suggestions**, not a permanently expanded extra section.
+
+State A: normal suggestions setup
+- search
+- category chips
+- generate button
+
+State B: director setup
+- compact text input row
+- short helper text
+- `Generate Director Ideas` button
+- optional back button to return to normal categories
+
+Suggested structure:
+
+```text
+Suggestions
+[ Normal ] [ Director ]
+
+When Normal:
+- existing category/search UI
+
+When Director:
+- single-line or 2-line compact textarea
+- short “direct the next beat” helper copy
+- generate button
+```
+
+#### Layout Rules
+
+- Do not show category cloud and director input at full size simultaneously
+- Switching to Director should replace or heavily collapse normal setup UI
+- Results area should still take over most of the panel after generation
+- Director helper copy must be one short line max
+- The input should be visually tighter than Quick Guide, not taller
+
+#### Data/State Model
+
+Add to suggestions UI state:
+
+```javascript
+mode: 'normal' | 'director'
+directorDraft: ''
+lastDirectorPrompt: ''
+```
+
+Request payload addition:
+
+```javascript
+director_prompt: string
+```
+
+Backend behavior:
+- treat director prompt as an extra constraint for the suggestion generator
+- do not make it a permanent context note
+- do not persist it as quick guide state
+
+#### User Actions on Results
+
+Same as standard suggestions:
+- `Send Now` → visible user-side story direction
+- `Insert Draft` → editable composer draft
+
+Director does **not** directly auto-trigger assistant generation by itself.
+
+---
+
+### Surprise Me - Proposed Product Definition
+
+#### What It Is
+
+`Surprise Me` is a **delayed hidden steering mechanism**, not a visible user-direction tool.
+
+It should let the user arm a future beat such as:
+- an interruption
+- a twist
+- a tonal shift
+- an escalation
+
+Then the app injects that beat later, invisibly, into a future assistant turn.
+
+#### Why This Is Advanced Mode
+
+Unlike normal suggestions:
+- it is intentionally hidden from visible user history
+- it changes later behavior
+- users need to understand something is “armed”
+
+That means it must not look like a normal suggestion action.
+
+#### Recommended UI Pattern
+
+Do **not** put full Surprise controls inside the normal suggestions dropdown body by default.
+
+Recommended options:
+
+1. `Surprise` sub-mode inside Suggestions
+- but only if it replaces normal setup UI while active
+
+2. small auxiliary popover/modal launched from Suggestions
+- preferred if implementation remains lightweight
+
+Given current space constraints, option 2 is safer.
+
+#### Minimum Viable UX
+
+`Arm Surprise` flow:
+- choose a surprise type/category
+- optional delay selector (`next turn`, `in 2 assistant turns`, `later`)
+- optional short custom note
+- save
+
+Then show a small persistent chip somewhere in the composer region:
+- `1 surprise armed`
+
+That chip must:
+- be visible
+- be dismissible
+- open a tiny manager to cancel or inspect armed surprise state
+
+#### Data/State Model
+
+Per-tab:
+
+```javascript
+armed_story_beats: [
+  {
+    id,
+    kind, // twist, interruption, reveal, escalation, tonal-shift, custom
+    instruction,
+    trigger_after_assistant_turns,
+    created_at,
+    enabled
+  }
+]
+```
+
+Runtime behavior:
+- decrement triggers after each completed assistant reply
+- when a beat matures, inject it as hidden one-shot guidance
+- then remove it
+
+#### Important Guardrails
+
+- `Surprise Me` should never silently arm without a visible indicator
+- users need a way to cancel armed beats
+- only one hidden beat should fire per reply
+- if multiple are armed, queue them deterministically
+
+---
+
+### Visual Design Guidance For Future Implementation
+
+#### Suggestions Panel
+
+The current suggestions panel already works because it:
+- opens upward
+- has a bounded width
+- collapses setup after generation
+
+For future modes:
+- keep width near the current range unless a deliberate redesign happens
+- avoid adding stacked multi-row helper blocks
+- avoid top-mounted persistent status banners
+- prefer segmented mode switches over more visible rows
+- prefer replacing setup content instead of extending it
+
+#### Composer Controls
+
+Keep the current philosophy:
+- compact pill buttons
+- premium but restrained glass/gradient styling
+- no chunky “toolbox” feel
+
+If `Director` or `Surprise` needs extra control entrypoints:
+- use short labels
+- avoid growing the main input-bar footprint significantly
+- consider a mode switch inside the suggestions surface before adding new always-visible controls to the composer row
+
+#### Mobile / Smaller Heights
+
+Explicit requirement:
+- future implementation must be validated against small-height viewport behavior
+- setup + results must not compete for space simultaneously
+- active mode should be obvious without consuming more than ~1 compact control row above the results list
+
+---
+
+### Recommended Implementation Order
+
+1. **Director Mode**
+- lower UX risk
+- fits the current visible-history user-direction model
+- can reuse most of the suggestions transport and rendering logic
+
+2. **Surprise Me**
+- higher UX risk
+- requires hidden-state explainability
+- requires new per-tab armed-beat management
+
+Do not combine both in one first pass.
+
+---
+
+### Screenshot / Test Expectations For Future Agent
+
+Any future implementation of these modes should extend:
+- `tests/ui/capture.mjs`
+- `tests/ui/guided-generation/*.spec.js`
+
+Minimum capture expectations:
+- Director setup state
+- Director generated results state
+- Surprise armed state indicator
+- Surprise firing after delayed trigger
+- Small-screen viewport sanity for suggestions panel
+
+Minimum behavioral assertions:
+- Director results still use `Send Now` / `Insert Draft` correctly
+- Surprise does not create a visible user message unless explicitly designed to
+- only one armed surprise fires at a time
+- results/setup panel does not regress into split-state clutter
 
 ---
 

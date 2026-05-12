@@ -8,7 +8,7 @@ import { initDashboardRender } from './features/dashboard-render.js';
 import { initWebSocket } from './features/dashboard-ws.js';
 import { initPresets } from './features/presets.js';
 import { initSessions } from './features/sessions.js';
-import { addChatTab, autoResizeChatInput, initChatState, initChatTabs, restoreTabFromTrash } from './features/chat-state.js';
+import { activeChatTab, addChatTab, autoResizeChatInput, initChatState, initChatTabs, restoreTabFromTrash } from './features/chat-state.js';
 import { chatScroll, initChatRender, renderTrashDropdown } from './features/chat-render.js';
 import { initAttachDetach } from './features/attach-detach.js';
 import { initRemoteAgent } from './features/remote-agent.js';
@@ -27,9 +27,8 @@ import { initSensorBridge } from './features/sensor-bridge.js';
 import { initToast } from './features/toast.js';
 import { initNetworkDetection } from './features/network-detection.js';
 import { initContextSidebar } from './features/chat-notes.js';
-import { initSuggestionsDropdown } from './features/chat-suggestions.js';
-import { initQuickGuide } from './features/chat-quick-guide.js';
-import { initFixLastResponse } from './features/chat-fix-last.js';
+import { initSuggestionsDropdown, closeSuggestionsDropdown } from './features/chat-suggestions.js';
+import { initQuickGuide, closeQuickGuide } from './features/chat-quick-guide.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
@@ -126,7 +125,10 @@ initNetworkDetection();
 initContextSidebar();
 initSuggestionsDropdown();
 initQuickGuide();
-initFixLastResponse();
+
+// Mutual exclusion: opening one guided panel closes the other.
+window.addEventListener('suggestionsOpened', () => closeQuickGuide());
+window.addEventListener('quickGuideOpened', () => closeSuggestionsDropdown());
 
 // Wire up guided generation event handlers
 document.getElementById('context-sidebar-toggle')?.addEventListener('click', () => {
@@ -144,18 +146,90 @@ document.getElementById('quick-guide-toggle')?.addEventListener('click', (e) => 
 });
 
 // Handle suggestion selection
-window.addEventListener('suggestionSelected', (e) => {
-    const { text, mode = 'replace' } = e.detail;
+function parseSuggestionText(text) {
+    const [rawTitle, ...rest] = (text || '').split('\n');
+    return {
+        title: (rawTitle || '').trim(),
+        description: rest.join('\n').trim(),
+    };
+}
+
+function detectSuggestionInputStyle(tab) {
+    const recentUserMessages = (tab?.messages || [])
+        .filter(msg => msg.role === 'user' && msg.content?.trim())
+        .slice(-5)
+        .map(msg => msg.content.trim());
+
+    if (recentUserMessages.length === 0) return 'instruction';
+
+    const joined = recentUserMessages.join('\n').toLowerCase();
+    const firstPersonMatches = joined.match(/\b(i|i'm|i’d|i'll|me|my|mine)\b/g) || [];
+    const directiveMatches = joined.match(/\b(write|continue|have|make|let|show|focus|use|keep|add|rewrite|respond)\b/g) || [];
+
+    if (directiveMatches.length >= firstPersonMatches.length && directiveMatches.length >= 2) {
+        return 'instruction';
+    }
+    if (firstPersonMatches.length >= 3) {
+        return 'first_person';
+    }
+    return 'third_person';
+}
+
+function buildSuggestionDraft(text, tab) {
+    const { title, description } = parseSuggestionText(text);
+    const beat = [title, description].filter(Boolean).join('. ');
+    const style = detectSuggestionInputStyle(tab);
+
+    if (style === 'first_person') {
+        return `Use this beat for my next first-person turn:\n${beat}\n\nKeep my established POV, tense, and voice. Expand it into a natural, detailed continuation.`;
+    }
+    if (style === 'third_person') {
+        return `Use this beat for the next scene continuation:\n${beat}\n\nKeep the established third-person POV, tense, and tone. Expand it into a natural, detailed continuation.`;
+    }
+    return `Use this next beat:\n${beat}\n\nKeep the current POV, tense, and tone. Expand it into a natural, detailed continuation.`;
+}
+
+function buildSuggestionSendMessage(text, tab) {
+    const { title, description } = parseSuggestionText(text);
+    const beat = description ? `${title}. ${description}` : title;
+    const style = detectSuggestionInputStyle(tab);
+
+    if (style === 'first_person') {
+        return `Continue from my perspective using this beat: ${beat}. Keep my established voice, POV, and tense.`;
+    }
+    if (style === 'third_person') {
+        return `Continue the scene using this beat: ${beat}. Keep the established third-person style, tone, and tense.`;
+    }
+    return `Use this next beat: ${beat}. Keep the current POV, tense, and tone.`;
+}
+
+window.addEventListener('suggestionSelected', async (e) => {
+    const { text, mode = 'send' } = e.detail;
+    const tab = activeChatTab();
     const input = document.getElementById('chat-input');
-    if (input) {
-        if (mode === 'append' && input.value.trim()) {
-            const separator = input.value.endsWith('\n') ? '' : '\n';
-            input.value = `${input.value}${separator}${text}`;
-        } else {
-            input.value = text;
+
+    if (mode === 'send') {
+        const [{ sendChatWithContent }] = await Promise.all([
+            import('./features/chat-transport.js'),
+        ]);
+        if (tab) {
+            await sendChatWithContent(buildSuggestionSendMessage(text, tab));
         }
+        return;
+    }
+
+    if (input && tab) {
+        const draft = buildSuggestionDraft(text, tab);
+        if (input.value.trim()) {
+            const separator = input.value.endsWith('\n') ? '' : '\n';
+            input.value = `${input.value}${separator}${draft}`;
+        } else {
+            input.value = draft;
+        }
+        input.dataset.suggestionDraft = 'true';
         input.focus();
         input.setSelectionRange(input.value.length, input.value.length);
+        autoResizeChatInput();
     }
 });
 

@@ -34,8 +34,9 @@ The chat tab provides multi-tab streaming conversations with the connected llama
 
 - **Custom system prompts** — Per-tab system prompt with live editing
 - **Template library** — Pre-built persona templates with policy management
-- **Persona strip** — Click persona chips to switch conversation style; persists per-tab via `active_template_id`
-- **Explicit mode** — Toggle for uncensored content on models that require guardrail override
+- **Persona dropdown** — Select a persona template from the dropdown menu; persists per-tab via `active_template_id`
+- **Template manager** — Create, edit, and delete custom persona templates with policy management
+- **Explicit mode** — See "Explicit Mode v2" section below for the three-level system
 
 ## Model Parameters
 
@@ -115,6 +116,99 @@ Control how timestamps appear on messages via Settings > Appearance > Date Forma
 
 Toggle whether Enter sends the message or inserts a newline. When off, use Ctrl+Enter to send. Persists per-user in preferences.
 
+## Guided Generation
+
+Guided generation tools help shape conversations through structured notes, contextual suggestions, and pre-built prompts.
+
+### Context Notes Sidebar
+
+A persistent, resizable sidebar with predefined sections for organizing creative direction:
+
+- **Character** — Character descriptions, motivations, and voice notes
+- **Setting** — World-building details, locations, and atmosphere
+- **Plot** — Story beats, plot points, and narrative arcs
+- **Tone** — Mood, pacing, and stylistic preferences
+
+Notes persist per-tab and are included as context when generating responses.
+
+![Context Notes Sidebar](../screenshots/08-context-notes-expanded.png)
+
+### Suggestions Dropdown
+
+An AI-powered suggestion system with 15+ category chips organized in collapsible groups:
+
+- **Story Tools** — Scene transitions, dialogue prompts, conflict generators
+- **Genres** — Genre-specific writing prompts and tropes
+- **Explicit** — Mature content suggestions and direction
+
+The dropdown includes a search filter for quick access to specific suggestion types.
+
+![Suggestions Dropdown](../screenshots/09-suggestions-dropdown.png)
+![Suggestions Tag Cloud](../screenshots/13a-suggestions-tag-cloud.png)
+
+### Quick Guide
+
+An inline instruction panel with three modes for controlling generation:
+
+| Mode | Description |
+|------|-------------|
+| **Quick** | Direct instruction — send a one-line command to steer the next response |
+| **Director** | Custom prompt — write a detailed scene direction for the AI to follow |
+| **Surprise** | Timed injection — schedule a prompt to appear after a set number of messages |
+
+![Quick Guide Dropdown](../screenshots/10-quick-guide-dropdown.png)
+![Quick Guide AI Director](../screenshots/10c-guide-ai-director.png)
+
+### Suggestion History
+
+Recently used suggestions are tracked per-tab for quick reuse. The history panel shows the last 20 suggestions with timestamps.
+
+### Pathweaver Prompts
+
+17 pre-built prompts for different genres and creative scenarios:
+
+- **Action** — Fight scenes, chase sequences, and high-stakes moments
+- **Comedy** — Dialogue-driven humor and situational comedy
+- **Fantasy** — World-building, magic systems, and epic quests
+- **Horror** — Suspense, atmosphere, and jump-scare pacing
+- **Mystery** — Clues, red herrings, and detective work
+- **Romance** — Emotional beats and relationship dynamics
+- **Sci-Fi** — Technology, space exploration, and future societies
+- **Thriller** — Tension, pacing, and plot twists
+- **Drama** — Character development and emotional arcs
+
+## Explicit Mode v2
+
+A three-level content filtering system that adapts to the active persona's content policy.
+
+### Levels
+
+| Level | Icon | Description |
+|-------|------|-------------|
+| **Off** | 🔒 | Default — standard content filtering for all personas |
+| **Unlocked** | 🔓 | Level 1 — relaxed filtering, allows mild mature content |
+| **Unrestricted** | 🔥 | Level 2 — full uncensored mode, no content restrictions |
+
+### Persona-Specific Policies
+
+Each persona has its own default explicit mode setting:
+
+| Persona | Default Level | Notes |
+|---------|--------------|-------|
+| **Roleplay Companion** | Unlocked | Allows mild romance and emotional intimacy |
+| **Study Partner** | Off | Educational content only |
+| **Therapist** | Unlocked | Allows discussion of sensitive topics |
+| **Business Advisor** | Off | Professional content only |
+| **Philosopher** | Off | Academic and intellectual content |
+
+### Controls
+
+- **Chat footer toggle** — Quick toggle between levels in the chat input footer
+- **Settings panel** — Full explicit mode controls in Settings > Content Policy
+
+![Explicit Unlocked](../screenshots/12a-explicit-unlocked.png)
+![Explicit Unrestricted](../screenshots/12b-explicit-unrestricted.png)
+
 ## Model Parameters (Extended)
 
 Additional per-tab parameters beyond the core sampling controls:
@@ -147,10 +241,31 @@ Two compaction modes control how the chat recovers from full context windows:
 
 ## Export & Import
 
-| Format | Export | Import |
-|--------|--------|--------|
-| **Markdown** | Formats as `**Role**: content` blocks with token counts and timestamps | Parses role/content pairs and appends to active tab |
-| **JSON** | Raw message array as `{tab-name}.json` | Parses `{role, content}` objects and appends to active tab |
+Export and import support two formats for chat conversations.
+
+### Markdown Export
+
+Exports chat history as formatted Markdown with:
+
+- **Role labels** — `**User**: content` and `**Assistant**: content` blocks
+- **Token counts** — Each message includes input/output token estimates
+- **Timestamps** — Message timestamps in ISO 8601 format
+- **Metadata** — System prompt, model parameters, and tab name in a header block
+
+### JSON Export
+
+Exports raw message array as `{tab-name}.json` with:
+
+- **Full message objects** — `{role, content, tokens, timestamp}` per message
+- **Tab metadata** — System prompt, model parameters, and settings included
+- **Full tab restore** — Importing a JSON file restores the entire tab state
+
+### Import
+
+| Format | Behavior |
+|--------|----------|
+| **Markdown** | Parses role/content pairs and appends messages to the active tab (preserves existing history) |
+| **JSON** | Parses `{role, content}` objects and appends to active tab; if file contains tab metadata, offers full tab restore |
 
 ## Data Flow
 

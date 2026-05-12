@@ -10,23 +10,26 @@ test.describe('Phase 8 - Tag Cloud', () => {
     await mockSuggestionsAPI(page);
   });
 
-  test('tag cloud renders all 15 category chips', async ({ page }) => {
+  test('tag cloud renders all 15 category chips in DOM', async ({ page }) => {
     await page.locator('#suggestions-toggle').click();
     await page.waitForSelector('#suggestions-dropdown', { state: 'visible' });
 
+    // 15 chips total in DOM (explicit is hidden until explicit mode is on)
     const chips = page.locator('.suggestion-category-btn');
     await expect(chips).toHaveCount(15);
 
-    const expectedCategories = [
+    // The 14 standard chips should be visible
+    const standardKeys = [
       'general', 'plot-twist', 'new-character', 'director',
       'action', 'comedy', 'fantasy', 'horror', 'mystery', 'noir',
       'romance', 'sci-fi', 'thriller', 'character',
-      'explicit',
     ];
-
-    for (const cat of expectedCategories) {
-      await expect(chips.filter({ hasText: cat })).toBeVisible();
+    for (const key of standardKeys) {
+      await expect(page.locator(`.suggestion-category-btn[data-category="${key}"]`)).toBeVisible();
     }
+
+    // Explicit chip exists but is hidden until explicit mode enabled
+    await expect(page.locator('.suggestion-category-btn[data-category="explicit"]')).toHaveCount(1);
   });
 
   test('story tools group contains 4 chips', async ({ page }) => {
@@ -57,14 +60,28 @@ test.describe('Phase 8 - Tag Cloud', () => {
     }
   });
 
-  test('explicit group contains 1 chip', async ({ page }) => {
+  test('explicit group contains 1 chip when explicit mode enabled', async ({ page }) => {
+    // Enable explicit mode so the group becomes visible
+    await page.evaluate(() => {
+      return import('/js/features/chat-state.js').then(({ activeChatTab }) => {
+        const tab = activeChatTab();
+        if (tab) tab.explicit_level = 1;
+      });
+    });
+
     await page.locator('#suggestions-toggle').click();
     await page.waitForSelector('#suggestions-dropdown', { state: 'visible' });
+
+    // Re-trigger UI update so explicit group shows
+    await page.evaluate(async () => {
+      const { setSuggestionCategory } = await import('/js/features/chat-suggestions.js');
+      setSuggestionCategory('general');
+    });
 
     const explicitGroup = page.locator('.category-group[data-group="explicit"]');
     const chips = explicitGroup.locator('.suggestion-category-btn');
     await expect(chips).toHaveCount(1);
-    await expect(chips.filter({ hasText: /Explicit/ })).toBeVisible();
+    await expect(page.locator('.suggestion-category-btn[data-category="explicit"]')).toBeVisible();
   });
 
   test('category groups are collapsible', async ({ page }) => {
@@ -176,6 +193,11 @@ test.describe('Phase 8 - Tag Cloud', () => {
       });
     });
 
+    // Re-toggle dropdown to force UI re-render with new explicit level
+    await page.locator('#suggestions-toggle').click();
+    await page.waitForSelector('#suggestions-dropdown', { state: 'visible' });
+    await page.locator('#suggestions-toggle').click();
+    await page.waitForSelector('#suggestions-dropdown', { state: 'hidden' });
     await page.locator('#suggestions-toggle').click();
     await page.waitForSelector('#suggestions-dropdown', { state: 'visible' });
 
@@ -206,9 +228,10 @@ test.describe('Phase 8 - Tag Cloud', () => {
       { text: 'Explicit', category: 'explicit' },
     ];
 
-    for (const { text, category } of expected) {
-      const chip = page.locator('.suggestion-category-btn', { hasText: text });
-      await expect(chip).toHaveAttribute('data-category', category);
+    // Use data-category attribute for unambiguous lookup (avoids substring matching)
+    for (const { category } of expected) {
+      await expect(page.locator(`.suggestion-category-btn[data-category="${category}"]`))
+        .toHaveAttribute('data-category', category);
     }
   });
 

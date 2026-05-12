@@ -5,71 +5,53 @@ Web dashboard for managing [llama.cpp](https://github.com/ggml-org/llama.cpp) se
 ## Quick Start
 
 ```bash
-# Download the latest release and run
 ./llama-monitor
-
-# Open http://localhost:7778 in your browser
+# Open http://localhost:7778
 ```
 
 On first launch, attach to an existing server or spawn a new one:
 
 ![Welcome Screen](docs/screenshots/01-welcome.png)
 
-## Modes of Operation
-
-| Mode | Description |
-|------|-------------|
-| **Dashboard** (default) | Full web UI with session management, GPU/system monitoring, chat, and server controls |
-| **Agent** (`--agent`) | Lightweight remote metrics endpoint for headless machines |
-
-```bash
-./llama-monitor --agent --agent-host 0.0.0.0 --agent-port 7779
-```
-
 ## Features
 
 ### Monitoring
 
-- **GPU Metrics** — Temperature, load, VRAM, power, clock speeds (AMD ROCm, NVIDIA, Apple Silicon)
-- **System Metrics** — CPU, temperature, load, RAM, motherboard model
-- **Inference Metrics** — Throughput, slot status, context window, generation progress
-- **Context Window Card** — Live gauge across all active chats with per-chat usage
-- **Capability-Aware UI** — Top nav status pill reflects live telemetry level
+GPU metrics (temperature, load, VRAM, power, clocks) for AMD ROCm, NVIDIA, Apple Silicon. System metrics (CPU, RAM, motherboard). Inference metrics with live context window gauge.
 
 ![Inference Metrics](docs/screenshots/02-inference-metrics.gif)
 
-### Server Management
-
-- Spawn/stop llama-server from the UI with configurable presets
-- File browser for binary and model discovery
-- All llama.cpp parameters grouped into collapsible preset sections
-
-### Remote Agents
-
-- SSH-based install, start, stop, update, and removal
-- Version detection with one-click in-place auto-update
-- Windows Task Scheduler for boot-start with full hardware access
-- Cross-platform: Linux, macOS, Windows
-
 ### Chat
 
-- Multi-tab with pin, rename, keyboard switching (Ctrl+1-9, Ctrl+Shift+Arrow)
-- System prompts, persona templates, per-tab model parameters
-- Streaming with reasoning blocks, syntax highlighting, context compaction
-- Token count estimates, history pagination, export, message edit/regenerate
+Multi-tab streaming conversations with system prompts, per-tab model parameters, reasoning blocks, and context compaction.
 
 ![Chat Interface](docs/screenshots/03-chat.png)
 
-### GPU & System Metrics
+- **Tag cloud search** — Browse and filter suggestions by category (15+ topics)
+- **Director mode** — AI-directed multi-step generation with plan-and-execute
+- **Persona dropdown** — Switch conversation styles with built-in templates
+- **Message actions** — Edit, regenerate, copy, export, import
 
-Real-time hardware monitoring with sparkline graphs:
+### Guided Generation
 
-![GPU & System Metrics](docs/screenshots/04-gpu-metrics.gif)
+Structured workflow for creative and technical writing. The context notes sidebar sets project goals, tone, and constraints. The suggestions dropdown offers 15+ categories from brainstorming to code review.
 
-### Desktop
+![Context Notes](docs/screenshots/08-context-notes-expanded.png)
+![Suggestions Dropdown](docs/screenshots/09-suggestions-dropdown.png)
 
-- System tray (optional, `--headless` or `--no-tray` to disable)
-- PWA support, headless mode, auto-update with one-click in-place upgrade
+The quick guide feature provides step-by-step assistance: **Director** (AI plans then executes) or **Surprise** (AI takes creative liberties).
+
+![Director Mode](docs/screenshots/10c-guide-ai-director.png)
+
+*Full details in [docs/reference/chat.md](docs/reference/chat.md)*
+
+### Explicit Mode
+
+Three-level content policy system with persona-aware guardrails: **Off** (default safety), **Unlocked** (relaxed for adult themes), **Unrestricted** (no filtering).
+
+![Explicit Mode](docs/screenshots/12b-explicit-unrestricted.png)
+
+*Full details in [docs/reference/chat.md](docs/reference/chat.md)*
 
 ## Supported Hardware
 
@@ -82,34 +64,23 @@ Real-time hardware monitoring with sparkline graphs:
 
 ## Installation
 
-Pre-built binaries on the [Releases page](../../releases/latest):
-
-| Platform | File |
-|----------|------|
-| Linux x86_64 | `llama-monitor-linux-x86_64` |
-| Linux aarch64 | `llama-monitor-linux-aarch64` |
-| Windows x86_64 | `llama-monitor-windows-x86_64.zip` |
-| macOS Apple Silicon | `llama-monitor-macos-aarch64.tar.gz` |
-
-### From Source
+Pre-built binaries on the [Releases page](../../releases/latest). Or build from source:
 
 ```bash
 git clone https://github.com/nmorgowicz-org/llama-monitor.git && cd llama-monitor
 cargo build --release
 ```
 
-Single self-contained binary at `target/release/llama-monitor`.
-
 ## Documentation
 
-- [Dashboard Capabilities](docs/reference/dashboard.md) — Metrics, monitoring, and hardware support
+- [Dashboard Capabilities](docs/reference/dashboard.md) — Metrics, monitoring, hardware support
 - [Remote Agent](docs/reference/remote-agent.md) — Headless deployment, SSH management, auto-update
-- [Chat](docs/reference/chat.md) — Multi-tab chat, telemetry, context compaction
-- [Real-Time Communication](docs/reference/realtime-communication.md) — WebSocket schema, polling intervals, network detection
+- [Chat](docs/reference/chat.md) — Multi-tab chat, guided generation, explicit mode, context compaction
+- [Real-Time Communication](docs/reference/realtime-communication.md) — WebSocket schema, polling, network detection
 - [API Reference](docs/reference/api.md) — REST endpoints
-- [Capabilities](docs/reference/capabilities.md) — Metric capability flags
 - [CLI Reference](docs/reference/cli-flags.md) — All flags and options
 - [Cross-Compilation](docs/reference/cross-compilation.md) — Build targets and toolchains
+- [Capability Flags](docs/reference/capabilities.md) — Metric capability system
 
 ## Development
 

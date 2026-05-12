@@ -28,19 +28,32 @@ test.describe('Context Notes Sidebar', () => {
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   });
 
-  test('add note with section and content', async ({ page }) => {
-    // Open sidebar
+  test('predefined sections are rendered', async ({ page }) => {
     await page.locator('#context-sidebar-toggle').click();
     await page.waitForSelector('.sidebar-notes-list');
 
-    // Add note
-    await page.locator('#sidebar-section-input').fill('Characters');
-    await page.locator('#sidebar-content-input').fill('Alice: 25, detective');
-    await page.locator('#sidebar-add-btn').click();
+    // All 4 predefined sections should be present
+    for (const section of ['Character', 'Setting', 'Plot', 'Tone']) {
+      await expect(page.locator(`.sidebar-section-wrapper[data-section="${section}"]`)).toBeVisible();
+    }
+  });
 
-    // Verify note appears
-    await expect(page.locator('.sidebar-note-item')).toContainText('Alice: 25, detective');
-    await expect(page.locator('.sidebar-note-section')).toContainText('CHARACTERS');
+  test('add note to Character section', async ({ page }) => {
+    await page.locator('#context-sidebar-toggle').click();
+    await page.waitForSelector('.sidebar-notes-list');
+
+    // Click the add note button for Character section
+    await page.locator('.sidebar-add-note-btn[data-section="Character"]').click();
+    await page.waitForSelector('.sidebar-form-textarea[data-section="Character"]', { state: 'visible' });
+
+    // Fill the note
+    await page.locator('.sidebar-form-textarea[data-section="Character"]').fill('Alice: 28, noir detective');
+
+    // Save the note
+    await page.locator('[data-section-save="Character"]').click();
+
+    // Note should appear in list
+    await expect(page.locator('.sidebar-note-item')).toContainText('Alice: 28, noir detective');
 
     // Verify persisted in tab
     const persisted = await page.evaluate(() => {
@@ -52,26 +65,13 @@ test.describe('Context Notes Sidebar', () => {
     expect(persisted).toBeGreaterThan(0);
   });
 
-  test('add note defaults section to General', async ({ page }) => {
-    await page.locator('#context-sidebar-toggle').click();
-    await page.waitForSelector('.sidebar-notes-list');
-
-    // Add note with empty section
-    await page.locator('#sidebar-section-input').fill('');
-    await page.locator('#sidebar-content-input').fill('General note');
-    await page.locator('#sidebar-add-btn').click();
-
-    // Should default to General
-    await expect(page.locator('.sidebar-note-section')).toContainText('GENERAL');
-  });
-
   test('delete note from list', async ({ page }) => {
-    // Seed a note
+    // Seed a note directly into tab state
     await page.evaluate(() => {
       return import('/js/features/chat-state.js').then(({ activeChatTab }) => {
         const tab = activeChatTab();
         tab.context_notes = [
-          { section: 'Test', content: 'Test note', created_at: Date.now() }
+          { section: 'Character', content: 'Test character note', created_at: Date.now() }
         ];
       });
     });
@@ -80,7 +80,7 @@ test.describe('Context Notes Sidebar', () => {
     await page.waitForSelector('.sidebar-note-item');
 
     const beforeCount = await page.locator('.sidebar-note-item').count();
-    await page.locator('.sidebar-note-delete').first().click();
+    await page.locator('.sidebar-note-btn-delete').first().click();
     const afterCount = await page.locator('.sidebar-note-item').count();
 
     expect(afterCount).toBe(beforeCount - 1);
@@ -90,19 +90,21 @@ test.describe('Context Notes Sidebar', () => {
     await page.locator('#context-sidebar-toggle').click();
     await page.waitForSelector('.sidebar-notes-list');
 
-    await expect(page.locator('.sidebar-empty-state')).toBeVisible();
-    await expect(page.locator('.sidebar-empty-state')).toContainText('No context notes');
+    // Each predefined section shows placeholder text when empty
+    await expect(page.locator('.sidebar-section-empty').first()).toBeVisible();
   });
 
-  test('note form clears after submit', async ({ page }) => {
+  test('note composer form closes after save', async ({ page }) => {
     await page.locator('#context-sidebar-toggle').click();
     await page.waitForSelector('.sidebar-notes-list');
 
-    await page.locator('#sidebar-section-input').fill('Test');
-    await page.locator('#sidebar-content-input').fill('Test content');
-    await page.locator('#sidebar-add-btn').click();
+    await page.locator('.sidebar-add-note-btn[data-section="Character"]').click();
+    await page.waitForSelector('.sidebar-form-textarea[data-section="Character"]', { state: 'visible' });
 
-    await expect(page.locator('#sidebar-section-input')).toHaveValue('');
-    await expect(page.locator('#sidebar-content-input')).toHaveValue('');
+    await page.locator('.sidebar-form-textarea[data-section="Character"]').fill('Test content');
+    await page.locator('[data-section-save="Character"]').click();
+
+    // Form should close after save
+    await expect(page.locator('.sidebar-form-textarea[data-section="Character"]')).not.toBeVisible();
   });
 });

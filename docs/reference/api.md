@@ -295,8 +295,15 @@ Retrieve persisted UI settings.
   "remote_agent_ssh_autostart": false,
   "remote_agent_ssh_target": "",
   "remote_agent_ssh_command": "",
-  "explicit_mode_policy": "",
-  "context_card_view": "gauge"
+"explicit_mode_policy": "",
+   "context_card_view": "gauge",
+   "enabled_context_notes": false,
+   "enabled_suggestions": false,
+   "enabled_quick_guide": false,
+   "default_sidebar_width": 320,
+   "suggestion_count": 5,
+   "context_depth": 10,
+   "suggestion_prompts": {}
 }
 ```
 
@@ -306,6 +313,18 @@ Fields from `ui-settings.json`:
 - `remote_agent_*`: Remote agent configuration
 - `explicit_mode_policy`: Policy text appended when explicit mode is enabled
 - `context_card_view`: `"gauge"` | `"text"` (UI preference)
+
+### Guided Generation Settings
+
+These settings control the guided generation features (context notes, suggestions, quick guide).
+
+- `enabled_context_notes` (boolean): Enable/disable context notes in chat
+- `enabled_suggestions` (boolean): Enable/disable suggestion generation
+- `enabled_quick_guide` (boolean): Enable/disable quick guide panel
+- `default_sidebar_width` (integer): Sidebar width in pixels (default: 320)
+- `suggestion_count` (integer): Number of suggestions to generate per request (default: 5)
+- `context_depth` (integer): Number of recent messages to include in context for suggestions (default: 10)
+- `suggestion_prompts` (object): Category-specific prompt templates for suggestion generation. Keys are category names (e.g. `"general"`, `"coding"`, `"writing"`), values are prompt strings.
 
 **Note:** Only `GET` is currently implemented; `PUT` returns 404. Settings are persisted via the `POST /api/settings/save` endpoint (deprecated in favor of direct file writes from the UI).
 
@@ -344,6 +363,48 @@ Send a message to the active llama.cpp server via the OpenAI-compatible `/v1/cha
 ### `POST /api/chat/abort`
 Abort the currently streaming chat response.
 
+### `POST /api/chat/suggestions`
+Generate suggestions for a given category. Uses the current chat context to produce relevant follow-up prompts.
+
+**Request:**
+```json
+{
+  "category": "general",
+  "count": 5
+}
+```
+
+**Response:**
+```json
+{
+  "suggestions": [
+    "What's the weather like today?",
+    "Can you explain quantum computing?",
+    "Write a short poem about coding"
+  ],
+  "category": "general",
+  "count": 3
+}
+```
+
+### `POST /api/chat/suggestions/rewrite`
+Rewrite a suggestion using the current chat context. Useful for refining or rephrasing a suggestion.
+
+**Request:**
+```json
+{
+  "suggestion": "Explain quantum computing",
+  "category": "general"
+}
+```
+
+**Response:**
+```json
+{
+  "content": "Can you explain the basics of quantum computing in simple terms?"
+}
+```
+
 ### `GET /api/chat/tabs`
 Load all persisted chat tabs from disk.
 
@@ -361,7 +422,7 @@ Save all chat tabs to disk. Body is an array of `ChatTab` objects.
   "system_prompt": "You are helpful.",
   "ai_name": null,
   "user_name": null,
-  "explicit_mode": null,
+  "explicit_level": null,
   "messages": [
     {
       "role": "user",

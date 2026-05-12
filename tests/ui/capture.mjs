@@ -553,12 +553,16 @@ async function describeQuickGuideFlow(page) {
         const assistantMessages = Array.from(document.querySelectorAll('#chat-messages .chat-message-assistant'));
         const lastAssistant = assistantMessages.at(-1)?.querySelector('.chat-msg-body')?.textContent?.trim() ?? null;
         const container = document.getElementById('quick-guide-container');
+        const activeMode = document.querySelector('.quick-guide-mode-btn.active')?.dataset.guideMode ?? null;
+        const armedChip = document.getElementById('quick-guide-status-chip')?.textContent?.trim() ?? null;
         return {
             assistantCount: assistantMessages.length,
             lastAssistantPreview: lastAssistant?.slice(0, 240) ?? null,
             errorCount: errors.length,
             latestError: errors.at(-1) ?? null,
             quickGuideExpanded: container?.classList.contains('quick-guide-expanded') ?? false,
+            activeMode,
+            armedChip,
         };
     });
 }
@@ -699,6 +703,48 @@ async function scenarioNewFeatures(ctx) {
     await captureShot(page, '10b-quick-guide-response.png', { fullPage: true });
     await page.evaluate(async () => {
         const { toggleQuickGuide } = await import('./js/features/chat-quick-guide.js');
+        const toggle = document.getElementById('quick-guide-toggle');
+        const expanded = toggle?.getAttribute('aria-expanded') === 'true';
+        if (!expanded) toggleQuickGuide();
+    });
+    await sleep(500);
+    await page.evaluate(() => {
+        document.getElementById('quick-guide-mode-director')?.click();
+    });
+    await sleep(500);
+    console.log('[CAPTURE] Director mode state:', JSON.stringify(
+        await describeQuickGuideFlow(page)
+    ));
+    await captureShot(page, '10c-guide-ai-director.png', { fullPage: true });
+    await page.type('#quick-guide-director-input', 'Escalate this scene into a close-quarters confrontation, but keep it noir and restrained.');
+    await page.click('#quick-guide-director-generate-btn');
+    await page.waitForFunction(() => {
+        const results = document.getElementById('quick-guide-director-results');
+        if (!results) return false;
+        return results.querySelectorAll('[data-director-apply]').length > 0
+            || results.textContent.includes('failed')
+            || results.textContent.includes('No director ideas');
+    }, { timeout: 120000 });
+    await sleep(1200);
+    console.log('[CAPTURE] Director results state:', JSON.stringify(
+        await describeQuickGuideFlow(page)
+    ));
+    await captureShot(page, '10d-guide-ai-director-results.png', { fullPage: true });
+    await page.evaluate(() => {
+        document.getElementById('quick-guide-mode-surprise')?.click();
+    });
+    await sleep(500);
+    await page.select('#quick-guide-surprise-kind', 'reveal');
+    await page.select('#quick-guide-surprise-delay', '1');
+    await page.type('#quick-guide-surprise-input', 'Reveal that the shadow already knows the ledger is fake.');
+    await page.click('#quick-guide-surprise-arm-btn');
+    await sleep(800);
+    console.log('[CAPTURE] Surprise mode state:', JSON.stringify(
+        await describeQuickGuideFlow(page)
+    ));
+    await captureShot(page, '10e-guide-ai-surprise.png', { fullPage: true });
+    await page.evaluate(async () => {
+        const { toggleQuickGuide } = await import('./js/features/chat-quick-guide.js');
         toggleQuickGuide();
     });
     await sleep(500);
@@ -724,6 +770,14 @@ async function scenarioNewFeatures(ctx) {
     await page.type('#suggestion-search-input', 'horror');
     await sleep(500);
     await captureShot(page, '13b-suggestions-search-filter.png', { fullPage: false });
+
+    // Open manage categories modal to validate rendering
+    await page.evaluate(() => document.getElementById('suggestions-manage-btn')?.click());
+    await sleep(800);
+    await captureShot(page, '14-manage-categories.png', { fullPage: false });
+    await captureElementScreenshot(page, '#categories-builtin-list', '14b-builtin-list.png', { padding: 12 });
+    await page.keyboard.press('Escape');
+    await sleep(300);
 
     await cleanupScreenshotTabs(page);
     detachSuggestionsLogger();

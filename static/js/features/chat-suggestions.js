@@ -1,7 +1,7 @@
 // ── Suggestions (Dropdown) ──────────────────────────────────────────────────
 // Dropdown menu with AI-generated suggestions (General, Plot Twist, New Character).
 
-import { activeChatTab, persistChatTabs } from './chat-state.js';
+import { activeChatTab, autoResizeChatInput, persistChatTabs } from './chat-state.js';
 import { chat } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast, showToastWithActions } from './toast.js';
@@ -32,6 +32,11 @@ let suggestionsState = {
     isLoading: false,
     hasGenerated: false,
     suggestions: [],
+    mode: 'browse',
+    draftSuggestion: null,
+    draftText: '',
+    rewrittenText: '',
+    rewriteLoading: false,
     recentSuggestions: [],
     customCategories: new Map(),
     retryCount: 0,
@@ -48,6 +53,15 @@ export function toggleSuggestionsDropdown() {
     if (settings.enabled_suggestions === false) return;
 
     suggestionsState.expanded = !suggestionsState.expanded;
+    if (suggestionsState.expanded) {
+        window.dispatchEvent(new CustomEvent('suggestionsOpened'));
+    }
+    updateDropdownUI();
+}
+
+export function closeSuggestionsDropdown() {
+    if (!suggestionsState.expanded) return;
+    suggestionsState.expanded = false;
     updateDropdownUI();
 }
 
@@ -73,6 +87,8 @@ function updateDropdownUI() {
     const description = document.getElementById('suggestions-category-description');
     const preview = document.getElementById('suggestions-category-preview');
     const setupToggle = document.getElementById('suggestions-view-toggle');
+    const backBtn = document.getElementById('suggestions-editor-back');
+    const recentContainer = document.getElementById('suggestions-recent');
     const meta = CATEGORY_META[suggestionsState.currentCategory] || {
         label: suggestionsState.currentCategory,
         description: 'Generate suggestions for the current conversation.',
@@ -94,6 +110,7 @@ function updateDropdownUI() {
     }
 
     dropdown.classList.toggle('setup-collapsed', suggestionsState.setupCollapsed);
+    dropdown.classList.toggle('suggestions-workspace-open', suggestionsState.mode !== 'browse');
 
     if (status) {
         status.textContent = suggestionsState.isLoading ? 'Loading' : meta.label;
@@ -111,6 +128,10 @@ function updateDropdownUI() {
     if (setupToggle) {
         setupToggle.textContent = suggestionsState.setupCollapsed ? 'Show Setup' : 'Hide Setup';
         setupToggle.setAttribute('aria-pressed', suggestionsState.setupCollapsed ? 'true' : 'false');
+        setupToggle.hidden = suggestionsState.mode !== 'browse';
+    }
+    if (backBtn) {
+        backBtn.hidden = suggestionsState.mode === 'browse';
     }
 
     // Toggle explicit group visibility based on explicit_level
@@ -141,6 +162,9 @@ function updateDropdownUI() {
 
     // Always render recent suggestions
     renderRecentSuggestions();
+    if (recentContainer) {
+        recentContainer.hidden = suggestionsState.mode !== 'browse';
+    }
 }
 
 function applySearchFilter() {
@@ -197,6 +221,16 @@ function renderSuggestionsList() {
     const container = document.getElementById('suggestions-list');
     if (!container) return;
 
+    if (suggestionsState.mode === 'draft') {
+        renderSuggestionDraftEditor(container);
+        return;
+    }
+
+    if (suggestionsState.mode === 'preview') {
+        renderSuggestionDraftPreview(container);
+        return;
+    }
+
     if (!suggestionsState.isLoading && !suggestionsState.hasGenerated) {
         container.innerHTML = '';
         return;
@@ -238,8 +272,8 @@ function renderSuggestionsList() {
                 <div class="suggestion-content">${escapeHtml(description || title)}</div>
             </div>
             <div class="suggestion-actions">
-                <button class="suggestion-btn suggestion-btn-append" data-mode="append" aria-label="Append suggestion: ${escapeHtml(title)}">Append</button>
-                <button class="suggestion-btn suggestion-btn-use" data-mode="replace" aria-label="Replace input with suggestion: ${escapeHtml(title)}">Replace</button>
+                <button class="suggestion-btn suggestion-btn-append" data-mode="draft" aria-label="Edit draft for suggestion: ${escapeHtml(title)}">Edit Draft</button>
+                <button class="suggestion-btn suggestion-btn-use" data-mode="send" aria-label="Send suggestion as user direction: ${escapeHtml(title)}">Send Direction</button>
             </div>
         </div>
     `;
@@ -254,6 +288,286 @@ function renderSuggestionsList() {
             useSuggestion(index, btn.dataset.mode || 'replace');
         });
     });
+}
+
+function parseSuggestionText(text) {
+    const [title, ...rest] = (text || '').split('\n');
+    return {
+        title: (title || '').trim(),
+        description: rest.join('\n').trim(),
+    };
+}
+
+function detectSuggestionRewriteStyle(tab) {
+    const recentUserMessages = (tab?.messages || [])
+        .filter(msg => msg.role === 'user' && msg.content?.trim())
+        .slice(-5)
+        .map(msg => msg.content.trim());
+
+    if (recentUserMessages.length === 0) return 'instruction';
+
+    const joined = recentUserMessages.join('\n').toLowerCase();
+    const firstPersonMatches = joined.match(/\b(i|i'm|i'd|i'll|me|my|mine)\b/g) || [];
+    const directiveMatches = joined.match(/\b(write|continue|have|make|let|show|focus|use|keep|add|rewrite|respond)\b/g) || [];
+
+    if (directiveMatches.length >= firstPersonMatches.length && directiveMatches.length >= 2) {
+        return 'instruction';
+    }
+    if (firstPersonMatches.length >= 3) {
+        return 'first_person';
+    }
+    return 'third_person';
+}
+
+function buildSuggestionDraftSeed(text, tab) {
+    const { title, description } = parseSuggestionText(text);
+    const beat = [title, description].filter(Boolean).join('. ');
+    const style = detectSuggestionRewriteStyle(tab);
+
+    if (style === 'first_person') {
+        return `Use this beat for my next turn:\n${beat}\n\nI want this to land in my established first-person voice and perspective.`;
+    }
+    if (style === 'third_person') {
+        return `Use this beat for the next scene continuation:\n${beat}\n\nKeep it aligned with the existing third-person voice, tone, and tension.`;
+    }
+    return `Use this beat:\n${beat}\n\nTurn it into a natural continuation that matches the current scene voice, POV, and tension.`;
+}
+
+function openSuggestionDraft(index) {
+    const tab = activeChatTab();
+    const suggestion = suggestionsState.suggestions[index];
+    if (!tab || !suggestion) return;
+
+    suggestionsState.mode = 'draft';
+    suggestionsState.setupCollapsed = true;
+    suggestionsState.draftSuggestion = suggestion;
+    suggestionsState.draftText = buildSuggestionDraftSeed(suggestion, tab);
+    suggestionsState.rewrittenText = '';
+    suggestionsState.rewriteLoading = false;
+    updateDropdownUI();
+}
+
+function resetSuggestionWorkspace({ preserveResults = true } = {}) {
+    suggestionsState.mode = 'browse';
+    suggestionsState.draftSuggestion = null;
+    suggestionsState.draftText = '';
+    suggestionsState.rewrittenText = '';
+    suggestionsState.rewriteLoading = false;
+    if (!preserveResults) {
+        suggestionsState.hasGenerated = false;
+    }
+    updateDropdownUI();
+}
+
+function renderSuggestionDraftEditor(container) {
+    const { title } = parseSuggestionText(suggestionsState.draftSuggestion || '');
+    const helperCopy = suggestionsState.rewriteLoading
+        ? 'Rewriting your draft into fuller user-side prose…'
+        : 'Edit the beat, then let the AI rewrite it into a fuller user-side message in your established voice and POV.';
+
+    // eslint-disable-next-line no-unsanitized/property -- Internal state escaped before insertion
+    container.innerHTML = `
+        <div class="suggestions-workspace-card">
+            <div class="suggestions-workspace-kicker">Draft From Suggestion</div>
+            <div class="suggestions-workspace-title">${escapeHtml(title || 'Selected Suggestion')}</div>
+            <div class="suggestions-workspace-copy">${escapeHtml(helperCopy)}</div>
+            <textarea class="suggestions-draft-editor" id="suggestions-draft-editor" rows="8" placeholder="Adjust the beat, POV, emotional tone, or specific action before rewriting...">${escapeHtml(suggestionsState.draftText)}</textarea>
+            <div class="suggestions-workspace-actions">
+                <button class="suggestion-btn suggestion-btn-append" id="suggestions-draft-cancel" type="button">Cancel</button>
+                <button class="suggestion-btn suggestion-btn-use" id="suggestions-draft-rewrite" type="button" ${suggestionsState.rewriteLoading ? 'disabled' : ''}>Rewrite Draft</button>
+            </div>
+        </div>
+    `;
+
+    const editor = document.getElementById('suggestions-draft-editor');
+    editor?.addEventListener('input', (e) => {
+        suggestionsState.draftText = e.target.value;
+    });
+    document.getElementById('suggestions-draft-cancel')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        resetSuggestionWorkspace();
+    });
+    document.getElementById('suggestions-draft-rewrite')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        rewriteSuggestionDraft();
+    });
+}
+
+function renderSuggestionDraftPreview(container) {
+    const { title } = parseSuggestionText(suggestionsState.draftSuggestion || '');
+    container.innerHTML = `
+        <div class="suggestions-workspace-card">
+            <div class="suggestions-workspace-kicker">Composer Preview</div>
+            <div class="suggestions-workspace-title">${escapeHtml(title || 'Rewritten Draft')}</div>
+            <div class="suggestions-workspace-copy">This version is ready to drop into the main composer as your next message. Make any final tweaks there before sending.</div>
+            <div class="suggestions-preview-output">${escapeHtml(suggestionsState.rewrittenText)}</div>
+            <div class="suggestions-workspace-actions">
+                <button class="suggestion-btn suggestion-btn-append" id="suggestions-preview-edit" type="button">Edit Again</button>
+                <button class="suggestion-btn suggestion-btn-use" id="suggestions-preview-use" type="button">Use In Composer</button>
+            </div>
+        </div>
+    `;
+
+    document.getElementById('suggestions-preview-edit')?.addEventListener('click', () => {
+        suggestionsState.mode = 'draft';
+        updateDropdownUI();
+    });
+    document.getElementById('suggestions-preview-use')?.addEventListener('click', () => {
+        const input = document.getElementById('chat-input');
+        if (!input) return;
+        input.value = suggestionsState.rewrittenText;
+        delete input.dataset.suggestionDraft;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+        autoResizeChatInput();
+        suggestionsState.expanded = false;
+        resetSuggestionWorkspace();
+    });
+}
+
+function buildSuggestionRewritePrompt(tab, suggestionText, draftText) {
+    const style = detectSuggestionRewriteStyle(tab);
+    const charName = (tab?.ai_name || 'the AI character').trim();
+    const userName = (tab?.user_name || 'the user').trim();
+
+    const userMessages = (tab?.messages || [])
+        .filter(msg => msg.role === 'user' && msg.content?.trim())
+        .slice(-6)
+        .map(msg => msg.content.trim());
+
+    const recentContext = (tab?.messages || [])
+        .slice(-8)
+        .map(msg => `${msg.role === 'user' ? userName : charName}: ${msg.content}`)
+        .join('\n\n');
+
+    const voiceBlock = userMessages.length > 0
+        ? `\nVoice samples — how ${userName} actually writes:\n${userMessages.map((m, i) => `[${i + 1}] ${m}`).join('\n\n')}`
+        : '';
+
+    const styleInstruction = style === 'first_person'
+        ? `Write in first person as ${userName}. Mirror their sentence rhythm, vocabulary, and emotional cadence from the voice samples.`
+        : style === 'third_person'
+            ? `Write as a ${userName}-authored third-person continuation. Match the established tone, pacing, and POV from the voice samples.`
+            : `Write naturally as ${userName}'s next prose turn. Convert any planning language into scene prose that matches their voice from the samples.`;
+
+    return `You are helping ${userName} compose their next message in an ongoing creative writing exchange with ${charName}.
+
+CRITICAL: You are writing AS ${userName}, NOT as ${charName}. Do not write ${charName}'s dialogue, actions, or thoughts. Output only what ${userName} would type next.
+
+Task: Expand the draft notes into polished prose in ${userName}'s established voice.
+
+Rules:
+- Output ONLY ${userName}'s message — no labels, no explanations, no meta-language.
+- Do not mention "beat", "draft", "suggestion", "POV", or any planning terms.
+- Do not write as ${charName} or continue the scene from ${charName}'s perspective.
+- Match ${userName}'s voice closely using the samples below.
+
+Style: ${styleInstruction}
+
+Length: 2–4 paragraphs, 3–8 sentences. Rich but not overlong — ${userName}'s turns should be shorter than ${charName}'s.
+${voiceBlock}
+
+Suggestion beat to expand:
+${suggestionText}
+
+${userName}'s draft notes:
+${draftText}
+
+Recent conversation:
+${recentContext}`;
+}
+
+async function fetchSuggestionRewrite(prompt) {
+    const resp = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            messages: [
+                {
+                    role: 'system',
+                    content: 'You rewrite user-side creative-writing drafts into polished final prose. Keep all reasoning internal. Output only the rewritten final message.',
+                },
+                {
+                    role: 'user',
+                    content: prompt,
+                },
+            ],
+            stream: true,
+            temperature: 0.75,
+            thinking_budget_tokens: 0,
+            chat_template_kwargs: { enable_thinking: false },
+            max_tokens: 420,
+        }),
+    });
+
+    if (!resp.ok) {
+        const errText = await resp.text().catch(() => '');
+        throw new Error(`HTTP ${resp.status}: ${errText || resp.statusText}`);
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let output = '';
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop() ?? '';
+
+        for (const line of lines) {
+            if (!line.startsWith('data:')) continue;
+            const payload = line.slice(5).trim();
+            if (!payload || payload === '[DONE]') continue;
+            try {
+                const obj = JSON.parse(payload);
+                const delta = obj.choices?.[0]?.delta;
+                if (delta?.content) output += delta.content;
+            } catch {
+                // ignore malformed chunks
+            }
+        }
+    }
+
+    return output.trim();
+}
+
+async function rewriteSuggestionDraft() {
+    const tab = activeChatTab();
+    if (!tab || !suggestionsState.draftSuggestion) return;
+    const draftText = suggestionsState.draftText.trim();
+    if (!draftText) {
+        showToast('Add a draft note first', 'warning');
+        return;
+    }
+
+    suggestionsState.rewriteLoading = true;
+    updateDropdownUI();
+
+    try {
+        const prompt = buildSuggestionRewritePrompt(tab, suggestionsState.draftSuggestion, draftText);
+        const rewritten = await fetchSuggestionRewrite(prompt);
+        if (!rewritten) {
+            throw new Error('rewrite returned empty content');
+        }
+
+        // Drop directly into the main composer and close the popup
+        const input = document.getElementById('chat-input');
+        if (input) {
+            input.value = rewritten;
+            input.focus();
+            input.setSelectionRange(input.value.length, input.value.length);
+            autoResizeChatInput();
+        }
+        suggestionsState.expanded = false;
+        resetSuggestionWorkspace({ preserveResults: true });
+    } catch (error) {
+        showToast(`Draft rewrite failed: ${error.message}`, 'error');
+        suggestionsState.rewriteLoading = false;
+        updateDropdownUI();
+    }
 }
 
 function renderRecentSuggestions() {
@@ -320,7 +634,7 @@ function reuseRecentSuggestion(index) {
 
     // Dispatch event for chat-input to handle
     window.dispatchEvent(new CustomEvent('suggestionSelected', {
-        detail: { text: suggestion, mode: 'replace' },
+        detail: { text: suggestion, mode: 'send' },
     }));
 
     // Close dropdown
@@ -477,24 +791,86 @@ async function requestSuggestions({ tabId, category, contextDepth, suggestionCou
 
 // ── Use Suggestion ───────────────────────────────────────────────────────────
 
-function useSuggestion(index, mode = 'replace') {
+async function useSuggestion(index, mode = 'send') {
     const suggestion = suggestionsState.suggestions[index];
     if (!suggestion) return;
 
-    // Track in history
+    if (mode === 'draft') {
+        openSuggestionDraft(index);
+        return;
+    }
+
+    // Rewrite the suggestion in the user's voice before placing it in the composer.
+    // The suggestion text seeds both the context and the draft so the AI knows what
+    // beat to express — the rewrite just re-voices it as the user, not the character.
+    const tab = activeChatTab();
+    if (!tab) return;
+
     addRecentSuggestion(suggestion);
-
-    // Dispatch event for chat-input to handle
-    window.dispatchEvent(new CustomEvent('suggestionSelected', {
-        detail: { text: suggestion, mode },
-    }));
-
-    // Close dropdown
-    suggestionsState.expanded = false;
+    suggestionsState.rewriteLoading = true;
     updateDropdownUI();
+
+    try {
+        const prompt = buildSuggestionRewritePrompt(tab, suggestion, suggestion);
+        const rewritten = await fetchSuggestionRewrite(prompt);
+        if (!rewritten) throw new Error('rewrite returned empty content');
+
+        const input = document.getElementById('chat-input');
+        if (input) {
+            input.value = rewritten;
+            input.focus();
+            input.setSelectionRange(input.value.length, input.value.length);
+            autoResizeChatInput();
+        }
+        suggestionsState.expanded = false;
+        suggestionsState.rewriteLoading = false;
+        updateDropdownUI();
+    } catch (err) {
+        showToast(`Send Direction rewrite failed: ${err.message}`, 'error');
+        suggestionsState.rewriteLoading = false;
+        updateDropdownUI();
+    }
 }
 
 // ── Category Management ──────────────────────────────────────────────────────
+
+const CATEGORY_DEFAULT_PROMPTS = {
+    general: 'Generate {count} versatile next-step story beats that naturally continue the current conversation — action, emotion, dialogue, or any mix that fits the moment.',
+    'plot-twist': 'Generate {count} unexpected plot twists, reversals, or reveals that raise the stakes or shift the scene\'s direction entirely.',
+    'new-character': 'Generate {count} ways to introduce a new character who creates conflict, chemistry, new information, or a meaningful dynamic shift.',
+    director: 'Generate {count} high-level scene direction notes — pacing changes, tonal pivots, cinematic staging, or structural beats the story needs.',
+    action: 'Generate {count} action-driven beats with momentum, physical danger, immediate stakes, and visceral consequence.',
+    comedy: 'Generate {count} humor beats — awkward pivots, absurd escalations, well-timed punchlines, or playful character moments.',
+    fantasy: 'Generate {count} fantasy-flavored beats drawing on magic systems, myth, prophecy, or setting-specific lore.',
+    horror: 'Generate {count} horror beats — creeping dread, sudden menace, psychological pressure, or atmosphere that tightens the scene.',
+    mystery: 'Generate {count} mystery beats — clue drops, red herrings, suspicion shifts, or revelatory moments that reframe what we know.',
+    noir: 'Generate {count} noir beats — cynical dialogue, shadowy motives, moral compromise, and rain-soaked moral ambiguity.',
+    romance: 'Generate {count} romance beats — charged silence, emotional vulnerability, longing, misread signals, or turning points in intimacy.',
+    'sci-fi': 'Generate {count} sci-fi beats involving futuristic dilemmas, technological stakes, or speculative world logic that complicates the scene.',
+    thriller: 'Generate {count} thriller beats — escalating urgency, time pressure, dangerous information, or consequences that keep tightening.',
+    character: 'Generate {count} character-focused beats that reveal hidden desire, force a difficult choice, or expose an internal contradiction.',
+    explicit: 'Generate {count} explicit adult-only beats for this scene, grounded in character chemistry and emotional context.',
+};
+
+function getBuiltinPromptOverride(key) {
+    try {
+        const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
+        return (settings.suggestion_prompts || {})[key] || '';
+    } catch { return ''; }
+}
+
+function saveBuiltinPromptOverride(key, value) {
+    try {
+        const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
+        if (!settings.suggestion_prompts) settings.suggestion_prompts = {};
+        if (value.trim()) {
+            settings.suggestion_prompts[key] = value.trim();
+        } else {
+            delete settings.suggestion_prompts[key];
+        }
+        localStorage.setItem('llama_monitor_settings', JSON.stringify(settings));
+    } catch (e) { console.error('Failed to save prompt override:', e); }
+}
 
 function manageCategories() {
     const modal = document.getElementById('manage-categories-modal');
@@ -504,94 +880,187 @@ function manageCategories() {
     modal.inert = false;
     modal.classList.add('open');
 
-    renderCategoriesList();
+    renderBuiltinCategories();
+    renderCustomCategories();
 }
 
-function renderCategoriesList() {
-    const list = document.getElementById('categories-list');
+function renderBuiltinCategories() {
+    const list = document.getElementById('categories-builtin-list');
     if (!list) return;
 
-    const defaults = {
-        general: document.getElementById('settings-prompt-general')?.value || '',
-        'plot-twist': document.getElementById('settings-prompt-plot-twist')?.value || '',
-        'new-character': document.getElementById('settings-prompt-new-character')?.value || '',
-    };
-
-    const categories = [
-        { name: 'General', key: 'general', prompt: defaults.general, isDefault: true },
-        { name: 'Plot Twist', key: 'plot-twist', prompt: defaults['plot-twist'], isDefault: true },
-        { name: 'New Character', key: 'new-character', prompt: defaults['new-character'], isDefault: true },
-        ...Array.from(suggestionsState.customCategories.entries()).map(([key, prompt]) => ({
-            name: key.charAt(0).toUpperCase() + key.slice(1),
-            key,
-            prompt,
-            isDefault: false,
-        })),
-    ];
-
     // eslint-disable-next-line no-unsanitized/property -- User content escaped via escapeHtml()
-    list.innerHTML = categories.map(cat => `
-        <div class="category-item" data-key="${escapeHtml(cat.key)}" style="display:flex;align-items:center;justify-content:space-between;padding:12px;border:1px solid var(--border-color);border-radius:6px;margin-bottom:8px;background:var(--bg-secondary);">
-            <div>
-                <strong class="category-name">${escapeHtml(cat.name)}${cat.isDefault ? ' (Default)' : ''}</strong>
-                <div class="category-prompt" style="font-size:12px;color:var(--text-muted);margin-top:4px;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(cat.prompt.substring(0, 100))}${cat.prompt.length > 100 ? '...' : ''}</div>
+    list.innerHTML = Object.entries(CATEGORY_META).map(([key, meta]) => {
+        const override = getBuiltinPromptOverride(key);
+        const hasOverride = !!override;
+        const defaultPrompt = CATEGORY_DEFAULT_PROMPTS[key] || '';
+        const editValue = override || defaultPrompt;
+        return `
+        <div class="cat-card" data-key="${escapeHtml(key)}">
+            <div class="cat-card-main" role="button" tabindex="0" aria-expanded="false">
+                <div class="cat-card-info">
+                    <span class="cat-card-chip">${escapeHtml(meta.label)}</span>
+                    <span class="cat-card-desc">${escapeHtml(meta.description)}</span>
+                </div>
+                <div class="cat-card-status-wrap">
+                    ${hasOverride ? '<span class="cat-card-badge cat-card-badge-custom">Custom</span>' : '<span class="cat-card-badge">Default</span>'}
+                    <span class="cat-card-chevron" aria-hidden="true">›</span>
+                </div>
             </div>
-            <div style="display:flex;gap:8px;">
-                <button class="btn-sm btn-preset category-action-btn" data-action="edit" data-key="${escapeHtml(cat.key)}" title="Edit prompt">Edit</button>
-                ${!cat.isDefault ? `<button class="btn-sm btn-secondary category-action-btn" data-action="delete" data-key="${escapeHtml(cat.key)}" title="Remove category">Remove</button>` : ''}
+            <div class="cat-card-editor" hidden>
+                <textarea class="cat-mgr-field cat-card-textarea" data-key="${escapeHtml(key)}">${escapeHtml(editValue)}</textarea>
+                <div class="cat-card-editor-actions">
+                    <button class="cat-card-save" data-key="${escapeHtml(key)}">Save Override</button>
+                    <button class="cat-card-reset" data-key="${escapeHtml(key)}">Reset to Default</button>
+                </div>
             </div>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
 
-    list.querySelectorAll('.category-action-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const action = e.target.dataset.action;
-            const key = e.target.dataset.key;
-            if (action === 'edit') {
-                editCategoryPrompt(key);
-            } else if (action === 'delete') {
-                removeCategory(key);
+    list.querySelectorAll('.cat-card-main').forEach(mainEl => {
+        const toggle = () => {
+            const card = mainEl.closest('.cat-card');
+            const editor = card.querySelector('.cat-card-editor');
+            const opening = editor.hidden;
+            editor.hidden = !opening;
+            mainEl.setAttribute('aria-expanded', String(opening));
+            card.classList.toggle('is-open', opening);
+            if (opening) editor.querySelector('textarea')?.focus();
+        };
+        mainEl.addEventListener('click', toggle);
+        mainEl.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+        });
+    });
+
+    list.querySelectorAll('.cat-card-save').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const key = btn.dataset.key;
+            const card = btn.closest('.cat-card');
+            const val = card.querySelector('.cat-card-textarea')?.value || '';
+            const defaultPrompt = CATEGORY_DEFAULT_PROMPTS[key] || '';
+            const isCustom = val.trim() && val.trim() !== defaultPrompt.trim();
+            saveBuiltinPromptOverride(key, isCustom ? val : '');
+            const badge = card.querySelector('.cat-card-badge');
+            if (isCustom) {
+                badge.textContent = 'Custom';
+                badge.classList.add('cat-card-badge-custom');
+            } else {
+                badge.textContent = 'Default';
+                badge.classList.remove('cat-card-badge-custom');
             }
+            showToast(isCustom ? 'Prompt override saved' : 'Matches default — override cleared', 'success');
+        });
+    });
+
+    list.querySelectorAll('.cat-card-reset').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const key = btn.dataset.key;
+            const card = btn.closest('.cat-card');
+            const textarea = card.querySelector('.cat-card-textarea');
+            const defaultPrompt = CATEGORY_DEFAULT_PROMPTS[key] || '';
+            if (textarea) textarea.value = defaultPrompt;
+            saveBuiltinPromptOverride(key, '');
+            const badge = card.querySelector('.cat-card-badge');
+            badge.textContent = 'Default';
+            badge.classList.remove('cat-card-badge-custom');
+            showToast('Reset to default', 'success');
         });
     });
 }
 
-function addCategory(name, prompt) {
-    if (!name || !prompt) {
+function renderCustomCategories() {
+    const list = document.getElementById('categories-custom-list');
+    if (!list) return;
+
+    const customs = Array.from(suggestionsState.customCategories.entries());
+
+    if (customs.length === 0) {
+        list.innerHTML = '<div class="cat-mgr-empty">No custom categories yet. Add one below.</div>';
+        return;
+    }
+
+    // eslint-disable-next-line no-unsanitized/property -- User content escaped via escapeHtml()
+    list.innerHTML = customs.map(([key, catPrompt]) => {
+        const label = key.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        const preview = catPrompt.length > 90 ? catPrompt.slice(0, 90) + '...' : catPrompt;
+        return `
+        <div class="cat-card cat-card-custom" data-key="${escapeHtml(key)}">
+            <div class="cat-card-main">
+                <div class="cat-card-info">
+                    <span class="cat-card-chip cat-card-chip-custom">${escapeHtml(label)}</span>
+                    <span class="cat-card-desc">${escapeHtml(preview)}</span>
+                </div>
+                <div class="cat-card-status-wrap">
+                    <button class="cat-card-toggle cat-card-edit-btn" data-key="${escapeHtml(key)}" aria-expanded="false">Edit</button>
+                    <button class="cat-card-delete" data-key="${escapeHtml(key)}">Delete</button>
+                </div>
+            </div>
+            <div class="cat-card-editor" hidden>
+                <textarea class="cat-mgr-field cat-card-textarea" data-key="${escapeHtml(key)}">${escapeHtml(catPrompt)}</textarea>
+                <div class="cat-card-editor-actions">
+                    <button class="cat-card-save-custom" data-key="${escapeHtml(key)}">Save</button>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('.cat-card-edit-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const card = btn.closest('.cat-card');
+            const editor = card.querySelector('.cat-card-editor');
+            const isOpen = !editor.hidden;
+            editor.hidden = isOpen;
+            btn.setAttribute('aria-expanded', String(!isOpen));
+            btn.textContent = isOpen ? 'Edit' : 'Close';
+            if (!isOpen) editor.querySelector('textarea')?.focus();
+        });
+    });
+
+    list.querySelectorAll('.cat-card-save-custom').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const key = btn.dataset.key;
+            const card = btn.closest('.cat-card');
+            const val = card.querySelector('.cat-card-textarea')?.value || '';
+            if (!val.trim()) { showToast('Prompt cannot be empty', 'error'); return; }
+            suggestionsState.customCategories.set(key, val.trim());
+            saveCustomCategories();
+            renderCustomCategories();
+            showToast('Category updated', 'success');
+        });
+    });
+
+    list.querySelectorAll('.cat-card-delete').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const key = btn.dataset.key;
+            removeCategory(key);
+        });
+    });
+}
+
+// Keep for backward compat — now delegates to both lists
+function renderCategoriesList() {
+    renderBuiltinCategories();
+    renderCustomCategories();
+}
+
+function addCategory(name, catPrompt) {
+    if (!name || !catPrompt) {
         showToast('Please provide both a name and prompt', 'error');
         return;
     }
 
     const key = name.toLowerCase().replace(/\s+/g, '-');
-    suggestionsState.customCategories.set(key, prompt);
+    suggestionsState.customCategories.set(key, catPrompt);
     saveCustomCategories();
-    renderCategoriesList();
+    renderCustomCategories();
     showToast(`Category "${name}" added`, 'success');
 }
 
 function removeCategory(key) {
     if (suggestionsState.customCategories.delete(key)) {
         saveCustomCategories();
-        renderCategoriesList();
+        renderCustomCategories();
         showToast('Category removed', 'success');
-    }
-}
-
-function editCategoryPrompt(key) {
-    const existingPrompt = suggestionsState.customCategories.get(key) ||
-        document.getElementById(`settings-prompt-${key}`)?.value || '';
-
-    const newPrompt = prompt('Edit prompt for category:', existingPrompt);
-    if (newPrompt !== null) {
-        if (key === 'general' || key === 'plot-twist' || key === 'new-character') {
-            const el = document.getElementById(`settings-prompt-${key}`);
-            if (el) el.value = newPrompt;
-        } else {
-            suggestionsState.customCategories.set(key, newPrompt);
-            saveCustomCategories();
-        }
-        renderCategoriesList();
-        showToast('Category updated', 'success');
     }
 }
 
@@ -624,6 +1093,7 @@ function setupGenerateButton() {
     });
 
     const setupToggle = document.getElementById('suggestions-view-toggle');
+    const backBtn = document.getElementById('suggestions-editor-back');
     if (setupToggle) {
         setupToggle.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -631,6 +1101,15 @@ function setupGenerateButton() {
             updateDropdownUI();
         });
     }
+    backBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (suggestionsState.mode === 'preview') {
+            suggestionsState.mode = 'draft';
+            updateDropdownUI();
+            return;
+        }
+        resetSuggestionWorkspace();
+    });
 }
 
 // ── Category Buttons ─────────────────────────────────────────────────────────
@@ -713,6 +1192,9 @@ function setupKeyboardNav() {
         if (!suggestionsState.expanded) return;
         const searchInput = document.getElementById('suggestion-search-input');
         if (document.activeElement === searchInput && !['Escape'].includes(e.key)) return;
+        // Let the draft editor handle its own arrow/enter keys
+        const draftEditor = document.getElementById('suggestions-draft-editor');
+        if (document.activeElement === draftEditor && e.key !== 'Escape') return;
 
         const items = document.querySelectorAll('.suggestion-item');
         const activeItem = document.querySelector('.suggestion-item.active');
@@ -747,11 +1229,11 @@ function setupKeyboardNav() {
         } else if (e.key === 'Enter' && activeItem) {
             e.preventDefault();
             const index = activeItem.dataset.index || activeItem.dataset.recentIndex;
-            useSuggestion(parseInt(index, 10), 'replace');
+            useSuggestion(parseInt(index, 10), 'send');
         } else if (e.key === 'Tab' && activeItem) {
             e.preventDefault();
             const index = activeItem.dataset.index || activeItem.dataset.recentIndex;
-            useSuggestion(parseInt(index, 10), 'replace');
+            useSuggestion(parseInt(index, 10), 'send');
         } else if (e.key === 'Escape') {
             suggestionsState.expanded = false;
             updateDropdownUI();
@@ -824,6 +1306,14 @@ export function initSuggestionsDropdown() {
     setupTagCloudUI();
     window.addEventListener('activeTabChanged', updateDropdownUI);
     window.addEventListener('explicitModeChanged', updateDropdownUI);
+    window.addEventListener('chatReplyComplete', () => {
+        if (suggestionsState.hasGenerated) {
+            suggestionsState.hasGenerated = false;
+            suggestionsState.suggestions = [];
+            suggestionsState.setupCollapsed = false;
+            if (suggestionsState.expanded) updateDropdownUI();
+        }
+    });
     updateDropdownUI();
     renderRecentSuggestions();
 }

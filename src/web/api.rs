@@ -89,6 +89,23 @@ pub struct ContextNote {
     pub created_at: u64,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct ArmedStoryBeat {
+    pub id: String,
+    pub kind: String,
+    pub instruction: String,
+    #[serde(default)]
+    pub remaining_turns: u32,
+    #[serde(default)]
+    pub created_at: u64,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 /// Model parameters for a chat tab
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct ChatModelParams {
@@ -189,6 +206,9 @@ pub struct ChatTab {
     /// Guided generation: persistent quick guide applied to subsequent replies
     #[serde(default)]
     pub quick_guide_active: String,
+    /// Guided generation: delayed hidden story beats for future assistant turns
+    #[serde(default)]
+    pub armed_story_beats: Vec<ArmedStoryBeat>,
 }
 
 /// Suggestion request for guided generation
@@ -221,11 +241,23 @@ pub struct SuggestionContextMessage {
 #[derive(serde::Serialize, Debug)]
 pub struct SuggestionResponse {
     pub suggestions: Vec<String>,
+    #[serde(default)]
+    pub cards: Vec<SuggestionCard>,
     pub category: String,
     pub count: u32,
 }
 
-fn suggestions_output_contract(count: u32) -> String {
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SuggestionCard {
+    #[serde(rename = "type")]
+    pub suggestion_type: String,
+    pub title: String,
+    pub effect: String,
+    #[serde(default)]
+    pub detail: String,
+}
+
+fn default_suggestions_output_contract(count: u32) -> String {
     format!(
         "\n\nFINAL OUTPUT REQUIREMENTS:\n\
 Return ONLY valid JSON. Do not include reasoning, planning, commentary, markdown, code fences, or preamble.\n\
@@ -238,6 +270,31 @@ Rules:\n\
 - Do not mention your thinking process.\n\
 - Do not number the suggestions.\n"
     )
+}
+
+fn director_output_contract(count: u32) -> String {
+    format!(
+        "\n\nFINAL OUTPUT REQUIREMENTS:\n\
+Return ONLY valid JSON. Do not include reasoning, planning, commentary, markdown, code fences, or preamble.\n\
+Return exactly {count} items in this shape:\n\
+{{\"suggestions\":[{{\"type\":\"pressure\",\"title\":\"Short Title\",\"effect\":\"Short immediate effect line.\",\"detail\":\"One concise sentence explaining how the assistant should continue the scene.\"}}]}}\n\
+Rules:\n\
+- `type` must be one of: pressure, reveal, escalation, interruption, twist, tone-shift, reversal, intimacy, investigation, confrontation.\n\
+- `title` must be plain text, under 8 words, and user-facing.\n\
+- `effect` must be a compact summary line under 12 words.\n\
+- `detail` must be one concise actionable sentence.\n\
+- Do not output keys other than `suggestions`, `type`, `title`, `effect`, and `detail`.\n\
+- Do not mention your thinking process.\n\
+- Do not number the suggestions.\n"
+    )
+}
+
+fn suggestions_output_contract(category: &str, count: u32) -> String {
+    if category == "director" {
+        director_output_contract(count)
+    } else {
+        default_suggestions_output_contract(count)
+    }
 }
 
 fn suggestion_temperature(category: &str) -> f32 {
@@ -1810,7 +1867,7 @@ fn api_chat_suggestions(
                     .replace("[STORY CONTEXT]", &context)
                     .replace("[conversation context]", &context)
                     .replace("[CONVERSATION CONTEXT]", &context)
-                    + &suggestions_output_contract(count);
+                    + &suggestions_output_contract(&req.category, count);
                 let temperature = suggestion_temperature(&req.category);
 
                 // Build messages for suggestion request
@@ -1928,16 +1985,33 @@ fn api_chat_suggestions(
                     )));
                 }
 
-                let suggestions = parse_suggestions(content);
+                let cards = if req.category == "director" {
+                    parse_director_cards(content)
+                } else {
+                    Vec::new()
+                };
+                let suggestions = if req.category == "director" && !cards.is_empty() {
+                    cards
+                        .iter()
+                        .map(|card| format!("{}\n{}", card.title, card.detail))
+                        .collect()
+                } else {
+                    parse_suggestions(content)
+                };
                 if suggestions.is_empty() {
                     return Err(warp::reject::custom(ApiError(
                         "upstream returned no parseable suggestions".to_string(),
                     )));
                 }
-                let count = suggestions.len() as u32;
+                let count = if req.category == "director" && !cards.is_empty() {
+                    cards.len() as u32
+                } else {
+                    suggestions.len() as u32
+                };
 
                 Ok::<_, warp::Rejection>(warp::reply::json(&SuggestionResponse {
                     suggestions,
+                    cards,
                     category: req.category,
                     count,
                 }))
@@ -1949,8 +2023,7 @@ fn parse_suggestions(text: &str) -> Vec<String> {
     fn clean_fragment(value: &str) -> String {
         value
             .replace("**", "")
-            .replace('*', "")
-            .replace('`', "")
+            .replace(['*', '`'], "")
             .trim()
             .to_string()
     }
@@ -2033,7 +2106,7 @@ fn parse_suggestions(text: &str) -> Vec<String> {
             .nth(1)
             .unwrap_or(&normalized);
         let inline_ideas = regex::Regex::new(
-            r"(?:Idea|Suggestion)\s*\d+\s*(?:\(([^)]+)\))?:\s*(.+?)(?=\s+-\s+\*?(?:Idea|Suggestion)\s*\d+\s*(?:\(|:)|$)",
+            r"(?:Idea|Suggestion)\s*\d+\s*(?:\(([^)]+)\))?:\s*(.+?)(?:\s+-\s+\*?(?:Idea|Suggestion)\s*\d+\s*(?:\(|:)|$)",
         )
         .ok();
         if let Some(re) = inline_ideas {
@@ -2137,7 +2210,7 @@ fn parse_suggestions(text: &str) -> Vec<String> {
     if suggestions.is_empty() {
         suggestions = text
             .lines()
-            .map(|s| clean_fragment(s))
+            .map(clean_fragment)
             .filter(|s| !s.is_empty() && s.len() > 2)
             .filter(|s| !s.starts_with('['))
             .filter(|s| {
@@ -2151,6 +2224,157 @@ fn parse_suggestions(text: &str) -> Vec<String> {
     }
 
     suggestions
+}
+
+fn parse_director_cards(text: &str) -> Vec<SuggestionCard> {
+    fn clean_fragment(value: &str) -> String {
+        value
+            .replace("**", "")
+            .replace(['*', '`'], "")
+            .trim()
+            .to_string()
+    }
+
+    fn normalize_type(value: &str) -> String {
+        let normalized = value
+            .trim()
+            .to_ascii_lowercase()
+            .replace(['_', ' '], "-");
+        match normalized.as_str() {
+            "revelation" => "reveal".to_string(),
+            "pressure" | "reveal" | "escalation" | "interruption" | "twist" | "tone-shift"
+            | "reversal" | "intimacy" | "investigation" | "confrontation" => normalized,
+            _ => "pressure".to_string(),
+        }
+    }
+
+    fn infer_type(title: &str, body: &str) -> String {
+        let haystack = format!("{} {}", title, body).to_ascii_lowercase();
+        if haystack.contains("reveal") || haystack.contains("truth") || haystack.contains("secret")
+        {
+            return "reveal".to_string();
+        }
+        if haystack.contains("interrupt") || haystack.contains("arrives") || haystack.contains("appears") {
+            return "interruption".to_string();
+        }
+        if haystack.contains("twist") || haystack.contains("betray") || haystack.contains("reversal") {
+            return "twist".to_string();
+        }
+        if haystack.contains("close-quarters")
+            || haystack.contains("lunges")
+            || haystack.contains("fight")
+            || haystack.contains("draw")
+            || haystack.contains("gun")
+        {
+            return "confrontation".to_string();
+        }
+        if haystack.contains("intimate") || haystack.contains("quiet") || haystack.contains("soft") {
+            return "intimacy".to_string();
+        }
+        if haystack.contains("investigate") || haystack.contains("photo") || haystack.contains("clue") {
+            return "investigation".to_string();
+        }
+        if haystack.contains("escalate")
+            || haystack.contains("danger")
+            || haystack.contains("violence")
+            || haystack.contains("shot")
+        {
+            return "escalation".to_string();
+        }
+        "pressure".to_string()
+    }
+
+    fn split_effect_detail(description: &str) -> (String, String) {
+        let trimmed = clean_fragment(description);
+        if trimmed.is_empty() {
+            return (String::new(), String::new());
+        }
+        let mut parts = trimmed.splitn(2, ". ");
+        let first = parts.next().unwrap_or("").trim().trim_end_matches('.');
+        let rest = parts.next().unwrap_or("").trim();
+        let effect = first.to_string();
+        let detail = if rest.is_empty() {
+            first.to_string()
+        } else {
+            rest.to_string()
+        };
+        (effect, detail)
+    }
+
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(text) {
+        let suggestions_json = value
+            .get("suggestions")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .or_else(|| value.as_array().cloned());
+
+        if let Some(entries) = suggestions_json {
+            let cards: Vec<SuggestionCard> = entries
+                .into_iter()
+                .filter_map(|entry| {
+                    let obj = entry.as_object()?;
+                    let title = clean_fragment(obj.get("title")?.as_str()?);
+                    if title.is_empty() {
+                        return None;
+                    }
+                    let effect = obj
+                        .get("effect")
+                        .and_then(|v| v.as_str())
+                        .map(clean_fragment)
+                        .unwrap_or_default();
+                    let detail = obj
+                        .get("detail")
+                        .or_else(|| obj.get("description"))
+                        .and_then(|v| v.as_str())
+                        .map(clean_fragment)
+                        .unwrap_or_default();
+                    let suggestion_type = obj
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .map(normalize_type)
+                        .unwrap_or_else(|| infer_type(&title, &format!("{} {}", effect, detail)));
+                    let fallback_effect = if effect.is_empty() {
+                        title.clone()
+                    } else {
+                        effect
+                    };
+                    let fallback_detail = if detail.is_empty() {
+                        fallback_effect.clone()
+                    } else {
+                        detail
+                    };
+                    Some(SuggestionCard {
+                        suggestion_type,
+                        title,
+                        effect: fallback_effect,
+                        detail: fallback_detail,
+                    })
+                })
+                .collect();
+            if !cards.is_empty() {
+                return cards;
+            }
+        }
+    }
+
+    parse_suggestions(text)
+        .into_iter()
+        .filter_map(|entry| {
+            let mut parts = entry.splitn(2, '\n');
+            let title = clean_fragment(parts.next().unwrap_or(""));
+            if title.is_empty() {
+                return None;
+            }
+            let description = clean_fragment(parts.next().unwrap_or(""));
+            let (effect, detail) = split_effect_detail(&description);
+            Some(SuggestionCard {
+                suggestion_type: infer_type(&title, &description),
+                title,
+                effect: if effect.is_empty() { description.clone() } else { effect },
+                detail: if detail.is_empty() { description } else { detail },
+            })
+        })
+        .collect()
 }
 
 fn compute_chat_tab_totals(mut tab: ChatTab) -> ChatTab {
@@ -2835,6 +3059,7 @@ mod tests {
             context_notes: vec![],
             sidebar_width: 0,
             quick_guide_active: String::new(),
+            armed_story_beats: vec![],
         }
     }
 

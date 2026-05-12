@@ -67,6 +67,7 @@ export function newChatTab(name = 'New Chat') {
         quick_guide_draft: '',
         quick_guide_active: '',
         quick_guide_pending: '',
+        armed_story_beats: [],
         created_at: Date.now(),
         updated_at: Date.now(),
         pinned: false,
@@ -95,6 +96,7 @@ function normalizeChatTab(tab) {
         quick_guide_draft: tab.quick_guide_draft ?? '',
         quick_guide_active: '',
         quick_guide_pending: '',
+        armed_story_beats: tab.armed_story_beats ?? [],
         pinned: tab.pinned ?? false,
     };
 }

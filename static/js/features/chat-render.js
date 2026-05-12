@@ -86,16 +86,53 @@ export function renderMdStreaming(src) {
     return src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>');
 }
 
+// ── Roleplay text colorization ────────────────────────────────────────────────
+// Walks text nodes inside `el` and wraps "quoted dialogue" in .rp-dialogue spans.
+// Skips code blocks. em tags (from *asterisks* markdown) get colour via CSS only.
+
+export function colorizeRpText(el) {
+    if (!el) return;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+    const textNodes = [];
+    let node;
+    while ((node = walker.nextNode())) textNodes.push(node);
+
+    // Match straight " " and curly " " / " " quote pairs — LLMs routinely use smart quotes.
+    const dialogueRe = /["“]([^"“”\r\n]{1,600})["”]/g;
+
+    for (const textNode of textNodes) {
+        const parent = textNode.parentNode;
+        if (!parent || parent.closest('pre, code')) continue;
+        const text = textNode.textContent;
+        if (!dialogueRe.test(text)) { dialogueRe.lastIndex = 0; continue; }
+        dialogueRe.lastIndex = 0;
+
+        const frag = document.createDocumentFragment();
+        let last = 0;
+        let m;
+        while ((m = dialogueRe.exec(text)) !== null) {
+            if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+            const span = document.createElement('span');
+            span.className = 'rp-dialogue';
+            span.textContent = m[0];
+            frag.appendChild(span);
+            last = m.index + m[0].length;
+        }
+        if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+        parent.replaceChild(frag, textNode);
+    }
+}
+
 // ── Scroll ────────────────────────────────────────────────────────────────────
 
 export function chatScroll(force = false) {
     ensureChatElements();
     const c = chatMessagesEl;
     if (!c) return;
-    
+
     // Don't auto-scroll if user has manually scrolled up during generation
     if (!force && chat.disableAutoScroll) return;
-    
+
     const distFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
     if (force || distFromBottom < 80) {
         c.scrollTop = c.scrollHeight;
@@ -106,6 +143,19 @@ export function chatScroll(force = false) {
         // Reset auto-scroll disable flag after forced scroll
         chat.disableAutoScroll = false;
     }
+}
+
+// Scroll so the top of `el` sits at the top of the chat viewport (+ 8px padding).
+// Used on first AI token: after the initial forced-to-bottom on submit, this
+// repositions so the response bubble starts at the top, giving maximum reading room.
+export function chatScrollToEl(el) {
+    ensureChatElements();
+    const c = chatMessagesEl;
+    if (!c || !el) return;
+    if (chat.disableAutoScroll) return;
+    const containerTop = c.getBoundingClientRect().top;
+    const elTop = el.getBoundingClientRect().top;
+    c.scrollTop = c.scrollTop + (elTop - containerTop) - 8;
 }
 
 function initChatScrollButton() {
@@ -602,6 +652,7 @@ function buildMessageElement(msg, idx, allMessages) {
       </div>`;
     // eslint-disable-next-line no-unsanitized/property -- DOMPurify sanitizes HTML
     wrapper.innerHTML = window.DOMPurify.sanitize(html);
+    colorizeRpText(wrapper.querySelector('.chat-msg-body'));
 
     return wrapper;
 }
@@ -660,6 +711,7 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
     if (content) {
         // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context
         body.innerHTML = renderMd(content);
+        colorizeRpText(body);
         if (typeof hljs !== 'undefined') {
             body.querySelectorAll('pre code:not(.hljs)').forEach(codeEl => {
                 hljs.highlightElement(codeEl);
@@ -996,6 +1048,7 @@ function saveMessageEdit(btn) {
     // Update message in-place (safe during streaming — doesn't wipe other messages)
     // eslint-disable-next-line no-unsanitized/property -- msg.content is user-editable local data, rendered via trusted renderMd
     body.innerHTML = typeof renderMd === 'function' ? renderMd(msg.content) : escapeHtml(msg.content);
+    if (msg.role === 'assistant') colorizeRpText(body);
     body.classList.add('chat-msg-body-rendered');
 }
 
@@ -1008,6 +1061,7 @@ function cancelMessageEdit(btn) {
         // Restore original content in-place (safe during streaming)
         // eslint-disable-next-line no-unsanitized/property -- msg.content is user-editable local data, rendered via trusted renderMd
         body.innerHTML = typeof renderMd === 'function' ? renderMd(msg.content) : escapeHtml(msg.content);
+        if (msg.role === 'assistant') colorizeRpText(body);
         body.classList.add('chat-msg-body-rendered');
     }
 }

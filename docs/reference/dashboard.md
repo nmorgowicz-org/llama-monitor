@@ -152,7 +152,7 @@ Manage model presets — named configurations with default parameters, model pat
 | **Agent token** | Bearer token for agent authentication |
 | **SSH target** | `user@host` for SSH-based agent management |
 | **SSH command** | Custom remote command to start the agent |
-| **Explicit mode** | Toggle uncensored content policy |
+| **Explicit mode** | 3-level explicit mode: Off (🔒), Unlocked (🔓, level 1), Unrestricted (🔥, level 2). Each level applies different persona-specific policies. |
 
 ## User Preferences
 
@@ -165,6 +165,29 @@ Accessible via the user menu button. Preferences persist in `localStorage` and a
 | **Spacing scale** | Adjusts `--gap-md` CSS variable for tighter/wider layout |
 | **Chat style** | `rounded`, `compact`, `minimal`, `bubbly` |
 | **Enter-to-send** | Toggle Enter key behavior |
+
+## Chat Input Buttons
+
+The chat input bar includes toggle buttons for guided generation features:
+
+| Button | Description |
+|--------|-------------|
+| **Context notes** | Opens sidebar with inline notes for context management |
+| **Suggestions** | Dropdown with category chips for quick suggestion insertion |
+| **Quick guide** | Inline instruction panel for guided prompts |
+| **Explicit mode** | 3-state toggle (🔒 Off, 🔓 Unlocked, 🔥 Unrestricted) |
+
+![Chat Input Buttons](../screenshots/11-chat-input-buttons.png)
+
+## Guided Generation
+
+The guided generation features help users craft better prompts and manage context:
+
+- **Context notes** — Sidebar panel for adding structured notes that feed into the conversation context
+- **Suggestions** — Category-based suggestion chips that auto-complete common prompt patterns
+- **Quick guide** — Inline instruction panel with persona-specific guidance for generation
+
+See [Chat Reference](chat.md) for detailed usage of these features.
 
 ## Visualization Switchers
 

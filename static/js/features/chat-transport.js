@@ -17,6 +17,7 @@ import {
     finalizeAssistantMessage,
     incrementUnreadCount,
     chatScroll,
+    chatScrollToEl,
     renderMd,
     renderMdStreaming,
     updateChatTabBadge,
@@ -142,6 +143,11 @@ function buildRoleBoundaryInstruction(tab) {
     const assistantName = (tab?.ai_name || '{{char}}').trim();
     const userName = (tab?.user_name || '{{user}}').trim();
     return `### ROLE BOUNDARY ###\n\nYou are ${assistantName}. By default, write only ${assistantName}'s reply. Do not speak as, write dialogue for, narrate actions for, or decide choices/thoughts for ${userName} unless the latest user instruction explicitly asks you to control or write both sides.`;
+}
+
+function getArmedStoryBeat(tab) {
+    const beats = (tab?.armed_story_beats || []).filter(beat => beat.enabled !== false);
+    return beats.find(beat => (beat.remaining_turns || 0) === 0) || null;
 }
 
 export async function fetchSummary(messages, options = {}) {
@@ -309,8 +315,16 @@ export async function sendChat() {
     const input = document.getElementById('chat-input');
     const text = input.value.trim();
     if (!text) return;
+    const isSuggestionDraft = input.dataset.suggestionDraft === 'true';
     input.value = '';
+    delete input.dataset.suggestionDraft;
     if (typeof autoResizeChatInput === 'function') autoResizeChatInput();
+
+    if (isSuggestionDraft) {
+        const instruction = `Use this user-edited suggestion draft as hidden story direction for the next reply:\n\n${text}\n\nPreserve the established POV, tense, tone, and expected response length. Turn it into a natural multi-sentence or multi-paragraph assistant response. Do not echo, quote, or label the draft note.`;
+        await sendOneShotGuideReply(instruction);
+        return;
+    }
 
     const userMsg = {
         role: 'user',
@@ -348,6 +362,34 @@ export async function sendQuickGuideReply() {
     const result = await _doSendChat(tab, { transientUserPrompt });
     if (result) result.transientUserPrompt = transientUserPrompt;
     return result;
+}
+
+export async function sendOneShotGuideReply(instruction) {
+    if (chat.busy || chat.compactionInProgress) return null;
+    const tab = activeChatTab();
+    if (!tab || !instruction?.trim()) return null;
+    if (!tab.messages?.length) {
+        showToast('Guided suggestions need existing chat context before they can respond', 'warning');
+        return null;
+    }
+
+    const previousGuide = tab.quick_guide_active || '';
+    tab.quick_guide_active = instruction.trim();
+    scheduleChatPersist();
+
+    try {
+        const lastMsg = tab.messages.at(-1);
+        const transientUserPrompt = lastMsg?.role === 'user'
+            ? null
+            : 'Apply the active guidance to the existing conversation and write the next assistant reply now. Continue naturally from the latest exchange. Write only the assistant reply. Do not write dialogue, actions, thoughts, or decisions for the user unless explicitly instructed.';
+
+        const result = await _doSendChat(tab, { transientUserPrompt });
+        if (result) result.transientUserPrompt = transientUserPrompt;
+        return result;
+    } finally {
+        tab.quick_guide_active = previousGuide;
+        scheduleChatPersist();
+    }
 }
 
 export async function regenerateQuickGuideReply(tab, msgIdx, quickGuideMeta, variants) {
@@ -418,6 +460,7 @@ export async function _doSendChat(tab, options = {}) {
     const params = tab.model_params;
     const messages = [];
     const systemParts = [];
+    const armedBeat = getArmedStoryBeat(tab);
     let systemPrompt = tab.system_prompt ? substituteNames(tab.system_prompt, tab.ai_name, tab.user_name) : '';
     if (tab.explicit_level > 0) {
         const template = typeof resolveActiveTemplate === 'function'
@@ -465,6 +508,10 @@ export async function _doSendChat(tab, options = {}) {
     const quickGuideInstruction = tab.quick_guide_active || tab.quick_guide_pending || tab._quickGuideInstruction;
     if (quickGuideInstruction) {
         systemParts.push(`### QUICK GUIDE ###\n\n${quickGuideInstruction}`);
+    }
+
+    if (armedBeat?.instruction) {
+        systemParts.push(`### ARMED STORY BEAT ###\n\n${armedBeat.instruction}`);
     }
 
     systemParts.push(buildRoleBoundaryInstruction(tab));
@@ -521,6 +568,8 @@ export async function _doSendChat(tab, options = {}) {
                 min_p: params.min_p,
                 repeat_penalty: params.repeat_penalty,
                 ...(params.max_tokens ? { max_tokens: params.max_tokens } : {}),
+                thinking_budget_tokens: 2048,
+                chat_template_kwargs: { enable_thinking: true },
             }),
         });
 
@@ -624,6 +673,9 @@ export async function _doSendChat(tab, options = {}) {
                         }
                         // Increment once per response (not per token) so badge = unread message count
                         if (isFirstToken && typeof incrementUnreadCount === 'function') incrementUnreadCount();
+                        // On first token, scroll so the AI bubble top sits at the viewport top.
+                        // Submit already forced scroll-to-bottom; this gives maximum reading room.
+                        if (isFirstToken && msgEl) chatScrollToEl(msgEl);
                     }
                 } catch { /* malformed chunk — skip */ }
             }
@@ -708,6 +760,15 @@ export async function _doSendChat(tab, options = {}) {
         };
         tab.messages.push(finalMessage);
         tab.updated_at = Date.now();
+        if (armedBeat) {
+            tab.armed_story_beats = (tab.armed_story_beats || []).filter(beat => beat.id !== armedBeat.id);
+        }
+        tab.armed_story_beats = (tab.armed_story_beats || []).map(beat => {
+            if ((beat.remaining_turns || 0) > 0) {
+                return { ...beat, remaining_turns: beat.remaining_turns - 1 };
+            }
+            return beat;
+        });
         scheduleChatPersist();
     } else if (!tab.messages.at(-1)?.content) {
         tab.messages.pop();
@@ -723,6 +784,7 @@ export async function _doSendChat(tab, options = {}) {
     chat.busy = false;
     chat.abortController = null;
     if (typeof updateChatTabBadge === 'function') updateChatTabBadge();
+    window.dispatchEvent(new CustomEvent('chatReplyComplete'));
 
     // Trigger auto-compact if the tab has it enabled and the threshold was hit.
     // Runs after busy is cleared so compaction can proceed without being blocked.
@@ -789,7 +851,7 @@ export function showConnectionLostModal() {
 
 export function initChatTransport() {
     // Wire up transport getter for chat-state and chat-render (avoids circular import)
-    const transport = () => ({ sendChat, sendChatResend, sendSuggestedPrompt, sendQuickGuideReply, regenerateQuickGuideReply, stopChat });
+    const transport = () => ({ sendChat, sendChatResend, sendSuggestedPrompt, sendQuickGuideReply, sendOneShotGuideReply, regenerateQuickGuideReply, stopChat });
     setTransportGetter(transport);
     setChatTransportGetter(transport);
     setChatBusyUI(chat.busy);

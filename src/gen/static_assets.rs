@@ -24,7 +24,6 @@ pub const CORE_APP_STATE_JS: &str = include_str!("../../static/js/core/app-state
 pub const CORE_FORMAT_JS: &str = include_str!("../../static/js/core/format.js");
 pub const FEATURES_ANIMATE_JS: &str = include_str!("../../static/js/features/animate.js");
 pub const FEATURES_ATTACH_DETACH_JS: &str = include_str!("../../static/js/features/attach-detach.js");
-pub const FEATURES_CHAT_FIX_LAST_JS: &str = include_str!("../../static/js/features/chat-fix-last.js");
 pub const FEATURES_CHAT_NOTES_JS: &str = include_str!("../../static/js/features/chat-notes.js");
 pub const FEATURES_CHAT_PARAMS_JS: &str = include_str!("../../static/js/features/chat-params.js");
 pub const FEATURES_CHAT_QUICK_GUIDE_JS: &str = include_str!("../../static/js/features/chat-quick-guide.js");
