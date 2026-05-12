@@ -199,13 +199,13 @@ pub struct ChatTab {
     /// persisted so the dashboard can show it on page load without a live session.
     #[serde(rename = "lastCtxPct", default)]
     pub last_ctx_pct: Option<f32>,
-    #[serde(rename = "activeTemplateId", default)]
+    #[serde(rename = "activeTemplateId", alias = "active_template_id", default)]
     pub active_template_id: Option<String>,
     /// Guided generation: persistent context notes (character, setting, plot details)
     #[serde(default)]
     pub context_notes: Vec<ContextNote>,
     /// Guided generation: remembered sidebar width in pixels (default: 280)
-    #[serde(default, rename = "sidebarWidth")]
+    #[serde(default, rename = "sidebarWidth", alias = "sidebar_width")]
     pub sidebar_width: u32,
     /// Guided generation: persistent quick guide applied to subsequent replies
     #[serde(default)]
