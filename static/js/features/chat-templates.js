@@ -1180,7 +1180,7 @@ export function toggleExplicitMode(forceValue) {
     if (!tab) return;
 
     if (forceValue != null && typeof forceValue === 'number') {
-        tab.explicitLevel = forceValue;
+        tab.explicit_level = forceValue;
     } else {
         tab.explicit_level = ((tab.explicit_level || 0) + 1) % 3;
     }
