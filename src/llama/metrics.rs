@@ -39,6 +39,7 @@ pub struct LlamaMetrics {
     pub slot_generation_available: bool,
     pub slots: Vec<SlotSnapshot>,
     pub requests_processing: u32,
+    pub n_busy_slots_per_decode: f64,
     pub status: String,
     pub model_name: String,
     pub model_params: Option<u64>,
@@ -85,14 +86,14 @@ struct SlotSnapshotInput {
 
 #[derive(Debug, Clone, Default)]
 pub struct PrometheusValues {
-    pub prompt_tokens_per_sec: f64,
-    pub predicted_tokens_per_sec: f64,
     pub prompt_tokens_total: f64,
     pub prompt_seconds_total: f64,
     pub predicted_tokens_total: f64,
     pub predicted_seconds_total: f64,
     pub n_tokens_max: u64,
     pub requests_processing: u32,
+    pub n_decode_total: f64,
+    pub n_busy_slots_per_decode: f64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -132,14 +133,14 @@ pub fn parse_prometheus_metrics(body: &str) -> PrometheusValues {
             None => continue,
         };
         match name {
-            "llamacpp:prompt_tokens_seconds" => vals.prompt_tokens_per_sec = value,
-            "llamacpp:predicted_tokens_seconds" => vals.predicted_tokens_per_sec = value,
             "llamacpp:prompt_tokens_total" => vals.prompt_tokens_total = value,
             "llamacpp:prompt_seconds_total" => vals.prompt_seconds_total = value,
             "llamacpp:tokens_predicted_total" => vals.predicted_tokens_total = value,
             "llamacpp:tokens_predicted_seconds_total" => vals.predicted_seconds_total = value,
             "llamacpp:n_tokens_max" => vals.n_tokens_max = value as u64,
             "llamacpp:requests_processing" => vals.requests_processing = value as u32,
+            "llamacpp:n_decode_total" => vals.n_decode_total = value,
+            "llamacpp:n_busy_slots_per_decode" => vals.n_busy_slots_per_decode = value,
             _ => {}
         }
     }
@@ -380,20 +381,20 @@ mod tests {
         let body = include_str!("../../tests/fixtures/prometheus_metrics.txt");
         let vals = parse_prometheus_metrics(body);
 
-        assert!((vals.prompt_tokens_per_sec - 1234.5).abs() < 0.1);
-        assert!((vals.predicted_tokens_per_sec - 56.7).abs() < 0.1);
         assert!((vals.prompt_tokens_total - 10000.0).abs() < 0.1);
         assert!((vals.prompt_seconds_total - 8.1).abs() < 0.1);
         assert!((vals.predicted_tokens_total - 5000.0).abs() < 0.1);
         assert!((vals.predicted_seconds_total - 88.2).abs() < 0.1);
         assert_eq!(vals.n_tokens_max, 131072);
         assert_eq!(vals.requests_processing, 1);
+        assert!((vals.n_decode_total - 42000.0).abs() < 0.1);
+        assert!((vals.n_busy_slots_per_decode - 1.5).abs() < 0.01);
     }
 
     #[test]
     fn test_parse_prometheus_metrics_empty() {
         let vals = parse_prometheus_metrics("");
-        assert_eq!(vals.prompt_tokens_per_sec, 0.0);
+        assert_eq!(vals.prompt_tokens_total, 0.0);
         assert_eq!(vals.n_tokens_max, 0);
     }
 

@@ -40,6 +40,7 @@ import {
     renderSlotGrid,
     getPrimarySlot,
     renderSlotUtilization,
+    renderBatchEfficiency,
     renderRequestStats,
     renderGenerationDetailItems,
     renderDecodingConfig,
@@ -510,6 +511,7 @@ function updateInferenceMetrics(d) {
     renderRecentTask();
     renderSlotGrid(l, hasActiveEndpoint);
     renderSlotUtilization(l);
+    renderBatchEfficiency(l);
     renderRequestStats();
     renderDecodingConfig(l, hasActiveEndpoint, generationActive);
     renderLiveSparkline('m-live-output-spark', metricSeries.liveOutput);

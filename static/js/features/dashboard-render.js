@@ -430,6 +430,24 @@ function renderSlotUtilization(l) {
     if (utilValue) utilValue.textContent = utilPct + '%';
 }
 
+function renderBatchEfficiency(l) {
+    const container = document.getElementById('m-slot-batch-efficiency');
+    const valueEl = document.getElementById('m-busy-slots-per-decode');
+    if (!container || !valueEl) return;
+
+    const total = (l?.slots_processing || 0) + (l?.slots_idle || 0);
+    const value = l?.n_busy_slots_per_decode;
+
+    // Only meaningful with multi-slot servers (>1 slot configured)
+    if (!value || value <= 0 || total <= 1) {
+        container.style.display = 'none';
+        return;
+    }
+
+    container.style.display = '';
+    valueEl.textContent = value.toFixed(2);
+}
+
 function renderRequestStats() {
     const reqCount = document.getElementById('m-req-count');
     const reqAvg = document.getElementById('m-req-avg');
@@ -1240,6 +1258,7 @@ export {
     renderSlotGrid,
     getPrimarySlot,
     renderSlotUtilization,
+    renderBatchEfficiency,
     renderRequestStats,
     renderGenerationDetailItems,
     renderDecodingConfig,

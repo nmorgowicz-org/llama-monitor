@@ -1,9 +1,3 @@
-# HELP llamacpp:prompt_tokens_seconds Prompt tokens per second (gauge)
-# TYPE llamacpp:prompt_tokens_seconds gauge
-llamacpp:prompt_tokens_seconds 1234.5
-# HELP llamacpp:predicted_tokens_seconds Predicted tokens per second (gauge)
-# TYPE llamacpp:predicted_tokens_seconds gauge
-llamacpp:predicted_tokens_seconds 56.7
 # HELP llamacpp:prompt_tokens_total Total prompt tokens processed
 # TYPE llamacpp:prompt_tokens_total counter
 llamacpp:prompt_tokens_total 10000
@@ -22,3 +16,9 @@ llamacpp:n_tokens_max 131072
 # HELP llamacpp:requests_processing Current requests processing
 # TYPE llamacpp:requests_processing gauge
 llamacpp:requests_processing 1
+# HELP llamacpp:n_decode_total Total number of batch decode calls
+# TYPE llamacpp:n_decode_total counter
+llamacpp:n_decode_total 42000
+# HELP llamacpp:n_busy_slots_per_decode Average number of busy slots per decode call
+# TYPE llamacpp:n_busy_slots_per_decode gauge
+llamacpp:n_busy_slots_per_decode 1.5

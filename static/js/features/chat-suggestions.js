@@ -6,6 +6,7 @@ import { chat } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { toggleExplicitMode } from './chat-templates.js';
+import { sendChatWithContent } from './chat-transport.js';
 
 const CATEGORY_META = {
     general: { label: 'General', description: 'Versatile next-step prompts that fit almost any conversation.' },
@@ -734,13 +735,8 @@ async function useSuggestion(index, mode = 'send') {
         const rewritten = await fetchSuggestionRewrite(prompt);
         if (!rewritten) throw new Error('rewrite returned empty content');
 
-        const input = document.getElementById('chat-input');
-        if (input) {
-            input.value = rewritten;
-            input.focus();
-            input.setSelectionRange(input.value.length, input.value.length);
-            autoResizeChatInput();
-        }
+        // Send the rewritten suggestion directly as a user message
+        sendChatWithContent(rewritten);
         suggestionsState.expanded = false;
         suggestionsState.rewriteLoading = false;
         updateDropdownUI();
