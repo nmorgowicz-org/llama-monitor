@@ -119,7 +119,7 @@ function updateQuickGuideUI() {
         } else if (armedCount > 0) {
             status.textContent = `${armedCount} Armed`;
             status.hidden = false;
-        } else if (quickGuideState.expanded && draft) {
+        } else if (quickGuideState.expanded) {
             status.textContent = draft ? 'Draft' : 'Idle';
             status.hidden = false;
         } else {
@@ -207,6 +207,7 @@ function setupQuickInputHandler() {
         if (tab) {
             tab.quick_guide_draft = e.target.value;
             scheduleChatPersist();
+            updateQuickGuideUI();
         }
     });
 

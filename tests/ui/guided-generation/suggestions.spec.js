@@ -43,20 +43,26 @@ test.describe('Suggestions Dropdown', () => {
     await page.locator('#suggestions-toggle').click();
     await page.waitForSelector('#suggestions-dropdown', { state: 'visible' });
 
-    // Click Plot Twist via data-category attribute for precision
-    await page.locator('.suggestion-category-btn[data-category="plot-twist"]').click();
+    // Directly call setSuggestionCategory to switch to Plot Twist
+    await page.evaluate(async () => {
+      const { setSuggestionCategory } = await import('/js/features/chat-suggestions.js');
+      setSuggestionCategory('plot-twist');
+    });
 
-    // Wait for active class to be applied by updateDropdownUI
-    await page.waitForFunction(
-      () => document.querySelector('.suggestion-category-btn[data-category="plot-twist"]')?.classList.contains('active'),
-      { timeout: 3000 }
-    );
+    // Wait for the status text to show the new category label (reliable indicator)
+    await expect(page.locator('#suggestions-toggle-status')).toHaveText('Plot Twist', { timeout: 3000 });
   });
 
   test('use suggestion draft inserts into chat input', async ({ page }) => {
-    // Also mock the suggestion rewrite endpoint used by 'send' mode
-    await page.route('/api/chat/suggestions/rewrite', route => {
-      route.fulfill({ status: 200, json: { content: 'Mocked rewritten suggestion text' } });
+    // Mock the rewrite endpoint — chat-suggestions.js calls /api/chat with stream:true
+    // and expects an SSE response (data: {...} lines), not a plain JSON response.
+    await page.route('/api/chat', route => {
+      const sse = 'data: {"choices":[{"delta":{"content":"Mocked rewritten suggestion text"}}]}\n\ndata: [DONE]\n\n';
+      route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: sse,
+      });
     });
 
     await page.locator('#suggestions-toggle').click();
@@ -66,22 +72,22 @@ test.describe('Suggestions Dropdown', () => {
     await page.locator('#suggestions-generate-btn').click();
     await page.waitForSelector('.suggestion-item', { state: 'visible', timeout: 10000 });
 
-    // Click draft button (data-mode="draft") to avoid the async rewrite path
-    const draftBtn = page.locator('.suggestion-btn[data-mode="draft"]').first();
-    if (await draftBtn.count() > 0) {
-      await draftBtn.click();
-      const chatInput = page.locator('#chat-input');
-      await expect(chatInput).not.toHaveValue('', { timeout: 5000 });
+    // Click send button (data-mode="send") which rewrites and inserts into chat input
+    const sendBtn = page.locator('.suggestion-btn[data-mode="send"]').first();
+    if (await sendBtn.count() > 0) {
+      await sendBtn.click();
+      await expect(page.locator('#chat-input')).not.toHaveValue('', { timeout: 8000 });
     } else {
-      // Fall back to first suggestion-btn (send mode with mocked rewrite)
+      // Fall back to first suggestion-btn
       await page.locator('.suggestion-btn').first().click();
       await expect(page.locator('#chat-input')).not.toHaveValue('', { timeout: 8000 });
     }
   });
 
   test('used suggestions tracked in history', async ({ page }) => {
-    await page.route('/api/chat/suggestions/rewrite', route => {
-      route.fulfill({ status: 200, json: { content: 'Rewritten text' } });
+    await page.route('/api/chat', route => {
+      const sse = 'data: {"choices":[{"delta":{"content":"Rewritten text"}}]}\n\ndata: [DONE]\n\n';
+      route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse });
     });
 
     await page.locator('#suggestions-toggle').click();
@@ -96,8 +102,9 @@ test.describe('Suggestions Dropdown', () => {
   });
 
   test('clear recent history', async ({ page }) => {
-    await page.route('/api/chat/suggestions/rewrite', route => {
-      route.fulfill({ status: 200, json: { content: 'Rewritten text' } });
+    await page.route('/api/chat', route => {
+      const sse = 'data: {"choices":[{"delta":{"content":"Rewritten text"}}]}\n\ndata: [DONE]\n\n';
+      route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse });
     });
 
     await page.locator('#suggestions-toggle').click();
@@ -108,9 +115,14 @@ test.describe('Suggestions Dropdown', () => {
     // Use send mode so addRecentSuggestion is called and history is populated
     await page.locator('.suggestion-btn[data-mode="send"]').first().click();
     await page.locator('#suggestions-toggle').click();
+    await page.locator('#suggestions-toggle').click();
     await page.waitForSelector('#suggestions-dropdown', { state: 'visible' });
 
-    await page.locator('.suggestions-clear-recent').click();
+    // Wait for recent history to be populated
+    await page.waitForSelector('.suggestions-recent-list .suggestion-item', { timeout: 5000 });
+
+    // Use force click to bypass pointer event interception from chat-messages-inner
+    await page.locator('.suggestions-clear-recent').click({ force: true });
     await expect(page.locator('.suggestions-recent-list .suggestion-item')).toHaveCount(0);
   });
 

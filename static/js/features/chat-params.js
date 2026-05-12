@@ -357,6 +357,7 @@ export async function compactChatTab(tab, keepTail = null, summarize = true) {
 
     tab.messages = [
         ...(systemMsg ? [systemMsg] : []),
+        ...tombstones,
         tombstone,
         ...kept,
     ];

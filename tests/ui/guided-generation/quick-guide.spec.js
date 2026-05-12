@@ -64,8 +64,15 @@ test.describe('Quick Guide', () => {
     await page.locator('#quick-guide-input').fill('Show, don\'t tell');
     await page.locator('#quick-guide-submit-btn').click();
 
+    // Wait for the guide to close (the submit is async)
+    await page.waitForSelector('#quick-guide-input', { state: 'hidden', timeout: 5000 });
+
+    // Wait a bit for the last used instruction to be stored
+    await page.waitForTimeout(500);
+
     // Toggle again to see last used
     await page.locator('#quick-guide-toggle').click();
+    await page.waitForSelector('#quick-guide-input', { state: 'visible' });
     await expect(page.locator('.quick-guide-last-used')).toContainText('Show, don\'t tell');
   });
 

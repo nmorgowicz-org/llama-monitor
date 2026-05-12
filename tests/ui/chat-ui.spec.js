@@ -201,28 +201,41 @@ test.describe('explicit mode toggle v2 (3-state)', () => {
 
     // Click once → level 1: 🔓 badge visible, .active class
     await page.locator('#chat-explicit-toggle-footer').click();
-    await expect(badge).toBeVisible({ timeout: 3000 });
+    // Wait for tab to re-render (badge appears)
+    await page.waitForFunction(() => {
+      return document.querySelector('.chat-tab-explicit-badge') !== null;
+    }, { timeout: 5000 });
     await expect(badge).toContainText('\u{1F513}');
     await expect(page.locator('#chat-explicit-toggle-footer')).toHaveClass(/active/);
 
     // Click again → level 2: 🔥 badge visible, .unrestricted class
     await page.locator('#chat-explicit-toggle-footer').click();
-    await expect(badge).toBeVisible();
+    // Wait for tab to re-render (badge text changes)
+    await page.waitForFunction(() => {
+      const badge = document.querySelector('.chat-tab-explicit-badge');
+      return badge && badge.textContent.includes('\u{1F525}');
+    }, { timeout: 5000 });
     await expect(badge).toContainText('\u{1F525}');
     await expect(page.locator('#chat-explicit-toggle-footer')).toHaveClass(/unrestricted/);
 
     // Click again → cycle back to level 0: badge gone
     await page.locator('#chat-explicit-toggle-footer').click();
+    // Wait for tab to re-render (badge disappears)
+    await page.waitForFunction(() => {
+      return document.querySelector('.chat-tab-explicit-badge') === null;
+    }, { timeout: 5000 });
     await expect(badge).toHaveCount(0);
     await expect(page.locator('#chat-explicit-toggle-footer')).not.toHaveClass(/active/);
   });
 
   test('explicit policy injection at level 1', async ({ page }) => {
-    // Set explicit_level = 1 directly
+    // Set explicit_level = 1 directly and update UI
     await page.evaluate(async () => {
       const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { updateExplicitToggleUI } = await import('/js/features/chat-templates.js');
       const tab = activeChatTab();
       if (tab) tab.explicit_level = 1;
+      updateExplicitToggleUI();
     });
 
     // Verify level is set
@@ -238,11 +251,13 @@ test.describe('explicit mode toggle v2 (3-state)', () => {
   });
 
   test('explicit policy injection at level 2', async ({ page }) => {
-    // Set explicit_level = 2 directly
+    // Set explicit_level = 2 directly and update UI
     await page.evaluate(async () => {
       const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { updateExplicitToggleUI } = await import('/js/features/chat-templates.js');
       const tab = activeChatTab();
       if (tab) tab.explicit_level = 2;
+      updateExplicitToggleUI();
     });
 
     // Verify level is set
@@ -675,7 +690,11 @@ test.describe('context compaction', () => {
       renderChatMessages();
     });
     await page.locator('#btn-compact').click();
-    await page.waitForSelector('.chat-compact-marker[data-compact-state="final"]', { timeout: 10000 });
+    // Wait for compaction to complete (the button becomes enabled again)
+    await page.waitForFunction(() => {
+      const btn = document.getElementById('btn-compact');
+      return btn && !btn.disabled;
+    }, { timeout: 30000 });
     await expect(page.locator('.chat-compact-marker[data-compact-state="final"]')).toHaveCount(1);
 
     // Second round: inject more messages and compact again
@@ -690,6 +709,11 @@ test.describe('context compaction', () => {
       renderChatMessages();
     });
     await page.locator('#btn-compact').click();
+    // Wait for compaction to complete (the button becomes enabled again)
+    await page.waitForFunction(() => {
+      const btn = document.getElementById('btn-compact');
+      return btn && !btn.disabled;
+    }, { timeout: 30000 });
     const tombstones = page.locator('.chat-compact-marker[data-compact-state="final"]');
     await expect(tombstones).toHaveCount(2, { timeout: 10000 });
 

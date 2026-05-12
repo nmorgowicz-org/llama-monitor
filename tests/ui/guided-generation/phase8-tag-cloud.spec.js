@@ -189,17 +189,12 @@ test.describe('Phase 8 - Tag Cloud', () => {
     await page.evaluate(() => {
       import('/js/features/chat-state.js').then(({ activeChatTab }) => {
         const tab = activeChatTab();
-        if (tab) tab.explicit_level = 1;
+        if (tab) {
+          tab.explicit_level = 1;
+          window.dispatchEvent(new CustomEvent('explicitModeChanged'));
+        }
       });
     });
-
-    // Re-toggle dropdown to force UI re-render with new explicit level
-    await page.locator('#suggestions-toggle').click();
-    await page.waitForSelector('#suggestions-dropdown', { state: 'visible' });
-    await page.locator('#suggestions-toggle').click();
-    await page.waitForSelector('#suggestions-dropdown', { state: 'hidden' });
-    await page.locator('#suggestions-toggle').click();
-    await page.waitForSelector('#suggestions-dropdown', { state: 'visible' });
 
     const explicitGroup = page.locator('#suggestions-explicit-group');
     await expect(explicitGroup).toBeVisible();

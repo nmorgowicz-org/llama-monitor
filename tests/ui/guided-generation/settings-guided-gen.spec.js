@@ -139,10 +139,11 @@ test.describe('Settings - Guided Generation', () => {
     // Modify something
     await page.locator('#settings-prompt-general').fill('Test');
 
-    // Ctrl+S triggers save
+    // Focus the modal so Ctrl+S is captured
+    await page.locator('#settings-modal').focus();
     await page.keyboard.press('Control+S');
 
     const saveButton = page.locator('#settings-modal-save');
-    await expect(saveButton).toHaveClass(/success/, { timeout: 3000 });
+    await expect(saveButton).toHaveClass(/success/, { timeout: 5000 });
   });
 });
