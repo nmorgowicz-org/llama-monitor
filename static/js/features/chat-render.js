@@ -98,7 +98,9 @@ export function colorizeRpText(el) {
     while ((node = walker.nextNode())) textNodes.push(node);
 
     // Match straight " " and curly " " / " " quote pairs — LLMs routinely use smart quotes.
-    const dialogueRe = /["“]([^"“”\r\n]{1,600})["”]/g;
+    // Allow newlines inside quotes (multi-line dialogue) and increase max length to 2000 chars.
+    // Use non-greedy (lazy) quantifier to match the shortest possible quote, not the longest.
+    const dialogueRe = /["“]([^"“”]{1,2000}?)["”]/g;
 
     for (const textNode of textNodes) {
         const parent = textNode.parentNode;
@@ -237,7 +239,6 @@ export function renderChatTabs() {
         el.innerHTML = `
           <div class="chat-tab-name-wrapper">
             <span class="chat-tab-name" data-chat-tab-rename="${tab.id}">${escapeHtml(tab.name)}</span>
-            ${tab.activeTemplateId ? `<span class="chat-tab-persona"></span>` : ''}
           </div>
           <svg class="chat-tab-pin-icon ${tab.pinned ? 'pinned' : ''}" width="11" height="11" viewBox="0 0 24 24" fill="${tab.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" aria-hidden="true" data-tooltip="${tab.pinned ? 'Unpin tab' : 'Pin tab'}">
             <path d="M16 12V3h-3V2H8v1H5v9l-2 6 3 1 2-5v9h6v-9l2 5 3-1-2-6z"/>
@@ -307,16 +308,6 @@ export function renderChatTabs() {
             });
         }
 
-        // Populate persona label
-        const personaLabel = el.querySelector('.chat-tab-persona');
-        const nameWrapper = el.querySelector('.chat-tab-name-wrapper');
-        if (personaLabel && tab.activeTemplateId) {
-            getTemplateNameById(tab.activeTemplateId).then(name => {
-                if (personaLabel && name) {
-                    personaLabel.textContent = name;
-                }
-            });
-        }
         if (tab.explicitLevel > 0) {
             const badge = document.createElement('span');
             badge.className = 'chat-tab-explicit-badge';
@@ -324,7 +315,7 @@ export function renderChatTabs() {
             badge.title = tab.explicit_level >= 2 ? 'Unrestricted mode' : 'Explicit mode';
             const countEl = el.querySelector('.chat-tab-count');
             if (countEl) {
-                countEl.parentNode.insertBefore(badge, countEl.nextSibling);
+                countEl.parentNode.insertBefore(badge, countEl);
             } else {
                 el.appendChild(badge);
             }
@@ -493,8 +484,15 @@ export function renderChatMessages() {
 function loadMoreMessages(tab, currentLimit) {
     const allMessages = tab.messages.filter(m => m.role !== 'system' || m.compaction_marker);
     tab.visible_message_limit = Math.min(currentLimit * 2, allMessages.length);
+
+    // Preserve scroll position before re-rendering
+    const scrollEl = chatMessagesEl;
+    const scrollTop = scrollEl ? scrollEl.scrollTop : 0;
+
     renderChatMessages();
-    if (chatMessagesEl) chatMessagesEl.scrollTop = 0;
+
+    // Restore scroll position (don't scroll to top)
+    if (scrollEl) scrollEl.scrollTop = scrollTop;
 }
 
 function buildMessageElement(msg, idx, allMessages) {
@@ -593,11 +591,11 @@ function buildMessageElement(msg, idx, allMessages) {
         }
     }
 
- // LLM output rendered via marked.js; user content escaped with escapeHtml().replace(); labels are user-configured display names
+ // All messages rendered via marked.js for consistent styling (backticks, italics, bold); labels are user-configured display names
     const html = `
       <div class="chat-avatar">${isUser ? userLabel : aiLabel}</div>
       <div class="chat-bubble">
-        <div class="chat-msg-body">${isUser ? escapeHtml(msg.content).replace(/\n/g, '<br>') : renderMd(msg.content)}</div>
+        <div class="chat-msg-body">${renderMd(msg.content)}</div>
         <div class="chat-msg-footer">
           <span class="chat-msg-time">${ts}</span>
           ${metaHtml}
