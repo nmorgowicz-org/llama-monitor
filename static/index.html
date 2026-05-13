@@ -2463,19 +2463,20 @@
             <button type="button" class="cat-mgr-close" id="manage-categories-close" aria-label="Close">&#x2715;</button>
         </div>
         <div class="cat-mgr-body">
-            <div class="cat-mgr-col">
+            <div class="cat-mgr-col cat-mgr-col-left">
+                <div class="cat-mgr-col-header">
+                    <span class="cat-mgr-col-label">Custom</span>
+                    <span class="cat-mgr-col-hint">Your categories appear alongside the built-ins as chips</span>
+                </div>
+                <div id="categories-custom-list" class="cat-mgr-list"></div>
+                <div class="cat-mgr-separator"></div>
                 <div class="cat-mgr-col-header">
                     <span class="cat-mgr-col-label">Built-in</span>
                     <span class="cat-mgr-col-hint">Override any prompt — leave blank to restore the default</span>
                 </div>
                 <div id="categories-builtin-list" class="cat-mgr-list"></div>
             </div>
-            <div class="cat-mgr-col cat-mgr-col-custom">
-                <div class="cat-mgr-col-header">
-                    <span class="cat-mgr-col-label">Custom</span>
-                    <span class="cat-mgr-col-hint">Your categories appear alongside the built-ins as chips</span>
-                </div>
-                <div id="categories-custom-list" class="cat-mgr-list"></div>
+            <div class="cat-mgr-col cat-mgr-col-right">
                 <div class="cat-mgr-add-section">
                     <div class="cat-mgr-add-label">New Category</div>
                     <input type="text" id="new-category-name" class="cat-mgr-field" placeholder="Name (e.g., Western, Spy Thriller, Slice of Life)">
