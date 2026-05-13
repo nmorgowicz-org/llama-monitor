@@ -2463,6 +2463,13 @@
             <button type="button" class="cat-mgr-close" id="manage-categories-close" aria-label="Close">&#x2715;</button>
         </div>
         <div class="cat-mgr-body">
+            <div class="cat-mgr-col">
+                <div class="cat-mgr-col-header">
+                    <span class="cat-mgr-col-label">Built-in</span>
+                    <span class="cat-mgr-col-hint">Override any prompt — leave blank to restore the default</span>
+                </div>
+                <div id="categories-builtin-list" class="cat-mgr-list"></div>
+            </div>
             <div class="cat-mgr-col cat-mgr-col-custom">
                 <div class="cat-mgr-col-header">
                     <span class="cat-mgr-col-label">Custom</span>
@@ -2478,13 +2485,6 @@
                     </div>
                     <button type="button" id="add-category-btn" class="cat-mgr-add-btn">Add Category</button>
                 </div>
-            </div>
-            <div class="cat-mgr-col">
-                <div class="cat-mgr-col-header">
-                    <span class="cat-mgr-col-label">Built-in</span>
-                    <span class="cat-mgr-col-hint">Override any prompt — leave blank to restore the default</span>
-                </div>
-                <div id="categories-builtin-list" class="cat-mgr-list"></div>
             </div>
         </div>
     </div>
