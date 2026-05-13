@@ -895,7 +895,9 @@ function renderCustomCategories() {
     }
 
     // eslint-disable-next-line no-unsanitized/property -- User content escaped via escapeHtml()
-    list.innerHTML = customs.map(([key, catPrompt]) => {
+    list.innerHTML = customs.map(([key, catData]) => {
+        const catPrompt = typeof catData === 'string' ? catData : (catData.prompt || '');
+        const isExplicit = typeof catData === 'string' ? false : (catData.explicit || false);
         const label = key.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
         const preview = catPrompt.length > 90 ? catPrompt.slice(0, 90) + '...' : catPrompt;
         return `
@@ -912,6 +914,12 @@ function renderCustomCategories() {
             </div>
             <div class="cat-card-editor" hidden>
                 <textarea class="cat-mgr-field cat-card-textarea" data-key="${escapeHtml(key)}">${escapeHtml(catPrompt)}</textarea>
+                <div class="cat-card-editor-explicit">
+                    <label class="cat-mgr-explicit-label">
+                        <input type="checkbox" class="cat-mgr-explicit-check" data-key="${escapeHtml(key)}" ${isExplicit ? 'checked' : ''}>
+                        <span class="cat-mgr-explicit-text">Explicit</span>
+                    </label>
+                </div>
                 <div class="cat-card-editor-actions">
                     <button class="cat-card-save-custom" data-key="${escapeHtml(key)}">Save</button>
                 </div>
@@ -936,8 +944,9 @@ function renderCustomCategories() {
             const key = btn.dataset.key;
             const card = btn.closest('.cat-card');
             const val = card.querySelector('.cat-card-textarea')?.value || '';
+            const isExplicit = card.querySelector('.cat-mgr-explicit-check')?.checked || false;
             if (!val.trim()) { showToast('Prompt cannot be empty', 'error'); return; }
-            suggestionsState.customCategories.set(key, val.trim());
+            suggestionsState.customCategories.set(key, { prompt: val.trim(), explicit: isExplicit });
             saveCustomCategories();
             renderCustomCategories();
             showToast('Category updated', 'success');
@@ -958,7 +967,7 @@ function renderCategoriesList() {
     renderCustomCategories();
 }
 
-function addCategory(name, focusKeywords) {
+function addCategory(name, focusKeywords, isExplicit = false) {
     if (!name || !focusKeywords) {
         showToast('Please provide both a name and focus keywords', 'error');
         return;
@@ -968,7 +977,7 @@ function addCategory(name, focusKeywords) {
     const catPrompt = `Generate {count} ${name.toLowerCase()} story beats. Focus on ${focusKeywords}. Build naturally from the current conversation.\n\nFormat each as:\nTITLE\nOne-sentence description of the beat.`;
 
     const key = name.toLowerCase().replace(/\s+/g, '-');
-    suggestionsState.customCategories.set(key, catPrompt);
+    suggestionsState.customCategories.set(key, { prompt: catPrompt, explicit: isExplicit });
     saveCustomCategories();
     renderCustomCategories();
     showToast(`Category "${name}" added`, 'success');
@@ -979,6 +988,17 @@ function removeCategory(key) {
         saveCustomCategories();
         renderCustomCategories();
         showToast('Category removed', 'success');
+    }
+}
+
+function toggleCategoryExplicit(key) {
+    const cat = suggestionsState.customCategories.get(key);
+    if (cat) {
+        cat.explicit = !cat.explicit;
+        suggestionsState.customCategories.set(key, cat);
+        saveCustomCategories();
+        renderCustomCategories();
+        showToast(`Category "${key}" ${cat.explicit ? 'marked as explicit' : 'unmarked as explicit'}`, 'success');
     }
 }
 
@@ -1071,13 +1091,16 @@ function setupCategoryButtons() {
         addCategoryBtn.addEventListener('click', () => {
             const nameInput = document.getElementById('new-category-name');
             const focusInput = document.getElementById('new-category-focus');
+            const explicitCheck = document.getElementById('new-category-explicit');
             const name = nameInput?.value.trim();
             const focus = focusInput?.value.trim();
+            const isExplicit = explicitCheck?.checked || false;
 
             if (name && focus) {
-                addCategory(name, focus);
+                addCategory(name, focus, isExplicit);
                 nameInput.value = '';
                 focusInput.value = '';
+                explicitCheck.checked = false;
             }
         });
     }
