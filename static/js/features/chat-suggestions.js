@@ -157,12 +157,114 @@ function updateDropdownUI() {
         btn.setAttribute('aria-label', `${categoryMeta.label}. ${categoryMeta.description}`);
     });
 
+    // Render custom categories in the dropdown
+    renderCustomCategoryButtons();
+
     if (listContainer) {
         renderSuggestionsList();
     }
 
    // Always render recent suggestions
     // (removed - no longer needed)
+}
+
+function renderCustomCategoryButtons() {
+    const tagCloud = document.querySelector('.suggestions-tag-cloud');
+    if (!tagCloud) return;
+
+    const customs = Array.from(suggestionsState.customCategories.entries());
+    if (customs.length === 0) return;
+
+    // Separate explicit and non-explicit custom categories
+    const explicitCustoms = customs.filter(([key, catData]) => {
+        const isExplicit = typeof catData === 'string' ? false : (catData.explicit || false);
+        return isExplicit;
+    });
+    const nonExplicitCustoms = customs.filter(([key, catData]) => {
+        const isExplicit = typeof catData === 'string' ? false : (catData.explicit || false);
+        return !isExplicit;
+    });
+
+    // Remove existing custom category buttons (to avoid duplicates)
+    tagCloud.querySelectorAll('.suggestion-category-btn[data-custom]').forEach(btn => btn.remove());
+
+    // Add non-explicit custom categories to a new "Custom" group (before Explicit group)
+    if (nonExplicitCustoms.length > 0) {
+        const explicitGroup = document.getElementById('suggestions-explicit-group');
+        let customGroup = document.getElementById('suggestions-custom-group');
+        if (!customGroup) {
+            customGroup = document.createElement('div');
+            customGroup.id = 'suggestions-custom-group';
+            customGroup.className = 'category-group';
+            customGroup.innerHTML = '<div class="category-group-title">Custom</div>';
+            // Insert before the explicit group
+            if (explicitGroup) {
+                explicitGroup.parentNode.insertBefore(customGroup, explicitGroup);
+            } else {
+                tagCloud.appendChild(customGroup);
+            }
+        }
+        // Clear existing buttons in the custom group
+        customGroup.querySelectorAll('.suggestion-category-btn').forEach(btn => btn.remove());
+
+        nonExplicitCustoms.forEach(([key, catData]) => {
+            const label = key.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+            const btn = document.createElement('button');
+            btn.className = 'suggestion-category-btn';
+            btn.dataset.category = key;
+            btn.dataset.custom = 'true';
+            btn.textContent = label;
+            btn.setAttribute('title', `${label}: Custom category`);
+            btn.setAttribute('aria-label', `${label}. Custom category`);
+            customGroup.appendChild(btn);
+            // Wire up the same event handlers as built-in buttons
+            setupCategoryButton(btn);
+        });
+    } else {
+        // Remove the custom group if no non-explicit custom categories
+        const customGroup = document.getElementById('suggestions-custom-group');
+        if (customGroup) customGroup.remove();
+    }
+
+    // Add explicit custom categories to the Explicit group
+    const explicitGroup = document.getElementById('suggestions-explicit-group');
+    if (explicitGroup && explicitCustoms.length > 0) {
+        explicitCustoms.forEach(([key, catData]) => {
+            const label = key.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+            const btn = document.createElement('button');
+            btn.className = 'suggestion-category-btn';
+            btn.dataset.category = key;
+            btn.dataset.custom = 'true';
+            btn.textContent = label;
+            btn.setAttribute('title', `${label}: Custom explicit category`);
+            btn.setAttribute('aria-label', `${label}. Custom explicit category`);
+            explicitGroup.appendChild(btn);
+            // Wire up the same event handlers as built-in buttons
+            setupCategoryButton(btn);
+        });
+    }
+}
+
+function setupCategoryButton(btn) {
+    btn.addEventListener('mouseenter', () => {
+        suggestionsState.previewCategory = btn.dataset.category;
+        updateDropdownUI();
+    });
+    btn.addEventListener('mouseleave', () => {
+        suggestionsState.previewCategory = null;
+        updateDropdownUI();
+    });
+    btn.addEventListener('focus', () => {
+        suggestionsState.previewCategory = btn.dataset.category;
+        updateDropdownUI();
+    });
+    btn.addEventListener('blur', () => {
+        suggestionsState.previewCategory = null;
+        updateDropdownUI();
+    });
+    btn.addEventListener('click', () => {
+        setSuggestionCategory(btn.dataset.category);
+    });
 }
 
 function applySearchFilter() {
