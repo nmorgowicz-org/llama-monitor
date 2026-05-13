@@ -1099,11 +1099,14 @@ function setupCategoryButtons() {
             autoGenBtn.textContent = '⏳ Generating...';
 
             try {
-                const response = await fetch('/api/chat/complete', {
+                const response = await fetch('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        prompt: `Generate 3-5 focus keywords for a story category called "${categoryName}". Return only the keywords, separated by commas. No explanation.`,
+                        messages: [{
+                            role: 'user',
+                            content: `Generate 3-5 focus keywords for a story category called "${categoryName}". Return only the keywords, separated by commas. No explanation.`,
+                        }],
                         max_tokens: 50,
                         temperature: 0.7,
                         thinking_budget_tokens: 0,
@@ -1111,10 +1114,39 @@ function setupCategoryButtons() {
                     }),
                 });
 
-                const data = await response.json();
-                if (data.content) {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                // Read streaming SSE response
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buf = '';
+                let content = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buf += decoder.decode(value, { stream: true });
+
+                    const lines = buf.split('\n');
+                    buf = lines.pop() ?? '';
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data:')) continue;
+                        const payload = line.slice(5).trim();
+                        if (payload === '[DONE]') continue;
+                        try {
+                            const obj = JSON.parse(payload);
+                            const delta = obj.choices?.[0]?.delta;
+                            if (delta?.content) content += delta.content;
+                        } catch { /* skip malformed chunks */ }
+                    }
+                }
+
+                if (content) {
                     // Clean up the response - remove any extra text, just keep the keywords
-                    const keywords = data.content
+                    const keywords = content
                         .replace(/^["']|["']$/g, '') // Remove surrounding quotes
                         .replace(/\s*[-–—]\s*/g, ', ') // Replace dashes with commas
                         .split(',')
