@@ -2472,14 +2472,10 @@
                 <div class="cat-mgr-add-section">
                     <div class="cat-mgr-add-label">New Category</div>
                     <input type="text" id="new-category-name" class="cat-mgr-field" placeholder="Name (e.g., Western, Spy Thriller, Slice of Life)">
-                    <textarea id="new-category-prompt" class="cat-mgr-field cat-mgr-textarea" rows="6" placeholder="Tell the AI what kind of beats to generate.
-
-Example:
-Generate {count} western-themed story beats. Focus on frontier tension, lawman vs. outlaw dynamics, high-noon confrontations, and the harsh beauty of open plains. Build naturally from the current conversation.
-
-Format each as:
-TITLE
-One-sentence description of the beat."></textarea>
+                    <div class="cat-mgr-focus-row">
+                        <input type="text" id="new-category-focus" class="cat-mgr-field" placeholder="Focus concepts (e.g., power dynamics, control, surrender)">
+                        <button type="button" id="auto-generate-focus-btn" class="cat-mgr-auto-gen-btn" title="Auto-generate focus keywords from category name">✨ Auto</button>
+                    </div>
                     <button type="button" id="add-category-btn" class="cat-mgr-add-btn">Add Category</button>
                 </div>
             </div>

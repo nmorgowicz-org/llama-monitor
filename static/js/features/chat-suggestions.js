@@ -958,11 +958,14 @@ function renderCategoriesList() {
     renderCustomCategories();
 }
 
-function addCategory(name, catPrompt) {
-    if (!name || !catPrompt) {
-        showToast('Please provide both a name and prompt', 'error');
+function addCategory(name, focusKeywords) {
+    if (!name || !focusKeywords) {
+        showToast('Please provide both a name and focus keywords', 'error');
         return;
     }
+
+    // Generate the template from the focus keywords
+    const catPrompt = `Generate {count} ${name.toLowerCase()} story beats. Focus on ${focusKeywords}. Build naturally from the current conversation.\n\nFormat each as:\nTITLE\nOne-sentence description of the beat.`;
 
     const key = name.toLowerCase().replace(/\s+/g, '-');
     suggestionsState.customCategories.set(key, catPrompt);
@@ -1067,27 +1070,65 @@ function setupCategoryButtons() {
     if (addCategoryBtn) {
         addCategoryBtn.addEventListener('click', () => {
             const nameInput = document.getElementById('new-category-name');
-            const promptInput = document.getElementById('new-category-prompt');
+            const focusInput = document.getElementById('new-category-focus');
             const name = nameInput?.value.trim();
-            const prompt = promptInput?.value.trim();
+            const focus = focusInput?.value.trim();
 
-            if (name && prompt) {
-                addCategory(name, prompt);
+            if (name && focus) {
+                addCategory(name, focus);
                 nameInput.value = '';
-                promptInput.value = '';
+                focusInput.value = '';
             }
         });
     }
 
-    // Pre-fill template when user focuses on the textarea
-    const promptInput = document.getElementById('new-category-prompt');
-    if (promptInput) {
-        promptInput.addEventListener('focus', () => {
-            // Only pre-fill if the textarea is empty (user hasn't started typing yet)
-            if (!promptInput.value.trim()) {
-                const nameInput = document.getElementById('new-category-name');
-                const topic = nameInput?.value.trim() || '<topic>';
-                promptInput.value = `Generate {count} ${topic} story beats. Focus on <descriptions, nouns, concepts, or ideas>. Build naturally from the current conversation.\n\nFormat each as:\nTITLE\nOne-sentence description of the beat.`;
+    // Auto-generate focus keywords from category name
+    const autoGenBtn = document.getElementById('auto-generate-focus-btn');
+    if (autoGenBtn) {
+        autoGenBtn.addEventListener('click', async () => {
+            const nameInput = document.getElementById('new-category-name');
+            const focusInput = document.getElementById('new-category-focus');
+            const categoryName = nameInput?.value.trim();
+
+            if (!categoryName) {
+                showToast('Enter a category name first', 'warning', '', { duration: 2000 });
+                return;
+            }
+
+            autoGenBtn.disabled = true;
+            autoGenBtn.textContent = '⏳ Generating...';
+
+            try {
+                const response = await fetch('/api/chat/complete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: `Generate 3-5 focus keywords for a story category called "${categoryName}". Return only the keywords, separated by commas. No explanation.`,
+                        max_tokens: 50,
+                        temperature: 0.7,
+                    }),
+                });
+
+                const data = await response.json();
+                if (data.content) {
+                    // Clean up the response - remove any extra text, just keep the keywords
+                    const keywords = data.content
+                        .replace(/^["']|["']$/g, '') // Remove surrounding quotes
+                        .replace(/\s*[-–—]\s*/g, ', ') // Replace dashes with commas
+                        .split(',')
+                        .map(k => k.trim())
+                        .filter(k => k.length > 0)
+                        .slice(0, 5) // Limit to 5 keywords
+                        .join(', ');
+
+                    focusInput.value = keywords;
+                }
+            } catch (e) {
+                console.error('Auto-generate focus failed:', e);
+                showToast('Failed to generate focus keywords', 'error', '', { duration: 2000 });
+            } finally {
+                autoGenBtn.disabled = false;
+                autoGenBtn.textContent = '✨ Auto';
             }
         });
     }
