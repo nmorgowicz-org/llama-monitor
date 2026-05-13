@@ -1099,19 +1099,11 @@ function setupCategoryButtons() {
             autoGenBtn.textContent = '⏳ Generating...';
 
             try {
-                const response = await fetch('/api/chat/suggestions', {
+                const response = await fetch('/api/keywords/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        tab_id: activeChatTab()?.id || '',
-                        category: 'custom',
-                        context_depth: 0,
-                        count: 1,
-                        messages: [],
-                        system_prompt: '',
-                        context_notes: [],
-                        quick_guide_active: false,
-                        prompt: `Generate 3-5 focus keywords for a story category called "${categoryName}". Return only the keywords, separated by commas. No explanation.`,
+                        category: categoryName,
                     }),
                 });
 
@@ -1120,18 +1112,8 @@ function setupCategoryButtons() {
                 }
 
                 const data = await response.json();
-                if (data.suggestions && data.suggestions.length > 0) {
-                    // Clean up the response - remove any extra text, just keep the keywords
-                    const keywords = data.suggestions[0]
-                        .replace(/^["']|["']$/g, '') // Remove surrounding quotes
-                        .replace(/\s*[-–—]\s*/g, ', ') // Replace dashes with commas
-                        .split(',')
-                        .map(k => k.trim())
-                        .filter(k => k.length > 0)
-                        .slice(0, 5) // Limit to 5 keywords
-                        .join(', ');
-
-                    focusInput.value = keywords;
+                if (data.keywords && data.keywords.length > 0) {
+                    focusInput.value = data.keywords.join(', ');
                 }
             } catch (e) {
                 console.error('Auto-generate focus failed:', e);

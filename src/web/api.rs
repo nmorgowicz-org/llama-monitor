@@ -261,6 +261,18 @@ pub struct SuggestionCard {
     pub detail: String,
 }
 
+/// Keyword generation request
+#[derive(serde::Deserialize, Debug)]
+pub struct KeywordRequest {
+    pub category: String,
+}
+
+/// Keyword generation response
+#[derive(serde::Serialize, Debug)]
+pub struct KeywordResponse {
+    pub keywords: Vec<String>,
+}
+
 fn default_suggestions_output_contract(count: u32) -> String {
     format!(
         "\n\nFINAL OUTPUT REQUIREMENTS:\n\
@@ -659,6 +671,118 @@ fn api_disable_lhm(
         })
 }
 
+fn api_generate_keywords(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "keywords" / "generate")
+        .and(warp::post())
+        .and(warp::body::json::<KeywordRequest>())
+        .and_then(move |req: KeywordRequest| {
+            let state = state.clone();
+            async move {
+                let session = state.get_active_session()
+                    .ok_or(warp::reject::not_found())?;
+
+                let url = match &session.mode {
+                    crate::state::SessionMode::Spawn { port } => {
+                        format!("http://127.0.0.1:{port}/v1/chat/completions")
+                    }
+                    crate::state::SessionMode::Attach { endpoint } => {
+                        format!("{endpoint}/v1/chat/completions")
+                    }
+                };
+
+                let prompt = format!(
+                    "Generate 3-5 focus keywords for a story category called \"{}\". Return only the keywords, separated by commas. No explanation.",
+                    req.category
+                );
+
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .build()
+                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+
+                let response = client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .json(&serde_json::json!({
+                        "messages": [
+                            {"role": "system", "content": "You generate focus keywords. Return only the keywords, comma-separated, with no explanation."},
+                            {"role": "user", "content": prompt},
+                        ],
+                        "stream": true,
+                        "thinking_budget_tokens": 0,
+                        "chat_template_kwargs": {"enable_thinking": false},
+                        "temperature": 0.7,
+                        "max_tokens": 128,
+                    }))
+                    .send()
+                    .await
+                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+
+                if !response.status().is_success() {
+                    let status = response.status();
+                    let err_body = response.text().await.unwrap_or_default();
+                    return Err(warp::reject::custom(ApiError(format!(
+                        "upstream {}: {}", status, err_body
+                    ))));
+                }
+
+                use futures_util::StreamExt;
+                let mut upstream = response.bytes_stream();
+                let mut buf = String::new();
+                let mut content = String::new();
+
+                while let Some(chunk) = upstream.next().await {
+                    let chunk = chunk.map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                    buf.push_str(&String::from_utf8_lossy(&chunk));
+
+                    while let Some(pos) = buf.find('\n') {
+                        let line = buf[..pos].trim().to_string();
+                        buf = buf[pos + 1..].to_string();
+
+                        let Some(data) = line.strip_prefix("data: ") else { continue; };
+                        let data = data.trim();
+                        if data.is_empty() || data == "[DONE]" { continue; }
+
+                        let event: serde_json::Value = serde_json::from_str(data)
+                            .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                        if let Some(delta) = event.get("choices")
+                            .and_then(|c| c.as_array())
+                            .and_then(|c| c.first())
+                            .and_then(|c| c.get("delta"))
+                            .and_then(|d| d.get("content"))
+                            .and_then(|c| c.as_str())
+                        {
+                            content.push_str(delta);
+                        }
+                    }
+                }
+
+                let content = content.trim().to_string();
+                if content.is_empty() {
+                    return Err(warp::reject::custom(ApiError(
+                        "upstream returned empty keyword content".to_string(),
+                    )));
+                }
+
+                let keywords: Vec<String> = content
+                    .split(',')
+                    .map(|k| k.trim().to_string())
+                    .filter(|k| !k.is_empty())
+                    .collect();
+
+                if keywords.is_empty() {
+                    return Err(warp::reject::custom(ApiError(
+                        "upstream returned no parseable keywords".to_string(),
+                    )));
+                }
+
+                Ok::<_, warp::Rejection>(warp::reply::json(&KeywordResponse { keywords }))
+            }
+        })
+}
+
 pub fn api_routes(
     state: AppState,
     app_config: Arc<AppConfig>,
@@ -685,6 +809,7 @@ pub fn api_routes(
     let chat = api_chat(state.clone());
     let chat_abort = api_chat_abort(state.clone());
     let chat_suggestions = api_chat_suggestions(state.clone());
+    let generate_keywords = api_generate_keywords(state.clone());
     let get_chat_tabs = api_get_chat_tabs();
     let put_chat_tabs = api_put_chat_tabs();
     let get_sessions = api_get_sessions(state.clone());
@@ -734,6 +859,7 @@ pub fn api_routes(
         .or(chat)
         .or(chat_abort)
         .or(chat_suggestions)
+        .or(generate_keywords)
         .or(get_chat_tabs)
         .or(put_chat_tabs);
     let session_routes = get_sessions
