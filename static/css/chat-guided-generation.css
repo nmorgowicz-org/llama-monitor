@@ -2830,6 +2830,14 @@
     gap: 6px;
 }
 
+/* Make the left column (custom + built-in) take full height */
+.cat-mgr-col-left {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex: 1; /* Take full height */
+}
+
 .cat-mgr-col-header {
     display: flex;
     flex-direction: column;
@@ -3012,6 +3020,27 @@
     border-color: rgba(248, 113, 113, 0.36);
 }
 
+/* Edit button - match delete button's fancy oval pill style */
+.cat-card-edit-btn {
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    white-space: nowrap;
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    background: transparent;
+    color: rgba(99, 102, 241, 0.7);
+}
+
+.cat-card-edit-btn:hover {
+    background: rgba(99, 102, 241, 0.1);
+    color: #818cf8;
+    border-color: rgba(99, 102, 241, 0.36);
+}
+
 .cat-card-editor {
     border-top: 1px solid rgba(255, 255, 255, 0.06);
     padding: 12px 14px;
@@ -3121,21 +3150,41 @@
     gap: 8px;
 }
 
-.cat-mgr-explicit-label {
+.cat-mgr-explicit-btn {
     display: flex;
     align-items: center;
     gap: 6px;
+    padding: 6px 12px;
+    background: rgba(99, 102, 241, 0.12);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 999px;
+    color: #c7d2fe;
     font-size: 11px;
-    color: var(--text-secondary);
+    font-weight: 600;
     cursor: pointer;
+    transition: all 0.2s ease;
     user-select: none;
 }
 
-.cat-mgr-explicit-check {
-    width: 14px;
-    height: 14px;
-    accent-color: #6366f1;
-    cursor: pointer;
+.cat-mgr-explicit-btn:hover {
+    background: rgba(99, 102, 241, 0.2);
+    border-color: rgba(99, 102, 241, 0.4);
+    color: #e0e7ff;
+}
+
+.cat-mgr-explicit-btn.active {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+}
+
+.cat-mgr-explicit-btn.active:hover {
+    background: rgba(239, 68, 68, 0.25);
+    border-color: rgba(239, 68, 68, 0.5);
+}
+
+.cat-mgr-explicit-icon {
+    flex-shrink: 0;
 }
 
 .cat-mgr-explicit-text {

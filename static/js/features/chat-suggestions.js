@@ -1017,10 +1017,12 @@ function renderCustomCategories() {
             <div class="cat-card-editor" hidden>
                 <textarea class="cat-mgr-field cat-card-textarea" data-key="${escapeHtml(key)}">${escapeHtml(catPrompt)}</textarea>
                 <div class="cat-card-editor-explicit">
-                    <label class="cat-mgr-explicit-label">
-                        <input type="checkbox" class="cat-mgr-explicit-check" data-key="${escapeHtml(key)}" ${isExplicit ? 'checked' : ''}>
+                    <button type="button" class="cat-mgr-explicit-btn ${isExplicit ? 'active' : ''}" data-key="${escapeHtml(key)}" title="Toggle explicit mode for this category">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="cat-mgr-explicit-icon">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
+                        </svg>
                         <span class="cat-mgr-explicit-text">Explicit</span>
-                    </label>
+                    </button>
                 </div>
                 <div class="cat-card-editor-actions">
                     <button class="cat-card-save-custom" data-key="${escapeHtml(key)}">Save</button>
@@ -1193,17 +1195,25 @@ function setupCategoryButtons() {
         addCategoryBtn.addEventListener('click', () => {
             const nameInput = document.getElementById('new-category-name');
             const focusInput = document.getElementById('new-category-focus');
-            const explicitCheck = document.getElementById('new-category-explicit');
+            const explicitBtn = document.getElementById('new-category-explicit-btn');
             const name = nameInput?.value.trim();
             const focus = focusInput?.value.trim();
-            const isExplicit = explicitCheck?.checked || false;
+            const isExplicit = explicitBtn?.classList.contains('active') || false;
 
             if (name && focus) {
                 addCategory(name, focus, isExplicit);
                 nameInput.value = '';
                 focusInput.value = '';
-                explicitCheck.checked = false;
+                explicitBtn?.classList.remove('active');
             }
+        });
+    }
+
+    // Toggle explicit button
+    const explicitBtn = document.getElementById('new-category-explicit-btn');
+    if (explicitBtn) {
+        explicitBtn.addEventListener('click', () => {
+            explicitBtn.classList.toggle('active');
         });
     }
 
