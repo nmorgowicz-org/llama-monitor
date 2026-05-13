@@ -1078,7 +1078,7 @@ function addCategory(name, focusKeywords, isExplicit = false) {
     }
 
     // Generate the template from the focus keywords
-    const catPrompt = `Generate {count} ${name.toLowerCase()} story beats. Focus on ${focusKeywords}. Build naturally from the current conversation.\n\nFormat each as:\nTITLE\nOne-sentence description of the beat.`;
+    const catPrompt = `Generate {count} ${name.toLowerCase()} story beats. Focus on ${focusKeywords}. Build naturally from the current conversation.`;
 
     const key = name.toLowerCase().replace(/\s+/g, '-');
     suggestionsState.customCategories.set(key, { prompt: catPrompt, explicit: isExplicit });
