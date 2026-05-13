@@ -175,11 +175,10 @@ pub struct ChatTab {
     )]
     pub explicit_level: Option<u8>,
     pub messages: Vec<ChatMessage>,
-    // Serialized as camelCase so GET responses and PUT bodies use identical names.
-    // Alias keeps existing disk files readable if they were written as snake_case.
-    #[serde(rename = "totalInputTokens", alias = "total_input_tokens", default)]
+    // Standardized on snake_case to avoid duplicate field errors.
+    #[serde(default)]
     pub total_input_tokens: Option<u64>,
-    #[serde(rename = "totalOutputTokens", alias = "total_output_tokens", default)]
+    #[serde(default)]
     pub total_output_tokens: Option<u64>,
     #[serde(default)]
     pub model_params: ChatModelParams,
