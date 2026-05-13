@@ -1106,6 +1106,7 @@ function setupCategoryButtons() {
                         prompt: `Generate 3-5 focus keywords for a story category called "${categoryName}". Return only the keywords, separated by commas. No explanation.`,
                         max_tokens: 50,
                         temperature: 0.7,
+                        thinking: false,
                     }),
                 });
 
