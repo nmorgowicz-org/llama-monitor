@@ -1079,6 +1079,19 @@ function setupCategoryButtons() {
         });
     }
 
+    // Pre-fill template when user focuses on the textarea
+    const promptInput = document.getElementById('new-category-prompt');
+    if (promptInput) {
+        promptInput.addEventListener('focus', () => {
+            // Only pre-fill if the textarea is empty (user hasn't started typing yet)
+            if (!promptInput.value.trim()) {
+                const nameInput = document.getElementById('new-category-name');
+                const topic = nameInput?.value.trim() || '<topic>';
+                promptInput.value = `Generate {count} ${topic} story beats. Focus on <descriptions, nouns, concepts, or ideas>. Build naturally from the current conversation.\n\nFormat each as:\nTITLE\nOne-sentence description of the beat.`;
+            }
+        });
+    }
+
     const manageBtn = document.getElementById('suggestions-manage-btn');
     if (manageBtn) {
         manageBtn.addEventListener('click', (e) => {
