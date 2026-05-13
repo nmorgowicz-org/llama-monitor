@@ -207,6 +207,14 @@ function renderCustomCategoryButtons() {
         // Clear existing buttons in the custom group
         customGroup.querySelectorAll('.suggestion-category-btn').forEach(btn => btn.remove());
 
+        // Create chips container for custom buttons
+        const chips = document.createElement('div');
+        chips.className = 'category-group-chips';
+        const chipsInner = document.createElement('div');
+        chipsInner.className = 'category-group-chips-inner';
+        chips.appendChild(chipsInner);
+        customGroup.appendChild(chips);
+
         nonExplicitCustoms.forEach(([key, catData]) => {
             const label = key.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
             const btn = document.createElement('button');
@@ -216,7 +224,7 @@ function renderCustomCategoryButtons() {
             btn.textContent = label;
             btn.setAttribute('title', `${label}: Custom category`);
             btn.setAttribute('aria-label', `${label}. Custom category`);
-            customGroup.appendChild(btn);
+            chipsInner.appendChild(btn);
             // Wire up the same event handlers as built-in buttons
             setupCategoryButton(btn);
         });
@@ -228,7 +236,15 @@ function renderCustomCategoryButtons() {
 
     // Add explicit custom categories to the Explicit group
     const explicitGroup = document.getElementById('suggestions-explicit-group');
-    if (explicitGroup && explicitCustoms.length > 0) {
+      if (explicitGroup && explicitCustoms.length > 0) {
+        // Create chips container for explicit custom buttons
+        const chips = document.createElement('div');
+        chips.className = 'category-group-chips';
+        const chipsInner = document.createElement('div');
+        chipsInner.className = 'category-group-chips-inner';
+        chips.appendChild(chipsInner);
+        explicitGroup.appendChild(chips);
+
         explicitCustoms.forEach(([key, catData]) => {
             const label = key.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
             const btn = document.createElement('button');
@@ -238,7 +254,7 @@ function renderCustomCategoryButtons() {
             btn.textContent = label;
             btn.setAttribute('title', `${label}: Custom explicit category`);
             btn.setAttribute('aria-label', `${label}. Custom explicit category`);
-            explicitGroup.appendChild(btn);
+            chipsInner.appendChild(btn);
             // Wire up the same event handlers as built-in buttons
             setupCategoryButton(btn);
         });
