@@ -153,36 +153,171 @@ cargo fmt
 npm run lint
 ```
 
+## Documentation Maintenance
+
+Keeping docs accurate is a first-class concern. Agents MUST update documentation when features change — not as a follow-up, but as part of the same PR.
+
+### When Docs Must Be Updated
+
+Update documentation whenever a change falls into any of these categories:
+
+| Change Type | Required Doc Updates |
+|-------------|---------------------|
+| New user-visible feature | `docs/reference/<area>.md`, README feature list if high-impact |
+| Changed UI label, button name, or element ID | Any doc that references the old name; update capture.mjs selectors |
+| New API endpoint | `docs/reference/api.md` with request/response schema |
+| Changed API field name or type | `docs/reference/api.md` ChatTab/Message object, any affected schemas |
+| New backend struct field | `docs/reference/api.md` if client-visible |
+| Renamed function or exported symbol | Check docs for any prose references |
+| New config file or persistence key | `docs/reference/` area doc + `AGENTS.md` File Persistence table |
+| Removed feature | Remove all doc references; remove screenshots if no longer accurate |
+| New screenshot scenario or capture script change | `tests/ui/README.md`, scenario usage block in `capture.mjs` |
+
+### Which Docs to Update
+
+| Area | Primary File | Notes |
+|------|-------------|-------|
+| Chat features, personas, compaction, guided generation | `docs/reference/chat.md` | Most frequently changed |
+| REST API endpoints and data shapes | `docs/reference/api.md` | Keep ChatTab/ChatMessage objects in sync with Rust structs |
+| Dashboard, monitoring, hardware | `docs/reference/dashboard.md` | |
+| Remote agent and SSH | `docs/reference/remote-agent.md` | |
+| CLI flags | `docs/reference/cli-flags.md` | |
+| High-impact features visible in the README | `README.md` | See README guidelines below |
+
+### README.md Guidelines
+
+The README is a product overview — not a feature changelog. Apply a high bar for what appears there.
+
+**Include in the README:**
+- Features that are visually striking or immediately useful to a first-time visitor
+- Features that differentiate llama-monitor from a plain llama.cpp dashboard
+- Screenshots that show off the app in an impressive or useful state
+
+**Do not include in the README:**
+- Debugging-only features (internal logs, raw metrics dumps)
+- Minor UX improvements (default value changes, layout tweaks)
+- Features that are only relevant after deep use (export formats, fine-grained settings)
+- More than 7–8 feature screenshots total — prefer fewer, higher-quality shots
+
+**Feature section structure:**
+
+```markdown
+### Feature Name
+
+One or two sentences explaining what the feature does and why it's useful. Write for
+a developer who has never seen the app — lead with the value, not the mechanism.
+
+![Alt text](docs/screenshots/filename.png)
+```
+
+Keep descriptions under 3 sentences. If a feature needs more explanation, it belongs in `docs/reference/`, not the README. Link to the reference doc at the bottom of the section if relevant.
+
+**Updating the README:**
+- Prefer updating existing sections to replacing them
+- When a feature is substantially reworked, update both the prose and the screenshot
+- When removing a feature, remove its README section and the screenshot file if it is no longer accurate
+
+### docs/reference/ Guidelines
+
+Reference docs are comprehensive. Include:
+- All parameters with their defaults and valid ranges
+- All API fields (type, default, nullability)
+- All UI controls and what they do
+- Screenshots for any non-trivial modal, panel, or workflow
+- Cross-references to related sections with relative links
+
+Avoid:
+- Repeating prose from the README verbatim
+- Writing from the perspective of a commit ("we added X") — write as if it always existed
+- Leaving stale information — if a field is renamed, update the doc in the same PR
+
+---
+
 ## Screenshot Harness
 
-All repo-managed screenshots and animated UI captures should use the single harness:
+All repo-managed screenshots and animated UI captures use the single harness:
 
 ```bash
 node tests/ui/capture.mjs --scenario <name>
 ```
 
-Current built-in scenarios:
-- `artifacts` — core setup/chat/logs stills
-- `new-features` — guided generation and chat-input feature stills
-- `docs` — settings/modal/docs stills
-- `sparkline` — sparkline validation stills
-- `gifs` — inference and GPU/system animated GIFs
+The harness spawns a fresh `target/release/llama-monitor` binary on a temporary port with a clean config dir, then attaches to `REMOTE_SERVER` (default `http://192.168.2.16:8001`). The remote llama.cpp server must be reachable for any scenario that sends chat messages.
 
-Rules for agents:
-1. **Do not create new one-off screenshot scripts** unless explicitly requested. Extend `tests/ui/capture.mjs` instead.
-2. **Rebuild release before trusting visual results** when UI code changed. The harness runs `target/release/llama-monitor`.
-3. **Preserve remote-agent connectivity**. The harness seeds a temp config from the user profile so captures do not dirty local state while still retaining needed settings/tokens.
-4. **Use scenario-specific logs for debugging**. If a popup, hovercard, or panel is invisible, log geometry/state in the scenario rather than guessing.
-5. **Clean up temporary chat tabs through the shared helpers** in the harness rather than ad hoc tab mutation.
-6. **Document new scenarios** in both `tests/ui/capture.mjs` usage text and `tests/ui/README.md`.
+### Environment Variables
 
-Common examples:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SCREENSHOT_PORT` | `8892` | Base port for the spawned monitor instance |
+| `REMOTE_SERVER` | `http://192.168.2.16:8001` | llama.cpp server to attach to |
+
+### Scenarios
+
+| Scenario | What It Captures | Saves To |
+|----------|-----------------|----------|
+| `artifacts` | Welcome screen, chat with response, telemetry, logs | `docs/screenshots/` |
+| `new-features` | Context notes, suggestions, tag cloud, quick guide, director mode, explicit mode, manage categories | `docs/screenshots/` |
+| `docs` | Chat panels (behavior, response settings, style), debug modal, settings, preferences, persona modal, models, keyboard shortcuts, GPU section | `docs/screenshots/artifacts/` |
+| `sparkline` | Throughput sparkline validation stills | `docs/screenshots/artifacts/` |
+| `gifs` | Inference and GPU/system animated GIFs | `docs/screenshots/` |
+
+**Output directory convention:**
+- `docs/screenshots/` — hero shots used directly in `README.md` and reference docs
+- `docs/screenshots/artifacts/` — supplemental stills for reference docs and debugging; not linked from README
+
+### Running Captures
 
 ```bash
+# Rebuild release binary first if UI code changed
+cargo build --release
+
+# Core hero shots
 SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario artifacts
+
+# Guided generation and chat-input features
 SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario new-features
+
+# Settings, panels, modals, debug surfaces
+SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario docs
+
+# Animated GIFs
 SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
+SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --inference-only
 ```
+
+### When to Regenerate Screenshots
+
+| Situation | Action |
+|-----------|--------|
+| New UI surface added (modal, panel, section) | Extend the appropriate scenario; run it; commit new screenshots |
+| Existing UI surface visually changed | Re-run the scenario that covers it; commit updated screenshots |
+| Element ID or selector changed | Update the selector in `capture.mjs` first, then re-run |
+| Screenshot referenced in docs but no longer accurate | Regenerate or remove; never leave stale screenshots in docs |
+| README hero shot is outdated | Re-run `artifacts` or `new-features` and update the file in-place |
+
+### Rules for Agents
+
+1. **Always rebuild release before running captures** when any `static/` file has changed. The harness runs `target/release/llama-monitor`, not the dev build.
+2. **Do not create new one-off screenshot scripts.** Add scenarios to `tests/ui/capture.mjs` instead.
+3. **Fix broken selectors in the same PR as the rename.** When an element ID changes (e.g., `#btn-system-prompt` → `#btn-behavior`), update `capture.mjs` at the same time to keep the harness green.
+4. **Promote screenshots from `artifacts/` to `docs/screenshots/` explicitly** when linking them in the README. Copy the file; do not change the artifacts path in the scenario.
+5. **Prefer updating existing scenario functions** over adding new ones for incremental changes to an existing feature area.
+6. **Log geometry/state for invisible surfaces.** If a popup, hovercard, or panel isn't appearing, add a `console.log` with element geometry before calling `captureShot`. Do not skip the capture silently.
+7. **Document new scenarios** in both the `printUsage()` block and `tests/ui/README.md`.
+8. **Use `--no-attach` only for the welcome-screen shot.** All chat and feature screenshots require an attached server.
+
+### Naming Convention
+
+Screenshots use a numeric prefix for rough ordering and a descriptive slug:
+
+```
+NN-description.png         # hero shots in docs/screenshots/
+NNb-description.png        # variant or sub-shot of the same numbered slot
+```
+
+When adding a new screenshot:
+- Pick the next available number in the relevant range
+- Use a slug that describes the UI surface, not the commit or feature branch
+- Never reuse a number that already refers to a different surface (readers bookmark images by URL)
 
 ## Static Asset Registration (AUTO-GENERATED)
 
