@@ -17,32 +17,59 @@ GPU metrics (temperature, load, VRAM, power, clocks) for AMD ROCm, NVIDIA, Apple
 
 ![Inference Metrics](docs/screenshots/02-inference-metrics.gif)
 
-### Chat
+### Multi-Tab Chat
 
-Multi-tab streaming conversations with system prompts, per-tab model parameters, reasoning blocks, and context compaction.
+Independent conversations with their own system prompts, model parameters, and message histories. Reasoning blocks, Markdown rendering with syntax highlighting, and real-time telemetry.
 
 ![Chat Interface](docs/screenshots/03-chat.png)
 
+### Personas & Template Manager
+
+A full persona library with Active/Custom/Built-in sections. Each persona carries its own explicit content policy at Levels 1 and 2. Switch personas per tab, reset built-in personas to default, and edit custom role boundaries with `{{char}}`, `{{user}}`, and `{{gender}}` token substitution.
+
+![Persona Manager](docs/screenshots/10b-persona-modal.png)
+
+### Context Notes
+
+A resizable sidebar for per-tab world-building notes (character, setting, plot, tone). Notes are injected into every prompt so the model always has your creative context — without you repeating it. AI-powered analysis compares the current conversation against your notes and flags anything stale.
+
+![Context Notes](docs/screenshots/08-context-notes-expanded.png)
+
 ### AI-Generated Suggestions
 
-Real, creative suggestions from the model — not canned templates. The AI reads your context and generates story ideas, plot twists, and scene directions.
+Real, creative suggestions from the model — not canned templates. The AI reads your context and generates story ideas, plot twists, scene directions, and more. Browse by tag cloud, search by keyword, or auto-generate focus keywords.
 
 ![Suggestions Results](docs/screenshots/09b-suggestions-results.png)
 
-### Director Mode
+### Director Mode & Quick Guide
 
-AI-directed multi-step generation. The model plans a scene, then executes it with dramatic reversals and cinematic pacing.
+Shape the next response with a one-line instruction, a detailed scene direction, or a timed story beat that fires after a set number of replies. The AI plans and executes your direction.
 
 ![Director Mode Results](docs/screenshots/10d-guide-ai-director-results.png)
 
-### Surprise Mode
+### Explicit Mode
 
-Arm the AI to deliver an unexpected reveal after a set number of replies. Perfect for interactive fiction and roleplay.
+Three-level content policy (Off / Unlocked / Unrestricted) that adapts per persona. Each persona stores its own Level 1 and Level 2 policy text, editable in the template manager.
 
-![Surprise Mode](docs/screenshots/10e-guide-ai-surprise.png)
+![Explicit Unlocked](docs/screenshots/12a-explicit-unlocked.png)
 
-**Guided Generation** — AI-powered story beats, scene direction, and timed surprises — [details](docs/reference/chat.md)
-**Explicit Mode** — Three-level content policy (Off/Unlocked/Unrestricted) with persona-aware guardrails — [details](docs/reference/chat.md)
+### Prompt Debug Inspector
+
+See exactly what the model receives — system prompt slice-by-slice with token estimates, full message history with per-message token counts, and generation timing. Essential for tuning context pressure and diagnosing unexpected responses.
+
+![Prompt Debug Inspector](docs/screenshots/08b-prompt-debug.png)
+
+### Manage Categories
+
+Customize the built-in suggestion prompts and add your own categories. Toggle individual prompts on or off, edit the prompt text, and organize your own creative workflows.
+
+![Manage Categories](docs/screenshots/14-manage-categories.png)
+
+---
+
+**Guided Generation** — context notes, AI suggestions, director/surprise modes — [details](docs/reference/chat.md)  
+**Explicit Mode** — per-persona three-level content policy — [details](docs/reference/chat.md)  
+**Prompt Debug Inspector** — outbound request analysis with token breakdown — [details](docs/reference/chat.md)
 
 ## Supported Hardware
 
@@ -66,7 +93,7 @@ cargo build --release
 
 - [Dashboard Capabilities](docs/reference/dashboard.md) — Metrics, monitoring, hardware support
 - [Remote Agent](docs/reference/remote-agent.md) — Headless deployment, SSH management, auto-update
-- [Chat](docs/reference/chat.md) — Multi-tab chat, guided generation, explicit mode, context compaction
+- [Chat](docs/reference/chat.md) — Multi-tab chat, personas, guided generation, explicit mode, context compaction, debug inspector
 - [Real-Time Communication](docs/reference/realtime-communication.md) — WebSocket schema, polling, network detection
 - [API Reference](docs/reference/api.md) — REST endpoints
 - [CLI Reference](docs/reference/cli-flags.md) — All flags and options

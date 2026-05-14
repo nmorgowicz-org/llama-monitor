@@ -808,7 +808,7 @@ async function scenarioDocs(ctx) {
         await sleep(300);
     }
 
-    const behaviorBtn = await page.$('#btn-system-prompt');
+    const behaviorBtn = await page.$('#btn-behavior');
     if (behaviorBtn) {
         await behaviorBtn.click();
         await sleep(500);

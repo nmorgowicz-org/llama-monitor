@@ -377,18 +377,17 @@ Generate suggestions for a given category. Uses the current chat context to prod
 **Response:**
 ```json
 {
-  "suggestions": [
-    "What's the weather like today?",
-    "Can you explain quantum computing?",
-    "Write a short poem about coding"
-  ],
+  "suggestions": ["...", "...", "..."],
+  "cards": [],
   "category": "general",
   "count": 3
 }
 ```
 
+`cards` is populated for the `director` category — each card includes `type`, `title`, `effect`, and `detail` fields for richer UI display.
+
 ### `POST /api/chat/suggestions/rewrite`
-Rewrite a suggestion using the current chat context. Useful for refining or rephrasing a suggestion.
+Rewrite a suggestion using the current chat context.
 
 **Request:**
 ```json
@@ -404,6 +403,70 @@ Rewrite a suggestion using the current chat context. Useful for refining or reph
   "content": "Can you explain the basics of quantum computing in simple terms?"
 }
 ```
+
+### `POST /api/keywords/generate`
+Generate focus keywords for the suggestion system. Calls the model with thinking disabled for a fast response.
+
+**Request:**
+```json
+{
+  "messages": [
+    { "role": "user", "content": "..." },
+    { "role": "assistant", "content": "..." }
+  ],
+  "system_prompt": "You are ...",
+  "count": 5
+}
+```
+
+**Response:**
+```json
+{
+  "keywords": ["noir", "tension", "diner", "confrontation", "rain"]
+}
+```
+
+### `POST /api/context-notes/analyze`
+Analyze the current conversation against existing context notes. Returns per-section suggestions with staleness detection.
+
+**Request:**
+```json
+{
+  "messages": [
+    { "role": "user", "content": "..." },
+    { "role": "assistant", "content": "..." }
+  ],
+  "system_prompt": "...",
+  "existing_notes": [
+    { "section": "character", "content": "Kira, 28, cynical detective." }
+  ],
+  "sections": ["character", "setting", "plot", "tone"]
+}
+```
+
+**Response:**
+```json
+{
+  "sections": [
+    {
+      "section": "character",
+      "suggested": "Kira is now acting as an informant, contradicting her earlier stance.",
+      "status": "stale",
+      "reason": "Recent messages show her cooperating with the suspect."
+    },
+    {
+      "section": "setting",
+      "suggested": "Neo-Tokyo diner, late night, rain. Three unknown figures just entered.",
+      "status": "current"
+    }
+  ]
+}
+```
+
+**Status values:**
+- `new` — no existing note; a first suggestion is provided
+- `current` — existing note still accurately reflects the conversation
+- `stale` — existing note is outdated; `reason` explains what changed
 
 ### `GET /api/chat/tabs`
 Load all persisted chat tabs from disk.
@@ -422,7 +485,10 @@ Save all chat tabs to disk. Body is an array of `ChatTab` objects.
   "system_prompt": "You are helpful.",
   "ai_name": null,
   "user_name": null,
+  "ai_gender": null,
   "explicit_level": null,
+  "active_template_id": null,
+  "role_boundary_custom": null,
   "messages": [
     {
       "role": "user",
@@ -432,32 +498,62 @@ Save all chat tabs to disk. Body is an array of `ChatTab` objects.
       "output_tokens": null,
       "cumulative_input_tokens": null,
       "cumulative_output_tokens": null,
-      "compaction_marker": null
+      "compaction_marker": null,
+      "thinking_content": null
     }
   ],
-  "totalInputTokens": 0,
-  "totalOutputTokens": 0,
+  "total_input_tokens": 0,
+  "total_output_tokens": 0,
   "model_params": {
     "temperature": 0.7,
     "top_p": 0.9,
     "top_k": 40,
     "min_p": 0.01,
     "repeat_penalty": 1.0,
-    "max_tokens": null
+    "max_tokens": 4096
   },
   "created_at": 1746000000000,
   "updated_at": 1746001000000,
   "auto_compact": null,
   "compact_threshold": null,
-  "lastCtxPct": null,
-  "activeTemplateId": null
+  "auto_compact_summarize": true,
+  "compact_mode": null,
+  "last_ctx_pct": null,
+  "context_notes": [],
+  "context_custom_sections": [],
+  "sidebar_width": 280,
+  "quick_guide_draft": "",
+  "armed_story_beats": []
 }
 ```
 
-**Notes:**
-- `totalInputTokens` / `totalOutputTokens` use camelCase in both GET and PUT bodies.
-- `lastCtxPct` is the last known context window pressure (0–100), persisted by the client so the context card can show a value before the server responds.
-- `activeTemplateId` links the tab to a template/persona by ID.
+**Tab fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ai_gender` | `string \| null` | Gender for `{{gender}}` token: `"male"`, `"female"`, or `"neutral"` |
+| `active_template_id` | `string \| null` | Links the tab to a persona template by ID |
+| `role_boundary_custom` | `string \| null` | Custom role boundary instruction; overrides the auto-generated default when set |
+| `total_input_tokens` | `number` | Running total of input tokens across all messages |
+| `total_output_tokens` | `number` | Running total of output tokens across all messages |
+| `auto_compact_summarize` | `boolean` | When true, dropped messages are summarized by the LLM (default: `true`) |
+| `compact_mode` | `string \| null` | `"percent"` or `"optimized"` |
+| `last_ctx_pct` | `number \| null` | Last known context window pressure (0–100) |
+| `context_notes` | `array` | Per-tab context notes for the guided generation sidebar |
+| `context_custom_sections` | `array` | User-defined custom section names for context notes |
+| `sidebar_width` | `number` | Width of the context notes sidebar in pixels |
+| `armed_story_beats` | `array` | Pending timed story beat injections (Surprise mode) |
+
+**Message fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `thinking_content` | `string \| null` | Raw reasoning/thinking content from the model (if any) |
+| `compaction_marker` | `boolean \| null` | True for tombstone messages created by compaction |
+| `summarized` | `boolean \| null` | True if this tombstone was generated by LLM summarization |
+| `dropped_count` | `number \| null` | How many messages were dropped to create this tombstone |
+| `tokens_freed_estimate` | `number \| null` | Estimated tokens freed by this compaction |
+| `memory_domain` | `string \| null` | Domain used for compaction context (e.g. `"creative"`, `"coding"`) |
 
 ---
 
@@ -574,4 +670,4 @@ ws://localhost:7778/ws
 
 ---
 
-**Last updated:** 2026-05-03
+**Last updated:** 2026-05-14
