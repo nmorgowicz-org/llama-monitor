@@ -1622,6 +1622,8 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(154px, 1fr));
   gap: 10px;
+  max-height: 240px;
+  overflow-y: auto;
 }
 
 .slot-tile {

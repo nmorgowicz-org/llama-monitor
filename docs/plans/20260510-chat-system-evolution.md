@@ -1,45 +1,116 @@
 # Chat System Evolution
 **Date:** 2026-05-10
 **Supersedes:** `docs/plans/20260503-chat_storage_rework.md` (deleted)
-**Status:** Planned
-**Branch target:** `feature/chat-guided-generations` → `main`
+**Status:** Partially implemented elsewhere; session sidebar, SQLite migration, and cross-session search remain pending on this branch
+**Branch context:** `feature/persona-reset-and-explicit-policies` → `main`
 
 ---
 
 ## Executive Summary
 
-Three connected work streams that together replace the overflowing horizontal tab bar with a
-Discord-style session sidebar, reduce storage write amplification, and add full-text search across
-conversations.
+This document originally described a near-term branch that would replace the overflowing horizontal
+chat tab bar with a Discord-style conversation sidebar, move chat persistence from `chat-tabs.json`
+to SQLite, and add cross-session search.
 
-1. **Phase 0 — Navigation cleanup** (~1 hr): Remove `Sessions` and `Models` from the left icon
-   rail. Both open modals that are already reachable from the Server tab top bar.
-2. **Phase 1 — Chat session sidebar** (2–3 days): Replace `#chat-tab-bar` (horizontal, overflows
-   silently) with a 240 px panel inside the Chat view. Discord-style list, pinned section, recency
-   groups, context-pressure bars, rename/pin/delete/export context menu.
-3. **Phase 2 — SQLite storage** (2–3 days): Replace the single `chat-tabs.json` full-overwrite
-   approach with `rusqlite` (bundled). FTS5 full-text search, row-level writes, atomic transactions,
-   zero system dependencies. The session sidebar needs cross-session search; the Rust rewrite is
-   happening anyway.
-4. **Phase 3 — Frontend API adapters** (1–2 days): Lazy-load messages (only active session),
-   per-tab debounced persistence, `chat-search.js`.
+That full evolution has not landed on the current branch. If the branch in its present state
+merges to `main`, the app will still ship the horizontal `#chat-tab-bar`, the `Sessions` and
+`Models` left-rail buttons, flat-file `chat-tabs.json` persistence, and bulk `GET`/`PUT
+/api/chat/tabs` saves.
+
+What *has* landed since the earlier storage-rework plan is substantial chat model growth around
+guided generation, explicit-policy handling, pinning, and compaction metadata. This document now
+serves two purposes:
+
+1. Record the current branch reality so downstream work does not assume the sidebar/storage rewrite
+   is already present.
+2. Preserve the intended target design for the remaining navigation, storage, and search work.
+
+Remaining work:
+
+1. **Phase 0 — Navigation cleanup**: Remove `Sessions` and `Models` from the left icon rail once
+   their remaining modal entry points are no longer needed there.
+2. **Phase 1 — Chat session sidebar**: Replace `#chat-tab-bar` with a left conversation panel and
+   update screenshot/tests automation that currently targets the tab-bar DOM.
+3. **Phase 2 — SQLite storage**: Replace the flat-file full-overwrite model with row-level storage
+   and optional FTS-backed search.
+4. **Phase 3 — Frontend API adapters**: Move from full-array tab fetch/save to storage-aware chat
+   APIs. Basic debounced persistence already exists; the missing work is per-tab CRUD, lazy loading,
+   and search UI.
 
 ---
 
 ## What Changed Since May 3
 
-| Change | Impact |
+Already landed in the current chat model and UI:
+
+| Change | Current impact |
 |---|---|
-| `explicit_level: u8` (3-state) replaces `explicit_mode: bool` | SQLite schema uses `INTEGER 0/1/2` |
-| `context_notes: Vec<ContextNote>` on ChatTab | `context_notes TEXT JSON` column in `tabs` |
-| `sidebar_width: u32` | `sidebar_width INTEGER` column in `tabs` |
-| `auto_compact_summarize`, `compact_mode` | Two new columns in `tabs` |
-| Message `_variants` / `_variantIndex` | `variants TEXT` + `variant_index INTEGER` in `messages` |
-| Tab overflow is an active UX pain point | Drives session sidebar priority |
+| `explicit_level: u8` replaces `explicit_mode: bool` | Three-state explicit policy handling is live and must survive any storage migration |
+| `context_notes`, `context_custom_sections`, `sidebar_width` | Guided-generation context notes are already persisted and rendered in the existing right-side notes rail |
+| `role_boundary_custom`, `ai_gender`, `active_template_id` | Behavior/persona controls are already part of the per-tab contract |
+| `auto_compact_summarize`, `compact_mode`, extended compaction metadata | Flat-file persistence already stores richer compaction state than the earlier plan assumed |
+| Message `_variants` / `_variantIndex` | Variant cycling/regeneration is live in the current message renderer |
+| `quick_guide_active`, `armed_story_beats` | Guided-generation state now participates in prompt construction and persistence expectations |
+| `pinned` tabs and deleted-tab recovery | Session-management behavior has evolved within the horizontal tab bar, not via a new sidebar |
+
+Still pending from this evolution plan:
+
+| Planned item | Current status |
+|---|---|
+| Remove `Sessions` / `Models` rail buttons | Not started on this branch |
+| Replace `#chat-tab-bar` with `.chat-sessions-panel` | Not started on this branch |
+| Move to SQLite / `rusqlite` | Not started on this branch |
+| Add cross-session search / `chat-search.js` | Not started on this branch |
+| Replace bulk `GET`/`PUT /api/chat/tabs` with granular chat APIs | Not started on this branch |
+
+---
+
+## Current Branch Reality
+
+The current branch still matches the pre-evolution DOM and storage model:
+
+- `static/index.html` still contains `#sidebar-btn-sessions`, `#sidebar-btn-models`,
+  `#chat-tab-bar`, and `#chat-tab-trash-dropdown`.
+- `static/js/features/nav.js` still special-cases `sessions` and `models` in `switchTab()`.
+- `static/js/features/chat-render.js` still renders horizontal tabs, pin state, drag reordering,
+  and the deleted-tab dropdown.
+- `static/js/features/chat-state.js` still loads all tabs at once and persists the full tab array
+  with a debounce plus 30-second safety saves.
+- `src/web/api.rs` still persists chat state to `chat-tabs.json`; there is no `rusqlite`
+  dependency, no `src/chat_storage.rs`, and no search endpoint.
+
+Related shipped work that this plan did not originally account for:
+
+- The right-side guided-generation context-notes rail is already live.
+- The primary system-prompt surface is now named `Behavior`, not `System Prompt`.
+- Screenshot automation and UI tests still target the pre-evolution tab-bar structure.
+- `docs/plans/20260510-adaptive-layout-enhancements.md` already references the future
+  `.chat-sessions-panel` DOM, so that downstream plan should continue to be treated as dependent on
+  this work remaining unfinished.
+
+## Migration Invariants
+
+Any future implementation of the sidebar/storage rewrite must preserve:
+
+- pinned tabs and pin ordering
+- deleted-tab recovery / trash behavior
+- visible-message pagination and load-more behavior
+- persona reset and explicit-policy handling
+- role-boundary overrides and `ai_gender` token substitution
+- context-note persistence, analysis, and guided-generation flows
+- quick-guide state and armed story beats
+- message variants / variant navigation
+
+Clarification: existing `sidebar_width` already refers to the guided-generation context-notes
+sidebar. If a future conversation panel needs persisted width, it should use a distinct field name
+such as `sessions_panel_width`.
 
 ---
 
 ## ASCII Wireframes
+
+These wireframes describe the intended target state for the remaining evolution work. They do not
+match the current branch DOM.
 
 ### Full layout — chat view active, panel expanded
 
@@ -2215,80 +2286,86 @@ time, never at storage time).
 
 ## Migration Safety
 
-- `chat-tabs.json` is renamed to `chat-tabs.json.bak` after successful import — user can manually
-  restore by renaming back.
-- If `chat.db` already exists AND `.json` is absent (re-run after crash), `migrate_from_legacy` is
-  a no-op.
-- WAL mode: concurrent reads never block during a write (important: the Rust server may receive tab
-  API calls while a background poll task reads from SQLite).
-- The `REFERENCES tabs(id) ON DELETE CASCADE` constraint means deleting a tab also deletes all its
-  messages in one statement — no orphan cleanup needed.
+Current branch note: none of the SQLite migration behavior below is live yet. Chat persistence still
+uses `chat-tabs.json` with debounced save-on-change and a 30-second safety save.
+
+When SQLite migration work actually begins, preserve these safeguards:
+
+- `chat-tabs.json` should be copied or renamed to `chat-tabs.json.bak` after successful import so
+  users can manually restore it if needed.
+- If `chat.db` already exists and `.json` is absent, legacy import should be a no-op.
+- WAL mode should be used so read paths do not block during writes.
+- Deleting a tab should continue to clean up associated messages atomically.
 
 ---
 
-## Implementation Order
+## Remaining Implementation Order
 
-### Week 1 — UX first
+This is the remaining work order, not a description of what the current branch already contains.
 
-| Day | Work | Files |
-|-----|------|-------|
-| 1 | Phase 0: remove Sessions+Models nav buttons; clean `switchTab` | `index.html`, `nav.js` |
-| 1 | Phase 1a: HTML — add `#chat-sessions-panel`, wrap chat content in `.chat-main-area`, remove `#chat-tab-bar` | `index.html` |
-| 2 | Phase 1b: CSS — `#page-chat` flex-row, session panel width animation, `.csp-*` styles | `layout.css`, `chat.css` |
-| 3 | Phase 1c: `chat-sessions-sidebar.js` — full implementation | new file |
-| 3 | Phase 1d: Wire sidebar into `nav.js`, `bootstrap.js`, `chat-state.js`, `chat-render.js` | 4 files |
+### Step 1 — Align the UI shell
 
-End of Week 1: sidebar renders from existing `chat.tabs` data (still backed by old `chat-tabs.json`
-API). All session management works in new sidebar. Horizontal tab bar is gone.
+- remove `Sessions` / `Models` rail buttons and the related dead modal-branch handling in
+  `switchTab()`
+- replace `#chat-tab-bar` with a left conversation panel
+- update screenshot harness selectors and UI tests that currently assume the tab bar and trash
+  dropdown
 
-### Week 2 — Storage
+### Step 2 — Preserve current chat behavior inside the new shell
 
-| Day | Work | Files |
-|-----|------|-------|
-| 4 | Phase 2a: `src/chat_storage.rs` — schema, open, migrate, CRUD | new file |
-| 4 | Phase 2b: `Cargo.toml` + integrate `ChatStorage` into `AppState`, run migration | `Cargo.toml`, `state.rs`, `main.rs` |
-| 5 | Phase 2c: All 9 new API endpoints | `api.rs` |
-| 6 | Phase 3a: `chat-state.js` lazy load, per-tab persist, new API calls | `chat-state.js` |
-| 7 | Phase 3b: `chat-search.js` FTS5 search UI | new file |
+- carry forward pinning, drag reorder, delete/restore, explicit badges, and current tab metadata
+- avoid overloading `sidebar_width`, which already belongs to the context-notes rail
+- keep the current `Behavior`/persona/guided-generation flows intact
+
+### Step 3 — Replace flat-file storage
+
+- introduce `rusqlite` plus a dedicated storage layer
+- migrate legacy `chat-tabs.json`
+- preserve all currently shipped tab/message fields, including guided-generation and compaction
+  metadata
+
+### Step 4 — Move the frontend to granular chat APIs
+
+- keep debounced saves, but stop rewriting the entire tab array for every change
+- add per-tab CRUD and lazy message loading
+- add cross-session search only after the storage layer exists
 
 ---
 
 ## File Impact Summary
 
-### New files
+Current branch files that still define the pre-evolution behavior:
 
 | File | Purpose |
 |------|---------|
-| `src/chat_storage.rs` | SQLite storage layer |
-| `static/js/features/chat-sessions-sidebar.js` | Session panel module |
-| `static/js/features/chat-search.js` | FTS5 cross-session search |
+| `static/index.html` | Still renders `Sessions` / `Models` nav buttons and the horizontal `#chat-tab-bar` |
+| `static/js/features/nav.js` | Still special-cases modal-only `sessions` / `models` navigation |
+| `static/js/features/chat-render.js` | Still owns horizontal tab rendering, pinning, drag reorder, and trash UI |
+| `static/js/features/chat-state.js` | Still loads/saves the entire chat-tab collection |
+| `static/js/features/chat-notes.js` | Already owns the guided-generation sidebar that uses `sidebar_width` |
+| `src/web/api.rs` | Still exposes flat-file-backed `GET` / `PUT /api/chat/tabs` |
 
-### Modified files
+Expected new files when the remaining plan lands:
 
 | File | Change |
 |------|--------|
-| `static/index.html` | Remove Sessions/Models buttons; remove `#chat-tab-bar`; add `#chat-sessions-panel`; wrap chat content in `.chat-main-area` |
-| `static/css/layout.css` | `#page-chat { flex-direction: row; }` + `.chat-sessions-panel` width-based slide animation + `.chat-main-area` |
-| `static/css/chat.css` | New `.csp-*` rules section (old `.chat-tab-*` rules stay until Phase 3 cleanup) |
-| `static/js/features/nav.js` | `switchTab` — remove dead `models`/`sessions` branches; add `showSessionPanel`/`hideSessionPanel` calls |
-| `static/js/bootstrap.js` | Add `initChatSessionsSidebar()` call; remove trash-btn event bindings |
-| `static/js/features/chat-state.js` | Add `renderChatSessionsSidebar` binding; update `addChatTab`, `closeChatTab`, `switchChatTab`, `scheduleChatPersist`, `initChatTabs` |
-| `static/js/features/chat-render.js` | Guard `renderChatTabs()` + `updateTabBarOverflowMask()`; add `renderChatSessionsSidebar` to bindings; add `data-msg-id` attribute alongside existing `data-msg-idx` (do not remove `data-msg-idx`) |
-| `src/web/api.rs` | Replace 2 flat-file endpoints with 9 SQLite-backed endpoints |
-| `src/state.rs` | Add `chat_storage: Arc<ChatStorage>` to `AppState` |
-| `src/main.rs` | Open `ChatStorage`, run migration, pass to `AppState::new` |
-| `Cargo.toml` | Add `rusqlite = { version = "0.31", features = ["bundled"] }` |
+| `src/chat_storage.rs` | SQLite storage layer |
+| `static/js/features/chat-sessions-sidebar.js` | Session panel module |
+| `static/js/features/chat-search.js` | Cross-session search UI |
 
-### Deleted (Phase 3 cleanup)
+Expected major modified files when the remaining plan lands:
 
-| Symbol | In |
-|--------|----|
-| `renderChatTabs()` | `chat-render.js` — replaced by session sidebar |
-| `updateTabBarOverflowMask()` | `chat-render.js` |
-| All `.chat-tab`, `.chat-tab-bar`, `.chat-tab-*` CSS | `chat.css` |
-| `GET /api/chat/tabs` full-array (old) | `api.rs` |
-| `PUT /api/chat/tabs` full-array (old) | `api.rs` |
-| `chat_tabs_path()` + `CONFIG_DIR` | `api.rs` (if nothing else uses them) |
+| File | Change |
+|------|--------|
+| `static/index.html` | Remove rail buttons and tab bar; add conversation panel structure |
+| `static/css/layout.css` | Convert the chat page layout to support a left session panel |
+| `static/css/chat.css` | Add `.csp-*` styles and eventually retire `.chat-tab-*` rules |
+| `static/js/features/nav.js` | Remove dead `models` / `sessions` branches; coordinate panel visibility |
+| `static/js/bootstrap.js` | Initialize the session sidebar and remove tab-bar-specific wiring |
+| `static/js/features/chat-state.js` | Switch from full-array persistence to granular storage-aware adapters |
+| `static/js/features/chat-render.js` | Either retire or sharply reduce tab-bar rendering responsibilities |
+| `src/web/api.rs` | Replace flat-file endpoints with SQLite-backed chat APIs |
+| `src/state.rs`, `src/main.rs`, `Cargo.toml` | Wire in the new storage layer |
 
 ---
 
@@ -2296,13 +2373,13 @@ API). All session management works in new sidebar. Horizontal tab bar is gone.
 
 | Risk | Likelihood | Mitigation |
 |------|------------|------------|
-| SQLite migration loses tabs | Low | `.json.bak` kept; migration is idempotent |
-| Width-animation not smooth | Very Low | `width: 0 → 240px` + `overflow: hidden` always animates; DO NOT use `display: none → flex` |
-| `switchChatTab` is now async — callers expect sync | Medium | Audit all callers; most fire-and-forget is fine; `chat.busy` guard prevents concurrent calls |
-| Session panel layout breaks on narrow viewports | Medium | Test at 1280px; add `@media (max-width: 1100px) { .chat-sessions-panel.visible { width: 180px; } }` |
-| `bundled` SQLite increases compile time | Low | ~10 s on clean build; CI caches deps |
-| Drag-to-reorder in vertical list | Medium | Same JS drag API as horizontal tab bar, different axis — tested pattern |
-| FTS5 snippet returns `<mark>` tags rendered via `innerHTML` | Accepted | Local-only app; message content is stored raw (escaped at render) |
+| Downstream work assumes `.chat-sessions-panel` already exists | High | Keep this document explicit that the current branch still ships the pre-evolution DOM |
+| Sidebar rollout breaks screenshot/tests automation | High | Update `tests/ui/capture.mjs` and related UI tests in the same change set as the DOM migration |
+| SQLite migration loses tabs or newer guided-generation fields | Medium | Preserve a backup of `chat-tabs.json`; migrate against the current richer tab/message schema |
+| New session-panel width collides with existing `sidebar_width` meaning | Medium | Use a separate persisted field such as `sessions_panel_width` |
+| Granular APIs regress current debounced-save behavior | Medium | Keep save debouncing semantics while changing only the storage/write granularity |
+| Session panel layout breaks on narrow viewports | Medium | Validate at medium desktop widths before treating mobile media queries as sufficient |
+| FTS search lands before storage layer semantics are stable | Medium | Stage search after the schema and per-tab API contract are settled |
 
 ---
 

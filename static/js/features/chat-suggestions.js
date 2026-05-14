@@ -6,6 +6,7 @@ import { chat } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { toggleExplicitMode } from './chat-templates.js';
+import { sendChatWithContent } from './chat-transport.js';
 
 const CATEGORY_META = {
     general: { label: 'General', description: 'Versatile next-step prompts that fit almost any conversation.' },
@@ -76,24 +77,44 @@ export function getSuggestionsState() {
 
 // ── Dropdown UI Updates ──────────────────────────────────────────────────────
 
-function updateDropdownUI() {
-    const dropdown = document.getElementById('suggestions-dropdown');
-    const toggleBtn = document.getElementById('suggestions-toggle');
-    const wrapper = toggleBtn?.closest('.guided-tool');
-    const categoryBtns = document.querySelectorAll('.suggestion-category-btn');
-    const listContainer = document.getElementById('suggestions-list');
-    const explicitGroup = document.getElementById('suggestions-explicit-group');
-    const status = document.getElementById('suggestions-toggle-status');
-    const description = document.getElementById('suggestions-category-description');
-    const preview = document.getElementById('suggestions-category-preview');
-    const setupToggle = document.getElementById('suggestions-view-toggle');
-    const backBtn = document.getElementById('suggestions-editor-back');
-    const recentContainer = document.getElementById('suggestions-recent');
+function updatePreviewText() {
     const meta = CATEGORY_META[suggestionsState.currentCategory] || {
         label: suggestionsState.currentCategory,
         description: 'Generate suggestions for the current conversation.',
     };
     const previewMeta = CATEGORY_META[suggestionsState.previewCategory || suggestionsState.currentCategory] || meta;
+    const preview = document.getElementById('suggestions-category-preview');
+    if (preview) {
+        preview.textContent = `${previewMeta.label}: ${previewMeta.description}`;
+    }
+
+    // Update category button active states and tooltips
+    document.querySelectorAll('.suggestion-category-btn').forEach(btn => {
+        const category = btn.dataset.category;
+        const categoryMeta = CATEGORY_META[category] || {
+            label: btn.textContent.trim(),
+            description: 'Generate suggestions for the current conversation.',
+        };
+        btn.classList.toggle('active', category === suggestionsState.currentCategory);
+        btn.setAttribute('title', `${categoryMeta.label}: ${categoryMeta.description}`);
+        btn.setAttribute('aria-label', `${categoryMeta.label}. ${categoryMeta.description}`);
+    });
+}
+
+function updateDropdownUI() {
+    const dropdown = document.getElementById('suggestions-dropdown');
+    const toggleBtn = document.getElementById('suggestions-toggle');
+    const wrapper = toggleBtn?.closest('.guided-tool');
+    const listContainer = document.getElementById('suggestions-list');
+    const explicitGroup = document.getElementById('suggestions-explicit-group');
+    const status = document.getElementById('suggestions-toggle-status');
+    const description = document.getElementById('suggestions-category-description');
+    const setupToggle = document.getElementById('suggestions-view-toggle');
+    const backBtn = document.getElementById('suggestions-editor-back');
+    const meta = CATEGORY_META[suggestionsState.currentCategory] || {
+        label: suggestionsState.currentCategory,
+        description: 'Generate suggestions for the current conversation.',
+    };
 
     if (!dropdown || !toggleBtn) return;
 
@@ -122,9 +143,6 @@ function updateDropdownUI() {
             ? `Generating ${meta.label.toLowerCase()} ideas from the current conversation…`
             : '';
     }
-    if (preview) {
-        preview.textContent = `${previewMeta.label}: ${previewMeta.description}`;
-    }
     if (setupToggle) {
         setupToggle.textContent = suggestionsState.setupCollapsed ? 'Show Setup' : 'Hide Setup';
         setupToggle.setAttribute('aria-pressed', suggestionsState.setupCollapsed ? 'true' : 'false');
@@ -144,27 +162,134 @@ function updateDropdownUI() {
     // Apply search filter
     applySearchFilter();
 
-    // Update category buttons
-    categoryBtns.forEach(btn => {
-        const category = btn.dataset.category;
-        const categoryMeta = CATEGORY_META[category] || {
-            label: btn.textContent.trim(),
-            description: 'Generate suggestions for the current conversation.',
-        };
-        btn.classList.toggle('active', category === suggestionsState.currentCategory);
-        btn.setAttribute('title', `${categoryMeta.label}: ${categoryMeta.description}`);
-        btn.setAttribute('aria-label', `${categoryMeta.label}. ${categoryMeta.description}`);
-    });
+    // Lightweight preview + button state update (does NOT rebuild custom buttons)
+    updatePreviewText();
 
     if (listContainer) {
         renderSuggestionsList();
     }
 
-    // Always render recent suggestions
-    renderRecentSuggestions();
-    if (recentContainer) {
-        recentContainer.hidden = suggestionsState.mode !== 'browse';
+   // Always render recent suggestions
+    // (removed - no longer needed)
+}
+
+function renderCustomCategoryButtons() {
+    const tagCloud = document.querySelector('.suggestions-tag-cloud');
+    if (!tagCloud) return;
+
+    const customs = Array.from(suggestionsState.customCategories.entries());
+    if (customs.length === 0) return;
+
+    // Separate explicit and non-explicit custom categories
+    const explicitCustoms = customs.filter(([key, catData]) => {
+        const isExplicit = typeof catData === 'string' ? false : (catData.explicit || false);
+        return isExplicit;
+    });
+    const nonExplicitCustoms = customs.filter(([key, catData]) => {
+        const isExplicit = typeof catData === 'string' ? false : (catData.explicit || false);
+        return !isExplicit;
+    });
+
+    // Remove ALL existing custom elements (buttons + chips containers) to avoid accumulation
+    tagCloud.querySelectorAll('.suggestion-category-btn[data-custom]').forEach(btn => btn.remove());
+    tagCloud.querySelectorAll('.category-group-chips[data-custom-chips]').forEach(el => el.remove());
+    // Clear chips containers in custom group (recreated each time)
+    const customGroupEl = document.getElementById('suggestions-custom-group');
+    if (customGroupEl) {
+        customGroupEl.querySelectorAll('.category-group-chips').forEach(el => el.remove());
     }
+
+    // Add non-explicit custom categories to a new "Custom" group (before Explicit group)
+    if (nonExplicitCustoms.length > 0) {
+        const explicitGroup = document.getElementById('suggestions-explicit-group');
+        let customGroup = document.getElementById('suggestions-custom-group');
+        if (!customGroup) {
+            customGroup = document.createElement('div');
+            customGroup.id = 'suggestions-custom-group';
+            customGroup.className = 'category-group';
+            customGroup.innerHTML = '<div class="category-group-title">Custom</div>';
+            // Insert before the explicit group
+            if (explicitGroup) {
+                explicitGroup.parentNode.insertBefore(customGroup, explicitGroup);
+            } else {
+                tagCloud.appendChild(customGroup);
+            }
+        }
+
+        // Create chips container for custom buttons
+        const chips = document.createElement('div');
+        chips.className = 'category-group-chips';
+        const chipsInner = document.createElement('div');
+        chipsInner.className = 'category-group-chips-inner';
+        chips.appendChild(chipsInner);
+        customGroup.appendChild(chips);
+
+        nonExplicitCustoms.forEach(([key, catData]) => {
+            const label = key.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+            const btn = document.createElement('button');
+            btn.className = 'suggestion-category-btn';
+            btn.dataset.category = key;
+            btn.dataset.custom = 'true';
+            btn.textContent = label;
+            btn.setAttribute('title', `${label}: Custom category`);
+            btn.setAttribute('aria-label', `${label}. Custom category`);
+            chipsInner.appendChild(btn);
+            setupCategoryButton(btn);
+        });
+    } else {
+        // Remove the custom group if no non-explicit custom categories
+        const customGroup = document.getElementById('suggestions-custom-group');
+        if (customGroup) customGroup.remove();
+    }
+
+    // Add explicit custom categories to the Explicit group
+    const explicitGroupEl = document.getElementById('suggestions-explicit-group');
+    if (explicitGroupEl && explicitCustoms.length > 0) {
+        // Create chips container for explicit custom buttons
+        const chips = document.createElement('div');
+        chips.className = 'category-group-chips';
+        chips.dataset.customChips = 'true';
+        const chipsInner = document.createElement('div');
+        chipsInner.className = 'category-group-chips-inner';
+        chips.appendChild(chipsInner);
+        explicitGroupEl.appendChild(chips);
+
+        explicitCustoms.forEach(([key, catData]) => {
+            const label = key.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+            const btn = document.createElement('button');
+            btn.className = 'suggestion-category-btn';
+            btn.dataset.category = key;
+            btn.dataset.custom = 'true';
+            btn.textContent = label;
+            btn.setAttribute('title', `${label}: Custom explicit category`);
+            btn.setAttribute('aria-label', `${label}. Custom explicit category`);
+            chipsInner.appendChild(btn);
+            setupCategoryButton(btn);
+        });
+    }
+}
+
+function setupCategoryButton(btn) {
+    btn.addEventListener('mouseenter', () => {
+        suggestionsState.previewCategory = btn.dataset.category;
+        updatePreviewText();
+    });
+    btn.addEventListener('mouseleave', () => {
+        suggestionsState.previewCategory = null;
+        updatePreviewText();
+    });
+    btn.addEventListener('focus', () => {
+        suggestionsState.previewCategory = btn.dataset.category;
+        updatePreviewText();
+    });
+    btn.addEventListener('blur', () => {
+        suggestionsState.previewCategory = null;
+        updatePreviewText();
+    });
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setSuggestionCategory(btn.dataset.category);
+    });
 }
 
 function applySearchFilter() {
@@ -458,6 +583,7 @@ Task: Expand the draft notes into polished prose in ${userName}'s established vo
 
 Rules:
 - Output ONLY ${userName}'s message — no labels, no explanations, no meta-language.
+- Strip any leading label (e.g., "Next story beat:", "Plot twist:") from the suggestion. Write the actual prose only.
 - Do not mention "beat", "draft", "suggestion", "POV", or any planning terms.
 - Do not write as ${charName} or continue the scene from ${charName}'s perspective.
 - Match ${userName}'s voice closely using the samples below.
@@ -570,87 +696,6 @@ async function rewriteSuggestionDraft() {
     }
 }
 
-function renderRecentSuggestions() {
-    const container = document.getElementById('suggestions-recent');
-    const list = document.getElementById('suggestions-recent-list');
-    const tab = activeChatTab();
-
-    if (!container || !list || !tab) return;
-
-    const recent = tab._suggestion_history || [];
-
-    if (!suggestionsState.hasGenerated || recent.length === 0) {
-        container.style.display = 'none';
-        return;
-    }
-
-    container.style.display = 'block';
-    // eslint-disable-next-line no-unsanitized/property -- User content escaped via escapeHtml()
-    list.innerHTML = recent.map((suggestion, index) => `
-        <div class="suggestion-item" data-recent-index="${index}" role="option" aria-selected="false" tabindex="0">
-            <div class="suggestion-content">${escapeHtml(suggestion)}</div>
-            <button class="suggestion-btn suggestion-btn-use" title="Reuse this suggestion" aria-label="Reuse suggestion: ${escapeHtml(suggestion)}">Use</button>
-        </div>
-    `).join('');
-
-    // Attach reuse handlers
-    list.querySelectorAll('.suggestion-btn-use').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const item = e.target.closest('.suggestion-item');
-            const index = parseInt(item.dataset.recentIndex, 10);
-            reuseRecentSuggestion(index);
-        });
-    });
-}
-
-function addRecentSuggestion(suggestion) {
-    const tab = activeChatTab();
-    if (!tab) return;
-
-    tab._suggestion_history = tab._suggestion_history || [];
-
-    // Remove if already exists to avoid duplicates
-    tab._suggestion_history = tab._suggestion_history.filter(s => s !== suggestion);
-
-    // Add to beginning
-    tab._suggestion_history.unshift(suggestion);
-
-    // Limit to 10
-    if (tab._suggestion_history.length > 10) {
-        tab._suggestion_history = tab._suggestion_history.slice(0, 10);
-    }
-
-    // Save
-    persistChatTabs().catch(() => {});
-    renderRecentSuggestions();
-}
-
-function reuseRecentSuggestion(index) {
-    const tab = activeChatTab();
-    if (!tab || !tab._suggestion_history || index < 0 || index >= tab._suggestion_history.length) return;
-
-    const suggestion = tab._suggestion_history[index];
-
-    // Dispatch event for chat-input to handle
-    window.dispatchEvent(new CustomEvent('suggestionSelected', {
-        detail: { text: suggestion, mode: 'send' },
-    }));
-
-    // Close dropdown
-    suggestionsState.expanded = false;
-    updateDropdownUI();
-}
-
-export function clearRecentSuggestions() {
-    const tab = activeChatTab();
-    if (!tab) return;
-
-    tab._suggestion_history = [];
-    persistChatTabs().catch(() => {});
-    renderRecentSuggestions();
-}
-
 // ── Fetch Suggestions from API ───────────────────────────────────────────────
 
 function getSettingsValue() {
@@ -715,7 +760,16 @@ async function fetchSuggestions() {
     const contextDepth = settings.context_depth ?? 10;
     const suggestionCount = settings.suggestion_count ?? 5;
     const prompts = settings.suggestion_prompts ?? {};
-    const promptValue = prompts[suggestionsState.currentCategory];
+    let promptValue = prompts[suggestionsState.currentCategory];
+
+    // Check custom categories if not found in settings prompts
+    if (!promptValue) {
+        const customCat = suggestionsState.customCategories.get(suggestionsState.currentCategory);
+        if (customCat && typeof customCat.prompt === 'string') {
+            promptValue = customCat.prompt;
+        }
+    }
+
     const prompt = typeof promptValue === 'string' && promptValue.trim()
         ? promptValue
         : null;
@@ -806,22 +860,19 @@ async function useSuggestion(index, mode = 'send') {
     const tab = activeChatTab();
     if (!tab) return;
 
-    addRecentSuggestion(suggestion);
     suggestionsState.rewriteLoading = true;
     updateDropdownUI();
 
     try {
-        const prompt = buildSuggestionRewritePrompt(tab, suggestion, suggestion);
+        // Parse the suggestion to extract just the content, stripping any leading label like "Next story beat:" or "Plot twist:"
+        const { title, description } = parseSuggestionText(suggestion);
+        const beat = [title, description].filter(Boolean).join('. ');
+        const prompt = buildSuggestionRewritePrompt(tab, beat, beat);
         const rewritten = await fetchSuggestionRewrite(prompt);
         if (!rewritten) throw new Error('rewrite returned empty content');
 
-        const input = document.getElementById('chat-input');
-        if (input) {
-            input.value = rewritten;
-            input.focus();
-            input.setSelectionRange(input.value.length, input.value.length);
-            autoResizeChatInput();
-        }
+        // Send the rewritten suggestion directly as a user message
+        sendChatWithContent(rewritten);
         suggestionsState.expanded = false;
         suggestionsState.rewriteLoading = false;
         updateDropdownUI();
@@ -980,7 +1031,9 @@ function renderCustomCategories() {
     }
 
     // eslint-disable-next-line no-unsanitized/property -- User content escaped via escapeHtml()
-    list.innerHTML = customs.map(([key, catPrompt]) => {
+    list.innerHTML = customs.map(([key, catData]) => {
+        const catPrompt = typeof catData === 'string' ? catData : (catData.prompt || '');
+        const isExplicit = typeof catData === 'string' ? false : (catData.explicit || false);
         const label = key.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
         const preview = catPrompt.length > 90 ? catPrompt.slice(0, 90) + '...' : catPrompt;
         return `
@@ -997,6 +1050,14 @@ function renderCustomCategories() {
             </div>
             <div class="cat-card-editor" hidden>
                 <textarea class="cat-mgr-field cat-card-textarea" data-key="${escapeHtml(key)}">${escapeHtml(catPrompt)}</textarea>
+                <div class="cat-card-editor-explicit">
+                    <button type="button" class="cat-mgr-explicit-btn ${isExplicit ? 'active' : ''}" data-key="${escapeHtml(key)}" title="Toggle explicit mode for this category">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="cat-mgr-explicit-icon">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
+                        </svg>
+                        <span class="cat-mgr-explicit-text">Explicit</span>
+                    </button>
+                </div>
                 <div class="cat-card-editor-actions">
                     <button class="cat-card-save-custom" data-key="${escapeHtml(key)}">Save</button>
                 </div>
@@ -1021,10 +1082,12 @@ function renderCustomCategories() {
             const key = btn.dataset.key;
             const card = btn.closest('.cat-card');
             const val = card.querySelector('.cat-card-textarea')?.value || '';
+            const isExplicit = card.querySelector('.cat-mgr-explicit-check')?.checked || false;
             if (!val.trim()) { showToast('Prompt cannot be empty', 'error'); return; }
-            suggestionsState.customCategories.set(key, val.trim());
+            suggestionsState.customCategories.set(key, { prompt: val.trim(), explicit: isExplicit });
             saveCustomCategories();
             renderCustomCategories();
+            renderCustomCategoryButtons();
             showToast('Category updated', 'success');
         });
     });
@@ -1043,16 +1106,20 @@ function renderCategoriesList() {
     renderCustomCategories();
 }
 
-function addCategory(name, catPrompt) {
-    if (!name || !catPrompt) {
-        showToast('Please provide both a name and prompt', 'error');
+function addCategory(name, focusKeywords, isExplicit = false) {
+    if (!name || !focusKeywords) {
+        showToast('Please provide both a name and focus keywords', 'error');
         return;
     }
 
+    // Generate the template from the focus keywords
+    const catPrompt = `Generate {count} ${name.toLowerCase()} story beats. Focus on ${focusKeywords}. Build naturally from the current conversation.`;
+
     const key = name.toLowerCase().replace(/\s+/g, '-');
-    suggestionsState.customCategories.set(key, catPrompt);
+    suggestionsState.customCategories.set(key, { prompt: catPrompt, explicit: isExplicit });
     saveCustomCategories();
     renderCustomCategories();
+    renderCustomCategoryButtons();
     showToast(`Category "${name}" added`, 'success');
 }
 
@@ -1060,7 +1127,20 @@ function removeCategory(key) {
     if (suggestionsState.customCategories.delete(key)) {
         saveCustomCategories();
         renderCustomCategories();
+        renderCustomCategoryButtons();
         showToast('Category removed', 'success');
+    }
+}
+
+function toggleCategoryExplicit(key) {
+    const cat = suggestionsState.customCategories.get(key);
+    if (cat) {
+        cat.explicit = !cat.explicit;
+        suggestionsState.customCategories.set(key, cat);
+        saveCustomCategories();
+        renderCustomCategories();
+        renderCustomCategoryButtons();
+        showToast(`Category "${key}" ${cat.explicit ? 'marked as explicit' : 'unmarked as explicit'}`, 'success');
     }
 }
 
@@ -1118,11 +1198,11 @@ function setupCategoryButtons() {
     document.querySelectorAll('.suggestion-category-btn').forEach(btn => {
         const previewCategory = () => {
             suggestionsState.previewCategory = btn.dataset.category;
-            updateDropdownUI();
+            updatePreviewText();
         };
         const resetPreviewCategory = () => {
             suggestionsState.previewCategory = suggestionsState.currentCategory;
-            updateDropdownUI();
+            updatePreviewText();
         };
 
         btn.addEventListener('mouseenter', previewCategory);
@@ -1152,14 +1232,68 @@ function setupCategoryButtons() {
     if (addCategoryBtn) {
         addCategoryBtn.addEventListener('click', () => {
             const nameInput = document.getElementById('new-category-name');
-            const promptInput = document.getElementById('new-category-prompt');
+            const focusInput = document.getElementById('new-category-focus');
+            const explicitBtn = document.getElementById('new-category-explicit-btn');
             const name = nameInput?.value.trim();
-            const prompt = promptInput?.value.trim();
+            const focus = focusInput?.value.trim();
+            const isExplicit = explicitBtn?.classList.contains('active') || false;
 
-            if (name && prompt) {
-                addCategory(name, prompt);
+            if (name && focus) {
+                addCategory(name, focus, isExplicit);
                 nameInput.value = '';
-                promptInput.value = '';
+                focusInput.value = '';
+                explicitBtn?.classList.remove('active');
+            }
+        });
+    }
+
+    // Toggle explicit button
+    const explicitBtn = document.getElementById('new-category-explicit-btn');
+    if (explicitBtn) {
+        explicitBtn.addEventListener('click', () => {
+            explicitBtn.classList.toggle('active');
+        });
+    }
+
+    // Auto-generate focus keywords from category name
+    const autoGenBtn = document.getElementById('auto-generate-focus-btn');
+    if (autoGenBtn) {
+        autoGenBtn.addEventListener('click', async () => {
+            const nameInput = document.getElementById('new-category-name');
+            const focusInput = document.getElementById('new-category-focus');
+            const categoryName = nameInput?.value.trim();
+
+            if (!categoryName) {
+                showToast('Enter a category name first', 'warning', '', { duration: 2000 });
+                return;
+            }
+
+            autoGenBtn.disabled = true;
+            autoGenBtn.textContent = '⏳ Generating...';
+
+            try {
+                const response = await fetch('/api/keywords/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        category: categoryName,
+                    }),
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                if (data.keywords && data.keywords.length > 0) {
+                    focusInput.value = data.keywords.join(', ');
+                }
+            } catch (e) {
+                console.error('Auto-generate focus failed:', e);
+                showToast('Failed to generate focus keywords', 'error', '', { duration: 2000 });
+            } finally {
+                autoGenBtn.disabled = false;
+                autoGenBtn.textContent = '✨ Auto';
             }
         });
     }
@@ -1171,18 +1305,6 @@ function setupCategoryButtons() {
             manageCategories();
         });
     }
-}
-
-// ── Clear Recent Button ─────────────────────────────────────────────────────
-
-function setupClearRecentButton() {
-    const clearBtn = document.getElementById('suggestions-clear-recent');
-    if (!clearBtn) return;
-
-    clearBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        clearRecentSuggestions();
-    });
 }
 
 // ── Keyboard Navigation ─────────────────────────────────────────────────────
@@ -1299,7 +1421,6 @@ export function initSuggestionsDropdown() {
     loadCustomCategories();
     setupGenerateButton();
     setupCategoryButtons();
-    setupClearRecentButton();
     setupKeyboardNav();
     setupClickOutside();
     setupOfflineDetection();
@@ -1315,5 +1436,6 @@ export function initSuggestionsDropdown() {
         }
     });
     updateDropdownUI();
-    renderRecentSuggestions();
+    // Render custom category buttons (only on init and when categories change)
+    renderCustomCategoryButtons();
 }

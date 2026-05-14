@@ -9,16 +9,18 @@ The chat tab provides multi-tab streaming conversations with the connected llama
 - **Keyboard switching** — Ctrl+1–9 by position, Ctrl+Shift+←/→ to cycle
 - **Rename** — Custom tab names persist in `chat-tabs.json`
 - **Maximum 10 tabs** — Old inactive tabs are auto-pruned
+- **Periodic save** — Tabs auto-save every 30 seconds to prevent data loss on force-kill
 
 ## Messaging
 
 - **Streaming** — Real-time SSE streaming from `/v1/chat/completions`
-- **Reasoning blocks** — Thinking/reasoning content rendered in expandable blocks
+- **Reasoning blocks** — Thinking/reasoning content rendered in expandable blocks; raw content stored in `thinking_content` field per message
 - **Markdown rendering** — Full Markdown with syntax-highlighted code blocks (highlight.js, atom-one-dark theme)
 - **Code block headers** — Language label, line count, and copy button per block
 - **Token estimates** — Input shows `~N tok` with color warnings at 800+ (yellow) and 1500+ (red) tokens
 - **Smart scroll** — Auto-scroll only when near bottom; scroll-to-bottom button with unread count badge
 - **History pagination** — Long conversations render only the most recent N messages (default 15); "Load More" reveals older batches
+- **RP text colorization** — Dialogue quoted with any Unicode double-quote variant (", ", „, ‟, «, ») is highlighted. Works correctly across inline formatting like bold and italic.
 
 ### Message Actions
 
@@ -30,35 +32,114 @@ The chat tab provides multi-tab streaming conversations with the connected llama
 | **Export** | Download entire chat history as formatted JSON |
 | **Import** | Import conversations from `.json` (full tab restore) or `.md` (append messages to active tab) |
 
-## System Prompts & Personas
+## Personas & Template Manager
 
-- **Custom system prompts** — Per-tab system prompt with live editing
-- **Template library** — Pre-built persona templates with policy management
-- **Persona dropdown** — Select a persona template from the dropdown menu; persists per-tab via `active_template_id`
-- **Template manager** — Create, edit, and delete custom persona templates with policy management
-- **Explicit mode** — See "Explicit Mode v2" section below for the three-level system
+The template manager is the central place for managing all chat personas.
+
+![Persona Manager](../screenshots/10b-persona-modal.png)
+
+### Template List Sections
+
+The persona list organizes templates into three sections:
+
+| Section | Description |
+|---------|-------------|
+| **Active** | The persona currently applied to this chat tab — shown at the top with an "Active" badge |
+| **Custom** | User-created personas |
+| **Built-in** | Pre-built personas shipped with llama-monitor |
+
+### Applying a Persona
+
+- Click the persona chip in the chat header to open a quick-select menu
+- Select a persona to apply it to the current tab; the `active_template_id` is saved per-tab
+- Open the template manager (pencil icon on the persona chip) for full editing
+
+### Per-Persona Explicit Policies
+
+Each template stores independent policy text for Level 1 (moderate) and Level 2 (unrestricted) explicit modes. These policies are appended to the system prompt when explicit mode is active, replacing the global policy.
+
+### Reset to Default
+
+Built-in personas can be reset to their original prompt and explicit policies via the reset button in the template manager. User copies of built-in personas are overwritten; pure built-in entries (no user copy) show "Already at default."
+
+### Token Substitution
+
+System prompts support these substitution tokens:
+
+| Token | Replaced With |
+|-------|---------------|
+| `{{char}}` | The AI name for this tab |
+| `{{user}}` | The user name for this tab |
+| `{{gender}}` | The AI gender (`male`, `female`, or `neutral`) — defaults to `neutral` |
+
+Set `ai_gender` on any tab to control how `{{gender}}` resolves throughout the system prompt and explicit policies.
+
+### Custom Role Boundary
+
+By default, the role boundary instruction tells the model to write only the assistant's reply and not speak for the user. You can override this per-tab with a custom `role_boundary_custom` text field. Leave blank to use the auto-generated default.
+
+## Behavior Panel
+
+The behavior panel (flag icon in the chat toolbar) provides quick access to the persona system prompt, role boundary configuration, and AI gender setting for the current tab.
+
+![Behavior Settings](../screenshots/artifacts/07-behavior-settings.png)
 
 ## Model Parameters
 
 Per-tab controls for generation behavior. An active-params dot indicator appears when non-defaults are set.
 
-| Parameter | Description |
-|-----------|-------------|
-| Temperature | Randomness (0.0–2.0) |
-| top_p | Nucleus sampling threshold |
-| top_k | Top-k sampling |
-| min_p | Minimum probability threshold |
-| repeat_penalty | Repetition avoidance |
-| max_tokens | Output length limit |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| Temperature | 0.7 | Randomness (0.0–2.0) |
+| top_p | 0.9 | Nucleus sampling threshold |
+| top_k | 40 | Top-k sampling |
+| min_p | 0.01 | Minimum probability threshold |
+| repeat_penalty | 1.0 | Repetition avoidance |
+| max_tokens | 4096 | Output length limit |
+| stream_timeout | 120s | Maximum wait for streaming response |
+
+![Response Settings](../screenshots/artifacts/08-response-settings.png)
 
 ## Context Compaction
 
 Recover from full context windows by summarizing earlier conversation into a tombstone message.
 
-- **Manual compaction** — Click Compact to summarize messages above the threshold
-- **Auto-compaction** — Per-tab threshold control; compacts automatically when context pressure exceeds the limit
+### Compact Confirmation Modal
+
+Clicking Compact opens a confirmation dialog before any messages are dropped:
+
+- **Stats preview** — Shows total message count, how many will be dropped vs. kept, estimated tokens freed, current context %, and model capacity
+- **Summary preview** — When auto-summarize is enabled, the summary is generated in the background and displayed inline. You can edit the summary text before confirming, or restore the auto-generated version.
+- **Exit animation** — The modal fades out to confirm the action completed
+
+### Compaction Modes
+
+| Mode | Behavior |
+|------|----------|
+| **Percent** | Triggers when context usage exceeds a configurable threshold (default 80%) |
+| **Optimized** | Triggers when fewer than 25,000 tokens remain in the context window |
+
+- **Auto-summarize** — When enabled, dropped messages are sent to the LLM for summarization instead of simple truncation
+- **Threshold slider** — Adjust auto-compact trigger from 0% to 100% per tab
 - **Multi-compact safe** — Tombstones are preserved across re-compactions
-- **Context ring** — Live context pressure indicator in the telemetry rail
+
+## Prompt Debug Inspector
+
+The debug inspector shows exactly what the model receives for each request. Open it with the `{...}` button in the chat input toolbar.
+
+![Prompt Debug Inspector](../screenshots/08b-prompt-debug.png)
+
+### What It Shows
+
+| Section | Description |
+|---------|-------------|
+| **System slices** | Each component of the final system prompt (base persona, role boundary, explicit policy, context notes, armed story beat) with individual token estimates |
+| **History** | Every message in the outbound request with per-message token estimates |
+| **Totals** | Combined system and history token counts vs. model context capacity |
+| **Timing** | Prompt processing time and generation time from the model's response timings |
+| **Model params** | The exact sampling parameters sent with this request |
+
+Token estimates are rough (1 token ≈ 4 characters). The actual count from the model's `timings` object is shown once the response completes.
 
 ## Chat Telemetry
 
@@ -79,14 +160,14 @@ Real-time metrics for the active chat tab, accessible via the telemetry toggle i
 - **Activity timeline** — 5-minute rolling window of recent tasks
 
 ### Popup Mode
-The telemetry panel can float as a popover or pin inline below the chat toolbar. The popup mode includes a pin toggle to switch between floating and inline layouts.
+The telemetry panel can float as a popover or pin inline below the chat toolbar.
 
 ![Chat Telemetry](../screenshots/03b-chat-telemetry.png)
 ![Chat Telemetry Pinned](../screenshots/03c-chat-telemetry-pinned.png)
 
 ## Chat Style
 
-The style panel (gear icon in chat header) controls the visual appearance of messages.
+The style panel controls the visual appearance of messages.
 
 | Style | Description |
 |-------|-------------|
@@ -122,167 +203,123 @@ Guided generation tools help shape conversations through structured notes, conte
 
 ### Context Notes Sidebar
 
-A persistent, resizable sidebar with predefined sections for organizing creative direction:
-
-- **Character** — Character descriptions, motivations, and voice notes
-- **Setting** — World-building details, locations, and atmosphere
-- **Plot** — Story beats, plot points, and narrative arcs
-- **Tone** — Mood, pacing, and stylistic preferences
-
-Notes persist per-tab and are included as context when generating responses.
+A persistent, resizable sidebar that injects per-tab world-building notes into every prompt.
 
 ![Context Notes Sidebar](../screenshots/08-context-notes-expanded.png)
 
+**Predefined sections:**
+
+| Section | Purpose |
+|---------|---------|
+| Character | Character descriptions, motivations, and voice notes |
+| Setting | World-building details, locations, and atmosphere |
+| Plot/Scenario | Story beats, plot points, and narrative arcs |
+| Tone | Mood, pacing, and stylistic preferences |
+
+The sidebar expanded state persists in `localStorage` — it reopens in the same state on reload.
+
+#### AI Analysis
+
+The "Analyze" button compares the current conversation against your existing notes via `POST /api/context-notes/analyze`. For each section it returns:
+
+- `new` — no existing note; a first suggestion is provided
+- `current` — existing note still accurately reflects the conversation
+- `stale` — existing note is outdated or contradicted by recent events, with a reason
+
 ### Suggestions Dropdown
 
-An AI-powered suggestion system with 15+ category chips organized in collapsible groups:
-
-- **Story Tools** — Scene transitions, dialogue prompts, conflict generators
-- **Genres** — Genre-specific writing prompts and tropes
-- **Explicit** — Mature content suggestions and direction
-
-The dropdown includes a search filter for quick access to specific suggestion types.
+An AI-powered suggestion system with 15+ category chips organized in collapsible groups.
 
 ![Suggestions Dropdown](../screenshots/09-suggestions-dropdown.png)
 
-Suggestions are AI-generated based on the active persona and context notes. Each suggestion is a ready-to-send prompt that steers the conversation in a specific direction.
+The dropdown includes a search filter and tag cloud for quick browsing.
+
+![Tag Cloud](../screenshots/13a-suggestions-tag-cloud.png)
+![Search Filter](../screenshots/13b-suggestions-search-filter.png)
+
+Suggestions are generated by the active model using the current system prompt, context notes, and conversation history.
 
 ![Suggestions Results](../screenshots/09b-suggestions-results.png)
 
-### Quick Guide
+#### Focus Keywords
 
-An inline instruction panel with three modes for controlling generation:
+The "Focus Keywords" field in the suggestions setup lets you steer what the AI generates toward. Auto-generate populates it using `POST /api/keywords/generate`, which calls the model with thinking disabled for a fast response.
 
-| Mode | Description |
-|------|-------------|
-| **Quick** | Direct instruction — send a one-line command to steer the next response |
-| **Director** | Custom prompt — write a detailed scene direction for the AI to follow |
-| **Surprise** | Timed injection — schedule a prompt to appear after a set number of messages |
+#### Custom Categories
 
-![Quick Guide Dropdown](../screenshots/10-quick-guide-dropdown.png)
-![Quick Guide AI Director](../screenshots/10c-guide-ai-director.png)
-
-Director mode results show the AI following your detailed scene instructions.
-
-![Quick Guide Director Results](../screenshots/10d-guide-ai-director-results.png)
-
-### Surprise Mode
-
-Surprise mode arms a timed injection that fires after a set number of subsequent messages. The armed indicator shows the countdown and the scheduled prompt text.
-
-![Surprise Mode Armed](../screenshots/10e-guide-ai-surprise.png)
-
-### Suggestion History
-
-Recently used suggestions are tracked per-tab for quick reuse. The history panel shows the last 20 suggestions with timestamps.
+Create your own suggestion categories alongside the built-in ones. Custom categories appear in the tag cloud and dropdown.
 
 ### Manage Categories
 
-The Manage Categories modal lets you customize the built-in suggestion prompts and add your own custom categories. Open it from the suggestions dropdown menu.
+Customize built-in suggestion prompts and add your own categories.
 
-- **Built-in prompts** — Edit, disable, or reorder the 15+ pre-built prompts in each category (Story Tools, Genres, Explicit)
-- **Custom categories** — Create new category groups with your own prompts; they appear alongside built-in categories
-- **Prompt editing** — Each prompt has a name, description, and the actual suggestion text. Changes persist in `~/.config/llama-monitor/suggestion-categories.json`
+![Manage Categories](../screenshots/14-manage-categories.png)
+
+- **Built-in prompts** — Edit, disable, or reorder the 15+ pre-built prompts in each category
+- **Custom categories** — Create new groups with your own prompts
+- **Prompt editing** — Name, description, and prompt text; changes persist in `~/.config/llama-monitor/suggestion-categories.json`
 - **Enable/disable** — Toggle individual prompts on or off without deleting them
 
-![Manage Categories Modal](../screenshots/14-manage-categories.png)
+### Quick Guide
 
-### Tag Cloud
+An inline panel with three modes for directing generation:
 
-The tag cloud displays 15+ category chips organized in collapsible groups for quick visual browsing. Groups include:
+| Mode | Description |
+|------|-------------|
+| **Quick** | Direct instruction — one-line command to steer the next response |
+| **Director** | Custom scene direction — detailed prompt the AI follows |
+| **Surprise** | Timed injection — a prompt that fires after a set number of messages |
 
-- **Story Tools** — Scene transitions, dialogue prompts, conflict generators, pacing controls
-- **Genres** — Action, Comedy, Fantasy, Horror, Mystery, Romance, Sci-Fi, Thriller, Drama
-- **Explicit** — Mature content suggestions with persona-aware filtering
+![Quick Guide](../screenshots/10-quick-guide-dropdown.png)
+![Director Mode](../screenshots/10c-guide-ai-director.png)
 
-Each group has a collapsible header. A search filter at the top lets you narrow to specific tags by name. Clicking a tag opens the corresponding suggestion dropdown.
+Director results show the AI following your scene instructions with narrative beats and structure.
 
-![Tag Cloud](../screenshots/13a-suggestions-tag-cloud.png)
+![Director Results](../screenshots/10d-guide-ai-director-results.png)
 
-### Pathweaver Prompts
+### Surprise Mode
 
-17 pre-built prompts for different genres and creative scenarios:
+Arms a timed injection that fires after a set number of subsequent messages. An armed indicator shows the countdown.
 
-- **Action** — Fight scenes, chase sequences, and high-stakes moments
-- **Comedy** — Dialogue-driven humor and situational comedy
-- **Fantasy** — World-building, magic systems, and epic quests
-- **Horror** — Suspense, atmosphere, and jump-scare pacing
-- **Mystery** — Clues, red herrings, and detective work
-- **Romance** — Emotional beats and relationship dynamics
-- **Sci-Fi** — Technology, space exploration, and future societies
-- **Thriller** — Tension, pacing, and plot twists
-- **Drama** — Character development and emotional arcs
+![Surprise Mode Armed](../screenshots/10e-guide-ai-surprise.png)
 
-## Explicit Mode v2
+## Explicit Mode
 
-A three-level content filtering system that adapts to the active persona's content policy.
+A three-level content filtering system that adapts to the active persona's policy.
 
 ### Levels
 
 | Level | Icon | Description |
 |-------|------|-------------|
-| **Off** | 🔒 | Default — standard content filtering for all personas |
-| **Unlocked** | 🔓 | Level 1 — relaxed filtering, allows mild mature content |
-| **Unrestricted** | 🔥 | Level 2 — full uncensored mode, no content restrictions |
-
-### Persona-Specific Policies
-
-Each persona has its own default explicit mode setting:
-
-| Persona | Default Level | Notes |
-|---------|--------------|-------|
-| **Roleplay Companion** | Unlocked | Allows mild romance and emotional intimacy |
-| **Study Partner** | Off | Educational content only |
-| **Therapist** | Unlocked | Allows discussion of sensitive topics |
-| **Business Advisor** | Off | Professional content only |
-| **Philosopher** | Off | Academic and intellectual content |
-
-### Controls
-
-- **Chat footer toggle** — Quick toggle between levels in the chat input footer
-- **Settings panel** — Full explicit mode controls in Settings > Content Policy
+| **Off** | 🔒 | Default — standard content filtering |
+| **Unlocked** | 🔓 | Level 1 — relaxed filtering, mild mature content |
+| **Unrestricted** | 🔥 | Level 2 — full uncensored mode |
 
 ![Explicit Unlocked](../screenshots/12a-explicit-unlocked.png)
 ![Explicit Unrestricted](../screenshots/12b-explicit-unrestricted.png)
 ![Explicit Locked](../screenshots/12c-explicit-locked.png)
 
-## Model Parameters (Extended)
+### Persona-Specific Policies
 
-Additional per-tab parameters beyond the core sampling controls:
+Each persona stores its own Level 1 and Level 2 policy text. When explicit mode is active, the persona's policy is appended to the system prompt. Edit policies in the template manager footer when a persona is selected.
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `stream_timeout` | 120s | Maximum time to wait for a streaming response before timing out |
+### Controls
 
-## Context Compaction (Extended)
-
-Two compaction modes control how the chat recovers from full context windows:
-
-| Mode | Behavior |
-|------|----------|
-| **Percent** | Triggers when context usage exceeds a configurable threshold (default 80%) |
-| **Optimized** | Triggers when fewer than 25,000 tokens remain in the context window |
-
-- **Auto-summarize** — When enabled, dropped messages are sent to the LLM for summarization instead of simple truncation
-- **Threshold slider** — Adjust auto-compact trigger from 0% to 100% per tab
-- **Context pressure bar** — Visual indicator in the chat header showing current context usage
+- **Chat footer toggle** — Quick toggle between levels in the chat input footer
+- **Behavior panel** — Full explicit mode controls accessible via the flag button in the chat toolbar
 
 ## Message Management
 
 | Feature | Description |
 |---------|-------------|
-| **Message limit** | Control how many messages are rendered (5–200, default 15). Tabs with long conversations render only the most recent N messages; click "Load More" for older batches |
-| **Copy settings** | Copy system prompt and model parameters from any other tab to the active tab via the copy settings dropdown |
-| **AI/You names** | Customize the display names for assistant and user roles per tab |
-| **Tab trash** | Deleted tabs are retained for 24 hours and can be restored via the tab trash menu |
+| **Message limit** | Control how many messages are rendered (5–200, default 15). "Load More" reveals older batches |
+| **Copy settings** | Copy system prompt and model parameters from any other tab to the active tab |
+| **AI/You names** | Customize display names for assistant and user roles per tab |
+| **Tab trash** | Deleted tabs retained for 24 hours, restorable via the tab trash menu |
 
 ## Export & Import
 
-Export and import support two formats for chat conversations.
-
 ### Markdown Export
-
-Exports chat history as formatted Markdown with:
 
 - **Role labels** — `**User**: content` and `**Assistant**: content` blocks
 - **Token counts** — Each message includes input/output token estimates
@@ -290,8 +327,6 @@ Exports chat history as formatted Markdown with:
 - **Metadata** — System prompt, model parameters, and tab name in a header block
 
 ### JSON Export
-
-Exports raw message array as `{tab-name}.json` with:
 
 - **Full message objects** — `{role, content, tokens, timestamp}` per message
 - **Tab metadata** — System prompt, model parameters, and settings included
@@ -301,8 +336,8 @@ Exports raw message array as `{tab-name}.json` with:
 
 | Format | Behavior |
 |--------|----------|
-| **Markdown** | Parses role/content pairs and appends messages to the active tab (preserves existing history) |
-| **JSON** | Parses `{role, content}` objects and appends to active tab; if file contains tab metadata, offers full tab restore |
+| **Markdown** | Parses role/content pairs and appends to the active tab |
+| **JSON** | Parses `{role, content}` objects and appends; if file contains tab metadata, offers full tab restore |
 
 ## Data Flow
 
@@ -314,4 +349,4 @@ User message → /v1/chat/completions (SSE stream) → Browser renders tokens li
 
 ## Persistence
 
-Chat tabs, messages, system prompts, and model parameters persist to `~/.config/llama-monitor/chat-tabs.json`. Data is saved on every change (debounced) and survives app restarts.
+Chat tabs, messages, system prompts, and model parameters persist to `~/.config/llama-monitor/chat-tabs.json`. Data is saved on every change (debounced) and additionally every 30 seconds as a safety save.

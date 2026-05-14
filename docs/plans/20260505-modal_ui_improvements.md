@@ -1,8 +1,9 @@
-# Modal UI Premium Overhaul — 2026-05-05
+# Modal UI Premium Overhaul — 2026-05-05 (Revised 2026-05-12)
 
-**Date:** 2026-05-05
+**Date:** 2026-05-05 (revised 2026-05-12)
 **Status:** In Progress (settings modal upgraded, agent modal polished, remaining modals queued)
 **Author:** AI Agent Session
+**Revised by:** AI Agent Session — removed Session Modal and Models Modal from high-impact phases due to chat system evolution (see `docs/plans/20260510-chat-system-evolution.md`)
 
 ---
 
@@ -43,7 +44,7 @@ The premium design language is defined by three authoritative sources:
 |--------|--------|---------|
 | Widget-card for ALL `.modal-field` elements | DONE | Previously only Performance tab had card treatment. Now all panes (Session, GPU, Models, Appearance, Advanced) get elevated cards |
 | Per-pane accent colors | DONE | Each pane's fields have unique top-line gradient: Session=teal, GPU=green, Models=teal, Appearance=purple, Performance=indigo, Advanced=yellow |
-| Idle float animation | DONE | Staggered `settings-field-float` with per-field delay (0s, 0.4s, 0.8s, 1.2s, 1.6s) |
+| Idle float animation | **MISSING** | Staggered `settings-field-float` with per-field delay (0s, 0.4s, 0.8s, 1.2s, 1.6s) — **no keyframe exists** |
 | `.modal-section` premium upgrade | DONE | Runtime Config card now has widget-card treatment with amber accent, hover elevation, idle float |
 | Elevated form controls | DONE | Inputs/selects inside widget-card fields have gradient bg, hover glow, focus ring |
 | Pane entrance animation | DONE | `settings-pane-entrance` with 300ms cubic-bezier |
@@ -59,7 +60,9 @@ The premium design language is defined by three authoritative sources:
 
 ---
 
-## Remaining Modals — Priority Queue
+## Remaining Modals — Priority Queue (Revised)
+
+> **Note:** The chat system evolution plan (`docs/plans/20260510-chat-system-evolution.md`) removes the Sessions and Models buttons from the left icon rail. The new session sidebar replaces the horizontal tab bar. This makes the Session Modal and Models Modal much lower priority. The revised priority queue below reflects this change.
 
 ### Phase 1: High-Impact Modals (Frequently Used)
 
@@ -109,8 +112,48 @@ The premium design language is defined by three authoritative sources:
 
 **Estimated effort:** ~250 lines CSS
 
-#### 3. Session Modal (`#session-modal`)
-**Frequency:** High — opened when managing sessions
+---
+
+### Phase 2: Medium-Impact Modals
+
+#### 3. Export Modal (`#export-modal`)
+**Frequency:** Medium — opened from session sidebar context menu (Export JSON, Export Markdown)
+**Current State:** Bare `.modal` shell, flat `.export-panel` sections
+
+**Tasks:**
+- [ ] Glass shell + ambient glow + breathing border
+- [ ] Widget-card for `.export-panel` sections
+- [ ] Card treatment for `.export-option` items
+- [ ] Custom radio button styling
+
+**Estimated effort:** ~100 lines CSS
+
+#### 4. User Preferences Modal (`#user-preferences-modal`)
+**Tasks:**
+- [ ] Glass shell + ambient glow + breathing border
+- [ ] Widget-card for `.personalization-section` panels
+- [ ] Elevated form controls
+- [ ] Custom range slider styling
+
+**Estimated effort:** ~120 lines CSS
+
+#### 5. Template Manager Modal (`#template-manager-modal`)
+**Tasks:**
+- [ ] Glass shell + ambient glow + breathing border
+- [ ] Sidebar panel elevation
+- [ ] Preview panel elevation
+- [ ] `.explicit-policy-section .modal-section` widget-card
+
+**Estimated effort:** ~100 lines CSS
+
+---
+
+### Phase 3: Lower-Impact Modals
+
+> **Note:** The Session Modal and Models Modal are now low priority because the chat system evolution removes their buttons from the left icon rail. The new session sidebar replaces the horizontal tab bar.
+
+#### 6. Session Modal (`#session-modal`)
+**Frequency:** Low — only reachable from Server tab top bar (not from left icon rail)
 **Current State:** Bare `.modal` shell, flat `.session-item` cards
 
 **Tasks:**
@@ -126,11 +169,10 @@ The premium design language is defined by three authoritative sources:
 
 **Estimated effort:** ~150 lines CSS
 
----
+#### 7. Models Modal (`#models-modal`)
+**Frequency:** Low — only reachable from Server tab top bar (not from left icon rail)
+**Current State:** Bare `.modal` shell, flat `.model-item` cards
 
-### Phase 2: Medium-Impact Modals
-
-#### 4. Models Modal (`#models-modal`)
 **Tasks:**
 - [ ] Glass shell + ambient glow + breathing border
 - [ ] Widget-card for `.model-item` elements
@@ -138,37 +180,6 @@ The premium design language is defined by three authoritative sources:
 - [ ] Hover elevation on model items
 
 **Estimated effort:** ~100 lines CSS
-
-#### 5. Export Modal (`#export-modal`)
-**Tasks:**
-- [ ] Glass shell + ambient glow + breathing border
-- [ ] Widget-card for `.export-panel` sections
-- [ ] Card treatment for `.export-option` items
-- [ ] Custom radio button styling
-
-**Estimated effort:** ~100 lines CSS
-
-#### 6. User Preferences Modal (`#user-preferences-modal`)
-**Tasks:**
-- [ ] Glass shell + ambient glow + breathing border
-- [ ] Widget-card for `.personalization-section` panels
-- [ ] Elevated form controls
-- [ ] Custom range slider styling
-
-**Estimated effort:** ~120 lines CSS
-
-#### 7. Template Manager Modal (`#template-manager-modal`)
-**Tasks:**
-- [ ] Glass shell + ambient glow + breathing border
-- [ ] Sidebar panel elevation
-- [ ] Preview panel elevation
-- [ ] `.explicit-policy-section .modal-section` widget-card
-
-**Estimated effort:** ~100 lines CSS
-
----
-
-### Phase 3: Lower-Impact Modals
 
 #### 8. File Browser Modal (`#file-browser-modal`)
 **Tasks:**
@@ -434,13 +445,13 @@ All animations must respect `prefers-reduced-motion`:
 
 ---
 
-## Estimated Total Effort
+## Estimated Total Effort (Revised)
 
 | Phase | Modals | Lines CSS | Priority |
 |-------|--------|-----------|----------|
-| Phase 1 | Config, Preset, Session | ~600 | High |
-| Phase 2 | Models, Export, Preferences, Templates | ~400 | Medium |
-| Phase 3 | File Browser, Shortcuts, Analytics, Release Notes | ~360 | Lower |
+| Phase 1 | Config, Preset | ~450 | **High** |
+| Phase 2 | Export, Preferences, Templates | ~320 | **Medium** |
+| Phase 3 | Session, Models, File Browser, Shortcuts, Analytics, Release Notes | ~590 | **Low** |
 | **Total** | **11 modals** | **~1360 lines** | |
 
 ---
@@ -448,7 +459,7 @@ All animations must respect `prefers-reduced-motion`:
 ## Execution Strategy for Future Agents
 
 1. **Create `modal-premium.css`** with shared patterns (entrance, exit, breathe, drift, float, glass shell, section card)
-2. **Phase 1 first** — Config, Preset, Session are highest-frequency modals
+2. **Phase 1 first** — Config and Preset are highest-frequency modals (Session Modal is now low priority)
 3. **Each modal gets:**
    - Glass shell + ambient glow + breathing border
    - Header gradient title

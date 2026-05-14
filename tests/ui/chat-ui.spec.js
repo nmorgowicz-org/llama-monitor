@@ -67,7 +67,7 @@ test.describe('chat UI shell', () => {
   });
 
   test('shows chat header controls', async ({ page }) => {
-    await expect(page.locator('#btn-system-prompt')).toBeVisible();
+    await expect(page.locator('#btn-behavior')).toBeVisible();
     await expect(page.locator('#btn-model-params')).toBeVisible();
     await expect(page.locator('#chat-explicit-toggle-footer')).toBeVisible();
   });
@@ -88,21 +88,22 @@ test.describe('system prompt panel', () => {
 
   test('opens and closes via .open class (not display:none)', async ({ page }) => {
     // Panel starts without .open — not visible
-    await expect(page.locator('#chat-system-panel')).not.toHaveClass(/open/);
-    await page.locator('#btn-system-prompt').click();
+    await expect(page.locator('#chat-behavior-panel')).not.toHaveClass(/open/);
+    await page.locator('#btn-behavior').click();
     // CSS transition: wait for panel to be visible
-    await expect(page.locator('#chat-system-panel')).toHaveClass(/open/);
-    await expect(page.locator('#chat-system-panel')).toBeVisible();
-    await page.locator('#btn-system-prompt').click();
-    await expect(page.locator('#chat-system-panel')).not.toHaveClass(/open/);
+    await expect(page.locator('#chat-behavior-panel')).toHaveClass(/open/);
+    await expect(page.locator('#chat-behavior-panel')).toBeVisible();
+    await page.locator('#btn-behavior').click();
+    await expect(page.locator('#chat-behavior-panel')).not.toHaveClass(/open/);
   });
 
   test('allows editing system prompt', async ({ page }) => {
-    await page.locator('#btn-system-prompt').click();
-    await page.locator('#chat-system-input').fill('You are a test assistant.');
-    await expect(page.locator('#chat-system-input')).toHaveValue('You are a test assistant.');
-    // Indicator should appear when prompt is set
-    await expect(page.locator('#system-prompt-indicator')).toBeVisible();
+    // System prompt editing moved to template manager; behavior panel no longer has inline input.
+    // Verify behavior panel opens and shows persona management controls instead.
+    await page.locator('#btn-behavior').click();
+    await expect(page.locator('#chat-behavior-panel')).toHaveClass(/open/);
+    // Template manager button present for system prompt/persona editing
+    await expect(page.locator('#chat-open-template-mgr')).toBeVisible();
   });
 
   test('shows persona dropdown', async ({ page }) => {
@@ -189,10 +190,11 @@ test.describe('explicit mode toggle v2 (3-state)', () => {
   });
 
   test('toggle in settings panel mirrors footer toggle', async ({ page }) => {
-    await page.locator('#btn-system-prompt').click();
-    // Enable via settings panel toggle
-    await page.locator('#chat-explicit-toggle-settings').click();
-    await expect(page.locator('#chat-explicit-toggle-settings')).toHaveClass(/active/);
+    await page.locator('#btn-behavior').click();
+    await expect(page.locator('#chat-behavior-panel')).toHaveClass(/open/);
+    // Enable via behavior panel toggle
+    await page.locator('#chat-explicit-toggle-behavior').click();
+    await expect(page.locator('#chat-explicit-toggle-behavior')).toHaveClass(/active/);
     // Footer should also be active
     await expect(page.locator('#chat-explicit-toggle-footer')).toHaveClass(/active/);
   });
@@ -367,9 +369,16 @@ test.describe('template manager', () => {
       await openTemplateManager();
     });
     await expect(page.locator('.explicit-policy-section')).toBeVisible();
-    await expect(page.getByText('Explicit Mode Policy')).toBeVisible();
-    await page.getByText('Explicit Mode Policy').click();
-    await expect(page.locator('#explicit-policy-input')).toBeVisible();
+    await expect(page.getByText('Persona Explicit Policies')).toBeVisible();
+    await page.getByText('Persona Explicit Policies').click();
+    // Check that at least one of the policy containers is present
+    const level1 = page.locator('#persona-explicit-level1');
+    const level2 = page.locator('#persona-explicit-level2');
+    const none = page.locator('#persona-explicit-none');
+    const l1Count = await level1.count();
+    const l2Count = await level2.count();
+    const noneCount = await none.count();
+    expect(l1Count + l2Count + noneCount).toBeGreaterThan(0);
   });
 });
 
@@ -634,6 +643,15 @@ test.describe('context compaction', () => {
     }, TEST_TAB_PREFIX);
   });
 
+  async function confirmCompact(page) {
+    // Wait for compact confirmation modal to appear
+    await expect(page.locator('.compact-confirm-overlay')).toBeVisible({ timeout: 5000 });
+    // Wait for OK button to be enabled (summary may fail in CI, but OK still enables)
+    await expect(page.locator('.compact-confirm-ok:not([disabled])')).toBeVisible({ timeout: 10000 });
+    // Confirm the compact
+    await page.locator('.compact-confirm-ok').click();
+  }
+
   test('compact button removes old messages and creates tombstone', async ({ page }) => {
     // Inject 20 synthetic messages to simulate a long conversation.
     // Set visible_message_limit high so pagination doesn't hide messages from DOM counts.
@@ -655,6 +673,8 @@ test.describe('context compaction', () => {
 
     // Trigger compaction via the compact button
     await page.locator('#btn-compact').click();
+    await confirmCompact(page);
+
     // Wait for compaction to complete (tombstone appears)
     await page.waitForSelector('.chat-compact-marker[data-compact-state="final"]', { timeout: 10000 });
 
@@ -684,11 +704,9 @@ test.describe('context compaction', () => {
       renderChatMessages();
     });
     await page.locator('#btn-compact').click();
-    // Wait for compaction to complete (the button becomes enabled again)
-    await page.waitForFunction(() => {
-      const btn = document.getElementById('btn-compact');
-      return btn && !btn.disabled;
-    }, { timeout: 30000 });
+    await confirmCompact(page);
+    // Wait for compaction to complete (tombstone appears)
+    await page.waitForSelector('.chat-compact-marker[data-compact-state="final"]', { timeout: 10000 });
     await expect(page.locator('.chat-compact-marker[data-compact-state="final"]')).toHaveCount(1);
 
     // Second round: inject more messages and compact again
@@ -703,11 +721,8 @@ test.describe('context compaction', () => {
       renderChatMessages();
     });
     await page.locator('#btn-compact').click();
-    // Wait for compaction to complete (the button becomes enabled again)
-    await page.waitForFunction(() => {
-      const btn = document.getElementById('btn-compact');
-      return btn && !btn.disabled;
-    }, { timeout: 30000 });
+    await confirmCompact(page);
+    // Wait for second tombstone
     const tombstones = page.locator('.chat-compact-marker[data-compact-state="final"]');
     await expect(tombstones).toHaveCount(2, { timeout: 10000 });
 

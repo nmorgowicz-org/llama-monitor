@@ -5,7 +5,15 @@ import { activeChatTab, persistChatTabs } from './chat-state.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast } from './toast.js';
 
+// ── Analysis state ────────────────────────────────────────────────────────────
+let analysisState = {
+    loading: false,
+    results: null,  // SectionAnalysis[]
+    dismissed: new Set(),
+};
+
 const SIDEBAR_STORAGE_KEY = 'llama_monitor_sidebar_width';
+const SIDEBAR_EXPANDED_KEY = 'llama_monitor_sidebar_expanded';
 const SIDEBAR_INTRO_HIDDEN_KEY = 'llama_monitor_context_notes_intro_hidden';
 const DEFAULT_WIDTH = 280;
 const MIN_WIDTH = 240;
@@ -14,13 +22,13 @@ const MAX_WIDTH = 600;
 const PREDEFINED_SECTIONS = [
     { id: 'character', name: 'Character', icon: '👤', placeholder: 'e.g. "Kira, 28, cynical detective with a dry wit. Secretly writes poetry."' },
     { id: 'setting', name: 'Setting', icon: '🌍', placeholder: 'e.g. "Neo-Tokyo, 2087. Acid rain, neon signs, the Yakuza run everything."' },
-    { id: 'plot', name: 'Plot', icon: '📖', placeholder: 'e.g. "The murder victim was Kira\'s mentor. The suspect list includes her partner."' },
+    { id: 'plot', name: 'Plot/Scenario', icon: '📖', placeholder: 'e.g. "The murder victim was Kira\'s mentor. The suspect list includes her partner."' },
     { id: 'tone', name: 'Tone', icon: '🎭', placeholder: 'e.g. "Noir atmosphere. Wry humor. Short punchy sentences. No melodrama."' },
 ];
 
 let sidebarResizing = false;
 let sidebarState = {
-    expanded: false,
+    expanded: localStorage.getItem(SIDEBAR_EXPANDED_KEY) === 'true',
     activeSection: null,
     editingNoteIndex: null,
     composerSection: null,
@@ -56,7 +64,10 @@ export function toggleContextSidebar() {
     if (settings.enabled_context_notes === false) return;
 
     sidebarState.expanded = !sidebarState.expanded;
+    localStorage.setItem(SIDEBAR_EXPANDED_KEY, String(sidebarState.expanded));
+    sidebarState._transitioning = true;
     updateSidebarUI();
+    setTimeout(() => { sidebarState._transitioning = false; }, 350);
 }
 
 export function isContextSidebarEnabled() {
@@ -81,14 +92,17 @@ function updateSidebarUI() {
     const introToggle = document.getElementById('chat-sidebar-intro-toggle');
     const tab = activeChatTab();
 
-    if (!sidebar || !contextBar || !toggleBtn || !messages || !tab) return;
+   // Always ensure CSS variable is set, even if some elements are missing
+    if (messages) {
+        const savedWidth = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+        const rawWidth = tab ? (tab.sidebar_width || (savedWidth ? parseInt(savedWidth, 10) : DEFAULT_WIDTH)) : (savedWidth ? parseInt(savedWidth, 10) : DEFAULT_WIDTH);
+        const width = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, typeof rawWidth === 'number' && isFinite(rawWidth) ? rawWidth : DEFAULT_WIDTH));
+        messages.style.setProperty('--chat-sidebar-current-width', sidebarState.expanded ? `${width}px` : '36px');
+    }
 
-    // Update width from tab state or localStorage
-    const savedWidth = localStorage.getItem(SIDEBAR_STORAGE_KEY);
-    const width = tab.sidebar_width ?? (savedWidth ? parseInt(savedWidth, 10) : DEFAULT_WIDTH);
-    messages.style.setProperty('--chat-sidebar-current-width', sidebarState.expanded ? `${width}px` : '36px');
+    if (!sidebar || !contextBar || !toggleBtn) return;
 
-    const notesCount = (tab.context_notes || []).filter(note => note.content?.trim()).length;
+    const notesCount = tab ? (tab.context_notes || []).filter(note => note.content?.trim()).length : 0;
     const introHidden = localStorage.getItem(SIDEBAR_INTRO_HIDDEN_KEY) === 'true';
 
     if (countBadge) {
@@ -114,7 +128,7 @@ function updateSidebarUI() {
         );
     }
 
-    // Update expanded state
+    // Update expanded state (always applied, even if tab is temporarily unavailable)
     if (sidebarState.expanded) {
         sidebar.classList.add('sidebar-expanded');
         contextBar.classList.add('expanded');
@@ -131,7 +145,9 @@ function updateSidebarUI() {
         collapseBtn?.classList.remove('visible');
     }
 
-    renderNotesList();
+    if (tab) {
+        renderNotesList();
+    }
 }
 
 // ── Notes List Rendering ─────────────────────────────────────────────────────
@@ -675,6 +691,7 @@ function setupSidebarCloseHandler() {
         collapseBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             sidebarState.expanded = false;
+            localStorage.setItem(SIDEBAR_EXPANDED_KEY, 'false');
             updateSidebarUI();
         });
     }
@@ -692,6 +709,290 @@ function setupSidebarIntroToggle() {
     });
 }
 
+// ── Context Notes Wizard ─────────────────────────────────────────────────────
+
+function getAllSectionNames() {
+    const tab = activeChatTab();
+    const predefined = PREDEFINED_SECTIONS.map(s => s.name);
+    const custom = tab?.context_custom_sections || [];
+    return [...predefined, ...custom.filter(c => !predefined.includes(c))];
+}
+
+async function runContextAnalysis() {
+    const tab = activeChatTab();
+    if (!tab) return;
+
+    if (!tab.messages || tab.messages.length === 0) {
+        showToast('No conversation to analyse yet — send some messages first', 'warning');
+        return;
+    }
+
+    if (analysisState.loading) return;
+
+    analysisState.loading = true;
+    analysisState.results = null;
+    analysisState.dismissed = new Set();
+    analysisState.sectionLoading = new Set();
+    updateAnalysisPanelUI();
+
+    const sections = getAllSectionNames();
+    const existingNotes = (tab.context_notes || []).filter(n => n.content?.trim());
+    const allMessages = (tab.messages || []).map(m => ({ role: m.role, content: m.content }));
+    // Default: last 20 messages for the quick full-panel scan
+    const messages = allMessages.slice(-20);
+
+    try {
+        const data = await callAnalyzeApi({ messages, existingNotes, sections, tab });
+        analysisState.results = data.sections || [];
+        analysisState.loading = false;
+        updateAnalysisPanelUI();
+    } catch (err) {
+        analysisState.loading = false;
+        analysisState.results = null;
+        updateAnalysisPanelUI();
+        showToast(`Analysis failed: ${err.message}`, 'error');
+    }
+}
+
+async function runSectionFullContextAnalysis(sectionName) {
+    const tab = activeChatTab();
+    if (!tab || !analysisState.results) return;
+
+    analysisState.sectionLoading = analysisState.sectionLoading || new Set();
+    if (analysisState.sectionLoading.has(sectionName)) return;
+
+    analysisState.sectionLoading.add(sectionName);
+    updateAnalysisPanelUI();
+
+    const existingNotes = (tab.context_notes || []).filter(n => n.content?.trim());
+    const allMessages = (tab.messages || []).map(m => ({ role: m.role, content: m.content }));
+
+    try {
+        const data = await callAnalyzeApi({
+            messages: allMessages,
+            existingNotes,
+            sections: [sectionName],
+            tab,
+        });
+
+        const updated = data.sections?.[0];
+        if (updated) {
+            const idx = analysisState.results.findIndex(r => r.section === sectionName);
+            if (idx >= 0) {
+                analysisState.results[idx] = updated;
+            } else {
+                analysisState.results.push(updated);
+            }
+            analysisState.dismissed.delete(sectionName);
+        }
+    } catch (err) {
+        showToast(`Full-context analysis failed: ${err.message}`, 'error');
+    } finally {
+        analysisState.sectionLoading.delete(sectionName);
+        updateAnalysisPanelUI();
+    }
+}
+
+async function callAnalyzeApi({ messages, existingNotes, sections, tab }) {
+    const resp = await fetch('/api/context-notes/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            messages,
+            system_prompt: tab.system_prompt || '',
+            existing_notes: existingNotes,
+            sections,
+        }),
+    });
+
+    if (!resp.ok) {
+        const errText = await resp.text().catch(() => '');
+        throw new Error(`HTTP ${resp.status}: ${errText || resp.statusText}`);
+    }
+
+    return resp.json();
+}
+
+function updateAnalysisPanelUI() {
+    const panel = document.getElementById('sidebar-analysis-panel');
+    const analyzeBtn = document.getElementById('chat-sidebar-analyze-btn');
+    if (!panel) return;
+
+    if (analyzeBtn) {
+        analyzeBtn.classList.toggle('is-loading', analysisState.loading);
+        analyzeBtn.disabled = analysisState.loading;
+    }
+
+    if (analysisState.loading) {
+        panel.hidden = false;
+        panel.innerHTML = `
+            <div class="sidebar-analysis-loading">
+                <div class="sidebar-analysis-spinner"></div>
+                <span>Analysing conversation…</span>
+            </div>
+        `;
+        return;
+    }
+
+    if (!analysisState.results) {
+        panel.hidden = true;
+        panel.innerHTML = '';
+        return;
+    }
+
+    const visible = analysisState.results.filter(r => !analysisState.dismissed.has(r.section));
+    if (visible.length === 0) {
+        panel.hidden = true;
+        panel.innerHTML = '';
+        return;
+    }
+
+    panel.hidden = false;
+
+    const tab = activeChatTab();
+    const existingNotes = (tab?.context_notes || []).filter(n => n.content?.trim());
+    const allMsgCount = (tab?.messages || []).length;
+    const sectionLoading = analysisState.sectionLoading || new Set();
+
+    // eslint-disable-next-line no-unsanitized/property
+    panel.innerHTML = `
+        <div class="sidebar-analysis-header">
+            <span class="sidebar-analysis-title">✨ AI Review</span>
+            <button class="sidebar-analysis-dismiss-all" id="sidebar-analysis-dismiss-all">Dismiss all</button>
+        </div>
+        <div class="sidebar-analysis-cards" id="sidebar-analysis-cards">
+            ${visible.map(result => {
+                const status = result.status || 'new';
+                const existingNote = existingNotes.find(n => n.section === result.section);
+                const statusLabel = status === 'stale' ? '⚠ Stale' : status === 'current' ? '✓ Current' : '+ New';
+                const statusClass = `sidebar-analysis-status-${status}`;
+                const isSecLoading = sectionLoading.has(result.section);
+                const canFullContext = allMsgCount > 20;
+
+                return `
+                <div class="sidebar-analysis-card" data-section="${escapeHtml(result.section)}">
+                    <div class="sidebar-analysis-card-header">
+                        <span class="sidebar-analysis-section">${escapeHtml(result.section)}</span>
+                        <div class="sidebar-analysis-card-header-right">
+                            ${canFullContext ? `
+                                <button class="sidebar-analysis-btn-full-ctx ${isSecLoading ? 'is-loading' : ''}" data-action="full-context" data-section="${escapeHtml(result.section)}" title="Re-analyse using full conversation history" ${isSecLoading ? 'disabled' : ''}>
+                                    ${isSecLoading ? '…' : '⟳ Full context'}
+                                </button>
+                            ` : ''}
+                            <span class="sidebar-analysis-status ${statusClass}">${statusLabel}</span>
+                        </div>
+                    </div>
+                    ${status === 'stale' && result.reason ? `
+                        <div class="sidebar-analysis-reason">${escapeHtml(result.reason)}</div>
+                    ` : ''}
+                    ${status === 'stale' && existingNote ? `
+                        <div class="sidebar-analysis-existing">
+                            <div class="sidebar-analysis-existing-label">Current note:</div>
+                            <div class="sidebar-analysis-existing-text">${escapeHtml(existingNote.content)}</div>
+                        </div>
+                    ` : ''}
+                    <div class="sidebar-analysis-suggested">${escapeHtml(result.suggested)}</div>
+                    <div class="sidebar-analysis-actions">
+                        ${status === 'new' ? `
+                            <button class="sidebar-analysis-btn sidebar-analysis-btn-add" data-action="add" data-section="${escapeHtml(result.section)}">Add</button>
+                            <button class="sidebar-analysis-btn sidebar-analysis-btn-skip" data-action="skip" data-section="${escapeHtml(result.section)}">Skip</button>
+                        ` : status === 'stale' ? `
+                            <button class="sidebar-analysis-btn sidebar-analysis-btn-add" data-action="replace" data-section="${escapeHtml(result.section)}">Use AI version</button>
+                            <button class="sidebar-analysis-btn sidebar-analysis-btn-keep" data-action="keep" data-section="${escapeHtml(result.section)}">Keep mine</button>
+                            <button class="sidebar-analysis-btn sidebar-analysis-btn-skip" data-action="delete" data-section="${escapeHtml(result.section)}">Delete</button>
+                        ` : `
+                            <button class="sidebar-analysis-btn sidebar-analysis-btn-keep" data-action="keep" data-section="${escapeHtml(result.section)}">Looks good</button>
+                            <button class="sidebar-analysis-btn sidebar-analysis-btn-add" data-action="replace" data-section="${escapeHtml(result.section)}">Update</button>
+                        `}
+                    </div>
+                </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+
+    setupAnalysisPanelHandlers();
+}
+
+function setupAnalysisPanelHandlers() {
+    const panel = document.getElementById('sidebar-analysis-panel');
+    if (!panel) return;
+
+    panel.querySelector('#sidebar-analysis-dismiss-all')?.addEventListener('click', () => {
+        analysisState.dismissed = new Set((analysisState.results || []).map(r => r.section));
+        updateAnalysisPanelUI();
+    });
+
+    panel.querySelectorAll('[data-action]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const action = btn.dataset.action;
+            const section = btn.dataset.section;
+
+            if (action === 'full-context') {
+                runSectionFullContextAnalysis(section);
+                return;
+            }
+
+            const result = (analysisState.results || []).find(r => r.section === section);
+            if (!result) return;
+
+            handleAnalysisAction(action, section, result.suggested);
+        });
+    });
+}
+
+function handleAnalysisAction(action, section, suggested) {
+    const tab = activeChatTab();
+    if (!tab) return;
+
+    if (action === 'add') {
+        addNote(section, suggested);
+        analysisState.dismissed.add(section);
+        updateAnalysisPanelUI();
+    } else if (action === 'replace') {
+        const notes = (tab.context_notes || []).filter(n => n.content?.trim());
+        const existingIndex = notes.findIndex(n => n.section === section);
+        if (existingIndex >= 0) {
+            const allNotes = tab.context_notes || [];
+            const realIndex = allNotes.indexOf(notes[existingIndex]);
+            if (realIndex >= 0) {
+                updateNote(realIndex, section, suggested);
+                analysisState.dismissed.add(section);
+                updateAnalysisPanelUI();
+                return;
+            }
+        }
+        // No existing note — just add
+        addNote(section, suggested);
+        analysisState.dismissed.add(section);
+        updateAnalysisPanelUI();
+    } else if (action === 'keep' || action === 'skip') {
+        analysisState.dismissed.add(section);
+        updateAnalysisPanelUI();
+    } else if (action === 'delete') {
+        const notes = (tab.context_notes || []).filter(n => n.content?.trim());
+        const existingIndex = notes.findIndex(n => n.section === section);
+        if (existingIndex >= 0) {
+            const allNotes = tab.context_notes || [];
+            const realIndex = allNotes.indexOf(notes[existingIndex]);
+            if (realIndex >= 0) {
+                deleteNote(realIndex);
+            }
+        }
+        analysisState.dismissed.add(section);
+        updateAnalysisPanelUI();
+    }
+}
+
+function setupAnalyzeButton() {
+    const btn = document.getElementById('chat-sidebar-analyze-btn');
+    if (!btn) return;
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        runContextAnalysis();
+    });
+}
+
 // ── Initialization ───────────────────────────────────────────────────────────
 
 export function initContextSidebar() {
@@ -699,10 +1000,12 @@ export function initContextSidebar() {
     setupAddSectionHandler();
     setupSidebarCloseHandler();
     setupSidebarIntroToggle();
+    setupAnalyzeButton();
     updateSidebarUI();
 
-    // Listen for tab switches
+    // Listen for tab switches — defer to avoid racing with in-flight toggle transitions
     window.addEventListener('activeTabChanged', () => {
+        if (sidebarState._transitioning) return;
         updateSidebarUI();
     });
 }

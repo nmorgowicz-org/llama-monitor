@@ -92,13 +92,63 @@ export function renderMdStreaming(src) {
 
 export function colorizeRpText(el) {
     if (!el) return;
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+
+    // Match all common Unicode double quotation marks — LLMs routinely mix variants.
+    // U+0022 ", U+201C ", U+201D ", U+201E „, U+201F ‟, U+00AB «, U+00BB »
+    // (single quotes omitted — U+2019/U+0027 are also apostrophes in contractions)
+    // Allow newlines inside quotes (multi-line dialogue), max length 4000 chars.
+    // Use non-greedy (lazy) quantifier to match shortest quote pair.
+    const dialogueRe = /[\u0022\u201C\u201D\u201E\u201F\u00AB\u00BB][^\u0022\u201C\u201D\u201E\u201F\u00AB\u00BB]{1,4000}?[\u0022\u201C\u201D\u201E\u201F\u00AB\u00BB]/g;
+
+    // Process each block-level child independently.
+    // For blocks with inline formatting (em, strong), we flatten text across element
+    // boundaries so the regex can match quotes that span across markdown-generated tags.
+    const blockSelectors = 'p, li, blockquote, div, h1, h2, h3, h4, h5, h6';
+    const blocks = el.querySelectorAll(blockSelectors);
+
+    if (blocks.length === 0) {
+        colorizeBlock(el, dialogueRe);
+        return;
+    }
+
+    blocks.forEach(block => {
+        if (block.closest('pre, code')) return;
+        colorizeBlock(block, dialogueRe);
+    });
+}
+
+function colorizeBlock(block, dialogueRe) {
+    const fullText = block.textContent;
+    if (!fullText) return;
+
+    // Find all quote matches in the flattened text
+    const matches = [];
+    let m;
+    dialogueRe.lastIndex = 0;
+    while ((m = dialogueRe.exec(fullText)) !== null) {
+        matches.push({ start: m.index, end: m.index + m[0].length });
+    }
+
+    if (matches.length === 0) return;
+
+    // Skip if already colorized (idempotency)
+    if (block.querySelector('.rp-dialogue')) return;
+
+   // If no inline formatting, use simple text-node replacement
+    if (!block.querySelector('em, strong, code, a, del, ins, s, u, abbr, kbd, var, sub, sup')) {
+        colorizeTextNodes(block, dialogueRe);
+        return;
+    }
+
+    // Has inline formatting — rebuild HTML to handle cross-boundary quotes
+    colorizeWithRebuild(block, fullText, matches);
+}
+
+function colorizeTextNodes(block, dialogueRe) {
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, null);
     const textNodes = [];
     let node;
     while ((node = walker.nextNode())) textNodes.push(node);
-
-    // Match straight " " and curly " " / " " quote pairs — LLMs routinely use smart quotes.
-    const dialogueRe = /["“]([^"“”\r\n]{1,600})["”]/g;
 
     for (const textNode of textNodes) {
         const parent = textNode.parentNode;
@@ -120,6 +170,123 @@ export function colorizeRpText(el) {
         }
         if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
         parent.replaceChild(frag, textNode);
+    }
+}
+
+function colorizeWithRebuild(block, fullText, matches) {
+    // Build a character stream that tracks dialogue state and formatting tags.
+    // Then rebuild the block's HTML with <span class="rp-dialogue"> at quote boundaries,
+    // preserving ALL inline formatting throughout.
+
+    const INLINE_FMT_TAGS = new Set(['em', 'strong', 'code', 'a', 'del', 'ins', 's', 'u', 'abbr', 'kbd', 'var', 'sub', 'sup']);
+
+    const dialogueSet = new Set();
+    for (const match of matches) {
+        for (let i = match.start; i < match.end; i++) {
+            dialogueSet.add(i);
+        }
+    }
+
+    // Walk text nodes and record each character's dialogue state and formatting context
+    const stream = [];
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, null);
+    let textNode;
+    let textIdx = 0;
+
+    while ((textNode = walker.nextNode())) {
+        const text = textNode.textContent;
+        // Collect ALL inline formatting ancestors (outermost → innermost)
+        const tagStack = [];
+        let ancestor = textNode;
+        while (ancestor) {
+            if (ancestor.nodeType === 1) {
+                const tag = ancestor.tagName.toLowerCase();
+                if (INLINE_FMT_TAGS.has(tag)) {
+                    tagStack.unshift(tag);
+                }
+            }
+            ancestor = ancestor.parentNode;
+        }
+
+        for (let i = 0; i < text.length; i++) {
+            stream.push({
+                ch: text[i],
+                dialogue: dialogueSet.has(textIdx + i),
+                stack: tagStack.length ? tagStack.join('|') : '',
+            });
+        }
+        textIdx += text.length;
+    }
+
+    // Build HTML by tracking state transitions
+    let html = '';
+    let inDialogue = false;
+    let currentStack = [];
+
+    for (const s of stream) {
+        const targetStack = s.stack ? s.stack.split('|') : [];
+
+        // Dialogue state transition
+        if (s.dialogue !== inDialogue) {
+            if (inDialogue) {
+                // Exiting dialogue: close all fmt tags, close span
+                while (currentStack.length) {
+                    html += `</${currentStack.pop()}>`;
+                }
+                html += '</span>';
+                inDialogue = false;
+
+                // Reopen fmt tags for current character
+                for (const tag of targetStack) {
+                    html += `<${tag}>`;
+                    currentStack.push(tag);
+                }
+            } else {
+                // Entering dialogue: close all fmt tags, open span, reopen fmt tags
+                while (currentStack.length) {
+                    html += `</${currentStack.pop()}>`;
+                }
+                html += '<span class="rp-dialogue">';
+                inDialogue = true;
+                for (const tag of targetStack) {
+                    html += `<${tag}>`;
+                    currentStack.push(tag);
+                }
+            }
+        } else {
+            // Formatting state transition (same dialogue state)
+            // Sync currentStack → targetStack by finding common prefix
+            let i = 0;
+            while (i < currentStack.length && i < targetStack.length && currentStack[i] === targetStack[i]) i++;
+            // Close tags after divergence point
+            while (currentStack.length > i) {
+                html += `</${currentStack.pop()}>`;
+            }
+            // Open new tags after divergence point
+            for (let j = i; j < targetStack.length; j++) {
+                html += `<${targetStack[j]}>`;
+                currentStack.push(targetStack[j]);
+            }
+        }
+
+        html += escapeHtmlChar(s.ch);
+    }
+
+    // Close remaining open tags
+    while (currentStack.length) html += `</${currentStack.pop()}>`;
+    if (inDialogue) html += '</span>';
+
+    // eslint-disable-next-line no-unsanitized/property -- we control the HTML construction
+    block.innerHTML = html;
+}
+
+function escapeHtmlChar(c) {
+    switch (c) {
+        case '<': return '&lt;';
+        case '>': return '&gt;';
+        case '&': return '&amp;';
+        case '"': return '&quot;';
+        default: return c;
     }
 }
 
@@ -237,7 +404,6 @@ export function renderChatTabs() {
         el.innerHTML = `
           <div class="chat-tab-name-wrapper">
             <span class="chat-tab-name" data-chat-tab-rename="${tab.id}">${escapeHtml(tab.name)}</span>
-            ${tab.active_template_id ? `<span class="chat-tab-persona"></span>` : ''}
           </div>
           <svg class="chat-tab-pin-icon ${tab.pinned ? 'pinned' : ''}" width="11" height="11" viewBox="0 0 24 24" fill="${tab.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" aria-hidden="true" data-tooltip="${tab.pinned ? 'Unpin tab' : 'Pin tab'}">
             <path d="M16 12V3h-3V2H8v1H5v9l-2 6 3 1 2-5v9h6v-9l2 5 3-1-2-6z"/>
@@ -307,16 +473,6 @@ export function renderChatTabs() {
             });
         }
 
-        // Populate persona label
-        const personaLabel = el.querySelector('.chat-tab-persona');
-        const nameWrapper = el.querySelector('.chat-tab-name-wrapper');
-        if (personaLabel && tab.active_template_id) {
-            getTemplateNameById(tab.active_template_id).then(name => {
-                if (personaLabel && name) {
-                    personaLabel.textContent = name;
-                }
-            });
-        }
         if (tab.explicit_level > 0) {
             const badge = document.createElement('span');
             badge.className = 'chat-tab-explicit-badge';
@@ -324,7 +480,7 @@ export function renderChatTabs() {
             badge.title = tab.explicit_level >= 2 ? 'Unrestricted mode' : 'Explicit mode';
             const countEl = el.querySelector('.chat-tab-count');
             if (countEl) {
-                countEl.parentNode.insertBefore(badge, countEl.nextSibling);
+                countEl.parentNode.insertBefore(badge, countEl);
             } else {
                 el.appendChild(badge);
             }
@@ -486,15 +642,22 @@ export function renderChatMessages() {
         container.appendChild(el);
         idx++;
     }
-    chatScroll(true);
+ setTimeout(() => chatScroll(true), 50);
     getChatViewBindings().syncCompactSettingsUI?.(activeChatTab());
 }
 
 function loadMoreMessages(tab, currentLimit) {
     const allMessages = tab.messages.filter(m => m.role !== 'system' || m.compaction_marker);
     tab.visible_message_limit = Math.min(currentLimit * 2, allMessages.length);
+
+    // Preserve scroll position before re-rendering
+    const scrollEl = chatMessagesEl;
+    const scrollTop = scrollEl ? scrollEl.scrollTop : 0;
+
     renderChatMessages();
-    if (chatMessagesEl) chatMessagesEl.scrollTop = 0;
+
+    // Restore scroll position (don't scroll to top)
+    if (scrollEl) scrollEl.scrollTop = scrollTop;
 }
 
 function buildMessageElement(msg, idx, allMessages) {
@@ -593,11 +756,27 @@ function buildMessageElement(msg, idx, allMessages) {
         }
     }
 
- // LLM output rendered via marked.js; user content escaped with escapeHtml().replace(); labels are user-configured display names
+ // Thinking block HTML for persisted reasoning content
+    let thinkingHtml = '';
+    if (!isUser && msg.thinking_content) {
+        const thinkTokens = Math.round(msg.thinking_content.length / 4);
+        thinkingHtml = `
+        <details class="chat-thinking">
+          <summary class="chat-thinking-summary">
+            <svg class="chat-thinking-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"/></svg>
+            <span class="chat-thinking-label">Thinking</span>
+            <span class="chat-thinking-token-count" style="margin:0 8px; color:var(--text-muted);">(${thinkTokens} tokens)</span>
+          </summary>
+          <div class="chat-thinking-body">${escapeHtml(msg.thinking_content)}</div>
+        </details>`;
+    }
+
+  // All messages rendered via marked.js for consistent styling (backticks, italics, bold); labels are user-configured display names
     const html = `
       <div class="chat-avatar">${isUser ? userLabel : aiLabel}</div>
       <div class="chat-bubble">
-        <div class="chat-msg-body">${isUser ? escapeHtml(msg.content).replace(/\n/g, '<br>') : renderMd(msg.content)}</div>
+        ${thinkingHtml}
+        <div class="chat-msg-body">${renderMd(msg.content)}</div>
         <div class="chat-msg-footer">
           <span class="chat-msg-time">${ts}</span>
           ${metaHtml}
@@ -851,8 +1030,8 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
         const modelName = lastLlamaMetrics?.model_name || '';
         const inp = usage ? (usage.prompt_tokens ?? 0) : 0;
         const out = usage ? (usage.completion_tokens ?? 0) : 0;
-        const totalInput = tab ? (tab.totalInputTokens || 0) : inp;
-        const totalOutput = tab ? (tab.totalOutputTokens || 0) : out;
+        const totalInput = tab ? (tab.total_input_tokens || 0) : inp;
+        const totalOutput = tab ? (tab.total_output_tokens || 0) : out;
         const total = totalInput + totalOutput;
         const capacity = lastLlamaMetrics?.context_capacity_tokens || 0;
         // ctx% = (all generated output tokens in this chat + current request's input tokens) / capacity.
@@ -862,7 +1041,7 @@ export function finalizeAssistantMessage(el, content, usage, tab) {
         const ctxTokens = totalOutput + inp;
         const ctxPct = capacity > 0 && ctxTokens > 0 ? Math.min(100, Math.round((ctxTokens / capacity) * 100)) : 0;
 
-        if (tab) tab.lastCtxPct = ctxPct;
+        if (tab) tab.last_ctx_pct = ctxPct;
 
         const parts = [];
         if (inp > 0) parts.push(`↓${formatTokenCount(inp)}`);

@@ -44,6 +44,8 @@
 
 .remote-agent-setup-body {
   flex: 1;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
   padding: 20px;
 }

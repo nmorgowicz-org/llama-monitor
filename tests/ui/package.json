@@ -5,6 +5,7 @@
   "scripts": {
     "test": "playwright test",
     "test:ssh": "playwright test remote-agent-ssh.integration.spec.js",
+    "test:ai": "LLAMA_MONITOR_HAS_AI=1 playwright test",
     "test:headed": "playwright test --headless=false",
     "test:debug": "playwright test --debug",
     "test:report": "playwright show-report",

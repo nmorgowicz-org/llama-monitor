@@ -2,6 +2,7 @@
 // Tab switching and sidebar collapse.
 
 import { chat, lastLlamaMetrics, metricSeries, wsData } from '../core/app-state.js';
+import { chatScroll } from './chat-render.js';
 
 export function switchTab(name) {
     const page = document.getElementById('page-' + name);
@@ -30,6 +31,11 @@ export function switchTab(name) {
 
     const sidebarButton = document.querySelector(`.sidebar-btn[data-tab="${name}"]`);
     if (sidebarButton) sidebarButton.classList.add('active');
+
+    // Scroll chat to bottom when entering chat page (no tab switch = no re-render)
+    if (name === 'chat') {
+        setTimeout(() => chatScroll(true), 50);
+    }
 }
 
 function toggleSidebarCollapse() {
@@ -83,7 +89,7 @@ function initEndpointStatus() {
 function deriveTabCtxPct(tab, capacity) {
     if (!tab || !capacity) return 0;
     const asst = (tab.messages || []).filter(m => m.role === 'assistant' && !m.compaction_marker);
-    if (!asst.length) return tab.lastCtxPct || 0;
+    if (!asst.length) return tab.last_ctx_pct || 0;
     const totalOutput = asst.reduce((sum, m) => sum + (m.output_tokens || 0), 0);
     const lastInput = asst.at(-1)?.input_tokens || 0;
     return Math.min(200, (totalOutput + lastInput) / capacity * 100);

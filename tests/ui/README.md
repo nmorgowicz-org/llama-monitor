@@ -82,6 +82,8 @@ SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario artifacts --chat-only
 SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario new-features
 
 # Docs/review stills
+# Captures chat panels plus current modal surfaces like settings, user preferences,
+# personas, models, keyboard shortcuts, and prompt debug.
 SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario docs
 
 # Sparkline validation captures

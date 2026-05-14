@@ -193,6 +193,9 @@ jobs:
           exit 1
 
       - name: Run Playwright UI tests
+        # Runs all .spec.js files except:
+        # - SSH integration test (skips without LLAMA_MONITOR_SSH_TARGET)
+        # - AI-dependent tests (skip without LLAMA_MONITOR_HAS_AI=1)
         working-directory: tests/ui
         env:
           LLAMA_MONITOR_UI_URL: http://127.0.0.1:7778

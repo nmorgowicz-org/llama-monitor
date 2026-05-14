@@ -131,7 +131,8 @@ window.addEventListener('suggestionsOpened', () => closeQuickGuide());
 window.addEventListener('quickGuideOpened', () => closeSuggestionsDropdown());
 
 // Wire up guided generation event handlers
-document.getElementById('context-sidebar-toggle')?.addEventListener('click', () => {
+document.getElementById('context-sidebar-toggle')?.addEventListener('click', (e) => {
+    e.stopPropagation();
     import('./features/chat-notes.js').then(({ toggleContextSidebar }) => toggleContextSidebar());
 });
 
@@ -143,6 +144,39 @@ document.getElementById('suggestions-toggle')?.addEventListener('click', (e) => 
 document.getElementById('quick-guide-toggle')?.addEventListener('click', (e) => {
     e.stopPropagation();
     import('./features/chat-quick-guide.js').then(({ toggleQuickGuide }) => toggleQuickGuide());
+});
+
+function getTopmostDismissibleOverlay() {
+    const candidates = [
+        ...document.querySelectorAll('.modal-overlay.open, .modal-overlay.active, .keyboard-shortcut-overlay.open, #release-notes-panel.open')
+    ].filter(el => {
+        const style = getComputedStyle(el);
+        return style.display !== 'none' && style.visibility !== 'hidden';
+    });
+
+    candidates.sort((a, b) => {
+        const aZ = Number.parseInt(getComputedStyle(a).zIndex, 10) || 0;
+        const bZ = Number.parseInt(getComputedStyle(b).zIndex, 10) || 0;
+        return bZ - aZ;
+    });
+
+    return candidates[0] || null;
+}
+
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented || e.repeat || e.isComposing) return;
+
+    const overlay = getTopmostDismissibleOverlay();
+    if (!overlay) return;
+
+    const closeButton = overlay.querySelector('.modal-close, .shortcuts-close, .cat-mgr-close, .modal-close-btn')
+        || (overlay.id === 'release-notes-panel' ? document.getElementById('release-notes-close') : null);
+
+    if (!closeButton) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    closeButton.click();
 });
 
 // Handle suggestion selection

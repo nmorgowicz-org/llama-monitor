@@ -69,15 +69,15 @@ function deriveCtxPctFromMessages(tab, capacity) {
     return Math.min(100, Math.round((ctxTokens / capacity) * 100));
 }
 
-// Backfill lastCtxPct for tabs that don't have it persisted yet.
+// Backfill last_ctx_pct for tabs that don't have it persisted yet.
 // Called when llama metrics arrive with a known capacity.
 function backfillCtxPct(capacity) {
     let dirty = false;
     for (const tab of chat.tabs) {
-        if (!tab.lastCtxPct) {
+        if (!tab.last_ctx_pct) {
             const derived = deriveCtxPctFromMessages(tab, capacity);
             if (derived != null && derived > 0) {
-                tab.lastCtxPct = derived;
+                tab.last_ctx_pct = derived;
                 dirty = true;
             }
         }
@@ -98,11 +98,11 @@ function deriveChatSummaries(capacity) {
                 || 0;
 
             // Always re-derive from message tokens when capacity is known — using stale
-            // lastCtxPct after a model swap would show the wrong percentage (e.g. 37% of
+            // last_ctx_pct after a model swap would show the wrong percentage (e.g. 37% of
             // 131k still showing as 37% on a 32k model where it actually represents 150%+).
             let ctxPct = capacity > 0
                 ? deriveCtxPctFromMessages(tab, capacity)
-                : (typeof tab.lastCtxPct === 'number' && tab.lastCtxPct > 0 ? tab.lastCtxPct : null);
+                : (typeof tab.last_ctx_pct === 'number' && tab.last_ctx_pct > 0 ? tab.last_ctx_pct : null);
 
             return {
                 id: tab.id,
@@ -112,8 +112,8 @@ function deriveChatSummaries(capacity) {
                 lastMessageTimestamp: lastTimestamp,
                 isStale: lastTimestamp > 0 ? now - lastTimestamp > STALE_CHAT_MS : true,
                 autoCompact: !!tab.auto_compact,
-                inputTokens: tab.totalInputTokens || 0,
-                outputTokens: tab.totalOutputTokens || 0,
+                inputTokens: tab.total_input_tokens || 0,
+                outputTokens: tab.total_output_tokens || 0,
                 messageCount: messages.filter(msg => msg.role !== 'system').length,
             };
         })
