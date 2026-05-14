@@ -8,6 +8,7 @@ release/
 # IDE and editor files
 .vscode/
 .idea/
+.opencode/
 *.swp
 *.swo
 *~
