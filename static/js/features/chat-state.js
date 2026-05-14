@@ -60,7 +60,7 @@ export function newChatTab(name = 'New Chat') {
             top_k: 40,
             min_p: 0.01,
             repeat_penalty: 1.0,
-            max_tokens: null,
+            max_tokens: 4096,
             stream_timeout: 120,
         },
         context_notes: [],
@@ -95,7 +95,7 @@ function normalizeChatTab(tab) {
         total_output_tokens: tab.total_output_tokens ?? tab.totalOutputTokens ?? total_output_tokens,
         context_notes: tab.context_notes ?? [],
         context_custom_sections: tab.context_custom_sections ?? [],
-        sidebar_width: tab.sidebar_width ?? tab.sidebarWidth ?? 280,
+        sidebar_width: tab.sidebar_width || tab.sidebarWidth || 280,
         quick_guide_draft: tab.quick_guide_draft ?? '',
         quick_guide_active: '',
         quick_guide_pending: '',
@@ -131,9 +131,16 @@ export async function initChatTabs() {
     refreshTopCockpit();
 
    // Trigger context card update - mark that chat tabs loaded so dashboard can poll
-     if (typeof window.onChatTabsLoaded === 'function') {
-         window.onChatTabsLoaded();
-     }
+      if (typeof window.onChatTabsLoaded === 'function') {
+          window.onChatTabsLoaded();
+      }
+
+      // Notify subscribers that tabs are loaded and a tab is active.
+      // Defer to next macrotask so any in-flight user interactions (e.g. sidebar
+      // toggle) have already painted their CSS transitions before this fires.
+      setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('activeTabChanged', { detail: { tabId: chat.activeTabId } }));
+      }, 0);
 
      // Show chat tip only when user is on monitor view with an active chat session
      const { setupViewState } = await import('../core/app-state.js');
@@ -243,26 +250,21 @@ export function togglePinTab(id) {
     scheduleChatPersist();
 }
 
-export function clearChat() {
-    const tab = activeChatTab();
-    if (!tab) return;
-    tab.messages = [];
-    tab.updated_at = Date.now();
-    chatViewBindings.renderChatMessages?.();
-    chatViewBindings.updateChatTabBadge?.();
-    chatViewBindings.refreshChatTelemetry?.();
-    refreshTopCockpit();
-    scheduleChatPersist();
-}
-
 // ── Tab Field Updates ─────────────────────────────────────────────────────────
 
-export function substituteNames(prompt, aiName, userName) {
+export function substituteNames(prompt, aiName, userName, gender) {
     if (!prompt) return prompt;
     let p = prompt;
     p = p.replace(/\{\{char\}\}/gi, aiName || 'AI');
     p = p.replace(/\{\{user\}\}/gi, userName || 'User');
+    p = p.replace(/\{\{gender\}\}/gi, gender || 'neutral');
     return p;
+}
+
+export function getDefaultRoleBoundaryText(tab) {
+    const assistantName = (tab?.ai_name || '{{char}}').trim();
+    const userName = (tab?.user_name || '{{user}}').trim();
+    return `You are ${assistantName}. By default, write only ${assistantName}'s reply. Do not speak as, write dialogue for, narrate actions for, or decide choices/thoughts for ${userName} unless the latest user instruction explicitly asks you to control or write both sides.\n\nWhen the scene introduces supporting or secondary characters, you may voice those characters as needed to serve the narrative — but do not speak for or make decisions on behalf of ${userName}.`;
 }
 
 export function updateChatName(field, value) {

@@ -78,6 +78,8 @@ pub struct ChatMessage {
     pub compacted_message_count_total: Option<u64>,
     #[serde(default)]
     pub recent_tail_kept: Option<u64>,
+    #[serde(default)]
+    pub thinking_content: Option<String>,
 }
 
 /// Context note for guided generation (character details, setting info, etc.)
@@ -212,6 +214,12 @@ pub struct ChatTab {
     /// Guided generation: delayed hidden story beats for future assistant turns
     #[serde(default)]
     pub armed_story_beats: Vec<ArmedStoryBeat>,
+    /// Custom role boundary instruction (overrides the default if set)
+    #[serde(default)]
+    pub role_boundary_custom: Option<String>,
+    /// Gender for {{gender}} token substitution: "male", "female", or "neutral"
+    #[serde(default)]
+    pub ai_gender: Option<String>,
 }
 
 /// Suggestion request for guided generation
@@ -270,6 +278,33 @@ pub struct KeywordRequest {
 #[derive(serde::Serialize, Debug)]
 pub struct KeywordResponse {
     pub keywords: Vec<String>,
+}
+
+/// Context notes analysis request
+#[derive(serde::Deserialize, Debug)]
+pub struct ContextNotesAnalyzeRequest {
+    pub messages: Vec<SuggestionContextMessage>,
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    pub existing_notes: Vec<ContextNote>,
+    pub sections: Vec<String>,
+}
+
+/// Per-section analysis result
+#[derive(serde::Serialize, Debug)]
+pub struct SectionAnalysis {
+    pub section: String,
+    pub suggested: String,
+    /// "new" | "current" | "stale"
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Context notes analysis response
+#[derive(serde::Serialize, Debug)]
+pub struct ContextNotesAnalyzeResponse {
+    pub sections: Vec<SectionAnalysis>,
 }
 
 fn default_suggestions_output_contract(count: u32) -> String {
@@ -782,6 +817,188 @@ fn api_generate_keywords(
         })
 }
 
+fn api_analyze_context_notes(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "context-notes" / "analyze")
+        .and(warp::post())
+        .and(warp::body::json::<ContextNotesAnalyzeRequest>())
+        .and_then(move |req: ContextNotesAnalyzeRequest| {
+            let state = state.clone();
+            async move {
+                let session = state.get_active_session()
+                    .ok_or(warp::reject::not_found())?;
+
+                let url = match &session.mode {
+                    crate::state::SessionMode::Spawn { port } => {
+                        format!("http://127.0.0.1:{port}/v1/chat/completions")
+                    }
+                    crate::state::SessionMode::Attach { endpoint } => {
+                        format!("{endpoint}/v1/chat/completions")
+                    }
+                };
+
+                // Build a trimmed conversation excerpt (last 20 messages)
+                let recent: Vec<_> = req.messages.iter().rev().take(20).rev().collect();
+                let convo_text = recent.iter()
+                    .map(|m| format!("{}: {}", m.role, m.content))
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+
+                // Summarise existing notes for the prompt
+                let existing_summary = if req.existing_notes.is_empty() {
+                    "None".to_string()
+                } else {
+                    req.existing_notes.iter()
+                        .map(|n| format!("[{}] {}", n.section, n.content))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
+
+                let sections_list = req.sections.join(", ");
+
+                let system_prompt_block = req.system_prompt
+                    .as_deref()
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|s| format!("\nSYSTEM PROMPT (describes the overall scenario/character setup):\n{s}\n"))
+                    .unwrap_or_default();
+
+                let system_msg = "You are a creative-writing assistant that analyses a conversation and produces structured context notes. \
+                    You MUST return valid JSON only — no markdown fences, no explanation, no extra text. \
+                    Follow the schema exactly.";
+
+                let user_msg = format!(
+                    "Analyse the conversation below and fill in context notes for each section.\n\
+                    Sections to analyse: {sections_list}\n\n\
+                    For each section:\n\
+                    - Write a concise, high-signal note (1-3 sentences) that a language model would find useful.\n\
+                    - Compare your suggestion to the EXISTING note for that section (if any).\n\
+                    - Set \"status\" to:\n\
+                        \"new\"     — no existing note; you are providing a first suggestion\n\
+                        \"current\" — existing note still accurately reflects the conversation\n\
+                        \"stale\"   — existing note is outdated or contradicted by recent events\n\
+                    - If \"stale\", add a short \"reason\" explaining what changed.\n\
+                    {system_prompt_block}\n\
+                    EXISTING NOTES:\n{existing_summary}\n\n\
+                    CONVERSATION (most recent last):\n{convo_text}\n\n\
+                    Return ONLY this JSON structure:\n\
+                    {{\"sections\":[{{\"section\":\"<name>\",\"suggested\":\"<note text>\",\"status\":\"new|current|stale\",\"reason\":\"<only if stale>\"}}]}}"
+                );
+
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(60))
+                    .build()
+                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+
+                let response = client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .json(&serde_json::json!({
+                        "messages": [
+                            {"role": "system", "content": system_msg},
+                            {"role": "user", "content": user_msg},
+                        ],
+                        "stream": true,
+                        "thinking_budget_tokens": 0,
+                        "chat_template_kwargs": {"enable_thinking": false},
+                        "temperature": 0.4,
+                        "max_tokens": 1024,
+                    }))
+                    .send()
+                    .await
+                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+
+                if !response.status().is_success() {
+                    let status = response.status();
+                    let err_body = response.text().await.unwrap_or_default();
+                    return Err(warp::reject::custom(ApiError(format!(
+                        "upstream {}: {}", status, err_body
+                    ))));
+                }
+
+                use futures_util::StreamExt;
+                let mut upstream = response.bytes_stream();
+                let mut buf = String::new();
+                let mut content = String::new();
+
+                while let Some(chunk) = upstream.next().await {
+                    let chunk = chunk.map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                    buf.push_str(&String::from_utf8_lossy(&chunk));
+
+                    while let Some(pos) = buf.find('\n') {
+                        let line = buf[..pos].trim().to_string();
+                        buf = buf[pos + 1..].to_string();
+
+                        let Some(data) = line.strip_prefix("data: ") else { continue; };
+                        let data = data.trim();
+                        if data.is_empty() || data == "[DONE]" { continue; }
+
+                        let event: serde_json::Value = match serde_json::from_str(data) {
+                            Ok(v) => v,
+                            Err(_) => continue,
+                        };
+                        if let Some(delta) = event.get("choices")
+                            .and_then(|c| c.as_array())
+                            .and_then(|c| c.first())
+                            .and_then(|c| c.get("delta"))
+                            .and_then(|d| d.get("content"))
+                            .and_then(|c| c.as_str())
+                        {
+                            content.push_str(delta);
+                        }
+                    }
+                }
+
+                let content = content.trim().to_string();
+                if content.is_empty() {
+                    return Err(warp::reject::custom(ApiError(
+                        "upstream returned empty analysis".to_string(),
+                    )));
+                }
+
+                // Strip markdown fences if present
+                let json_str = {
+                    let s = content.trim();
+                    let s = s.strip_prefix("```json").unwrap_or(s);
+                    let s = s.strip_prefix("```").unwrap_or(s);
+                    let s = s.strip_suffix("```").unwrap_or(s);
+                    s.trim().to_string()
+                };
+
+                let parsed: serde_json::Value = serde_json::from_str(&json_str)
+                    .map_err(|e| warp::reject::custom(ApiError(format!(
+                        "failed to parse analysis JSON: {e} — raw: {json_str}"
+                    ))))?;
+
+                let sections_arr = parsed.get("sections")
+                    .and_then(|v| v.as_array())
+                    .ok_or_else(|| warp::reject::custom(ApiError(
+                        "analysis JSON missing 'sections' array".to_string()
+                    )))?;
+
+                let mut sections: Vec<SectionAnalysis> = Vec::new();
+                for entry in sections_arr {
+                    let section = entry.get("section").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let suggested = entry.get("suggested").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let status = entry.get("status").and_then(|v| v.as_str()).unwrap_or("new").to_string();
+                    let reason = entry.get("reason").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+                    if section.is_empty() || suggested.is_empty() { continue; }
+
+                    sections.push(SectionAnalysis { section, suggested, status, reason });
+                }
+
+                if sections.is_empty() {
+                    return Err(warp::reject::custom(ApiError(
+                        "analysis returned no usable section data".to_string(),
+                    )));
+                }
+
+                Ok::<_, warp::Rejection>(warp::reply::json(&ContextNotesAnalyzeResponse { sections }))
+            }
+        })
+}
+
 pub fn api_routes(
     state: AppState,
     app_config: Arc<AppConfig>,
@@ -854,11 +1071,13 @@ pub fn api_routes(
         .or(put_gpu_env)
         .or(get_settings)
         .or(put_settings);
+    let analyze_context_notes = api_analyze_context_notes(state.clone());
     let chat_routes = browse
         .or(chat)
         .or(chat_abort)
         .or(chat_suggestions)
         .or(generate_keywords)
+        .or(analyze_context_notes)
         .or(get_chat_tabs)
         .or(put_chat_tabs);
     let session_routes = get_sessions
@@ -3206,6 +3425,8 @@ mod tests {
             sidebar_width: 0,
             quick_guide_active: String::new(),
             armed_story_beats: vec![],
+            role_boundary_custom: None,
+            ai_gender: None,
         }
     }
 
@@ -3363,6 +3584,7 @@ mod tests {
             compacted_at: Some(456),
             compacted_message_count_total: Some(84),
             recent_tail_kept: Some(8),
+            thinking_content: None,
         };
 
         let json = serde_json::to_string(&msg).expect("ChatMessage should serialize");

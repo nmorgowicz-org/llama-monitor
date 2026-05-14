@@ -7,14 +7,15 @@ import { setupViewState, chat } from '../core/app-state.js';
 
 export function switchView(targetView) {
     if (setupViewState.view === 'transitioning') return;
+
+    const previousView = setupViewState.view;
     setupViewState.view = 'transitioning';
 
-    // Save previous position when leaving monitor view
-    if (targetView === 'setup' && setupViewState.view !== 'transitioning' && setupViewState.view !== 'setup') {
+    if (targetView === 'setup' && previousView === 'monitor') {
         savePreviousPosition();
     }
 
-    const currentViewEl = document.getElementById('view-' + (setupViewState.view === 'transitioning' ? 'setup' : setupViewState.view));
+    const currentViewEl = document.getElementById('view-' + previousView);
     const targetViewEl = document.getElementById('view-' + targetView);
     const setupStrip = document.getElementById('endpoint-strip-setup');
     const monitorStrip = document.getElementById('endpoint-strip-monitor');

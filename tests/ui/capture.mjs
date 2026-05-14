@@ -226,7 +226,9 @@ async function waitForMonitor(page) {
 }
 
 async function switchTab(page, tabName) {
-    await page.click(`button[data-tab="${tabName}"]`);
+    await page.evaluate((name) => {
+        document.querySelector(`button[data-tab="${name}"]`)?.click();
+    }, tabName);
     await page.waitForFunction((name) => {
         const tab = document.querySelector(`button[data-tab="${name}"]`);
         const pageEl = document.getElementById(`page-${name}`);
@@ -789,50 +791,75 @@ async function scenarioDocs(ctx) {
     await gotoApp(page, baseUrl);
     await attachToServer(page);
 
-    await switchTab(page, 'chat');
-    await sleep(1000);
+    await createFreshChat(page);
+    await sendChatPrompt(
+        page,
+        'Reply in 2 short paragraphs explaining how prompt construction, context window pressure, and generation timing interact in llama.cpp.'
+    );
+    await waitForChatResponse(page);
+    await sleep(1500);
 
-    const styleBtn = await page.$('#chat-style-btn');
+    const styleBtn = await page.$('#btn-chat-style');
     if (styleBtn) {
         await styleBtn.click();
         await sleep(500);
         await captureShot(page, '06-chat-style.png', { fullPage: true });
-        await page.keyboard.press('Escape');
+        await styleBtn.click();
         await sleep(300);
     }
 
-    const compactBtn = await page.$('#chat-compact-btn');
-    if (compactBtn) {
-        await compactBtn.click();
-        await sleep(500);
-        await captureShot(page, '07-compact-settings.png', { fullPage: true });
-        await page.keyboard.press('Escape');
-        await sleep(300);
-    }
-
-    const behaviorBtn = await page.$('#chat-behavior-btn');
+    const behaviorBtn = await page.$('#btn-system-prompt');
     if (behaviorBtn) {
         await behaviorBtn.click();
         await sleep(500);
-        await captureShot(page, '08-behavior-settings.png', { fullPage: true });
+        await captureShot(page, '07-behavior-settings.png', { fullPage: true });
+        await behaviorBtn.click();
+        await sleep(300);
+    }
+
+    const responseBtn = await page.$('#btn-model-params');
+    if (responseBtn) {
+        await responseBtn.click();
+        await sleep(500);
+        await captureShot(page, '08-response-settings.png', { fullPage: true });
+        await responseBtn.click();
+        await sleep(300);
+    }
+
+    const debugBtn = await page.$('#btn-debug-prompt');
+    if (debugBtn) {
+        await debugBtn.click();
+        await page.waitForSelector('#debug-prompt-modal.active', { timeout: 5000 });
+        await sleep(500);
+        const debugScrollState = await page.evaluate(() => {
+            const body = document.querySelector('#debug-prompt-modal .debug-modal-body');
+            return body ? {
+                clientHeight: body.clientHeight,
+                scrollHeight: body.scrollHeight,
+                scrollable: body.scrollHeight > body.clientHeight,
+            } : null;
+        });
+        console.log(`[CAPTURE] Debug modal scroll state: ${JSON.stringify(debugScrollState)}`);
+        await captureShot(page, '08b-prompt-debug.png', { fullPage: true });
         await page.keyboard.press('Escape');
         await sleep(300);
     }
 
-    const settingsBtn = await page.$('button[name="settings"]');
+    const settingsBtn = await page.$('#settings-btn');
     if (settingsBtn) {
         await settingsBtn.click();
+        await page.waitForSelector('#settings-modal.open', { timeout: 5000 });
         await sleep(800);
         await captureShot(page, '09-settings-modal.png', { fullPage: true });
 
-        const perfTab = await page.$('#settings-tab-performance');
+        const perfTab = await page.$('#settings-modal .settings-tab[data-tab="performance"]');
         if (perfTab) {
             await perfTab.click();
             await sleep(500);
             await captureShot(page, '09b-settings-performance.png', { fullPage: true });
         }
 
-        const advTab = await page.$('#settings-tab-advanced');
+        const advTab = await page.$('#settings-modal .settings-tab[data-tab="advanced"]');
         if (advTab) {
             await advTab.click();
             await sleep(500);
@@ -843,13 +870,14 @@ async function scenarioDocs(ctx) {
         await sleep(300);
     }
 
-    const userBtn = await page.$('#user-menu-btn');
+    const userBtn = await page.$('#nav-user-btn');
     if (userBtn) {
         await userBtn.click();
         await sleep(300);
-        const prefsBtn = await page.$('#user-menu-prefs-btn');
+        const prefsBtn = await page.$('#user-menu-preferences');
         if (prefsBtn) {
             await prefsBtn.click();
+            await page.waitForSelector('#user-preferences-modal.open', { timeout: 5000 });
             await sleep(500);
             await captureShot(page, '10-user-preferences.png', { fullPage: true });
             await page.keyboard.press('Escape');
@@ -857,12 +885,103 @@ async function scenarioDocs(ctx) {
         }
     }
 
+    const personaBtn = await page.$('#chat-persona-btn');
+    if (personaBtn) {
+        await personaBtn.click();
+        let personaMenuOpened = true;
+        try {
+            await page.waitForSelector('#chat-persona-menu:not(.hidden)', { timeout: 1200 });
+        } catch {
+            personaMenuOpened = false;
+        }
+        if (personaMenuOpened) {
+            await page.waitForSelector('#chat-persona-menu .chat-persona-menu-item', { timeout: 5000 });
+            await page.click('#chat-persona-menu .chat-persona-menu-item');
+            await sleep(250);
+            await personaBtn.click();
+            await page.waitForSelector('#chat-persona-menu:not(.hidden)', { timeout: 5000 });
+            const manageTemplatesBtn = await page.$('#chat-persona-edit-prompt');
+            if (manageTemplatesBtn) {
+                await manageTemplatesBtn.click();
+            }
+        } else {
+            await page.evaluate(() => {
+                document.getElementById('chat-persona-edit-prompt')?.click();
+            });
+        }
+        await page.waitForSelector('#template-manager-modal.active', { timeout: 5000 });
+        await page.waitForSelector('#template-manager-modal .template-list-item', { timeout: 5000 });
+        await sleep(500);
+        await page.evaluate(() => {
+            document.querySelector('#template-manager-modal .template-list-item')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            const details = document.querySelector('#persona-explicit-policies details');
+            if (details) details.open = true;
+        });
+        await sleep(600);
+        const personaScrollState = await page.evaluate(() => {
+            const content = document.querySelector('#template-manager-modal .template-manager-content');
+            const list = document.querySelector('#template-manager-modal .template-manager-list');
+            const preview = document.querySelector('#template-manager-modal .template-manager-preview');
+            const policy = document.querySelector('#persona-explicit-policies');
+            return {
+                content: content ? {
+                    clientHeight: content.clientHeight,
+                    scrollHeight: content.scrollHeight,
+                    scrollable: content.scrollHeight > content.clientHeight,
+                } : null,
+                list: list ? {
+                    clientHeight: list.clientHeight,
+                    scrollHeight: list.scrollHeight,
+                    scrollable: list.scrollHeight > list.clientHeight,
+                } : null,
+                preview: preview ? {
+                    clientHeight: preview.clientHeight,
+                    scrollHeight: preview.scrollHeight,
+                    scrollable: preview.scrollHeight > preview.clientHeight,
+                } : null,
+                policy: policy ? {
+                    clientHeight: policy.clientHeight,
+                    scrollHeight: policy.scrollHeight,
+                } : null,
+            };
+        });
+        console.log(`[CAPTURE] Persona modal scroll state: ${JSON.stringify(personaScrollState)}`);
+        await captureShot(page, '10b-persona-modal.png', { fullPage: true });
+        await page.click('#template-manager-close');
+        await page.waitForSelector('#template-manager-modal.active', { hidden: true, timeout: 5000 });
+        await sleep(300);
+    }
+
+    const modelsBtn = await page.$('#sidebar-btn-models');
+    if (modelsBtn) {
+        await modelsBtn.click();
+        let modelsOpened = true;
+        try {
+            await page.waitForSelector('#models-modal.open', { timeout: 1200 });
+        } catch {
+            modelsOpened = false;
+        }
+        if (!modelsOpened) {
+            await page.evaluate(() => {
+                window.openModelsModal?.();
+            });
+            await page.waitForSelector('#models-modal.open', { timeout: 5000 });
+        }
+        await sleep(700);
+        await captureShot(page, '10c-models-modal.png', { fullPage: true });
+        await page.click('#models-modal-close');
+        await page.waitForSelector('#models-modal.open', { hidden: true, timeout: 5000 });
+        await sleep(300);
+    }
+
     await page.keyboard.down('Control');
     await page.keyboard.press('/');
     await page.keyboard.up('Control');
+    await page.waitForSelector('#keyboard-shortcuts-modal.open', { timeout: 5000 });
     await sleep(500);
     await captureShot(page, '11-keyboard-shortcuts.png', { fullPage: true });
-    await page.keyboard.press('Escape');
+    await page.click('#keyboard-shortcuts-modal .shortcuts-close');
+    await page.waitForSelector('#keyboard-shortcuts-modal.open', { hidden: true, timeout: 5000 });
     await sleep(300);
 
     await switchTab(page, 'server');

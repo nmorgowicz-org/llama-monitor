@@ -5,21 +5,23 @@
 import { chat, lastLlamaMetrics, monitorState, wsData } from '../core/app-state.js';
 import {
     activeChatTab,
+    getDefaultRoleBoundaryText,
     registerChatViewBindings,
     scheduleChatPersist,
     substituteNames,
     updateChatName,
 } from './chat-state.js';
 import { saveSettings } from './settings.js';
-import { exportChatTab, importChatTab, renderChatMessages } from './chat-render.js';
+import { exportChatTab, importChatTab, renderChatMessages, renderMd } from './chat-render.js';
 import { fetchSummary, sendChat } from './chat-transport.js';
 import {
     loadTemplates,
-    onSystemPromptChange,
     openTemplateManager,
+    syncPersonaPanel,
+    toggleBehaviorPanel,
     toggleExplicitMode,
-    toggleSystemPromptPanel,
 } from './chat-templates.js';
+import { escapeHtml } from '../core/format.js';
 import { showToast, showToastWithActions } from './toast.js';
 
 // Local state — previously on window, migrated to local variables
@@ -28,6 +30,8 @@ let enterToSend = localStorage.getItem('llama-monitor-enter-to-send') !== 'false
 let paramToastTimer = null;
 let chatTelemetryPopoverOpen = false;
 let chatTelemetryPinned = localStorage.getItem('llama-monitor-chat-telemetry-pinned') === 'true';
+let debugInspectorView = 'slice';
+let debugSelectedSliceKey = null;
 
 // ── Model params panel ────────────────────────────────────────────────────────
 
@@ -37,10 +41,10 @@ function toggleModelParamsPanel() {
     const wasOpen = panel.classList.contains('open');
     const isOpen = panel.classList.toggle('open');
     if (isOpen && !wasOpen) {
-        const systemPanel = document.getElementById('chat-system-panel');
+        const behaviorPanel = document.getElementById('chat-behavior-panel');
         const stylePanel = document.getElementById('chat-style-panel');
         const styleLabel = document.getElementById('chat-style-label');
-        if (systemPanel) systemPanel.classList.remove('open');
+        if (behaviorPanel) behaviorPanel.classList.remove('open');
         if (stylePanel) stylePanel.style.display = 'none';
         if (styleLabel) styleLabel.textContent = 'Style';
         if (btn) btn.classList.add('active');
@@ -66,7 +70,7 @@ function syncParamPanelToTab() {
     set('param-min-p', p.min_p, 'param-min-p-val');
     set('param-repeat-penalty', p.repeat_penalty, 'param-repeat-penalty-val');
     const maxTok = document.getElementById('param-max-tokens');
-    if (maxTok) maxTok.value = p.max_tokens ?? '';
+    if (maxTok) maxTok.value = p.max_tokens ?? 4096;
     const streamTimeout = document.getElementById('param-stream-timeout');
     if (streamTimeout) streamTimeout.value = p.stream_timeout ?? 120;
 }
@@ -113,7 +117,7 @@ function resetParamsToDefaults() {
         top_k: 40,
         min_p: 0.01,
         repeat_penalty: 1.0,
-        max_tokens: null,
+        max_tokens: 4096,
         stream_timeout: 120,
     };
     tab.updated_at = Date.now();
@@ -138,9 +142,7 @@ function duplicateTabSettings(sourceId) {
     scheduleChatPersist();
     syncParamPanelToTab();
     updateParamsDirtyIndicator();
-    const indicator = document.getElementById('system-prompt-indicator');
-    indicator.style.display = target.system_prompt ? 'inline' : 'none';
-    document.getElementById('chat-system-input').value = target.system_prompt;
+    syncPersonaPanel();
     showToast('Settings copied from "' + source.name + '"', 'success');
 }
 
@@ -319,7 +321,7 @@ export async function compactChatTab(tab, keepTail = null, summarize = true) {
             previousMemory: existingMemory,
             recentTailMessages: kept.slice(-8),
             domain: memoryDomain,
-            systemPrompt: substituteNames(tab.system_prompt || '', tab.ai_name, tab.user_name),
+            systemPrompt: substituteNames(tab.system_prompt || '', tab.ai_name, tab.user_name, tab.ai_gender),
             contextNotes: tab.context_notes || [],
         });
         if (summary) {
@@ -387,13 +389,338 @@ function setCompactButtonBusy(isBusy) {
 function onManualCompact() {
     const tab = activeChatTab();
     if (!tab) return;
-    compactChatTab(tab);
+    showCompactConfirmation(tab);
+}
+
+function showCompactConfirmation(tab, isAuto = false) {
+    const msgs = tab.messages;
+    const tombstones = msgs.filter(m => m.compaction_marker);
+    const conversational = msgs.filter(m => m.role !== 'system' && !m.compaction_marker);
+
+    const capacity = lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
+    const resolvedKeepTail = capacity > 0
+        ? calcKeepTailForCapacity(conversational, capacity)
+        : 15;
+
+    if (conversational.length <= resolvedKeepTail) {
+        showToast('Nothing to compact', 'info');
+        return;
+    }
+
+    const droppedCount = conversational.length - resolvedKeepTail;
+    const keptCount = resolvedKeepTail;
+    const dropped = conversational.slice(0, droppedCount);
+    const kept = conversational.slice(-keptCount);
+    const tokensFreed = dropped.reduce((sum, m) => sum + Math.round((m.input_tokens || 0) + (m.output_tokens || 0)), 0);
+    const ctxPct = tab.last_ctx_pct || 0;
+    const summarize = tab.auto_compact_summarize !== false;
+    const domain = inferCompactionDomain(tab, dropped, kept);
+    const existingMemory = tombstones.length > 0;
+    let cachedSummary = null;
+    let originalSummary = null;
+
+   const overlay = document.createElement('div');
+    overlay.className = 'compact-confirm-overlay';
+    // eslint-disable-next-line no-unsanitized/property -- all values from local tab state (numeric counts, boolean flags, domain enum); no user-controlled network data
+    overlay.innerHTML = `
+        <div class="compact-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="compact-confirm-title">
+            <div class="compact-confirm-header">
+                <div class="compact-confirm-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+                        <line x1="15" y1="9" x2="21" y2="3"/><line x1="3" y1="21" x2="9" y2="15"/>
+                    </svg>
+                </div>
+                <h2 id="compact-confirm-title">${isAuto ? 'Auto-Compact Triggered' : 'Compact Context'}</h2>
+                <button class="compact-confirm-close" aria-label="Close" title="Close">&times;</button>
+            </div>
+            <div class="compact-confirm-body">
+                <div class="compact-confirm-warning">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    <span>This will permanently remove older messages from the visible chat. The model will no longer see them directly.</span>
+                </div>
+                <div class="compact-confirm-stats">
+                    <div class="compact-stat">
+                        <span class="compact-stat-label">Total Messages</span>
+                        <span class="compact-stat-value">${conversational.length}</span>
+                    </div>
+                    <div class="compact-stat">
+                        <span class="compact-stat-label">Messages Dropped</span>
+                        <span class="compact-stat-value compact-stat-danger">${droppedCount}</span>
+                    </div>
+                    <div class="compact-stat">
+                        <span class="compact-stat-label">Messages Kept</span>
+                        <span class="compact-stat-value compact-stat-safe">${keptCount}</span>
+                    </div>
+                    <div class="compact-stat">
+                        <span class="compact-stat-label">Est. Tokens Freed</span>
+                        <span class="compact-stat-value">${tokensFreed > 0 ? `${(tokensFreed / 1000).toFixed(1)}k` : '—'}</span>
+                    </div>
+                    <div class="compact-stat">
+                        <span class="compact-stat-label">Context Usage</span>
+                        <span class="compact-stat-value ${ctxPct > 80 ? 'compact-stat-danger' : ctxPct > 60 ? 'compact-stat-warn' : ''}">${ctxPct > 0 ? `${ctxPct.toFixed(1)}%` : '—'}</span>
+                    </div>
+                    <div class="compact-stat">
+                        <span class="compact-stat-label">Model Capacity</span>
+                        <span class="compact-stat-value">${capacity > 0 ? `${(capacity / 1000).toFixed(0)}k` : '—'}</span>
+                    </div>
+                </div>
+                ${summarize ? `
+                <div class="compact-confirm-preview">
+                    <div class="compact-preview-header">
+                        <h3>Summary Preview</h3>
+                        <div class="compact-preview-actions" style="display:none;">
+                            <button class="compact-preview-btn compact-preview-edit" title="Edit summary">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                            </button>
+                            <button class="compact-preview-btn compact-preview-save" title="Save changes" style="display:none;">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                            </button>
+                            <button class="compact-preview-btn compact-preview-cancel-edit" title="Cancel edit" style="display:none;">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                            <button class="compact-preview-btn compact-preview-restore" title="Restore default" style="display:none;">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="compact-preview-status">
+                        <span class="compact-preview-dot"></span>
+                        <span class="compact-preview-label">Generating summary from ${droppedCount} dropped messages…</span>
+                    </div>
+                    <div class="compact-preview-skeleton">
+                        <div class="compact-skeleton-line" style="width:60%"></div>
+                        <div class="compact-skeleton-line" style="width:85%"></div>
+                        <div class="compact-skeleton-line" style="width:45%"></div>
+                        <div class="compact-skeleton-line" style="width:72%"></div>
+                        <div class="compact-skeleton-line" style="width:55%"></div>
+                        <div class="compact-skeleton-line" style="width:68%"></div>
+                    </div>
+                    <div class="compact-preview-content" style="display:none;"></div>
+                    <textarea class="compact-preview-editor" style="display:none;" rows="10"></textarea>
+                </div>` : ''}
+                <div class="compact-confirm-details">
+                    <button class="compact-details-toggle" type="button">
+                        <span class="compact-details-title">What happens next</span>
+                        <svg class="compact-details-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </button>
+                    <div class="compact-details-body">
+                        <ul>
+                            <li>
+                                <span class="detail-icon ${summarize ? 'detail-icon-active' : 'detail-icon-inactive'}">${summarize ? '●' : '○'}</span>
+                                <span><strong>AI Summarization</strong> ${summarize ? 'enabled' : 'disabled'} — ${summarize ? 'The model will generate a rolling memory summary preserving key facts, decisions, and momentum from the dropped messages.' : 'A simple marker will be inserted noting how many messages were removed.'}</span>
+                            </li>
+                            <li>
+                                <span class="detail-icon detail-icon-info">●</span>
+                                <span><strong>Domain: ${domain}</strong> — ${domain === 'creative' ? 'Summary will prioritize characters, setting, plot beats, world rules, and emotional state.' : domain === 'coding' ? 'Summary will prioritize project goals, technical decisions, file names, APIs, and unresolved tasks.' : 'Summary will prioritize goals, facts, commitments, constraints, and unresolved questions.'}</span>
+                            </li>
+                            <li>
+                                <span class="detail-icon ${existingMemory ? 'detail-icon-active' : 'detail-icon-inactive'}">${existingMemory ? '●' : '○'}</span>
+                                <span><strong>Existing Memory</strong> — ${existingMemory ? `${tombstones.length} prior compaction${tombstones.length > 1 ? 's' : ''} will be merged into the new summary.` : 'This is the first compaction for this chat.'}</span>
+                            </li>
+                            <li>
+                                <span class="detail-icon detail-icon-info">●</span>
+                                <span><strong>Context Notes</strong> — Your ${tab.context_notes?.filter(n => n.content?.trim).length || 0} note${(tab.context_notes?.filter(n => n.content?.trim).length || 0) !== 1 ? 's' : ''} will remain active and visible in the sidebar.</span>
+                            </li>
+                            <li>
+                                <span class="detail-icon detail-icon-info">●</span>
+                                <span><strong>System Prompt</strong> — Your system/persona prompt will be preserved unchanged.</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="compact-confirm-footer">
+                ${isAuto ? `<button class="btn btn-secondary compact-confirm-defer">Defer</button>` : ''}
+                <button class="btn btn-secondary compact-confirm-cancel">Cancel</button>
+                <button class="btn btn-danger compact-confirm-ok" disabled>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+                        <line x1="15" y1="9" x2="21" y2="3"/><line x1="3" y1="21" x2="9" y2="15"/>
+                    </svg>
+                    ${summarize ? 'Generating…' : 'Compact Now'}
+                </button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    const close = () => {
+        overlay.classList.add('closing');
+        overlay.classList.remove('visible');
+        setTimeout(() => overlay.remove(), 300);
+    };
+
+    // Collapsible details
+    const detailsToggle = overlay.querySelector('.compact-details-toggle');
+    const detailsBody = overlay.querySelector('.compact-details-body');
+    const detailsChevron = overlay.querySelector('.compact-details-chevron');
+    if (detailsToggle && detailsBody && detailsChevron) {
+        detailsBody.style.maxHeight = '0';
+        detailsBody.style.overflow = 'hidden';
+        detailsToggle.addEventListener('click', () => {
+            const isExpanded = detailsChevron.classList.toggle('expanded');
+            detailsBody.style.maxHeight = isExpanded ? `${detailsBody.scrollHeight}px` : '0';
+            detailsBody.style.transition = `max-height 0.25s ease`;
+        });
+    }
+
+    const okBtn = overlay.querySelector('.compact-confirm-ok');
+    const cancelBtn = overlay.querySelector('.compact-confirm-cancel');
+    overlay.querySelector('.compact-confirm-close').addEventListener('click', close);
+    cancelBtn.addEventListener('click', close);
+
+    // Summary preview handlers
+    const previewActions = overlay.querySelector('.compact-preview-actions');
+    const editBtn = overlay.querySelector('.compact-preview-edit');
+    const saveBtn = overlay.querySelector('.compact-preview-save');
+    const cancelEditBtn = overlay.querySelector('.compact-preview-cancel-edit');
+    const restoreBtn = overlay.querySelector('.compact-preview-restore');
+    const previewContent = overlay.querySelector('.compact-preview-content');
+    const previewEditor = overlay.querySelector('.compact-preview-editor');
+
+    if (summarize) {
+        const existingMemoryText = tombstones
+            .map(extractRollingMemory)
+            .filter(Boolean)
+            .join('\n\n');
+        fetchSummary(dropped, {
+            previousMemory: existingMemoryText,
+            recentTailMessages: kept.slice(-8),
+            domain: domain,
+            systemPrompt: substituteNames(tab.system_prompt || '', tab.ai_name, tab.user_name, tab.ai_gender),
+            contextNotes: tab.context_notes || [],
+        }).then(summary => {
+            cachedSummary = summary || null;
+            originalSummary = cachedSummary;
+            const skeleton = overlay.querySelector('.compact-preview-skeleton');
+            const status = overlay.querySelector('.compact-preview-status');
+            if (skeleton) skeleton.style.display = 'none';
+            if (status) status.remove();
+            if (previewContent) {
+                previewContent.style.display = 'block';
+                // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked in trusted local context
+                previewContent.innerHTML = cachedSummary
+                    ? renderMd(cachedSummary)
+                    : '<p class="compact-preview-fallback">Summary generation failed — compact will still proceed with a basic marker.</p>';
+            }
+            if (previewActions) previewActions.style.display = 'flex';
+            okBtn.disabled = false;
+            okBtn.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+                    <line x1="15" y1="9" x2="21" y2="3"/><line x1="3" y1="21" x2="9" y2="15"/>
+                </svg>
+                Compact Now
+            `;
+        }).catch(() => {
+            const skeleton = overlay.querySelector('.compact-preview-skeleton');
+            const status = overlay.querySelector('.compact-preview-status');
+            if (skeleton) skeleton.style.display = 'none';
+            if (status) status.remove();
+            if (previewContent) {
+                previewContent.style.display = 'block';
+                previewContent.innerHTML = '<p class="compact-preview-fallback">Summary preview failed — compact will still proceed with a basic marker.</p>';
+            }
+            okBtn.disabled = false;
+            okBtn.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+                    <line x1="15" y1="9" x2="21" y2="3"/><line x1="3" y1="21" x2="9" y2="15"/>
+                </svg>
+                Compact Now
+            `;
+        });
+
+        // Edit mode
+        if (editBtn) {
+            editBtn.addEventListener('click', () => {
+                editBtn.style.display = 'none';
+                restoreBtn.style.display = 'inline-flex';
+                if (saveBtn) saveBtn.style.display = 'inline-flex';
+                if (cancelEditBtn) cancelEditBtn.style.display = 'inline-flex';
+                if (previewContent && previewEditor) {
+                    previewContent.style.display = 'none';
+                    previewEditor.style.display = 'block';
+                    previewEditor.value = cachedSummary || '';
+                }
+            });
+        }
+        if (saveBtn) {
+            saveBtn.addEventListener('click', () => {
+                if (previewEditor && previewContent) {
+                    cachedSummary = previewEditor.value.trim() || cachedSummary;
+                    // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked in trusted local context
+                    previewContent.innerHTML = renderMd(cachedSummary);
+                    previewEditor.style.display = 'none';
+                    previewContent.style.display = 'block';
+                }
+                editBtn.style.display = 'inline-flex';
+                saveBtn.style.display = 'none';
+                cancelEditBtn.style.display = 'none';
+                restoreBtn.style.display = 'none';
+            });
+        }
+        if (cancelEditBtn) {
+            cancelEditBtn.addEventListener('click', () => {
+                if (previewEditor && previewContent) {
+                    previewEditor.style.display = 'none';
+                    previewContent.style.display = 'block';
+                }
+                editBtn.style.display = 'inline-flex';
+                saveBtn.style.display = 'none';
+                cancelEditBtn.style.display = 'none';
+                restoreBtn.style.display = 'none';
+            });
+        }
+        if (restoreBtn) {
+            restoreBtn.addEventListener('click', () => {
+                if (originalSummary && previewEditor) {
+                    previewEditor.value = originalSummary;
+                }
+            });
+        }
+    }
+
+    // Defer button (auto-compact only)
+    const deferBtn = overlay.querySelector('.compact-confirm-defer');
+    if (deferBtn) {
+        deferBtn.addEventListener('click', () => {
+            tab._compactDeferred = true;
+            close();
+            showToast('Compaction deferred — will check again after next response', 'info');
+        });
+    }
+
+    okBtn.addEventListener('click', () => {
+        close();
+        setTimeout(() => {
+            if (cachedSummary) {
+                tab._compactPreviewSummary = cachedSummary;
+            }
+            compactChatTab(tab, null, summarize);
+        }, 300);
+    });
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) close();
+    });
 }
 
 // Called after each response (via view binding) and after model switch.
 // Fires compaction if auto_compact is on and the tab has hit its threshold.
 export async function checkAutoCompact(tab) {
     if (!tab || !tab.auto_compact || chat.compactionInProgress || chat.busy) return;
+    if (tab._compactDeferred) {
+        tab._compactDeferred = false;
+        return;
+    }
     const capacity = lastLlamaMetrics?.context_capacity_tokens || lastLlamaMetrics?.kv_cache_max || 0;
     if (!capacity) return;
 
@@ -414,7 +741,7 @@ export async function checkAutoCompact(tab) {
     }
 
     if (shouldCompact) {
-        await compactChatTab(tab, null, !!tab.auto_compact_summarize);
+        showCompactConfirmation(tab, true);
     }
 }
 
@@ -686,9 +1013,9 @@ function toggleStylePanel() {
         panel.querySelectorAll('.chat-style-card').forEach(card => {
             card.classList.toggle('active', card.dataset.style === current);
         });
-        const systemPanel = document.getElementById('chat-system-panel');
+        const behaviorPanel = document.getElementById('chat-behavior-panel');
         const paramsPanel = document.getElementById('chat-params-panel');
-        if (systemPanel) systemPanel.classList.remove('open');
+        if (behaviorPanel) behaviorPanel.classList.remove('open');
         if (paramsPanel) paramsPanel.classList.remove('open');
         const styleLabel = document.getElementById('chat-style-label');
         if (styleLabel) styleLabel.textContent = 'Style';
@@ -786,6 +1113,59 @@ function loadChatNames() {
 
     if (aiInput) aiInput.value = tab.ai_name || '';
     if (userInput) userInput.value = tab.user_name || '';
+    syncPersonaPanel();
+}
+
+// ── Gender pill handler ───────────────────────────────────────────────────────
+
+function onGenderChange(gender) {
+    const tab = activeChatTab();
+    if (!tab) return;
+    tab.ai_gender = gender;
+    tab.updated_at = Date.now();
+    scheduleChatPersist();
+    document.querySelectorAll('.chat-gender-pill').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.gender === gender);
+    });
+    showToast(`Gender: ${gender.charAt(0).toUpperCase() + gender.slice(1)}`, 'success');
+}
+
+// ── Role boundary handlers ────────────────────────────────────────────────────
+
+let roleBoundaryToastTimer = null;
+
+function onRoleBoundaryChange() {
+    const tab = activeChatTab();
+    if (!tab) return;
+    const input = document.getElementById('chat-role-boundary-input');
+    if (!input) return;
+    const defaultText = getDefaultRoleBoundaryText(tab);
+    const typed = input.value.trim();
+    tab.role_boundary_custom = (typed && typed !== defaultText) ? typed : null;
+    tab.updated_at = Date.now();
+    scheduleChatPersist();
+    clearTimeout(roleBoundaryToastTimer);
+    roleBoundaryToastTimer = setTimeout(() => showToast('Role boundary saved', 'success'), 1500);
+}
+
+function resetRoleBoundaryToDefault() {
+    const tab = activeChatTab();
+    if (!tab) return;
+    tab.role_boundary_custom = null;
+    tab.updated_at = Date.now();
+    scheduleChatPersist();
+    const input = document.getElementById('chat-role-boundary-input');
+    if (input) input.value = getDefaultRoleBoundaryText(tab);
+    showToast('Role boundary reset to default', 'success');
+}
+
+function toggleRoleBoundarySection() {
+    const body = document.getElementById('chat-role-boundary-body');
+    const chevron = document.getElementById('chat-role-boundary-chevron');
+    if (!body) return;
+    const isOpen = body.style.display !== 'none';
+    body.style.display = isOpen ? 'none' : 'block';
+    if (chevron) chevron.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(90deg)';
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -818,11 +1198,11 @@ export function initChatParams() {
     });
 
     // Bind chat header buttons
-    document.getElementById('btn-system-prompt')?.addEventListener('click', (e) => {
-    const btn = document.getElementById('btn-system-prompt');
-    const panel = document.getElementById('chat-system-panel');
+    document.getElementById('btn-behavior')?.addEventListener('click', (e) => {
+    const btn = document.getElementById('btn-behavior');
+    const panel = document.getElementById('chat-behavior-panel');
     const wasOpen = panel.classList.contains('open');
-    toggleSystemPromptPanel();
+    toggleBehaviorPanel();
     setTimeout(() => {
         const isOpen = panel.classList.contains('open');
         const styleBtn = document.getElementById('btn-chat-style');
@@ -843,11 +1223,11 @@ export function initChatParams() {
     toggleModelParamsPanel();
     setTimeout(() => {
         const isOpen = panel.classList.contains('open');
-        const systemBtn = document.getElementById('btn-system-prompt');
+        const behaviorBtn = document.getElementById('btn-behavior');
         const styleBtn = document.getElementById('btn-chat-style');
         if (isOpen && !wasOpen) {
             btn.classList.add('active');
-            if (systemBtn) systemBtn.classList.remove('active');
+            if (behaviorBtn) behaviorBtn.classList.remove('active');
             if (styleBtn) styleBtn.classList.remove('active');
         } else if (!isOpen && wasOpen) {
             btn.classList.remove('active');
@@ -860,11 +1240,11 @@ export function initChatParams() {
     setTimeout(() => {
         const panel = document.getElementById('chat-style-panel');
         const isOpen = panel.style.display !== 'none';
-        const systemBtn = document.getElementById('btn-system-prompt');
+        const behaviorBtn = document.getElementById('btn-behavior');
         const paramsBtn = document.getElementById('btn-model-params');
         if (isOpen) {
             btn.classList.add('active');
-            if (systemBtn) systemBtn.classList.remove('active');
+            if (behaviorBtn) behaviorBtn.classList.remove('active');
             if (paramsBtn) paramsBtn.classList.remove('active');
         } else {
             btn.classList.remove('active');
@@ -917,10 +1297,18 @@ export function initChatParams() {
         });
     }
 
-    // Bind system prompt panel
+    // Bind persona panel (formerly "system prompt panel")
     document.getElementById('chat-copy-settings-btn')?.addEventListener('click', showCopySettingsDropdown);
-    document.getElementById('chat-explicit-toggle-settings')?.addEventListener('click', toggleExplicitMode);
-    document.getElementById('chat-system-input')?.addEventListener('input', onSystemPromptChange);
+    document.getElementById('chat-explicit-toggle-behavior')?.addEventListener('click', toggleExplicitMode);
+    document.getElementById('chat-open-template-mgr')?.addEventListener('click', () => openTemplateManager(activeChatTab()?.active_template_id || null));
+    document.getElementById('chat-role-boundary-toggle')?.addEventListener('click', toggleRoleBoundarySection);
+    document.getElementById('chat-role-boundary-input')?.addEventListener('input', onRoleBoundaryChange);
+    document.getElementById('chat-role-boundary-reset')?.addEventListener('click', resetRoleBoundaryToDefault);
+    document.querySelectorAll('.chat-gender-pill').forEach(btn => {
+        btn.addEventListener('click', () => onGenderChange(btn.dataset.gender));
+    });
+
+    // Bind compact / context settings (in model panel)
     document.getElementById('chat-msg-limit')?.addEventListener('input', (e) => onMessageLimitChange(+e.target.value));
     document.getElementById('chat-auto-compact')?.addEventListener('change', (e) => onAutoCompactChange(e.target.checked));
     document.getElementById('compact-mode-percent')?.addEventListener('click', () => onCompactModeChange('percent'));
@@ -938,7 +1326,7 @@ export function initChatParams() {
     document.getElementById('param-top-k')?.addEventListener('input', (e) => onParamChange('top_k', +e.target.value));
     document.getElementById('param-min-p')?.addEventListener('input', (e) => onParamChange('min_p', +e.target.value));
     document.getElementById('param-repeat-penalty')?.addEventListener('input', (e) => onParamChange('repeat_penalty', +e.target.value));
-    document.getElementById('param-max-tokens')?.addEventListener('input', (e) => onParamChange('max_tokens', e.target.value ? +e.target.value : null));
+    document.getElementById('param-max-tokens')?.addEventListener('input', (e) => onParamChange('max_tokens', e.target.value ? +e.target.value : 4096));
     document.getElementById('param-stream-timeout')?.addEventListener('input', (e) => onParamChange('stream_timeout', +e.target.value));
 
     // Bind enter toggle
@@ -1062,8 +1450,8 @@ export function registerPersonaMenuBindings() {
     editBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
         menu.classList.add('hidden');
-        const btnSystemPrompt = document.getElementById('btn-system-prompt');
-        if (btnSystemPrompt) btnSystemPrompt.classList.add('active');
+        const btnBehavior = document.getElementById('btn-behavior');
+        if (btnBehavior) btnBehavior.classList.add('active');
         const activeId = activeChatTab()?.active_template_id || null;
         openTemplateManager(activeId);
     });
@@ -1201,6 +1589,7 @@ function createPersonaItem(persona, isActive) {
             tab.active_template_id = persona.id;
             tab.updated_at = Date.now();
             scheduleChatPersist?.();
+            syncPersonaPanel();
         }
     });
     
@@ -1244,3 +1633,546 @@ export function updatePersonaMenuName() {
         }
     });
 }
+
+// ── Debug Prompt Modal ─────────────────────────────────────────────────────
+
+const DEBUG_COLORS = [
+    'rgba(99, 102, 241, 0.7)',
+    'rgba(139, 92, 246, 0.7)',
+    'rgba(236, 72, 153, 0.7)',
+    'rgba(244, 114, 182, 0.7)',
+    'rgba(45, 212, 191, 0.7)',
+    'rgba(34, 211, 238, 0.7)',
+    'rgba(251, 191, 36, 0.7)',
+    'rgba(251, 146, 60, 0.7)',
+];
+
+function formatDebugTokens(value) {
+    const n = Number(value) || 0;
+    if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+    return `${n}`;
+}
+
+function formatDebugLabel(label) {
+    return String(label || '—')
+        .toLowerCase()
+        .split(/[\s_-]+/)
+        .filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+}
+
+function formatDebugShare(value) {
+    const n = Number(value) || 0;
+    if (n === 0) return '0%';
+    if (n < 1) return `${n.toFixed(1)}%`;
+    if (n < 10) return `${n.toFixed(1)}%`;
+    return `${Math.round(n)}%`;
+}
+
+function getDebugUtilization(total, capacity) {
+    return capacity > 0 ? (total / capacity) * 100 : 0;
+}
+
+function getDebugPressureState(utilization) {
+    if (utilization >= 90) return { label: 'Critical', tone: 'critical' };
+    if (utilization >= 75) return { label: 'Hot', tone: 'warning' };
+    if (utilization >= 55) return { label: 'Warm', tone: 'active' };
+    return { label: 'Healthy', tone: 'calm' };
+}
+
+function getDebugSliceKey(label) {
+    return String(label || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+}
+
+function formatDebugTimestamp(value) {
+    if (!value) return '—';
+    try {
+        return new Date(value).toLocaleTimeString([], {
+            hour: 'numeric',
+            minute: '2-digit',
+            second: '2-digit',
+        });
+    } catch {
+        return '—';
+    }
+}
+
+async function copyDebugText(text, successMessage) {
+    try {
+        await navigator.clipboard.writeText(text || '');
+        showToast(successMessage, 'success');
+    } catch (err) {
+        showToast(`Copy failed: ${err.message}`, 'error');
+    }
+}
+
+function getDebugSegments(data) {
+    const total = Number(data.totalTokens) || 1;
+    const capacity = Number(data.capacity) || 0;
+    const remaining = Math.max(0, capacity - total);
+    const segments = [];
+    let colorIdx = 0;
+
+    for (const part of data.systemPartsDetailed || []) {
+        segments.push({
+            key: getDebugSliceKey(part.label),
+            label: formatDebugLabel(part.label),
+            rawLabel: part.label,
+            tokens: Number(part.tokens) || 0,
+            color: DEBUG_COLORS[colorIdx % DEBUG_COLORS.length],
+            kind: 'system',
+            content: part.content || '',
+        });
+        colorIdx++;
+    }
+
+    const historyMessages = data.historyMessagesDetailed || [];
+    const conversationPreview = historyMessages
+        .slice(-4)
+        .map(message => `${message.role.toUpperCase()}: ${message.content}`)
+        .join('\n\n');
+
+    segments.push({
+        key: 'conversation',
+        label: 'Conversation',
+        rawLabel: 'Conversation',
+        tokens: Number(data.historyTokens) || 0,
+        color: DEBUG_COLORS[colorIdx % DEBUG_COLORS.length],
+        kind: 'history',
+        content: conversationPreview,
+    });
+    colorIdx++;
+
+    if (remaining > 0) {
+        segments.push({
+            key: 'remaining',
+            label: 'Remaining',
+            rawLabel: 'Remaining',
+            tokens: remaining,
+            color: 'rgba(255,255,255,0.06)',
+            kind: 'remaining',
+            content: '',
+        });
+    }
+
+    return segments;
+}
+
+function ensureDebugSelection(data) {
+    const segments = getDebugSegments(data).filter(seg => seg.kind !== 'remaining');
+    if (!segments.length) {
+        debugSelectedSliceKey = null;
+        return;
+    }
+
+    if (!debugSelectedSliceKey || !segments.some(seg => seg.key === debugSelectedSliceKey)) {
+        const firstSystem = segments.find(seg => seg.kind === 'system');
+        debugSelectedSliceKey = firstSystem?.key || segments[0].key;
+    }
+}
+
+function openDebugModal() {
+    const overlay = document.getElementById('debug-prompt-modal');
+    if (!overlay) return;
+    debugInspectorView = 'slice';
+    document.getElementById('debug-payload-section')?.classList.add('hidden');
+    overlay.classList.add('active');
+    populateDebugModal();
+}
+
+function closeDebugModal() {
+    const overlay = document.getElementById('debug-prompt-modal');
+    if (!overlay) return;
+    const modal = overlay.querySelector('.debug-modal');
+    if (modal) modal.classList.add('closing');
+    setTimeout(() => {
+        overlay.classList.remove('active');
+        if (modal) modal.classList.remove('closing');
+    }, 200);
+}
+
+function populateDebugModal() {
+    const tab = activeChatTab();
+    const data = tab?._lastDebugData;
+    const emptyState = document.getElementById('debug-empty-state');
+    const content = document.getElementById('debug-content');
+
+    if (!data) {
+        if (emptyState) emptyState.classList.remove('hidden');
+        if (content) content.classList.add('hidden');
+        return;
+    }
+
+    if (emptyState) emptyState.classList.add('hidden');
+    if (content) content.classList.remove('hidden');
+
+    ensureDebugSelection(data);
+    populateDebugSummary(data);
+    populateCtxBreakdown(data);
+    populateTiming(data);
+    populateParams(data);
+    populateDebugInspector(data);
+    populatePayloadJson(data);
+}
+
+function populateDebugSummary(data) {
+    const total = Number(data.totalTokens) || 0;
+    const capacity = Number(data.capacity) || 0;
+    const remaining = Math.max(0, capacity - total);
+    const utilization = getDebugUtilization(total, capacity);
+    const pressure = getDebugPressureState(utilization);
+    const systemEntries = Object.entries(data.systemTokens || {});
+    const dominantEntry = [
+        ...systemEntries.map(([label, tokens]) => ({ label: formatDebugLabel(label), tokens: Number(tokens) || 0 })),
+        { label: 'Conversation', tokens: Number(data.historyTokens) || 0 },
+    ].sort((a, b) => b.tokens - a.tokens)[0];
+
+    const setText = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    };
+
+    setText('debug-stat-utilization', capacity ? `${utilization.toFixed(1)}%` : '—');
+    setText('debug-stat-total', formatDebugTokens(total));
+    setText('debug-stat-headroom', capacity ? `${formatDebugTokens(remaining)} tok` : '—');
+    setText('debug-stat-dominant', dominantEntry?.label || '—');
+
+    const heroChip = document.getElementById('debug-hero-chip');
+    if (heroChip) {
+        heroChip.textContent = pressure.label;
+        heroChip.dataset.tone = pressure.tone;
+    }
+
+    const heroText = document.getElementById('debug-hero-text');
+    if (heroText) {
+        if (!capacity) {
+            heroText.textContent = 'Capacity was unavailable for this request, so the debug view is emphasizing composition and timing instead of headroom.';
+        } else {
+            heroText.textContent = `${formatDebugTokens(remaining)} tokens of headroom remain after the last send. ${dominantEntry?.label || 'Conversation'} is currently the largest slice of the window.`;
+        }
+    }
+}
+
+function populateCtxBreakdown(data) {
+    const bar = document.getElementById('debug-ctx-bar');
+    const legend = document.getElementById('debug-ctx-legend');
+    const summary = document.getElementById('debug-ctx-summary');
+    const badge = document.getElementById('debug-ctx-badge');
+    if (!bar || !legend || !summary) return;
+
+    const total = Number(data.totalTokens) || 1;
+    const capacity = Number(data.capacity) || 0;
+    const utilization = getDebugUtilization(total, capacity);
+    const pressure = getDebugPressureState(utilization);
+    const segments = getDebugSegments(data);
+
+    const denominator = capacity || total;
+    const dominantUsed = segments
+        .filter(seg => seg.kind !== 'remaining')
+        .sort((a, b) => b.tokens - a.tokens)[0];
+    const usedTotal = segments
+        .filter(seg => seg.kind !== 'remaining')
+        .reduce((sum, seg) => sum + (Number(seg.tokens) || 0), 0);
+    const historyShare = usedTotal > 0 ? ((Number(data.historyTokens) || 0) / usedTotal) * 100 : 0;
+    const systemTotal = Object.values(data.systemTokens || {}).reduce((sum, val) => sum + (Number(val) || 0), 0);
+    const systemShare = usedTotal > 0 ? (systemTotal / usedTotal) * 100 : 0;
+
+    // eslint-disable-next-line no-unsanitized/property -- labels are escaped; counts and percentages are numeric
+    bar.innerHTML = segments.map(seg => {
+        const pct = Math.max(0, Math.round((seg.tokens / denominator) * 100));
+        const height = Math.max(28, Math.round((seg.tokens / denominator) * 240));
+        const label = escapeHtml(seg.label);
+        const activeClass = seg.key === debugSelectedSliceKey ? ' active' : '';
+        return `<button type="button" class="debug-ctx-segment debug-ctx-segment-${seg.kind}${activeClass}" data-debug-slice="${escapeHtml(seg.key)}" style="height:${height}px; --debug-segment-color:${seg.color};" title="${label}: ${seg.tokens} tokens (${pct}%)">
+            <div class="debug-ctx-segment-sheen"></div>
+            <span class="debug-ctx-label">${label}</span>
+            <span class="debug-ctx-tokens">${formatDebugTokens(seg.tokens)} tok</span>
+        </button>`;
+    }).join('');
+
+    // eslint-disable-next-line no-unsanitized/property -- labels are escaped; token counts are numeric
+    legend.innerHTML = segments.map(seg =>
+        `<button type="button" class="debug-ctx-legend-item${seg.key === debugSelectedSliceKey ? ' active' : ''}" data-debug-slice="${escapeHtml(seg.key)}">
+            <span class="debug-ctx-legend-swatch" style="background:${seg.color}"></span>
+            <span class="debug-ctx-legend-copy">
+                <strong>${escapeHtml(seg.label)}</strong>
+                <span>${formatDebugTokens(seg.tokens)} tok</span>
+            </span>
+        </button>`
+    ).join('');
+
+    // eslint-disable-next-line no-unsanitized/property -- labels are escaped; metric values are derived numbers
+    summary.innerHTML = `
+        <div class="debug-ctx-summary-card" data-tone="${pressure.tone}">
+            <span class="debug-ctx-summary-label">Pressure</span>
+            <strong>${pressure.label}</strong>
+            <p>${capacity ? `${utilization.toFixed(1)}% of the available context is currently occupied.` : 'Capacity is unknown, so utilization is estimated from the captured prompt only.'}</p>
+        </div>
+        <div class="debug-ctx-summary-card">
+            <span class="debug-ctx-summary-label">Dominant Slice</span>
+            <strong>${escapeHtml(dominantUsed?.label || '—')}</strong>
+            <p>${dominantUsed ? `${formatDebugTokens(dominantUsed.tokens)} tokens, ${Math.round((dominantUsed.tokens / Math.max(usedTotal, 1)) * 100)}% of the used prompt.` : 'No prompt slices were recorded.'}</p>
+        </div>
+        <div class="debug-ctx-summary-card">
+            <span class="debug-ctx-summary-label">Composition</span>
+            <strong>${formatDebugShare(historyShare)} history / ${formatDebugShare(systemShare)} system</strong>
+            <p>Conversation history and system scaffolding are balanced across the captured request.</p>
+        </div>
+    `;
+
+    if (badge) {
+        badge.textContent = pressure.label;
+        badge.dataset.tone = pressure.tone;
+    }
+}
+
+function populateTiming(data) {
+    const grid = document.getElementById('debug-timing-grid');
+    if (!grid) return;
+
+    const cells = [];
+    if (data.promptMs != null) {
+        cells.push({ label: 'Prompt', value: Math.round(data.promptMs), unit: 'ms' });
+    }
+    if (data.genMs != null) {
+        cells.push({ label: 'Generation', value: Math.round(data.genMs), unit: 'ms' });
+    }
+    if (data.promptMs && data.genMs) {
+        const totalSec = ((data.promptMs + data.genMs) / 1000);
+        cells.push({ label: 'Total', value: totalSec.toFixed(1), unit: 's' });
+    }
+    if (data.totalTokens && data.promptMs && data.genMs) {
+        const throughput = data.totalTokens / ((data.promptMs + data.genMs) / 1000);
+        cells.push({ label: 'Observed Throughput', value: throughput.toFixed(1), unit: 'tok/s' });
+    }
+    if (data.modelParams?.max_tokens) {
+        cells.push({ label: 'Max Tokens', value: data.modelParams.max_tokens, unit: '' });
+    }
+
+    // eslint-disable-next-line no-unsanitized/property -- debug data uses hardcoded labels and numeric timing values only
+    grid.innerHTML = cells.map(c =>
+        `<div class="debug-timing-cell"><div class="debug-timing-cell-label">${c.label}</div><div class="debug-timing-cell-value">${c.value}<span class="debug-timing-cell-unit">${c.unit}</span></div></div>`
+    ).join('');
+}
+
+function populateParams(data) {
+    const grid = document.getElementById('debug-params-grid');
+    if (!grid || !data.modelParams) return;
+
+    const params = data.modelParams;
+    const entries = [
+        ['Temperature', params.temperature ?? '—'],
+        ['Top P', params.top_p ?? '—'],
+        ['Top K', params.top_k ?? '—'],
+        ['Min P', params.min_p ?? '—'],
+        ['Repeat Penalty', params.repeat_penalty ?? '—'],
+        ['Max Tokens', params.max_tokens ?? '—'],
+    ];
+
+    // eslint-disable-next-line no-unsanitized/property -- debug data uses hardcoded param names and numeric values only
+    grid.innerHTML = entries.map(([label, value]) =>
+        `<div class="debug-params-cell"><span class="debug-params-cell-label">${label}</span><span class="debug-params-cell-value">${value}</span></div>`
+    ).join('');
+}
+
+function buildConversationInspector(data) {
+    const rows = [];
+    const historyMessages = data.historyMessagesDetailed || [];
+    const previewMessages = historyMessages.slice(-4);
+    rows.push('<div class="debug-inspector-note">Conversation history is intentionally summarized here so the modal stays readable. Use the payload viewer if you need the full message array.</div>');
+    rows.push(`<div class="debug-inspector-subsection"><span class="debug-inspector-subtitle">Recent Messages</span><div class="debug-inspector-message-list">`);
+    for (const message of previewMessages) {
+        rows.push(
+            `<div class="debug-inspector-message">
+                <div class="debug-inspector-message-meta">${escapeHtml(message.role)} • ${formatDebugTokens(message.tokens)} tok</div>
+                <pre class="debug-inspector-pre">${escapeHtml(message.content)}</pre>
+            </div>`
+        );
+    }
+    if (data.finalUserPrompt) {
+        rows.push(
+            `<div class="debug-inspector-message">
+                <div class="debug-inspector-message-meta">current user prompt • ${formatDebugTokens(Math.max(1, Math.round((data.finalUserPrompt || '').length / 4)))} tok</div>
+                <pre class="debug-inspector-pre">${escapeHtml(data.finalUserPrompt)}</pre>
+            </div>`
+        );
+    }
+    rows.push('</div></div>');
+    return rows.join('');
+}
+
+function populateDebugInspector(data) {
+    const titleEl = document.getElementById('debug-inspector-title');
+    const metaEl = document.getElementById('debug-inspector-meta');
+    const bodyEl = document.getElementById('debug-inspector-body');
+    const sliceBtn = document.getElementById('debug-view-slice');
+    const finalBtn = document.getElementById('debug-view-final');
+    if (!titleEl || !metaEl || !bodyEl || !sliceBtn || !finalBtn) return;
+
+    sliceBtn.classList.toggle('active', debugInspectorView === 'slice');
+    finalBtn.classList.toggle('active', debugInspectorView === 'final');
+
+    const segments = getDebugSegments(data);
+    const selected = segments.find(seg => seg.key === debugSelectedSliceKey)
+        || segments.find(seg => seg.kind === 'system')
+        || segments[0];
+
+    if (debugInspectorView === 'final') {
+        titleEl.textContent = 'Final Prompt';
+        // eslint-disable-next-line no-unsanitized/property -- chip values are formatted locally and escaped where needed
+        metaEl.innerHTML = `
+            <span class="debug-inspector-chip">system ${formatDebugTokens(data.totalSystemTokens || 0)} tok</span>
+            <span class="debug-inspector-chip">conversation ${formatDebugTokens(data.historyTokens || 0)} tok</span>
+            <span class="debug-inspector-chip">sent ${escapeHtml(formatDebugTimestamp(data.sentAt))}</span>
+        `;
+        bodyEl.innerHTML = `
+            <div class="debug-inspector-subsection">
+                <span class="debug-inspector-subtitle">Final System Message</span>
+                <pre class="debug-inspector-pre">${escapeHtml(data.finalSystemPrompt || '')}</pre>
+            </div>
+            <div class="debug-inspector-subsection">
+                <span class="debug-inspector-subtitle">Last User Message</span>
+                <pre class="debug-inspector-pre">${escapeHtml(data.finalUserPrompt || '(none)')}</pre>
+            </div>
+        `;
+        return;
+    }
+
+    titleEl.textContent = selected?.label || 'Prompt Slice';
+    // eslint-disable-next-line no-unsanitized/property -- chip values are formatted locally and escaped where needed
+    metaEl.innerHTML = selected ? `
+        <span class="debug-inspector-chip">${escapeHtml(selected.kind === 'system' ? 'system slice' : selected.kind)}</span>
+        <span class="debug-inspector-chip">${formatDebugTokens(selected.tokens)} tok</span>
+        <span class="debug-inspector-chip">${selected.kind === 'remaining' ? 'unused capacity' : escapeHtml(formatDebugTimestamp(data.sentAt))}</span>
+    ` : '';
+
+    if (!selected) {
+        bodyEl.innerHTML = '<div class="debug-inspector-note">No prompt slices were captured for this request.</div>';
+        return;
+    }
+
+    if (selected.kind === 'remaining') {
+        bodyEl.innerHTML = '<div class="debug-inspector-note">Remaining capacity is not text that was sent. It represents unused headroom in the current context window.</div>';
+        return;
+    }
+
+    if (selected.kind === 'history') {
+        // eslint-disable-next-line no-unsanitized/property -- conversation preview content is escaped before assembly
+        bodyEl.innerHTML = buildConversationInspector(data);
+        return;
+    }
+
+    bodyEl.innerHTML = `<pre class="debug-inspector-pre">${escapeHtml(selected.content || '')}</pre>`;
+}
+
+function populatePayloadJson(data) {
+    const pre = document.getElementById('debug-payload-json');
+    if (!pre) return;
+    pre.textContent = JSON.stringify(data.requestPayload || {}, null, 2);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('btn-debug-prompt');
+    const closeBtn = document.getElementById('debug-modal-close');
+    const overlay = document.getElementById('debug-prompt-modal');
+    const ctxBar = document.getElementById('debug-ctx-bar');
+    const ctxLegend = document.getElementById('debug-ctx-legend');
+    const sliceViewBtn = document.getElementById('debug-view-slice');
+    const finalViewBtn = document.getElementById('debug-view-final');
+    const copySliceBtn = document.getElementById('debug-copy-slice-btn');
+    const copyFinalBtn = document.getElementById('debug-copy-final-btn');
+    const viewPayloadBtn = document.getElementById('debug-view-payload-btn');
+    const copyPayloadBtn = document.getElementById('debug-copy-payload-btn');
+    const hidePayloadBtn = document.getElementById('debug-hide-payload-btn');
+
+    btn?.addEventListener('click', openDebugModal);
+    closeBtn?.addEventListener('click', closeDebugModal);
+    overlay?.addEventListener('click', (e) => {
+        if (e.target === overlay) closeDebugModal();
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && overlay?.classList.contains('active')) {
+            closeDebugModal();
+        }
+    });
+
+    const onSliceSelect = (e) => {
+        const target = e.target.closest('[data-debug-slice]');
+        if (!target) return;
+        debugSelectedSliceKey = target.dataset.debugSlice;
+        debugInspectorView = 'slice';
+        const data = activeChatTab()?._lastDebugData;
+        if (!data) return;
+        populateCtxBreakdown(data);
+        populateDebugInspector(data);
+    };
+
+    ctxBar?.addEventListener('click', onSliceSelect);
+    ctxLegend?.addEventListener('click', onSliceSelect);
+
+    sliceViewBtn?.addEventListener('click', () => {
+        debugInspectorView = 'slice';
+        const data = activeChatTab()?._lastDebugData;
+        if (!data) return;
+        populateCtxBreakdown(data);
+        populateDebugInspector(data);
+    });
+
+    finalViewBtn?.addEventListener('click', () => {
+        debugInspectorView = 'final';
+        const data = activeChatTab()?._lastDebugData;
+        if (!data) return;
+        populateCtxBreakdown(data);
+        populateDebugInspector(data);
+    });
+
+    copySliceBtn?.addEventListener('click', () => {
+        const data = activeChatTab()?._lastDebugData;
+        if (!data) return;
+        const segments = getDebugSegments(data);
+        const selected = segments.find(seg => seg.key === debugSelectedSliceKey) || segments[0];
+        if (!selected) return;
+        if (selected.kind === 'history') {
+            copyDebugText((data.historyMessagesDetailed || []).map(message => `${message.role}: ${message.content}`).join('\n\n'), 'Conversation payload copied');
+            return;
+        }
+        if (selected.kind === 'remaining') {
+            showToast('Remaining capacity is not prompt text', 'info');
+            return;
+        }
+        copyDebugText(selected.content || '', `${selected.label} copied`);
+    });
+
+    copyFinalBtn?.addEventListener('click', () => {
+        const data = activeChatTab()?._lastDebugData;
+        if (!data) return;
+        const parts = [];
+        if (data.finalSystemPrompt) {
+            parts.push(`SYSTEM\n${data.finalSystemPrompt}`);
+        }
+        if (data.finalUserPrompt) {
+            parts.push(`USER\n${data.finalUserPrompt}`);
+        }
+        copyDebugText(parts.join('\n\n'), 'Final prompt copied');
+    });
+
+    copyPayloadBtn?.addEventListener('click', () => {
+        const data = activeChatTab()?._lastDebugData;
+        if (!data) return;
+        copyDebugText(JSON.stringify(data.requestPayload || {}, null, 2), 'Payload JSON copied');
+    });
+
+    viewPayloadBtn?.addEventListener('click', () => {
+        document.getElementById('debug-payload-section')?.classList.remove('hidden');
+    });
+
+    hidePayloadBtn?.addEventListener('click', () => {
+        document.getElementById('debug-payload-section')?.classList.add('hidden');
+    });
+});

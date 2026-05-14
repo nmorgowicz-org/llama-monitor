@@ -9,6 +9,7 @@ import {
     setChatBusyUI,
     setTransportGetter,
     getChatViewBindings,
+    getDefaultRoleBoundaryText,
 } from './chat-state.js';
 import {
     renderChatMessages,
@@ -140,9 +141,8 @@ ${transcript}`;
 }
 
 function buildRoleBoundaryInstruction(tab) {
-    const assistantName = (tab?.ai_name || '{{char}}').trim();
-    const userName = (tab?.user_name || '{{user}}').trim();
-    return `### ROLE BOUNDARY ###\n\nYou are ${assistantName}. By default, write only ${assistantName}'s reply. Do not speak as, write dialogue for, narrate actions for, or decide choices/thoughts for ${userName} unless the latest user instruction explicitly asks you to control or write both sides.`;
+    const text = tab?.role_boundary_custom?.trim() || getDefaultRoleBoundaryText(tab);
+    return `### ROLE BOUNDARY ###\n\n${text}`;
 }
 
 function getArmedStoryBeat(tab) {
@@ -461,7 +461,7 @@ export async function _doSendChat(tab, options = {}) {
     const messages = [];
     const systemParts = [];
     const armedBeat = getArmedStoryBeat(tab);
-    let systemPrompt = tab.system_prompt ? substituteNames(tab.system_prompt, tab.ai_name, tab.user_name) : '';
+    let systemPrompt = tab.system_prompt ? substituteNames(tab.system_prompt, tab.ai_name, tab.user_name, tab.ai_gender) : '';
     if (tab.explicit_level > 0) {
         const template = typeof resolveActiveTemplate === 'function'
             ? resolveActiveTemplate(tab.active_template_id) : null;
@@ -540,7 +540,52 @@ export async function _doSendChat(tab, options = {}) {
         });
     }
 
-    chat.busy = true;
+    // Capture debug snapshot of the exact outbound request shape.
+    const roughTokens = (str) => Math.max(1, Math.round((str || '').length / 4));
+    const systemPartsDetailed = systemParts.map((part) => {
+        const headerMatch = part.match(/^###\s*(.+?)\s*###/);
+        const label = headerMatch ? headerMatch[1] : 'Base system';
+        return {
+            label,
+            content: part,
+            tokens: roughTokens(part),
+        };
+    });
+    const systemTokenMap = {};
+    for (const part of systemPartsDetailed) {
+        systemTokenMap[part.label] = (systemTokenMap[part.label] || 0) + part.tokens;
+    }
+    const historyMessagesDetailed = persistentHistory.map((message, index) => ({
+        index,
+        role: message.role,
+        content: message.content,
+        tokens: roughTokens(message.content),
+    }));
+    const historyTokens = historyMessagesDetailed.reduce((sum, message) => sum + message.tokens, 0)
+        + (transientUserPrompt ? roughTokens(transientUserPrompt) : 0);
+    const finalSystemPrompt = systemParts.join('\n\n');
+    const requestPayload = {
+        messages,
+        stream: true,
+        ...params,
+    };
+    tab._lastDebugData = {
+        systemTokens: systemTokenMap,
+        systemPartsDetailed,
+        finalSystemPrompt,
+        historyMessageCount: persistentHistory.length + (transientUserPrompt ? 1 : 0),
+        historyMessagesDetailed,
+        historyTokens,
+        finalUserPrompt: transientUserPrompt || '',
+        totalSystemTokens: roughTokens(finalSystemPrompt),
+        totalTokens: roughTokens(finalSystemPrompt) + historyTokens,
+        modelParams: { ...params },
+        capacity: lastLlamaMetrics?.context_capacity_tokens || 0,
+        sentAt: Date.now(),
+        requestPayload,
+    };
+
+     chat.busy = true;
     setChatBusyUI(true);
     chat.abortController = new AbortController();
 
@@ -567,7 +612,7 @@ export async function _doSendChat(tab, options = {}) {
                 top_k: params.top_k,
                 min_p: params.min_p,
                 repeat_penalty: params.repeat_penalty,
-                ...(params.max_tokens ? { max_tokens: params.max_tokens } : {}),
+                max_tokens: params.max_tokens || 4096,
                 thinking_budget_tokens: 2048,
                 chat_template_kwargs: { enable_thinking: true },
             }),
@@ -625,6 +670,10 @@ export async function _doSendChat(tab, options = {}) {
                             prompt_tokens: obj.timings.prompt_n || 0,
                             completion_tokens: obj.timings.predicted_n || 0,
                         };
+                        if (tab._lastDebugData) {
+                            tab._lastDebugData.promptMs = obj.timings.prompt_ms ?? null;
+                            tab._lastDebugData.genMs = obj.timings.predicted_ms ?? null;
+                        }
                         continue;
                     }
 
@@ -757,6 +806,7 @@ export async function _doSendChat(tab, options = {}) {
             output_tokens: out,
             cumulativeInputTokens: tab.total_input_tokens,
             cumulativeOutputTokens: tab.total_output_tokens,
+            thinking_content: thinkContent || undefined,
         };
         tab.messages.push(finalMessage);
         tab.updated_at = Date.now();
@@ -818,7 +868,7 @@ export function stopChat() {
     setChatBusyUI(false);
 }
 
-// ── Connection Lost Modal ──────────────────────────────────────────────────────
+// ── Connection Lost Modal + Banner ────────────────────────────────────────────
 
 let connectionLostModalShown = false;
 
@@ -831,20 +881,47 @@ export function showConnectionLostModal() {
 
     modal.classList.add('open');
 
-    // Wire up buttons
     document.getElementById('connection-lost-go-welcome-btn')?.addEventListener('click', async () => {
+        closeModal();
         const { switchView } = await import('./setup-view.js');
         switchView('setup');
-        // Wait for view transition to complete before closing modal
-        setTimeout(closeModal, 600);
     });
-    document.getElementById('connection-lost-dismiss-btn')?.addEventListener('click', closeModal);
-    document.getElementById('connection-lost-modal-close')?.addEventListener('click', closeModal);
+    document.getElementById('connection-lost-dismiss-btn')?.addEventListener('click', () => {
+        closeModal();
+        showDisconnectedBanner();
+    });
+    document.getElementById('connection-lost-modal-close')?.addEventListener('click', () => {
+        closeModal();
+        showDisconnectedBanner();
+    });
 
     function closeModal() {
         modal.classList.remove('open');
         connectionLostModalShown = false;
     }
+}
+
+function showDisconnectedBanner() {
+    const banner = document.getElementById('disconnected-banner');
+    if (!banner) return;
+    banner.hidden = false;
+
+    const setupBtn = document.getElementById('disconnected-banner-setup-btn');
+    // Replace with a fresh clone to avoid stacking listeners across multiple disconnects
+    if (setupBtn) {
+        const fresh = setupBtn.cloneNode(true);
+        setupBtn.replaceWith(fresh);
+        fresh.addEventListener('click', async () => {
+            hideDisconnectedBanner();
+            const { switchView } = await import('./setup-view.js');
+            switchView('setup');
+        });
+    }
+}
+
+export function hideDisconnectedBanner() {
+    const banner = document.getElementById('disconnected-banner');
+    if (banner) banner.hidden = true;
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@
 // Tab switching and sidebar collapse.
 
 import { chat, lastLlamaMetrics, metricSeries, wsData } from '../core/app-state.js';
+import { chatScroll } from './chat-render.js';
 
 export function switchTab(name) {
     const page = document.getElementById('page-' + name);
@@ -30,6 +31,11 @@ export function switchTab(name) {
 
     const sidebarButton = document.querySelector(`.sidebar-btn[data-tab="${name}"]`);
     if (sidebarButton) sidebarButton.classList.add('active');
+
+    // Scroll chat to bottom when entering chat page (no tab switch = no re-render)
+    if (name === 'chat') {
+        setTimeout(() => chatScroll(true), 50);
+    }
 }
 
 function toggleSidebarCollapse() {
