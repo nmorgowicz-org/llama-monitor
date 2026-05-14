@@ -825,7 +825,6 @@ function updateAnalysisPanelUI() {
 
     if (analysisState.loading) {
         panel.hidden = false;
-        // eslint-disable-next-line no-unsanitized/property
         panel.innerHTML = `
             <div class="sidebar-analysis-loading">
                 <div class="sidebar-analysis-spinner"></div>

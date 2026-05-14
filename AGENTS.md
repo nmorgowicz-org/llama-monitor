@@ -405,6 +405,26 @@ Return a detailed report of any issues found with file:line references.
 - **Medium issues** (missing accessibility, incomplete theme coverage): Should fix before PR
 - **Low issues** (cosmetic, minor cleanup): Can note in PR description as follow-up
 
+## Pre-Push / Pre-Tag Checks
+
+Before pushing or tagging a PR as ready, the agent MUST run the same checks as CI locally. If any fail, the agent MUST fix them before pushing.
+
+Required checks:
+
+- `git diff --check`
+- `cargo fmt -- --check`
+- `cargo clippy -- -D warnings`
+- `cargo test`
+- `cargo build --release`
+- `./scripts/validate-js.sh`
+- `npm run lint` (if `static/**` or `tests/ui/**` changed)
+
+Rules:
+
+- Never rely on CI to catch issues you can avoid.
+- If a check fails, fix the root cause; do not comment out, ignore, or “trust” CI.
+- This is mandatory for every push, not just initial PRs.
+
 ## CI/CD Workflow
 
 ### Pull Requests
