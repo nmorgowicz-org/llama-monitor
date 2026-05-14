@@ -32,8 +32,8 @@ test.describe('Context Notes Sidebar', () => {
     await page.locator('#context-sidebar-toggle').click();
     await page.waitForSelector('.sidebar-notes-list');
 
-    // All 4 predefined sections should be present
-    for (const section of ['Character', 'Setting', 'Plot', 'Tone']) {
+    // All 4 predefined sections should be present (note: "Plot/Scenario" is the actual name)
+    for (const section of ['Character', 'Setting', 'Plot/Scenario', 'Tone']) {
       await expect(page.locator(`.sidebar-section-wrapper[data-section="${section}"]`)).toBeVisible();
     }
   });

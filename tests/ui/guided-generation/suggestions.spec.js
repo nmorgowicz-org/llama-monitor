@@ -53,7 +53,7 @@ test.describe('Suggestions Dropdown', () => {
     await expect(page.locator('#suggestions-toggle-status')).toHaveText('Plot Twist', { timeout: 3000 });
   });
 
-  test('use suggestion draft inserts into chat input', async ({ page }) => {
+  test('send direction sends suggestion as user message', async ({ page }) => {
     // Mock the rewrite endpoint — chat-suggestions.js calls /api/chat with stream:true
     // and expects an SSE response (data: {...} lines), not a plain JSON response.
     await page.route('/api/chat', route => {
@@ -72,70 +72,20 @@ test.describe('Suggestions Dropdown', () => {
     await page.locator('#suggestions-generate-btn').click();
     await page.waitForSelector('.suggestion-item', { state: 'visible', timeout: 10000 });
 
-    // Click send button (data-mode="send") which rewrites and inserts into chat input
+    // Click send button (data-mode="send") which rewrites and sends as user message
     const sendBtn = page.locator('.suggestion-btn[data-mode="send"]').first();
     if (await sendBtn.count() > 0) {
       await sendBtn.click();
-      await expect(page.locator('#chat-input')).not.toHaveValue('', { timeout: 8000 });
+      // The suggestion is sent directly as a user message, not inserted into chat input
+      await expect(page.locator('#chat-messages .chat-message-user').last()).toBeVisible({ timeout: 8000 });
     } else {
       // Fall back to first suggestion-btn
       await page.locator('.suggestion-btn').first().click();
-      await expect(page.locator('#chat-input')).not.toHaveValue('', { timeout: 8000 });
+      await expect(page.locator('#chat-messages .chat-message-user').last()).toBeVisible({ timeout: 8000 });
     }
   });
 
-  test('used suggestions tracked in history', async ({ page }) => {
-    await page.route('/api/chat', route => {
-      const sse = 'data: {"choices":[{"delta":{"content":"Rewritten text"}}]}\n\ndata: [DONE]\n\n';
-      route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse });
-    });
-
-    await page.locator('#suggestions-toggle').click();
-    await page.waitForSelector('#suggestions-dropdown', { state: 'visible' });
-
-    await page.locator('#suggestions-generate-btn').click();
-    await page.waitForSelector('.suggestion-item', { state: 'visible', timeout: 10000 });
-    // Use send mode so addRecentSuggestion is called and history is populated
-    await page.locator('.suggestion-btn[data-mode="send"]').first().click();
-
-    await expect(page.locator('.suggestions-recent')).toBeVisible({ timeout: 5000 });
-  });
-
-  test('clear recent history', async ({ page }) => {
-    await page.route('/api/chat', route => {
-      const sse = 'data: {"choices":[{"delta":{"content":"Rewritten text"}}]}\n\ndata: [DONE]\n\n';
-      route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse });
-    });
-
-    await page.locator('#suggestions-toggle').click();
-    await page.waitForSelector('#suggestions-dropdown', { state: 'visible' });
-
-    await page.locator('#suggestions-generate-btn').click();
-    await page.waitForSelector('.suggestion-item', { state: 'visible', timeout: 10000 });
-    // Use send mode so addRecentSuggestion is called and history is populated
-    await page.locator('.suggestion-btn[data-mode="send"]').first().click();
-    await page.locator('#suggestions-toggle').click();
-    await page.locator('#suggestions-toggle').click();
-    await page.waitForSelector('#suggestions-dropdown', { state: 'visible' });
-
-    // Wait for recent history to be populated
-    await page.waitForSelector('.suggestions-recent-list .suggestion-item', { timeout: 5000 });
-
-    // Directly clear the history and re-render
-    await page.evaluate(async () => {
-      const { activeChatTab } = await import('/js/features/chat-state.js');
-      const tab = activeChatTab();
-      if (tab) {
-        tab._suggestion_history = [];
-        // Re-render the recent suggestions list
-        const list = document.getElementById('suggestions-recent-list');
-        if (list) list.innerHTML = '';
-        const container = document.getElementById('suggestions-recent');
-        if (container) container.style.display = 'none';
-      }
-    });
-    await expect(page.locator('.suggestions-recent-list .suggestion-item')).toHaveCount(0);
-  });
+  // Recent suggestions UI removed; history tests no longer applicable.
 
   test('keyboard navigation through suggestions', async ({ page }) => {
     await page.locator('#suggestions-toggle').click();
