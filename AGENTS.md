@@ -405,11 +405,13 @@ Return a detailed report of any issues found with file:line references.
 - **Medium issues** (missing accessibility, incomplete theme coverage): Should fix before PR
 - **Low issues** (cosmetic, minor cleanup): Can note in PR description as follow-up
 
-## Pre-Push / Pre-Tag Checks
+## Pre-Push / Pre-Tag Checks (MANDATORY)
 
-Before pushing or tagging a PR as ready, the agent MUST run the same checks as CI locally. If any fail, the agent MUST fix them before pushing.
+Before pushing or tagging a PR as ready, the agent MUST run the same checks as CI locally.
+If any check fails, the agent MUST NOT push until all are fixed.
+This is not optional.
 
-Required checks:
+Required checks (every time):
 
 - `git diff --check`
 - `cargo fmt -- --check`
@@ -419,11 +421,15 @@ Required checks:
 - `./scripts/validate-js.sh`
 - `npm run lint` (if `static/**` or `tests/ui/**` changed)
 
-Rules:
+Hard rules:
 
 - Never rely on CI to catch issues you can avoid.
-- If a check fails, fix the root cause; do not comment out, ignore, or “trust” CI.
-- This is mandatory for every push, not just initial PRs.
+- Never push “to see if CI passes.”
+- Never ignore, comment out, or “trust” a failing check.
+- Include auto-generated files (e.g., src/gen/*) in every check and commit.
+- If you change code, configs, or static assets, re-run the full checklist before pushing.
+- If you are unsure whether something might affect CI, assume it does and run the checks.
+- If a check fails and you cannot immediately fix it, STOP and ask for clarification instead of pushing.
 
 ## CI/CD Workflow
 
