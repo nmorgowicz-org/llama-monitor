@@ -434,7 +434,7 @@ async function waitForChatResponse(page, timeoutMs = 300000) {
         return assistantMessages.length > 0;
     }, { timeout: timeoutMs });
     // Additional buffer to ensure AI has fully completed
-    await sleep(3000);
+    await sleep(5000);
 }
 
 async function waitForChatComplete(page, timeoutMs = 300000) {
