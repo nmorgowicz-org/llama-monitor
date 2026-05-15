@@ -512,6 +512,11 @@ impl ChatStorage {
     // ── Full-text search ──────────────────────────────────────────────────────
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
+        let normalized_query = normalize_fts_query(query);
+        if normalized_query.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT t.id, t.name, m.id, m.role,
@@ -525,7 +530,7 @@ impl ChatStorage {
              ORDER BY rank
              LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![query, limit as i64], |row| {
+        let rows = stmt.query_map(params![normalized_query, limit as i64], |row| {
             Ok(SearchResult {
                 tab_id: row.get(0)?,
                 tab_name: row.get(1)?,
@@ -761,5 +766,124 @@ impl ChatStorage {
         conn.execute_batch("PRAGMA recovery_mode = 0")?;
 
         Ok(())
+    }
+}
+
+fn normalize_fts_query(query: &str) -> String {
+    query
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(|token| format!("{token}*"))
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn make_tab(id: &str, name: &str) -> ChatTabRow {
+        ChatTabRow {
+            id: id.to_string(),
+            name: name.to_string(),
+            system_prompt: String::new(),
+            ai_name: None,
+            user_name: None,
+            explicit_level: 0,
+            active_template_id: None,
+            auto_compact: true,
+            auto_compact_summarize: false,
+            compact_mode: "percent".to_string(),
+            compact_threshold: 0.8,
+            model_params: serde_json::json!({}),
+            context_notes: serde_json::json!([]),
+            sidebar_width: 280,
+            tab_order: 0,
+            pinned: false,
+            last_ctx_pct: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            created_at: 1,
+            updated_at: 1,
+            messages: Vec::new(),
+        }
+    }
+
+    fn make_message(tab_id: &str, role: &str, content: &str) -> MessageRow {
+        MessageRow {
+            id: 0,
+            tab_id: tab_id.to_string(),
+            role: role.to_string(),
+            content: content.to_string(),
+            timestamp_ms: 1,
+            input_tokens: None,
+            output_tokens: None,
+            cumulative_input_tokens: None,
+            cumulative_output_tokens: None,
+            compaction_marker: false,
+            variants: None,
+            variant_index: None,
+            seq: 0,
+        }
+    }
+
+    #[test]
+    fn normalize_fts_query_builds_prefix_and_terms() {
+        assert_eq!(normalize_fts_query("rain"), "rain*");
+        assert_eq!(normalize_fts_query("gpu-43c"), "gpu* AND 43c*");
+        assert_eq!(
+            normalize_fts_query("slow HTTP endpoint."),
+            "slow* AND HTTP* AND endpoint*"
+        );
+        assert_eq!(normalize_fts_query("..."), "");
+    }
+
+    #[test]
+    fn search_supports_prefix_matches() {
+        let dir = tempdir().expect("temp dir");
+        let db_path = dir.path().join("chat.db");
+        let store = ChatStorage::open(&db_path).expect("open storage");
+
+        let tab = make_tab("tab-1", "Noir Scene");
+        store.create_tab(&tab).expect("create tab");
+        store
+            .append_message(&make_message(
+                "tab-1",
+                "assistant",
+                "The rain fell like needles on the pavement.",
+            ))
+            .expect("append message");
+
+        let results = store.search("rai", 10).expect("prefix search");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].tab_name, "Noir Scene");
+        assert!(results[0].snippet.contains("<mark>rain</mark>"));
+    }
+
+    #[test]
+    fn search_tolerates_free_form_punctuation() {
+        let dir = tempdir().expect("temp dir");
+        let db_path = dir.path().join("chat.db");
+        let store = ChatStorage::open(&db_path).expect("open storage");
+
+        let tab = make_tab("tab-1", "Debug Session");
+        store.create_tab(&tab).expect("create tab");
+        store
+            .append_message(&make_message(
+                "tab-1",
+                "assistant",
+                "Check gpu-43c status before you debug the slow HTTP endpoint.",
+            ))
+            .expect("append message");
+
+        let hyphenated = store.search("gpu-43c", 10).expect("hyphenated search");
+        assert_eq!(hyphenated.len(), 1);
+
+        let punctuated = store
+            .search("slow HTTP endpoint.", 10)
+            .expect("punctuated search");
+        assert_eq!(punctuated.len(), 1);
+        assert_eq!(punctuated[0].tab_name, "Debug Session");
     }
 }

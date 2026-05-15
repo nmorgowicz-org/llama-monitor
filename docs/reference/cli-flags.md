@@ -1,88 +1,91 @@
 # CLI Flags Reference
 
-All CLI flags can be viewed by running:
+Use `llama-monitor --help` to see the current flag list from the binary.
+
+## Core dashboard flags
+
+### `--host` (default: `127.0.0.1`)
+
+Bind address for the dashboard web UI.
+
+Use `0.0.0.0` only when you intentionally want LAN access.
 
 ```bash
-llama-monitor --help
-```
-
----
-
-## Core Configuration
-
-### `--host` (default: "127.0.0.1")
-
-**Type:** String  
-**Description:** Host/interface for the dashboard web UI
-
-Use `0.0.0.0` to allow LAN access. When binding to `0.0.0.0`, consider using `--basic-auth` to require credentials.
-
-```bash
-llama-monitor --host 0.0.0.0
 llama-monitor --host 127.0.0.1
+llama-monitor --host 0.0.0.0
 ```
 
 ### `--basic-auth`
 
-**Type:** String (format: `user:password`)  
-**Description:** Enable HTTP Basic Auth
+Enable HTTP Basic Auth for the dashboard in `user:password` form.
 
-Requires `--host 0.0.0.0` to be effective. When set, all API requests must include valid credentials via browser prompt or Authorization header.
+This is only useful when the dashboard is reachable by other machines, usually alongside `--host 0.0.0.0`.
 
 ```bash
 llama-monitor --host 0.0.0.0 --basic-auth admin:secret123
 ```
 
-### `--port`, `-p` (default: 7778)
+### `--port`, `-p` (default: `7778`)
 
-**Type:** Integer  
-**Description:** Port for the monitor web UI  
-**Short flag:** `-p`
-
-> **Note:** The short flag for `--port` is `-p` (clap auto-generates it from `--port`).
+Port for the dashboard web UI.
 
 ```bash
 llama-monitor --port 8000
 llama-monitor -p 9999
 ```
 
+### `--headless`
+
+Run without tray or desktop UI integration.
+
+```bash
+llama-monitor --headless
+```
+
+### `--no-tray`
+
+Disable the tray icon even on systems where one would normally be shown.
+
+```bash
+llama-monitor --no-tray
+```
+
+## Local llama.cpp launch defaults
+
+These flags seed the dashboard's local spawn/runtime defaults.
+
 ### `--llama-server-path`, `-s`
 
-**Type:** Path  
-**Description:** Path to the llama-server binary  
-**Short flag:** `-s`
+Path to the `llama-server` binary.
 
 ```bash
 llama-monitor --llama-server-path /usr/local/bin/llama-server
 llama-monitor -s /opt/llama.cpp/llama-server
 ```
 
-```bash
-llama-monitor --llama-server-path /usr/local/bin/llama-server
-```
-
 ### `--llama-server-cwd`
 
-**Type:** Path  
-**Description:** Working directory for llama-server
+Optional working directory for `llama-server`.
+
+Use this only when the launched process depends on relative paths.
 
 ```bash
-llama-monitor --llama-server-cwd /home/user/models
+llama-monitor --llama-server-cwd /srv/llama
 ```
 
 ### `--models-dir`, `-m`
 
-**Type:** Path  
-**Description:** Directory containing .gguf model files for auto-discovery
+Directory used for model auto-discovery.
 
 ```bash
-llama-monitor --models-dir /home/user/models
+llama-monitor --models-dir /srv/models
 ```
+
+## Persisted file locations
 
 ### `--presets-file`
 
-**Type:** Path  
-**Description:** Path to presets JSON file
+Override the presets JSON path.
 
 ```bash
 llama-monitor --presets-file ~/.config/llama-monitor/presets-custom.json
@@ -90,8 +93,7 @@ llama-monitor --presets-file ~/.config/llama-monitor/presets-custom.json
 
 ### `--sessions-file`
 
-**Type:** Path  
-**Description:** Path to sessions JSON file
+Override the sessions JSON path.
 
 ```bash
 llama-monitor --sessions-file ~/.config/llama-monitor/sessions-custom.json
@@ -99,42 +101,35 @@ llama-monitor --sessions-file ~/.config/llama-monitor/sessions-custom.json
 
 ### `--config-dir`
 
-**Type:** Path  
-**Description:** Override the config directory (default: `~/.config/llama-monitor`)
-
-Override the default config directory for all persisted files (presets, sessions, settings, etc.).
+Override the root configuration directory. This affects persisted state such as sessions, presets, and UI settings.
 
 ```bash
 llama-monitor --config-dir /custom/config/path
 ```
 
----
+## GPU monitoring flags
 
-## GPU Configuration
+### `--gpu-backend` (default: `auto`)
 
-### `--gpu-backend` (default: "auto")
+Select the GPU telemetry backend.
 
-**Type:** String  
-**Description:** GPU monitoring backend
+Valid values:
 
-Available backends:
-- `auto` - Auto-detect based on system
-- `rocm` - AMD ROCm (Linux)
-- `nvidia` - NVIDIA CUDA (Linux/Windows)
-- `none` - Disable GPU monitoring
-
-> **Note:** Apple Silicon uses automatic detection; there is no separate `apple` backend flag.
+- `auto`
+- `rocm`
+- `nvidia`
+- `none`
 
 ```bash
+llama-monitor --gpu-backend auto
 llama-monitor --gpu-backend rocm
-llama-monitor --gpu-backend apple
+llama-monitor --gpu-backend nvidia
 llama-monitor --gpu-backend none
 ```
 
 ### `--gpu-arch`
 
-**Type:** String  
-**Description:** GPU architecture for ROCm environment (e.g. gfx906, gfx1100, auto)
+ROCm architecture override used for local GPU environment setup, for example `gfx906`, `gfx1100`, or `auto`.
 
 ```bash
 llama-monitor --gpu-arch gfx1100
@@ -143,105 +138,65 @@ llama-monitor --gpu-arch auto
 
 ### `--gpu-devices`
 
-**Type:** String  
-**Description:** Visible GPU device indices (comma-separated, e.g. 0,1,2,3)
+Comma-separated local GPU device indices.
 
 ```bash
 llama-monitor --gpu-devices 0,1
-llama-monitor --gpu-devices 2,3
 ```
 
----
+## Polling
 
-## Polling Configuration
+### `--llama-poll-interval` (default: `1`)
 
-### `--llama-poll-interval` (default: 1)
-
-**Type:** Integer  
-**Description:** Llama metrics polling interval in seconds
+Polling interval in seconds for llama.cpp metrics collection.
 
 ```bash
 llama-monitor --llama-poll-interval 5
 ```
 
----
+## Remote agent mode
 
-## Headless/Tray Configuration
-
-### `--headless`
-
-**Type:** Boolean  
-**Description:** Run in headless mode (no tray, no desktop UI)
-
-Use when running on a headless server or when you want to run the server without the desktop interface.
-
-```bash
-llama-monitor --headless
-```
-
-### `--no-tray`
-
-**Type:** Boolean  
-**Description:** Disable tray icon (override automatic detection)
-
-Use when you want to prevent the tray icon from appearing, even on systems where it would normally be available.
-
-```bash
-llama-monitor --no-tray
-```
-
----
-
-## Remote Agent Configuration
+These flags run `llama-monitor` as the lightweight remote metrics agent instead of the full dashboard.
 
 ### `--agent`
 
-**Type:** Boolean  
-**Description:** Run as a lightweight remote metrics agent instead of the full dashboard
-
-When enabled, llama-monitor runs as a metrics collection service that can be queried by other tools. This mode is designed for remote monitoring scenarios.
+Start in remote-agent mode.
 
 ```bash
 llama-monitor --agent
 ```
 
-### `--agent-host` (default: "127.0.0.1")
+### `--agent-host` (default: `127.0.0.1`)
 
-**Type:** String  
-**Description:** Host/interface for remote metrics agent mode
+Bind address for the agent HTTP server.
 
 ```bash
-llama-monitor --agent-host 0.0.0.0
+llama-monitor --agent --agent-host 0.0.0.0
 ```
 
-### `--agent-port` (default: 7779)
+### `--agent-port` (default: `7779`)
 
-**Type:** Integer  
-**Description:** Port for remote metrics agent mode
+Port for the agent HTTP server.
 
 ```bash
-llama-monitor --agent-port 8888
+llama-monitor --agent --agent-port 7779
 ```
 
 ### `--agent-token`
 
-**Type:** String  
-**Description:** Optional bearer token required by remote metrics agent mode
+Optional bearer token required by the agent.
 
 ```bash
 llama-monitor --agent --agent-token "your-secret-token"
 ```
 
----
+## Remote-agent integration in dashboard mode
 
-## Remote Agent Connection (Dashboard Mode)
-
-When running the full dashboard (without `--agent`), these flags configure how it connects to a remote metrics agent:
+These flags apply when you are running the full dashboard and want it to talk to or manage a remote agent.
 
 ### `--remote-agent-url`
 
-**Type:** String  
-**Description:** Override remote agent URL used by dashboard polling
+Explicit remote-agent URL used by the dashboard for polling.
 
 ```bash
 llama-monitor --remote-agent-url http://192.168.1.100:7779
@@ -249,8 +204,7 @@ llama-monitor --remote-agent-url http://192.168.1.100:7779
 
 ### `--remote-agent-token`
 
-**Type:** String  
-**Description:** Optional bearer token used when polling a remote metrics agent
+Optional bearer token used when polling the remote agent.
 
 ```bash
 llama-monitor --remote-agent-token "your-secret-token"
@@ -258,8 +212,7 @@ llama-monitor --remote-agent-token "your-secret-token"
 
 ### `--remote-agent-ssh-autostart`
 
-**Type:** Boolean  
-**Description:** Enable SSH autostart when a remote metrics agent is unreachable
+Allow one SSH start attempt after attaching to a remote endpoint if the agent is unreachable.
 
 ```bash
 llama-monitor --remote-agent-ssh-autostart
@@ -267,8 +220,7 @@ llama-monitor --remote-agent-ssh-autostart
 
 ### `--remote-agent-ssh-target`
 
-**Type:** String  
-**Description:** SSH target used to autostart remote metrics agent (e.g. user@host)
+Saved SSH target for remote-agent management.
 
 ```bash
 llama-monitor --remote-agent-ssh-target user@192.168.1.100
@@ -276,84 +228,34 @@ llama-monitor --remote-agent-ssh-target user@192.168.1.100
 
 ### `--remote-agent-ssh-command`
 
-**Type:** String  
-**Description:** Remote command run over SSH to start the metrics agent
+Optional override for the remote command used to start the agent over SSH.
 
 ```bash
-llama-monitor --remote-agent-ssh-command "systemctl start llama-agent"
+llama-monitor --remote-agent-ssh-command "systemctl --user start llama-monitor-agent"
 ```
 
----
+## Supported examples
 
-## Examples
-
-### Local Development
+### Dashboard on the local machine
 
 ```bash
-llama-monitor \
-  --port 8000 \
-  --models-dir ~/models \
-  --llama-server-path ~/llama.cpp/server/llama-server
+llama-monitor --llama-server-path /usr/local/bin/llama-server --models-dir ~/models
 ```
 
-### Headless Server
+### Headless dashboard on a LAN host
 
 ```bash
-llama-monitor \
-  --headless \
-  --port 8000 \
-  --llama-server-path /opt/llama-server
+llama-monitor --headless --host 0.0.0.0 --basic-auth admin:secret123
 ```
 
-### Remote Agent
+### Dedicated remote agent
 
 ```bash
-llama-monitor \
-  --agent \
-  --agent-host 0.0.0.0 \
-  --agent-port 7779
+llama-monitor --agent --agent-host 0.0.0.0 --agent-port 7779 --agent-token "shared-secret"
 ```
 
-### AMD ROCm GPU Monitoring
+### ROCm-focused local setup
 
 ```bash
-llama-monitor \
-  --gpu-backend rocm \
-  --gpu-arch gfx906 \
-  --gpu-devices 0,1,2,3
+llama-monitor --gpu-backend rocm --gpu-arch gfx1100 --gpu-devices 0,1
 ```
-
-### Apple Silicon
-
-```bash
-llama-monitor \
-  --gpu-backend apple
-```
-
----
-
-## Environment Variables
-
-Some settings can also be configured via environment variables:
-
-| Variable | Flag Equivalent | Description |
-|----------|-----------------|-------------|
-| `LLAMA_MONITOR_PORT` | `--port` | Web UI port |
-| `LLAMA_MONITOR_GPU_BACKEND` | `--gpu-backend` | GPU monitoring backend |
-| `LLAMA_MONITOR_HEADLESS` | `--headless` | Headless mode |
-
----
-
-## API Endpoints
-
-The remote metrics agent exposes these endpoints:
-
-- `GET /metrics` - Raw metrics in Prometheus format
-- `GET /health` - Health check endpoint
-- `GET /capabilities` - Available metrics and reasons
-
-See `docs/20260420-remote-agent-api.md` for more details.
-
----
-
-**Last Updated**: 2026-04-20

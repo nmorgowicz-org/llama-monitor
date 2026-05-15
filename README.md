@@ -1,6 +1,6 @@
 # Llama Monitor
 
-Web dashboard for managing [llama.cpp](https://github.com/ggml-org/llama.cpp) servers with real-time GPU monitoring, multi-session management, and AI-powered creative chat.
+Monitoring-first web dashboard for [llama.cpp](https://github.com/ggml-org/llama.cpp) servers. It tracks inference throughput, context pressure, GPU/system telemetry, remote-agent health, and multi-session state in one UI, with chat tools layered on top when you want to work from the same surface.
 
 ## Quick Start
 
@@ -11,65 +11,59 @@ Web dashboard for managing [llama.cpp](https://github.com/ggml-org/llama.cpp) se
 
 ## Features
 
-### Monitoring
+### Live Monitoring Cockpit
 
-GPU metrics (temperature, load, VRAM, power, clocks) for AMD ROCm, NVIDIA, Apple Silicon. System metrics (CPU, RAM). Live inference context window gauge.
+The top nav and Server tab show throughput, context pressure, request activity, slot state, and model/runtime details as your endpoint works. Local sessions read host telemetry directly; remote sessions gain the same depth through the remote agent.
 
 ![Inference Metrics](docs/screenshots/02-inference-metrics.gif)
 
-### Multi-Tab Chat
+### Remote Host Telemetry
 
-Independent conversations with their own system prompts, model parameters, and message histories. Reasoning blocks, Markdown rendering with syntax highlighting, and real-time telemetry.
+Attach to a remote llama.cpp server, then add the companion remote agent when you need GPU, CPU, RAM, and host-health metrics from that machine. The header Agent flow and runtime configuration panel handle install, start, update, and repair actions.
+
+![GPU & System Metrics](docs/screenshots/08-gpu-section.png)
+
+### Multi-Session Chat Workspace
+
+Chat tabs, prompt controls, telemetry overlays, and logs live next to the monitoring dashboard so you can inspect behavior and interact with the model from the same app.
 
 ![Chat Interface](docs/screenshots/03-chat.png)
 
-### Personas & Template Manager
-
-A full persona library with Active/Custom/Built-in sections. Each persona carries its own explicit content policy at Levels 1 and 2. Switch personas per tab, reset built-in personas to default, and edit custom role boundaries with `{{char}}`, `{{user}}`, and `{{gender}}` token substitution.
-
-![Persona Manager](docs/screenshots/10b-persona-modal.png)
-
 ### Context Notes
 
-A resizable sidebar for per-tab world-building notes (character, setting, plot, tone). Notes are injected into every prompt so the model always has your creative context — without you repeating it. AI-powered analysis compares the current conversation against your notes and flags anything stale.
+A per-tab sidebar for persistent world-building notes, scene state, and other prompt context that should travel with the conversation.
 
 ![Context Notes](docs/screenshots/08-context-notes-expanded.png)
 
 ### AI-Generated Suggestions
 
-Real, creative suggestions from the model — not canned templates. The AI reads your context and generates story ideas, plot twists, scene directions, and more. Browse by tag cloud, search by keyword, or auto-generate focus keywords.
+Generate context-aware scene ideas, prompts, and writing directions from the current conversation and notes instead of relying on canned templates.
 
 ![Suggestions Results](docs/screenshots/09b-suggestions-results.png)
 
 ### Director Mode & Quick Guide
 
-Shape the next response with a one-line instruction, a detailed scene direction, or a timed story beat that fires after a set number of replies. The AI plans and executes your direction.
+Guide the next response with a one-off instruction, a staged direction, or a timed story beat without rewriting the full prompt stack.
 
 ![Director Mode Results](docs/screenshots/10d-guide-ai-director-results.png)
 
-### Explicit Mode
+### Personas & Template Manager
 
-Three-level content policy (Off / Unlocked / Unrestricted) that adapts per persona. Each persona stores its own Level 1 and Level 2 policy text, editable in the template manager.
+Manage built-in and custom personas, explicit-policy variants, and token-substitution fields from the template manager.
 
-![Explicit Unlocked](docs/screenshots/12a-explicit-unlocked.png)
+![Persona Manager](docs/screenshots/10b-persona-modal.png)
 
 ### Prompt Debug Inspector
 
-See exactly what the model receives — system prompt slice-by-slice with token estimates, full message history with per-message token counts, and generation timing. Essential for tuning context pressure and diagnosing unexpected responses.
+Inspect the exact outbound prompt composition, token estimates, and per-message contribution when you need to debug context pressure or response behavior.
 
 ![Prompt Debug Inspector](docs/screenshots/08b-prompt-debug.png)
 
-### Manage Categories
-
-Customize the built-in suggestion prompts and add your own categories. Toggle individual prompts on or off, edit the prompt text, and organize your own creative workflows.
-
-![Manage Categories](docs/screenshots/14-manage-categories.png)
-
 ---
 
-**Guided Generation** — context notes, AI suggestions, director/surprise modes — [details](docs/reference/chat.md)  
-**Explicit Mode** — per-persona three-level content policy — [details](docs/reference/chat.md)  
-**Prompt Debug Inspector** — outbound request analysis with token breakdown — [details](docs/reference/chat.md)
+**Monitoring reference**: [Dashboard Capabilities](docs/reference/dashboard.md)  
+**Remote telemetry setup**: [Remote Agent](docs/reference/remote-agent.md)  
+**Chat and guided generation**: [Chat](docs/reference/chat.md)
 
 ## Supported Hardware
 
@@ -82,35 +76,36 @@ Customize the built-in suggestion prompts and add your own categories. Toggle in
 
 ## Installation
 
-Pre-built binaries on the [Releases page](../../releases/latest). Or build from source:
+Pre-built binaries are available on the [latest release](../../releases/latest). To build from source:
 
 ```bash
-git clone https://github.com/nmorgowicz-org/llama-monitor.git && cd llama-monitor
+git clone https://github.com/nmorgowicz-org/llama-monitor.git
+cd llama-monitor
 cargo build --release
 ```
 
 ## Documentation
 
-- [Dashboard Capabilities](docs/reference/dashboard.md) — Metrics, monitoring, hardware support
-- [Remote Agent](docs/reference/remote-agent.md) — Headless deployment, SSH management, auto-update
-- [Chat](docs/reference/chat.md) — Multi-tab chat, personas, guided generation, explicit mode, context compaction, debug inspector
+- [Dashboard Capabilities](docs/reference/dashboard.md) — Monitoring surfaces, telemetry, refresh behavior
+- [Remote Agent](docs/reference/remote-agent.md) — Remote host telemetry, SSH setup, agent lifecycle
+- [Chat](docs/reference/chat.md) — Chat tabs, personas, guided generation, prompt tooling
 - [Real-Time Communication](docs/reference/realtime-communication.md) — WebSocket schema, polling, network detection
 - [API Reference](docs/reference/api.md) — REST endpoints
-- [CLI Reference](docs/reference/cli-flags.md) — All flags and options
+- [CLI Reference](docs/reference/cli-flags.md) — Supported flags
 - [Cross-Compilation](docs/reference/cross-compilation.md) — Build targets and toolchains
 - [Capability Flags](docs/reference/capabilities.md) — Metric capability system
 
 ## Development
 
 ```bash
-cargo run              # Debug mode
-cargo test             # Run tests
-cargo clippy -- -D warnings  # Lint
-cargo fmt              # Format
-cargo build --release  # Production binary
+cargo run
+cargo test
+cargo clippy -- -D warnings
+cargo fmt
+cargo build --release
 ```
 
-Frontend in `static/` is embedded at compile time. No Node.js build step for the backend.
+Frontend assets under `static/` are embedded at compile time. There is no Node build step for the shipped app, but the repo uses Node-based tooling for linting, UI tests, and screenshot capture.
 
 ## License
 

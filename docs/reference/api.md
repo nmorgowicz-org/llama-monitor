@@ -1,150 +1,166 @@
 # REST API Reference
 
-Llama Monitor exposes a REST API on the same port as the web UI (default **7778**).
+Llama Monitor serves its REST API on the same port as the web UI, typically `http://localhost:7778`.
 
-For real-time data use the WebSocket endpoint documented in `websocket-schema.md`. The REST API is for configuration, session management, and one-off queries.
+This page documents the live handlers in [`src/web/api.rs`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/src/web/api.rs) and the persisted data shapes in [`src/state.rs`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/src/state.rs), [`src/presets/mod.rs`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/src/presets/mod.rs), and [`src/chat_storage.rs`](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/src/chat_storage.rs).
 
 ## Base URL
 
-```
+```text
 http://localhost:7778
 ```
-
----
 
 ## Sessions
 
 ### `GET /api/sessions`
-List all known sessions.
+Returns the persisted session list from `sessions.json`.
 
-**Response:**
 ```json
 [
   {
     "id": "session_1746000000000",
     "name": "Default Session",
     "mode": { "Spawn": { "port": 8001 } },
-    "status": "Running",
-    "preset_id": "my-preset",
+    "status": "Stopped",
+    "preset_id": "",
     "created_at": 1746000000,
-    "last_active": 1746001000
+    "last_active": 1746000000
   }
 ]
 ```
 
-**Session status values:** `Stopped` · `Running` · `Disconnected` · `Error(message)`  
-**Session mode:** Nested object from Serde serialization of `SessionMode` enum:  
-- Spawn: `{ "Spawn": { "port": 8001 } }`  
-- Attach: `{ "Attach": { "endpoint": "http://..." } }`
+`mode` is serde's enum shape:
+- spawn session: `{ "Spawn": { "port": 8001 } }`
+- attached session: `{ "Attach": { "endpoint": "http://192.168.1.50:8001" } }`
 
----
+`status` is one of:
+- `"Stopped"`
+- `"Running"`
+- `"Disconnected"`
+- `{ "Error": "message" }`
 
 ### `POST /api/sessions`
-Create a new session record (does not start it).
+Creates a session record only. It does not start a server.
 
-**Request:**
+Request body must be a full `Session` object:
+
 ```json
 {
-  "name": "My Session",
-  "mode": "spawn",
-  "endpoint": "http://127.0.0.1:8001"
+  "id": "session_custom",
+  "name": "Remote Box",
+  "mode": { "Attach": { "endpoint": "http://192.168.1.50:8001" } },
+  "status": "Disconnected",
+  "preset_id": "",
+  "created_at": 1746000000,
+  "last_active": 1746000000
 }
 ```
 
----
+Response:
+
+```json
+{ "ok": true }
+```
+
+On failure:
+
+```json
+{ "ok": false, "error": "Maximum sessions reached" }
+```
 
 ### `DELETE /api/sessions/{id}`
-Delete a session record.
 
----
+```json
+{ "ok": true }
+```
 
 ### `GET /api/sessions/active`
-Get the currently active session.
+Returns a compact active-session summary, not the full `Session` object.
 
-**Response:**
 ```json
 {
   "id": "session_1746000000000",
   "name": "Default Session",
-  "mode": { "Spawn": { "port": 8001 } },
+  "mode": "Spawn:8001",
   "status": "Running",
-  "preset_id": "",
-  "created_at": 1746000000,
   "last_active": 1746001000
 }
 ```
 
----
+If there is no active session:
+
+```json
+{ "error": "No active session" }
+```
 
 ### `POST /api/sessions/active`
-Set the active session by ID.
 
-**Request:**
 ```json
 { "id": "session_1746000000000" }
 ```
 
----
+Response:
+
+```json
+{ "ok": true }
+```
 
 ### `POST /api/sessions/spawn`
-Spawn a new llama.cpp server with a preset and make it the active session.
+Creates a spawn session, starts `llama-server` from a saved preset, and makes it active.
 
-**Request:**
+Request:
+
 ```json
 {
-  "preset_id": "my-preset",
-  "name": "My Session",
+  "preset_id": "default-1",
+  "name": "Session on port 8001",
   "port": 8001
 }
 ```
 
-Fields:
-- `preset_id` (required): Preset ID to use for server launch
-- `name` (optional): Session name; defaults to `"Session on port {port}"`
-- `port` (optional): Server port; defaults to `8001`
+`preset_id` is required. `name` defaults to `Session on port {port}`. `port` defaults to `8001`.
 
-**Response:**
+Success response:
+
 ```json
 {
   "ok": true,
-  "session_id": "session_1746000000000",
-  "port": 8001
+  "session_id": "session_1746000000000"
 }
 ```
-
----
 
 ### `POST /api/attach`
-Attach to an existing llama.cpp server endpoint.
+Attaches to a reachable private-network or loopback endpoint.
 
-**Request:**
+Request:
+
 ```json
 {
-  "endpoint": "http://192.168.1.50:8001",
-  "session_name": "Remote GPU Box"
+  "endpoint": "http://192.168.1.50:8001"
 }
 ```
 
-**Response:**
+Success response:
+
 ```json
 {
-  "session_id": "session_1746000000001",
-  "endpoint": "http://192.168.1.50:8001",
-  "status": "attached"
+  "ok": true,
+  "warning": null
 }
 ```
 
----
+If `/health` is unavailable the attach still succeeds, but `warning` explains that inference metrics will be missing.
 
 ### `POST /api/detach`
-Detach from the current endpoint (stops polling, clears active session).
+Detaches only if the active session is an attach session.
 
----
+```json
+{ "ok": true }
+```
 
 ### `GET /api/capabilities`
-Get current capabilities and availability reasons. Mirrors the `capabilities` / `endpoint_kind` / `availability` fields from the WebSocket push.
+Returns the current metrics capability state.
 
-**Response:**
 ```json
 {
   "capabilities": {
@@ -168,268 +184,366 @@ Get current capabilities and availability reasons. Mirrors the `capabilities` / 
 }
 ```
 
-Fields:
-- `capabilities`: MetricsCapabilities object (see `capabilities.md`)
-- `endpoint_kind`: `"Local"` | `"Remote"` | `"Unknown"`
-- `session_kind`: `"Spawn"` | `"Attach"` | `"None"`
-- `tray_mode`: `"Desktop"` | `"Headless"` | `"Failed"`
-- `availability`: Availability reasons for system/gpu/cpu_temp
-
-See `capabilities.md` for value enumerations.
-
----
-
 ## Server Control
 
 ### `POST /api/start`
-Start the llama.cpp server for the active spawn session.
+Starts `llama-server` for the active spawn session. Request body is the full server config payload used by the launcher.
 
 ### `POST /api/stop`
-Stop the llama.cpp server for the active spawn session.
+Stops the managed `llama-server`.
 
 ### `POST /api/kill-llama`
-Force-kill any running llama.cpp process (emergency stop).
-
----
+Emergency process kill for `llama-server`.
 
 ## Presets
 
-Model presets store llama.cpp server launch parameters.
+Presets are stored in `presets.json` and use the `ModelPreset` struct.
 
 ### `GET /api/presets`
+
 ```json
 [
   {
-    "id": "my-preset",
-    "name": "My 7B Preset",
-    "model_path": "/models/llama-3-8b.Q4_K_M.gguf",
-    "n_gpu_layers": 99,
-    "n_threads": 8,
-    "n_ctx": 32768,
-    "n_batch": 512,
-    "n_parallel": 1,
-    "extra_args": []
+    "id": "default-1",
+    "name": "Example: Small Model 128K context",
+    "model_path": "",
+    "context_size": 128000,
+    "ctk": "f16",
+    "ctv": "f16",
+    "tensor_split": "",
+    "batch_size": 2048,
+    "ubatch_size": 2048,
+    "no_mmap": true,
+    "ngram_spec": true,
+    "parallel_slots": 1,
+    "temperature": null,
+    "top_p": null,
+    "top_k": null,
+    "min_p": null,
+    "repeat_penalty": null,
+    "n_cpu_moe": null,
+    "gpu_layers": null,
+    "mlock": false,
+    "flash_attn": "",
+    "split_mode": "",
+    "main_gpu": null,
+    "threads": null,
+    "threads_batch": null,
+    "rope_scaling": "",
+    "rope_freq_base": null,
+    "rope_freq_scale": null,
+    "draft_model": "",
+    "draft_min": null,
+    "draft_max": null,
+    "spec_ngram_size": null,
+    "seed": null,
+    "system_prompt_file": "",
+    "extra_args": ""
   }
 ]
 ```
 
 ### `POST /api/presets`
-Create a preset. Body is a preset object (without `id`).
+Creates a preset from a full `ModelPreset` payload. If `id` is omitted, serde supplies one.
+
+Response:
+
+```json
+{ "ok": true, "preset": { "...": "..." } }
+```
 
 ### `PUT /api/presets/{id}`
-Update a preset.
+Updates the preset matched by the path `id`.
 
 ### `DELETE /api/presets/{id}`
-Delete a preset.
+
+```json
+{ "ok": true }
+```
 
 ### `POST /api/presets/reset`
-Reset all presets to factory defaults.
+Replaces the in-memory and on-disk preset list with factory defaults.
 
----
+```json
+{ "ok": true }
+```
 
-## Templates (Personas)
+## Templates
 
-System prompt templates / personas for the chat interface.
+Templates are stored in `templates.json`. Built-in personas live in the frontend and are merged client-side; this API only returns user-stored entries.
 
 ### `GET /api/templates`
+
 ```json
 [
   {
-    "id": "helpful-assistant",
+    "id": "t1746000000000",
     "name": "Helpful Assistant",
-    "system_prompt": "You are a helpful assistant.",
-    "ai_name": "Assistant",
-    "user_name": "User"
+    "prompt": "You are a helpful assistant.",
+    "explicit_policies": {
+      "level1": "Soft policy text",
+      "level2": "Unrestricted policy text"
+    }
   }
 ]
 ```
 
+`explicit_policies` is optional, and each level field is optional.
+
 ### `POST /api/templates`
-Create a template.
+Creates a template from a full `SystemPromptTemplate` payload.
+
+```json
+{ "ok": true, "template": { "...": "..." } }
+```
 
 ### `PUT /api/templates/{id}`
-Update a template.
+Updates the template matched by the path `id`.
 
 ### `DELETE /api/templates/{id}`
-Delete a template.
 
----
+```json
+{ "ok": true }
+```
 
 ## Models
 
 ### `GET /api/models`
-Discover available GGUF model files from the configured models directory.
+Returns the current scan result for the configured `models_dir`.
 
-**Response:**
 ```json
 [
   {
-    "name": "llama-3-8b.Q4_K_M.gguf",
-    "path": "/models/llama-3-8b.Q4_K_M.gguf",
-    "size_bytes": 4680000000
+    "path": "/models/Qwen3.5-27B-Q4_0.gguf",
+    "filename": "Qwen3.5-27B-Q4_0.gguf",
+    "size_bytes": 4680000000,
+    "size_display": "4.4 GB",
+    "quant_type": "Q4_0",
+    "model_name": "Qwen3.5-27B",
+    "is_split": false
   }
 ]
 ```
 
 ### `POST /api/models/refresh`
-Re-scan the models directory.
+Rescans `models_dir`.
 
----
+Success:
+
+```json
+{ "ok": true, "count": 12 }
+```
+
+Failure when no model directory is configured:
+
+```json
+{ "ok": false, "error": "no models directory configured (use --models-dir)" }
+```
 
 ## Settings
 
 ### `GET /api/settings`
-Retrieve persisted UI settings.
+Returns the persisted `UiSettings` object from `ui-settings.json`.
 
 ```json
 {
-  "preset_id": "my-preset",
+  "preset_id": "",
   "port": 8001,
-  "llama_server_path": "/usr/local/bin/llama-server",
+  "llama_server_path": "",
   "llama_server_cwd": "",
-  "models_dir": "/models",
-  "server_endpoint": "http://127.0.0.1:8001",
+  "models_dir": "",
+  "server_endpoint": "",
   "llama_poll_interval": 1,
   "remote_agent_url": "",
   "remote_agent_token": "",
   "remote_agent_ssh_autostart": false,
   "remote_agent_ssh_target": "",
   "remote_agent_ssh_command": "",
-"explicit_mode_policy": "",
-   "context_card_view": "gauge",
-   "enabled_context_notes": false,
-   "enabled_suggestions": false,
-   "enabled_quick_guide": false,
-   "default_sidebar_width": 320,
-   "suggestion_count": 5,
-   "context_depth": 10,
-   "suggestion_prompts": {}
+  "explicit_mode_policy": "",
+  "context_card_view": "gauge",
+  "ws_push_interval_ms": 500,
+  "chat_input_height": "",
+  "enabled_context_notes": true,
+  "enabled_suggestions": true,
+  "enabled_quick_guide": true,
+  "default_sidebar_width": 280,
+  "suggestion_prompts": {},
+  "suggestion_count": 5,
+  "context_depth": 10
 }
 ```
 
-Fields from `ui-settings.json`:
-- `preset_id`, `port`, `llama_server_path`, `llama_server_cwd`, `models_dir`
-- `server_endpoint`, `llama_poll_interval`
-- `remote_agent_*`: Remote agent configuration
-- `explicit_mode_policy`: Policy text appended when explicit mode is enabled
-- `context_card_view`: `"gauge"` | `"text"` (UI preference)
-
-### Guided Generation Settings
-
-These settings control the guided generation features (context notes, suggestions, quick guide).
-
-- `enabled_context_notes` (boolean): Enable/disable context notes in chat
-- `enabled_suggestions` (boolean): Enable/disable suggestion generation
-- `enabled_quick_guide` (boolean): Enable/disable quick guide panel
-- `default_sidebar_width` (integer): Sidebar width in pixels (default: 320)
-- `suggestion_count` (integer): Number of suggestions to generate per request (default: 5)
-- `context_depth` (integer): Number of recent messages to include in context for suggestions (default: 10)
-- `suggestion_prompts` (object): Category-specific prompt templates for suggestion generation. Keys are category names (e.g. `"general"`, `"coding"`, `"writing"`), values are prompt strings.
-
-**Note:** Only `GET` is currently implemented; `PUT` returns 404. Settings are persisted via the `POST /api/settings/save` endpoint (deprecated in favor of direct file writes from the UI).
-
 ### `PUT /api/settings`
-Save UI settings. Body is the same shape as GET response.
+Saves the `UiSettings` object to disk.
 
----
+Response:
+
+```json
+{ "ok": true }
+```
+
+Notes:
+- The live handler expects the current full `UiSettings` shape.
+- The frontend also uses a narrow partial-update path for `ws_push_interval_ms`; external clients should prefer sending the full object.
 
 ## GPU Environment
 
 ### `GET /api/gpu-env`
-Get detected GPU backend configuration.
+
+```json
+{
+  "env": {
+    "arch": "auto",
+    "devices": "",
+    "rocm_path": "/opt/rocm",
+    "extra_env": []
+  },
+  "architectures": [
+    { "id": "auto", "name": "Auto-detect", "hsa_version": "" }
+  ],
+  "detected": {
+    "arch": "gfx1100",
+    "count": 1,
+    "names": ["gfx1100"]
+  }
+}
+```
+
+`detected` can be `null` if no GPU probe succeeds.
 
 ### `PUT /api/gpu-env`
-Override GPU backend configuration.
+Request body is the persisted `GpuEnv` object:
 
----
+```json
+{
+  "arch": "auto",
+  "devices": "",
+  "rocm_path": "/opt/rocm",
+  "extra_env": [["HSA_ENABLE_SDMA", "0"]]
+}
+```
 
-## Chat
+Response:
+
+```json
+{ "ok": true }
+```
+
+## File Browser
+
+### `GET /api/browse`
+Browses a local directory.
+
+Query params:
+- `path`: absolute or relative path; if omitted, starts at the current user's home directory
+- `filter`: optional, currently `gguf` or `executable`
+
+Example:
+
+```text
+/api/browse?path=/models&filter=gguf
+```
+
+Response:
+
+```json
+{
+  "path": "/models",
+  "parent": "/",
+  "entries": [
+    {
+      "name": "Qwen3.5-27B-Q4_0.gguf",
+      "is_dir": false,
+      "size": 4680000000,
+      "size_display": "4680 MB",
+      "path": "/models/Qwen3.5-27B-Q4_0.gguf"
+    }
+  ]
+}
+```
+
+On invalid input the API returns a JSON error payload such as:
+
+```json
+{ "path": "/missing", "error": "Path not found" }
+```
+
+## Chat Transport
 
 ### `POST /api/chat`
-Send a message to the active llama.cpp server via the OpenAI-compatible `/v1/chat/completions` endpoint. Streams the response.
+Pass-through streaming proxy to the active session's `/v1/chat/completions`.
 
-**Request:**
-```json
-{
-  "messages": [
-    { "role": "system", "content": "You are helpful." },
-    { "role": "user", "content": "Hello!" }
-  ],
-  "temperature": 0.7,
-  "max_tokens": 512
-}
-```
+The request body is forwarded as raw bytes. The server does not validate or reshape the OpenAI-compatible payload before forwarding it upstream.
+
+The response is an SSE stream that forwards upstream `data: ...` events.
 
 ### `POST /api/chat/abort`
-Abort the currently streaming chat response.
+Current no-op acknowledgement endpoint:
+
+```json
+{ "ok": true }
+```
 
 ### `POST /api/chat/suggestions`
-Generate suggestions for a given category. Uses the current chat context to produce relevant follow-up prompts.
+Generates guided-generation suggestions using either supplied chat context or a fallback tab lookup.
 
-**Request:**
+Request:
+
 ```json
 {
+  "tab_id": "tab_1746000000000",
   "category": "general",
-  "count": 5
-}
-```
-
-**Response:**
-```json
-{
-  "suggestions": ["...", "...", "..."],
-  "cards": [],
-  "category": "general",
-  "count": 3
-}
-```
-
-`cards` is populated for the `director` category — each card includes `type`, `title`, `effect`, and `detail` fields for richer UI display.
-
-### `POST /api/chat/suggestions/rewrite`
-Rewrite a suggestion using the current chat context.
-
-**Request:**
-```json
-{
-  "suggestion": "Explain quantum computing",
-  "category": "general"
-}
-```
-
-**Response:**
-```json
-{
-  "content": "Can you explain the basics of quantum computing in simple terms?"
-}
-```
-
-### `POST /api/keywords/generate`
-Generate focus keywords for the suggestion system. Calls the model with thinking disabled for a fast response.
-
-**Request:**
-```json
-{
+  "count": 5,
+  "context_depth": 10,
   "messages": [
     { "role": "user", "content": "..." },
     { "role": "assistant", "content": "..." }
   ],
   "system_prompt": "You are ...",
+  "context_notes": [
+    { "section": "plot", "content": "..." }
+  ],
+  "quick_guide_active": "",
+  "prompt": null
+}
+```
+
+Response:
+
+```json
+{
+  "suggestions": ["..."],
+  "cards": [],
+  "category": "general",
   "count": 5
 }
 ```
 
-**Response:**
+For `category: "director"`, `cards` can contain structured entries:
+
 ```json
 {
-  "keywords": ["noir", "tension", "diner", "confrontation", "rain"]
+  "type": "pressure",
+  "title": "Tighten The Net",
+  "effect": "More pressure now.",
+  "detail": "Force the next reply into a narrower choice."
 }
 ```
 
-### `POST /api/context-notes/analyze`
-Analyze the current conversation against existing context notes. Returns per-section suggestions with staleness detection.
+### `POST /api/keywords/generate`
 
-**Request:**
+```json
+{ "category": "noir" }
+```
+
+Response:
+
+```json
+{ "keywords": ["rain", "diner", "tension"] }
+```
+
+### `POST /api/context-notes/analyze`
+
 ```json
 {
   "messages": [
@@ -438,236 +552,438 @@ Analyze the current conversation against existing context notes. Returns per-sec
   ],
   "system_prompt": "...",
   "existing_notes": [
-    { "section": "character", "content": "Kira, 28, cynical detective." }
+    { "section": "character", "content": "Kira is a cynical detective.", "created_at": 1746000000000 }
   ],
   "sections": ["character", "setting", "plot", "tone"]
 }
 ```
 
-**Response:**
+Response:
+
 ```json
 {
   "sections": [
     {
       "section": "character",
-      "suggested": "Kira is now acting as an informant, contradicting her earlier stance.",
+      "suggested": "Kira is now cooperating with the suspect.",
       "status": "stale",
-      "reason": "Recent messages show her cooperating with the suspect."
-    },
-    {
-      "section": "setting",
-      "suggested": "Neo-Tokyo diner, late night, rain. Three unknown figures just entered.",
-      "status": "current"
+      "reason": "Recent messages contradict the earlier note."
     }
   ]
 }
 ```
 
-**Status values:**
-- `new` — no existing note; a first suggestion is provided
-- `current` — existing note still accurately reflects the conversation
-- `stale` — existing note is outdated; `reason` explains what changed
+`status` is `new`, `current`, or `stale`.
+
+## Chat Persistence API
+
+The live chat persistence layer is SQLite-backed and centered on `chat.db`. Chat tabs are no longer stored as one big JSON array.
 
 ### `GET /api/chat/tabs`
-Load all persisted chat tabs from disk.
+Returns tab metadata only, without message bodies.
 
-**Response:** Array of `ChatTab` objects (see below).
+```json
+[
+  {
+    "id": "tab_1746000000000",
+    "name": "Noir Scene",
+    "explicit_level": 0,
+    "active_template_id": null,
+    "pinned": false,
+    "tab_order": 0,
+    "last_ctx_pct": null,
+    "total_input_tokens": 0,
+    "total_output_tokens": 0,
+    "message_count": 12,
+    "created_at": 1746000000000,
+    "updated_at": 1746000100000
+  }
+]
+```
 
-### `PUT /api/chat/tabs`
-Save all chat tabs to disk. Body is an array of `ChatTab` objects.
+### `POST /api/chat/tabs`
+Creates one tab. Request body is a full `ChatTabRow`. If `id` is empty, the server generates one. `created_at` and `updated_at` are overwritten server-side.
 
-### ChatTab Object
+Response is the created tab object.
+
+### `GET /api/chat/tabs/{id}`
+Returns the full tab row plus messages.
 
 ```json
 {
-  "id": "tab_abc123",
-  "name": "My Chat",
-  "system_prompt": "You are helpful.",
+  "id": "tab_1746000000000",
+  "name": "Noir Scene",
+  "system_prompt": "",
   "ai_name": null,
   "user_name": null,
-  "ai_gender": null,
-  "explicit_level": null,
+  "explicit_level": 0,
   "active_template_id": null,
-  "role_boundary_custom": null,
+  "auto_compact": true,
+  "auto_compact_summarize": false,
+  "compact_mode": "percent",
+  "compact_threshold": 0.8,
+  "model_params": {},
+  "context_notes": [],
+  "sidebar_width": 280,
+  "tab_order": 0,
+  "pinned": false,
+  "last_ctx_pct": null,
+  "total_input_tokens": 0,
+  "total_output_tokens": 0,
+  "created_at": 1746000000000,
+  "updated_at": 1746000100000,
   "messages": [
     {
+      "id": 1,
+      "tab_id": "tab_1746000000000",
       "role": "user",
       "content": "Hello",
-      "timestamp_ms": 1746000000000,
+      "timestamp_ms": 1746000001000,
       "input_tokens": null,
       "output_tokens": null,
       "cumulative_input_tokens": null,
       "cumulative_output_tokens": null,
-      "compaction_marker": null,
-      "thinking_content": null
+      "compaction_marker": false,
+      "variants": null,
+      "variant_index": null,
+      "seq": 0
     }
-  ],
-  "total_input_tokens": 0,
-  "total_output_tokens": 0,
-  "model_params": {
-    "temperature": 0.7,
-    "top_p": 0.9,
-    "top_k": 40,
-    "min_p": 0.01,
-    "repeat_penalty": 1.0,
-    "max_tokens": 4096
-  },
-  "created_at": 1746000000000,
-  "updated_at": 1746001000000,
-  "auto_compact": null,
-  "compact_threshold": null,
-  "auto_compact_summarize": true,
-  "compact_mode": null,
-  "last_ctx_pct": null,
-  "context_notes": [],
-  "context_custom_sections": [],
-  "sidebar_width": 280,
-  "quick_guide_draft": "",
-  "armed_story_beats": []
+  ]
 }
 ```
 
-**Tab fields:**
+### `PUT /api/chat/tabs/{id}`
+Full save for one tab. The handler updates tab metadata and then replaces all messages for that tab.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `ai_gender` | `string \| null` | Gender for `{{gender}}` token: `"male"`, `"female"`, or `"neutral"` |
-| `active_template_id` | `string \| null` | Links the tab to a persona template by ID |
-| `role_boundary_custom` | `string \| null` | Custom role boundary instruction; overrides the auto-generated default when set |
-| `total_input_tokens` | `number` | Running total of input tokens across all messages |
-| `total_output_tokens` | `number` | Running total of output tokens across all messages |
-| `auto_compact_summarize` | `boolean` | When true, dropped messages are summarized by the LLM (default: `true`) |
-| `compact_mode` | `string \| null` | `"percent"` or `"optimized"` |
-| `last_ctx_pct` | `number \| null` | Last known context window pressure (0–100) |
-| `context_notes` | `array` | Per-tab context notes for the guided generation sidebar |
-| `context_custom_sections` | `array` | User-defined custom section names for context notes |
-| `sidebar_width` | `number` | Width of the context notes sidebar in pixels |
-| `armed_story_beats` | `array` | Pending timed story beat injections (Surprise mode) |
+Response:
 
-**Message fields:**
+```json
+{ "ok": true }
+```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `thinking_content` | `string \| null` | Raw reasoning/thinking content from the model (if any) |
-| `compaction_marker` | `boolean \| null` | True for tombstone messages created by compaction |
-| `summarized` | `boolean \| null` | True if this tombstone was generated by LLM summarization |
-| `dropped_count` | `number \| null` | How many messages were dropped to create this tombstone |
-| `tokens_freed_estimate` | `number \| null` | Estimated tokens freed by this compaction |
-| `memory_domain` | `string \| null` | Domain used for compaction context (e.g. `"creative"`, `"coding"`) |
+Important behavior:
+- `id` is taken from the path.
+- `updated_at` is overwritten server-side.
+- message order is rewritten from array order
+- during this replace path, only `role`, `content`, `timestamp_ms`, `input_tokens`, `output_tokens`, and `compaction_marker` are persisted for each message; cumulative token fields and variant fields are not preserved by this route
 
----
+### `PATCH /api/chat/tabs/{id}/meta`
+Metadata-only update for one tab. Request body uses the same tab shape, but `messages` are ignored.
 
-## File Browser
+### `POST /api/chat/tabs/{id}/messages`
+Appends one or more messages.
 
-### `GET /api/browse?path=/some/dir`
-Browse the local filesystem for model files. Returns directory entries.
+Request:
 
----
-
-## Remote Agent
-
-The remote agent runs on a target machine (typically Linux/Windows) and provides host metrics + server control over SSH or direct HTTP.
-
-### `GET /api/remote-agent/releases/latest`
-Fetch the latest agent release info from GitHub.
-
-### `POST /api/remote-agent/detect`
-Probe a target machine via SSH to check agent install state.
-
-**Request:**
 ```json
 {
-  "ssh_target": "ssh://user@192.168.1.50:22",
-  "ssh_connection": {
-    "host": "192.168.1.50",
-    "username": "user",
-    "port": 22
-  }
+  "messages": [
+    {
+      "tab_id": "ignored-and-overwritten",
+      "role": "assistant",
+      "content": "Hello back",
+      "timestamp_ms": 1746000002000,
+      "input_tokens": 10,
+      "output_tokens": 25,
+      "cumulative_input_tokens": 10,
+      "cumulative_output_tokens": 25,
+      "compaction_marker": false,
+      "variants": null,
+      "variant_index": null,
+      "seq": 999
+    }
+  ]
 }
 ```
 
-### `POST /api/remote-agent/ssh/host-key`
-Retrieve the SSH host key for a target.
+Response:
 
-### `POST /api/remote-agent/ssh/trust`
-Add a host key to the trusted hosts list.
+```json
+{ "ok": true, "last_id": 42 }
+```
 
-### `GET /api/remote-agent/status`
-Get the current remote agent connection status.
+Important behavior:
+- `tab_id` in each message is overwritten from the path
+- `seq` is ignored and assigned automatically
+- this append route does persist `cumulative_input_tokens`, `cumulative_output_tokens`, `variants`, and `variant_index`
 
-### `POST /api/remote-agent/install`
-Install the remote agent on the target machine via SSH.
+### `PATCH /api/chat/tabs/order`
 
-### `POST /api/remote-agent/start`
-Start the remote agent on the target machine.
+```json
+{
+  "tab_order": ["tab_a", "tab_b", "tab_c"]
+}
+```
 
-### `POST /api/remote-agent/update`
-Update the remote agent binary on the target machine.
+Response:
 
-### `POST /api/remote-agent/stop`
-Stop the remote agent on the target machine.
+```json
+{ "ok": true }
+```
 
-### `DELETE /api/remote-agent/remove`
-Uninstall the remote agent from the target machine.
+### `DELETE /api/chat/tabs/{id}`
 
----
+```json
+{ "ok": true }
+```
 
-## Windows: LibreHardwareMonitor (LHM)
+## Chat Search
 
-LHM provides hardware sensor data on Windows. These endpoints are Windows-only; non-Windows platforms return `{"available": false}` or equivalent.
+### `GET /api/chat/search`
+Full-text search over non-compaction-marker messages in `chat.db`.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/lhm/check` | Check if LHM is running/installed |
-| `GET` | `/api/lhm/status` | Get disabled/enabled state |
-| `GET` | `/api/lhm/progress` | Get install progress |
-| `POST` | `/api/lhm/start` | Start LHM service |
-| `POST` | `/api/lhm/install` | Download and install LHM |
-| `POST` | `/api/lhm/uninstall` | Uninstall LHM |
-| `POST` | `/api/lhm/disable` | Disable LHM without uninstalling |
+Query params:
+- `q`: required search string
+- `limit`: optional result limit, default `50`
 
----
+Example:
 
-## Windows: Sensor Bridge
+```text
+/api/chat/search?q=slow%20endpoint&limit=20
+```
 
-The sensor bridge is a C# sidecar that forwards LHM sensor data.
+Response:
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/sensor-bridge/status` | Check bridge status |
-| `POST` | `/api/sensor-bridge/install` | Install the bridge |
-| `POST` | `/api/sensor-bridge/uninstall` | Uninstall the bridge |
+```json
+[
+  {
+    "tab_id": "tab_1746000000000",
+    "tab_name": "Debug Session",
+    "message_id": 17,
+    "role": "assistant",
+    "snippet": "Check <mark>slow</mark> HTTP <mark>endpoint</mark> first.",
+    "timestamp_ms": 1746000002000
+  }
+]
+```
 
----
+Search notes:
+- punctuation is normalized before FTS lookup
+- prefix matching is used internally
+- empty or unparseable queries return `[]`
 
-## Self-Update
+## Database Admin
 
-### `POST /api/self-update`
-Trigger a self-update of the llama-monitor binary from GitHub releases.
+All `/api/db/*` routes operate on the SQLite chat database.
 
----
+### `GET /api/db/stats`
 
-## Error Responses
+```json
+{
+  "tab_count": 3,
+  "message_count": 248,
+  "fts_index_count": 248
+}
+```
 
-All endpoints return standard HTTP status codes.
+### `GET /api/db/integrity`
 
-| Code | Meaning |
-|------|---------|
-| `200` | Success |
-| `400` | Bad request / invalid parameters |
-| `404` | Resource not found |
-| `500` | Internal server error |
+```json
+{
+  "status": "healthy",
+  "detail": "ok"
+}
+```
 
----
+If `detail` is not `"ok"`, `status` is `"corrupted"`.
+
+### `POST /api/db/maintenance`
+
+```json
+{ "operation": "checkpoint" }
+```
+
+Supported operations:
+- `checkpoint`
+- `vacuum`
+- `rebuild_fts`
+- `analyze`
+
+Responses:
+
+```json
+{ "backfilled": 0, "deleted": 0, "log": 0 }
+```
+
+```json
+{ "status": "vacuumed" }
+```
+
+```json
+{ "status": "fts_rebuilt" }
+```
+
+```json
+{ "status": "analyzed" }
+```
+
+### `POST /api/db/backup`
+Creates a manual backup in `~/.config/llama-monitor/backups/chat_<timestamp>.db`.
+
+```json
+{
+  "status": "backup_created",
+  "path": "/Users/nick/.config/llama-monitor/backups/chat_1746000000000.db",
+  "size_bytes": 40960
+}
+```
+
+Manual backups are pruned to the 7 newest `chat_*.db` files.
+
+### `DELETE /api/db/backup`
+
+```json
+{
+  "backup_name": "chat_1746000000000.db"
+}
+```
+
+Response:
+
+```json
+{
+  "status": "deleted",
+  "backup": "chat_1746000000000.db"
+}
+```
+
+### `GET /api/db/backups`
+Lists both manual backups (`chat_*.db`) and automatic hourly backups (`chat_auto_*.db`).
+
+```json
+{
+  "backups": [
+    {
+      "name": "chat_auto_1746000000000.db",
+      "size": 40960,
+      "modified": 1746000000000
+    }
+  ],
+  "total_size": 40960
+}
+```
+
+### `POST /api/db/restore`
+
+```json
+{
+  "backup_name": "chat_1746000000000.db"
+}
+```
+
+Success:
+
+```json
+{
+  "status": "restored",
+  "backup": "chat_1746000000000.db"
+}
+```
+
+Before restore, the server creates `pre_restore_<timestamp>.db` in the same `backups/` directory.
+
+### `POST /api/db/repair`
+
+```json
+{ "operation": "repair_indexes" }
+```
+
+Supported operations:
+- `repair_indexes`
+- `emergency_recovery`
+
+Responses:
+
+```json
+{ "status": "indexes_repaired" }
+```
+
+```json
+{ "status": "recovery_attempted" }
+```
+
+### `GET /api/db/indexes`
+
+```json
+[
+  {
+    "name": "idx_messages_tab",
+    "table": "messages",
+    "sql": "CREATE INDEX IF NOT EXISTS idx_messages_tab ON messages(tab_id, seq)",
+    "rebuildable": false
+  }
+]
+```
+
+### `POST /api/db/query`
+Runs admin queries, limited to `SELECT` and `PRAGMA`.
+
+```json
+{
+  "sql": "SELECT id, name FROM tabs ORDER BY updated_at DESC LIMIT 10"
+}
+```
+
+Response:
+
+```json
+{
+  "columns": ["id", "name"],
+  "rows": [
+    { "id": "tab_1", "name": "Noir Scene" }
+  ],
+  "row_count": 1
+}
+```
+
+## Legacy Chat Fields
+
+The project previously used a flat-file chat format. The live SQLite-backed API no longer persists several legacy fields that still appear in old docs, old exports, or migration code.
+
+Not part of the live `ChatTabRow` API:
+- `ai_gender`
+- `role_boundary_custom`
+- `quick_guide_active`
+- `armed_story_beats`
+- `context_custom_sections`
+- `quick_guide_draft`
+
+Not part of the live `MessageRow` API:
+- `thinking_content`
+- `summarized`
+- `dropped_count`
+- `dropped_preview`
+- `tokens_freed_estimate`
+- `ctx_pct_before`
+- `memory_version`
+- `memory_domain`
+- `summary_kind`
+- `compacted_at`
+- `compacted_message_count_total`
+- `recent_tail_kept`
+
+Compatibility note:
+- startup migration from legacy `chat-tabs.json` still reads some of those older fields
+- the live REST persistence API does not return or preserve them
+
+## Errors
+
+Most handlers return JSON error payloads rather than relying on HTTP status alone. Common shapes are:
+
+```json
+{ "ok": false, "error": "Preset not found" }
+```
+
+```json
+{ "error": "No active session" }
+```
 
 ## WebSocket
 
-See `websocket-schema.md` for the real-time metrics stream.
+For realtime metrics and capability pushes, use:
 
-```
+```text
 ws://localhost:7778/ws
 ```
 
----
-
-**Last updated:** 2026-05-14
+See `docs/reference/realtime-communication.md` and `docs/reference/capabilities.md`.

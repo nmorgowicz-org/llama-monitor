@@ -1,131 +1,149 @@
 # Chat
 
-The chat tab provides multi-tab streaming conversations with the connected llama.cpp server, per-tab configuration, and real-time telemetry.
+The chat tab provides multi-conversation streaming chat against the connected llama.cpp server, with per-conversation prompts, parameters, guided-generation tools, and live telemetry.
 
 ## Tab Management
 
-- **Multi-tab** — Parallel conversations with independent system prompts, model parameters, and message history
-- **Pin tabs** — Pinned tabs stay at the front and persist across sessions
-- **Keyboard switching** — Ctrl+1–9 by position, Ctrl+Shift+←/→ to cycle
-- **Rename** — Custom tab names persist in `chat-tabs.json`
-- **Maximum 10 tabs** — Old inactive tabs are auto-pruned
-- **Periodic save** — Tabs auto-save every 30 seconds to prevent data loss on force-kill
+- **Multi-tab conversations** — Each tab keeps its own message history, system prompt, persona, explicit level, model parameters, context notes, and guided-generation state
+- **Pinned tabs** — Pinned conversations stay grouped at the front in both the top tab strip and the conversation sidebar
+- **Drag reorder** — Drag tabs within the pinned or unpinned section to change order
+- **Keyboard switching** — `Ctrl+1` through `Ctrl+9` jump by tab position; `Ctrl+Shift+Left/Right` cycles
+- **Rename** — Double-click the top tab label or use the sidebar context menu
+- **Delete with undo** — Closing a tab moves it into an in-memory trash bin with an Undo toast; the trash list is not persisted across reloads
+
+## Conversation Sidebar
+
+The left conversation sidebar is the main organizer for chat sessions.
+
+![Conversation Sidebar](../screenshots/artifacts/sidebar-sidebar-expanded.png)
+![Conversation Sidebar Collapsed](../screenshots/artifacts/sidebar-sidebar-collapsed.png)
+
+- **Recency groups** — Conversations are grouped into `Pinned`, `Today`, `Yesterday`, `This Week`, and `Older`
+- **Per-conversation status** — Each row shows the conversation name, persona label, explicit-mode badge, message count, and a context-pressure bar derived from the last known context percentage
+- **Collapse/expand** — The collapsed state persists in `localStorage` and is restored when the page is reopened
+- **Name filter** — The inline filter in the sidebar header matches conversation names and visible persona labels only
+- **Context menu** — Rename, pin/unpin, export JSON, export Markdown, duplicate, and delete are available from the `...` menu
+
+![Conversation Context Menu](../screenshots/artifacts/chat-context-menu.png)
+
+### Cross-Conversation Message Search
+
+The magnifying-glass button opens a separate full-text search mode that searches message bodies across stored conversations.
+
+![Conversation Search](../screenshots/artifacts/sidebar-fts-search-active.png)
+
+- **Message search** — Searches stored message content, not just conversation names
+- **Prefix and punctuation tolerant** — Short fragments and punctuation-heavy queries are normalized before matching
+- **Collapse-safe** — If the sidebar was collapsed before search, closing search restores that state
+- **Jump to match** — Clicking a result switches to the matching tab, scrolls to the stored message row, and briefly highlights it
 
 ## Messaging
 
 - **Streaming** — Real-time SSE streaming from `/v1/chat/completions`
-- **Reasoning blocks** — Thinking/reasoning content rendered in expandable blocks; raw content stored in `thinking_content` field per message
-- **Markdown rendering** — Full Markdown with syntax-highlighted code blocks (highlight.js, atom-one-dark theme)
-- **Code block headers** — Language label, line count, and copy button per block
-- **Token estimates** — Input shows `~N tok` with color warnings at 800+ (yellow) and 1500+ (red) tokens
-- **Smart scroll** — Auto-scroll only when near bottom; scroll-to-bottom button with unread count badge
-- **History pagination** — Long conversations render only the most recent N messages (default 15); "Load More" reveals older batches
-- **RP text colorization** — Dialogue quoted with any Unicode double-quote variant (", ", „, ‟, «, ») is highlighted. Works correctly across inline formatting like bold and italic.
+- **Markdown rendering** — Assistant output is rendered with Markdown, syntax-highlighted code blocks, and per-block copy controls
+- **Thinking blocks** — If the upstream model sends `reasoning_content`, the UI renders it in an expandable thinking block during the active browser session
+- **Token estimates** — The composer shows a rough `~N tok` estimate with warning colors at higher counts
+- **Smart scroll** — Auto-scroll stays on only while you are near the bottom; scrolling upward during generation disables follow mode until you jump back down
+- **Unread badge** — New assistant replies increment a scroll-to-bottom unread badge when you are reading older content
+- **History pagination** — Long conversations render only the newest messages first (default 15) and expose older history through `Load More`
+- **RP dialogue highlighting** — Quoted dialogue is colorized even when Markdown formatting splits the text across inline tags
 
 ### Message Actions
 
 | Action | Description |
 |--------|-------------|
-| **Edit** | Edit any user message (not just the last one) and regenerate from that point |
-| **Regenerate** | Re-send from any user message to get a different response |
-| **Copy** | Copy message text to clipboard |
-| **Export** | Download entire chat history as formatted JSON |
-| **Import** | Import conversations from `.json` (full tab restore) or `.md` (append messages to active tab) |
+| **Edit** | Edit a user message and regenerate from that point |
+| **Regenerate** | Re-run from a prior user turn to get a different assistant reply |
+| **Copy** | Copy message text to the clipboard |
+| **Export JSON** | Download the active tab as a single-item JSON array containing the current in-memory tab object |
+| **Export Markdown** | Download only the visible conversation transcript as `**You**` / `**Assistant**` blocks separated by `---` |
+| **Import JSON** | Create a new tab from the first element of the JSON array |
+| **Import Markdown** | Parse `**You**` and `**Assistant**` blocks and append them to the active tab as new messages |
 
 ## Personas & Template Manager
 
-The template manager is the central place for managing all chat personas.
+The template manager is the central place for chat personas.
 
 ![Persona Manager](../screenshots/10b-persona-modal.png)
 
 ### Template List Sections
 
-The persona list organizes templates into three sections:
-
 | Section | Description |
 |---------|-------------|
-| **Active** | The persona currently applied to this chat tab — shown at the top with an "Active" badge |
+| **Active** | The persona currently applied to this tab |
 | **Custom** | User-created personas |
-| **Built-in** | Pre-built personas shipped with llama-monitor |
+| **Built-in** | Personas shipped with llama-monitor |
 
 ### Applying a Persona
 
-- Click the persona chip in the chat header to open a quick-select menu
-- Select a persona to apply it to the current tab; the `active_template_id` is saved per-tab
-- Open the template manager (pencil icon on the persona chip) for full editing
+- Click the persona chip in the chat header to open quick-select
+- Applying a persona stores its `active_template_id` on the current tab
+- Use the pencil action on the chip to open the full manager
 
 ### Per-Persona Explicit Policies
 
-Each template stores independent policy text for Level 1 (moderate) and Level 2 (unrestricted) explicit modes. These policies are appended to the system prompt when explicit mode is active, replacing the global policy.
-
-### Reset to Default
-
-Built-in personas can be reset to their original prompt and explicit policies via the reset button in the template manager. User copies of built-in personas are overwritten; pure built-in entries (no user copy) show "Already at default."
+Each persona stores separate Level 1 and Level 2 explicit-policy text. When explicit mode is enabled, the active persona's policy text is appended to the system prompt for that tab.
 
 ### Token Substitution
 
-System prompts support these substitution tokens:
+System prompts support:
 
 | Token | Replaced With |
 |-------|---------------|
-| `{{char}}` | The AI name for this tab |
-| `{{user}}` | The user name for this tab |
-| `{{gender}}` | The AI gender (`male`, `female`, or `neutral`) — defaults to `neutral` |
-
-Set `ai_gender` on any tab to control how `{{gender}}` resolves throughout the system prompt and explicit policies.
+| `{{char}}` | The AI name for the tab |
+| `{{user}}` | The user name for the tab |
+| `{{gender}}` | The AI gender (`male`, `female`, or `neutral`) |
 
 ### Custom Role Boundary
 
-By default, the role boundary instruction tells the model to write only the assistant's reply and not speak for the user. You can override this per-tab with a custom `role_boundary_custom` text field. Leave blank to use the auto-generated default.
+Each tab can override the default role-boundary instruction with `role_boundary_custom`. If blank, the app generates a default boundary from the current AI and user names.
 
 ## Behavior Panel
 
-The behavior panel (flag icon in the chat toolbar) provides quick access to the persona system prompt, role boundary configuration, and AI gender setting for the current tab.
+The behavior panel provides fast access to the active persona prompt, role-boundary controls, AI gender, and explicit-mode settings for the current tab.
 
-![Behavior Settings](../screenshots/artifacts/07-behavior-settings.png)
+![Behavior Settings](../screenshots/artifacts/settings-behavior-settings.png)
 
 ## Model Parameters
 
-Per-tab controls for generation behavior. An active-params dot indicator appears when non-defaults are set.
+Per-tab controls for generation behavior. A dot indicator appears when the active tab differs from defaults.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| Temperature | 0.7 | Randomness (0.0–2.0) |
-| top_p | 0.9 | Nucleus sampling threshold |
-| top_k | 40 | Top-k sampling |
-| min_p | 0.01 | Minimum probability threshold |
-| repeat_penalty | 1.0 | Repetition avoidance |
-| max_tokens | 4096 | Output length limit |
-| stream_timeout | 120s | Maximum wait for streaming response |
+| Temperature | `0.7` | Randomness |
+| `top_p` | `0.9` | Nucleus sampling threshold |
+| `top_k` | `40` | Top-k sampling |
+| `min_p` | `0.01` | Minimum probability threshold |
+| `repeat_penalty` | `1.0` | Repetition penalty |
+| `max_tokens` | `4096` | Reply length cap |
+| `stream_timeout` | `120s` | Abort if no content arrives within this interval |
 
-![Response Settings](../screenshots/artifacts/08-response-settings.png)
+![Response Settings](../screenshots/artifacts/settings-model-settings.png)
 
 ## Context Compaction
 
-Recover from full context windows by summarizing earlier conversation into a tombstone message.
+Compaction turns older history into a memory/tombstone entry so the conversation can continue inside the model context window.
 
 ### Compact Confirmation Modal
 
-Clicking Compact opens a confirmation dialog before any messages are dropped:
-
-- **Stats preview** — Shows total message count, how many will be dropped vs. kept, estimated tokens freed, current context %, and model capacity
-- **Summary preview** — When auto-summarize is enabled, the summary is generated in the background and displayed inline. You can edit the summary text before confirming, or restore the auto-generated version.
-- **Exit animation** — The modal fades out to confirm the action completed
+- **Stats preview** — Shows message counts, estimated tokens freed, current context %, and model capacity
+- **Summary preview** — When summarization is enabled, the generated summary appears before you confirm and can be edited
+- **Exit animation** — The modal fades out after a completed compaction
 
 ### Compaction Modes
 
 | Mode | Behavior |
 |------|----------|
-| **Percent** | Triggers when context usage exceeds a configurable threshold (default 80%) |
-| **Optimized** | Triggers when fewer than 25,000 tokens remain in the context window |
+| **Percent** | Triggers once context usage passes the configured threshold |
+| **Optimized** | Triggers when the remaining context budget drops below a fixed reserve |
 
-- **Auto-summarize** — When enabled, dropped messages are sent to the LLM for summarization instead of simple truncation
-- **Threshold slider** — Adjust auto-compact trigger from 0% to 100% per tab
-- **Multi-compact safe** — Tombstones are preserved across re-compactions
+- **Auto-summarize** — Uses the model to summarize dropped history instead of only trimming it
+- **Threshold slider** — Per-tab auto-compact threshold
+- **Rolling memory aware** — Existing compaction markers are folded back into later requests as `COMPACTED MEMORY`
 
 ## Prompt Debug Inspector
 
-The debug inspector shows exactly what the model receives for each request. Open it with the `{...}` button in the chat input toolbar.
+The debug inspector shows the exact outbound request shape used for the next reply. Open it with the `{...}` button in the chat input toolbar.
 
 ![Prompt Debug Inspector](../screenshots/08b-prompt-debug.png)
 
@@ -133,220 +151,235 @@ The debug inspector shows exactly what the model receives for each request. Open
 
 | Section | Description |
 |---------|-------------|
-| **System slices** | Each component of the final system prompt (base persona, role boundary, explicit policy, context notes, armed story beat) with individual token estimates |
-| **History** | Every message in the outbound request with per-message token estimates |
-| **Totals** | Combined system and history token counts vs. model context capacity |
-| **Timing** | Prompt processing time and generation time from the model's response timings |
-| **Model params** | The exact sampling parameters sent with this request |
-
-Token estimates are rough (1 token ≈ 4 characters). The actual count from the model's `timings` object is shown once the response completes.
+| **System slices** | The assembled system prompt split into base prompt, context notes, quick guide, armed story beat, role boundary, and compacted memory sections when present |
+| **History** | The non-system message history that will actually be sent upstream |
+| **Totals** | Rough token estimates versus the model context capacity |
+| **Timing** | Prompt and generation timings once a reply finishes |
+| **Model params** | The exact sampling parameters used for the request |
 
 ## Chat Telemetry
 
-Real-time metrics for the active chat tab, accessible via the telemetry toggle in the chat header.
+Real-time metrics for the active chat tab, accessible from the telemetry toggle in the chat header.
 
-### Summary Rail (always visible)
-- **State chip** — Current generation state (idle, prompting, generating)
-- **Prompt/Output stage** — Visual indicator of current processing phase
-- **Throughput bars** — Live prompt (P) and generation (G) token speeds with mini progress bars
-- **Live rate** — Current generation rate in tokens/sec
-- **Context ring** — Current tab context pressure with percentage
+### Summary Rail
+
+- **State chip** — Idle, prompting, or generating
+- **Stage indicator** — Prompt vs generation phase
+- **Throughput bars** — Prompt and generation speeds
+- **Live rate** — Current generation tokens per second
+- **Context ring** — Last known context pressure for the tab
 
 ### Expanded Detail Panel
-- **Throughput grid** — Detailed prompt and generation speed metrics
-- **Sparkline** — Throughput history chart
-- **Task metadata** — Task ID, context usage, model info
-- **Slot tiles** — Per-slot status with generation progress
-- **Activity timeline** — 5-minute rolling window of recent tasks
 
-### Popup Mode
-The telemetry panel can float as a popover or pin inline below the chat toolbar.
+- **Throughput grid**
+- **Sparkline**
+- **Task metadata**
+- **Slot tiles**
+- **Activity timeline**
+
+The panel can float as a popover or be pinned inline below the toolbar.
 
 ![Chat Telemetry](../screenshots/03b-chat-telemetry.png)
 ![Chat Telemetry Pinned](../screenshots/03c-chat-telemetry-pinned.png)
 
 ## Chat Style
 
-The style panel controls the visual appearance of messages.
+The style panel changes message presentation for the current browser.
 
 | Style | Description |
 |-------|-------------|
-| **Rounded** | Default — rounded message bubbles with subtle shadows |
-| **Compact** | Tighter spacing, thinner borders, reduced padding |
-| **Minimal** | Flat design, no shadows, minimal chrome |
-| **Bubbly** | Larger bubbles with gradient backgrounds |
+| **Rounded** | Rounded bubbles with shadows |
+| **Compact** | Tighter spacing and lighter chrome |
+| **Minimal** | Flat layout with minimal decoration |
+| **Bubbly** | Larger bubbles with stronger visual treatment |
 
-Style selection persists in `localStorage` key `llama-monitor-chat-style`.
+Style selection persists in `localStorage` under `llama-monitor-chat-style`.
 
 ### Font Scaling
 
-Adjust message font size from 70% to 150% in 10% increments via the style panel. Stored as CSS variable `--chat-font-scale`.
+Message font size can be adjusted from 70% to 150% via the style panel.
 
 ### Date Format
 
-Control how timestamps appear on messages via Settings > Appearance > Date Format:
+Message timestamps follow the per-user appearance setting:
 
 | Format | Example |
 |--------|---------|
-| `MM/DD/YY` | 05/06/26 |
-| `DD/MM/YY` | 06/05/26 |
-| `YYYY-MM-DD` | 2026-05-06 |
-| `locale` | Browser locale default |
+| `MM/DD/YY` | `05/06/26` |
+| `DD/MM/YY` | `06/05/26` |
+| `YYYY-MM-DD` | `2026-05-06` |
+| `locale` | Browser locale |
 
 ### Enter Behavior
 
-Toggle whether Enter sends the message or inserts a newline. When off, use Ctrl+Enter to send. Persists per-user in preferences.
+Enter-to-send is stored as a browser preference. When disabled, `Enter` inserts a newline and `Ctrl+Enter` sends.
 
 ## Guided Generation
 
-Guided generation tools help shape conversations through structured notes, contextual suggestions, and pre-built prompts.
+Guided-generation features shape the next assistant reply without forcing you to rewrite the base persona or model settings for the whole tab.
 
 ### Context Notes Sidebar
 
-A persistent, resizable sidebar that injects per-tab world-building notes into every prompt.
+The right-side context notes panel stores structured notes on the active tab and injects them into the system prompt as grouped `### SECTION NOTES ###` blocks.
 
 ![Context Notes Sidebar](../screenshots/08-context-notes-expanded.png)
 
-**Predefined sections:**
+#### Built-In Sections
 
 | Section | Purpose |
 |---------|---------|
-| Character | Character descriptions, motivations, and voice notes |
-| Setting | World-building details, locations, and atmosphere |
-| Plot/Scenario | Story beats, plot points, and narrative arcs |
-| Tone | Mood, pacing, and stylistic preferences |
+| Character | Character traits, motivations, voice, and relationships |
+| Setting | Places, world rules, atmosphere |
+| Plot/Scenario | Current beats, stakes, and scenario facts |
+| Tone | Mood, pacing, and stylistic guardrails |
 
-The sidebar expanded state persists in `localStorage` — it reopens in the same state on reload.
+#### Behavior
 
-#### AI Analysis
+- **Per-tab notes** — Notes live on the tab, not globally
+- **Multiple notes per section** — A section can contain several entries; they are concatenated when injected
+- **Custom sections** — You can create additional section names, which are also persisted with the tab
+- **Resizable width** — Width is stored on the tab and also mirrored in `localStorage` for UI restore
+- **Expanded/collapsed state** — The open state and intro visibility are browser-local `localStorage` preferences
 
-The "Analyze" button compares the current conversation against your existing notes via `POST /api/context-notes/analyze`. For each section it returns:
+#### AI Review
 
-- `new` — no existing note; a first suggestion is provided
-- `current` — existing note still accurately reflects the conversation
-- `stale` — existing note is outdated or contradicted by recent events, with a reason
+The `Analyze` action calls `POST /api/context-notes/analyze`.
+
+- **Default scan depth** — The initial review uses the last 20 messages
+- **Per-section full-context rerun** — Individual sections can be re-analyzed against the full conversation when needed
+- **Statuses** — `new`, `current`, and `stale`
+- **Actions** — Add the suggested note, replace your existing note, keep your version, skip, or delete the current note
 
 ### Suggestions Dropdown
 
-An AI-powered suggestion system with 15+ category chips organized in collapsible groups.
+Suggestions generate user-side next-step ideas from the current conversation context.
 
 ![Suggestions Dropdown](../screenshots/09-suggestions-dropdown.png)
 
-The dropdown includes a search filter and tag cloud for quick browsing.
+The browser sends recent messages, the current system prompt, non-empty context notes, and the active quick-guide instruction (if one is currently active) as suggestion context.
 
 ![Tag Cloud](../screenshots/13a-suggestions-tag-cloud.png)
 ![Search Filter](../screenshots/13b-suggestions-search-filter.png)
-
-Suggestions are generated by the active model using the current system prompt, context notes, and conversation history.
-
 ![Suggestions Results](../screenshots/09b-suggestions-results.png)
 
 #### Focus Keywords
 
-The "Focus Keywords" field in the suggestions setup lets you steer what the AI generates toward. Auto-generate populates it using `POST /api/keywords/generate`, which calls the model with thinking disabled for a fast response.
+The setup panel can auto-generate focus keywords through `POST /api/keywords/generate`. That request disables model thinking for a fast keyword-only result.
+
+#### Suggestion Draft Rewrite
+
+`Edit Draft` opens a workspace that turns a suggestion into a fuller user-side message. The rewrite pass tries to match recent user voice and point of view before dropping the result into the main composer.
 
 #### Custom Categories
 
-Create your own suggestion categories alongside the built-in ones. Custom categories appear in the tag cloud and dropdown.
+Custom categories appear alongside built-in ones and persist to `~/.config/llama-monitor/suggestion-categories.json`.
 
 ### Manage Categories
 
-Customize built-in suggestion prompts and add your own categories.
-
 ![Manage Categories](../screenshots/14-manage-categories.png)
 
-- **Built-in prompts** — Edit, disable, or reorder the 15+ pre-built prompts in each category
-- **Custom categories** — Create new groups with your own prompts
-- **Prompt editing** — Name, description, and prompt text; changes persist in `~/.config/llama-monitor/suggestion-categories.json`
-- **Enable/disable** — Toggle individual prompts on or off without deleting them
+- **Built-in prompts** — Editable, reorderable, and individually disableable
+- **Custom categories** — Add your own groups and prompt lists
+- **Per-prompt edits** — Name, description, and prompt text
 
 ### Quick Guide
 
-An inline panel with three modes for directing generation:
+Quick Guide is the inline steering surface for one-off reply direction.
 
 | Mode | Description |
 |------|-------------|
-| **Quick** | Direct instruction — one-line command to steer the next response |
-| **Director** | Custom scene direction — detailed prompt the AI follows |
-| **Surprise** | Timed injection — a prompt that fires after a set number of messages |
+| **Quick** | Applies a direct instruction to the next guided reply, then clears it |
+| **Director** | Expands one directing note into four continuation options |
+| **Surprise** | Arms a hidden future beat that lands on a later assistant reply |
 
 ![Quick Guide](../screenshots/10-quick-guide-dropdown.png)
 ![Director Mode](../screenshots/10c-guide-ai-director.png)
-
-Director results show the AI following your scene instructions with narrative beats and structure.
-
 ![Director Results](../screenshots/10d-guide-ai-director-results.png)
 
-### Surprise Mode
+#### Quick Mode Details
 
-Arms a timed injection that fires after a set number of subsequent messages. An armed indicator shows the countdown.
+- **Draft persistence** — The unsent quick-guide draft is stored on the tab
+- **Immediate guided follow-up** — Submitting a quick guide triggers a guided reply flow instead of only changing future defaults
+- **Restore previous guide** — If the last quick-guide reply is restorable, the app removes that assistant reply and reopens the instruction for editing
+
+#### Surprise Mode Details
+
+- **Delayed beats** — Each surprise stores `kind`, normalized instruction text, and `remaining_turns`
+- **Countdown** — A beat fires when `remaining_turns` reaches `0`; other armed beats decrement after assistant replies complete
+- **Per-tab queue** — Armed surprises are part of tab state
 
 ![Surprise Mode Armed](../screenshots/10e-guide-ai-surprise.png)
 
 ## Explicit Mode
 
-A three-level content filtering system that adapts to the active persona's policy.
-
-### Levels
+Explicit mode is a three-level content filter layered on top of the active persona.
 
 | Level | Icon | Description |
 |-------|------|-------------|
-| **Off** | 🔒 | Default — standard content filtering |
-| **Unlocked** | 🔓 | Level 1 — relaxed filtering, mild mature content |
-| **Unrestricted** | 🔥 | Level 2 — full uncensored mode |
+| **Off** | 🔒 | Default filtering |
+| **Unlocked** | 🔓 | Level 1 persona policy |
+| **Unrestricted** | 🔥 | Level 2 persona policy |
 
 ![Explicit Unlocked](../screenshots/12a-explicit-unlocked.png)
 ![Explicit Unrestricted](../screenshots/12b-explicit-unrestricted.png)
 ![Explicit Locked](../screenshots/12c-explicit-locked.png)
 
-### Persona-Specific Policies
-
-Each persona stores its own Level 1 and Level 2 policy text. When explicit mode is active, the persona's policy is appended to the system prompt. Edit policies in the template manager footer when a persona is selected.
-
 ### Controls
 
-- **Chat footer toggle** — Quick toggle between levels in the chat input footer
-- **Behavior panel** — Full explicit mode controls accessible via the flag button in the chat toolbar
+- **Footer toggle** — Fast level switch in the composer footer
+- **Behavior panel** — Full explicit controls for the current tab
 
 ## Message Management
 
 | Feature | Description |
 |---------|-------------|
-| **Message limit** | Control how many messages are rendered (5–200, default 15). "Load More" reveals older batches |
-| **Copy settings** | Copy system prompt and model parameters from any other tab to the active tab |
-| **AI/You names** | Customize display names for assistant and user roles per tab |
-| **Tab trash** | Deleted tabs retained for 24 hours, restorable via the tab trash menu |
+| **Message limit** | Controls how many messages are rendered at once (default 15) |
+| **Copy settings** | Copies prompt and parameter settings from another tab into the current one |
+| **AI/You names** | Per-tab display names used in the UI and prompt token substitution |
+| **Tab trash** | Deleted tabs are restorable from the in-memory trash menu until the page reloads or the trash entry ages out |
 
 ## Export & Import
 
 ### Markdown Export
 
-- **Role labels** — `**User**: content` and `**Assistant**: content` blocks
-- **Token counts** — Each message includes input/output token estimates
-- **Timestamps** — Message timestamps in ISO 8601 format
-- **Metadata** — System prompt, model parameters, and tab name in a header block
+- Exports only non-system messages
+- Uses `**You**` and `**Assistant**` headings plus `---` separators
+- Does **not** include timestamps, token counts, personas, system prompts, notes, or model parameters
 
 ### JSON Export
 
-- **Full message objects** — `{role, content, tokens, timestamp}` per message
-- **Tab metadata** — System prompt, model parameters, and settings included
-- **Full tab restore** — Importing a JSON file restores the entire tab state
+- Exports the active tab as a one-element array
+- Includes the current in-memory tab object, including messages and tab-level settings that exist in the browser state at export time
+- This is the only built-in export that carries personas, model params, notes, explicit level, quick-guide drafts, and similar tab metadata
 
-### Import
+### Import Behavior
 
 | Format | Behavior |
 |--------|----------|
-| **Markdown** | Parses role/content pairs and appends to the active tab |
-| **JSON** | Parses `{role, content}` objects and appends; if file contains tab metadata, offers full tab restore |
+| **Markdown** | Appends parsed user/assistant blocks to the active tab with fresh import timestamps |
+| **JSON** | Creates a new tab from the first array element in the file |
+
+### Reasoning / Thinking Content
+
+Thinking blocks are currently a live-session UI feature, not a durable storage feature.
+
+- Assistant `thinking_content` can appear in the browser while a reply streams
+- JSON export can include `thinking_content` if it is still present in the in-memory tab object
+- The current SQLite tab/message schema does not store `thinking_content`, so those blocks are not restored after a reload from `chat.db`
 
 ## Data Flow
 
-```
-User message → /v1/chat/completions (SSE stream) → Browser renders tokens live
-                                                    ↓
-                                            WebSocket metrics (500ms) → Telemetry rail updates
+```text
+User message -> /v1/chat/completions (SSE stream) -> Browser renders tokens live
+                                                   -> Chat telemetry updates from live metrics
 ```
 
 ## Persistence
 
-Chat tabs, messages, system prompts, and model parameters persist to `~/.config/llama-monitor/chat-tabs.json`. Data is saved on every change (debounced) and additionally every 30 seconds as a safety save.
+Chat persistence is backed by SQLite, not by the old flat JSON store.
+
+- **Primary store** — `~/.config/llama-monitor/chat.db`
+- **Schema** — Conversations live in `tabs` and `messages` tables, with full-text search on message content
+- **Legacy migration** — If `~/.config/llama-monitor/chat-tabs.json` exists at startup, the app imports it into `chat.db` and renames the old file to `chat-tabs.json.bak`
+- **Write pattern** — The browser saves whole-tab updates through `/api/chat/tabs/:id` and flushes pending tab data on page unload
+- **Search backing** — Cross-conversation message search reads from the database-backed FTS index, not from transient browser-only state

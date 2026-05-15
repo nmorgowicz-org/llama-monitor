@@ -10,6 +10,8 @@ let _searchInput = null;
 let _searchTimer = null;
 let _searchList = null;
 let _searchHeader = null;
+let _searchCount = null;
+let _collapsedBeforeSearch = false;
 
 export function initChatSearch() {
     const panel = document.getElementById('chat-sessions-panel');
@@ -35,6 +37,15 @@ export function initChatSearch() {
     wrap.className = 'csp-search-input-wrap';
     wrap.style.display = 'none';
 
+    const icon = document.createElement('span');
+    icon.className = 'csp-search-input-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML =
+        `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3">
+            <circle cx="11" cy="11" r="7"/>
+            <path d="M20 20l-3.5-3.5"/>
+        </svg>`;
+
     _searchInput = document.createElement('input');
     _searchInput.id = 'csp-search-input';
     _searchInput.type = 'search';
@@ -52,6 +63,7 @@ export function initChatSearch() {
     closeBtn.innerHTML = '✕';
     closeBtn.addEventListener('click', closeSearch);
 
+    wrap.appendChild(icon);
     wrap.appendChild(_searchInput);
     wrap.appendChild(closeBtn);
     header.appendChild(wrap);
@@ -61,9 +73,16 @@ export function initChatSearch() {
     _searchHeader.className = 'csp-search-header';
     _searchHeader.style.display = 'none';
     _searchHeader.innerHTML =
-        `<div class="csp-search-header-title">Search conversations</div>
+        `<div class="csp-search-header-copy">
+            <div class="csp-search-header-title">Message Search</div>
+            <div class="csp-search-header-subtitle">Across all conversations</div>
+         </div>
+         <div class="csp-search-header-meta">
+            <span class="csp-search-count">Type 2+ letters</span>
+         </div>
          <button class="csp-search-back-btn" type="button">Back</button>`;
     _searchHeader.querySelector('.csp-search-back-btn').addEventListener('click', closeSearch);
+    _searchCount = _searchHeader.querySelector('.csp-search-count');
 
     const listEl = document.getElementById('csp-list');
     if (listEl) listEl.after(_searchHeader);
@@ -81,27 +100,35 @@ export function initChatSearch() {
 
 export function openSearch() {
     const panel = document.getElementById('chat-sessions-panel');
+    _collapsedBeforeSearch = panel.classList.contains('collapsed')
+        || localStorage.getItem('csp-collapsed') === 'true';
     if (!panel.classList.contains('visible')) {
         panel.classList.add('visible');
-        panel.classList.remove('collapsed');
     }
+    panel.classList.remove('collapsed');
 
     _searchActive = true;
+    panel.classList.add('search-active');
 
     const wrap = _searchInput?.closest('.csp-search-input-wrap');
     if (wrap) wrap.style.display = 'flex';
     _searchInput?.focus();
+    _searchInput?.select();
 
     const list = document.getElementById('csp-list');
     if (list) list.style.display = 'none';
 
     if (_searchHeader) _searchHeader.style.display = 'flex';
     if (_searchList) _searchList.style.display = 'flex';
+    renderIdleState();
 }
 
 export function closeSearch() {
     if (!_searchActive) return;
     _searchActive = false;
+
+    const panel = document.getElementById('chat-sessions-panel');
+    panel?.classList.remove('search-active');
 
     const wrap = _searchInput?.closest('.csp-search-input-wrap');
     if (wrap) wrap.style.display = 'none';
@@ -110,6 +137,7 @@ export function closeSearch() {
 
     if (_searchList) _searchList.innerHTML = '';
     if (_searchList) _searchList.style.display = 'none';
+    updateSearchCount('Type 2+ letters');
 
     if (_searchHeader) _searchHeader.style.display = 'none';
 
@@ -117,6 +145,11 @@ export function closeSearch() {
     if (list) list.style.display = '';
 
     clearTimeout(_searchTimer);
+
+    if (_collapsedBeforeSearch) {
+        panel?.classList.add('collapsed');
+    }
+    _collapsedBeforeSearch = false;
 }
 
 async function onSearchInput() {
@@ -124,32 +157,37 @@ async function onSearchInput() {
     clearTimeout(_searchTimer);
 
     if (!q || q.length < 2) {
-        if (_searchList) _searchList.innerHTML = '';
+        renderIdleState();
         return;
     }
 
     _searchTimer = setTimeout(async () => {
         try {
+            renderLoadingState(q);
             const resp = await fetch(`/api/chat/search?q=${encodeURIComponent(q)}&limit=50`);
             const results = await resp.json();
-            renderResults(results);
+            renderResults(results, q);
         } catch (e) {
             console.error('[chat-search] search failed:', e);
+            renderErrorState();
         }
     }, 300);
 }
 
-function renderResults(results) {
+function renderResults(results, query) {
     if (!_searchList) return;
 
     if (!results || results.length === 0) {
+        updateSearchCount('0 matches');
         _searchList.innerHTML =
             `<div class="csp-search-empty">
-                No conversations found for “${escapeHtml(_searchInput.value)}”
+                <div class="csp-search-empty-title">No matches found</div>
+                <div class="csp-search-empty-body">Try a broader phrase or a shorter fragment than “${escapeHtml(query)}”.</div>
              </div>`;
         return;
     }
 
+    updateSearchCount(`${results.length} ${results.length === 1 ? 'match' : 'matches'}`);
     const frag = document.createDocumentFragment();
 
     for (const r of results) {
@@ -162,8 +200,11 @@ function renderResults(results) {
         // eslint-disable-next-line no-unsanitized/property
         card.innerHTML =
             `<div class="csp-search-result-header">
-                <span class="csp-search-result-tab">${escapeHtml(r.tab_name)}</span>
-                <span class="csp-search-result-role">${roleLabel}</span>
+                <div class="csp-search-result-heading">
+                    <span class="csp-search-result-tab">${escapeHtml(r.tab_name)}</span>
+                    <span class="csp-search-result-role">${roleLabel}</span>
+                </div>
+                <span class="csp-search-result-jump">Jump</span>
              </div>
              <div class="csp-search-result-snippet">${snippet}</div>`;
 
@@ -192,4 +233,40 @@ function escapeHtml(s) {
     const div = document.createElement('div');
     div.textContent = s;
     return div.innerHTML;
+}
+
+function renderIdleState() {
+    if (!_searchList) return;
+    updateSearchCount('Type 2+ letters');
+    _searchList.innerHTML =
+        `<div class="csp-search-empty csp-search-empty-idle">
+            <div class="csp-search-empty-title">Search across messages</div>
+            <div class="csp-search-empty-body">Find exact moments, themes, or fragments from any chat tab.</div>
+         </div>`;
+}
+
+function renderLoadingState(query) {
+    if (!_searchList) return;
+    updateSearchCount('Searching…');
+    _searchList.innerHTML =
+        `<div class="csp-search-empty csp-search-empty-loading">
+            <div class="csp-search-empty-title">Searching</div>
+            <div class="csp-search-empty-body">Looking for “${escapeHtml(query)}” across your conversation history.</div>
+         </div>`;
+}
+
+function renderErrorState() {
+    if (!_searchList) return;
+    updateSearchCount('Search unavailable');
+    _searchList.innerHTML =
+        `<div class="csp-search-empty csp-search-empty-error">
+            <div class="csp-search-empty-title">Search unavailable</div>
+            <div class="csp-search-empty-body">The message index could not be queried right now. Try again in a moment.</div>
+         </div>`;
+}
+
+function updateSearchCount(text) {
+    if (_searchCount) {
+        _searchCount.textContent = text;
+    }
 }

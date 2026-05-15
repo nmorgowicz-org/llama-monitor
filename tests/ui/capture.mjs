@@ -6,8 +6,9 @@
  *
  * Quick examples:
  *   node tests/ui/capture.mjs --list-scenarios
- *   SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario artifacts
- *   SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario new-features
+ *   node tests/ui/capture.mjs --scenario welcome
+ *   SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario chat
+ *   SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario guided-gen
  *   SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
  *
  * Adding a new screenshot flow:
@@ -1477,7 +1478,7 @@ async function scenarioGifs(ctx, options) {
         await sleep(1500);
         await captureFrames(page, 'inference', totalFrames, fps);
         await generationPromise;
-        framesToGif('inference', join(SCREENSHOTS_DIR, '02-inference-metrics.gif'), fps);
+        framesToGif('inference', join(ARTIFACTS_DIR, '02-inference-metrics.gif'), fps);
         cleanupFrames();
     }
 
@@ -1490,7 +1491,7 @@ async function scenarioGifs(ctx, options) {
         });
         await sleep(1200);
         await captureFrames(page, 'gpu', totalFrames, fps);
-        framesToGif('gpu', join(SCREENSHOTS_DIR, '04-gpu-metrics.gif'), fps);
+        framesToGif('gpu', join(ARTIFACTS_DIR, '04-gpu-metrics.gif'), fps);
         cleanupFrames();
     }
 }
@@ -1705,13 +1706,13 @@ await captureShot(page, 'sidebar-sidebar-expanded.png', { fullPage: true });
             console.log('[CAPTURE] Search results visible:', resultsVisible);
 
             // Capture full-page with search mode and results
-            await captureShot(page, 'guided-gen-fts-search-active.png', { fullPage: true });
+            await captureShot(page, 'sidebar-fts-search-active.png', { fullPage: true });
 
             // Capture close-up of search results
             const searchResults = await page.$('.csp-search-results');
             if (searchResults) {
-                await captureElementScreenshot(page, '.csp-search-results', 'guided-gen-fts-search-results.png', { padding: 12 });
-                await captureCloseUp(page, '.csp-search-results', 'guided-gen-fts-search-results.png', options);
+                await captureElementScreenshot(page, '.csp-search-results', 'sidebar-fts-search-results.png', { padding: 12 });
+                await captureCloseUp(page, '.csp-search-results', 'sidebar-fts-search-results.png', options);
             }
 
             // Close search
@@ -1892,9 +1893,9 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
         return;
     }
 
-    // Default to the core artifact flow so an unqualified invocation still
-    // produces something useful for docs work.
-    const scenarioName = forcedScenario || options.scenario || 'artifacts';
+    // Default to the welcome flow so an unqualified invocation still succeeds
+    // without requiring a remote attach.
+    const scenarioName = forcedScenario || options.scenario || 'welcome';
     const scenario = SCENARIOS[scenarioName];
     if (!scenario) {
         throw new Error(`Unknown scenario "${scenarioName}". Use --list-scenarios.`);

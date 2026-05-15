@@ -254,15 +254,20 @@ The harness spawns a fresh `target/release/llama-monitor` binary on a temporary 
 
 | Scenario | What It Captures | Saves To |
 |----------|-----------------|----------|
-| `artifacts` | Welcome screen, chat with response, telemetry, logs | `docs/screenshots/` |
-| `new-features` | Context notes, suggestions, tag cloud, quick guide, director mode, explicit mode, manage categories | `docs/screenshots/` |
-| `docs` | Chat panels (behavior, response settings, style), debug modal, settings, preferences, persona modal, models, keyboard shortcuts, GPU section | `docs/screenshots/artifacts/` |
+| `welcome` | Welcome/setup screen without attach | `docs/screenshots/artifacts/` |
+| `chat` | Chat, telemetry, logs | `docs/screenshots/artifacts/` |
+| `guided-gen` | Context notes, suggestions, quick guide, director mode, surprise, explicit mode, categories | `docs/screenshots/artifacts/` |
+| `sidebar` | Chat sidebar, FTS search, context menu, name filter | `docs/screenshots/artifacts/` |
+| `settings` | Settings modal, preferences, persona, models, shortcuts | `docs/screenshots/artifacts/` |
+| `panels` | Chat config panels, style, prompt debug | `docs/screenshots/artifacts/` |
+| `dashboard` | Server tab and GPU section | `docs/screenshots/artifacts/` |
 | `sparkline` | Throughput sparkline validation stills | `docs/screenshots/artifacts/` |
-| `gifs` | Inference and GPU/system animated GIFs | `docs/screenshots/` |
+| `gifs` | Inference and GPU/system animated GIFs | `docs/screenshots/artifacts/` |
+| `smoke` | Startup smoke validation | no screenshots unless the scenario is extended |
 
 **Output directory convention:**
-- `docs/screenshots/` — hero shots used directly in `README.md` and reference docs
-- `docs/screenshots/artifacts/` — supplemental stills for reference docs and debugging; not linked from README
+- `docs/screenshots/` — promoted hero shots used directly in `README.md`
+- `docs/screenshots/artifacts/` — raw harness output for stills, GIFs, reference-doc images, and debugging
 
 ### Running Captures
 
@@ -270,16 +275,30 @@ The harness spawns a fresh `target/release/llama-monitor` binary on a temporary 
 # Rebuild release binary first if UI code changed
 cargo build --release
 
-# Core hero shots
-SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario artifacts
+# Welcome screen only
+node tests/ui/capture.mjs --scenario welcome
 
-# Guided generation and chat-input features
-SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario new-features
+# Core chat surfaces
+SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario chat
 
-# Settings, panels, modals, debug surfaces
-SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario docs
+# Guided-generation features
+SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario guided-gen
+
+# Sidebar and search surfaces
+SCREENSHOT_PORT=8893 node tests/ui/capture.mjs --scenario sidebar
+
+# Settings, panels, modals
+SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario settings
+SCREENSHOT_PORT=8896 node tests/ui/capture.mjs --scenario panels
+
+# Dashboard/server surfaces
+SCREENSHOT_PORT=8897 node tests/ui/capture.mjs --scenario dashboard
+
+# Validation stills
+SCREENSHOT_PORT=8898 node tests/ui/capture.mjs --scenario sparkline
 
 # Animated GIFs
+SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs
 SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
 SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --inference-only
 ```
@@ -292,7 +311,7 @@ SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --inference-only
 | Existing UI surface visually changed | Re-run the scenario that covers it; commit updated screenshots |
 | Element ID or selector changed | Update the selector in `capture.mjs` first, then re-run |
 | Screenshot referenced in docs but no longer accurate | Regenerate or remove; never leave stale screenshots in docs |
-| README hero shot is outdated | Re-run `artifacts` or `new-features` and update the file in-place |
+| README hero shot is outdated | Re-run the relevant scenario, then explicitly promote the best artifact into `docs/screenshots/` |
 
 ### Rules for Agents
 
@@ -461,14 +480,26 @@ All user data persists to `~/.config/llama-monitor/`:
 
 | File | Purpose |
 |------|---------|
-| `sessions.json` | Session definitions (spawn/attach mode, ports, server configs) |
-| `presets.json` | Model presets with all llama.cpp parameters |
-| `ui-settings.json` | Web UI preferences (paths, ports, presets) |
-| `gpu-env.json` | GPU environment config (architecture, device indices) |
+| `chat.db` | SQLite chat storage for tabs, messages, full-text search index, and chat metadata |
+| `backups/` | Manual `chat_*.db`, automatic hourly `chat_auto_*.db`, and pre-restore `pre_restore_*.db` database backups |
+| `sessions.json` | Persisted session list (`Session` objects with spawn/attach mode, status, preset ID, timestamps) |
+| `presets.json` | Model presets with llama.cpp launch parameters |
+| `templates.json` | User-created or user-modified chat persona templates and explicit policy overrides |
+| `ui-settings.json` | Persisted `UiSettings` values such as paths, ports, remote-agent settings, explicit policy, guided-generation defaults, and chat input height |
+| `gpu-env.json` | GPU environment overrides (`arch`, `devices`, `rocm_path`, `extra_env`) |
+| `ssh-known-hosts.json` | Trusted SSH host keys for remote-agent workflows |
+| `lhm-disabled.json` | Persisted Windows LibreHardwareMonitor disabled/enabled state |
 
 Data is persisted:
-- Sessions: every 30 seconds + on explicit save
-- Presets/Settings: on explicit save via API
+- Sessions: autosaved every 30 seconds
+- Presets: saved immediately by the preset CRUD API
+- Templates: saved immediately by the template CRUD API
+- UI settings: saved immediately by `PUT /api/settings`
+- GPU environment: saved immediately by `PUT /api/gpu-env`
+- Chat database: updated live by chat tab/message APIs; WAL checkpointed hourly
+- Chat backups: automatic hourly backup plus manual `/api/db/backup`
+
+Frontend-only browser persistence also exists in `localStorage` and is not mirrored into `~/.config/llama-monitor/`. This includes UI state such as chat style, chat font, enter-to-send, telemetry pinning, nav/sidebar collapse state, visualization preferences, last attached endpoint, last session/setup positioning, date format, update dismissals, and some guided-generation UI toggles/categories.
 
 ## Git Branch Strategy
 
