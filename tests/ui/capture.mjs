@@ -1678,7 +1678,7 @@ await captureShot(page, 'sidebar-sidebar-expanded.png', { fullPage: true });
         const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
         renderChatSessionsSidebar();
     });
-    await sleep(300);
+    await sleep(1000);
 
     // Test FTS search: open search mode, query across multiple chats, capture results
     const searchBtn = await page.$('.csp-search-btn');
