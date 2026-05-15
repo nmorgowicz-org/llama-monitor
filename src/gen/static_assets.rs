@@ -8,7 +8,8 @@ pub const CSS_AGENT_MODAL: &str = include_str!("../../static/css/agent-modal.css
 pub const CSS_BASE: &str = include_str!("../../static/css/base.css");
 pub const CSS_CARDS_HARDWARE: &str = include_str!("../../static/css/cards-hardware.css");
 pub const CSS_CARDS_INFERENCE: &str = include_str!("../../static/css/cards-inference.css");
-pub const CSS_CHAT_GUIDED_GENERATION: &str = include_str!("../../static/css/chat-guided-generation.css");
+pub const CSS_CHAT_GUIDED_GENERATION: &str =
+    include_str!("../../static/css/chat-guided-generation.css");
 pub const CSS_CHAT: &str = include_str!("../../static/css/chat.css");
 pub const CSS_COMPONENTS: &str = include_str!("../../static/css/components.css");
 pub const CSS_LAYOUT: &str = include_str!("../../static/css/layout.css");
@@ -23,31 +24,41 @@ pub const COMPAT_GLOBALS_JS: &str = include_str!("../../static/js/compat/globals
 pub const CORE_APP_STATE_JS: &str = include_str!("../../static/js/core/app-state.js");
 pub const CORE_FORMAT_JS: &str = include_str!("../../static/js/core/format.js");
 pub const FEATURES_ANIMATE_JS: &str = include_str!("../../static/js/features/animate.js");
-pub const FEATURES_ATTACH_DETACH_JS: &str = include_str!("../../static/js/features/attach-detach.js");
+pub const FEATURES_ATTACH_DETACH_JS: &str =
+    include_str!("../../static/js/features/attach-detach.js");
 pub const FEATURES_CHAT_NOTES_JS: &str = include_str!("../../static/js/features/chat-notes.js");
 pub const FEATURES_CHAT_PARAMS_JS: &str = include_str!("../../static/js/features/chat-params.js");
-pub const FEATURES_CHAT_QUICK_GUIDE_JS: &str = include_str!("../../static/js/features/chat-quick-guide.js");
+pub const FEATURES_CHAT_QUICK_GUIDE_JS: &str =
+    include_str!("../../static/js/features/chat-quick-guide.js");
 pub const FEATURES_CHAT_RENDER_JS: &str = include_str!("../../static/js/features/chat-render.js");
 pub const FEATURES_CHAT_SEARCH_JS: &str = include_str!("../../static/js/features/chat-search.js");
-pub const FEATURES_CHAT_SESSIONS_SIDEBAR_JS: &str = include_str!("../../static/js/features/chat-sessions-sidebar.js");
+pub const FEATURES_CHAT_SESSIONS_SIDEBAR_JS: &str =
+    include_str!("../../static/js/features/chat-sessions-sidebar.js");
 pub const FEATURES_CHAT_STATE_JS: &str = include_str!("../../static/js/features/chat-state.js");
-pub const FEATURES_CHAT_SUGGESTIONS_JS: &str = include_str!("../../static/js/features/chat-suggestions.js");
-pub const FEATURES_CHAT_TEMPLATES_JS: &str = include_str!("../../static/js/features/chat-templates.js");
-pub const FEATURES_CHAT_TRANSPORT_JS: &str = include_str!("../../static/js/features/chat-transport.js");
+pub const FEATURES_CHAT_SUGGESTIONS_JS: &str =
+    include_str!("../../static/js/features/chat-suggestions.js");
+pub const FEATURES_CHAT_TEMPLATES_JS: &str =
+    include_str!("../../static/js/features/chat-templates.js");
+pub const FEATURES_CHAT_TRANSPORT_JS: &str =
+    include_str!("../../static/js/features/chat-transport.js");
 pub const FEATURES_CONFIG_JS: &str = include_str!("../../static/js/features/config.js");
 pub const FEATURES_CONTEXT_CARD_JS: &str = include_str!("../../static/js/features/context-card.js");
-pub const FEATURES_DASHBOARD_RENDER_JS: &str = include_str!("../../static/js/features/dashboard-render.js");
+pub const FEATURES_DASHBOARD_RENDER_JS: &str =
+    include_str!("../../static/js/features/dashboard-render.js");
 pub const FEATURES_DASHBOARD_WS_JS: &str = include_str!("../../static/js/features/dashboard-ws.js");
 pub const FEATURES_DB_ADMIN_JS: &str = include_str!("../../static/js/features/db-admin.js");
-pub const FEATURES_FILE_BROWSER_LAUNCHER_JS: &str = include_str!("../../static/js/features/file-browser-launcher.js");
+pub const FEATURES_FILE_BROWSER_LAUNCHER_JS: &str =
+    include_str!("../../static/js/features/file-browser-launcher.js");
 pub const FEATURES_FILE_BROWSER_JS: &str = include_str!("../../static/js/features/file-browser.js");
 pub const FEATURES_LHM_JS: &str = include_str!("../../static/js/features/lhm.js");
 pub const FEATURES_MODELS_JS: &str = include_str!("../../static/js/features/models.js");
 pub const FEATURES_NAV_JS: &str = include_str!("../../static/js/features/nav.js");
-pub const FEATURES_NETWORK_DETECTION_JS: &str = include_str!("../../static/js/features/network-detection.js");
+pub const FEATURES_NETWORK_DETECTION_JS: &str =
+    include_str!("../../static/js/features/network-detection.js");
 pub const FEATURES_PRESETS_JS: &str = include_str!("../../static/js/features/presets.js");
 pub const FEATURES_REMOTE_AGENT_JS: &str = include_str!("../../static/js/features/remote-agent.js");
-pub const FEATURES_SENSOR_BRIDGE_JS: &str = include_str!("../../static/js/features/sensor-bridge.js");
+pub const FEATURES_SENSOR_BRIDGE_JS: &str =
+    include_str!("../../static/js/features/sensor-bridge.js");
 pub const FEATURES_SESSIONS_JS: &str = include_str!("../../static/js/features/sessions.js");
 pub const FEATURES_SETTINGS_JS: &str = include_str!("../../static/js/features/settings.js");
 pub const FEATURES_SETUP_VIEW_JS: &str = include_str!("../../static/js/features/setup-view.js");

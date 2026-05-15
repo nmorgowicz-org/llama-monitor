@@ -341,15 +341,28 @@ fn main() -> Result<()> {
         let sessions_path = shutdown_sessions_path;
         let state = shutdown_state;
         runtime.spawn(async move {
-            // Wait for SIGINT or SIGTERM
-            let mut sigint =
-                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()).unwrap();
-            let mut sigterm =
-                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
+            // Wait for shutdown signal (platform-specific)
+            #[cfg(unix)]
+            {
+                let mut sigint =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+                        .unwrap();
+                let mut sigterm =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                        .unwrap();
 
-            tokio::select! {
-                _ = sigint.recv() => {},
-                _ = sigterm.recv() => {},
+                tokio::select! {
+                    _ = sigint.recv() => {},
+                    _ = sigterm.recv() => {},
+                }
+            }
+
+            #[cfg(windows)]
+            {
+                // On Windows, Ctrl+C is handled by the console handler;
+                // we also listen for Ctrl+Break via console control events.
+                // For now, block until a console event triggers shutdown.
+                tokio::signal::ctrl_c().await.ok();
             }
 
             println!("\n[info] Shutdown signal received, finalizing...");

@@ -2613,7 +2613,7 @@ Start-Sleep -Seconds 2\""
             .map_err(|e| anyhow::anyhow!("Cannot write update helper to temp dir: {e}"))?;
 
         std::process::Command::new("cmd.exe")
-            .args(["/C", &batch_path.to_string_lossy().into_owned()])
+            .args(["/C", &batch_path.to_string_lossy()])
             .creation_flags(DETACHED_PROCESS)
             .spawn()
             .map_err(|e| anyhow::anyhow!("Cannot launch update helper: {e}"))?;

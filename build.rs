@@ -58,12 +58,13 @@ fn collect_files(base: &Path, prefix: &str, files: &mut Vec<(String, String, Str
             if filename.starts_with(".DS_Store") || filename.starts_with('.') {
                 continue;
             }
-            // Get relative path from base directory
+            // Get relative path from base directory (normalize to forward slashes)
             let relative = path
                 .strip_prefix(base)
                 .unwrap()
                 .to_string_lossy()
-                .to_string();
+                .to_string()
+                .replace('\\', "/");
             // Generate a Rust-compatible constant name
             let const_name = path_to_const(&relative);
             // Determine content type category (only js/css/html have dedicated reply functions)

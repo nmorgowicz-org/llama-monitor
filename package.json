@@ -1,7 +1,8 @@
 {
   "type": "module",
   "scripts": {
-    "lint": "eslint static/js/"
+    "lint": "eslint static/js/",
+    "validate-js": "node scripts/validate-js.mjs"
   },
   "devDependencies": {
     "eslint": "^9.0.0",
