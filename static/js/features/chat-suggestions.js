@@ -622,7 +622,7 @@ async function fetchSuggestionRewrite(prompt) {
             temperature: 0.75,
             thinking_budget_tokens: 0,
             chat_template_kwargs: { enable_thinking: false },
-            max_tokens: 420,
+            max_tokens: 1024,
         }),
     });
 
