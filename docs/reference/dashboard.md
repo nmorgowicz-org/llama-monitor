@@ -143,4 +143,4 @@ Open the shortcuts modal with `Ctrl+/`.
 | `Ctrl+.` | Stop server |
 | `Escape` | Close the active modal |
 
-![Keyboard Shortcuts](../screenshots/06-keyboard-shortcuts.png)
+![Keyboard Shortcuts](../screenshots/panels-keyboard-shortcuts.png)

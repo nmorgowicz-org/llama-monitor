@@ -1392,8 +1392,8 @@ async function scenarioPanels(ctx, options) {
     if (behaviorBtn) {
         await behaviorBtn.click();
         await sleep(500);
-        await captureShot(page, 'settings-behavior-settings.png', { fullPage: true });
-        await captureCloseUp(page, '#behavior-sidebar', 'settings-behavior-settings.png', options);
+        await captureShot(page, 'panels-behavior-settings.png', { fullPage: true });
+        await captureCloseUp(page, '#behavior-sidebar', 'panels-behavior-settings.png', options);
         await behaviorBtn.click();
         await sleep(300);
     }
@@ -1402,8 +1402,8 @@ async function scenarioPanels(ctx, options) {
     if (responseBtn) {
         await responseBtn.click();
         await sleep(500);
-        await captureShot(page, 'settings-model-settings.png', { fullPage: true });
-        await captureCloseUp(page, '#model-params-sidebar', 'settings-model-settings.png', options);
+        await captureShot(page, 'panels-model-settings.png', { fullPage: true });
+        await captureCloseUp(page, '#model-params-sidebar', 'panels-model-settings.png', options);
         await responseBtn.click();
         await sleep(300);
     }
@@ -1413,18 +1413,33 @@ async function scenarioPanels(ctx, options) {
     await waitForChatComplete(page);
     await sleep(1500);
 
-    const debugBtn = await page.$('#btn-debug-prompt');
-    if (debugBtn) {
+    const debugDropdownBtn = await page.$('#btn-debug-dropdown');
+    if (debugDropdownBtn) {
         try {
+            await debugDropdownBtn.click();
+            await page.waitForFunction(() => {
+                const menu = document.getElementById('debug-dropdown-menu');
+                return !!menu && menu.classList.contains('open');
+            }, { timeout: 5000 });
+
+            const debugBtn = await page.$('#btn-debug-prompt');
+            if (!debugBtn) {
+                throw new Error('Prompt Debug menu item not found after opening tools menu');
+            }
+
             await debugBtn.click();
             await page.waitForSelector('#debug-prompt-modal.active', { timeout: 5000 });
+            await page.waitForFunction(() => {
+                const content = document.getElementById('debug-content');
+                return !!content && !content.classList.contains('hidden');
+            }, { timeout: 5000 });
             await sleep(500);
             await captureShot(page, 'panels-prompt-debug.png', { fullPage: true });
             await captureCloseUp(page, '#debug-prompt-modal', 'panels-prompt-debug.png', options);
             await page.keyboard.press('Escape');
             await sleep(300);
         } catch (e) {
-            console.log('[CAPTURE] Debug prompt modal failed, skipping...');
+            console.log(`[CAPTURE] Debug prompt modal failed, skipping... ${e.message}`);
         }
     }
 }

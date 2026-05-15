@@ -29,35 +29,17 @@ Chat tabs, prompt controls, telemetry overlays, and logs live next to the monito
 
 ![Chat Interface](docs/screenshots/03-chat.png)
 
-### Context Notes
+### Guided Generation
 
-A per-tab sidebar for persistent world-building notes, scene state, and other prompt context that should travel with the conversation.
-
-![Context Notes](docs/screenshots/08-context-notes-expanded.png)
-
-### AI-Generated Suggestions
-
-Generate context-aware scene ideas, prompts, and writing directions from the current conversation and notes instead of relying on canned templates.
+A per-tab notes sidebar, AI-generated suggestions, quick guide flows, and director/surprise tools let you steer the next reply without rebuilding the whole prompt stack.
 
 ![Suggestions Results](docs/screenshots/09b-suggestions-results.png)
 
-### Director Mode & Quick Guide
+### Personas & Prompt Tooling
 
-Guide the next response with a one-off instruction, a staged direction, or a timed story beat without rewriting the full prompt stack.
+Manage built-in and custom personas, explicit-policy variants, and outbound prompt inspection from the same workspace.
 
-![Director Mode Results](docs/screenshots/10d-guide-ai-director-results.png)
-
-### Personas & Template Manager
-
-Manage built-in and custom personas, explicit-policy variants, and token-substitution fields from the template manager.
-
-![Persona Manager](docs/screenshots/10b-persona-modal.png)
-
-### Prompt Debug Inspector
-
-Inspect the exact outbound prompt composition, token estimates, and per-message contribution when you need to debug context pressure or response behavior.
-
-![Prompt Debug Inspector](docs/screenshots/08b-prompt-debug.png)
+![Prompt Debug Inspector](docs/screenshots/panels-prompt-debug.png)
 
 ---
 
