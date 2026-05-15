@@ -437,6 +437,18 @@ async function waitForChatResponse(page, timeoutMs = 300000) {
     await sleep(5000);
 }
 
+async function waitForChatIdle(page, timeoutMs = 60000) {
+    // Wait for chat to become idle (no streaming, send button not in stop mode)
+    await page.waitForFunction(() => {
+        const streaming = document.querySelector('#chat-messages .chat-message-streaming');
+        if (streaming) return false;
+        const sendBtn = document.getElementById('btn-send');
+        if (sendBtn && sendBtn.classList.contains('btn-chat-send-stop')) return false;
+        return true;
+    }, { timeout: timeoutMs });
+    await sleep(1000);
+}
+
 async function waitForChatComplete(page, timeoutMs = 300000) {
     // Wait for streaming to stop and assistant message to appear
     await waitForChatResponse(page, timeoutMs);
@@ -962,15 +974,13 @@ async function scenarioGuidedGen(ctx, options) {
     await page.type('#quick-guide-input', 'Keep the next reply concise and technical, 3 bullets max.');
     await sleep(300);
     await page.keyboard.press('Enter');
-    await sleep(600);
+    // Wait for quick guide response to complete before sending next message
+    await waitForChatIdle(page);
     // Now send a user message that will use the guide
     await sendChatPrompt(page, 'Explain how connection pooling improves performance.');
     await waitForChatComplete(page);
     await sleep(1500);
     await captureShot(page, 'guided-gen-quick-guide-response.png', { fullPage: true });
-
-    // Ensure AI has fully completed before moving to next flow
-    await sleep(10000);
 
   // Director mode: switch to director mode and generate ideas
     // Fresh chat with seeded noir scene for director demo
@@ -1021,7 +1031,8 @@ async function scenarioGuidedGen(ctx, options) {
             const applyBtn = await page.$('.quick-guide-director-apply-btn');
             if (applyBtn) {
                 await applyBtn.click();
-                await sleep(800);
+                // Wait for director apply response to complete before sending next message
+                await waitForChatIdle(page);
                 await sendChatPrompt(page, 'Continue the scene with higher tension.');
 await waitForChatComplete(page);
                 await sleep(1500);
@@ -1029,9 +1040,6 @@ await waitForChatComplete(page);
             }
         }
     }
-
-    // Ensure AI has fully completed before moving to next flow
-    await sleep(10000);
 
     // Surprise mode: switch to surprise mode and arm a surprise
     // Fresh chat with content for chat-related screenshot
