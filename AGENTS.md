@@ -395,7 +395,11 @@ In CI:
   - `npm test` against a freshly built release binary.
 - Skips:
   - SSH integration tests unless `LLAMA_MONITOR_SSH_TARGET` is configured.
-  - AI-dependent tests unless `LLAMA_MONITOR_HAS_AI=1` is set.
+  - AI-dependent tests: excluded from CI by default because runners have no live endpoint.
+    - If a test is valuable but requires AI, keep it in the suite as disabled/manual-only:
+      - Gate it with `LLAMA_MONITOR_HAS_AI=1`.
+      - Use `test.skip(!hasAi, 'Set LLAMA_MONITOR_HAS_AI=1 to run AI-dependent tests.')`.
+      - Never make AI-dependent tests mandatory for CI.
 
 ### Maintenance Rules
 
@@ -429,7 +433,11 @@ Add or extend e2e tests when:
   - Easy to regress (multi-step flows, configuration toggles, persistence).
 - The test can be:
   - Deterministic and fast.
-  - Independent of AI responses (or clearly gated with `LLAMA_MONITOR_HAS_AI=1`).
+  - Independent of AI responses (preferred), or:
+    - If it requires AI, keep it disabled and manual-only:
+      - Gate with `LLAMA_MONITOR_HAS_AI=1`.
+      - Use `test.skip(!hasAi, 'Set LLAMA_MONITOR_HAS_AI=1 to run AI-dependent tests.')`.
+      - Never make it mandatory for CI.
 
 Prefer:
 
@@ -442,6 +450,7 @@ Avoid:
   - Rely on exact visual layout or pixel positions (use screenshot harness for that).
   - Depend on external AI responses without being gated and idempotent.
   - Are so tightly coupled to internal structure that every refactor breaks them.
+  - Require AI and are not disabled via `LLAMA_MONITOR_HAS_AI=1` (CI must never fail because a runner lacks a live endpoint).
 
 If a change is minor (e.g., small UX tweak, internal refactor, non-user-facing fix) and existing tests already cover the broader area, you can skip adding a new test.
 
