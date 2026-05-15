@@ -441,8 +441,24 @@ async function waitForChatComplete(page, timeoutMs = 300000) {
     // Wait for streaming to stop and assistant message to appear
     await waitForChatResponse(page, timeoutMs);
 
-    // Verify no [stopped] text in the last assistant message
-    const hasStopped = await page.evaluate(() => {
+    // Retry until no [stopped] text in the last assistant message (max 3 retries)
+    for (let i = 0; i < 3; i++) {
+        const hasStopped = await page.evaluate(() => {
+            const assistantMessages = document.querySelectorAll('#chat-messages .chat-message-assistant');
+            if (assistantMessages.length === 0) return false;
+            const lastMessage = assistantMessages[assistantMessages.length - 1];
+            const body = lastMessage.querySelector('.chat-msg-body');
+            return body && body.textContent.includes('[stopped]');
+        });
+
+        if (!hasStopped) break;
+
+        console.log(`[CAPTURE] Detected [stopped] response, waiting longer (attempt ${i + 1}/3)...`);
+        await sleep(10000);
+    }
+
+    // Final check
+    const stillStopped = await page.evaluate(() => {
         const assistantMessages = document.querySelectorAll('#chat-messages .chat-message-assistant');
         if (assistantMessages.length === 0) return false;
         const lastMessage = assistantMessages[assistantMessages.length - 1];
@@ -450,20 +466,8 @@ async function waitForChatComplete(page, timeoutMs = 300000) {
         return body && body.textContent.includes('[stopped]');
     });
 
-    if (hasStopped) {
-        console.log('[CAPTURE] Detected [stopped] response, waiting longer...');
-        await sleep(5000);
-        // Try again
-        const stillStopped = await page.evaluate(() => {
-            const assistantMessages = document.querySelectorAll('#chat-messages .chat-message-assistant');
-            if (assistantMessages.length === 0) return false;
-            const lastMessage = assistantMessages[assistantMessages.length - 1];
-            const body = lastMessage.querySelector('.chat-msg-body');
-            return body && body.textContent.includes('[stopped]');
-        });
-        if (stillStopped) {
-            console.log('[CAPTURE] WARNING: [stopped] response persists, may need manual review');
-        }
+    if (stillStopped) {
+        console.log('[CAPTURE] WARNING: [stopped] response persists after retries, may need manual review');
     }
 }
 
