@@ -338,6 +338,128 @@ When adding a new screenshot:
 - Use a slug that describes the UI surface, not the commit or feature branch
 - Never reuse a number that already refers to a different surface (readers bookmark images by URL)
 
+## Playwright UI E2E Tests
+
+Playwright UI tests are separate from the Puppeteer screenshot harness. They:
+
+- Run anywhere (local and CI).
+- Validate behavior and flows, not pixel-perfect visuals.
+- Are typically run near the end of a feature branch before marking a PR ready.
+
+### Running Locally
+
+From the repository root:
+
+```bash
+cd tests/ui
+npm install
+npx playwright install chromium
+npm test
+```
+
+Useful variants:
+
+- `npm test` — run all tests (headless)
+- `npm run test:headed` — run with browser visible
+- `npm run test:debug` — run in Playwright inspector
+- `npm run test:ssh` — run SSH integration tests (requires LLAMA_MONITOR_SSH_TARGET)
+- `LLAMA_MONITOR_HAS_AI=1 npm run test:ai` — include AI-dependent tests
+
+Notes:
+
+- Tests use a fresh temporary config dir via `run-server.sh`; they do not depend on your local `~/.config/llama-monitor/`.
+- The UI URL defaults to `http://127.0.0.1:7778`. You can override with `LLAMA_MONITOR_UI_URL`.
+
+### When to Run
+
+- Before adding the `ready-to-test` label to a PR.
+- After any change that affects:
+  - Chat behavior (tabs, messages, compaction, guided generation).
+  - Navigation, modals, panels, or settings flows.
+  - Remote-agent or SSH-related flows.
+- Near the end of a feature branch, as part of final validation.
+
+If a change is small and clearly isolated (e.g., internal refactor, docs-only), you may skip e2e, but you must still run the Rust checks and JS linting.
+
+### CI Behavior
+
+In CI:
+
+- Triggered by the `ui` job when:
+  - The PR has `ready-to-test` label or is from `dependabot`.
+  - One or more files under `static/**` or `tests/ui/**` changed.
+- Runs:
+  - `npm run validate-js` (syntax).
+  - `npm ci` in `tests/ui`.
+  - `npx playwright install chromium`.
+  - `npm test` against a freshly built release binary.
+- Skips:
+  - SSH integration tests unless `LLAMA_MONITOR_SSH_TARGET` is configured.
+  - AI-dependent tests unless `LLAMA_MONITOR_HAS_AI=1` is set.
+
+### Maintenance Rules
+
+UI e2e tests are first-class and must be kept in sync with the application. Agents MUST treat them similarly to reference documentation: update them as part of the same PR that changes the feature.
+
+#### Must Update
+
+Update e2e tests when:
+
+- A UI element’s ID, label, or structure changes that tests rely on.
+- A flow is modified (e.g., new step, removed step, changed default behavior).
+- A feature is renamed or moved (e.g., tab name, settings section, menu item).
+- A new non-trivial feature or flow is added (see “When to Add” below).
+
+#### Must Prune
+
+Remove or adjust tests when:
+
+- A feature is removed or deprecated.
+- A test no longer reflects the intended behavior of the app.
+- A test is flaky and depends on transient or external behavior that is not stable or testable.
+
+Never leave dead tests that pass for the wrong reasons or test removed functionality.
+
+#### When to Add
+
+Add or extend e2e tests when:
+
+- The feature is:
+  - Visually or functionally significant (new modal, panel, sidebar, chat mode).
+  - Easy to regress (multi-step flows, configuration toggles, persistence).
+- The test can be:
+  - Deterministic and fast.
+  - Independent of AI responses (or clearly gated with `LLAMA_MONITOR_HAS_AI=1`).
+
+Prefer:
+
+- Short, focused tests that validate key behaviors.
+- Tests that assert meaningful outcomes (e.g., “chat tab created”, “settings persisted”, “search filters results”) rather than internal implementation details.
+
+Avoid:
+
+- Tests that:
+  - Rely on exact visual layout or pixel positions (use screenshot harness for that).
+  - Depend on external AI responses without being gated and idempotent.
+  - Are so tightly coupled to internal structure that every refactor breaks them.
+
+If a change is minor (e.g., small UX tweak, internal refactor, non-user-facing fix) and existing tests already cover the broader area, you can skip adding a new test.
+
+### Relationship to Screenshot Harness
+
+- Playwright tests:
+  - Purpose: validate functional behavior and flows.
+  - Environment: local and CI.
+- Puppeteer screenshot harness (`capture.mjs`):
+  - Purpose: capture reference visuals for docs and design.
+  - Environment: local only, requires a release binary and (often) a remote llama.cpp server.
+
+Do not conflate them:
+
+- When a feature’s behavior changes:
+  - Update Playwright tests if it affects automated flows.
+  - Update screenshot scenarios only if visuals/docs are impacted.
+
 ## Static Asset Registration (AUTO-GENERATED)
 
 All static files (JS, CSS, HTML, etc.) are embedded at compile time via `include_str!` macros. **Registration is automatic** — `build.rs` scans `static/` and generates:
