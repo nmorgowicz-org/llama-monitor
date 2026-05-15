@@ -1,7 +1,4 @@
 // ── Performance Baseline ──────────────────────────────────────────────────────
-// Phase 1: Establish measurement baseline before optimization.
-// Run with: npx playwright test perf-baseline.spec.js
-//
 
 import { test, expect } from '@playwright/test';
 
@@ -20,7 +17,6 @@ test.describe('performance baseline', () => {
     await page.waitForSelector('html.modules-ready');
     const modulesReadyTime = Date.now() - startTime;
 
-    // Count JS requests
     const jsRequests = requests.filter(r => r.url.endsWith('.js'));
     const cssRequests = requests.filter(r => r.url.endsWith('.css'));
 
@@ -41,7 +37,6 @@ test.describe('performance baseline', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
 
-    // Measure time for a dashboard update
     const updateMs = await page.evaluate(() => {
       const start = performance.now();
       if (typeof window.updateDashboard === 'function') {

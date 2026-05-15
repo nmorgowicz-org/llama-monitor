@@ -10,15 +10,7 @@ async function enterMonitorView(page) {
   await expect(page.locator('#endpoint-strip-monitor')).toBeVisible();
 }
 
-async function openNewSessionForm(page) {
-  await page.getByRole('button', { name: /sessions/i }).click();
-  await expect(page.locator('#session-modal')).toHaveClass(/open/);
-  await expect(page.locator('#session-modal-title')).toHaveText('Sessions');
-  await page.locator('#btn-new-session').click();
-  await expect(page.locator('#sessions-new-form')).toBeVisible();
-}
-
-test.describe('modern UI shell', () => {
+test.describe('app shell', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
@@ -60,7 +52,7 @@ test.describe('modern UI shell', () => {
   });
 });
 
-test.describe('modal controls', () => {
+test.describe('modals and menus', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
@@ -80,7 +72,11 @@ test.describe('modal controls', () => {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
 
-    await openNewSessionForm(page);
+    await page.getByRole('button', { name: /sessions/i }).click();
+    await expect(page.locator('#session-modal')).toHaveClass(/open/);
+    await expect(page.locator('#session-modal-title')).toHaveText('Sessions');
+    await page.locator('#btn-new-session').click();
+    await expect(page.locator('#sessions-new-form')).toBeVisible();
     await page.locator('#modal-session-mode').selectOption('attach');
     await expect(page.locator('#modal-session-port-label')).toHaveText('Endpoint');
     expect(errors).toEqual([]);
@@ -119,7 +115,6 @@ test.describe('modal controls', () => {
   test('remote agent fix opens runtime configuration', async ({ page }) => {
     await enterMonitorView(page);
     await page.evaluate(() => {
-      // Force both agent-status and fix button visible for testing
       document.getElementById('agent-status').style.display = '';
       document.querySelector('.btn-agent-fix').style.display = '';
     });
@@ -149,7 +144,7 @@ test.describe('modal controls', () => {
 
     await page.route('/api/remote-agent/detect', async route => {
       detectCalls += 1;
-      const payload = route.request().postDataJSON();
+      const payload = route.request().postDataJSON;
       expect(payload.ssh_target).toBe('ssh://user@192.0.2.16:2222');
       expect(payload.ssh_connection).toMatchObject({
         host: '192.0.2.16',
@@ -251,7 +246,7 @@ test.describe('inference metric rendering', () => {
   test('renders active slot, request, speculative, and sampler state from slot snapshots', async ({ page }) => {
     await page.evaluate(async () => {
       const { renderSlotGrid, renderDecodingConfig, updateRequestActivity, renderActivityRail,
-              renderGenerationDetailItems, setChipState } = await import('/js/features/dashboard-render.js');
+               renderGenerationDetailItems, setChipState } = await import('/js/features/dashboard-render.js');
       const l = {
         slots_processing: 1,
         slots_idle: 0,
