@@ -528,9 +528,6 @@ async function captureCloseUp(page, selector, filename, options = {}) {
 }
 
 async function captureElementScreenshot(page, selector, filename, options = {}) {
-    // Only capture element screenshots when --close-up flag is passed
-    if (!options.closeUp) return;
-
     const padding = options.padding ?? 20;
     const handle = await page.$(selector);
     if (!handle) {
