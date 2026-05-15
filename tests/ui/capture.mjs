@@ -426,30 +426,87 @@ async function sendChatPrompt(page, prompt) {
     }, { timeout: 10000 });
 }
 
+async function logChatState(page, label) {
+    const state = await page.evaluate(() => {
+        const { chat } = window;
+        const streaming = document.querySelector('#chat-messages .chat-message-streaming');
+        const assistantMessages = document.querySelectorAll('#chat-messages .chat-message-assistant');
+        const lastAssistant = assistantMessages[assistantMessages.length - 1];
+        const lastBody = lastAssistant?.querySelector('.chat-msg-body');
+        const sendBtn = document.getElementById('btn-send');
+        return {
+            chatBusy: chat?.busy,
+            streamingElement: !!streaming,
+            assistantCount: assistantMessages.length,
+            lastMessageLength: lastBody?.textContent?.length ?? 0,
+            sendBtnClass: sendBtn?.className ?? null,
+        };
+    });
+    console.log(`[CAPTURE] ${label}:`, JSON.stringify(state));
+    return state;
+}
+
 async function waitForChatResponse(page, timeoutMs = 300000) {
+    const start = Date.now();
+    console.log('[CAPTURE] waitForChatResponse: waiting for chat response...');
+    
+    await logChatState(page, 'waitForChatResponse:BEFORE');
+    
     await page.waitForFunction(() => {
+        // Check chat.busy state directly - this is the authoritative source
+        const { chat } = window;
+        if (chat?.busy) return false;
+        
+        // Also check UI state as fallback
         const streaming = document.querySelector('#chat-messages .chat-message-streaming');
         if (streaming) return false;
         const assistantMessages = Array.from(document.querySelectorAll('#chat-messages .chat-message-assistant'));
         return assistantMessages.length > 0;
     }, { timeout: timeoutMs });
-    // Additional buffer to ensure AI has fully completed
-    await sleep(5000);
+    
+    // Increased buffer to ensure AI has fully completed
+    await sleep(10000);
+    
+    await logChatState(page, 'waitForChatResponse:AFTER');
+    
+    const elapsed = Date.now() - start;
+    console.log(`[CAPTURE] waitForChatResponse: completed in ${elapsed}ms`);
 }
 
 async function waitForChatIdle(page, timeoutMs = 60000) {
+    const start = Date.now();
+    console.log('[CAPTURE] waitForChatIdle: waiting for chat to become idle...');
+    
+    await logChatState(page, 'waitForChatIdle:BEFORE');
+    
     // Wait for chat to become idle (no streaming, send button not in stop mode)
     await page.waitForFunction(() => {
+        // Check chat.busy state directly - this is the authoritative source
+        const { chat } = window;
+        if (chat?.busy) return false;
+        
         const streaming = document.querySelector('#chat-messages .chat-message-streaming');
         if (streaming) return false;
         const sendBtn = document.getElementById('btn-send');
         if (sendBtn && sendBtn.classList.contains('btn-chat-send-stop')) return false;
         return true;
     }, { timeout: timeoutMs });
-    await sleep(1000);
+    
+    // Increased buffer
+    await sleep(2000);
+    
+    await logChatState(page, 'waitForChatIdle:AFTER');
+    
+    const elapsed = Date.now() - start;
+    console.log(`[CAPTURE] waitForChatIdle: completed in ${elapsed}ms`);
 }
 
 async function waitForChatComplete(page, timeoutMs = 300000) {
+    const start = Date.now();
+    console.log('[CAPTURE] waitForChatComplete: waiting for chat to complete...');
+    
+    await logChatState(page, 'waitForChatComplete:BEFORE');
+    
     // Wait for streaming to stop and assistant message to appear
     await waitForChatResponse(page, timeoutMs);
 
@@ -481,6 +538,11 @@ async function waitForChatComplete(page, timeoutMs = 300000) {
     if (stillStopped) {
         console.log('[CAPTURE] WARNING: [stopped] response persists after retries, may need manual review');
     }
+    
+    await logChatState(page, 'waitForChatComplete:AFTER');
+    
+    const elapsed = Date.now() - start;
+    console.log(`[CAPTURE] waitForChatComplete: completed in ${elapsed}ms`);
 }
 
 async function waitForChatSettledOrError(page, timeoutMs = 300000) {
