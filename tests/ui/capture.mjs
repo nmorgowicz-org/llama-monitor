@@ -970,7 +970,7 @@ async function scenarioGuidedGen(ctx, options) {
     await captureShot(page, 'guided-gen-quick-guide-response.png', { fullPage: true });
 
     // Ensure AI has fully completed before moving to next flow
-    await sleep(5000);
+    await sleep(10000);
 
   // Director mode: switch to director mode and generate ideas
     // Fresh chat with seeded noir scene for director demo
@@ -1031,7 +1031,7 @@ await waitForChatComplete(page);
     }
 
     // Ensure AI has fully completed before moving to next flow
-    await sleep(5000);
+    await sleep(10000);
 
     // Surprise mode: switch to surprise mode and arm a surprise
     // Fresh chat with content for chat-related screenshot
