@@ -473,7 +473,7 @@ async function waitForChatResponse(page, timeoutMs = 300000) {
     console.log(`[CAPTURE] waitForChatResponse: completed in ${elapsed}ms`);
 }
 
-async function waitForChatIdle(page, timeoutMs = 60000) {
+async function waitForChatIdle(page, timeoutMs = 120000) {
     const start = Date.now();
     console.log('[CAPTURE] waitForChatIdle: waiting for chat to become idle...');
     
@@ -492,8 +492,23 @@ async function waitForChatIdle(page, timeoutMs = 60000) {
         return true;
     }, { timeout: timeoutMs });
     
-    // Increased buffer
-    await sleep(2000);
+    // Verify idle state is stable (wait 5s to ensure no new streaming starts)
+    for (let i = 0; i < 5; i++) {
+        await sleep(1000);
+        const isIdle = await page.evaluate(() => {
+            const { chat } = window;
+            if (chat?.busy) return false;
+            const streaming = document.querySelector('#chat-messages .chat-message-streaming');
+            if (streaming) return false;
+            const sendBtn = document.getElementById('btn-send');
+            if (sendBtn && sendBtn.classList.contains('btn-chat-send-stop')) return false;
+            return true;
+        });
+        if (!isIdle) {
+            console.log('[CAPTURE] waitForChatIdle: chat became busy again, waiting...');
+            i = -1; // Reset counter and start over
+        }
+    }
     
     await logChatState(page, 'waitForChatIdle:AFTER');
     
