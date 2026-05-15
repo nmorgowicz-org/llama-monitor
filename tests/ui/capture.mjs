@@ -460,6 +460,8 @@ async function waitForChatResponse(page, timeoutMs = 300000) {
         // Also check UI state as fallback
         const streaming = document.querySelector('#chat-messages .chat-message-streaming');
         if (streaming) return false;
+        const sendBtn = document.getElementById('btn-send');
+        if (sendBtn && sendBtn.classList.contains('btn-chat-send-stop')) return false;
         const assistantMessages = Array.from(document.querySelectorAll('#chat-messages .chat-message-assistant'));
         return assistantMessages.length > 0;
     }, { timeout: timeoutMs });
