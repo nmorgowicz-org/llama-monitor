@@ -430,10 +430,43 @@ async function waitForChatResponse(page, timeoutMs = 300000) {
     await page.waitForFunction(() => {
         const streaming = document.querySelector('#chat-messages .chat-message-streaming');
         if (streaming) return false;
+        const thinking = document.querySelector('#chat-messages .chat-thinking');
+        if (thinking) return false;
         const assistantMessages = Array.from(document.querySelectorAll('#chat-messages .chat-message-assistant'));
-        const thinkingBlocks = Array.from(document.querySelectorAll('#chat-messages .chat-thinking'));
-        return assistantMessages.length > 0 || thinkingBlocks.length > 0;
+        return assistantMessages.length > 0;
     }, { timeout: timeoutMs });
+    // Additional buffer to ensure AI has fully completed
+    await sleep(3000);
+}
+
+async function waitForChatComplete(page, timeoutMs = 300000) {
+    // Wait for streaming to stop and thinking to disappear
+    await waitForChatResponse(page, timeoutMs);
+
+    // Verify no [stopped] text in the last assistant message
+    const hasStopped = await page.evaluate(() => {
+        const assistantMessages = document.querySelectorAll('#chat-messages .chat-message-assistant');
+        if (assistantMessages.length === 0) return false;
+        const lastMessage = assistantMessages[assistantMessages.length - 1];
+        const body = lastMessage.querySelector('.chat-msg-body');
+        return body && body.textContent.includes('[stopped]');
+    });
+
+    if (hasStopped) {
+        console.log('[CAPTURE] Detected [stopped] response, waiting longer...');
+        await sleep(5000);
+        // Try again
+        const stillStopped = await page.evaluate(() => {
+            const assistantMessages = document.querySelectorAll('#chat-messages .chat-message-assistant');
+            if (assistantMessages.length === 0) return false;
+            const lastMessage = assistantMessages[assistantMessages.length - 1];
+            const body = lastMessage.querySelector('.chat-msg-body');
+            return body && body.textContent.includes('[stopped]');
+        });
+        if (stillStopped) {
+            console.log('[CAPTURE] WARNING: [stopped] response persists, may need manual review');
+        }
+    }
 }
 
 async function waitForChatSettledOrError(page, timeoutMs = 300000) {
@@ -716,7 +749,7 @@ async function scenarioChat(ctx, options) {
     await sleep(300);
 
     await sendChatPrompt(page, 'Explain how a database index speeds up queries in 3 bullet points.');
-    await waitForChatResponse(page);
+    await waitForChatComplete(page);
     await sleep(2000);
 
     await captureShot(page, 'chat-chat.png', { fullPage: true });
@@ -851,7 +884,7 @@ async function scenarioGuidedGen(ctx, options) {
     await sleep(500);
     // Use a short prompt to set context
     await sendChatPrompt(page, 'Brainstorm 3 product names for a CLI tool that monitors GPUs.');
-    await waitForChatResponse(page);
+    await waitForChatComplete(page);
     await sleep(2000);
 
     await page.evaluate(async () => {
@@ -930,7 +963,7 @@ async function scenarioGuidedGen(ctx, options) {
     await sleep(600);
     // Now send a user message that will use the guide
     await sendChatPrompt(page, 'Explain how connection pooling improves performance.');
-    await waitForChatResponse(page);
+    await waitForChatComplete(page);
     await sleep(1500);
     await captureShot(page, 'guided-gen-quick-guide-response.png', { fullPage: true });
 
@@ -985,7 +1018,7 @@ async function scenarioGuidedGen(ctx, options) {
                 await applyBtn.click();
                 await sleep(800);
                 await sendChatPrompt(page, 'Continue the scene with higher tension.');
-                await waitForChatResponse(page);
+await waitForChatComplete(page);
                 await sleep(1500);
                 await captureShot(page, 'guided-gen-director-applied.png', { fullPage: true });
             }
@@ -1246,7 +1279,7 @@ async function scenarioPanels(ctx, options) {
     // Create a chat with a short, safe conversation so panels have real content behind them
     await createFreshChat(page);
     await sendChatPrompt(page, 'Compare REST and gRPC in 4 short bullets.');
-    await waitForChatResponse(page);
+    await waitForChatComplete(page);
     await sleep(1500);
 
     const styleBtn = await page.$('#btn-chat-style');
@@ -1281,7 +1314,7 @@ async function scenarioPanels(ctx, options) {
 
     // Send a real message so the prompt debug modal has actual content
     await sendChatPrompt(page, 'Explain the difference between TCP and UDP in 3 bullet points.');
-    await waitForChatResponse(page);
+    await waitForChatComplete(page);
     await sleep(1500);
 
     const debugBtn = await page.$('#btn-debug-prompt');
