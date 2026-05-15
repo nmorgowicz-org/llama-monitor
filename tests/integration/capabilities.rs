@@ -1,7 +1,14 @@
+use std::sync::Arc;
+
 use llama_monitor::{
+    chat_storage::ChatStorage,
     gpu::env::GpuEnv,
     state::{AppPaths, AppState, Session, UiSettings},
 };
+
+fn test_chat_storage() -> Arc<ChatStorage> {
+    Arc::new(ChatStorage::open(&std::path::PathBuf::from(":memory:")).unwrap())
+}
 
 #[test]
 fn local_spawn_has_all_metrics() {
@@ -19,7 +26,13 @@ fn local_spawn_has_all_metrics() {
         rocm_path: "/opt/rocm".into(),
         extra_env: vec![],
     };
-    let state = AppState::new(vec![], paths, gpu_env, UiSettings::default());
+    let state = AppState::new(
+        vec![],
+        paths,
+        gpu_env,
+        UiSettings::default(),
+        test_chat_storage(),
+    );
 
     let session = Session::new_spawn(
         "spawn_test".to_string(),
@@ -69,7 +82,13 @@ fn local_attach_has_full_metrics() {
         rocm_path: "/opt/rocm".into(),
         extra_env: vec![],
     };
-    let state = AppState::new(vec![], paths, gpu_env, UiSettings::default());
+    let state = AppState::new(
+        vec![],
+        paths,
+        gpu_env,
+        UiSettings::default(),
+        test_chat_storage(),
+    );
 
     let session = Session::new_attach(
         "attach_local_test".to_string(),
@@ -118,7 +137,13 @@ fn remote_attach_has_inference_only() {
         rocm_path: "/opt/rocm".into(),
         extra_env: vec![],
     };
-    let state = AppState::new(vec![], paths, gpu_env, UiSettings::default());
+    let state = AppState::new(
+        vec![],
+        paths,
+        gpu_env,
+        UiSettings::default(),
+        test_chat_storage(),
+    );
 
     let session = Session::new_attach(
         "attach_remote_test".to_string(),

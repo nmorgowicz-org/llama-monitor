@@ -45,6 +45,7 @@ fn migrate_config_if_needed(new_config_dir: &PathBuf) -> PathBuf {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct AppConfig {
+    pub config_dir: PathBuf,
     pub llama_server_path: PathBuf,
     pub llama_server_cwd: PathBuf,
     pub port: u16,
@@ -81,14 +82,12 @@ impl AppConfig {
         });
         let config_dir = migrate_config_if_needed(&new_config_dir);
 
-        // Register config dir for chat_tabs_path()
-        crate::web::api::set_config_dir(config_dir.clone());
-
         let presets_file = args
             .presets_file
             .unwrap_or_else(|| config_dir.join("presets.json"));
 
         Self {
+            config_dir: config_dir.clone(),
             llama_server_path: args.llama_server_path.unwrap_or(default_server_path),
             llama_server_cwd: args.llama_server_cwd.unwrap_or(default_server_cwd),
             port: args.port,

@@ -18,6 +18,7 @@ import {
 } from './chat-state.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { openTemplateManager } from './chat-templates.js';
+import { renderChatSessionsSidebar } from './chat-sessions-sidebar.js';
 
 // Getter for transport functions — avoids circular import (chat-render ↔ chat-transport)
 let _getTransport = null;
@@ -388,6 +389,7 @@ async function getTemplateNameById(id) {
 export function renderChatTabs() {
     ensureChatElements();
     const bar = chatTabBarEl;
+    if (!bar) return;
     const addBtn = bar?.querySelector('.chat-tab-add');
     bar?.querySelectorAll('.chat-tab').forEach(el => el.remove());
 
@@ -497,13 +499,6 @@ export function renderChatTabs() {
             bar.insertBefore(sep, firstUnpinned);
         }
     }
-    updateTabBarOverflowMask();
-}
-
-export function updateTabBarOverflowMask() {
-    const bar = document.getElementById('chat-tab-bar');
-    if (!bar) return;
-    bar.classList.toggle('no-overflow', bar.scrollWidth <= bar.clientWidth);
 }
 
 function getTimeAgo(ts) {
@@ -639,6 +634,7 @@ export function renderChatMessages() {
         const el = buildMessageElement(msg, idx, tab.messages);
         const realIdx = tab.messages.indexOf(msg);
         if (realIdx >= 0) el.dataset.msgIdx = realIdx;
+        el.dataset.msgId = msg.db_id ?? '';
         container.appendChild(el);
         idx++;
     }
@@ -1488,6 +1484,7 @@ export function initChatRender() {
     registerChatViewBindings({
         renderChatTabs,
         renderChatMessages,
+        renderChatSessionsSidebar,
         updateChatTabBadge,
     });
 }

@@ -150,14 +150,6 @@
             <span class="sidebar-label">Logs</span>
             <span class="sidebar-badge" id="sidebar-badge-logs"></span>
         </button>
-        <button class="sidebar-btn" data-tab="sessions" id="sidebar-btn-sessions" title="Sessions">
-            <span class="sidebar-icon">📂</span>
-            <span class="sidebar-label">Sessions</span>
-        </button>
-        <button class="sidebar-btn" data-tab="models" id="sidebar-btn-models" title="Models">
-            <span class="sidebar-icon">🤖</span>
-            <span class="sidebar-label">Models</span>
-        </button>
         <button class="sidebar-btn" data-tab="settings" id="sidebar-btn-settings" title="Settings">
             <span class="sidebar-icon">⚙️</span>
             <span class="sidebar-label">Settings</span>
@@ -615,25 +607,38 @@
         <!-- Page: Chat -->
         <div class="page chat-page" id="page-chat">
 
-            <!-- Tab bar -->
-            <div class="chat-tab-bar" id="chat-tab-bar">
-                <button class="chat-tab-add" id="chat-tab-add-btn" title="New chat tab">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                        <path d="M12 5v14M5 12h14"/>
-                    </svg>
-                </button>
-                <div class="chat-tab-trash-wrapper" id="chat-tab-trash-wrapper">
-                    <button class="chat-tab-trash-btn" id="chat-tab-trash-btn" title="Recently deleted tabs">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
-                            <path d="M15 12l-3 3-3-3"/>
-                            <path d="M12 15v-4"/>
+            <aside class="chat-sessions-panel" id="chat-sessions-panel" aria-label="Conversations">
+                <div class="csp-collapsed-strip" id="csp-collapsed-strip" title="Conversations">
+                    <div class="csp-collapsed-expand" id="csp-collapsed-expand" title="Show conversations">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <path d="M9 18l6-6-6-6"/>
+                        </svg>
+                    </div>
+                    <span class="csp-collapsed-label" id="csp-collapsed-label"></span>
+                </div>
+                <div class="csp-header">
+                    <span class="csp-title">Conversations</span>
+                    <button class="csp-collapse-btn" id="csp-collapse-btn" title="Collapse">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <path d="M15 18l-6-6 6-6"/>
                         </svg>
                     </button>
                 </div>
-            </div>
-            <div class="chat-tab-trash-dropdown" id="chat-tab-trash-dropdown">
-            </div>
+                <div class="csp-actions">
+                    <button class="csp-new-btn" id="csp-new-btn">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                        New Chat
+                    </button>
+                </div>
+                <div class="csp-search-wrap">
+                    <input class="csp-search" id="csp-search" type="search"
+                           placeholder="Search conversations…" autocomplete="off">
+                </div>
+                <div class="csp-list" id="csp-list"></div>
+                <div class="csp-trash-strip hidden" id="csp-trash-strip"></div>
+            </aside>
+
+            <div class="chat-main-area" id="chat-main-area">
 
             <!-- Chat header -->
             <div class="chat-header" id="chat-header">
@@ -1138,12 +1143,28 @@
             <!-- Input area -->
              <div class="chat-input-row" id="chat-input-row">
                <div class="chat-controls">
-                       <button class="btn-chat-control" id="btn-debug-prompt" title="Prompt debug info">
-                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                               <path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/>
-                           </svg>
-                       </button>
-                   </div>
+                       <div class="chat-controls-dropdown">
+                           <button class="btn-chat-control" id="btn-debug-dropdown" title="Tools">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M9 4H6a2 2 0 00-2 2v12a2 2 0 002 2h3"/>
+                                    <path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3"/>
+                                    <line x1="10" y1="10" x2="14" y2="10"/>
+                                    <line x1="10" y1="14" x2="14" y2="14"/>
+                                </svg>
+                                <svg class="dropdown-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                            </button>
+                           <div class="chat-controls-menu" id="debug-dropdown-menu">
+                               <button class="chat-controls-menu-item" id="btn-debug-prompt" data-action="prompt-debug">
+                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                   Prompt Debug
+                               </button>
+                               <button class="chat-controls-menu-item" id="btn-db-admin" data-action="db-admin">
+                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                                   Database Admin
+                               </button>
+                           </div>
+                       </div>
+                  </div>
                      <div class="chat-textarea-wrap">
                       <textarea id="chat-input" rows="1" placeholder="Send a message…"></textarea>
                       <span class="chat-char-count" id="chat-char-count" title="Approximate token count (chars ÷ 4)"></span>
@@ -1316,6 +1337,7 @@
                      </svg>
                  </button>
              </div>
+            </div>
         </div>
 
         <!-- Page: Logs -->
@@ -2444,6 +2466,66 @@
                         <input type="text" id="settings-data-directory" value="~/.config/llama-monitor">
                     </label>
                 </div>
+
+                <!-- Database Administration -->
+                <div class="settings-section">
+                    <h3>Database Administration</h3>
+                    <div class="db-admin-panel" id="db-admin-panel">
+                        <div class="db-admin-header">
+                            <div class="db-admin-title">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                                <span>Chat Database</span>
+                            </div>
+                            <div class="db-admin-status" id="db-admin-status">
+                                <span class="status-dot"></span>
+                                <span class="status-text">Checking...</span>
+                            </div>
+                        </div>
+
+                        <div class="db-admin-stats" id="db-admin-stats">
+                            <div class="db-stat">
+                                <span class="db-stat-label">Conversations</span>
+                                <span class="db-stat-value" id="db-stat-tabs">-</span>
+                            </div>
+                            <div class="db-stat">
+                                <span class="db-stat-label">Messages</span>
+                                <span class="db-stat-value" id="db-stat-messages">-</span>
+                            </div>
+                            <div class="db-stat">
+                                <span class="db-stat-label">Database Size</span>
+                                <span class="db-stat-value" id="db-stat-size">-</span>
+                            </div>
+                            <div class="db-stat">
+                                <span class="db-stat-label">FTS Index</span>
+                                <span class="db-stat-value" id="db-stat-fts">-</span>
+                            </div>
+                        </div>
+
+                        <div class="db-admin-actions">
+                            <button type="button" class="btn btn-secondary db-admin-btn" id="db-btn-backup" title="Create database backup">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                Backup Now
+                            </button>
+                            <button type="button" class="btn btn-secondary db-admin-btn" id="db-btn-check" title="Run integrity check">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                Verify
+                            </button>
+                            <button type="button" class="btn btn-secondary db-admin-btn" id="db-btn-maintenance" title="Run maintenance">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                                Maintain
+                            </button>
+                            <button type="button" class="btn btn-secondary db-admin-btn" id="db-btn-query" title="Run SQL query">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                                Query
+                            </button>
+                        </div>
+
+                        <div class="db-admin-log" id="db-admin-log">
+                            <div class="db-log-header">Activity Log</div>
+                            <div class="db-log-content" id="db-log-content"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="modal-buttons">
@@ -3002,6 +3084,217 @@
                     </div>
                     <pre class="debug-payload-json" id="debug-payload-json"></pre>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+    <!-- Database Administration Modal -->
+<div class="modal-overlay debug-modal-overlay" id="db-admin-modal" style="z-index:1400;">
+    <div class="modal debug-modal db-admin-modal">
+        <div class="modal-header debug-modal-header">
+            <h3>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px; opacity: 0.8;"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                Database Administration
+            </h3>
+            <button class="modal-close-btn" id="db-admin-modal-close" title="Close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <div class="modal-body debug-modal-body db-admin-body">
+            <!-- Status Header -->
+            <div class="db-admin-status-bar" id="db-admin-status-bar">
+                <div class="db-status-indicator">
+                    <span class="db-status-dot" id="db-status-dot"></span>
+                    <span class="db-status-text" id="db-status-text">Checking...</span>
+                </div>
+                <div class="db-status-actions">
+                    <button type="button" class="db-status-btn" id="db-btn-refresh" title="Refresh status">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="db-stats-grid" id="db-stats-grid">
+                <div class="db-stat-card">
+                    <div class="db-stat-card-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                    </div>
+                    <div class="db-stat-card-content">
+                        <div class="db-stat-card-value" id="db-stat-tabs">-</div>
+                        <div class="db-stat-card-label">Conversations</div>
+                    </div>
+                </div>
+                <div class="db-stat-card">
+                    <div class="db-stat-card-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    </div>
+                    <div class="db-stat-card-content">
+                        <div class="db-stat-card-value" id="db-stat-messages">-</div>
+                        <div class="db-stat-card-label">Messages</div>
+                    </div>
+                </div>
+                <div class="db-stat-card">
+                    <div class="db-stat-card-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+                    </div>
+                    <div class="db-stat-card-content">
+                        <div class="db-stat-card-value" id="db-stat-size">-</div>
+                        <div class="db-stat-card-label">Database Size</div>
+                    </div>
+                </div>
+                <div class="db-stat-card">
+                    <div class="db-stat-card-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                    </div>
+                    <div class="db-stat-card-content">
+                        <div class="db-stat-card-value" id="db-stat-fts">-</div>
+                        <div class="db-stat-card-label">FTS Index</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="db-admin-tabs" role="tablist">
+                <button type="button" class="db-tab active" data-tab="maintenance" role="tab">Maintenance</button>
+                <button type="button" class="db-tab" data-tab="backups" role="tab">Backups</button>
+                <button type="button" class="db-tab" data-tab="indexes" role="tab">Indexes</button>
+                <button type="button" class="db-tab" data-tab="repair" role="tab">Repair</button>
+                <button type="button" class="db-tab" data-tab="query" role="tab">Query</button>
+            </div>
+
+            <!-- Tab Content -->
+            <div class="db-admin-tab-content">
+                <!-- Maintenance Tab -->
+                <div class="db-tab-panel active" data-panel="maintenance">
+                    <div class="db-action-group">
+                        <h4>Quick Actions</h4>
+                        <div class="db-action-row">
+                            <button type="button" class="db-action-btn primary" id="db-btn-backup">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                Backup Now
+                            </button>
+                            <button type="button" class="db-action-btn" id="db-btn-check">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                Verify Integrity
+                            </button>
+                            <button type="button" class="db-action-btn" id="db-btn-checkpoint">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                Checkpoint WAL
+                            </button>
+                        </div>
+                    </div>
+                    <div class="db-action-group">
+                        <h4>Optimization</h4>
+                        <div class="db-action-row">
+                            <button type="button" class="db-action-btn" id="db-btn-vacuum">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+                                Vacuum
+                            </button>
+                            <button type="button" class="db-action-btn" id="db-btn-rebuild-fts">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+                                Rebuild FTS
+                            </button>
+                            <button type="button" class="db-action-btn" id="db-btn-analyze">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.21 15.89A10 10 0 118 2.83"/><path d="M22 12A10 10 0 0012 2v10z"/></svg>
+                                Analyze
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Backups Tab -->
+                <div class="db-tab-panel" data-panel="backups">
+                    <div class="db-backups-header">
+                        <h4>Backup Files</h4>
+                        <div class="db-backups-info" id="db-backups-info">
+                            <span id="db-backup-count">-</span> backups &middot; <span id="db-backup-total-size">-</span> total
+                        </div>
+                    </div>
+                    <div class="db-backups-list" id="db-backups-list">
+                        <div class="db-empty-state" id="db-backups-empty">
+                            <p>Loading backups...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Indexes Tab -->
+                <div class="db-tab-panel" data-panel="indexes">
+                    <div class="db-indexes-header">
+                        <h4>Database Indexes</h4>
+                        <button type="button" class="db-action-btn small" id="db-btn-rebuild-all-indexes">
+                            Rebuild All
+                        </button>
+                    </div>
+                    <div class="db-indexes-list" id="db-indexes-list">
+                        <div class="db-empty-state">
+                            <p>Loading indexes...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Repair Tab -->
+                <div class="db-tab-panel" data-panel="repair">
+                    <div class="db-repair-intro">
+                        <h4>Database Repair</h4>
+                        <p>Common fixes for SQLite issues. Most repairs create an automatic backup first.</p>
+                    </div>
+                    <div class="db-repair-list">
+                        <div class="db-repair-item">
+                            <div class="db-repair-info">
+                                <div class="db-repair-name">Recover Corrupted Indexes</div>
+                                <div class="db-repair-desc">Drop and recreate all indexes. Fixes "database disk image is malformed" errors.</div>
+                            </div>
+                            <button type="button" class="db-action-btn warning" id="db-btn-repair-indexes">Repair</button>
+                        </div>
+                        <div class="db-repair-item">
+                            <div class="db-repair-info">
+                                <div class="db-repair-name">Compact Database</div>
+                                <div class="db-repair-desc">Vacuum and rebuild to reclaim space from deleted data.</div>
+                            </div>
+                            <button type="button" class="db-action-btn" id="db-btn-repair-compact">Compact</button>
+                        </div>
+                        <div class="db-repair-item">
+                            <div class="db-repair-info">
+                                <div class="db-repair-name">Emergency Recovery</div>
+                                <div class="db-repair-desc">Use SQLite's recovery mode to extract data from a corrupted database.</div>
+                            </div>
+                            <button type="button" class="db-action-btn danger" id="db-btn-repair-emergency">Recover</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Query Tab -->
+                <div class="db-tab-panel" data-panel="query">
+                    <div class="db-query-intro">
+                        <h4>SQL Query Console</h4>
+                        <p>Execute read-only queries (SELECT, PRAGMA). Write operations are blocked for safety.</p>
+                    </div>
+                    <div class="db-query-form">
+                        <textarea id="db-query-input" rows="3" placeholder="SELECT COUNT(*) FROM messages"></textarea>
+                        <div class="db-query-actions">
+                            <button type="button" class="db-action-btn primary" id="db-btn-run-query">Run Query</button>
+                            <button type="button" class="db-action-btn" id="db-btn-clear-query">Clear</button>
+                        </div>
+                    </div>
+                    <div class="db-query-result" id="db-query-result" hidden>
+                        <div class="db-query-result-header">
+                            <span>Result</span>
+                            <button type="button" class="db-action-btn small" id="db-btn-copy-result">Copy</button>
+                        </div>
+                        <pre id="db-query-output"></pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Activity Log -->
+            <div class="db-admin-log" id="db-admin-log">
+                <div class="db-log-header">
+                    <span>Activity Log</span>
+                    <button type="button" class="db-action-btn small" id="db-btn-clear-log">Clear</button>
+                </div>
+                <div class="db-log-content" id="db-log-content"></div>
             </div>
         </div>
     </div>

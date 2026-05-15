@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
-use std::sync::OnceLock;
+
 use warp::Filter;
 use warp::reject::Reject;
 
@@ -34,52 +34,187 @@ use crate::presets::{self, ModelPreset};
 use crate::remote_ssh::{self, SshConnection};
 use crate::state::{self as app_state, AppState, SessionStatus, UiSettings};
 
-/// Chat message structure for persistence
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct CompactionPreview {
-    pub role: String,
-    pub snippet: String,
-}
+#[allow(dead_code)]
+mod legacy_chat_types {
+    use super::ContextNote;
+    /// Chat message structure for persistence (legacy flat-file types, used by tests)
+    #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+    pub struct CompactionPreview {
+        pub role: String,
+        pub snippet: String,
+    }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct ChatMessage {
-    pub role: String,
-    pub content: String,
-    pub timestamp_ms: u64,
-    #[serde(default)]
-    pub input_tokens: Option<u64>,
-    #[serde(default)]
-    pub output_tokens: Option<u64>,
-    #[serde(default, alias = "cumulativeInputTokens")]
-    pub cumulative_input_tokens: Option<u64>,
-    #[serde(default, alias = "cumulativeOutputTokens")]
-    pub cumulative_output_tokens: Option<u64>,
-    #[serde(default)]
-    pub compaction_marker: Option<bool>,
-    #[serde(default)]
-    pub summarized: Option<bool>,
-    #[serde(default)]
-    pub dropped_count: Option<u64>,
-    #[serde(default)]
-    pub dropped_preview: Option<Vec<CompactionPreview>>,
-    #[serde(default)]
-    pub tokens_freed_estimate: Option<u64>,
-    #[serde(default)]
-    pub ctx_pct_before: Option<f32>,
-    #[serde(default)]
-    pub memory_version: Option<u32>,
-    #[serde(default)]
-    pub memory_domain: Option<String>,
-    #[serde(default)]
-    pub summary_kind: Option<String>,
-    #[serde(default)]
-    pub compacted_at: Option<u64>,
-    #[serde(default)]
-    pub compacted_message_count_total: Option<u64>,
-    #[serde(default)]
-    pub recent_tail_kept: Option<u64>,
-    #[serde(default)]
-    pub thinking_content: Option<String>,
+    #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+    pub struct ChatMessage {
+        pub role: String,
+        pub content: String,
+        pub timestamp_ms: u64,
+        #[serde(default)]
+        pub input_tokens: Option<u64>,
+        #[serde(default)]
+        pub output_tokens: Option<u64>,
+        #[serde(default, alias = "cumulativeInputTokens")]
+        pub cumulative_input_tokens: Option<u64>,
+        #[serde(default, alias = "cumulativeOutputTokens")]
+        pub cumulative_output_tokens: Option<u64>,
+        #[serde(default)]
+        pub compaction_marker: Option<bool>,
+        #[serde(default)]
+        pub summarized: Option<bool>,
+        #[serde(default)]
+        pub dropped_count: Option<u64>,
+        #[serde(default)]
+        pub dropped_preview: Option<Vec<CompactionPreview>>,
+        #[serde(default)]
+        pub tokens_freed_estimate: Option<u64>,
+        #[serde(default)]
+        pub ctx_pct_before: Option<f32>,
+        #[serde(default)]
+        pub memory_version: Option<u32>,
+        #[serde(default)]
+        pub memory_domain: Option<String>,
+        #[serde(default)]
+        pub summary_kind: Option<String>,
+        #[serde(default)]
+        pub compacted_at: Option<u64>,
+        #[serde(default)]
+        pub compacted_message_count_total: Option<u64>,
+        #[serde(default)]
+        pub recent_tail_kept: Option<u64>,
+        #[serde(default)]
+        pub thinking_content: Option<String>,
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+    pub struct ArmedStoryBeat {
+        pub id: String,
+        pub kind: String,
+        pub instruction: String,
+        #[serde(default)]
+        pub remaining_turns: u32,
+        #[serde(default)]
+        pub created_at: u64,
+        #[serde(default = "default_true")]
+        pub enabled: bool,
+    }
+
+    fn default_true() -> bool {
+        true
+    }
+
+    /// Model parameters for a chat tab
+    #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+    pub struct ChatModelParams {
+        pub temperature: f32,
+        pub top_p: f32,
+        pub top_k: u32,
+        pub min_p: f32,
+        pub repeat_penalty: f32,
+        pub max_tokens: Option<u32>,
+    }
+
+    impl Default for ChatModelParams {
+        fn default() -> Self {
+            Self {
+                temperature: 0.7,
+                top_p: 0.9,
+                top_k: 40,
+                min_p: 0.01,
+                repeat_penalty: 1.0,
+                max_tokens: None,
+            }
+        }
+    }
+
+    /// Deserialize explicit_level from bool (legacy), u8, or null.
+    /// Tolerates corrupted disk data by defaulting to 0.
+    fn deserialize_explicit_level<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <Option<serde_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        match value {
+            Some(v) if v.is_null() => Ok(None),
+            Some(v) => {
+                if let Some(n) = v.as_u64() {
+                    return Ok(Some(n as u8));
+                }
+                if let Some(b) = v.as_bool() {
+                    return Ok(Some(if b { 1 } else { 0 }));
+                }
+                if let Some(n) = v.as_i64() {
+                    return Ok(Some(n as u8));
+                }
+                // Tolerate corrupted data: default to unlocked (1)
+                Ok(Some(0))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Chat tab structure for persistence (legacy flat-file)
+    #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+    pub struct ChatTab {
+        pub id: String,
+        pub name: String,
+        pub system_prompt: String,
+        #[serde(default)]
+        pub ai_name: Option<String>,
+        #[serde(default)]
+        pub user_name: Option<String>,
+        #[serde(
+            default,
+            rename = "explicitLevel",
+            alias = "explicit_mode",
+            alias = "explicit_level",
+            deserialize_with = "deserialize_explicit_level"
+        )]
+        pub explicit_level: Option<u8>,
+        pub messages: Vec<ChatMessage>,
+        // Standardized on snake_case to avoid duplicate field errors.
+        #[serde(default)]
+        pub total_input_tokens: Option<u64>,
+        #[serde(default)]
+        pub total_output_tokens: Option<u64>,
+        #[serde(default)]
+        pub model_params: ChatModelParams,
+        #[serde(default)]
+        pub created_at: u64,
+        #[serde(default)]
+        pub updated_at: u64,
+        #[serde(default)]
+        pub auto_compact: Option<bool>,
+        #[serde(default)]
+        pub auto_compact_summarize: Option<bool>,
+        #[serde(default)]
+        pub compact_threshold: Option<f32>,
+        #[serde(default)]
+        pub compact_mode: Option<String>,
+        /// Last known context window percentage (0–100). Derived client-side and
+        /// persisted so the dashboard can show it on page load without a live session.
+        #[serde(rename = "lastCtxPct", default)]
+        pub last_ctx_pct: Option<f32>,
+        #[serde(rename = "activeTemplateId", default)]
+        pub active_template_id: Option<String>,
+        /// Guided generation: persistent context notes (character, setting, plot details)
+        #[serde(default)]
+        pub context_notes: Vec<ContextNote>,
+        /// Guided generation: remembered sidebar width in pixels (default: 280)
+        #[serde(default, rename = "sidebarWidth")]
+        pub sidebar_width: u32,
+        /// Guided generation: persistent quick guide applied to subsequent replies
+        #[serde(default)]
+        pub quick_guide_active: String,
+        /// Guided generation: delayed hidden story beats for future assistant turns
+        #[serde(default)]
+        pub armed_story_beats: Vec<ArmedStoryBeat>,
+        /// Custom role boundary instruction (overrides the default if set)
+        #[serde(default)]
+        pub role_boundary_custom: Option<String>,
+        /// Gender for {{gender}} token substitution: "male", "female", or "neutral"
+        #[serde(default)]
+        pub ai_gender: Option<String>,
+    }
 }
 
 /// Context note for guided generation (character details, setting info, etc.)
@@ -89,137 +224,6 @@ pub struct ContextNote {
     pub content: String,
     #[serde(default)]
     pub created_at: u64,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct ArmedStoryBeat {
-    pub id: String,
-    pub kind: String,
-    pub instruction: String,
-    #[serde(default)]
-    pub remaining_turns: u32,
-    #[serde(default)]
-    pub created_at: u64,
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-/// Model parameters for a chat tab
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct ChatModelParams {
-    pub temperature: f32,
-    pub top_p: f32,
-    pub top_k: u32,
-    pub min_p: f32,
-    pub repeat_penalty: f32,
-    pub max_tokens: Option<u32>,
-}
-
-impl Default for ChatModelParams {
-    fn default() -> Self {
-        Self {
-            temperature: 0.7,
-            top_p: 0.9,
-            top_k: 40,
-            min_p: 0.01,
-            repeat_penalty: 1.0,
-            max_tokens: None,
-        }
-    }
-}
-
-/// Deserialize explicit_level from bool (legacy), u8, or null.
-/// Tolerates corrupted disk data by defaulting to 0.
-fn deserialize_explicit_level<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = <Option<serde_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
-    match value {
-        Some(v) if v.is_null() => Ok(None),
-        Some(v) => {
-            if let Some(n) = v.as_u64() {
-                return Ok(Some(n as u8));
-            }
-            if let Some(b) = v.as_bool() {
-                return Ok(Some(if b { 1 } else { 0 }));
-            }
-            if let Some(n) = v.as_i64() {
-                return Ok(Some(n as u8));
-            }
-            // Tolerate corrupted data: default to unlocked (1)
-            Ok(Some(0))
-        }
-        None => Ok(None),
-    }
-}
-
-/// Chat tab structure for persistence
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct ChatTab {
-    pub id: String,
-    pub name: String,
-    pub system_prompt: String,
-    #[serde(default)]
-    pub ai_name: Option<String>,
-    #[serde(default)]
-    pub user_name: Option<String>,
-    #[serde(
-        default,
-        rename = "explicitLevel",
-        alias = "explicit_mode",
-        alias = "explicit_level",
-        deserialize_with = "deserialize_explicit_level"
-    )]
-    pub explicit_level: Option<u8>,
-    pub messages: Vec<ChatMessage>,
-    // Standardized on snake_case to avoid duplicate field errors.
-    #[serde(default)]
-    pub total_input_tokens: Option<u64>,
-    #[serde(default)]
-    pub total_output_tokens: Option<u64>,
-    #[serde(default)]
-    pub model_params: ChatModelParams,
-    #[serde(default)]
-    pub created_at: u64,
-    #[serde(default)]
-    pub updated_at: u64,
-    #[serde(default)]
-    pub auto_compact: Option<bool>,
-    #[serde(default)]
-    pub auto_compact_summarize: Option<bool>,
-    #[serde(default)]
-    pub compact_threshold: Option<f32>,
-    #[serde(default)]
-    pub compact_mode: Option<String>,
-    /// Last known context window percentage (0–100). Derived client-side and
-    /// persisted so the dashboard can show it on page load without a live session.
-    #[serde(rename = "lastCtxPct", default)]
-    pub last_ctx_pct: Option<f32>,
-    #[serde(rename = "activeTemplateId", default)]
-    pub active_template_id: Option<String>,
-    /// Guided generation: persistent context notes (character, setting, plot details)
-    #[serde(default)]
-    pub context_notes: Vec<ContextNote>,
-    /// Guided generation: remembered sidebar width in pixels (default: 280)
-    #[serde(default, rename = "sidebarWidth")]
-    pub sidebar_width: u32,
-    /// Guided generation: persistent quick guide applied to subsequent replies
-    #[serde(default)]
-    pub quick_guide_active: String,
-    /// Guided generation: delayed hidden story beats for future assistant turns
-    #[serde(default)]
-    pub armed_story_beats: Vec<ArmedStoryBeat>,
-    /// Custom role boundary instruction (overrides the default if set)
-    #[serde(default)]
-    pub role_boundary_custom: Option<String>,
-    /// Gender for {{gender}} token substitution: "male", "female", or "neutral"
-    #[serde(default)]
-    pub ai_gender: Option<String>,
 }
 
 /// Suggestion request for guided generation
@@ -360,13 +364,6 @@ fn suggestion_temperature(category: &str) -> f32 {
     }
 }
 
-static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
-
-/// Set the config directory (called once at startup from AppConfig).
-pub fn set_config_dir(path: PathBuf) {
-    CONFIG_DIR.set(path).ok();
-}
-
 /// Load prompts from static/prompts directory
 fn load_prompts_from_files() -> HashMap<String, String> {
     let mut prompts = HashMap::new();
@@ -389,16 +386,7 @@ fn load_prompts_from_files() -> HashMap<String, String> {
     prompts
 }
 
-fn chat_tabs_path() -> PathBuf {
-    if let Some(dir) = CONFIG_DIR.get() {
-        dir.join("chat-tabs.json")
-    } else {
-        dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("llama-monitor")
-            .join("chat-tabs.json")
-    }
-}
+use crate::chat_storage::ChatStorage;
 
 fn api_check_lhm() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "lhm" / "check")
@@ -1026,8 +1014,29 @@ pub fn api_routes(
     let chat_abort = api_chat_abort(state.clone());
     let chat_suggestions = api_chat_suggestions(state.clone());
     let generate_keywords = api_generate_keywords(state.clone());
-    let get_chat_tabs = api_get_chat_tabs();
-    let put_chat_tabs = api_put_chat_tabs();
+    let chat_storage = state.chat_storage.clone();
+    let chat_list_tabs = api_list_tabs(chat_storage.clone());
+    let chat_create_tab = api_create_tab(chat_storage.clone());
+    let chat_get_tab = api_get_tab(chat_storage.clone());
+    let chat_put_tab = api_put_tab(chat_storage.clone());
+    let chat_delete_tab = api_delete_tab(chat_storage.clone());
+    let chat_patch_tab_meta = api_patch_tab_meta(chat_storage.clone());
+    let chat_append_messages = api_append_messages(chat_storage.clone());
+    let chat_reorder_tabs = api_reorder_tabs(chat_storage.clone());
+    let chat_search = api_chat_search(chat_storage.clone());
+
+    // Database admin routes
+    let db_stats = api_db_stats(chat_storage.clone());
+    let db_integrity = api_db_integrity(chat_storage.clone());
+    let db_maintenance = api_db_maintenance(chat_storage.clone());
+    let db_backup = api_db_backup(chat_storage.clone(), app_config.clone());
+    let db_delete_backup = api_db_delete_backup(app_config.clone());
+    let db_backups = api_db_backups(app_config.clone());
+    let db_restore = api_db_restore(chat_storage.clone(), app_config.clone());
+    let db_repair = api_db_repair(chat_storage.clone());
+    let db_indexes = api_db_indexes(chat_storage.clone());
+    let db_query = api_db_query(chat_storage);
+
     let get_sessions = api_get_sessions(state.clone());
     let create_session = api_create_session(state.clone());
     let delete_session = api_delete_session(state.clone());
@@ -1078,8 +1087,25 @@ pub fn api_routes(
         .or(chat_suggestions)
         .or(generate_keywords)
         .or(analyze_context_notes)
-        .or(get_chat_tabs)
-        .or(put_chat_tabs);
+        .or(chat_list_tabs)
+        .or(chat_create_tab)
+        .or(chat_get_tab)
+        .or(chat_put_tab)
+        .or(chat_delete_tab)
+        .or(chat_patch_tab_meta)
+        .or(chat_append_messages)
+        .or(chat_reorder_tabs)
+        .or(chat_search);
+    let db_routes = db_stats
+        .or(db_integrity)
+        .or(db_maintenance)
+        .or(db_backup)
+        .or(db_delete_backup)
+        .or(db_backups)
+        .or(db_restore)
+        .or(db_repair)
+        .or(db_indexes)
+        .or(db_query);
     let session_routes = get_sessions
         .or(create_session)
         .or(delete_session)
@@ -1114,6 +1140,7 @@ pub fn api_routes(
         .or(model_routes)
         .or(config_routes)
         .or(chat_routes)
+        .or(db_routes)
         .or(session_routes)
         .or(lhm_routes)
         .or(agent_routes)
@@ -2121,28 +2148,30 @@ fn api_chat_suggestions(
                             req.quick_guide_active.clone().unwrap_or_default(),
                         )
                     } else {
-                        // Fallback for older clients: rebuild from persisted tabs on disk.
-                        let path = chat_tabs_path();
-                        let tabs: Vec<ChatTab> = tokio::fs::read_to_string(&path).await
+                        // Fallback for older clients: load tab from chat_storage.
+                        let tab = state
+                            .chat_storage
+                            .get_tab(&req.tab_id)
                             .ok()
-                            .and_then(|raw| serde_json::from_str(&raw).ok())
-                            .unwrap_or_default();
-
-                        let tab = tabs
-                            .iter()
-                            .find(|t| t.id == req.tab_id)
                             .ok_or(warp::reject::not_found())?;
 
+                        let messages: Vec<SuggestionContextMessage> = tab
+                            .messages
+                            .iter()
+                            .map(|msg| SuggestionContextMessage {
+                                role: msg.role.clone(),
+                                content: msg.content.clone(),
+                            })
+                            .collect();
+
+                        let system_prompt = tab.system_prompt.clone();
+                        let context_notes: Vec<ContextNote> =
+                            serde_json::from_value(tab.context_notes.clone()).unwrap_or_default();
+
                         (
-                            tab.messages
-                                .iter()
-                                .map(|msg| SuggestionContextMessage {
-                                    role: msg.role.clone(),
-                                    content: msg.content.clone(),
-                                })
-                                .collect(),
-                            tab.system_prompt.clone(),
-                            tab.context_notes.clone(),
+                            messages,
+                            system_prompt,
+                            context_notes,
                             String::new(),
                         )
                     };
@@ -2740,99 +2769,675 @@ fn parse_director_cards(text: &str) -> Vec<SuggestionCard> {
         .collect()
 }
 
-fn compute_chat_tab_totals(mut tab: ChatTab) -> ChatTab {
-    if tab.total_input_tokens.is_none() || tab.total_output_tokens.is_none() {
-        let mut total_input: u64 = 0;
-        let mut total_output: u64 = 0;
-        for msg in &tab.messages {
-            if let Some(input) = msg.input_tokens {
-                total_input += input;
-            }
-            if let Some(output) = msg.output_tokens {
-                total_output += output;
-            }
-        }
-        tab.total_input_tokens = Some(total_input);
-        tab.total_output_tokens = Some(total_output);
-    }
-    tab
+// ── Chat storage helper ─────────────────────────────────────────────
+
+fn with_chat_storage(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (Arc<ChatStorage>,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || storage.clone())
 }
 
-fn api_get_chat_tabs() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
+fn with_app_config(
+    cfg: Arc<AppConfig>,
+) -> impl Filter<Extract = (Arc<AppConfig>,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || cfg.clone())
+}
+
+fn now_ts() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
+fn new_tab_id() -> String {
+    format!("tab_{}", now_ts())
+}
+
+// GET /api/chat/tabs — metadata only (no messages)
+fn api_list_tabs(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat" / "tabs")
         .and(warp::get())
-        .and_then(|| async move {
-            let path = chat_tabs_path();
-            if path.exists() {
-                match tokio::fs::read_to_string(&path).await {
-                    Ok(raw) => match serde_json::from_str::<Vec<ChatTab>>(&raw) {
-                        Ok(tabs) => {
-                            let tabs: Vec<ChatTab> =
-                                tabs.into_iter().map(compute_chat_tab_totals).collect();
-                            Ok::<_, warp::Rejection>(warp::reply::json(&tabs))
-                        }
-                        Err(_) => {
-                            Ok::<_, warp::Rejection>(warp::reply::json(&Vec::<ChatTab>::new()))
-                        }
-                    },
-                    Err(_) => Ok::<_, warp::Rejection>(warp::reply::json(&Vec::<ChatTab>::new())),
+        .and(with_chat_storage(storage))
+        .and_then(|store: Arc<ChatStorage>| async move {
+            match store.list_tabs() {
+                Ok(tabs) => Ok::<_, warp::Rejection>(warp::reply::json(&tabs)),
+                Err(e) => {
+                    eprintln!("list_tabs error: {e}");
+                    Ok(warp::reply::json(
+                        &Vec::<crate::chat_storage::TabMeta>::new(),
+                    ))
                 }
-            } else {
-                Ok::<_, warp::Rejection>(warp::reply::json(&Vec::<ChatTab>::new()))
             }
         })
 }
 
-fn api_put_chat_tabs() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
+// POST /api/chat/tabs — create new tab
+fn api_create_tab(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat" / "tabs")
-        .and(warp::put())
-        .and(warp::body::bytes())
-        .and_then(|body: bytes::Bytes| async move {
-            let body_str = String::from_utf8_lossy(&body);
-            let tabs: Vec<ChatTab> = match serde_json::from_slice(&body) {
-                Ok(t) => t,
-                Err(e) => {
-                    eprintln!("Chat tabs deserialize error: {} (body preview: {})", e, &body_str[..body_str.len().min(500)]);
-                    return Ok::<Box<dyn warp::reply::Reply + Send + Sync>, warp::Rejection>(Box::new(
-                        warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})),
-                            warp::http::StatusCode::BAD_REQUEST,
-                        )
-                    ));
+        .and(warp::post())
+        .and(warp::body::json::<crate::chat_storage::ChatTabRow>())
+        .and(with_chat_storage(storage))
+        .and_then(
+            move |mut tab: crate::chat_storage::ChatTabRow, store: Arc<ChatStorage>| async move {
+                if tab.id.is_empty() {
+                    tab.id = new_tab_id();
                 }
-            };
-            let path = chat_tabs_path();
-            // Protect against overwriting with fewer messages (stale frontend data)
-            let new_msg_count = tabs.iter().map(|t| t.messages.len()).sum::<usize>();
-            if let Ok(existing) = tokio::fs::read_to_string(&path).await
-                && let Ok(existing_tabs) = serde_json::from_str::<Vec<ChatTab>>(&existing)
-            {
-                let existing_msg_count = existing_tabs.iter().map(|t| t.messages.len()).sum::<usize>();
-                if new_msg_count < existing_msg_count && new_msg_count < 10 {
-                    eprintln!("Chat tabs: rejecting PUT - would lose {} messages ({} -> {})",
-                             existing_msg_count - new_msg_count, existing_msg_count, new_msg_count);
-                    return Ok::<Box<dyn warp::reply::Reply + Send + Sync>, warp::Rejection>(Box::new(
-                        warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({"ok": false, "error": "Would lose messages - rejecting stale data"})),
-                            warp::http::StatusCode::CONFLICT,
-                        )
-                    ));
+                tab.created_at = now_ts();
+                tab.updated_at = tab.created_at;
+                match store.create_tab(&tab) {
+                    Ok(_) => Ok::<_, warp::Rejection>(warp::reply::json(&tab)),
+                    Err(e) => Ok(warp::reply::json(
+                        &serde_json::json!({"ok":false,"error":e.to_string()}),
+                    )),
+                }
+            },
+        )
+}
+
+// GET /api/chat/tabs/:id — full tab with messages
+fn api_get_tab(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs" / String)
+        .and(warp::get())
+        .and(with_chat_storage(storage))
+        .and_then(|id: String, store: Arc<ChatStorage>| async move {
+            match store.get_tab(&id) {
+                Ok(tab) => Ok::<_, warp::Rejection>(warp::reply::json(&tab)),
+                Err(e) => Ok(warp::reply::json(
+                    &serde_json::json!({"ok":false,"error":e.to_string()}),
+                )),
+            }
+        })
+}
+
+// PUT /api/chat/tabs/:id — full save (meta + replace messages)
+fn api_put_tab(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs" / String)
+        .and(warp::put())
+        .and(warp::body::json::<crate::chat_storage::ChatTabRow>())
+        .and(with_chat_storage(storage))
+        .and_then(
+            move |id: String,
+                  mut tab: crate::chat_storage::ChatTabRow,
+                  store: Arc<ChatStorage>| async move {
+                tab.id = id;
+                tab.updated_at = now_ts();
+                let messages = std::mem::take(&mut tab.messages);
+                let msg_rows: Vec<crate::chat_storage::MessageRow> = messages
+                    .into_iter()
+                    .enumerate()
+                    .map(|(seq, m)| crate::chat_storage::MessageRow {
+                        seq: seq as i64,
+                        tab_id: tab.id.clone(),
+                        ..m
+                    })
+                    .collect();
+                let result = store
+                    .update_tab_meta(&tab)
+                    .and_then(|_| store.replace_messages(&tab.id, &msg_rows));
+                match result {
+                    Ok(_) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok":true}))),
+                    Err(e) => Ok(warp::reply::json(&serde_json::json!({"ok":false,"error":e.to_string()}))),
+                }
+            },
+        )
+}
+
+// DELETE /api/chat/tabs/:id
+fn api_delete_tab(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs" / String)
+        .and(warp::delete())
+        .and(with_chat_storage(storage))
+        .and_then(|id: String, store: Arc<ChatStorage>| async move {
+            match store.delete_tab(&id) {
+                Ok(_) => {
+                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok":true})))
+                }
+                Err(e) => Ok(warp::reply::json(
+                    &serde_json::json!({"ok":false,"error":e.to_string()}),
+                )),
+            }
+        })
+}
+
+// PATCH /api/chat/tabs/:id/meta — metadata only, no messages
+fn api_patch_tab_meta(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs" / String / "meta")
+        .and(warp::patch())
+        .and(warp::body::json::<crate::chat_storage::ChatTabRow>())
+        .and(with_chat_storage(storage))
+        .and_then(
+            move |id: String,
+                  mut tab: crate::chat_storage::ChatTabRow,
+                  store: Arc<ChatStorage>| async move {
+                tab.id = id;
+                tab.updated_at = now_ts();
+                match store.update_tab_meta(&tab) {
+                    Ok(_) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok":true}))),
+                    Err(e) => Ok(warp::reply::json(&serde_json::json!({"ok":false,"error":e.to_string()}))),
+                }
+            },
+        )
+}
+
+// POST /api/chat/tabs/:id/messages — append one or more messages
+fn api_append_messages(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs" / String / "messages")
+        .and(warp::post())
+        .and(warp::body::json::<serde_json::Value>())
+        .and(with_chat_storage(storage))
+        .and_then(
+            move |id: String, body: serde_json::Value, store: Arc<ChatStorage>| async move {
+                let msgs = body["messages"].as_array().cloned().unwrap_or_default();
+                let mut last_id = 0i64;
+                for msg_val in msgs {
+                    let msg: crate::chat_storage::MessageRow = serde_json::from_value(msg_val)
+                        .unwrap_or_else(|_| crate::chat_storage::MessageRow {
+                            tab_id: id.clone(),
+                            role: "user".into(),
+                            content: "".into(),
+                            id: 0,
+                            timestamp_ms: 0,
+                            input_tokens: None,
+                            output_tokens: None,
+                            cumulative_input_tokens: None,
+                            cumulative_output_tokens: None,
+                            compaction_marker: false,
+                            variants: None,
+                            variant_index: None,
+                            seq: 0,
+                        });
+                    let mut m = msg;
+                    m.tab_id = id.clone();
+                    match store.append_message(&m) {
+                        Ok(row_id) => last_id = row_id,
+                        Err(e) => eprintln!("append_message error: {e}"),
+                    }
+                }
+                Ok::<_, warp::Rejection>(warp::reply::json(
+                    &serde_json::json!({"ok":true,"last_id":last_id}),
+                ))
+            },
+        )
+}
+
+// PATCH /api/chat/tabs/order
+fn api_reorder_tabs(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs" / "order")
+        .and(warp::patch())
+        .and(warp::body::json::<serde_json::Value>())
+        .and(with_chat_storage(storage))
+        .and_then(
+            |body: serde_json::Value, store: Arc<ChatStorage>| async move {
+                let ids: Vec<String> = body["tab_order"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                match store.reorder_tabs(&ids) {
+                    Ok(_) => {
+                        Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok":true})))
+                    }
+                    Err(e) => Ok(warp::reply::json(
+                        &serde_json::json!({"ok":false,"error":e.to_string()}),
+                    )),
+                }
+            },
+        )
+}
+
+// GET /api/chat/search?q=…&limit=50
+fn api_chat_search(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct SearchParams {
+        q: String,
+        #[serde(default = "default_limit")]
+        limit: usize,
+    }
+    fn default_limit() -> usize {
+        50
+    }
+
+    warp::path!("api" / "chat" / "search")
+        .and(warp::get())
+        .and(warp::query::<SearchParams>())
+        .and(with_chat_storage(storage))
+        .and_then(|p: SearchParams, store: Arc<ChatStorage>| async move {
+            match store.search(&p.q, p.limit) {
+                Ok(results) => Ok::<_, warp::Rejection>(warp::reply::json(&results)),
+                Err(e) => {
+                    eprintln!("search error: {e}");
+                    Ok(warp::reply::json(
+                        &Vec::<crate::chat_storage::SearchResult>::new(),
+                    ))
                 }
             }
-            match serde_json::to_string_pretty(&tabs) {
-                Ok(json) => match tokio::fs::write(&path, json).await {
-                    Ok(_) => Ok::<Box<dyn warp::reply::Reply + Send + Sync>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({"ok": true})),
-                    )),
-                    Err(e) => Ok::<Box<dyn warp::reply::Reply + Send + Sync>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})),
-                    )),
+        })
+}
+
+// ── Database Admin Endpoints ──────────────────────────────────────────────────
+
+// GET /api/db/stats
+fn api_db_stats(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "db" / "stats")
+        .and(warp::get())
+        .and(with_chat_storage(storage))
+        .and_then(|store: Arc<ChatStorage>| async move {
+            match store.database_stats() {
+                Ok(stats) => Ok::<_, warp::Rejection>(warp::reply::json(&stats)),
+                Err(e) => {
+                    eprintln!("db stats error: {e}");
+                    Ok(warp::reply::json(
+                        &serde_json::json!({"error": e.to_string()}),
+                    ))
+                }
+            }
+        })
+}
+
+// GET /api/db/integrity
+fn api_db_integrity(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "db" / "integrity")
+        .and(warp::get())
+        .and(with_chat_storage(storage))
+        .and_then(|store: Arc<ChatStorage>| async move {
+            match store.integrity_check() {
+                Ok(result) => {
+                    let status = if result == "ok" {
+                        "healthy"
+                    } else {
+                        "corrupted"
+                    };
+                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                        "status": status,
+                        "detail": result,
+                    })))
+                }
+                Err(e) => {
+                    eprintln!("integrity check error: {e}");
+                    Ok(warp::reply::json(
+                        &serde_json::json!({"error": e.to_string()}),
+                    ))
+                }
+            }
+        })
+}
+
+// POST /api/db/maintenance - Run maintenance operations
+fn api_db_maintenance(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct MaintenanceRequest {
+        operation: String,
+    }
+
+    warp::path!("api" / "db" / "maintenance")
+        .and(warp::post())
+        .and(warp::body::json::<MaintenanceRequest>())
+        .and(with_chat_storage(storage))
+        .and_then(
+            |req: MaintenanceRequest, store: Arc<ChatStorage>| async move {
+                let result = match req.operation.as_str() {
+                    "checkpoint" => store.checkpoint().map(
+                        |(a, b, c)| serde_json::json!({"backfilled": a, "deleted": b, "log": c}),
+                    ),
+                    "vacuum" => store
+                        .vacuum()
+                        .map(|_| serde_json::json!({"status": "vacuumed"})),
+                    "rebuild_fts" => store
+                        .rebuild_fts_index()
+                        .map(|_| serde_json::json!({"status": "fts_rebuilt"})),
+                    "analyze" => store
+                        .analyze()
+                        .map(|_| serde_json::json!({"status": "analyzed"})),
+                    _ => Err(anyhow::anyhow!("Unknown operation: {}", req.operation)),
+                };
+
+                match result {
+                    Ok(response) => Ok::<_, warp::Rejection>(warp::reply::json(&response)),
+                    Err(e) => {
+                        eprintln!("maintenance error: {e}");
+                        Ok(warp::reply::json(
+                            &serde_json::json!({"error": e.to_string()}),
+                        ))
+                    }
+                }
+            },
+        )
+}
+
+// POST /api/db/backup - Create database backup
+fn api_db_backup(
+    storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "db" / "backup")
+        .and(warp::post())
+        .and(with_chat_storage(storage))
+        .and(with_app_config(app_config))
+        .and_then(|store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
+            let config_dir = cfg.config_dir.clone();
+
+            let backup_dir = config_dir.join("backups");
+            if let Err(e) = std::fs::create_dir_all(&backup_dir) {
+                eprintln!("Failed to create backup directory: {e}");
+                return Ok(warp::reply::json(
+                    &serde_json::json!({"error": e.to_string()}),
+                ));
+            }
+
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis().to_string())
+                .unwrap_or_else(|_| "0".to_string());
+            let backup_path = backup_dir.join(format!("chat_{}.db", timestamp));
+
+            match store.backup(&backup_path) {
+                Ok(()) => {
+                    let file_size = std::fs::metadata(&backup_path)
+                        .ok()
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+
+                    // Clean up old backups (keep last 7)
+                    if let Ok(entries) = std::fs::read_dir(&backup_dir) {
+                        let mut backups: Vec<_> = entries
+                            .filter_map(|e| e.ok())
+                            .filter(|e| e.file_name().to_string_lossy().starts_with("chat_"))
+                            .collect();
+                        backups.sort_by_key(|e| e.path());
+                        while backups.len() > 7 {
+                            let old = backups.remove(0);
+                            let _ = std::fs::remove_file(old.path());
+                        }
+                    }
+
+                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                        "status": "backup_created",
+                        "path": backup_path.to_string_lossy().to_string(),
+                        "size_bytes": file_size,
+                    })))
+                }
+                Err(e) => {
+                    eprintln!("backup error: {e}");
+                    Ok(warp::reply::json(
+                        &serde_json::json!({"error": e.to_string()}),
+                    ))
+                }
+            }
+        })
+}
+
+// GET /api/db/indexes - List database indexes
+fn api_db_indexes(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "db" / "indexes")
+        .and(warp::get())
+        .and(with_chat_storage(storage))
+        .and_then(|store: Arc<ChatStorage>| async move {
+            match store.list_indexes() {
+                Ok(indexes) => Ok::<_, warp::Rejection>(warp::reply::json(&indexes)),
+                Err(e) => {
+                    eprintln!("list indexes error: {e}");
+                    Ok(warp::reply::json(
+                        &serde_json::json!({"error": e.to_string()}),
+                    ))
+                }
+            }
+        })
+}
+
+// POST /api/db/query - Execute admin query (SELECT only)
+fn api_db_query(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct QueryRequest {
+        sql: String,
+    }
+
+    warp::path!("api" / "db" / "query")
+        .and(warp::post())
+        .and(warp::body::json::<QueryRequest>())
+        .and(with_chat_storage(storage))
+        .and_then(|req: QueryRequest, store: Arc<ChatStorage>| async move {
+            match store.execute_query(&req.sql) {
+                Ok(result) => Ok::<_, warp::Rejection>(warp::reply::json(&result)),
+                Err(e) => {
+                    eprintln!("query error: {e}");
+                    Ok(warp::reply::json(
+                        &serde_json::json!({"error": e.to_string()}),
+                    ))
+                }
+            }
+        })
+}
+
+// GET /api/db/backups - List available backups
+fn api_db_backups(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "db" / "backups")
+        .and(warp::get())
+        .and(with_app_config(app_config))
+        .and_then(|cfg: Arc<AppConfig>| async move {
+            let backup_dir = cfg.config_dir.join("backups");
+
+            let mut backups = Vec::new();
+            let mut total_size = 0u64;
+
+            if let Ok(entries) = std::fs::read_dir(&backup_dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    if let Ok(metadata) = entry.metadata()
+                        && metadata.is_file()
+                    {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        if name.starts_with("chat_") || name.starts_with("chat_auto_") {
+                            let size = metadata.len();
+                            total_size += size;
+                            let modified = metadata
+                                .modified()
+                                .ok()
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_millis() as i64)
+                                .unwrap_or(0);
+
+                            backups.push(serde_json::json!({
+                                "name": name,
+                                "size": size,
+                                "modified": modified,
+                            }));
+                        }
+                    }
+                }
+            }
+
+            backups.sort_by_key(|b| b["modified"].as_i64().unwrap_or(0));
+            backups.reverse();
+
+            Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                "backups": backups,
+                "total_size": total_size,
+            })))
+        })
+}
+
+// POST /api/db/restore - Restore from backup
+fn api_db_restore(
+    storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct RestoreRequest {
+        backup_name: String,
+    }
+
+    warp::path!("api" / "db" / "restore")
+        .and(warp::post())
+        .and(warp::body::json::<RestoreRequest>())
+        .and(with_chat_storage(storage))
+        .and(with_app_config(app_config))
+        .and_then(
+            |req: RestoreRequest, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
+                let backup_path = cfg.config_dir.join("backups").join(&req.backup_name);
+
+                if !backup_path.exists() {
+                    return Ok(warp::reply::json(&serde_json::json!({
+                        "error": format!("Backup not found: {}", req.backup_name)
+                    })));
+                }
+
+                // Get the current database path
+                let db_path = store.get_db_path();
+
+                // Create a safety backup before restore
+                let safety_backup = cfg.config_dir.join("backups").join(format!(
+                    "pre_restore_{}.db",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis().to_string())
+                        .unwrap_or_else(|_| "0".to_string())
+                ));
+
+                if std::fs::metadata(&db_path).is_ok() {
+                    let _ = std::fs::copy(&db_path, &safety_backup);
+                }
+
+                // Restore: copy backup over current database
+                match std::fs::copy(&backup_path, &db_path) {
+                    Ok(_) => {
+                        // Verify the restored database
+                        match store.integrity_check() {
+                            Ok(_) => {
+                                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                                    "status": "restored",
+                                    "backup": req.backup_name,
+                                })))
+                            }
+                            Err(e) => {
+                                eprintln!("Restored database integrity check failed: {e}");
+                                Ok(warp::reply::json(&serde_json::json!({
+                                    "error": "Restore succeeded but integrity check failed",
+                                    "safety_backup": safety_backup.to_string_lossy().to_string(),
+                                })))
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Restore error: {e}");
+                        Ok(warp::reply::json(
+                            &serde_json::json!({"error": e.to_string()}),
+                        ))
+                    }
+                }
+            },
+        )
+}
+
+// POST /api/db/repair - Database repair operations
+fn api_db_repair(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct RepairRequest {
+        operation: String,
+    }
+
+    warp::path!("api" / "db" / "repair")
+        .and(warp::post())
+        .and(warp::body::json::<RepairRequest>())
+        .and(with_chat_storage(storage))
+        .and_then(|req: RepairRequest, store: Arc<ChatStorage>| async move {
+            match req.operation.as_str() {
+                "repair_indexes" => match store.repair_indexes() {
+                    Ok(_) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                        "status": "indexes_repaired",
+                    }))),
+                    Err(e) => {
+                        eprintln!("Repair indexes error: {e}");
+                        Ok(warp::reply::json(
+                            &serde_json::json!({"error": e.to_string()}),
+                        ))
+                    }
                 },
-                Err(e) => Ok::<Box<dyn warp::reply::Reply + Send + Sync>, warp::Rejection>(Box::new(
-                    warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})),
-                )),
+                "emergency_recovery" => match store.emergency_recovery() {
+                    Ok(_) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                        "status": "recovery_attempted",
+                    }))),
+                    Err(e) => {
+                        eprintln!("Emergency recovery error: {e}");
+                        Ok(warp::reply::json(
+                            &serde_json::json!({"error": e.to_string()}),
+                        ))
+                    }
+                },
+                _ => Ok(warp::reply::json(&serde_json::json!({
+                    "error": format!("Unknown repair operation: {}", req.operation)
+                }))),
+            }
+        })
+}
+
+// DELETE /api/db/backup - Delete a specific backup
+fn api_db_delete_backup(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct DeleteBackupRequest {
+        backup_name: String,
+    }
+
+    warp::path!("api" / "db" / "backup")
+        .and(warp::delete())
+        .and(warp::body::json::<DeleteBackupRequest>())
+        .and(with_app_config(app_config))
+        .and_then(|req: DeleteBackupRequest, cfg: Arc<AppConfig>| async move {
+            let backup_path = cfg.config_dir.join("backups").join(&req.backup_name);
+
+            if !backup_path.exists() {
+                return Ok(warp::reply::json(&serde_json::json!({
+                    "error": format!("Backup not found: {}", req.backup_name)
+                })));
+            }
+
+            match std::fs::remove_file(&backup_path) {
+                Ok(_) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                    "status": "deleted",
+                    "backup": req.backup_name,
+                }))),
+                Err(e) => {
+                    eprintln!("Delete backup error: {e}");
+                    Ok(warp::reply::json(
+                        &serde_json::json!({"error": e.to_string()}),
+                    ))
+                }
             }
         })
 }
@@ -3173,7 +3778,7 @@ fn api_attach(
 
                 // Pre-attach health check
                 let client = match reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(5))
+                    .timeout(std::time::Duration::from_secs(15))
                     .build()
                 {
                     Ok(c) => c,
@@ -3188,7 +3793,17 @@ fn api_attach(
                 };
 
                 // Check if server is reachable
-                let server_up = client.get(&endpoint).send().await.is_ok();
+                eprintln!("[info] Health-checking llama-server at {}", endpoint);
+                let server_up = match client.get(&endpoint).send().await {
+                    Ok(resp) => {
+                        eprintln!("[info] llama-server health check status: {}", resp.status());
+                        true
+                    }
+                    Err(e) => {
+                        eprintln!("[warn] llama-server health check failed: {}", e);
+                        false
+                    }
+                };
                 if !server_up {
                     return Ok::<_, warp::Rejection>(warp::reply::json(
                         &serde_json::json!({
@@ -3399,7 +4014,7 @@ fn api_self_update() -> impl Filter<Extract = (impl warp::Reply,), Error = warp:
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::legacy_chat_types::*;
 
     fn make_minimal_chat_tab() -> ChatTab {
         ChatTab {

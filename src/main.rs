@@ -2,6 +2,7 @@
 
 mod agent;
 mod certs;
+mod chat_storage;
 mod cli;
 mod config;
 mod gpu;
@@ -17,11 +18,13 @@ mod system;
 mod tray;
 mod web;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+
+use crate::chat_storage::ChatStorage;
 
 const GPU_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SYSTEM_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -84,6 +87,16 @@ fn main() -> Result<()> {
     // Load sessions from disk (or defaults)
     let _sessions = state::load_sessions(&app_config.sessions_file);
 
+    // Open chat database
+    let chat_db_path = app_config.config_dir.join("chat.db");
+    let chat_storage = Arc::new(ChatStorage::open(&chat_db_path).context("opening chat.db")?);
+
+    // Migrate from legacy chat-tabs.json (best-effort)
+    let legacy = app_config.config_dir.join("chat-tabs.json");
+    if let Err(e) = chat_storage.migrate_from_legacy(&legacy) {
+        eprintln!("[warn] chat legacy migration failed: {e}");
+    }
+
     let state = state::AppState::new(
         initial_presets,
         state::AppPaths {
@@ -96,6 +109,7 @@ fn main() -> Result<()> {
         },
         gpu_env,
         ui_settings,
+        chat_storage,
     );
 
     if let Some(ref dir) = app_config.models_dir {
@@ -229,13 +243,59 @@ fn main() -> Result<()> {
     // Sessions persistence timer
     {
         let state = state.clone();
+        let sessions_file = app_config.sessions_file.clone();
         runtime.spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-                if let Err(e) =
-                    state::save_sessions(&app_config.sessions_file, &state.get_sessions())
-                {
+                if let Err(e) = state::save_sessions(&sessions_file, &state.get_sessions()) {
                     eprintln!("[error] Failed to save sessions: {}", e);
+                }
+            }
+        });
+    }
+
+    // Database maintenance timer (checkpoint WAL, periodic backup)
+    {
+        let chat_storage = state.chat_storage.clone();
+        let config_dir = app_config.config_dir.clone();
+        runtime.spawn(async move {
+            // Run maintenance every hour
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
+
+                // WAL checkpoint
+                if let Err(e) = chat_storage.checkpoint() {
+                    eprintln!("[error] WAL checkpoint failed: {}", e);
+                }
+
+                // Create backup
+                let backup_dir = config_dir.join("backups");
+                if let Err(e) = std::fs::create_dir_all(&backup_dir) {
+                    eprintln!("[error] Failed to create backup directory: {}", e);
+                    continue;
+                }
+
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis().to_string())
+                    .unwrap_or_else(|_| "0".to_string());
+                let backup_path = backup_dir.join(format!("chat_auto_{}.db", timestamp));
+
+                if let Err(e) = chat_storage.backup(&backup_path) {
+                    eprintln!("[error] Auto backup failed: {}", e);
+                }
+
+                // Clean up old backups (keep last 7)
+                if let Ok(entries) = std::fs::read_dir(&backup_dir) {
+                    let mut backups: Vec<_> = entries
+                        .filter_map(|e| e.ok())
+                        .filter(|e| e.file_name().to_string_lossy().starts_with("chat_auto_"))
+                        .collect();
+                    backups.sort_by_key(|e| e.path());
+                    while backups.len() > 7 {
+                        let old = backups.remove(0);
+                        let _ = std::fs::remove_file(old.path());
+                    }
                 }
             }
         });
@@ -248,6 +308,11 @@ fn main() -> Result<()> {
             .expect("Invalid host:port");
         warp::serve(routes).run(addr).await;
     });
+
+    // Clone shutdown-related fields before state is moved to tray
+    let shutdown_chat_storage = state.chat_storage.clone();
+    let shutdown_sessions_path = state.sessions_path.clone();
+    let shutdown_state = state.clone();
 
     // Run tray on the main thread when a desktop session is available.
     // Headless Linux servers still keep the web UI/API running.
@@ -270,7 +335,50 @@ fn main() -> Result<()> {
         println!("[info] Tray disabled in this build");
     }
 
-    park_forever()
+    // Graceful shutdown handler
+    {
+        let chat_storage = shutdown_chat_storage;
+        let sessions_path = shutdown_sessions_path;
+        let state = shutdown_state;
+        runtime.spawn(async move {
+            // Wait for SIGINT or SIGTERM
+            let mut sigint =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()).unwrap();
+            let mut sigterm =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
+
+            tokio::select! {
+                _ = sigint.recv() => {},
+                _ = sigterm.recv() => {},
+            }
+
+            println!("\n[info] Shutdown signal received, finalizing...");
+
+            // Checkpoint WAL
+            if let Err(e) = chat_storage.checkpoint() {
+                eprintln!("[warn] Final checkpoint failed: {}", e);
+            }
+
+            // Save sessions
+            if let Err(e) = state::save_sessions(&sessions_path, &state.get_sessions()) {
+                eprintln!("[warn] Final session save failed: {}", e);
+            }
+
+            println!("[info] Shutdown complete");
+            std::process::exit(0);
+        });
+    }
+
+    // Park main thread (tray or headless)
+    #[cfg(feature = "native-tray")]
+    {
+        park_forever();
+    }
+
+    #[cfg(not(feature = "native-tray"))]
+    {
+        park_forever();
+    }
 }
 
 #[cfg(target_os = "linux")]

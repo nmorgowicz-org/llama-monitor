@@ -9,7 +9,9 @@ import { initWebSocket } from './features/dashboard-ws.js';
 import { initPresets } from './features/presets.js';
 import { initSessions } from './features/sessions.js';
 import { activeChatTab, addChatTab, autoResizeChatInput, initChatState, initChatTabs, restoreTabFromTrash } from './features/chat-state.js';
-import { chatScroll, initChatRender, renderTrashDropdown } from './features/chat-render.js';
+import { chatScroll, initChatRender } from './features/chat-render.js';
+import { initChatSessionsSidebar, renderChatSessionsSidebar } from './features/chat-sessions-sidebar.js';
+import { initChatSearch } from './features/chat-search.js';
 import { initAttachDetach } from './features/attach-detach.js';
 import { initRemoteAgent } from './features/remote-agent.js';
 import { initChatTransport } from './features/chat-transport.js';
@@ -29,6 +31,7 @@ import { initNetworkDetection } from './features/network-detection.js';
 import { initContextSidebar } from './features/chat-notes.js';
 import { initSuggestionsDropdown, closeSuggestionsDropdown } from './features/chat-suggestions.js';
 import { initQuickGuide, closeQuickGuide } from './features/chat-quick-guide.js';
+import { initDbAdmin } from './features/db-admin.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
@@ -57,48 +60,11 @@ initChatTransport();
 
 // Phase 6b: Chat rendering, templates, and params (after state/transport)
 initChatRender();
+initChatSessionsSidebar();
+initChatSearch();
 
 // Bind chat scroll button
 document.getElementById('chat-scroll-bottom')?.addEventListener('click', () => chatScroll(true));
-
-// Bind chat tab add button
-document.getElementById('chat-tab-add-btn')?.addEventListener('click', addChatTab);
-
-// Bind trash dropdown toggle
-document.getElementById('chat-tab-trash-btn')?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const dropdown = document.getElementById('chat-tab-trash-dropdown');
-    if (!dropdown) return;
-    const isOpen = dropdown.classList.contains('open');
-    if (!isOpen) {
-        renderTrashDropdown();
-        const rect = e.currentTarget.getBoundingClientRect();
-        dropdown.style.top = (rect.bottom + 4) + 'px';
-        dropdown.style.right = (window.innerWidth - rect.right) + 'px';
-    }
-    dropdown.classList.toggle('open');
-});
-
-// Close trash dropdown when clicking outside
-document.addEventListener('click', (e) => {
-    const dropdown = document.getElementById('chat-tab-trash-dropdown');
-    const trashBtn = document.getElementById('chat-tab-trash-btn');
-    if (dropdown && dropdown.classList.contains('open') &&
-        !trashBtn.contains(e.target) && !dropdown.contains(e.target)) {
-        dropdown.classList.remove('open');
-    }
-});
-
-// Event delegation for trash restore buttons
-document.getElementById('chat-tab-trash-dropdown')?.addEventListener('click', (e) => {
-    const restoreBtn = e.target.closest('[data-trash-restore]');
-    if (restoreBtn) {
-        e.stopPropagation();
-        const tabId = restoreBtn.dataset.trashRestore;
-        restoreTabFromTrash(tabId);
-        document.getElementById('chat-tab-trash-dropdown')?.classList.remove('open');
-    }
-});
 
 initChatTemplates();
 initChatParams();
@@ -125,6 +91,9 @@ initNetworkDetection();
 initContextSidebar();
 initSuggestionsDropdown();
 initQuickGuide();
+
+// Phase 10: Database administration
+initDbAdmin();
 
 // Mutual exclusion: opening one guided panel closes the other.
 window.addEventListener('suggestionsOpened', () => closeQuickGuide());

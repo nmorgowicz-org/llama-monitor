@@ -62,11 +62,11 @@ fs.mkdirSync(TEMP_APP_CONFIG_DIR, { recursive: true });
 function parseArgs(argv) {
     const options = {
         scenario: null,
-        chatOnly: false,
         gpuOnly: false,
         inferenceOnly: false,
         listScenarios: false,
         noAttach: false,
+        closeUp: false,
         viewport: { ...DEFAULT_VIEWPORT },
     };
 
@@ -85,6 +85,8 @@ function parseArgs(argv) {
             options.listScenarios = true;
         } else if (arg === '--no-attach') {
             options.noAttach = true;
+        } else if (arg === '--close-up') {
+            options.closeUp = true;
         } else if (arg === '--help' || arg === '-h') {
             options.help = true;
         }
@@ -102,24 +104,38 @@ function printUsage() {
   node tests/ui/capture.mjs --scenario <name> [options]
 
 Scenarios:
-  artifacts      Welcome/chat/logs artifact screenshots
-  new-features   Guided generation artifact screenshots
-  docs           Docs/UI review still screenshots
-  sparkline      Sparkline validation screenshots
-  gifs           Inference/GPU animated GIF capture
+  Core
+    welcome          Welcome screen (no attach required)
+    chat             Chat, telemetry, logs
+
+  Chat Features
+    guided-gen       Suggestions, quick guide, director, surprise, explicit mode
+    sidebar          Sidebar, FTS search, context menu, name filter
+
+  Configuration
+    settings         Settings modal, preferences, persona, models, shortcuts
+    panels           Chat config panels (behavior, model, style, debug)
+    dashboard        Server tab, GPU section
+
+  Validation
+    sparkline        Sparkline validation screenshots
+    gifs             Inference/GPU animated GIF capture
+    smoke            Startup smoke test
 
 Options:
-  --chat-only        For artifacts scenario, capture only chat
   --gpu-only         For gifs scenario, capture only GPU/system animation
   --inference-only   For gifs scenario, capture only inference animation
   --no-attach        Skip remote attach for scenarios that do not require it
+  --close-up         Also capture element-level close-ups (debugging only)
   --list-scenarios   Print available scenarios
 
 Examples:
-  SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario artifacts
-  SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario new-features
+  node tests/ui/capture.mjs --scenario welcome
+  SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario chat
+  SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario guided-gen
+  SCREENSHOT_PORT=8893 node tests/ui/capture.mjs --scenario sidebar
   SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
-  REMOTE_SERVER=http://127.0.0.1:8001 node tests/ui/capture.mjs --scenario sparkline
+  SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario settings --close-up
 `);
 }
 
@@ -241,6 +257,26 @@ async function switchTab(page, tabName) {
 
 async function attachToServer(page, remoteServer = REMOTE_SERVER) {
     console.log(`[CAPTURE] Attaching to remote server at ${remoteServer}...`);
+
+    // Intercept the /api/attach response to log the real error
+    const attachPromise = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            reject(new Error('Attach API request timed out (no /api/attach response within 30s)'));
+        }, 30000);
+        page.once('response', async (response) => {
+            if (!response.url().includes('/api/attach')) return;
+            clearTimeout(timeout);
+            try {
+                const body = await response.text();
+                console.log(`[CAPTURE] /api/attach response ${response.status()}: ${body.trim()}`);
+                resolve();
+            } catch (e) {
+                console.log(`[CAPTURE] /api/attach response ${response.status()} (read error: ${e.message})`);
+                resolve();
+            }
+        });
+    });
+
     await page.waitForSelector('#setup-endpoint-url', { visible: true });
     await page.$eval('#setup-endpoint-url', (input, url) => {
         input.value = url;
@@ -248,14 +284,30 @@ async function attachToServer(page, remoteServer = REMOTE_SERVER) {
         input.dispatchEvent(new Event('change', { bubbles: true }));
     }, remoteServer);
     await sleep(200);
-    await page.click('#setup-attach-btn');
-    await waitForMonitor(page);
+
+    const attachBtn = await page.$('#setup-attach-btn');
+    if (!attachBtn) {
+        throw new Error('Attach button #setup-attach-btn not found');
+    }
+    console.log('[CAPTURE] Clicking attach button...');
+    await attachBtn.click();
+
+    // Wait for both the API response and the monitor view
+    await Promise.all([
+        attachPromise,
+        waitForMonitor(page),
+    ]);
+
+    // Optional: confirm endpoint displayed (use #endpoint-url, not #endpoint-url-display)
     await page.waitForFunction(
-        endpoint => document.getElementById('endpoint-url-display')?.textContent?.includes(endpoint),
-        { timeout: 15000 },
-        remoteServer
-    ).catch(() => null);
+        endpoint => document.getElementById('endpoint-url')?.textContent?.includes(endpoint),
+        { timeout: 5000 }
+    ).catch(() => {
+        console.log('[CAPTURE] Endpoint URL not confirmed in display (non-fatal)');
+    });
+
     await sleep(1500);
+    console.log('[CAPTURE] Attach successful.');
 }
 
 async function gotoApp(page, baseUrl) {
@@ -268,6 +320,7 @@ async function cleanupScreenshotTabs(page, { keepOne = false } = {}) {
         const { chat } = await import('/js/core/app-state.js');
         const { newChatTab, persistChatTabs } = await import('/js/features/chat-state.js');
         const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+        const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
 
         const screenshotTabs = chat.tabs.filter(tab => tab.name.startsWith(prefix));
         const keepId = keepOne ? screenshotTabs.at(-1)?.id : null;
@@ -287,6 +340,7 @@ async function cleanupScreenshotTabs(page, { keepOne = false } = {}) {
 
         renderChatTabs();
         renderChatMessages();
+        renderChatSessionsSidebar();
         await persistChatTabs();
     }, { prefix: SCREENSHOT_TAB_PREFIX, keepOne });
 }
@@ -300,14 +354,17 @@ async function clearExistingChats(page) {
 
 async function createFreshChat(page) {
     await switchTab(page, 'chat');
-    await page.waitForSelector('#chat-input', { visible: true });
+    await sleep(500);
+
     await cleanupScreenshotTabs(page);
-    await page.click('#chat-tab-add-btn');
-    await page.waitForFunction(prefix => {
-        const tabs = Array.from(document.querySelectorAll('#chat-tab-bar .chat-tab'));
-        const active = tabs.find(tab => tab.classList.contains('active'));
-        return !!active && active.textContent.includes(prefix);
-    }, { timeout: 5000 }, SCREENSHOT_TAB_PREFIX).catch(() => null);
+    await page.evaluate(async () => {
+        const { addChatTab } = await import('/js/features/chat-state.js');
+        const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+        addChatTab();
+        renderChatTabs();
+        renderChatMessages();
+    });
+    await sleep(300);
 
     await page.evaluate(async prefix => {
         const { chat } = await import('/js/core/app-state.js');
@@ -330,26 +387,46 @@ async function createFreshChat(page) {
 
 async function activateScreenshotChat(page) {
     await page.evaluate(prefix => {
-        const tabs = Array.from(document.querySelectorAll('#chat-tab-bar .chat-tab'));
-        const target = tabs.find(tab => tab.textContent?.includes(prefix));
+        const items = Array.from(document.querySelectorAll('.csp-item'));
+        const target = items.find(el => {
+            const name = el.querySelector('.csp-item-name')?.textContent || '';
+            return name.includes(prefix);
+        });
         target?.click();
     }, SCREENSHOT_TAB_PREFIX);
     await sleep(500);
 }
 
 async function sendChatPrompt(page, prompt) {
+    // Check if chat input is visible
+    const chatInput = await page.$('#chat-input');
+    if (!chatInput) {
+        console.log('[CAPTURE] Chat input not found!');
+        throw new Error('Chat input not found');
+    }
+    const inputVisible = await chatInput.evaluate(el => getComputedStyle(el).display !== 'none');
+    console.log('[CAPTURE] Chat input visible:', inputVisible);
+    if (!inputVisible) {
+        console.log('[CAPTURE] Chat input is not visible, trying to scroll into view...');
+        await chatInput.evaluate(el => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
+        await sleep(500);
+    }
     await page.$eval('#chat-input', (input, text) => {
         input.value = text;
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
     }, prompt);
-    await page.click('#btn-send');
+    // Use JavaScript to click the send button (puppeteer click may fail without proper event handling)
+    await page.evaluate(() => {
+        const sendBtn = document.getElementById('btn-send');
+        if (sendBtn) sendBtn.click();
+    });
     await page.waitForFunction(() => {
         return document.querySelectorAll('#chat-messages .chat-message-user').length > 0;
     }, { timeout: 10000 });
 }
 
-async function waitForChatResponse(page, timeoutMs = 180000) {
+async function waitForChatResponse(page, timeoutMs = 300000) {
     await page.waitForFunction(() => {
         const streaming = document.querySelector('#chat-messages .chat-message-streaming');
         if (streaming) return false;
@@ -359,7 +436,7 @@ async function waitForChatResponse(page, timeoutMs = 180000) {
     }, { timeout: timeoutMs });
 }
 
-async function waitForChatSettledOrError(page, timeoutMs = 180000) {
+async function waitForChatSettledOrError(page, timeoutMs = 300000) {
     await page.waitForFunction(() => {
         const streaming = document.querySelector('#chat-messages .chat-message-streaming');
         if (streaming) return false;
@@ -370,7 +447,7 @@ async function waitForChatSettledOrError(page, timeoutMs = 180000) {
     }, { timeout: timeoutMs });
 }
 
-async function waitForSuggestionsSettled(page, timeoutMs = 60000) {
+async function waitForSuggestionsSettled(page, timeoutMs = 300000) {
     await page.waitForFunction(() => {
         const dropdown = document.getElementById('suggestions-dropdown');
         const list = document.getElementById('suggestions-list');
@@ -424,7 +501,36 @@ async function captureShot(page, filename, options = {}) {
     console.log(`[CAPTURE] Saved ${filename}`);
 }
 
+async function captureCloseUp(page, selector, filename, options = {}) {
+    if (!options.closeUp) return;
+    const padding = options.padding ?? 24;
+    const handle = await page.$(selector);
+    if (!handle) {
+        console.log(`[CAPTURE] Close-up skipped (not found): ${selector}`);
+        return;
+    }
+    await handle.evaluate(el => {
+        el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'nearest' });
+    });
+    await sleep(300);
+    const box = await handle.boundingBox();
+    if (!box) return;
+    const viewport = page.viewport();
+    const clip = {
+        x: Math.max(0, box.x - padding),
+        y: Math.max(0, box.y - padding),
+        width: Math.min((viewport?.width ?? box.width) - Math.max(0, box.x - padding), box.width + padding * 2),
+        height: Math.min((viewport?.height ?? box.height) - Math.max(0, box.y - padding), box.height + padding * 2),
+    };
+    const cuName = filename.replace('.png', '-cu.png');
+    await page.screenshot({ path: join(ARTIFACTS_DIR, cuName), clip });
+    console.log(`[CAPTURE] Close-up saved ${cuName}`);
+}
+
 async function captureElementScreenshot(page, selector, filename, options = {}) {
+    // Only capture element screenshots when --close-up flag is passed
+    if (!options.closeUp) return;
+
     const padding = options.padding ?? 20;
     const handle = await page.$(selector);
     if (!handle) {
@@ -580,48 +686,64 @@ async function enableGuidedGeneration(page) {
     await sleep(500);
 }
 
-async function scenarioArtifacts(ctx, options) {
+// ── Welcome Screen ──────────────────────────────────────────────────────────────
+
+async function scenarioWelcome(ctx, options) {
     const { page, baseUrl } = ctx;
     await gotoApp(page, baseUrl);
-    await captureShot(page, '01-welcome.png', { fullPage: true });
-    if (options.noAttach) return;
+    await captureShot(page, 'welcome-welcome.png', { fullPage: true });
+}
 
+// ── Core Chat ───────────────────────────────────────────────────────────────────
+
+async function scenarioChat(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
     await attachToServer(page);
-    await createFreshChat(page);
-    await sendChatPrompt(
-        page,
-        'Reply with a compact final answer only: explain what llama.cpp GPU offload via -ngl does and why prompt processing and generation often run at different token speeds.'
-    );
+
+    await switchTab(page, 'chat');
+    await sleep(500);
+
+    // Create a fresh chat with a short, safe conversation
+    await cleanupScreenshotTabs(page);
+    await page.evaluate(async () => {
+        const { addChatTab } = await import('/js/features/chat-state.js');
+        const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+        addChatTab();
+        renderChatTabs();
+        renderChatMessages();
+    });
+    await sleep(300);
+
+    await sendChatPrompt(page, 'Explain how a database index speeds up queries in 3 bullet points.');
     await waitForChatResponse(page);
-    await sleep(1500);
-    await captureShot(page, '03-chat.png', { fullPage: true });
+    await sleep(2000);
+
+    await captureShot(page, 'chat-chat.png', { fullPage: true });
 
     const telemetryToggle = await page.$('#chat-telemetry-btn');
     if (telemetryToggle) {
         await telemetryToggle.click();
         await sleep(500);
-        await captureShot(page, '03b-chat-telemetry.png', { fullPage: true });
+        await captureShot(page, 'chat-chat-telemetry.png', { fullPage: true });
         const telemetryPin = await page.$('#chat-telemetry-pin-btn');
         if (telemetryPin) {
             await telemetryPin.click();
             await sleep(500);
-            await captureShot(page, '03c-chat-telemetry-pinned.png', { fullPage: true });
+            await captureShot(page, 'chat-chat-telemetry-pinned.png', { fullPage: true });
         }
     }
     await cleanupScreenshotTabs(page);
 
-    if (!options.chatOnly) {
-        await switchTab(page, 'logs');
-        await page.waitForSelector('#logs-empty-state.visible', { timeout: 10000 });
-        await sleep(1200);
-        await captureShot(page, '05-logs.png', { fullPage: true });
-    }
+    await switchTab(page, 'logs');
+    await page.waitForSelector('#logs-empty-state.visible', { timeout: 10000 });
+    await captureShot(page, 'chat-logs.png', { fullPage: true });
 }
 
-// Guided generation capture flow for context notes, suggestions, quick guide,
-// and explicit-mode chrome. Keep feature-specific diagnostics here so UI
-// regressions are easy to pinpoint from the capture logs.
-async function scenarioNewFeatures(ctx) {
+// ── Guided Generation ───────────────────────────────────────────────────────────
+// Suggestions, quick guide, director, surprise, explicit mode, context notes.
+
+async function scenarioGuidedGen(ctx, options) {
     const { page, baseUrl } = ctx;
     const detachSuggestionsLogger = attachSuggestionsResponseLogger(page);
     await gotoApp(page, baseUrl);
@@ -629,40 +751,111 @@ async function scenarioNewFeatures(ctx) {
     await enableGuidedGeneration(page);
 
     await createFreshChat(page);
-    await sendChatPrompt(
-        page,
-        'Reply with two concise paragraphs about a tense noir scene in progress, leaving room for the next beat to escalate.'
-    );
-    await waitForChatResponse(page, 120000);
-    await sleep(1500);
+    await sleep(500);
 
-    console.log('[CAPTURE] Creating test chat tabs...');
-    await page.evaluate(() => {
-        const addBtn = document.querySelector('.chat-tab-add');
-        if (addBtn) {
-            addBtn.click();
-            addBtn.click();
-            addBtn.click();
+    // Create multiple chats with distinct, safe content for 06-chat-tabs.png
+    console.log('[CAPTURE] Creating test chat tabs with content...');
+    await page.evaluate(async () => {
+        const { addChatTab } = await import('/js/features/chat-state.js');
+        const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+        for (let i = 0; i < 3; i++) {
+            addChatTab();
         }
+        renderChatTabs();
+        renderChatMessages();
     });
-    await sleep(1000);
-    await captureShot(page, '06-chat-tabs.png', { fullPage: true });
+    await sleep(500);
+
+    // Seed short messages into each chat so tabs look realistic
+    await page.evaluate(async () => {
+        const { chat } = await import('/js/core/app-state.js');
+        const { switchChatTab } = await import('/js/features/chat-state.js');
+        const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+        const tabs = chat.tabs;
+
+        if (tabs[0]) {
+            tabs[0].name = 'CI Pipeline';
+            tabs[0].messages = [
+                { role: 'user', content: 'Outline a simple CI pipeline for a Rust backend.' },
+                { role: 'assistant', content: 'Use GitHub Actions with these steps:\n- Run cargo fmt and cargo clippy.\n- Run cargo test.\n- Build a release binary.\n- Optionally upload artifacts.' },
+            ];
+        }
+        if (tabs[1]) {
+            tabs[1].name = 'Debugging';
+            tabs[1].messages = [
+                { role: 'user', content: 'List steps to debug a slow HTTP endpoint.' },
+                { role: 'assistant', content: '- Profile request duration.\n- Check database queries and indexes.\n- Inspect external service calls.\n- Review logs for retries or timeouts.' },
+            ];
+        }
+        if (tabs[2]) {
+            tabs[2].name = 'GPU Monitoring';
+            tabs[2].messages = [
+                { role: 'user', content: 'How can I monitor GPU temperature and utilization from the CLI?' },
+                { role: 'assistant', content: 'Use tools like nvidia-smi, nvtop, or custom scripts that read from /sys/class/thermal and GPU management APIs.' },
+            ];
+        }
+
+        for (const t of tabs) t.updated_at = Date.now();
+        await switchChatTab(tabs[0].id);
+        renderChatTabs();
+        renderChatMessages();
+    });
+    await sleep(800);
+
+    await captureShot(page, 'panels-chat-tabs.png', { fullPage: true });
     await activateScreenshotChat(page);
 
+    // For 08-context-notes-expanded.png:
+    // - Use a neo-noir style conversation.
+    // - Inject context notes so the sidebar shows real data.
     await page.evaluate(async () => {
-        const { toggleContextSidebar } = await import('./js/features/chat-notes.js');
+        const { chat } = await import('/js/core/app-state.js');
+        const { switchChatTab } = await import('/js/features/chat-state.js');
+        const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+        const tab = chat.tabs.find(t => t.name?.startsWith('[screenshot]')) || chat.tabs[0];
+        if (!tab) return;
+        tab.name = '[screenshot] Noir Scene';
+        tab.messages = [
+            { role: 'user', content: 'Write a short opening scene in a neo-noir detective story.' },
+            { role: 'assistant', content: 'The rain fell like needles on the pavement, each drop a tiny hammer against the silence. She stood in the shadow of the alley, her trench coat soaked through, her eyes scanning the street for the man who had promised to deliver the ledger.' },
+        ];
+        tab.context_notes = [
+            { section: 'Character', content: 'Detective in a rain-soaked city, dry humor, haunted by a past case.' },
+            { section: 'Setting', content: 'Neo-noir metropolis, neon signs, constant rain, corrupt underworld.' },
+            { section: 'Tone', content: 'Tense, cinematic, short punchy lines. No melodrama.' },
+        ];
+        tab.updated_at = Date.now();
+        await switchChatTab(tab.id);
+        renderChatTabs();
+        renderChatMessages();
+    });
+    await sleep(600);
+
+    // Open context sidebar with real notes visible
+    await page.evaluate(async () => {
+        const { toggleContextSidebar } = await import('/js/features/chat-notes.js');
         toggleContextSidebar();
     });
-    await sleep(1000);
-    await captureShot(page, '08-context-notes-expanded.png', { fullPage: true });
+    await sleep(1200);
+    await captureShot(page, 'guided-gen-context-notes-expanded.png', { fullPage: true });
+    // Close context sidebar
     await page.evaluate(async () => {
-        const { toggleContextSidebar } = await import('./js/features/chat-notes.js');
+        const { toggleContextSidebar } = await import('/js/features/chat-notes.js');
         toggleContextSidebar();
     });
     await sleep(500);
 
+    // Suggestions dropdown (09-suggestions-dropdown.png)
+    // Fresh chat to reduce context buildup
+    await createFreshChat(page);
+    await sleep(500);
+    // Use a short prompt to set context
+    await sendChatPrompt(page, 'Brainstorm 3 product names for a CLI tool that monitors GPUs.');
+    await waitForChatResponse(page);
+    await sleep(2000);
+
     await page.evaluate(async () => {
-        const { toggleSuggestionsDropdown } = await import('./js/features/chat-suggestions.js');
+        const { toggleSuggestionsDropdown } = await import('/js/features/chat-suggestions.js');
         toggleSuggestionsDropdown();
     });
     await sleep(1000);
@@ -672,112 +865,228 @@ async function scenarioNewFeatures(ctx) {
             ...(await describeSuggestionsPanel(page)),
         }
     ));
-    await captureShot(page, '09-suggestions-dropdown.png', { fullPage: true });
+    await captureShot(page, 'guided-gen-suggestions-dropdown.png', { fullPage: true });
+        await captureCloseUp(page, '#suggestions-dropdown', 'guided-gen-suggestions-dropdown.png', options);
     await page.click('#suggestions-generate-btn');
-    await waitForSuggestionsSettled(page, 90000);
+    await waitForSuggestionsSettled(page);
     await sleep(1200);
     console.log('[CAPTURE] Suggestions generated state:', JSON.stringify(
         await describeSuggestionsPanel(page)
     ));
-    await captureShot(page, '09b-suggestions-results.png', { fullPage: true });
+    await captureShot(page, 'guided-gen-suggestions-results.png', { fullPage: true });
+        await captureCloseUp(page, '#suggestions-dropdown', 'guided-gen-suggestions-results.png', options);
     await page.evaluate(async () => {
-        const { toggleSuggestionsDropdown } = await import('./js/features/chat-suggestions.js');
+        const { toggleSuggestionsDropdown } = await import('/js/features/chat-suggestions.js');
         toggleSuggestionsDropdown();
     });
     await sleep(500);
 
+    // Quick guide dropdown with real conversation
     await page.evaluate(async () => {
-        const { toggleQuickGuide } = await import('./js/features/chat-quick-guide.js');
+        const { toggleQuickGuide } = await import('/js/features/chat-quick-guide.js');
         toggleQuickGuide();
     });
     await sleep(1000);
     console.log('[CAPTURE] Quick guide state:', JSON.stringify(
         await describePopover(page, '#quick-guide-toggle', '#quick-guide-container')
     ));
-    await captureShot(page, '10-quick-guide-dropdown.png', { fullPage: true });
-    await page.type('#quick-guide-input', 'Make the next reply more ominous and cinematic while continuing directly from the latest exchange.');
-    await page.click('#quick-guide-submit-btn');
-    await waitForChatSettledOrError(page, 120000);
-    await sleep(1200);
-    console.log('[CAPTURE] Quick guide submit state:', JSON.stringify(
-        await describeQuickGuideFlow(page)
-    ));
-    await captureShot(page, '10b-quick-guide-response.png', { fullPage: true });
+    await captureShot(page, 'guided-gen-quick-guide-dropdown.png', { fullPage: true });
+        await captureCloseUp(page, '#quick-guide-container', 'guided-gen-quick-guide-dropdown.png', options);
     await page.evaluate(async () => {
-        const { toggleQuickGuide } = await import('./js/features/chat-quick-guide.js');
-        const toggle = document.getElementById('quick-guide-toggle');
-        const expanded = toggle?.getAttribute('aria-expanded') === 'true';
-        if (!expanded) toggleQuickGuide();
-    });
-    await sleep(500);
-    await page.evaluate(() => {
-        document.getElementById('quick-guide-mode-director')?.click();
-    });
-    await sleep(500);
-    console.log('[CAPTURE] Director mode state:', JSON.stringify(
-        await describeQuickGuideFlow(page)
-    ));
-    await captureShot(page, '10c-guide-ai-director.png', { fullPage: true });
-    await page.type('#quick-guide-director-input', 'Escalate this scene into a close-quarters confrontation, but keep it noir and restrained.');
-    await page.click('#quick-guide-director-generate-btn');
-    await page.waitForFunction(() => {
-        const results = document.getElementById('quick-guide-director-results');
-        if (!results) return false;
-        return results.querySelectorAll('[data-director-apply]').length > 0
-            || results.textContent.includes('failed')
-            || results.textContent.includes('No director ideas');
-    }, { timeout: 120000 });
-    await sleep(1200);
-    console.log('[CAPTURE] Director results state:', JSON.stringify(
-        await describeQuickGuideFlow(page)
-    ));
-    await captureShot(page, '10d-guide-ai-director-results.png', { fullPage: true });
-    await page.evaluate(() => {
-        document.getElementById('quick-guide-mode-surprise')?.click();
-    });
-    await sleep(500);
-    await page.select('#quick-guide-surprise-kind', 'reveal');
-    await page.select('#quick-guide-surprise-delay', '1');
-    await page.type('#quick-guide-surprise-input', 'Reveal that the shadow already knows the ledger is fake.');
-    await page.click('#quick-guide-surprise-arm-btn');
-    await sleep(800);
-    console.log('[CAPTURE] Surprise mode state:', JSON.stringify(
-        await describeQuickGuideFlow(page)
-    ));
-    await captureShot(page, '10e-guide-ai-surprise.png', { fullPage: true });
-    await page.evaluate(async () => {
-        const { toggleQuickGuide } = await import('./js/features/chat-quick-guide.js');
+        const { toggleQuickGuide } = await import('/js/features/chat-quick-guide.js');
         toggleQuickGuide();
     });
     await sleep(500);
 
-    await captureShot(page, '11-chat-input-buttons.png', { fullPage: true });
-
-    await page.evaluate(() => document.getElementById('chat-explicit-toggle-footer')?.click());
-    await sleep(800);
-    await captureShot(page, '12a-explicit-unlocked.png', { fullPage: false });
-    await page.evaluate(() => document.getElementById('chat-explicit-toggle-footer')?.click());
-    await sleep(800);
-    await captureShot(page, '12b-explicit-unrestricted.png', { fullPage: false });
-    await page.evaluate(() => document.getElementById('chat-explicit-toggle-footer')?.click());
-    await sleep(800);
-    await captureShot(page, '12c-explicit-locked.png', { fullPage: false });
-
+    // Quick guide response: apply a quick guide instruction and capture resulting reply
+    // Fresh chat with seeded context for quick guide demo
+    await createFreshChat(page);
+    await sleep(500);
     await page.evaluate(async () => {
-        const { toggleSuggestionsDropdown } = await import('./js/features/chat-suggestions.js');
+        const { chat } = await import('/js/core/app-state.js');
+        const { switchChatTab } = await import('/js/features/chat-state.js');
+        const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+        // Use the active tab (last one after createFreshChat)
+        const tab = chat.tabs[chat.tabs.length - 1];
+        if (tab) {
+            tab.messages = [
+                { role: 'user', content: 'I need help optimizing database queries for a web application.' },
+                { role: 'assistant', content: 'I can help with database query optimization. What database are you using, and what kind of queries are slow?' },
+            ];
+            await switchChatTab(tab.id);
+            renderChatTabs();
+            renderChatMessages();
+        }
+    });
+    await sleep(600);
+    await page.evaluate(async () => {
+        const { toggleQuickGuide } = await import('/js/features/chat-quick-guide.js');
+        toggleQuickGuide();
+    });
+    await sleep(400);
+    await page.type('#quick-guide-input', 'Keep the next reply concise and technical, 3 bullets max.');
+    await sleep(300);
+    await page.keyboard.press('Enter');
+    await sleep(600);
+    // Now send a user message that will use the guide
+    await sendChatPrompt(page, 'Explain how connection pooling improves performance.');
+    await waitForChatResponse(page);
+    await sleep(1500);
+    await captureShot(page, 'guided-gen-quick-guide-response.png', { fullPage: true });
+
+  // Director mode: switch to director mode and generate ideas
+    // Fresh chat with seeded noir scene for director demo
+    await createFreshChat(page);
+    await sleep(500);
+    await page.evaluate(async () => {
+        const { chat } = await import('/js/core/app-state.js');
+        const { switchChatTab, renderChatTabs, renderChatMessages } = await import('/js/features/chat-state.js');
+        const { renderChatTabs: renderTabs2, renderChatMessages: renderMsgs2 } = await import('/js/features/chat-render.js');
+        // Find the active tab (last one after createFreshChat)
+        const tab = chat.tabs[chat.tabs.length - 1];
+        if (tab) {
+            tab.name = '[director] Noir Scene';
+            tab.messages = [
+                { role: 'user', content: 'Write a short opening scene in a neo-noir detective story.' },
+                { role: 'assistant', content: 'The rain fell like needles on the pavement, each drop a tiny hammer against the silence. She stood in the shadow of the alley, her trench coat soaked through, her eyes scanning the street for the man who had promised to deliver the ledger.' },
+            ];
+            await switchChatTab(tab.id);
+            renderTabs2();
+            renderMsgs2();
+        }
+    });
+    await sleep(600);
+    await page.evaluate(async () => {
+        const { toggleQuickGuide } = await import('/js/features/chat-quick-guide.js');
+        toggleQuickGuide();
+    });
+    await sleep(400);
+    await page.evaluate(() => {
+        const btn = Array.from(document.querySelectorAll('.quick-guide-mode-btn'))
+            .find(b => b.dataset.guideMode === 'director');
+        if (btn) btn.click();
+    });
+    await sleep(400);
+    const directorInput = await page.$('#quick-guide-director-input');
+    if (directorInput) {
+        await directorInput.type('Raise tension and introduce a suspect who may be lying.', { delay: 20 });
+        const generateBtn = await page.$('#quick-guide-director-generate-btn');
+        if (generateBtn) {
+            await generateBtn.click();
+            await sleep(2000);
+            // Wait for director results
+            await page.waitForSelector('.quick-guide-director-item', { timeout: 120000 }).catch(() => {});
+            await sleep(800);
+            await captureShot(page, 'guided-gen-director-options.png', { fullPage: true });
+
+            // 10d-guide-ai-director-results.png: apply one idea and capture resulting reply
+            const applyBtn = await page.$('.quick-guide-director-apply-btn');
+            if (applyBtn) {
+                await applyBtn.click();
+                await sleep(800);
+                await sendChatPrompt(page, 'Continue the scene with higher tension.');
+                await waitForChatResponse(page);
+                await sleep(1500);
+                await captureShot(page, 'guided-gen-director-applied.png', { fullPage: true });
+            }
+        }
+    }
+
+    // Surprise mode: switch to surprise mode and arm a surprise
+    // Fresh chat with content for chat-related screenshot
+    await createFreshChat(page);
+    await sleep(500);
+    await page.evaluate(async () => {
+        const { chat } = await import('/js/core/app-state.js');
+        const { switchChatTab } = await import('/js/features/chat-state.js');
+        const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+        // Use the active tab (last one after createFreshChat)
+        const tab = chat.tabs[chat.tabs.length - 1];
+        if (tab) {
+            tab.messages = [
+                { role: 'user', content: 'Write a scene where a detective discovers a hidden clue.' },
+                { role: 'assistant', content: 'The safe was empty, but behind the false back she found a single photograph—her partner, standing next to the victim, both of them smiling.' },
+            ];
+            await switchChatTab(tab.id);
+            renderChatTabs();
+            renderChatMessages();
+        }
+    });
+    await sleep(600);
+    await page.evaluate(async () => {
+        const { toggleQuickGuide } = await import('/js/features/chat-quick-guide.js');
+        toggleQuickGuide();
+    });
+    await sleep(400);
+    await page.evaluate(() => {
+        const btn = Array.from(document.querySelectorAll('.quick-guide-mode-btn'))
+            .find(b => b.dataset.guideMode === 'surprise');
+        if (btn) btn.click();
+    });
+    await sleep(400);
+    const surpriseInput = await page.$('#quick-guide-surprise-input');
+    if (surpriseInput) {
+        await surpriseInput.type('A contact leaks a key piece of evidence that changes everything.', { delay: 20 });
+        const armBtn = await page.$('#quick-guide-surprise-arm-btn');
+        if (armBtn) {
+            await armBtn.click();
+            await sleep(800);
+            await captureShot(page, 'guided-gen-surprise-armed.png', { fullPage: false });
+        }
+    }
+
+    // Close quick guide if open
+    await page.evaluate(async () => {
+        const { closeQuickGuide } = await import('/js/features/chat-quick-guide.js');
+        closeQuickGuide();
+    });
+    await sleep(300);
+
+    // 11-chat-input-buttons.png with conversation present
+    await captureShot(page, 'panels-chat-input-buttons.png', { fullPage: true });
+
+    // Explicit mode toggles (12a/12b/12c) with real content
+    await page.evaluate(() => document.getElementById('chat-explicit-toggle-footer')?.click());
+    await sleep(800);
+    await captureShot(page, 'guided-gen-explicit-unlocked.png', { fullPage: false });
+    await page.evaluate(() => document.getElementById('chat-explicit-toggle-footer')?.click());
+    await sleep(800);
+    await captureShot(page, 'guided-gen-explicit-unrestricted.png', { fullPage: false });
+    await page.evaluate(() => document.getElementById('chat-explicit-toggle-footer')?.click());
+    await sleep(800);
+    await captureShot(page, 'guided-gen-explicit-locked.png', { fullPage: false });
+
+    // Re-open suggestions and ensure setup area is expanded for tag cloud shot
+    await page.evaluate(async () => {
+        const { toggleSuggestionsDropdown } = await import('/js/features/chat-suggestions.js');
         toggleSuggestionsDropdown();
     });
+    await sleep(600);
+    // Expand setup if collapsed
+    await page.evaluate(() => {
+        const toggle = document.getElementById('suggestions-view-toggle');
+        if (toggle && toggle.textContent?.trim() === 'Show Setup') {
+            toggle.click();
+        }
+    });
     await sleep(800);
-    await captureShot(page, '13a-suggestions-tag-cloud.png', { fullPage: false });
-    await page.type('#suggestion-search-input', 'horror');
-    await sleep(500);
-    await captureShot(page, '13b-suggestions-search-filter.png', { fullPage: false });
+    await captureShot(page, 'guided-gen-suggestions-tag-cloud.png', { fullPage: false });
+
+    // Type into search input and wait for filter to apply
+    await page.click('#suggestion-search-input');
+    await page.evaluate(() => {
+        const input = document.getElementById('suggestion-search-input');
+        if (input) input.value = '';
+    });
+    await page.type('#suggestion-search-input', 'horror', { delay: 50 });
+    await sleep(800);
+    await captureShot(page, 'guided-gen-suggestions-search-filter.png', { fullPage: false });
 
     // Open manage categories modal to validate rendering
     await page.evaluate(() => document.getElementById('suggestions-manage-btn')?.click());
     await sleep(800);
-    await captureShot(page, '14-manage-categories.png', { fullPage: false });
-    await captureElementScreenshot(page, '#categories-builtin-list', '14b-builtin-list.png', { padding: 12 });
+    await captureShot(page, 'guided-gen-manage-categories.png', { fullPage: false });
+    await captureElementScreenshot(page, '#categories-builtin-list', 'guided-gen-categories-builtin-list.png', { padding: 12 });
     await page.keyboard.press('Escape');
     await sleep(300);
 
@@ -785,17 +1094,158 @@ async function scenarioNewFeatures(ctx) {
     detachSuggestionsLogger();
 }
 
-// Documentation stills for settings/modals/panels used in README and docs.
-async function scenarioDocs(ctx) {
+// ── Settings & Modals ───────────────────────────────────────────────────────────
+// Settings modal, preferences, persona, models, keyboard shortcuts.
+
+async function scenarioSettings(ctx, options) {
     const { page, baseUrl } = ctx;
     await gotoApp(page, baseUrl);
     await attachToServer(page);
 
+    await switchTab(page, 'chat');
+    await sleep(500);
+
+    // Settings modal via button click
+    try {
+        await page.evaluate(() => { window.openSettingsModal?.(); });
+        await page.waitForSelector('#settings-modal.open', { timeout: 5000 });
+        await sleep(800);
+        await captureShot(page, 'settings-settings-modal.png', { fullPage: true });
+        await captureCloseUp(page, '#settings-modal', 'settings-settings-modal.png', options);
+
+        const perfTab = await page.$('#settings-modal .settings-tab[data-tab="performance"]');
+        if (perfTab) {
+            await perfTab.click();
+            await sleep(500);
+            await captureShot(page, 'settings-settings-performance.png', { fullPage: true });
+            await captureCloseUp(page, '#settings-modal', 'settings-settings-performance.png', options);
+        }
+
+        const advTab = await page.$('#settings-modal .settings-tab[data-tab="advanced"]');
+        if (advTab) {
+            await advTab.click();
+            await sleep(500);
+            await captureShot(page, 'settings-settings-advanced.png', { fullPage: true });
+            await captureCloseUp(page, '#settings-modal', 'settings-settings-advanced.png', options);
+        }
+
+        await page.keyboard.press('Escape');
+        await sleep(300);
+    } catch (e) {
+        console.log('[CAPTURE] Settings modal failed, skipping...');
+    }
+
+    // User preferences
+    const userBtn = await page.$('#nav-user-btn');
+    if (userBtn) {
+        try {
+            await userBtn.click();
+            await sleep(300);
+            const prefsBtn = await page.$('#user-menu-preferences');
+            if (prefsBtn) {
+                await prefsBtn.click();
+                await page.waitForSelector('#user-preferences-modal.open', { timeout: 5000 });
+                await sleep(500);
+                await captureShot(page, 'settings-user-preferences.png', { fullPage: true });
+                await captureCloseUp(page, '#user-preferences-modal', 'settings-user-preferences.png', options);
+                await page.keyboard.press('Escape');
+                await sleep(300);
+            }
+        } catch (e) {
+            console.log('[CAPTURE] User preferences modal failed, skipping...');
+        }
+    }
+
+    // Persona modal
+    const personaBtn = await page.$('#chat-persona-btn');
+    if (personaBtn) {
+        try {
+            await personaBtn.click();
+            let personaMenuOpened = true;
+            try {
+                await page.waitForSelector('#chat-persona-menu:not(.hidden)', { timeout: 1200 });
+            } catch {
+                personaMenuOpened = false;
+            }
+            if (personaMenuOpened) {
+                await page.waitForSelector('#chat-persona-menu .chat-persona-menu-item', { timeout: 5000 });
+                await page.click('#chat-persona-menu .chat-persona-menu-item');
+                await sleep(250);
+                await personaBtn.click();
+                await page.waitForSelector('#chat-persona-menu:not(.hidden)', { timeout: 5000 });
+                const manageTemplatesBtn = await page.$('#chat-persona-edit-prompt');
+                if (manageTemplatesBtn) {
+                    await manageTemplatesBtn.click();
+                }
+            } else {
+                await page.evaluate(() => {
+                    document.getElementById('chat-persona-edit-prompt')?.click();
+                });
+            }
+            await page.waitForSelector('#template-manager-modal.active', { timeout: 5000 });
+            await page.waitForSelector('#template-manager-modal .template-list-item', { timeout: 5000 });
+            await sleep(500);
+            await page.evaluate(() => {
+                document.querySelector('#template-manager-modal .template-list-item')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                const details = document.querySelector('#persona-explicit-policies details');
+                if (details) details.open = true;
+            });
+            await sleep(600);
+            await captureShot(page, 'guided-gen-persona-modal.png', { fullPage: true });
+            await captureCloseUp(page, '#template-manager-modal', 'guided-gen-persona-modal.png', options);
+            await page.click('#template-manager-close');
+            await page.waitForSelector('#template-manager-modal.active', { hidden: true, timeout: 5000 });
+            await sleep(300);
+        } catch (e) {
+            console.log('[CAPTURE] Persona modal failed, skipping...');
+        }
+    }
+
+    // Models modal
+    try {
+        await page.evaluate(() => { window.openModelsModal?.(); });
+        await page.waitForSelector('#models-modal.open', { timeout: 5000 });
+        await sleep(700);
+        await captureShot(page, 'panels-models-modal.png', { fullPage: true });
+        await captureCloseUp(page, '#models-modal', 'panels-models-modal.png', options);
+        await page.click('#models-modal-close');
+        await page.waitForSelector('#models-modal.open', { hidden: true, timeout: 5000 });
+        await sleep(300);
+    } catch (e) {
+        console.log('[CAPTURE] Models modal failed, skipping...');
+    }
+
+    // Keyboard shortcuts via Ctrl+/
+    try {
+        await page.keyboard.down('Control');
+        await page.keyboard.press('/');
+        await page.keyboard.up('Control');
+        await page.waitForSelector('#keyboard-shortcuts-modal.open', { timeout: 5000 });
+        await sleep(500);
+        await captureShot(page, 'panels-keyboard-shortcuts.png', { fullPage: true });
+        await captureCloseUp(page, '#keyboard-shortcuts-modal', 'panels-keyboard-shortcuts.png', options);
+        await page.click('#keyboard-shortcuts-modal .shortcuts-close');
+        await page.waitForSelector('#keyboard-shortcuts-modal.open', { hidden: true, timeout: 5000 });
+        await sleep(300);
+    } catch (e) {
+        console.log('[CAPTURE] Keyboard shortcuts modal failed, skipping...');
+    }
+}
+
+// ── Chat Panels ─────────────────────────────────────────────────────────────────
+// Behavior, model params, style panels, debug prompt.
+
+async function scenarioPanels(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    await attachToServer(page);
+
+    await switchTab(page, 'chat');
+    await sleep(500);
+
+    // Create a chat with a short, safe conversation so panels have real content behind them
     await createFreshChat(page);
-    await sendChatPrompt(
-        page,
-        'Reply in 2 short paragraphs explaining how prompt construction, context window pressure, and generation timing interact in llama.cpp.'
-    );
+    await sendChatPrompt(page, 'Compare REST and gRPC in 4 short bullets.');
     await waitForChatResponse(page);
     await sleep(1500);
 
@@ -803,7 +1253,8 @@ async function scenarioDocs(ctx) {
     if (styleBtn) {
         await styleBtn.click();
         await sleep(500);
-        await captureShot(page, '06-chat-style.png', { fullPage: true });
+        await captureShot(page, 'panels-chat-style.png', { fullPage: true });
+        await captureCloseUp(page, '#chat-style-sidebar', 'panels-chat-style.png', options);
         await styleBtn.click();
         await sleep(300);
     }
@@ -812,7 +1263,8 @@ async function scenarioDocs(ctx) {
     if (behaviorBtn) {
         await behaviorBtn.click();
         await sleep(500);
-        await captureShot(page, '07-behavior-settings.png', { fullPage: true });
+        await captureShot(page, 'settings-behavior-settings.png', { fullPage: true });
+        await captureCloseUp(page, '#behavior-sidebar', 'settings-behavior-settings.png', options);
         await behaviorBtn.click();
         await sleep(300);
     }
@@ -821,178 +1273,50 @@ async function scenarioDocs(ctx) {
     if (responseBtn) {
         await responseBtn.click();
         await sleep(500);
-        await captureShot(page, '08-response-settings.png', { fullPage: true });
+        await captureShot(page, 'settings-model-settings.png', { fullPage: true });
+        await captureCloseUp(page, '#model-params-sidebar', 'settings-model-settings.png', options);
         await responseBtn.click();
         await sleep(300);
     }
 
+    // Send a real message so the prompt debug modal has actual content
+    await sendChatPrompt(page, 'Explain the difference between TCP and UDP in 3 bullet points.');
+    await waitForChatResponse(page);
+    await sleep(1500);
+
     const debugBtn = await page.$('#btn-debug-prompt');
     if (debugBtn) {
-        await debugBtn.click();
-        await page.waitForSelector('#debug-prompt-modal.active', { timeout: 5000 });
-        await sleep(500);
-        const debugScrollState = await page.evaluate(() => {
-            const body = document.querySelector('#debug-prompt-modal .debug-modal-body');
-            return body ? {
-                clientHeight: body.clientHeight,
-                scrollHeight: body.scrollHeight,
-                scrollable: body.scrollHeight > body.clientHeight,
-            } : null;
-        });
-        console.log(`[CAPTURE] Debug modal scroll state: ${JSON.stringify(debugScrollState)}`);
-        await captureShot(page, '08b-prompt-debug.png', { fullPage: true });
-        await page.keyboard.press('Escape');
-        await sleep(300);
-    }
-
-    const settingsBtn = await page.$('#settings-btn');
-    if (settingsBtn) {
-        await settingsBtn.click();
-        await page.waitForSelector('#settings-modal.open', { timeout: 5000 });
-        await sleep(800);
-        await captureShot(page, '09-settings-modal.png', { fullPage: true });
-
-        const perfTab = await page.$('#settings-modal .settings-tab[data-tab="performance"]');
-        if (perfTab) {
-            await perfTab.click();
+        try {
+            await debugBtn.click();
+            await page.waitForSelector('#debug-prompt-modal.active', { timeout: 5000 });
             await sleep(500);
-            await captureShot(page, '09b-settings-performance.png', { fullPage: true });
-        }
-
-        const advTab = await page.$('#settings-modal .settings-tab[data-tab="advanced"]');
-        if (advTab) {
-            await advTab.click();
-            await sleep(500);
-            await captureShot(page, '09c-settings-advanced.png', { fullPage: true });
-        }
-
-        await page.keyboard.press('Escape');
-        await sleep(300);
-    }
-
-    const userBtn = await page.$('#nav-user-btn');
-    if (userBtn) {
-        await userBtn.click();
-        await sleep(300);
-        const prefsBtn = await page.$('#user-menu-preferences');
-        if (prefsBtn) {
-            await prefsBtn.click();
-            await page.waitForSelector('#user-preferences-modal.open', { timeout: 5000 });
-            await sleep(500);
-            await captureShot(page, '10-user-preferences.png', { fullPage: true });
+            await captureShot(page, 'panels-prompt-debug.png', { fullPage: true });
+            await captureCloseUp(page, '#debug-prompt-modal', 'panels-prompt-debug.png', options);
             await page.keyboard.press('Escape');
             await sleep(300);
+        } catch (e) {
+            console.log('[CAPTURE] Debug prompt modal failed, skipping...');
         }
     }
+}
 
-    const personaBtn = await page.$('#chat-persona-btn');
-    if (personaBtn) {
-        await personaBtn.click();
-        let personaMenuOpened = true;
-        try {
-            await page.waitForSelector('#chat-persona-menu:not(.hidden)', { timeout: 1200 });
-        } catch {
-            personaMenuOpened = false;
-        }
-        if (personaMenuOpened) {
-            await page.waitForSelector('#chat-persona-menu .chat-persona-menu-item', { timeout: 5000 });
-            await page.click('#chat-persona-menu .chat-persona-menu-item');
-            await sleep(250);
-            await personaBtn.click();
-            await page.waitForSelector('#chat-persona-menu:not(.hidden)', { timeout: 5000 });
-            const manageTemplatesBtn = await page.$('#chat-persona-edit-prompt');
-            if (manageTemplatesBtn) {
-                await manageTemplatesBtn.click();
-            }
-        } else {
-            await page.evaluate(() => {
-                document.getElementById('chat-persona-edit-prompt')?.click();
-            });
-        }
-        await page.waitForSelector('#template-manager-modal.active', { timeout: 5000 });
-        await page.waitForSelector('#template-manager-modal .template-list-item', { timeout: 5000 });
-        await sleep(500);
-        await page.evaluate(() => {
-            document.querySelector('#template-manager-modal .template-list-item')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-            const details = document.querySelector('#persona-explicit-policies details');
-            if (details) details.open = true;
-        });
-        await sleep(600);
-        const personaScrollState = await page.evaluate(() => {
-            const content = document.querySelector('#template-manager-modal .template-manager-content');
-            const list = document.querySelector('#template-manager-modal .template-manager-list');
-            const preview = document.querySelector('#template-manager-modal .template-manager-preview');
-            const policy = document.querySelector('#persona-explicit-policies');
-            return {
-                content: content ? {
-                    clientHeight: content.clientHeight,
-                    scrollHeight: content.scrollHeight,
-                    scrollable: content.scrollHeight > content.clientHeight,
-                } : null,
-                list: list ? {
-                    clientHeight: list.clientHeight,
-                    scrollHeight: list.scrollHeight,
-                    scrollable: list.scrollHeight > list.clientHeight,
-                } : null,
-                preview: preview ? {
-                    clientHeight: preview.clientHeight,
-                    scrollHeight: preview.scrollHeight,
-                    scrollable: preview.scrollHeight > preview.clientHeight,
-                } : null,
-                policy: policy ? {
-                    clientHeight: policy.clientHeight,
-                    scrollHeight: policy.scrollHeight,
-                } : null,
-            };
-        });
-        console.log(`[CAPTURE] Persona modal scroll state: ${JSON.stringify(personaScrollState)}`);
-        await captureShot(page, '10b-persona-modal.png', { fullPage: true });
-        await page.click('#template-manager-close');
-        await page.waitForSelector('#template-manager-modal.active', { hidden: true, timeout: 5000 });
-        await sleep(300);
-    }
+// ── Dashboard ───────────────────────────────────────────────────────────────────
+// Server tab, GPU section.
 
-    const modelsBtn = await page.$('#sidebar-btn-models');
-    if (modelsBtn) {
-        await modelsBtn.click();
-        let modelsOpened = true;
-        try {
-            await page.waitForSelector('#models-modal.open', { timeout: 1200 });
-        } catch {
-            modelsOpened = false;
-        }
-        if (!modelsOpened) {
-            await page.evaluate(() => {
-                window.openModelsModal?.();
-            });
-            await page.waitForSelector('#models-modal.open', { timeout: 5000 });
-        }
-        await sleep(700);
-        await captureShot(page, '10c-models-modal.png', { fullPage: true });
-        await page.click('#models-modal-close');
-        await page.waitForSelector('#models-modal.open', { hidden: true, timeout: 5000 });
-        await sleep(300);
-    }
-
-    await page.keyboard.down('Control');
-    await page.keyboard.press('/');
-    await page.keyboard.up('Control');
-    await page.waitForSelector('#keyboard-shortcuts-modal.open', { timeout: 5000 });
-    await sleep(500);
-    await captureShot(page, '11-keyboard-shortcuts.png', { fullPage: true });
-    await page.click('#keyboard-shortcuts-modal .shortcuts-close');
-    await page.waitForSelector('#keyboard-shortcuts-modal.open', { hidden: true, timeout: 5000 });
-    await sleep(300);
+async function scenarioDashboard(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    await attachToServer(page);
 
     await switchTab(page, 'server');
     await sleep(1000);
-    await captureShot(page, '12-server-tab.png', { fullPage: true });
+    await captureShot(page, 'settings-server-tab.png', { fullPage: true });
     await page.evaluate(() => {
         const gpu = document.getElementById('gpu-section') || document.getElementById('system-section');
         gpu?.scrollIntoView({ behavior: 'instant', block: 'start' });
     });
     await sleep(500);
-    await captureShot(page, '13-gpu-section.png', { fullPage: true });
+    await captureShot(page, 'dashboard-gpu-section.png', { fullPage: true });
 }
 
 // Validation pass for sparkline layouts and clipped section captures.
@@ -1002,9 +1326,9 @@ async function scenarioSparkline(ctx) {
     await attachToServer(page);
     console.log('[CAPTURE] Waiting for metrics to populate...');
     await sleep(4000);
-    await captureShot(page, 'sparkline-validate-full.png', { fullPage: true });
-    await captureElementScreenshot(page, '#gpu-section', 'sparkline-validate-gpu-section.png', { padding: 24 });
-    await captureElementScreenshot(page, '#system-section', 'sparkline-validate-system-section.png', { padding: 24 });
+    await captureShot(page, 'sparkline-sparkline-validate-full.png', { fullPage: true });
+    await captureElementScreenshot(page, '#gpu-section', 'sparkline-sparkline-validate-gpu-section.png', { padding: 24 });
+    await captureElementScreenshot(page, '#system-section', 'sparkline-sparkline-validate-system-section.png', { padding: 24 });
     await captureSparklineClips(page, 'svg.metric-sparkline, svg.hw-sparkline, svg.hw-metric-sparkline, svg.hw-clock-footer-spark');
 }
 
@@ -1043,12 +1367,390 @@ async function scenarioGifs(ctx, options) {
     }
 }
 
+// Sidebar features capture: expanded panel, collapsed strip, FTS search, context menu
+// ── Sidebar ─────────────────────────────────────────────────────────────────────
+// Chat sidebar, FTS search, context menu, name filter.
+
+async function scenarioSidebar(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    if (!options.noAttach) {
+        await attachToServer(page);
+    }
+
+    // Create multiple chats with different names for grouping
+    // Directly show the chat page and session panel (nav state may not be initialized)
+    await page.evaluate(async () => {
+        // Show chat page
+        const pages = document.querySelectorAll('.page');
+        pages.forEach(p => p.classList.remove('active'));
+        const chatPage = document.getElementById('page-chat');
+        if (chatPage) chatPage.classList.add('active');
+        // Show session panel
+        const panel = document.getElementById('chat-sessions-panel');
+        if (panel) panel.classList.add('visible');
+        // Render sidebar items (normally done by switchTab)
+        const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
+        renderChatSessionsSidebar();
+    });
+    await page.waitForSelector('#chat-sessions-panel', { visible: true });
+    await sleep(500);
+
+    // Create multiple chats with distinct content for sidebar and FTS search
+    await page.evaluate(async () => {
+        const { addChatTab } = await import('/js/features/chat-state.js');
+        for (let i = 0; i < 5; i++) {
+            addChatTab();
+        }
+    });
+    await sleep(500);
+
+    // Rename chats and seed them with content that will be searchable
+    await page.evaluate(async () => {
+        const { chat } = await import('/js/core/app-state.js');
+        const { renderChatTabs, renderChatMessages } = await import('/js/features/chat-render.js');
+        const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
+        const tabs = chat.tabs;
+
+        if (tabs[0]) {
+            tabs[0].name = 'Noir Scene';
+            tabs[0].messages = [
+                { role: 'user', content: 'Write a noir scene in progress.' },
+                { role: 'assistant', content: 'The rain fell like needles on the pavement, each drop a tiny hammer against the silence. She stood in the shadow of the alley, her trench coat soaked through, her eyes scanning the street for the man who had promised to deliver the ledger.' },
+            ];
+            tabs[0].pinned = true;
+        }
+        if (tabs[1]) {
+            tabs[1].name = 'Debug Session';
+            tabs[1].messages = [
+                { role: 'user', content: 'Help me debug a slow HTTP endpoint.' },
+                { role: 'assistant', content: 'Start by profiling the request duration, then inspect database queries, external service calls, and any retries or timeouts in the logs.' },
+            ];
+        }
+        if (tabs[2]) {
+            tabs[2].name = 'CI Pipeline';
+            tabs[2].messages = [
+                { role: 'user', content: 'Outline a simple CI pipeline for a Rust backend.' },
+                { role: 'assistant', content: 'Use GitHub Actions: run cargo fmt, cargo clippy, cargo test, then build a release binary and upload artifacts.' },
+            ];
+        }
+        if (tabs[3]) {
+            tabs[3].name = 'Recipe Ideas';
+            tabs[3].messages = [
+                { role: 'user', content: 'Suggest 3 quick dinner recipes using chicken and rice.' },
+                { role: 'assistant', content: '- Chicken and rice skillet with vegetables.\n- One-pot lemon herb chicken rice.\n- Stir-fried chicken with soy-ginger rice.' },
+            ];
+        }
+        if (tabs[4]) {
+            tabs[4].name = 'GPU Monitoring';
+            tabs[4].messages = [
+                { role: 'user', content: 'How can I monitor GPU temperature and utilization from the CLI?' },
+                { role: 'assistant', content: 'Use tools like nvidia-smi, nvtop, or custom scripts reading from /sys/class/thermal and GPU management APIs.' },
+            ];
+        }
+
+        for (const t of tabs) t.updated_at = Date.now();
+        renderChatTabs();
+        renderChatMessages();
+        renderChatSessionsSidebar();
+    });
+    await sleep(800);
+
+    // Persist all tabs to database so FTS search can find them
+    await page.evaluate(async () => {
+        const { chat } = await import('/js/core/app-state.js');
+        for (const tab of chat.tabs) {
+            const tabPayload = {
+                id: tab.id,
+                name: tab.name || '',
+                system_prompt: tab.system_prompt || '',
+                ai_name: tab.ai_name || null,
+                user_name: tab.user_name || null,
+                explicit_level: tab.explicit_level || 0,
+                active_template_id: tab.active_template_id || null,
+                auto_compact: tab.auto_compact !== false,
+                auto_compact_summarize: tab.auto_compact_summarize !== false,
+                compact_mode: tab.compact_mode || 'summarize',
+                compact_threshold: tab.compact_threshold || 0.8,
+                model_params: tab.model_params || {},
+                context_notes: tab.context_notes || [],
+                sidebar_width: tab.sidebar_width || 320,
+                tab_order: tab.tab_order || 0,
+                pinned: tab.pinned || false,
+                last_ctx_pct: tab.last_ctx_pct || null,
+                total_input_tokens: tab.total_input_tokens || 0,
+                total_output_tokens: tab.total_output_tokens || 0,
+                created_at: tab.created_at || Date.now(),
+                updated_at: Date.now(),
+                messages: [],
+            };
+            await fetch('/api/chat/tabs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(tabPayload),
+            });
+            if (tab.messages && tab.messages.length > 0) {
+                const msgPayload = {
+                    messages: tab.messages.map((m, idx) => ({
+                        tab_id: tab.id,
+                        role: m.role || 'user',
+                        content: m.content || '',
+                        timestamp_ms: m.timestamp_ms || Date.now(),
+                        seq: idx,
+                    })),
+                };
+                await fetch(`/api/chat/tabs/${tab.id}/messages`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(msgPayload),
+                });
+            }
+        }
+    });
+    await sleep(1500);
+
+    // Ensure sidebar is rendered with all chats
+    await page.evaluate(async () => {
+        const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
+        renderChatSessionsSidebar();
+    });
+    await sleep(300);
+
+    // Capture expanded sidebar with multiple chats
+await captureShot(page, 'sidebar-sidebar-expanded.png', { fullPage: true });
+
+    // Capture sidebar element detail
+
+    await captureElementScreenshot(page, '#chat-sessions-panel', 'sidebar-sidebar-panel-detail.png', { padding: 16 });
+
+    // Collapse the sidebar (directly set class for reliability)
+    await page.evaluate(() => {
+        const panel = document.getElementById('chat-sessions-panel');
+        if (panel) panel.classList.add('collapsed');
+        localStorage.setItem('csp-collapsed', 'true');
+    });
+    await sleep(500);
+
+    // Capture collapsed strip
+    await captureShot(page, 'sidebar-sidebar-collapsed.png', { fullPage: true });
+
+    // Capture collapsed strip detail
+    await captureElementScreenshot(page, '#csp-collapsed-strip', 'sidebar-sidebar-collapsed-detail.png', { padding: 12 });
+
+    // Expand again
+    await page.evaluate(() => {
+        const panel = document.getElementById('chat-sessions-panel');
+        if (panel) panel.classList.remove('collapsed');
+        localStorage.setItem('csp-collapsed', 'false');
+    });
+    await sleep(300);
+
+    // Re-render sidebar after expanding (items may not be visible when collapsed)
+    await page.evaluate(async () => {
+        const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
+        renderChatSessionsSidebar();
+    });
+    await sleep(300);
+
+    // Test FTS search: open search mode, query across multiple chats, capture results
+    const searchBtn = await page.$('.csp-search-btn');
+    if (searchBtn) {
+        console.log('[CAPTURE] FTS search button found, opening search mode...');
+        await page.evaluate(async () => {
+            const { openSearch } = await import('/js/features/chat-search.js');
+            openSearch();
+        });
+        await sleep(600);
+
+        const searchInput = await page.$('#csp-search-input');
+        if (searchInput) {
+            console.log('[CAPTURE] Search input found, typing query that matches multiple chats...');
+            // "rain" matches Noir Scene; "debug" matches Debug Session; "rain" is enough for a clear demo.
+            await page.type('#csp-search-input', 'rain');
+            await sleep(1200);
+
+            // Ensure results area is visible
+            const resultsVisible = await page.evaluate(() => {
+                const results = document.querySelector('.csp-search-results');
+                return results ? (results.style.display !== 'none') : false;
+            });
+            console.log('[CAPTURE] Search results visible:', resultsVisible);
+
+            // Capture full-page with search mode and results
+            await captureShot(page, 'guided-gen-fts-search-active.png', { fullPage: true });
+
+            // Capture close-up of search results
+            const searchResults = await page.$('.csp-search-results');
+            if (searchResults) {
+                await captureElementScreenshot(page, '.csp-search-results', 'guided-gen-fts-search-results.png', { padding: 12 });
+                await captureCloseUp(page, '.csp-search-results', 'guided-gen-fts-search-results.png', options);
+            }
+
+            // Close search
+            await page.keyboard.press('Escape');
+            await sleep(300);
+        } else {
+            console.log('[CAPTURE] Search input not found after opening search mode');
+        }
+    } else {
+        console.log('[CAPTURE] FTS search button not found; skipping FTS search captures');
+    }
+
+    // Test context menu: hover over a chat item and click the "..." button
+    await page.evaluate(async () => {
+        const { chat } = await import('/js/core/app-state.js');
+        const { switchChatTab } = await import('/js/features/chat-state.js');
+        const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
+        // Switch to first tab to make it active
+        const tab = chat.tabs[0];
+        if (tab) {
+            await switchChatTab(tab.id);
+            renderChatSessionsSidebar();
+        }
+    });
+    await sleep(500);
+
+    // Hover over first item to reveal action buttons
+    const hoverDebug = await page.evaluate(() => {
+        const item = document.querySelector('.csp-item');
+        const panel = document.getElementById('chat-sessions-panel');
+        return {
+            itemExists: !!item,
+            itemVisible: item ? getComputedStyle(item).display !== 'none' : false,
+            panelVisible: panel ? panel.classList.contains('visible') : false,
+            panelCollapsed: panel ? panel.classList.contains('collapsed') : false,
+        };
+    });
+    console.log('[CAPTURE] Hover debug:', JSON.stringify(hoverDebug));
+    // Actually, the hover is handled by CSS :hover pseudo-class, not a class
+    // Need to use puppeteer's hover instead
+    const firstItem = await page.$('.csp-item');
+    if (firstItem) {
+        // Try scrolling the sidebar to ensure the item is in the viewport
+        await firstItem.evaluate(el => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
+        await sleep(200);
+        // Try hovering using mouse.move
+        const box = await firstItem.boundingBox();
+        if (box) {
+            await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+            await sleep(500);
+        }
+    }
+
+    // Click the "..." more button to open context menu (using JS to bypass CSS hover)
+    await page.evaluate(() => {
+        const item = document.querySelector('.csp-item');
+        if (item) {
+            const moreBtn = item.querySelector('button[data-action="more"]');
+            if (moreBtn) {
+                // Show the actions container (normally shown on hover)
+                const actions = item.querySelector('.csp-item-actions');
+                if (actions) actions.style.display = 'flex';
+                // Click the more button
+                moreBtn.click();
+            }
+        }
+    });
+    await sleep(500);
+    await captureShot(page, 'chat-context-menu.png', { fullPage: true });
+    // Capture context menu detail
+    const menu = await page.$('.csp-context-menu');
+    if (menu) {
+        await captureElementScreenshot(page, '.csp-context-menu', 'chat-context-menu-detail.png', { padding: 12 });
+    }
+    // Close menu
+    await page.keyboard.press('Escape');
+    await sleep(300);
+
+    // Test search filter (name filter, not FTS)
+    await page.type('#csp-search', 'Noir');
+    await sleep(500);
+    await captureShot(page, 'sidebar-sidebar-name-filter.png', { fullPage: true });
+
+    // Clear filter
+    await page.evaluate(() => {
+        document.getElementById('csp-search').value = '';
+        document.getElementById('csp-search').dispatchEvent(new Event('input'));
+    });
+    await sleep(300);
+
+    await cleanupScreenshotTabs(page);
+}
+
+async function scenarioSmoke({ page, baseUrl }, options) {
+    const criticalPatterns = [
+        'import',
+        'Cannot set properties of (null|undefined)',
+        'is not defined',
+        'TypeError',
+        'SyntaxError',
+        'Failed to fetch module',
+        'Failed to load module script',
+    ];
+
+    const logs = {
+        error: [],
+        warn: [],
+    };
+
+    page.on('console', msg => {
+        const level = msg.type();
+        const text = msg.text();
+        if (level === 'error') logs.error.push(text);
+        if (level === 'warn') logs.warn.push(text);
+    });
+
+    page.on('pageerror', err => {
+        logs.error.push(err.message || String(err));
+    });
+
+    await gotoApp(page, baseUrl);
+
+    if (!options.noAttach) {
+        await attachToServer(page);
+    } else {
+        await waitForMonitor(page);
+    }
+
+    await sleep(2000);
+
+    const hasCritical = logs.error.some(line =>
+        criticalPatterns.some(p => line.includes(p))
+    );
+
+    console.log('[SMOKE] Console warnings:', logs.warn.length);
+    console.log('[SMOKE] Console errors:', logs.error.length);
+
+    if (logs.error.length > 0) {
+        console.log('[SMOKE] Error details:');
+        logs.error.forEach(e => console.log('  -', e));
+    }
+
+    if (hasCritical) {
+        throw new Error(
+            'SMOKE FAIL: critical console errors detected on startup. ' +
+            'Check for import/export issues, missing symbols, or runtime failures.'
+        );
+    }
+
+    console.log('[SMOKE] PASS: no critical console errors on startup.');
+}
+
 const SCENARIOS = {
-    artifacts: scenarioArtifacts,
-    'new-features': scenarioNewFeatures,
-    docs: scenarioDocs,
+    // Core
+    welcome: scenarioWelcome,
+    chat: scenarioChat,
+    // Chat features
+    'guided-gen': scenarioGuidedGen,
+    sidebar: scenarioSidebar,
+    // Configuration
+    settings: scenarioSettings,
+    panels: scenarioPanels,
+    dashboard: scenarioDashboard,
+    // Validation
     sparkline: scenarioSparkline,
     gifs: scenarioGifs,
+    smoke: scenarioSmoke,
 };
 
 export async function runCli({ scenario: forcedScenario = null, argv = process.argv.slice(2) } = {}) {

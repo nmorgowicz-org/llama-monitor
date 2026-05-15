@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod certs;
+pub mod chat_storage;
 pub mod cli;
 pub mod config;
 pub mod gpu;

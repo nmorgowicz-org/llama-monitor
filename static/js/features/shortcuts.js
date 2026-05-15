@@ -3,7 +3,6 @@
 
 import { chat } from '../core/app-state.js';
 import { switchChatTab } from './chat-state.js';
-import { updateTabBarOverflowMask } from './chat-render.js';
 
 // ── Keyboard Shortcuts Modal ──────────────────────────────────────────────────
 
@@ -52,9 +51,6 @@ function initChatKeyboardShortcuts() {
             const prev = chat.tabs[(idx - 1 + chat.tabs.length) % chat.tabs.length];
             if (prev) switchChatTab(prev.id);
         }
-    });
-    window.addEventListener('resize', () => {
-        updateTabBarOverflowMask();
     });
 }
 

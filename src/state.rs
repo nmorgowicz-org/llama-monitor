@@ -3,6 +3,7 @@ use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::chat_storage::ChatStorage;
 use crate::gpu::GpuMetrics;
 use crate::gpu::env::GpuEnv;
 use crate::llama::metrics::LlamaMetrics;
@@ -387,6 +388,7 @@ pub struct AppState {
     pub remote_agent_url: Arc<Mutex<Option<String>>>,
     pub remote_agent_version: Arc<Mutex<Option<String>>>,
     pub remote_agent_update_available: Arc<Mutex<bool>>,
+    pub chat_storage: Arc<ChatStorage>,
 }
 
 impl AppState {
@@ -395,6 +397,7 @@ impl AppState {
         paths: AppPaths,
         gpu_env: GpuEnv,
         ui_settings: UiSettings,
+        chat_storage: Arc<ChatStorage>,
     ) -> Self {
         let presets_path = paths.presets_path;
         let templates_path = paths.templates_path;
@@ -465,6 +468,7 @@ impl AppState {
             remote_agent_url: Arc::new(Mutex::new(None)),
             remote_agent_version: Arc::new(Mutex::new(None)),
             remote_agent_update_available: Arc::new(Mutex::new(false)),
+            chat_storage,
         };
 
         // Prune old inactive sessions on startup (older than 7 days)
@@ -968,7 +972,8 @@ mod tests {
         ) in test_cases
         {
             let paths = test_paths(PathBuf::new());
-            let state = AppState::new(vec![], paths, GpuEnv::default(), UiSettings::default());
+            let cs = Arc::new(ChatStorage::open(&PathBuf::from(":memory:")).unwrap());
+            let state = AppState::new(vec![], paths, GpuEnv::default(), UiSettings::default(), cs);
             let session = if mode == "spawn" {
                 Session::new_spawn("test".to_string(), "Test".to_string(), 8001, String::new())
             } else {
@@ -1014,11 +1019,13 @@ mod tests {
         )];
         std::fs::write(&sessions_path, serde_json::to_string(&sessions).unwrap()).unwrap();
 
+        let cs = Arc::new(ChatStorage::open(&PathBuf::from(":memory:")).unwrap());
         let state = AppState::new(
             vec![],
             test_paths(sessions_path.clone()),
             GpuEnv::default(),
             UiSettings::default(),
+            cs,
         );
 
         assert!(state.active_session_id.lock().unwrap().is_empty());
@@ -1031,11 +1038,13 @@ mod tests {
 
     #[test]
     fn set_active_session_rejects_missing_session_without_mutating() {
+        let cs = Arc::new(ChatStorage::open(&PathBuf::from(":memory:")).unwrap());
         let state = AppState::new(
             vec![],
             test_paths(PathBuf::new()),
             GpuEnv::default(),
             UiSettings::default(),
+            cs,
         );
         state.add_session(Session::new_spawn(
             "existing".to_string(),
@@ -1051,11 +1060,13 @@ mod tests {
 
     #[test]
     fn removing_active_session_clears_active_state() {
+        let cs = Arc::new(ChatStorage::open(&PathBuf::from(":memory:")).unwrap());
         let state = AppState::new(
             vec![],
             test_paths(PathBuf::new()),
             GpuEnv::default(),
             UiSettings::default(),
+            cs,
         );
         state.add_session(Session::new_spawn(
             "existing".to_string(),

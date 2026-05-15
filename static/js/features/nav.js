@@ -3,6 +3,7 @@
 
 import { chat, lastLlamaMetrics, metricSeries, wsData } from '../core/app-state.js';
 import { chatScroll } from './chat-render.js';
+import { showSessionPanel, hideSessionPanel } from './chat-sessions-sidebar.js';
 
 export function switchTab(name) {
     const page = document.getElementById('page-' + name);
@@ -12,15 +13,7 @@ export function switchTab(name) {
         document.querySelectorAll('.sidebar-btn').forEach(b => b.classList.remove('active'));
         const sidebarButton = document.querySelector(`.sidebar-btn[data-tab="${name}"]`);
         if (sidebarButton) sidebarButton.classList.add('active');
-
-        // Trigger modal open handlers
-        if (name === 'settings') {
-            window.openSettingsModal?.();
-        } else if (name === 'models') {
-            window.openModelsModal?.();
-        } else if (name === 'sessions') {
-            window.openSessionModal?.();
-        }
+        if (name === 'settings') window.openSettingsModal?.();
         return;
     }
 
@@ -31,6 +24,12 @@ export function switchTab(name) {
 
     const sidebarButton = document.querySelector(`.sidebar-btn[data-tab="${name}"]`);
     if (sidebarButton) sidebarButton.classList.add('active');
+
+    if (name === 'chat') {
+        showSessionPanel();
+    } else {
+        hideSessionPanel();
+    }
 
     // Scroll chat to bottom when entering chat page (no tab switch = no re-render)
     if (name === 'chat') {
