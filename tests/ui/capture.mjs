@@ -430,8 +430,6 @@ async function waitForChatResponse(page, timeoutMs = 300000) {
     await page.waitForFunction(() => {
         const streaming = document.querySelector('#chat-messages .chat-message-streaming');
         if (streaming) return false;
-        const thinking = document.querySelector('#chat-messages .chat-thinking');
-        if (thinking) return false;
         const assistantMessages = Array.from(document.querySelectorAll('#chat-messages .chat-message-assistant'));
         return assistantMessages.length > 0;
     }, { timeout: timeoutMs });
@@ -440,7 +438,7 @@ async function waitForChatResponse(page, timeoutMs = 300000) {
 }
 
 async function waitForChatComplete(page, timeoutMs = 300000) {
-    // Wait for streaming to stop and thinking to disappear
+    // Wait for streaming to stop and assistant message to appear
     await waitForChatResponse(page, timeoutMs);
 
     // Verify no [stopped] text in the last assistant message
