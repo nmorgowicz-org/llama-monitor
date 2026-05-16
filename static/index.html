@@ -2216,6 +2216,10 @@
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4"/><path d="M12 19v4"/><path d="M4.22 4.22l2.83 2.83"/><path d="M16.95 16.95l2.83 2.83"/><path d="M1 12h4"/><path d="M19 12h4"/><path d="M4.22 19.78l2.83-2.83"/><path d="M16.95 7.05l2.83-2.83"/></svg>
                     Advanced
                 </button>
+                <button class="settings-tab" data-tab="certificates">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    Certificates
+                </button>
             </div>
             <div class="settings-content">
                 <div class="settings-pane active" id="settings-session">
@@ -2465,6 +2469,61 @@
                         Data Directory
                         <input type="text" id="settings-data-directory" value="~/.config/llama-monitor">
                     </label>
+                </div>
+
+                <!-- Certificates -->
+                <div class="settings-pane" id="settings-certificates">
+                    <h3>Certificates</h3>
+                    <p class="settings-help">
+                        Manage TLS encryption for the web UI. Changes require a restart to take effect.
+                    </p>
+
+                    <!-- TLS Status -->
+                    <div id="tab-certificates" style="margin-bottom:16px;">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                            <strong>TLS Status</strong>
+                        </div>
+                        <div id="tls-status-text" style="color:var(--text-muted);font-size:13px;margin-bottom:2px;">
+                            Checking...
+                        </div>
+                        <div id="tls-details" style="font-size:12px;color:var(--text-muted);margin-bottom:6px;"></div>
+                    </div>
+
+                    <!-- LAN Warning -->
+                    <div id="tls-lan-warning" class="settings-warning" style="display:none;margin-bottom:14px;padding:10px 12px;border-radius:6px;border:1px solid var(--accent-orange);background:rgba(255,165,0,0.06);font-size:12px;color:var(--accent-orange);">
+                        <strong>Warning:</strong> Listening on all interfaces (0.0.0.0) without TLS.
+                        Anyone on your network can access the UI in cleartext.
+                    </div>
+
+                    <!-- HTTP only -->
+                    <div class="modal-section" style="margin-bottom:14px;">
+                        <h4>HTTP only (no TLS)</h4>
+                        <p class="settings-help">Recommended for local-only use (127.0.0.1).</p>
+                        <button type="button" class="btn btn-secondary" id="btn-disable-tls">Disable TLS</button>
+                    </div>
+
+                    <!-- Self-signed -->
+                    <div class="modal-section" style="margin-bottom:14px;">
+                        <h4>Self-signed certificate</h4>
+                        <p class="settings-help">Useful for internal use. Browser will show a warning unless you trust the certificate.</p>
+                        <button type="button" class="btn btn-secondary" id="btn-generate-self-signed">Generate self-signed certificate</button>
+                    </div>
+
+                    <!-- Custom certificate -->
+                    <div class="modal-section" style="margin-bottom:14px;">
+                        <h4>Use your own certificate</h4>
+                        <p class="settings-help">Use a certificate managed externally (e.g., Traefik, internal CA, or another ACME client).</p>
+                        <label class="modal-field">
+                            Certificate file path
+                            <input type="text" id="tls-custom-cert-path" placeholder="/path/to/cert.pem">
+                        </label>
+                        <label class="modal-field">
+                            Key file path
+                            <input type="text" id="tls-custom-key-path" placeholder="/path/to/key.pem">
+                        </label>
+                        <button type="button" class="btn btn-secondary" id="btn-apply-custom-cert">Apply</button>
+                    </div>
                 </div>
 
                 <!-- Database Administration -->

@@ -21,7 +21,7 @@ impl std::error::Error for ApiError {}
 
 impl Reject for ApiError {}
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, TLSConfig, TlsMode};
 use crate::gpu::env::{self as gpu_env, GPU_ARCHITECTURES, GpuEnv};
 
 #[cfg(target_os = "windows")]
@@ -1124,6 +1124,16 @@ pub fn api_routes(
         .or(install_lhm)
         .or(uninstall_lhm)
         .or(disable_lhm);
+    let bridge_routes = remote_agent_remove
+        .or(sensor_bridge_status)
+        .or(sensor_bridge_install)
+        .or(sensor_bridge_uninstall);
+
+    // TLS config routes
+    let tls_get_config = api_get_tls_config(state.clone());
+    let tls_put_config = api_put_tls_config(state.clone(), app_config.clone());
+    let tls_routes = tls_get_config.or(tls_put_config);
+
     let agent_routes = remote_agent_latest
         .or(remote_agent_detect)
         .or(remote_agent_host_key)
@@ -1132,11 +1142,7 @@ pub fn api_routes(
         .or(api_remote_agent_install(app_config.clone()))
         .or(api_remote_agent_start(app_config.clone()))
         .or(api_remote_agent_update(app_config.clone()))
-        .or(api_remote_agent_stop(app_config));
-    let bridge_routes = remote_agent_remove
-        .or(sensor_bridge_status)
-        .or(sensor_bridge_install)
-        .or(sensor_bridge_uninstall);
+        .or(api_remote_agent_stop(app_config.clone()));
 
     server_routes
         .or(preset_routes)
@@ -1149,6 +1155,7 @@ pub fn api_routes(
         .or(lhm_routes)
         .or(agent_routes)
         .or(bridge_routes)
+        .or(tls_routes)
         .or(api_self_update())
 }
 
@@ -4089,6 +4096,147 @@ fn api_kill_llama(
                 }
             }
         })
+}
+
+/// GET /api/tls/config — returns current TLS configuration (non-sensitive).
+fn api_get_tls_config(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "tls" / "config")
+        .and(warp::get())
+        .map(move || {
+            let cfg = state.get_tls_config();
+            // Return a sanitized view (no private keys; we don't store them inline anyway).
+            warp::reply::json(&serde_json::json!({
+                "mode": match cfg.mode {
+                    TlsMode::None => "none",
+                    TlsMode::SelfSigned => "self-signed",
+                    TlsMode::Custom => "custom",
+                },
+                "customCertPath": cfg.custom_cert_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+                "customKeyPath": cfg.custom_key_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+            }))
+        })
+}
+
+/// PUT /api/tls/config — update TLS configuration (requires api-token).
+/// In Phase 1, changes require a restart; we only persist to tls-config.json.
+fn api_put_tls_config(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "tls" / "config")
+        .and(warp::put())
+        .and(warp::header::optional::<String>("Authorization"))
+        .and(warp::body::json())
+        .and_then(
+            move |auth_header: Option<String>, body: serde_json::Value| {
+                let state = state.clone();
+                let app_config = app_config.clone();
+                async move {
+                    // Require api-token in Authorization: Bearer <token>
+                    let expected = match &app_config.api_token {
+                        Some(t) => t,
+                        None => {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "API token not configured"
+                                })),
+                                warp::http::StatusCode::UNAUTHORIZED,
+                            ));
+                        }
+                    };
+
+                    let token = match auth_header.as_ref().and_then(|h| h.strip_prefix("Bearer ")) {
+                        Some(t) => t.trim(),
+                        None => {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Missing or invalid Authorization header"
+                                })),
+                                warp::http::StatusCode::UNAUTHORIZED,
+                            ));
+                        }
+                    };
+
+                    if token != expected {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Invalid API token"
+                            })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
+
+                    // Extract mode
+                    let mode_str = body.get("mode").and_then(|v| v.as_str()).unwrap_or("none");
+
+                    let mode = match mode_str {
+                        "none" => TlsMode::None,
+                        "self-signed" => TlsMode::SelfSigned,
+                        "custom" => TlsMode::Custom,
+                        _ => {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": format!("Invalid mode: {}", mode_str)
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+                    };
+
+                    // For custom mode, validate cert/key paths
+                    if mode == TlsMode::Custom {
+                        let cert_path_str = body.get("customCertPath").and_then(|v| v.as_str());
+                        let key_path_str = body.get("customKeyPath").and_then(|v| v.as_str());
+
+                        if cert_path_str.is_none() || key_path_str.is_none() {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "custom mode requires customCertPath and customKeyPath"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+                    }
+
+                    let new_cfg = TLSConfig {
+                        mode,
+                        custom_cert_path: body
+                            .get("customCertPath")
+                            .and_then(|v| v.as_str())
+                            .map(PathBuf::from),
+                        custom_key_path: body
+                            .get("customKeyPath")
+                            .and_then(|v| v.as_str())
+                            .map(PathBuf::from),
+                    };
+
+                    // Update in-memory state
+                    state.set_tls_config(new_cfg.clone());
+
+                    // Persist to disk (restart required to apply)
+                    if let Err(e) = crate::config::save_tls_config(&app_config.config_dir, &new_cfg)
+                    {
+                        eprintln!("[error] Failed to save tls-config.json: {}", e);
+                        // Still return success; in-memory state updated.
+                    }
+
+                    Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": true,
+                            "requires_restart": true
+                        })),
+                        warp::http::StatusCode::OK,
+                    ))
+                }
+            },
+        )
 }
 
 fn api_self_update() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone

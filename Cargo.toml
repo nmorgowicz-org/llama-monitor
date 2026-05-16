@@ -10,6 +10,10 @@ webview-popover = ["dep:wry"]
 
 [dependencies]
     anyhow = "1"
+async-stream = "0.3"
+hyper = { version = "1", features = ["http1"] }
+hyper-util = { version = "0.1", features = ["server", "tokio"] }
+hyper-rustls = { version = "0.27", default-features = false, features = ["ring"] }
     base64 = "0.22"
     bytes = "1"
     clap = { version = "4", features = ["derive"] }
@@ -30,6 +34,9 @@ webview-popover = ["dep:wry"]
     tokio-stream = "0.1"
     url = "2"
     warp = { version = "0.4", features = ["server", "websocket"] }
+tokio-rustls = "0.26"
+rustls = "0.23"
+rustls-pemfile = "2"
     warp-helmet = "1.0"
     tray-icon = { version = "0.23", optional = true }
     winit = { version = "0.31.0-beta.2", default-features = false, features = ["x11", "wayland"], optional = true }

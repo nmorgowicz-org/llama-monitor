@@ -28,8 +28,8 @@ test.describe('performance baseline', () => {
     console.log('JS files loaded:');
     jsRequests.forEach(r => console.log(`  ${r.url}`));
 
-    // Assertions to track regression (baseline updated: 37 JS, added updates, etc.)
-    expect(jsRequests.length).toBeLessThanOrEqual(37);
+    // Assertions to track regression (baseline updated: 38 JS, added Certificates TLS support)
+    expect(jsRequests.length).toBeLessThanOrEqual(38);
     expect(modulesReadyTime).toBeLessThan(5000); // should be under 5s locally
   });
 

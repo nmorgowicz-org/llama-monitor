@@ -3,6 +3,66 @@ use std::path::PathBuf;
 
 use crate::cli::AppArgs;
 
+/// TLS operating mode.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TlsMode {
+    #[default]
+    None,
+    SelfSigned,
+    Custom,
+    // Acme reserved for Phase 2 (Let's Encrypt / lego)
+}
+
+/// TLS configuration persisted to tls-config.json.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TLSConfig {
+    pub mode: TlsMode,
+    pub custom_cert_path: Option<PathBuf>,
+    pub custom_key_path: Option<PathBuf>,
+}
+
+impl Default for TLSConfig {
+    fn default() -> Self {
+        Self {
+            mode: TlsMode::None,
+            custom_cert_path: None,
+            custom_key_path: None,
+        }
+    }
+}
+
+/// Load TLSConfig from tls-config.json; on any error, return default.
+pub fn load_tls_config(config_dir: &std::path::Path) -> TLSConfig {
+    let path = config_dir.join("tls-config.json");
+    if !path.exists() {
+        return TLSConfig::default();
+    }
+    let Ok(contents) = fs::read_to_string(&path) else {
+        eprintln!("[warn] Failed to read tls-config.json, using defaults");
+        return TLSConfig::default();
+    };
+    let Ok(cfg) = serde_json::from_str::<TLSConfig>(&contents) else {
+        eprintln!("[warn] Invalid tls-config.json, using defaults");
+        return TLSConfig::default();
+    };
+    cfg
+}
+
+/// Persist TLSConfig to tls-config.json (atomic write).
+pub fn save_tls_config(config_dir: &std::path::Path, cfg: &TLSConfig) -> std::io::Result<()> {
+    let path = config_dir.join("tls-config.json");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    let json = serde_json::to_string_pretty(cfg)?;
+    fs::write(&tmp, json)?;
+    fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct AppConfig {
@@ -32,6 +92,7 @@ pub struct AppConfig {
     pub remote_agent_ssh_command: Option<String>,
     pub db_admin_token: Option<String>,
     pub api_token: Option<String>,
+    pub tls_config: TLSConfig,
 }
 
 impl AppConfig {
@@ -77,6 +138,7 @@ impl AppConfig {
             remote_agent_ssh_command: args.remote_agent_ssh_command,
             db_admin_token: ensure_db_admin_token(&config_dir),
             api_token: ensure_api_token(&config_dir),
+            tls_config: load_tls_config(&config_dir),
         }
     }
 }

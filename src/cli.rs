@@ -110,6 +110,23 @@ pub struct AppArgs {
     /// Remote command run over SSH to start the metrics agent
     #[arg(long)]
     pub remote_agent_ssh_command: Option<String>,
+
+    /// Enable TLS with the given certificate and key files.
+    /// Requires --tls-cert and --tls-key.
+    #[arg(long)]
+    pub tls: bool,
+
+    /// Path to the TLS certificate file (PEM). Used with --tls.
+    #[arg(long)]
+    pub tls_cert: Option<PathBuf>,
+
+    /// Path to the TLS private key file (PEM). Used with --tls.
+    #[arg(long)]
+    pub tls_key: Option<PathBuf>,
+
+    /// Enable TLS with a self-signed certificate.
+    #[arg(long)]
+    pub tls_self_signed: bool,
 }
 
 #[cfg(test)]
@@ -150,6 +167,32 @@ mod tests {
         assert!(args.basic_auth.is_none());
         assert!(!args.remote_agent_ssh_autostart);
         assert_eq!(args.gpu_backend, "auto");
+        assert!(!args.tls);
+        assert!(!args.tls_self_signed);
+        assert!(args.tls_cert.is_none());
+        assert!(args.tls_key.is_none());
+    }
+
+    #[test]
+    fn test_tls_flags_parsing() {
+        let args = AppArgs::parse_from([
+            "llama-monitor",
+            "--tls",
+            "--tls-cert",
+            "/path/to/cert.pem",
+            "--tls-key",
+            "/path/to/key.pem",
+        ]);
+        assert!(args.tls);
+        assert_eq!(args.tls_cert, Some(PathBuf::from("/path/to/cert.pem")));
+        assert_eq!(args.tls_key, Some(PathBuf::from("/path/to/key.pem")));
+    }
+
+    #[test]
+    fn test_tls_self_signed_flag_parsing() {
+        let args = AppArgs::parse_from(["llama-monitor", "--tls-self-signed"]);
+        assert!(args.tls_self_signed);
+        assert!(!args.tls);
     }
 
     #[test]

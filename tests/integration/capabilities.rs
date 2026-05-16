@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use llama_monitor::{
     chat_storage::ChatStorage,
+    config::TLSConfig,
     gpu::env::GpuEnv,
     state::{AppPaths, AppState, Session, UiSettings},
 };
@@ -32,6 +33,7 @@ fn local_spawn_has_all_metrics() {
         gpu_env,
         UiSettings::default(),
         test_chat_storage(),
+        TLSConfig::default(),
     );
 
     let session = Session::new_spawn(
@@ -88,6 +90,7 @@ fn local_attach_has_full_metrics() {
         gpu_env,
         UiSettings::default(),
         test_chat_storage(),
+        TLSConfig::default(),
     );
 
     let session = Session::new_attach(
@@ -143,6 +146,7 @@ fn remote_attach_has_inference_only() {
         gpu_env,
         UiSettings::default(),
         test_chat_storage(),
+        TLSConfig::default(),
     );
 
     let session = Session::new_attach(
@@ -225,6 +229,10 @@ fn headless_mode_disables_tray() {
         remote_agent_ssh_autostart: false,
         remote_agent_ssh_target: None,
         remote_agent_ssh_command: None,
+        tls: false,
+        tls_cert: None,
+        tls_key: None,
+        tls_self_signed: false,
     };
 
     assert!(
@@ -257,6 +265,10 @@ fn headless_mode_disables_tray() {
         remote_agent_ssh_autostart: false,
         remote_agent_ssh_target: None,
         remote_agent_ssh_command: None,
+        tls: false,
+        tls_cert: None,
+        tls_key: None,
+        tls_self_signed: false,
     };
 
     assert!(
@@ -289,6 +301,10 @@ fn headless_mode_disables_tray() {
         remote_agent_ssh_autostart: false,
         remote_agent_ssh_target: None,
         remote_agent_ssh_command: None,
+        tls: false,
+        tls_cert: None,
+        tls_key: None,
+        tls_self_signed: false,
     };
 
     assert!(

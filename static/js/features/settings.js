@@ -5,6 +5,7 @@ import { settingsState } from '../core/app-state.js';
 import { setContextCardViewPreference } from './context-card.js';
 import { renderChatMessages } from './chat-render.js';
 import { getAutoPollingInterval } from './network-detection.js';
+import { showToast } from './toast.js';
 
 const DATE_FORMAT_KEY = 'llama-monitor-date-format';
 
@@ -327,6 +328,11 @@ function _bindSettingsEvents() {
             document.querySelectorAll('.settings-pane').forEach(p => p.classList.remove('active'));
             tab.classList.add('active');
             document.getElementById('settings-' + target)?.classList.add('active');
+
+            // Load TLS config when Certificates tab is opened
+            if (target === 'certificates') {
+                loadTlsConfig();
+            }
         });
     });
 
@@ -372,6 +378,133 @@ function _bindSettingsEvents() {
     });
 }
 
+// ── TLS / Certificates ────────────────────────────────────────────────────────
+
+async function loadTlsConfig() {
+    const statusEl = document.getElementById('tls-status-text');
+    const detailsEl = document.getElementById('tls-details');
+    const warningEl = document.getElementById('tls-lan-warning');
+
+    if (!statusEl) return;
+
+    try {
+        const res = await fetch('/api/tls/config', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+
+        if (!res.ok) {
+            statusEl.textContent = 'TLS: Unable to check status';
+            if (detailsEl) detailsEl.textContent = `Server responded ${res.status}`;
+            return;
+        }
+
+        const data = await res.json();
+        const mode = data?.mode || 'none';
+        const host = data?.host || '';
+
+        // Update status text
+        if (mode === 'none') {
+            statusEl.textContent = 'TLS: Disabled (HTTP only)';
+        } else if (mode === 'self-signed') {
+            statusEl.textContent = 'TLS: Enabled (Self-signed)';
+        } else if (mode === 'custom') {
+            statusEl.textContent = 'TLS: Enabled (Custom certificate)';
+        } else {
+            statusEl.textContent = 'TLS: Enabled';
+        }
+
+        // Future: show cert details when backend provides them
+        if (detailsEl && (data?.issuer || data?.expiry || data?.domains)) {
+            const parts = [];
+            if (data.issuer) parts.push('Issuer: ' + data.issuer);
+            if (data.expiry) parts.push('Expires: ' + data.expiry);
+            if (data.domains && data.domains.length) parts.push('Domains: ' + data.domains.join(', '));
+            detailsEl.textContent = parts.join(' · ');
+        } else if (detailsEl) {
+            detailsEl.textContent = '';
+        }
+
+        // Show LAN warning if 0.0.0.0 and no TLS
+        if (warningEl) {
+            if (mode === 'none' && host === '0.0.0.0') {
+                warningEl.style.display = 'block';
+            } else {
+                warningEl.style.display = 'none';
+            }
+        }
+    } catch (err) {
+        statusEl.textContent = 'TLS: Unable to check status';
+        if (detailsEl) detailsEl.textContent = 'Network or server error';
+        console.warn('[settings] TLS config load failed:', err);
+    }
+}
+
+async function tlsPut(payload) {
+    try {
+        const res = await fetch('/api/tls/config', {
+            method: 'PUT',
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            showToast('TLS update failed', 'error', text || `Server responded ${res.status}`);
+            return;
+        }
+
+        return await res.json().catch(() => ({}));
+    } catch (err) {
+        showToast('TLS update failed', 'error', err.message || 'Network error');
+    }
+}
+
+function _bindTlsEvents() {
+    // Disable TLS
+    const disableBtn = document.getElementById('btn-disable-tls');
+    if (disableBtn) {
+        disableBtn.addEventListener('click', async () => {
+            await tlsPut({ mode: 'none' });
+            showToast('TLS disabled', 'success', 'Restart llama-monitor to apply.');
+            await loadTlsConfig();
+        });
+    }
+
+    // Generate self-signed
+    const selfSignedBtn = document.getElementById('btn-generate-self-signed');
+    if (selfSignedBtn) {
+        selfSignedBtn.addEventListener('click', async () => {
+            await tlsPut({ mode: 'self-signed' });
+            showToast('Self-signed TLS enabled', 'success', 'Restart llama-monitor to apply.');
+            await loadTlsConfig();
+        });
+    }
+
+    // Apply custom certificate
+    const applyCustomBtn = document.getElementById('btn-apply-custom-cert');
+    if (applyCustomBtn) {
+        applyCustomBtn.addEventListener('click', async () => {
+            const certPath = (document.getElementById('tls-custom-cert-path')?.value || '').trim();
+            const keyPath = (document.getElementById('tls-custom-key-path')?.value || '').trim();
+
+            if (!certPath || !keyPath) {
+                showToast('Missing paths', 'error', 'Both certificate and key paths are required.');
+                return;
+            }
+
+            await tlsPut({
+                mode: 'custom',
+                custom_cert_path: certPath,
+                custom_key_path: keyPath,
+            });
+            showToast('Custom certificate configured', 'success', 'Restart llama-monitor to apply.');
+            await loadTlsConfig();
+        });
+    }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initSettings() {
@@ -384,4 +517,5 @@ export function initSettings() {
     document.getElementById('settings-modal-save')?.addEventListener('click', saveSettings);
 
     _bindSettingsEvents();
+    _bindTlsEvents();
 }

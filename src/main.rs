@@ -25,6 +25,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::chat_storage::ChatStorage;
+use crate::config::TlsMode;
 
 const GPU_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SYSTEM_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -110,6 +111,7 @@ fn main() -> Result<()> {
         gpu_env,
         ui_settings,
         chat_storage,
+        app_config.tls_config.clone(),
     );
 
     if let Some(ref dir) = app_config.models_dir {
@@ -195,21 +197,36 @@ fn main() -> Result<()> {
         None => None,
     };
 
+    // Apply CLI TLS overrides to tls_config
+    let mut tls_config = app_config.tls_config.clone();
+    if args.tls {
+        if args.tls_cert.is_none() || args.tls_key.is_none() {
+            eprintln!("[error] --tls requires both --tls-cert and --tls-key");
+            std::process::exit(1);
+        }
+        tls_config.mode = TlsMode::Custom;
+        tls_config.custom_cert_path = args.tls_cert.clone();
+        tls_config.custom_key_path = args.tls_key.clone();
+    } else if args.tls_self_signed {
+        tls_config.mode = TlsMode::SelfSigned;
+    }
+
+    // Update in-memory state with final TLSConfig
+    state.set_tls_config(tls_config.clone());
+
     let routes = web::build_routes(
         state.clone(),
         app_config.clone(),
         basic_auth_enabled.clone(),
     );
 
-    let auth_note = if basic_auth_enabled.is_some() {
-        " (Basic Auth enabled)"
-    } else {
-        ""
-    };
-    println!(
-        "[info] Llama Monitor running on http://{}:{}{}",
-        host, port, auth_note
-    );
+    // Warn when listening on all interfaces without TLS or auth
+    if host == "0.0.0.0" && tls_config.mode == TlsMode::None && basic_auth_enabled.is_none() {
+        eprintln!(
+            "[warn] Listening on all interfaces without TLS or authentication. \
+            Anyone on your network can access the UI."
+        );
+    }
 
     if args.headless {
         println!("[info] Headless mode enabled (no tray, no desktop UI)");
@@ -301,13 +318,177 @@ fn main() -> Result<()> {
         });
     }
 
-    // Warp server
+    // Warp server (HTTP or TLS depending on config)
+    let tls_mode = tls_config.mode.clone();
+    let tls_custom_cert = tls_config.custom_cert_path.clone();
+    let tls_custom_key = tls_config.custom_key_path.clone();
+    let tls_config_dir = app_config.config_dir.clone();
+    let tls_host = host.clone();
+    let tls_port = port;
+
     runtime.spawn(async move {
-        let addr: std::net::SocketAddr = format!("{}:{}", host, port)
+        let addr: std::net::SocketAddr = format!("{}:{}", tls_host, tls_port)
             .parse()
             .expect("Invalid host:port");
-        warp::serve(routes).run(addr).await;
+
+        match tls_mode {
+            TlsMode::None => {
+                println!(
+                    "[info] Llama Monitor running on http://{}:{}",
+                    tls_host, tls_port
+                );
+                warp::serve(routes).run(addr).await;
+            }
+            TlsMode::SelfSigned | TlsMode::Custom => {
+                // Determine cert and key paths
+                let (cert_path, key_path) = if matches!(tls_mode, TlsMode::SelfSigned) {
+                    let cp = tls_config_dir.join("tls-server.pem");
+                    let kp = tls_config_dir.join("tls-server.key");
+
+                    if !cp.exists() || !kp.exists() {
+                        let mut sans = vec!["localhost".to_string(), "127.0.0.1".to_string()];
+                        if tls_host != "0.0.0.0"
+                            && tls_host != "127.0.0.1"
+                            && !tls_host.starts_with('[')
+                        {
+                            sans.push(tls_host.clone());
+                        }
+                        let cert = crate::certs::generate_self_signed(sans);
+                        if let Err(e) = cert.save(&cp, &kp) {
+                            eprintln!("[error] Failed to write self-signed cert: {}", e);
+                            eprintln!(
+                                "[warn] Falling back to HTTP on http://{}:{}",
+                                tls_host, tls_port
+                            );
+                            warp::serve(routes).run(addr).await;
+                            return;
+                        }
+                        println!(
+                            "[info] Generated self-signed TLS certificate at {}",
+                            cp.display()
+                        );
+                    }
+                    (cp, kp)
+                } else {
+                    match (&tls_custom_cert, &tls_custom_key) {
+                        (Some(cp), Some(kp)) => (cp.clone(), kp.clone()),
+                        _ => {
+                            eprintln!(
+                                "[warn] TLS mode=custom but cert/key not set; falling back to HTTP"
+                            );
+                            warp::serve(routes).run(addr).await;
+                            return;
+                        }
+                    }
+                };
+
+                if !cert_path.exists() || !key_path.exists() {
+                    eprintln!("[warn] TLS certificate or key file not found; falling back to HTTP");
+                    warp::serve(routes).run(addr).await;
+                    return;
+                }
+
+                let tls_config = match build_tls_config(&cert_path, &key_path) {
+                    Ok(cfg) => cfg,
+                    Err(e) => {
+                        eprintln!("[error] Failed to load TLS config: {}", e);
+                        eprintln!(
+                            "[warn] Falling back to HTTP on http://{}:{}",
+                            tls_host, tls_port
+                        );
+                        warp::serve(routes).run(addr).await;
+                        return;
+                    }
+                };
+
+                let tls_acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(tls_config));
+
+                let listener = match tokio::net::TcpListener::bind(addr).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        eprintln!("[error] Failed to bind TLS listener: {}", e);
+                        return;
+                    }
+                };
+
+                let tls_mode_label = if matches!(tls_mode, TlsMode::SelfSigned) {
+                    "self-signed"
+                } else {
+                    "custom cert"
+                };
+
+                println!(
+                    "[info] Llama Monitor running on https://{}:{} ({})",
+                    tls_host, tls_port, tls_mode_label
+                );
+
+                // TLS server: replicate warp's Run pattern but with TLS-wrapped connections
+                loop {
+                    let (stream, _) = match listener.accept().await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("[error] TLS accept error: {}", e);
+                            continue;
+                        }
+                    };
+
+                    let acceptor = tls_acceptor.clone();
+                    let routes_clone = routes.clone();
+                    tokio::spawn(async move {
+                        let tls_stream = match acceptor.accept(stream).await {
+                            Ok(s) => s,
+                            Err(e) => {
+                                eprintln!("[error] TLS handshake error: {}", e);
+                                return;
+                            }
+                        };
+
+                        let svc = warp::service(routes_clone);
+                        let svc = hyper_util::service::TowerToHyperService::new(svc);
+                        let io = hyper_util::rt::TokioIo::new(tls_stream);
+
+                        if let Err(e) = hyper_util::server::conn::auto::Builder::new(
+                            hyper_util::rt::TokioExecutor::new(),
+                        )
+                        .http1()
+                        .serve_connection_with_upgrades(io, svc)
+                        .await
+                        {
+                            eprintln!("[error] TLS connection error: {}", e);
+                        }
+                    });
+                }
+            }
+        }
     });
+
+    /// Build a rustls ServerConfig from PEM cert and key files.
+    fn build_tls_config(
+        cert_path: &std::path::Path,
+        key_path: &std::path::Path,
+    ) -> Result<rustls::ServerConfig, anyhow::Error> {
+        use std::fs::File;
+        use std::io::BufReader;
+
+        let mut cert_reader = BufReader::new(File::open(cert_path)?);
+        let certs: Vec<rustls::pki_types::CertificateDer> = rustls_pemfile::certs(&mut cert_reader)
+            .filter_map(|c| c.ok())
+            .collect();
+        if certs.is_empty() {
+            anyhow::bail!("No certificates found in {}", cert_path.display());
+        }
+
+        let mut key_reader = BufReader::new(File::open(key_path)?);
+        let key: rustls::pki_types::PrivateKeyDer = rustls_pemfile::private_key(&mut key_reader)
+            .map_err(|_| anyhow::anyhow!("Failed to read private key from {}", key_path.display()))?
+            .ok_or_else(|| anyhow::anyhow!("No private key found in {}", key_path.display()))?;
+
+        let config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)?;
+
+        Ok(config)
+    }
 
     // Clone shutdown-related fields before state is moved to tray
     let shutdown_chat_storage = state.chat_storage.clone();
@@ -460,6 +641,10 @@ mod tests {
                 remote_agent_ssh_autostart: false,
                 remote_agent_ssh_target: None,
                 remote_agent_ssh_command: None,
+                tls: false,
+                tls_cert: None,
+                tls_key: None,
+                tls_self_signed: false,
             };
             assert_eq!(
                 should_start_tray(&args),
@@ -498,6 +683,10 @@ mod tests {
             remote_agent_ssh_autostart: false,
             remote_agent_ssh_target: None,
             remote_agent_ssh_command: None,
+            tls: false,
+            tls_cert: None,
+            tls_key: None,
+            tls_self_signed: false,
         };
         assert!(should_start_tray(&args));
         unsafe { std::env::remove_var("DISPLAY") };
@@ -528,6 +717,10 @@ mod tests {
             remote_agent_ssh_autostart: false,
             remote_agent_ssh_target: None,
             remote_agent_ssh_command: None,
+            tls: false,
+            tls_cert: None,
+            tls_key: None,
+            tls_self_signed: false,
         };
         assert!(should_start_tray(&args));
         unsafe { std::env::remove_var("WAYLAND_DISPLAY") };
@@ -559,6 +752,10 @@ mod tests {
             remote_agent_ssh_autostart: false,
             remote_agent_ssh_target: None,
             remote_agent_ssh_command: None,
+            tls: false,
+            tls_cert: None,
+            tls_key: None,
+            tls_self_signed: false,
         };
         assert!(!should_start_tray(&args));
     }
@@ -591,6 +788,10 @@ mod tests {
             remote_agent_ssh_autostart: false,
             remote_agent_ssh_target: None,
             remote_agent_ssh_command: None,
+            tls: false,
+            tls_cert: None,
+            tls_key: None,
+            tls_self_signed: false,
         };
         assert!(should_start_tray(&args));
     }
@@ -623,6 +824,10 @@ mod tests {
             remote_agent_ssh_autostart: false,
             remote_agent_ssh_target: None,
             remote_agent_ssh_command: None,
+            tls: false,
+            tls_cert: None,
+            tls_key: None,
+            tls_self_signed: false,
         };
         assert!(!should_start_tray(&args));
     }

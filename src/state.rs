@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::chat_storage::ChatStorage;
+use crate::config::TLSConfig;
 use crate::gpu::GpuMetrics;
 use crate::gpu::env::GpuEnv;
 use crate::llama::metrics::LlamaMetrics;
@@ -389,6 +390,7 @@ pub struct AppState {
     pub remote_agent_version: Arc<Mutex<Option<String>>>,
     pub remote_agent_update_available: Arc<Mutex<bool>>,
     pub chat_storage: Arc<ChatStorage>,
+    pub tls_config: Arc<Mutex<TLSConfig>>,
 }
 
 impl AppState {
@@ -398,6 +400,7 @@ impl AppState {
         gpu_env: GpuEnv,
         ui_settings: UiSettings,
         chat_storage: Arc<ChatStorage>,
+        tls_config: TLSConfig,
     ) -> Self {
         let presets_path = paths.presets_path;
         let templates_path = paths.templates_path;
@@ -469,6 +472,7 @@ impl AppState {
             remote_agent_version: Arc::new(Mutex::new(None)),
             remote_agent_update_available: Arc::new(Mutex::new(false)),
             chat_storage,
+            tls_config: Arc::new(Mutex::new(tls_config)),
         };
 
         // Prune old inactive sessions on startup (older than 7 days)
@@ -794,6 +798,14 @@ impl AppState {
 
         (system_reason, gpu_reason, cpu_temp_reason)
     }
+
+    pub fn get_tls_config(&self) -> TLSConfig {
+        self.tls_config.lock().unwrap().clone()
+    }
+
+    pub fn set_tls_config(&self, config: TLSConfig) {
+        *self.tls_config.lock().unwrap() = config;
+    }
 }
 
 #[allow(dead_code)]
@@ -891,6 +903,10 @@ mod tests {
         }
     }
 
+    fn test_tls_config() -> TLSConfig {
+        TLSConfig::default()
+    }
+
     #[test]
     fn endpoint_detection_with_various_hosts() {
         let local_hosts = [
@@ -973,7 +989,14 @@ mod tests {
         {
             let paths = test_paths(PathBuf::new());
             let cs = Arc::new(ChatStorage::open(&PathBuf::from(":memory:")).unwrap());
-            let state = AppState::new(vec![], paths, GpuEnv::default(), UiSettings::default(), cs);
+            let state = AppState::new(
+                vec![],
+                paths,
+                GpuEnv::default(),
+                UiSettings::default(),
+                cs,
+                test_tls_config(),
+            );
             let session = if mode == "spawn" {
                 Session::new_spawn("test".to_string(), "Test".to_string(), 8001, String::new())
             } else {
@@ -1026,6 +1049,7 @@ mod tests {
             GpuEnv::default(),
             UiSettings::default(),
             cs,
+            test_tls_config(),
         );
 
         assert!(state.active_session_id.lock().unwrap().is_empty());
@@ -1045,6 +1069,7 @@ mod tests {
             GpuEnv::default(),
             UiSettings::default(),
             cs,
+            test_tls_config(),
         );
         state.add_session(Session::new_spawn(
             "existing".to_string(),
@@ -1067,6 +1092,7 @@ mod tests {
             GpuEnv::default(),
             UiSettings::default(),
             cs,
+            test_tls_config(),
         );
         state.add_session(Session::new_spawn(
             "existing".to_string(),
