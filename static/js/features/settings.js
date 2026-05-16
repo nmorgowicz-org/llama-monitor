@@ -409,6 +409,13 @@ async function loadTlsConfig() {
             statusEl.textContent = 'TLS: Enabled (Self-signed)';
         } else if (mode === 'custom') {
             statusEl.textContent = 'TLS: Enabled (Custom certificate)';
+        } else if (mode === 'acme') {
+            const env = (data?.acme?.environment || '').toLowerCase();
+            if (env === 'staging') {
+                statusEl.textContent = 'TLS: Enabled (Let\'s Encrypt – Staging)';
+            } else {
+                statusEl.textContent = 'TLS: Enabled (Let\'s Encrypt – Production)';
+            }
         } else {
             statusEl.textContent = 'TLS: Enabled';
         }
@@ -430,6 +437,50 @@ async function loadTlsConfig() {
                 warningEl.style.display = 'block';
             } else {
                 warningEl.style.display = 'none';
+            }
+        }
+
+        // Pre-fill ACME fields when mode is "acme"
+        if (mode === 'acme' && data?.acme) {
+            const acme = data.acme;
+            const fqdnEl = document.getElementById('acme-fqdn');
+            const providerEl = document.getElementById('acme-dns-provider');
+            const stagingRadio = document.getElementById('acme-env-staging');
+            const prodRadio = document.getElementById('acme-env-production');
+            const delayEl = document.getElementById('acme-validation-delay');
+            const ncUserEl = document.getElementById('acme-nc-username');
+            const ncKeyEl = document.getElementById('acme-nc-api-key');
+            const ncIpEl = document.getElementById('acme-nc-source-ip');
+            const ncFieldsEl = document.getElementById('acme-nc-fields');
+
+            if (fqdnEl) fqdnEl.value = acme.fqdn || '';
+            if (providerEl) providerEl.value = (acme.dns_provider || 'namecheap').toLowerCase();
+
+            const env = (acme.environment || 'staging').toLowerCase();
+            if (stagingRadio) stagingRadio.checked = env === 'staging';
+            if (prodRadio) prodRadio.checked = env === 'production';
+
+            if (delayEl) delayEl.value = acme.validation_delay ?? 300;
+
+            // Namecheap fields
+            const dnsCfg = acme.dns_config || {};
+            if (ncUserEl) ncUserEl.value = dnsCfg.username || '';
+            if (ncKeyEl) ncKeyEl.value = ''; // never echo real key; show masked hint
+            if (ncIpEl) ncIpEl.value = dnsCfg.source_ip || '';
+
+            // Show/hide Namecheap fields based on provider
+            if (ncFieldsEl) {
+                ncFieldsEl.style.display =
+                    (acme.dns_provider || '').toLowerCase() === 'namecheap'
+                        ? 'block'
+                        : 'none';
+            }
+
+            // Show last renewal in tls-details if present
+            if (acme.last_renewal && detailsEl) {
+                detailsEl.textContent =
+                    (detailsEl.textContent ? detailsEl.textContent + ' · ' : '') +
+                    'Last renewal: ' + acme.last_renewal;
             }
         }
     } catch (err) {
@@ -501,6 +552,136 @@ function _bindTlsEvents() {
             });
             showToast('Custom certificate configured', 'success', 'Restart llama-monitor to apply.');
             await loadTlsConfig();
+        });
+    }
+
+    // ACME: show/hide Namecheap fields based on provider selection
+    const providerSelect = document.getElementById('acme-dns-provider');
+    if (providerSelect) {
+        providerSelect.addEventListener('change', () => {
+            const ncFields = document.getElementById('acme-nc-fields');
+            if (ncFields) {
+                ncFields.style.display =
+                    providerSelect.value === 'namecheap' ? 'block' : 'none';
+            }
+        });
+    }
+
+    // ACME: Request certificate
+    const acmeRequestBtn = document.getElementById('acme-request-cert');
+    if (acmeRequestBtn) {
+        acmeRequestBtn.addEventListener('click', async () => {
+            const statusEl = document.getElementById('acme-status-text');
+
+            const fqdn = (document.getElementById('acme-fqdn')?.value || '').trim();
+            const provider = document.getElementById('acme-dns-provider')?.value || 'namecheap';
+            const env = (document.querySelector('input[name="acme-env"]:checked')?.value || 'staging');
+            const delay = parseInt(document.getElementById('acme-validation-delay')?.value || '300', 10);
+
+            const ncUsername = (document.getElementById('acme-nc-username')?.value || '').trim();
+            const ncApiKey = (document.getElementById('acme-nc-api-key')?.value || '').trim();
+            const ncSourceIp = (document.getElementById('acme-nc-source-ip')?.value || '').trim();
+
+            // Basic validation
+            if (!fqdn) {
+                showToast('Missing domain', 'error', 'Enter a domain (FQDN) for your certificate.');
+                return;
+            }
+            if (provider !== 'namecheap') {
+                showToast('Unsupported provider', 'error', 'Only Namecheap is currently supported.');
+                return;
+            }
+            if (!ncUsername || !ncApiKey) {
+                showToast('Missing credentials', 'error', 'Namecheap username and API key are required.');
+                return;
+            }
+
+            const dnsConfig = {
+                username: ncUsername,
+                api_key: ncApiKey,
+            };
+            if (ncSourceIp) dnsConfig.source_ip = ncSourceIp;
+
+            const payload = {
+                mode: 'acme',
+                acme: {
+                    enabled: true,
+                    fqdn,
+                    environment: env,
+                    dns_provider: provider,
+                    dns_config: dnsConfig,
+                    validation_delay: delay,
+                },
+            };
+
+            if (statusEl) statusEl.textContent = 'Saving ACME configuration...';
+
+            // Save config
+            const putResult = await tlsPut(payload);
+            if (!putResult) {
+                if (statusEl) statusEl.textContent = 'Failed to save ACME configuration.';
+                return;
+            }
+
+            if (statusEl) statusEl.textContent = 'Requesting certificate...';
+
+            // Trigger ACME request
+            try {
+                const res = await fetch('/api/tls/acme/request', {
+                    method: 'POST',
+                    headers: window.authHeaders
+                        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                        : { 'Content-Type': 'application/json' },
+                });
+
+                if (!res.ok) {
+                    const text = await res.text().catch(() => '');
+                    if (statusEl) statusEl.textContent = 'Request failed: ' + (text || `Server responded ${res.status}`);
+                    return;
+                }
+
+                if (statusEl) {
+                    statusEl.textContent = 'Certificate requested. Restart llama-monitor to apply.';
+                }
+                showToast('ACME certificate requested', 'success', 'Restart llama-monitor to apply.');
+                await loadTlsConfig();
+            } catch (err) {
+                if (statusEl) statusEl.textContent = 'Request failed: ' + (err.message || 'Network error');
+            }
+        });
+    }
+
+    // ACME: Renew certificate
+    const acmeRenewBtn = document.getElementById('acme-renew-cert');
+    if (acmeRenewBtn) {
+        acmeRenewBtn.addEventListener('click', async () => {
+            const statusEl = document.getElementById('acme-status-text');
+            if (statusEl) statusEl.textContent = 'Renewing certificate...';
+
+            try {
+                const res = await fetch('/api/tls/acme/renew', {
+                    method: 'POST',
+                    headers: window.authHeaders
+                        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                        : { 'Content-Type': 'application/json' },
+                });
+
+                if (!res.ok) {
+                    const text = await res.text().catch(() => '');
+                    if (statusEl) statusEl.textContent = 'Renewal failed: ' + (text || `Server responded ${res.status}`);
+                    showToast('ACME renewal failed', 'error', text || `Server responded ${res.status}`);
+                    return;
+                }
+
+                if (statusEl) {
+                    statusEl.textContent = 'Certificate renewed. Restart llama-monitor to apply.';
+                }
+                showToast('ACME certificate renewed', 'success', 'Restart llama-monitor to apply.');
+                await loadTlsConfig();
+            } catch (err) {
+                if (statusEl) statusEl.textContent = 'Renewal failed: ' + (err.message || 'Network error');
+                showToast('ACME renewal failed', 'error', err.message || 'Network error');
+            }
         });
     }
 }

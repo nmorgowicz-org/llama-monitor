@@ -1,5 +1,6 @@
 #![recursion_limit = "256"]
 
+mod acme;
 mod agent;
 mod certs;
 mod chat_storage;
@@ -318,10 +319,43 @@ fn main() -> Result<()> {
         });
     }
 
+    // ACME certificate renewal job (runs every 24 hours)
+    {
+        let state = state.clone();
+        let config_dir = app_config.config_dir.clone();
+        runtime.spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(86400)).await;
+
+                let cfg = state.get_tls_config();
+                if !crate::acme::should_renew(&cfg) {
+                    continue;
+                }
+
+                match crate::acme::acme_renew_cert(&config_dir, &cfg) {
+                    Ok(new_cfg) => {
+                        eprintln!("[info] ACME renewal succeeded");
+                        state.set_tls_config(new_cfg.clone());
+                        if let Err(e) = crate::config::save_tls_config(&config_dir, &new_cfg) {
+                            eprintln!(
+                                "[error] Failed to save tls-config.json after renewal: {}",
+                                e
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[warn] ACME renewal failed: {}", e);
+                    }
+                }
+            }
+        });
+    }
+
     // Warp server (HTTP or TLS depending on config)
     let tls_mode = tls_config.mode.clone();
     let tls_custom_cert = tls_config.custom_cert_path.clone();
     let tls_custom_key = tls_config.custom_key_path.clone();
+    let tls_acme = tls_config.acme.clone();
     let tls_config_dir = app_config.config_dir.clone();
     let tls_host = host.clone();
     let tls_port = port;
@@ -338,6 +372,101 @@ fn main() -> Result<()> {
                     tls_host, tls_port
                 );
                 warp::serve(routes).run(addr).await;
+            }
+            TlsMode::Acme => {
+                // If ACME mode but no cert yet, start HTTP and log.
+                if tls_acme.cert_path.is_none() || tls_acme.key_path.is_none() {
+                    eprintln!(
+                        "[info] ACME mode enabled but no certificate; start with TLS disabled \
+                        until ACME request completes."
+                    );
+                    warp::serve(routes).run(addr).await;
+                    return;
+                }
+
+                let cert_path = tls_acme.cert_path.clone().unwrap();
+                let key_path = tls_acme.key_path.clone().unwrap();
+
+                if !cert_path.exists() || !key_path.exists() {
+                    eprintln!(
+                        "[warn] ACME cert/key files not found; falling back to HTTP on http://{}:{}",
+                        tls_host, tls_port
+                    );
+                    warp::serve(routes).run(addr).await;
+                    return;
+                }
+
+                let tls_cfg = match build_tls_config(&cert_path, &key_path) {
+                    Ok(cfg) => cfg,
+                    Err(e) => {
+                        eprintln!("[error] Failed to load ACME TLS config: {}", e);
+                        eprintln!(
+                            "[warn] Falling back to HTTP on http://{}:{}",
+                            tls_host, tls_port
+                        );
+                        warp::serve(routes).run(addr).await;
+                        return;
+                    }
+                };
+
+                let tls_acceptor =
+                    tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(tls_cfg));
+
+                let listener = match tokio::net::TcpListener::bind(addr).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        eprintln!("[error] Failed to bind ACME TLS listener: {}", e);
+                        return;
+                    }
+                };
+
+                println!(
+                    "[info] Llama Monitor running on https://{}:{} (ACME - {})",
+                    tls_host,
+                    tls_port,
+                    if tls_acme.environment == "staging" {
+                        "staging"
+                    } else {
+                        "production"
+                    }
+                );
+
+                loop {
+                    let (stream, _) = match listener.accept().await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("[error] ACME TLS accept error: {}", e);
+                            continue;
+                        }
+                    };
+
+                    let acceptor = tls_acceptor.clone();
+                    let routes_clone = routes.clone();
+                    tokio::spawn(async move {
+                        let tls_stream = match acceptor.accept(stream).await {
+                            Ok(s) => s,
+                            Err(e) => {
+                                eprintln!("[error] ACME TLS handshake error: {}", e);
+                                return;
+                            }
+                        };
+
+                        let svc = warp::service(routes_clone);
+                        let svc = hyper_util::service::TowerToHyperService::new(svc);
+                        let io = hyper_util::rt::TokioIo::new(tls_stream);
+
+                        if let Err(e) =
+                            hyper_util::server::conn::auto::Builder::new(
+                                hyper_util::rt::TokioExecutor::new(),
+                            )
+                            .http1()
+                            .serve_connection_with_upgrades(io, svc)
+                            .await
+                        {
+                            eprintln!("[error] ACME TLS connection error: {}", e);
+                        }
+                    });
+                }
             }
             TlsMode::SelfSigned | TlsMode::Custom => {
                 // Determine cert and key paths

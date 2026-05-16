@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -11,7 +12,36 @@ pub enum TlsMode {
     None,
     SelfSigned,
     Custom,
-    // Acme reserved for Phase 2 (Let's Encrypt / lego)
+    Acme,
+}
+
+/// ACME-specific configuration (Let's Encrypt / lego).
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AcmeConfig {
+    pub enabled: bool,
+    pub fqdn: String,
+    pub environment: String,
+    pub dns_provider: String,
+    pub dns_config: HashMap<String, String>,
+    pub validation_delay: u64,
+    pub last_renewal: Option<String>,
+    pub cert_path: Option<PathBuf>,
+    pub key_path: Option<PathBuf>,
+}
+
+impl AcmeConfig {
+    pub fn is_valid(&self) -> bool {
+        self.enabled
+            && !self.fqdn.is_empty()
+            && (self.environment == "staging" || self.environment == "production")
+            && !self.dns_provider.is_empty()
+            && !self.dns_config.is_empty()
+    }
+
+    pub fn has_namecheap_creds(&self) -> bool {
+        self.dns_config.contains_key("username") && self.dns_config.contains_key("api_key")
+    }
 }
 
 /// TLS configuration persisted to tls-config.json.
@@ -21,6 +51,7 @@ pub struct TLSConfig {
     pub mode: TlsMode,
     pub custom_cert_path: Option<PathBuf>,
     pub custom_key_path: Option<PathBuf>,
+    pub acme: AcmeConfig,
 }
 
 impl Default for TLSConfig {
@@ -29,8 +60,19 @@ impl Default for TLSConfig {
             mode: TlsMode::None,
             custom_cert_path: None,
             custom_key_path: None,
+            acme: AcmeConfig::default(),
         }
     }
+}
+
+/// Sanitize a TLSConfig so that an Acme mode with missing/invalid fields
+/// falls back gracefully instead of panicking or blocking startup.
+pub fn sanitize_tls_config(cfg: TLSConfig) -> TLSConfig {
+    let mut cfg = cfg;
+    if cfg.mode == TlsMode::Acme && !cfg.acme.is_valid() {
+        cfg.mode = TlsMode::None;
+    }
+    cfg
 }
 
 /// Load TLSConfig from tls-config.json; on any error, return default.
@@ -47,7 +89,7 @@ pub fn load_tls_config(config_dir: &std::path::Path) -> TLSConfig {
         eprintln!("[warn] Invalid tls-config.json, using defaults");
         return TLSConfig::default();
     };
-    cfg
+    sanitize_tls_config(cfg)
 }
 
 /// Persist TLSConfig to tls-config.json (atomic write).

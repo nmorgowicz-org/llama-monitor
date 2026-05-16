@@ -21,7 +21,7 @@ impl std::error::Error for ApiError {}
 
 impl Reject for ApiError {}
 
-use crate::config::{AppConfig, TLSConfig, TlsMode};
+use crate::config::{AppConfig, TlsMode};
 use crate::gpu::env::{self as gpu_env, GPU_ARCHITECTURES, GpuEnv};
 
 #[cfg(target_os = "windows")]
@@ -1132,7 +1132,12 @@ pub fn api_routes(
     // TLS config routes
     let tls_get_config = api_get_tls_config(state.clone());
     let tls_put_config = api_put_tls_config(state.clone(), app_config.clone());
-    let tls_routes = tls_get_config.or(tls_put_config);
+    let tls_acme_request = api_tls_acme_request(state.clone(), app_config.clone());
+    let tls_acme_renew = api_tls_acme_renew(state.clone(), app_config.clone());
+    let tls_routes = tls_get_config
+        .or(tls_put_config)
+        .or(tls_acme_request)
+        .or(tls_acme_renew);
 
     let agent_routes = remote_agent_latest
         .or(remote_agent_detect)
@@ -4106,15 +4111,37 @@ fn api_get_tls_config(
         .and(warp::get())
         .map(move || {
             let cfg = state.get_tls_config();
-            // Return a sanitized view (no private keys; we don't store them inline anyway).
+
+            let mode_str = match cfg.mode {
+                TlsMode::None => "none",
+                TlsMode::SelfSigned => "self-signed",
+                TlsMode::Custom => "custom",
+                TlsMode::Acme => "acme",
+            };
+
+            // Build a safe ACME summary (no secrets).
+            let acme_summary: serde_json::Value = if matches!(cfg.mode, TlsMode::Acme) {
+                serde_json::json!({
+                    "enabled": cfg.acme.enabled,
+                    "fqdn": cfg.acme.fqdn,
+                    "environment": cfg.acme.environment,
+                    "dnsProvider": cfg.acme.dns_provider,
+                    "validationDelay": cfg.acme.validation_delay,
+                    "lastRenewal": cfg.acme.last_renewal,
+                    "certPath": cfg.acme.cert_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+                    "keyPath": cfg.acme.key_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+                })
+            } else {
+                serde_json::json!({
+                    "enabled": cfg.acme.enabled,
+                })
+            };
+
             warp::reply::json(&serde_json::json!({
-                "mode": match cfg.mode {
-                    TlsMode::None => "none",
-                    TlsMode::SelfSigned => "self-signed",
-                    TlsMode::Custom => "custom",
-                },
+                "mode": mode_str,
                 "customCertPath": cfg.custom_cert_path.as_ref().map(|p| p.to_string_lossy().to_string()),
                 "customKeyPath": cfg.custom_key_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+                "acme": acme_summary,
             }))
         })
 }
@@ -4178,6 +4205,7 @@ fn api_put_tls_config(
                         "none" => TlsMode::None,
                         "self-signed" => TlsMode::SelfSigned,
                         "custom" => TlsMode::Custom,
+                        "acme" => TlsMode::Acme,
                         _ => {
                             return Ok::<_, warp::Rejection>(warp::reply::with_status(
                                 warp::reply::json(&serde_json::json!({
@@ -4205,7 +4233,106 @@ fn api_put_tls_config(
                         }
                     }
 
-                    let new_cfg = TLSConfig {
+                    // Build ACME config from request (or keep existing if not acme mode)
+                    let existing = state.get_tls_config();
+                    let acme_cfg = if mode == TlsMode::Acme {
+                        // Read acme fields from body
+                        let acme_obj = body.get("acme").and_then(|v| v.as_object());
+
+                        let enabled = acme_obj
+                            .and_then(|o| o.get("enabled").and_then(|v| v.as_bool()))
+                            .unwrap_or(true);
+
+                        let fqdn = acme_obj
+                            .and_then(|o| o.get("fqdn").and_then(|v| v.as_str()))
+                            .unwrap_or("")
+                            .to_string();
+
+                        let environment = acme_obj
+                            .and_then(|o| o.get("environment").and_then(|v| v.as_str()))
+                            .unwrap_or("staging")
+                            .to_string();
+
+                        let dns_provider = acme_obj
+                            .and_then(|o| o.get("dnsProvider").and_then(|v| v.as_str()))
+                            .unwrap_or("")
+                            .to_string();
+
+                        let validation_delay = acme_obj
+                            .and_then(|o| o.get("validationDelay").and_then(|v| v.as_u64()))
+                            .unwrap_or(300);
+
+                        // Parse dnsConfig as a map
+                        let dns_config: HashMap<String, String> = acme_obj
+                            .and_then(|o| o.get("dnsConfig").and_then(|v| v.as_object()))
+                            .map(|map| {
+                                map.iter()
+                                    .filter_map(|(k, v)| {
+                                        v.as_str().map(|s| (k.clone(), s.to_string()))
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+
+                        // Validate ACME fields
+                        if fqdn.is_empty() {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "acme mode requires acme.fqdn"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+
+                        if environment != "staging" && environment != "production" {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "acme.environment must be 'staging' or 'production'"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+
+                        if dns_provider.is_empty() {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "acme mode requires acme.dnsProvider"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+
+                        if dns_config.is_empty() {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "acme mode requires acme.dnsConfig"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+
+                        crate::config::AcmeConfig {
+                            enabled,
+                            fqdn,
+                            environment,
+                            dns_provider,
+                            dns_config,
+                            validation_delay,
+                            last_renewal: existing.acme.last_renewal.clone(),
+                            cert_path: existing.acme.cert_path.clone(),
+                            key_path: existing.acme.key_path.clone(),
+                        }
+                    } else {
+                        // Non-acme mode: disable ACME fields but preserve existing cert paths
+                        // (they may still be valid) until mode changes.
+                        existing.acme
+                    };
+
+                    let new_cfg = crate::config::TLSConfig {
                         mode,
                         custom_cert_path: body
                             .get("customCertPath")
@@ -4215,6 +4342,7 @@ fn api_put_tls_config(
                             .get("customKeyPath")
                             .and_then(|v| v.as_str())
                             .map(PathBuf::from),
+                        acme: acme_cfg,
                     };
 
                     // Update in-memory state
@@ -4237,6 +4365,176 @@ fn api_put_tls_config(
                 }
             },
         )
+}
+
+/// POST /api/tls/acme/request — trigger ACME certificate request (requires api-token).
+fn api_tls_acme_request(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "tls" / "acme" / "request")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("Authorization"))
+        .and_then(move |auth_header: Option<String>| {
+            let state = state.clone();
+            let app_config = app_config.clone();
+            async move {
+                // Auth check
+                let expected = match &app_config.api_token {
+                    Some(t) => t,
+                    None => {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "API token not configured"
+                            })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
+                };
+
+                let token = match auth_header.as_ref().and_then(|h| h.strip_prefix("Bearer ")) {
+                    Some(t) => t.trim(),
+                    None => {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Missing or invalid Authorization header"
+                            })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
+                };
+
+                if token != expected {
+                    return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Invalid API token"
+                        })),
+                        warp::http::StatusCode::UNAUTHORIZED,
+                    ));
+                }
+
+                let cfg = state.get_tls_config();
+                let config_dir = app_config.config_dir.clone();
+
+                match crate::acme::acme_request_cert(&config_dir, &cfg) {
+                    Ok(new_cfg) => {
+                        eprintln!("[info] ACME certificate request succeeded");
+                        state.set_tls_config(new_cfg.clone());
+                        if let Err(e) = crate::config::save_tls_config(&config_dir, &new_cfg) {
+                            eprintln!(
+                                "[error] Failed to save tls-config.json after ACME request: {}",
+                                e
+                            );
+                        }
+                        Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": true,
+                                "requires_restart": true
+                            })),
+                            warp::http::StatusCode::OK,
+                        ))
+                    }
+                    Err(e) => {
+                        eprintln!("[error] ACME certificate request failed: {}", e);
+                        Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": e
+                            })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ))
+                    }
+                }
+            }
+        })
+}
+
+/// POST /api/tls/acme/renew — trigger ACME certificate renewal (requires api-token).
+fn api_tls_acme_renew(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "tls" / "acme" / "renew")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("Authorization"))
+        .and_then(move |auth_header: Option<String>| {
+            let state = state.clone();
+            let app_config = app_config.clone();
+            async move {
+                // Auth check
+                let expected = match &app_config.api_token {
+                    Some(t) => t,
+                    None => {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "API token not configured"
+                            })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
+                };
+
+                let token = match auth_header.as_ref().and_then(|h| h.strip_prefix("Bearer ")) {
+                    Some(t) => t.trim(),
+                    None => {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Missing or invalid Authorization header"
+                            })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
+                };
+
+                if token != expected {
+                    return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Invalid API token"
+                        })),
+                        warp::http::StatusCode::UNAUTHORIZED,
+                    ));
+                }
+
+                let cfg = state.get_tls_config();
+                let config_dir = app_config.config_dir.clone();
+
+                match crate::acme::acme_renew_cert(&config_dir, &cfg) {
+                    Ok(new_cfg) => {
+                        eprintln!("[info] ACME renewal succeeded (manual)");
+                        state.set_tls_config(new_cfg.clone());
+                        if let Err(e) = crate::config::save_tls_config(&config_dir, &new_cfg) {
+                            eprintln!(
+                                "[error] Failed to save tls-config.json after ACME renewal: {}",
+                                e
+                            );
+                        }
+                        Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": true,
+                                "requires_restart": true
+                            })),
+                            warp::http::StatusCode::OK,
+                        ))
+                    }
+                    Err(e) => {
+                        eprintln!("[error] ACME renewal failed: {}", e);
+                        Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": e
+                            })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ))
+                    }
+                }
+            }
+        })
 }
 
 fn api_self_update() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone

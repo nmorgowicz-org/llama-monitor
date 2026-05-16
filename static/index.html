@@ -2510,6 +2510,72 @@
                         <button type="button" class="btn btn-secondary" id="btn-generate-self-signed">Generate self-signed certificate</button>
                     </div>
 
+                    <!-- Let's Encrypt (ACME) -->
+                    <div class="modal-section" style="margin-bottom:14px;">
+                        <h4>Let's Encrypt (ACME) – automated certificates</h4>
+                        <p class="settings-help">
+                            Use Staging first to test your DNS/API setup without hitting rate limits.
+                        </p>
+
+                        <label class="modal-field">
+                            Domain (FQDN)
+                            <input type="text" id="acme-fqdn" placeholder="llama-monitor.example.com">
+                        </label>
+
+                        <label class="modal-field">
+                            DNS provider
+                            <select id="acme-dns-provider">
+                                <option value="namecheap">Namecheap</option>
+                            </select>
+                        </label>
+
+                        <div style="margin-bottom:8px;">
+                            <span style="font-size:12px;color:var(--text-muted);">Environment</span>
+                            <div style="display:flex;gap:16px;margin-top:4px;">
+                                <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;">
+                                    <input type="radio" name="acme-env" id="acme-env-staging" value="staging" checked>
+                                    Staging (test)
+                                </label>
+                                <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;">
+                                    <input type="radio" name="acme-env" id="acme-env-production" value="production">
+                                    Production (real)
+                                </label>
+                            </div>
+                        </div>
+
+                        <label class="modal-field">
+                            Validation delay (seconds)
+                            <input type="number" id="acme-validation-delay" value="300" min="60" max="1800" step="10">
+                        </label>
+                        <p class="settings-help">Time to wait for DNS propagation before validation.</p>
+
+                        <div id="acme-nc-fields" style="margin-top:6px;padding-top:8px;border-top:1px solid var(--border-subtle);">
+                            <p style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">Namecheap credentials</p>
+
+                            <label class="modal-field">
+                                Username
+                                <input type="text" id="acme-nc-username" placeholder="Your Namecheap username">
+                            </label>
+
+                            <label class="modal-field">
+                                API Key
+                                <input type="password" id="acme-nc-api-key" placeholder="Namecheap API key">
+                            </label>
+
+                            <label class="modal-field">
+                                Source IP (optional)
+                                <input type="text" id="acme-nc-source-ip" placeholder="Leave blank if unsure">
+                            </label>
+                        </div>
+
+                        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+                            <button type="button" class="btn btn-primary" id="acme-request-cert">Request certificate</button>
+                            <button type="button" class="btn btn-secondary" id="acme-renew-cert">Renew now</button>
+                        </div>
+
+                        <div id="acme-status-text" style="font-size:12px;color:var(--text-muted);margin-top:6px;"></div>
+                    </div>
+
                     <!-- Custom certificate -->
                     <div class="modal-section" style="margin-bottom:14px;">
                         <h4>Use your own certificate</h4>
