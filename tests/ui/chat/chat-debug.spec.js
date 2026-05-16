@@ -16,6 +16,9 @@ test.describe('debug prompt inspector', () => {
   });
 
   test('shows empty state before any send', async ({ page }) => {
+    // Open the Tools dropdown, then click Prompt Debug
+    await page.locator('#btn-debug-dropdown').click();
+    await page.waitForSelector('#debug-dropdown-menu', { state: 'visible' });
     await page.locator('#btn-debug-prompt').click();
 
     await expect(page.locator('#debug-prompt-modal')).toHaveClass(/debug-modal-overlay/);
@@ -57,7 +60,9 @@ test.describe('debug prompt inspector', () => {
     await page.click('#btn-send');
     await page.waitForSelector('#chat-messages .chat-message-user', { timeout: 5000 });
 
-    // Open debug prompt
+    // Open the Tools dropdown, then click Prompt Debug
+    await page.locator('#btn-debug-dropdown').click();
+    await page.waitForSelector('#debug-dropdown-menu', { state: 'visible' });
     await page.locator('#btn-debug-prompt').click();
 
     // Content should be visible and empty state hidden

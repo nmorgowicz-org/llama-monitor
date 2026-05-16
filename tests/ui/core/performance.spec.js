@@ -28,8 +28,8 @@ test.describe('performance baseline', () => {
     console.log('JS files loaded:');
     jsRequests.forEach(r => console.log(`  ${r.url}`));
 
-    // Assertions to track regression (baseline updated: 34 JS, added chat-notes, chat-suggestions, chat-quick-guide, etc.)
-    expect(jsRequests.length).toBeLessThanOrEqual(34);
+    // Assertions to track regression (baseline updated: 37 JS, added updates, etc.)
+    expect(jsRequests.length).toBeLessThanOrEqual(37);
     expect(modulesReadyTime).toBeLessThan(5000); // should be under 5s locally
   });
 

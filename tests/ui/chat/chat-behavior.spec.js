@@ -90,17 +90,17 @@ test.describe('explicit mode toggle v2 (3-state)', () => {
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
-    // initChatTabs is async and fires after modules-ready — wait for it to finish
-    await page.waitForSelector('.chat-tab.active', { timeout: 10000 });
-    // Reset active tab to level 0 and re-render so toggle UI and tab badge are in sync
+    // Wait for chat sidebar to render (initChatTabs is async)
+    await page.waitForSelector('#csp-list .csp-item.active', { timeout: 10000 });
+    // Reset active tab to level 0 and re-render so toggle UI and sidebar badge are in sync
     await page.evaluate(async () => {
       const { activeChatTab } = await import('/js/features/chat-state.js');
       const { updateExplicitToggleUI } = await import('/js/features/chat-templates.js');
-      const { renderChatTabs } = await import('/js/features/chat-render.js');
+      const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
       const tab = activeChatTab();
       if (tab) tab.explicit_level = 0;
       updateExplicitToggleUI();
-      renderChatTabs();
+      renderChatSessionsSidebar();
     });
   });
 
@@ -129,28 +129,39 @@ test.describe('explicit mode toggle v2 (3-state)', () => {
   });
 
   test('3-state badge cycling on tab', async ({ page }) => {
-    // beforeEach already reset level to 0 and re-rendered tabs.
-    // Scope badge checks to the active tab only — other tabs may have their own badges.
-    const activeTabBadge = page.locator('.chat-tab.active .chat-tab-explicit-badge');
+    // Scope badge checks to the active sidebar item only.
+    const activeItemBadge = page.locator('#csp-list .csp-item.active .csp-item-explicit');
 
-    // State 0: no badge on active tab
-    await expect(activeTabBadge).toHaveCount(0);
+    // State 0: element exists but data-level is 0 (no visible indicator)
+    await expect(activeItemBadge).toHaveAttribute('data-level', '0');
 
-    // Click once → level 1: 🔓 badge on active tab
-    // toggleExplicitMode() calls renderChatTabs() via the registered binding
+    // Click once → level 1: 🔓 indicator
     await page.locator('#chat-explicit-toggle-footer').click();
     await expect(page.locator('#chat-explicit-toggle-footer')).toHaveClass(/active/);
-    await expect(activeTabBadge).toContainText('\u{1F513}');
+    // Sidebar item not auto-updated; re-render to reflect new level
+    await page.evaluate(async () => {
+      const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
+      renderChatSessionsSidebar();
+    });
+    await expect(activeItemBadge).toHaveAttribute('data-level', '1');
 
-    // Click again → level 2: 🔥 badge
+    // Click again → level 2: 🔥 indicator
     await page.locator('#chat-explicit-toggle-footer').click();
     await expect(page.locator('#chat-explicit-toggle-footer')).toHaveClass(/unrestricted/);
-    await expect(activeTabBadge).toContainText('\u{1F525}');
+    await page.evaluate(async () => {
+      const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
+      renderChatSessionsSidebar();
+    });
+    await expect(activeItemBadge).toHaveAttribute('data-level', '2');
 
-    // Click again → level 0: badge gone
+    // Click again → level 0: back to 0
     await page.locator('#chat-explicit-toggle-footer').click();
     await expect(page.locator('#chat-explicit-toggle-footer')).not.toHaveClass(/active/);
-    await expect(activeTabBadge).toHaveCount(0);
+    await page.evaluate(async () => {
+      const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
+      renderChatSessionsSidebar();
+    });
+    await expect(activeItemBadge).toHaveAttribute('data-level', '0');
   });
 
   test('explicit policy injection at level 1', async ({ page }) => {

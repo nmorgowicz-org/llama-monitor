@@ -197,7 +197,7 @@ test.describe('context compaction', () => {
     });
 
     // Create a new tab and switch to it
-    await page.locator('.chat-tab-add').click();
+    await page.locator('#csp-new-btn').click();
 
     // New tab should have auto-compact on by default
     const newTabAutoCompact2 = await page.evaluate(async () => {

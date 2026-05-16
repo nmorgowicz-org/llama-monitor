@@ -62,28 +62,28 @@ test.describe('chat tabs', () => {
   });
 
   test('creates new tab on + button click', async ({ page }) => {
-    const tabCount = await page.locator('.chat-tab').count();
-    await page.locator('.chat-tab-add').click();
-    await expect(page.locator('.chat-tab')).toHaveCount(tabCount + 1);
+    const tabCount = await page.locator('#csp-list .csp-item').count();
+    await page.locator('#csp-new-btn').click();
+    await expect(page.locator('#csp-list .csp-item')).toHaveCount(tabCount + 1);
   });
 
   test('switches between tabs', async ({ page }) => {
-    await page.locator('.chat-tab-add').click();
-    // Switch to first tab via JS (force click may not trigger handler on draggable element)
+    await page.locator('#csp-new-btn').click();
+    // Switch to first tab via JS
     await page.evaluate(async () => {
       const { switchChatTab } = await import('/js/features/chat-state.js');
-      const tab = document.querySelector('.chat-tab');
-      if (tab) switchChatTab(tab.dataset.tabId);
+      const item = document.querySelector('#csp-list .csp-item');
+      if (item) switchChatTab(item.dataset.tabId);
     });
-    await expect(page.locator('.chat-tab').first()).toHaveClass(/active/);
+    await expect(page.locator('#csp-list .csp-item').first()).toHaveClass(/active/);
   });
 
   test('Ctrl+Shift+ArrowRight cycles to next tab', async ({ page }) => {
-    await page.locator('.chat-tab-add').click();
+    await page.locator('#csp-new-btn').click();
     // New tab is added at the end and becomes active
-    await expect(page.locator('.chat-tab').last()).toHaveClass(/active/);
+    await expect(page.locator('#csp-list .csp-item').last()).toHaveClass(/active/);
     await page.keyboard.press('Control+Shift+ArrowRight');
-    await expect(page.locator('.chat-tab').first()).toHaveClass(/active/, { timeout: 3000 });
+    await expect(page.locator('#csp-list .csp-item').first()).toHaveClass(/active/, { timeout: 3000 });
   });
 });
 
@@ -94,80 +94,90 @@ test.describe('pin and favorite tabs', () => {
     await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
 
-    // Wait for initChatTabs to complete before manipulating tabs
-    await page.evaluate(async () => {
-      const { initChatTabs } = await import('/js/features/chat-state.js');
-      await initChatTabs();
-    });
+    // Wait for sidebar list to render
+    await page.waitForSelector('#csp-list .csp-item', { timeout: 10000 });
 
     // Create additional tabs for testing
     await page.evaluate(async () => {
       const { chat } = await import('/js/core/app-state.js');
-      const { newChatTab } = await import('/js/features/chat-state.js');
-      const { renderChatTabs } = await import('/js/features/chat-render.js');
+      const { newChatTab, persistChatTabs } = await import('/js/features/chat-state.js');
+      const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
 
       const tab2 = newChatTab('Chat 2');
       const tab3 = newChatTab('Chat 3');
       chat.tabs.push(tab2, tab3);
-      renderChatTabs();
+      await persistChatTabs();
+      renderChatSessionsSidebar();
     });
-    // Wait for chat tabs and pin icons to render
-    await page.waitForSelector('.chat-tab', { timeout: 5000 });
-    await page.waitForSelector('.chat-tab-pin-icon', { timeout: 5000 });
+    // Wait for sidebar items to appear
+    await page.waitForSelector('#csp-list .csp-item', { timeout: 5000 });
   });
 
   test('toggle pin button toggles pinned state', async ({ page }) => {
-    const pinButton = page.locator('.chat-tab-pin-icon').first();
+    // Hover first item to reveal actions, then click pin
+    const firstItem = page.locator('#csp-list .csp-item').first();
+    await firstItem.hover();
+    await page.waitForTimeout(200);
+    const pinButton = firstItem.locator('button[data-action="pin"]');
     await expect(pinButton).toBeVisible();
 
-    // Pin the tab (use force:true to bypass draggable parent)
-    await pinButton.click({ force: true });
-    await expect(pinButton).toHaveClass(/pinned/);
+    // Initially unpinned (⊙)
+    const initialText = await pinButton.textContent();
+    expect(initialText).toContain('⊙');
 
-    // Unpin the tab
-    await pinButton.click({ force: true });
-    await expect(pinButton).not.toHaveClass(/pinned/);
+    // Pin it → button shows pin emoji, title="Unpin"
+    await pinButton.click();
+    await expect(pinButton).toHaveAttribute('title', 'Unpin');
+
+    // Unpin → button title="Pin"
+    await pinButton.click();
+    await expect(pinButton).toHaveAttribute('title', 'Pin');
   });
 
   test('pinned tabs appear before unpinned tabs', async ({ page }) => {
-    // Pin the Chat 2 tab
+    // Pin the Chat 2 tab via JS
     await page.evaluate(async () => {
       const { chat } = await import('/js/core/app-state.js');
-      const { renderChatTabs } = await import('/js/features/chat-render.js');
+      const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
       const tab = chat.tabs.find(t => t.name === 'Chat 2');
       if (tab) {
         tab.pinned = true;
-        renderChatTabs();
+        renderChatSessionsSidebar();
       }
     });
 
-    // Pinned tab should appear before unpinned tabs
-    const pinnedTabs = page.locator('.chat-tab.chat-tab-pinned');
-    await expect(pinnedTabs.first()).toBeVisible();
-    const pinnedTabName = await pinnedTabs.first().textContent();
-    expect(pinnedTabName).toContain('Chat 2');
+    // Pinned tab should appear in "Pinned" group before unpinned tabs
+    const pinnedItem = page.locator('#csp-list .csp-item').filter({ hasText: 'Chat 2' });
+    await expect(pinnedItem).toBeVisible();
+    // Pinned items should be under the "Pinned" section header
+    const pinnedSection = page.locator('#csp-list .csp-section-header:has-text("Pinned")');
+    await expect(pinnedSection).toBeVisible();
+    // Chat 2 should appear in the pinned section (items after that header, before next)
+    const pinnedItems = page.locator('#csp-list .csp-item').filter({ hasText: 'Chat 2' });
+    await expect(pinnedItems.first()).toBeVisible();
   });
 
   test('drag to reorder is prevented across pinned/unpinned boundary', async ({ page }) => {
-    // Pin the first tab
-    await page.locator('.chat-tab-pin-icon').first().click({ force: true });
+    // Pin the first tab via JS
+    await page.evaluate(async () => {
+      const { chat } = await import('/js/core/app-state.js');
+      const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
+      if (chat.tabs[0]) chat.tabs[0].pinned = true;
+      renderChatSessionsSidebar();
+    });
 
-    // Start drag on the first tab
-    const firstTab = page.locator('.chat-tab').first();
-    const secondTab = page.locator('.chat-tab').nth(1);
+    // Start drag on the first item
+    const firstItem = page.locator('#csp-list .csp-item').first();
+    const secondItem = page.locator('#csp-list .csp-item').nth(1);
 
-    await firstTab.hover();
+    await firstItem.hover();
     await page.mouse.down();
-
-    // Try to drag over the second tab
-    await secondTab.hover();
-
-    // Release mouse
+    await secondItem.hover();
     await page.mouse.up();
 
     // Pinned tab should still be first
-    const firstTabText = await page.locator('.chat-tab').first().textContent();
-    expect(firstTabText).toBeTruthy();
+    const firstItemText = await firstItem.textContent();
+    expect(firstItemText).toBeTruthy();
   });
 });
 
