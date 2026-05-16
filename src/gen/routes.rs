@@ -7,7 +7,8 @@ use super::static_assets;
 use warp::Filter;
 
 /// Returns a warp Filter that serves all static assets.
-pub fn static_routes() -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+pub fn static_routes()
+-> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     // Helper: serve static JS with no-cache (force browser to reload on every request)
     fn js_reply(content: &'static str) -> impl warp::Reply {
         warp::reply::with_header(
@@ -354,5 +355,40 @@ pub fn static_routes() -> impl warp::Filter<Extract = (impl warp::Reply,), Error
         .map(|| js_reply(static_assets::SW_JS));
 
     // Chain all routes using balanced tree structure
-    route_0 .or(route_1) .or(route_2 .or(route_3)) .or(route_4 .or(route_5) .or(route_6 .or(route_7))) .or(route_8 .or(route_9) .or(route_10 .or(route_11)) .or(route_12 .or(route_13) .or(route_14 .or(route_15)))) .or(route_16 .or(route_17) .or(route_18 .or(route_19)) .or(route_20 .or(route_21) .or(route_22 .or(route_23))) .or(route_24 .or(route_25) .or(route_26 .or(route_27)) .or(route_28 .or(route_29) .or(route_30 .or(route_31))))) .or(route_32 .or(route_33) .or(route_34 .or(route_35)) .or(route_36 .or(route_37) .or(route_38 .or(route_39))) .or(route_40 .or(route_41) .or(route_42 .or(route_43)) .or(route_44 .or(route_45) .or(route_46 .or(route_47)))) .or(route_48 .or(route_49) .or(route_50 .or(route_51)) .or(route_52 .or(route_53) .or(route_54 .or(route_55))) .or(route_56 .or(route_57) .or(route_58 .or(route_59)) .or(route_60 .or(route_61) .or(route_62 .or(route_63)))))) .or(route_64 .or(route_65) .or(route_66 .or(route_67)) .or(route_68 .or(route_69)))
+    route_0
+        .or(route_1)
+        .or(route_2.or(route_3))
+        .or(route_4.or(route_5).or(route_6.or(route_7)))
+        .or(route_8
+            .or(route_9)
+            .or(route_10.or(route_11))
+            .or(route_12.or(route_13).or(route_14.or(route_15))))
+        .or(route_16
+            .or(route_17)
+            .or(route_18.or(route_19))
+            .or(route_20.or(route_21).or(route_22.or(route_23)))
+            .or(route_24
+                .or(route_25)
+                .or(route_26.or(route_27))
+                .or(route_28.or(route_29).or(route_30.or(route_31)))))
+        .or(route_32
+            .or(route_33)
+            .or(route_34.or(route_35))
+            .or(route_36.or(route_37).or(route_38.or(route_39)))
+            .or(route_40
+                .or(route_41)
+                .or(route_42.or(route_43))
+                .or(route_44.or(route_45).or(route_46.or(route_47))))
+            .or(route_48
+                .or(route_49)
+                .or(route_50.or(route_51))
+                .or(route_52.or(route_53).or(route_54.or(route_55)))
+                .or(route_56
+                    .or(route_57)
+                    .or(route_58.or(route_59))
+                    .or(route_60.or(route_61).or(route_62.or(route_63))))))
+        .or(route_64
+            .or(route_65)
+            .or(route_66.or(route_67))
+            .or(route_68.or(route_69)))
 }

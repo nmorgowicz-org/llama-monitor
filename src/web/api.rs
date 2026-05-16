@@ -3232,7 +3232,7 @@ fn api_db_query(
                 Ok(result) => Ok::<_, warp::Rejection>(warp::reply::json(&result)),
                 Err(e) => {
                     eprintln!("query error: {e}");
-                    Ok(warp::reply::json(
+                    Ok::<_, warp::Rejection>(warp::reply::json(
                         &serde_json::json!({"error": e.to_string()}),
                     ))
                 }

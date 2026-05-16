@@ -655,20 +655,69 @@ impl ChatStorage {
             .map_err(Into::into)
     }
 
-    /// Execute arbitrary SQL query (admin only)
+    /// Execute arbitrary SQL query (admin only, restricted to safe operations)
     pub fn execute_query(&self, sql: &str) -> Result<serde_json::Value> {
         let conn = self.conn.lock().unwrap();
 
-        // Safety: only allow SELECT and PRAGMA queries
-        let trimmed = sql.trim().to_uppercase();
-        if !trimmed.starts_with("SELECT") && !trimmed.starts_with("PRAGMA") {
+        // Normalize for checks
+        let trimmed = sql.trim();
+        let upper = trimmed.to_uppercase();
+
+        // Blocklist: disallow dangerous operations
+        let dangerous_keywords = [
+            "ATTACH DATABASE",
+            "DETACH DATABASE",
+            "LOAD_EXTENSION",
+            "CREATE TABLE",
+            "DROP TABLE",
+            "ALTER TABLE",
+            "CREATE INDEX",
+            "DROP INDEX",
+            "CREATE TRIGGER",
+            "DROP TRIGGER",
+            "CREATE VIEW",
+            "DROP VIEW",
+            "INSERT INTO",
+            "UPDATE ",
+            "DELETE FROM",
+            "REPLACE INTO",
+            "BEGIN ",
+            "COMMIT",
+            "ROLLBACK",
+            "PRAGMA journal_mode",
+            "PRAGMA synchronous",
+            "PRAGMA foreign_keys",
+            "PRAGMA encoding",
+            "PRAGMA page_size",
+            "PRAGMA cache_size",
+            "PRAGMA temp_store",
+            "PRAGMA mmap_size",
+            "PRAGMA locking_mode",
+            "PRAGMA wal_checkpoint(PASSIVE)",
+            "PRAGMA wal_checkpoint(FULL)",
+            "PRAGMA wal_checkpoint(TRUNCATE)",
+            "PRAGMA wal_checkpoint(PASSIVE)",
+            "PRAGMA wal_checkpoint(FULL)",
+            "PRAGMA wal_checkpoint(TRUNCATE)",
+        ];
+
+        if dangerous_keywords.iter().any(|k| upper.contains(k)) {
+            return Err(anyhow::anyhow!("Query contains a disallowed operation"));
+        }
+
+        // Allowlist: only allow SELECT, PRAGMA, VACUUM, ANALYZE
+        if !upper.starts_with("SELECT")
+            && !upper.starts_with("PRAGMA")
+            && !upper.starts_with("VACUUM")
+            && !upper.starts_with("ANALYZE")
+        {
             return Err(anyhow::anyhow!(
-                "Only SELECT and PRAGMA queries are allowed"
+                "Only SELECT, PRAGMA, VACUUM, and ANALYZE queries are allowed"
             ));
         }
 
         // Try to execute as a query that returns multiple rows
-        let mut stmt = conn.prepare(sql)?;
+        let mut stmt = conn.prepare(trimmed)?;
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
 
         let cols: Vec<String> = column_names.clone();
