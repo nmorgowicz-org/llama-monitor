@@ -53,11 +53,13 @@ test.describe('debug prompt inspector', () => {
     });
 
     // Send a message
+    const sendBtn = page.locator('#btn-send');
+    await sendBtn.waitFor({ state: 'visible', timeout: 5000 });
     await page.$eval('#chat-input', (el, text) => {
       el.value = text;
       el.dispatchEvent(new Event('input', { bubbles: true }));
     }, 'test');
-    await page.click('#btn-send');
+    await sendBtn.click();
     await page.waitForSelector('#chat-messages .chat-message-user', { timeout: 5000 });
 
     // Open the Tools dropdown, then click Prompt Debug

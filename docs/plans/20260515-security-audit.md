@@ -182,6 +182,7 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
 
 ### 5. Potential XSS via Markdown Rendering and DOM Insertion
 
+- Status: MITIGATED
 - Files:
   - static/js/features/chat-render.js
   - static/index.html
@@ -200,11 +201,20 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
     - Perform actions as the user.
 - Likelihood:
   - Medium-high: depends on exact usage of DOMPurify across all render paths.
-- Fix:
-  - Ensure:
-    - All markdown-rendered HTML is sanitized with DOMPurify.sanitize().
-    - No raw innerHTML from untrusted content.
-    - Streaming content is sanitized before insertion.
+- Mitigation Applied:
+  - Updated renderMd and renderMdStreaming to:
+    - Call marked.parse() as before.
+    - Then wrap the result in DOMPurify.sanitize() before returning.
+  - This centralizes sanitization:
+    - All chat messages (normal and streaming).
+    - Compaction summaries.
+    - Release notes.
+    - Compaction preview.
+    - Edit/save flows.
+- Remaining Risk:
+  - Low:
+    - DOMPurify is now consistently used for all marked-rendered content.
+    - Any future code that uses marked must continue to use renderMd/renderMdStreaming (or apply DOMPurify) to stay safe.
 
 ### 6. Basic Auth Weaknesses and Lack of TLS Enforcement
 
