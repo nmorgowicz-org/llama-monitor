@@ -52,6 +52,90 @@ fn shell_quote_path_cmd(path: &str) -> String {
     format!("\"{}\"", path.replace('"', "\"^\""))
 }
 
+/// Validates a user-supplied shell command for remote-agent autostart/start.
+///
+/// Enforces a strict allowlist:
+/// - Must start with a plausible llama-monitor binary path.
+/// - Only known, safe flags are permitted.
+/// - No shell metacharacters or arbitrary tokens.
+///
+/// This prevents command injection when the command is sent to
+/// `remote_ssh::exec` (which runs via `channel.exec()` on the remote shell).
+pub(crate) fn validate_remote_command(cmd: &str) -> bool {
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Shell metacharacters that could be used to chain or inject commands.
+    // Note: spaces are allowed (for flags), but these are not.
+    let dangerous = ";|&$`(){}[]!#<>?*~\n\r\\";
+    if trimmed.chars().any(|c| dangerous.contains(c)) {
+        return false;
+    }
+
+    // Split into tokens by spaces; enforce structure.
+    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+    if tokens.is_empty() {
+        return false;
+    }
+
+    // First token must be a plausible llama-monitor binary path.
+    let first = tokens[0];
+    let stem = first
+        .split('/')
+        .next_back()
+        .unwrap_or(first)
+        .split('\\')
+        .next_back()
+        .unwrap_or(first);
+    if !(stem == "llama-monitor" || stem == "llama-monitor.exe") {
+        return false;
+    }
+
+    // Allowed flags (prefix-based) and whether they take an argument.
+    let allowed_flags = [
+        "--agent",
+        "--agent-host",
+        "--agent-port",
+        "--models-dir",
+        "--version",
+        "--help",
+    ];
+
+    let mut i = 1usize;
+    while i < tokens.len() {
+        let tok = tokens[i];
+        if tok.starts_with("--") {
+            if allowed_flags.iter().any(|f| tok.starts_with(f)) {
+                // Flags that take a value are allowed if followed by a simple value token.
+                if ["--agent-host", "--agent-port", "--models-dir"]
+                    .iter()
+                    .any(|f| tok.starts_with(f))
+                {
+                    i += 1;
+                    if i >= tokens.len() {
+                        return false;
+                    }
+                    // Value token must be simple (no shell chars)
+                    if tokens[i].chars().any(|c| dangerous.contains(c)) {
+                        return false;
+                    }
+                }
+                i += 1;
+            } else {
+                // Unknown flag → reject.
+                return false;
+            }
+        } else {
+            // Positional / unknown token → reject.
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Validates an install path to ensure it does not contain shell metacharacters
 /// or target suspicious directories.
 ///
@@ -877,8 +961,13 @@ async fn maybe_autostart_remote_agent(
     ]) {
         if remote_os == RemoteOs::Windows && command.contains('~') {
             default_command
-        } else {
+        } else if validate_remote_command(&command) {
             command
+        } else {
+            eprintln!(
+                "[agent] Autostart: remote_agent_ssh_command failed validation; using default command"
+            );
+            default_command
         }
     } else {
         default_command

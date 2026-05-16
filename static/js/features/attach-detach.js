@@ -136,7 +136,9 @@ export async function doAttach() {
 
     const resp = await fetch('/api/attach', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: (typeof window.authHeaders === 'function')
+            ? window.authHeaders({ 'Content-Type': 'application/json' })
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify({ endpoint }),
     });
     const data = await resp.json();

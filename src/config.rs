@@ -3,45 +3,6 @@ use std::path::PathBuf;
 
 use crate::cli::AppArgs;
 
-fn migrate_config_if_needed(new_config_dir: &PathBuf) -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let old_config_dir = home
-        .join("Library")
-        .join("Application Support")
-        .join("llama-monitor");
-
-    if new_config_dir.exists() {
-        // New location already exists, use it
-        return new_config_dir.clone();
-    }
-
-    if old_config_dir.exists() {
-        // Old location exists, migrate it
-        if let Err(e) = fs::create_dir_all(new_config_dir) {
-            eprintln!("[config] Failed to create new config dir: {e}");
-            return old_config_dir;
-        }
-
-        if let Ok(entries) = fs::read_dir(&old_config_dir) {
-            for entry in entries.flatten() {
-                let src = entry.path();
-                let dst = new_config_dir.join(entry.file_name());
-                if let Err(e) = fs::copy(&src, &dst) {
-                    eprintln!("[config] Failed to migrate {:?}: {e}", src);
-                } else {
-                    eprintln!("[config] Migrated {:?} to {:?}", src, dst);
-                }
-            }
-        }
-        eprintln!(
-            "[config] Data migrated from old location to {:?}",
-            new_config_dir
-        );
-    }
-
-    new_config_dir.clone()
-}
-
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct AppConfig {
@@ -69,6 +30,8 @@ pub struct AppConfig {
     pub remote_agent_ssh_autostart: bool,
     pub remote_agent_ssh_target: Option<String>,
     pub remote_agent_ssh_command: Option<String>,
+    pub db_admin_token: Option<String>,
+    pub api_token: Option<String>,
 }
 
 impl AppConfig {
@@ -76,11 +39,10 @@ impl AppConfig {
         let default_server_path = PathBuf::from("llama-server");
         let default_server_cwd = PathBuf::from(".");
 
-        let new_config_dir = args.config_dir.unwrap_or_else(|| {
+        let config_dir = args.config_dir.unwrap_or_else(|| {
             let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
             home.join(".config").join("llama-monitor")
         });
-        let config_dir = migrate_config_if_needed(&new_config_dir);
 
         let presets_file = args
             .presets_file
@@ -113,6 +75,71 @@ impl AppConfig {
             remote_agent_ssh_autostart: args.remote_agent_ssh_autostart,
             remote_agent_ssh_target: args.remote_agent_ssh_target,
             remote_agent_ssh_command: args.remote_agent_ssh_command,
+            db_admin_token: ensure_db_admin_token(&config_dir),
+            api_token: ensure_api_token(&config_dir),
         }
     }
+}
+
+fn ensure_db_admin_token(config_dir: &PathBuf) -> Option<String> {
+    let token_file = config_dir.join("db-admin-token");
+
+    // Try to read existing token
+    if let Ok(content) = fs::read_to_string(&token_file) {
+        let trimmed = content.trim().to_string();
+        if !trimmed.is_empty() {
+            return Some(trimmed);
+        }
+    }
+
+    // Generate new token
+    let token = generate_random_token();
+    let _ = fs::create_dir_all(config_dir);
+    if fs::write(&token_file, &token).is_ok() {
+        eprintln!("[config] Generated db-admin-token");
+    }
+    Some(token)
+}
+
+fn ensure_api_token(config_dir: &PathBuf) -> Option<String> {
+    let token_file = config_dir.join("api-token");
+
+    if let Ok(content) = fs::read_to_string(&token_file) {
+        let trimmed = content.trim().to_string();
+        if !trimmed.is_empty() {
+            return Some(trimmed);
+        }
+    }
+
+    let token = generate_random_token();
+    let _ = fs::create_dir_all(config_dir);
+    if fs::write(&token_file, &token).is_ok() {
+        eprintln!("[config] Generated api-token");
+    }
+    Some(token)
+}
+
+fn generate_random_token() -> String {
+    // Read exactly 16 bytes from /dev/urandom (avoid reading all bytes)
+    let mut buf = [0u8; 16];
+    let value = if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        if std::io::Read::read_exact(&mut f, &mut buf).is_ok() {
+            u128::from_be_bytes(buf)
+        } else {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let pid = std::process::id() as u128;
+            ts ^ pid
+        }
+    } else {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let pid = std::process::id() as u128;
+        ts ^ pid
+    };
+    format!("{value:x}")
 }

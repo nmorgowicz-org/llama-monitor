@@ -21,24 +21,23 @@ pub fn build_routes(
     let api = api::api_routes(state, app_config.clone());
     let static_files = static_routes();
     let compact = compact_route(app_config);
+    let index = index_route();
 
-    let routes = ws.or(api).or(static_files).or(compact);
+    // Combine all non-index routes; helmet applies its CSP to these
+    let non_index = ws.or(api).or(static_files).or(compact);
 
     // Always apply auth filter; when credentials are None it passes through
     let auth = basic_auth_guard(basic_auth);
-    let routes = routes.and(auth).map(|reply, _: ()| reply);
+    let non_index = non_index.and(auth.clone()).map(|reply, _: ()| reply);
 
-    // Apply HTTP security headers to all responses
+    // Apply HTTP security headers to non-index routes
     // Custom CSP: allow external CDN scripts, fonts, styles, and data URIs (app requirements)
     // connect-src allows any HTTPS — needed for API calls and WebSocket connections
+    // No 'unsafe-inline' for scripts.
     let csp = ContentSecurityPolicy::new()
         .default_src(vec!["'self'", "data:"])
         .connect_src(vec!["'self'", "https:", "wss:"])
-        .script_src(vec![
-            "'self'",
-            "'unsafe-inline'",
-            "https://cdn.jsdelivr.net",
-        ])
+        .script_src(vec!["'self'", "https://cdn.jsdelivr.net"])
         .style_src(vec![
             "'self'",
             "'unsafe-inline'",
@@ -49,7 +48,12 @@ pub fn build_routes(
         .img_src(vec!["'self'", "data:", "https:"])
         .frame_src(vec!["'self'"]);
     let helmet: HelmetFilter = Helmet::new().add(csp).try_into().unwrap();
-    helmet.wrap(routes)
+    let non_index = helmet.wrap(non_index);
+
+    // Index route has its own per-request CSP with nonce; auth still applies.
+    let index = index.and(auth).map(|reply, _: ()| reply);
+
+    index.or(non_index)
 }
 
 /// Basic Auth guard — returns Ok(()) when credentials are valid or auth is disabled.
@@ -125,14 +129,48 @@ fn compact_route(
 }
 
 fn static_routes() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    // Special handling for index.html: inject version and platform
-    let index = warp::path::end().map(|| {
+    // All other static assets are served by generated routes
+    gen_routes::static_routes()
+}
+
+fn index_route() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    // Special handling for index.html: inject version, platform, and CSP nonce
+    warp::path::end().map(|| {
+        // Generate a per-request CSP nonce (URL-safe base64, 16 bytes)
+        let nonce_bytes: [u8; 16] = rand_core_getrandom_u128().to_be_bytes();
+        let nonce = BASE64.encode(nonce_bytes);
+
         let html = static_assets::INDEX_HTML
             .replace("{{ VERSION }}", env!("CARGO_PKG_VERSION"))
-            .replace("{{ PLATFORM }}", std::env::consts::OS);
-        warp::reply::html(html)
-    });
+            .replace("{{ PLATFORM }}", std::env::consts::OS)
+            .replace("{{ NONCE }}", &nonce);
 
-    // All other static assets are served by generated routes
-    index.or(gen_routes::static_routes())
+        // CSP for index.html: same as global, plus nonce for the version script
+        let csp = format!(
+            "default-src 'self' data:; \
+             connect-src 'self' https: wss:; \
+             script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; \
+             style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; \
+             font-src 'self' https://fonts.gstatic.com; \
+             img-src 'self' data: https:; \
+             frame-src 'self'"
+        );
+
+        warp::reply::with_header(
+            warp::reply::with_header(html, "content-type", "text/html"),
+            "content-security-policy",
+            csp,
+        )
+    })
+}
+
+// Simple u128 helper for CSP nonce generation (no extra dependency)
+fn rand_core_getrandom_u128() -> u128 {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let pid = std::process::id() as u128;
+    // Mix timestamp, pid, and a rotating counter-like value
+    ((ts.wrapping_mul(2654435761)) ^ pid).wrapping_add(0x9E3779B97F4A7C15u128)
 }

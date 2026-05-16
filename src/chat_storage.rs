@@ -656,7 +656,7 @@ impl ChatStorage {
     }
 
     /// Execute arbitrary SQL query (admin only, restricted to safe operations)
-    pub fn execute_query(&self, sql: &str) -> Result<serde_json::Value> {
+    pub fn execute_query(&self, sql: &str, is_admin: bool) -> Result<serde_json::Value> {
         let conn = self.conn.lock().unwrap();
 
         // Normalize for checks
@@ -714,6 +714,23 @@ impl ChatStorage {
             return Err(anyhow::anyhow!(
                 "Only SELECT, PRAGMA, VACUUM, and ANALYZE queries are allowed"
             ));
+        }
+
+        // Restricted mode: limit exposure of sensitive columns when not using admin token
+        if !is_admin {
+            // Non-SELECT operations are allowed as-is (PRAGMA/VACUUM/ANALYZE).
+            if upper.starts_with("SELECT") {
+                // Check for queries that would expose sensitive content.
+                // We block:
+                // - SELECT * FROM messages
+                // - SELECT ... FROM messages where content is selected
+                // - SELECT system_prompt / context_notes / model_params from tabs
+                if is_select_exposing_sensitive(&upper) {
+                    return Err(anyhow::anyhow!(
+                        "Query accesses restricted columns; use admin token for full access"
+                    ));
+                }
+            }
         }
 
         // Try to execute as a query that returns multiple rows
@@ -816,6 +833,39 @@ impl ChatStorage {
 
         Ok(())
     }
+}
+
+/// Returns true if this SELECT is likely to expose sensitive chat content or config
+/// and should be blocked in restricted (non-admin-token) mode.
+fn is_select_exposing_sensitive(upper: &str) -> bool {
+    // Quick checks: if there's no reference to sensitive tables, allow.
+    if !upper.contains("MESSAGES") && !upper.contains("TABS") {
+        return false;
+    }
+
+    // Block SELECT * from messages (would expose content).
+    if upper.contains("MESSAGES") && (upper.contains("SELECT *") || upper.contains("SELECT  *")) {
+        return true;
+    }
+
+    // Block if selecting messages.content explicitly.
+    if upper.contains("MESSAGES") && upper.contains("MESSAGES.CONTENT") {
+        return true;
+    }
+    if upper.contains("M.CONTENT") {
+        return true;
+    }
+
+    // Block if selecting tabs.system_prompt, context_notes, or model_params.
+    if upper.contains("TABS")
+        && (upper.contains("SYSTEM_PROMPT")
+            || upper.contains("CONTEXT_NOTES")
+            || upper.contains("MODEL_PARAMS"))
+    {
+        return true;
+    }
+
+    false
 }
 
 fn normalize_fts_query(query: &str) -> String {

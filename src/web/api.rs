@@ -1035,7 +1035,9 @@ pub fn api_routes(
     let db_restore = api_db_restore(chat_storage.clone(), app_config.clone());
     let db_repair = api_db_repair(chat_storage.clone());
     let db_indexes = api_db_indexes(chat_storage.clone());
-    let db_query = api_db_query(chat_storage);
+    let db_admin_token = api_db_admin_token(app_config.clone());
+    let db_query = api_db_query(chat_storage.clone(), app_config.clone());
+    let internal_token = api_internal_token(app_config.clone());
 
     let get_sessions = api_get_sessions(state.clone());
     let create_session = api_create_session(state.clone());
@@ -1045,7 +1047,7 @@ pub fn api_routes(
     let get_capabilities = api_get_capabilities(state.clone());
     let spawn_session_with_preset =
         api_spawn_session_with_preset(state.clone(), app_config.clone());
-    let attach = api_attach(state.clone());
+    let attach = api_attach(state.clone(), app_config.clone());
     let detach = api_detach(state.clone());
     let check_lhm = api_check_lhm();
     let start_lhm = api_lhm_start();
@@ -1105,7 +1107,9 @@ pub fn api_routes(
         .or(db_restore)
         .or(db_repair)
         .or(db_indexes)
-        .or(db_query);
+        .or(db_admin_token)
+        .or(db_query)
+        .or(internal_token);
     let session_routes = get_sessions
         .or(create_session)
         .or(delete_session)
@@ -1429,7 +1433,19 @@ fn api_remote_agent_start(
                 } else {
                     // Fallback: use frontend's command or build default
                     match request.get("start_command") {
-                        Some(v) => v.as_str().unwrap_or("").to_string(),
+                        Some(v) => {
+                            let cmd = v.as_str().unwrap_or("").to_string();
+                            if crate::agent::validate_remote_command(&cmd) {
+                                cmd
+                            } else {
+                                // Invalid or unsafe command → fall back to safe default
+                                crate::agent::default_start_command_for_target(
+                                    &ssh_target,
+                                    &install_path,
+                                )
+                                .await
+                            }
+                        }
                         None => {
                             crate::agent::default_start_command_for_target(
                                 &ssh_target,
@@ -3214,9 +3230,36 @@ fn api_db_indexes(
         })
 }
 
+// GET /api/internal/api-token - Return internal API token for UI use
+fn api_internal_token(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "internal" / "api-token")
+        .and(warp::get())
+        .and(with_app_config(app_config))
+        .map(|cfg: Arc<AppConfig>| {
+            let token = cfg.api_token.as_deref().unwrap_or("");
+            warp::reply::json(&serde_json::json!({ "token": token }))
+        })
+}
+
+// GET /api/db/admin-token - Return DB admin token for authenticated UI use
+fn api_db_admin_token(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "db" / "admin-token")
+        .and(warp::get())
+        .and(with_app_config(app_config))
+        .map(|cfg: Arc<AppConfig>| {
+            let token = cfg.db_admin_token.as_deref().unwrap_or("");
+            warp::reply::json(&serde_json::json!({ "token": token }))
+        })
+}
+
 // POST /api/db/query - Execute admin query (SELECT only)
 fn api_db_query(
     storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     #[derive(serde::Deserialize)]
     struct QueryRequest {
@@ -3225,19 +3268,54 @@ fn api_db_query(
 
     warp::path!("api" / "db" / "query")
         .and(warp::post())
+        .and(warp::header::headers_cloned())
         .and(warp::body::json::<QueryRequest>())
         .and(with_chat_storage(storage))
-        .and_then(|req: QueryRequest, store: Arc<ChatStorage>| async move {
-            match store.execute_query(&req.sql) {
-                Ok(result) => Ok::<_, warp::Rejection>(warp::reply::json(&result)),
-                Err(e) => {
-                    eprintln!("query error: {e}");
-                    Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({"error": e.to_string()}),
-                    ))
+        .and(with_app_config(app_config))
+        .and_then(
+            move |headers: warp::http::HeaderMap,
+                  req: QueryRequest,
+                  store: Arc<ChatStorage>,
+                  cfg: Arc<AppConfig>| {
+                let bearer: Option<String> = headers
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.strip_prefix("Bearer "))
+                    .map(str::to_string);
+
+                let store_clone = store.clone();
+                async move {
+                    // Require api-token for DB query (defense-in-depth)
+                    let has_api_token =
+                        bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+                    if !has_api_token {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
+
+                    // Admin mode if db_admin_token is present and valid
+                    let is_admin = bearer.as_deref()
+                        == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
+
+                    match store_clone.execute_query(&req.sql, is_admin) {
+                        Ok(result) => Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&result),
+                            warp::http::StatusCode::OK,
+                        )),
+                        Err(e) => {
+                            eprintln!("query error: {e}");
+                            Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                                warp::http::StatusCode::OK,
+                            ))
+                        }
+                    }
                 }
-            }
-        })
+            },
+        )
 }
 
 // GET /api/db/backups - List available backups
@@ -3731,22 +3809,42 @@ fn api_spawn_session_with_preset(
 
 fn api_attach(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "attach")
         .and(warp::path::end())
         .and(warp::post())
+        .and(warp::header::headers_cloned())
         .and(warp::body::json())
-        .and_then(move |payload: serde_json::Map<String, serde_json::Value>| {
+        .and(with_app_config(app_config))
+        .and_then(move |headers: warp::http::HeaderMap,
+                      payload: serde_json::Map<String, serde_json::Value>,
+                      cfg: Arc<AppConfig>| {
             let state = state.clone();
             async move {
+                // Require api-token for attach
+                let has_token = headers
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.strip_prefix("Bearer "))
+                    .is_some_and(|t| t == cfg.api_token.as_deref().unwrap_or(""));
+
+                if !has_token {
+                    return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": "unauthorized" })),
+                        warp::http::StatusCode::UNAUTHORIZED,
+                    ));
+                }
+
                 let endpoint: String = match payload.get("endpoint") {
                     Some(v) => {
                         if let Some(s) = v.as_str() {
                             // Validate: must be http/https scheme with private/loopback host
                             let parsed = url::Url::parse(s).map_err(|_| warp::reject::not_found())?;
                             if !["http", "https"].contains(&parsed.scheme()) {
-                                return Ok::<_, warp::Rejection>(warp::reply::json(
-                                    &serde_json::json!({"ok": false, "error": "Endpoint must use http:// or https://"}),
+                                return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({"ok": false, "error": "Endpoint must use http:// or https://"})),
+                                    warp::http::StatusCode::OK,
                                 ));
                             }
                             if let Some(host) = parsed.host_str()
@@ -3757,21 +3855,24 @@ fn api_attach(
                                             || (v4.octets()[0] == 172 && (4..=11).contains(&v4.octets()[1]))
                                             || (v4.octets()[0] == 192 && v4.octets()[1] == 168));
                                     if !ip.is_loopback() && !private {
-                                        return Ok::<_, warp::Rejection>(warp::reply::json(
-                                            &serde_json::json!({"ok": false, "error": "Endpoint must be on a private network"}),
+                                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                            warp::reply::json(&serde_json::json!({"ok": false, "error": "Endpoint must be on a private network"})),
+                                            warp::http::StatusCode::OK,
                                         ));
                                     }
                                 }
                             s.to_string()
                         } else {
-                            return Ok::<_, warp::Rejection>(warp::reply::json(
-                                &serde_json::json!({"ok": false, "error": "Invalid endpoint"}),
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({"ok": false, "error": "Invalid endpoint"})),
+                                warp::http::StatusCode::OK,
                             ));
                         }
                     }
                     None => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": "Missing endpoint"}),
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({"ok": false, "error": "Missing endpoint"})),
+                            warp::http::StatusCode::OK,
                         ));
                     }
                 };
@@ -3783,11 +3884,12 @@ fn api_attach(
                 {
                     Ok(c) => c,
                     Err(e) => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
                                 "ok": false,
                                 "error": format!("Failed to create HTTP client: {}", e)
-                            }),
+                            })),
+                            warp::http::StatusCode::OK,
                         ));
                     }
                 };
@@ -3805,11 +3907,12 @@ fn api_attach(
                     }
                 };
                 if !server_up {
-                    return Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({
+                    return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
                             "ok": false,
                             "error": format!("Cannot reach llama-server at {}. Is it running?", endpoint)
-                        }),
+                        })),
+                        warp::http::StatusCode::OK,
                     ));
                 }
 
@@ -3845,8 +3948,9 @@ fn api_attach(
                         endpoint,
                     );
                     if !state.add_session(session) {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": "Maximum sessions reached"}),
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({"ok": false, "error": "Maximum sessions reached"})),
+                            warp::http::StatusCode::OK,
                         ));
                     }
                     session_id
@@ -3854,14 +3958,17 @@ fn api_attach(
 
                 state.set_active_session(&session_id);
                 state.llama_poll_notify.notify_waiters();
-                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                    "ok": true,
-                    "warning": if !metrics_available {
-                        Some("llama-server is running but metrics endpoint (/health) is unavailable. Inference metrics will not be available. Start llama-server with --metrics flag to enable metrics.")
-                    } else {
-                        None
-                    }
-                })))
+                Ok::<_, warp::Rejection>(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "ok": true,
+                        "warning": if !metrics_available {
+                            Some("llama-server is running but metrics endpoint (/health) is unavailable. Inference metrics will not be available. Start llama-server with --metrics flag to enable metrics.")
+                        } else {
+                            None
+                        }
+                    })),
+                    warp::http::StatusCode::OK,
+                ))
             }
         })
 }

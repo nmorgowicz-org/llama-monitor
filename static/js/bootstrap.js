@@ -36,6 +36,30 @@ import { initDbAdmin } from './features/db-admin.js';
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
 
+// Fetch internal API token (transparent to user; used for protected endpoints)
+(async () => {
+    try {
+        const res = await fetch('/api/internal/api-token');
+        if (res.ok) {
+            const data = await res.json();
+            if (data.token) {
+                window.__API_TOKEN = data.token;
+            }
+        }
+    } catch {
+        // Non-critical: continue without token if fetch fails.
+    }
+})();
+
+// Helper for modules: returns headers object with Authorization if token is available.
+window.authHeaders = function(extra = {}) {
+    const headers = { ...extra };
+    if (window.__API_TOKEN && !headers['Authorization']) {
+        headers['Authorization'] = `Bearer ${window.__API_TOKEN}`;
+    }
+    return headers;
+};
+
 // Set app version in sidebar (lightweight, no module dependency)
 (function() {
     const el = document.getElementById('app-version');

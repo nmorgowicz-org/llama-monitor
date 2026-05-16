@@ -3,12 +3,27 @@
 
 const dbAdminLog = [];
 let dbAdminOverlay = null;
+let dbAdminToken = null;
+
+async function ensureDbAdminToken() {
+    if (dbAdminToken) return;
+    try {
+        const res = await fetch('/api/db/admin-token');
+        if (res.ok) {
+            const data = await res.json();
+            if (data.token) dbAdminToken = data.token;
+        }
+    } catch {
+        // Non-critical: continue without token if fetch fails.
+    }
+}
 
 export function initDbAdmin() {
     dbAdminOverlay = document.getElementById('db-admin-modal');
     if (!dbAdminOverlay) return;
 
-    // Load initial stats
+    // Load admin token and initial stats
+    ensureDbAdminToken();
     loadDbStats();
 
     // Close handlers
@@ -409,9 +424,18 @@ async function handleQuery() {
     addLogEntry('info', `Executing: ${sql.substring(0, 50)}...`);
 
     try {
+        await ensureDbAdminToken();
+        const headers = { 'Content-Type': 'application/json' };
+        // Use global api-token if available; fall back to db-admin-token.
+        const token = (typeof window.__API_TOKEN !== 'undefined' && window.__API_TOKEN)
+            ? window.__API_TOKEN
+            : dbAdminToken;
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
         const res = await fetch('/api/db/query', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ sql }),
         });
         const result = await res.json();
