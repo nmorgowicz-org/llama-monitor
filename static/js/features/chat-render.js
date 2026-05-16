@@ -75,14 +75,20 @@ function ensureChatElements() {
 
 export function renderMd(src) {
     if (typeof marked !== 'undefined') {
-        try { return marked.parse(src); } catch(_) {}
+        try {
+            const raw = marked.parse(src);
+            return (typeof window.DOMPurify !== 'undefined' ? window.DOMPurify.sanitize(raw) : raw);
+        } catch(_) {}
     }
     return src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>');
 }
 
 export function renderMdStreaming(src) {
     if (typeof marked !== 'undefined') {
-        try { return marked.parse(src, { gfm: true, breaks: true, renderer: new marked.Renderer() }); } catch(_) {}
+        try {
+            const raw = marked.parse(src, { gfm: true, breaks: true, renderer: new marked.Renderer() });
+            return (typeof window.DOMPurify !== 'undefined' ? window.DOMPurify.sanitize(raw) : raw);
+        } catch(_) {}
     }
     return src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>');
 }
