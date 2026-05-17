@@ -2147,6 +2147,10 @@ async function scenarioFilebrowser(ctx, options) {
             return;
         }
 
+        // Wait for entries to load so hint and list are visible
+        await page.waitForSelector('#fb-entries .fb-entry', { timeout: 3000 }).catch(() => {});
+        await sleep(400);
+
         // Capture the file browser modal open
         await captureShot(page, 'filebrowser-modal-open.png', { fullPage: true });
 
