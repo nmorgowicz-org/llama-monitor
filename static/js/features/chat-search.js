@@ -195,7 +195,10 @@ function renderResults(results, query) {
         card.className = 'csp-search-result';
 
         const roleLabel = r.role === 'assistant' ? 'AI' : 'You';
-        const snippet = r.snippet || '';
+        const rawSnippet = r.snippet || '';
+        const snippet = (typeof window.DOMPurify !== 'undefined')
+            ? window.DOMPurify.sanitize(rawSnippet, { ALLOWED_TAGS: ['mark'] })
+            : rawSnippet;
 
         // eslint-disable-next-line no-unsanitized/property
         card.innerHTML =

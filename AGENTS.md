@@ -640,3 +640,124 @@ Frontend-only browser persistence also exists in `localStorage` and is not mirro
 - **`hotfix/*`**: Critical bug fixes for production
 
 All branches should be deleted after merge.
+
+## Security Requirements (MANDATORY)
+
+All changes MUST follow these rules. Treat them as hard constraints, not suggestions.
+
+### 1) Threat model (always assume)
+
+- Local-first, but:
+  - Likely exposed to LAN.
+  - Possibly exposed via reverse proxy or port forwarding.
+- Assume:
+  - Any HTTP client on the network can send crafted requests.
+  - Chat/model responses are untrusted.
+  - Multiple llama-monitor instances may connect to the same agent or llama-server.
+
+### 2) Authentication and authorization
+
+- Any endpoint that:
+  - Starts/stops/kills processes,
+  - Restores/deletes DB backups,
+  - Changes security-sensitive config (TLS, tokens, SSH),
+  - Exposes secrets or tokens
+  must:
+  - Require an appropriate token:
+    - api-token for general operations.
+    - db-admin-token for high-impact/irreversible operations.
+  - Never rely on “same machine” or “same browser” as security.
+- New destructive or elevated endpoints:
+  - Must use db-admin-token or a dedicated elevated token.
+  - Must include a confirmation field (e.g., { "confirm": "action" }) to prevent accidental use.
+- When in doubt:
+  - Prefer stricter auth (db-admin-token) over weaker (api-token).
+
+### 3) Input validation
+
+- Treat all user input as untrusted:
+  - HTTP params, JSON fields, WebSocket messages, chat content, model outputs.
+- For file paths:
+  - Never trust raw user input.
+  - Rules:
+    - Reject "..", leading "/", leading "\\", and embedded path separators when expecting a filename.
+    - Canonicalize and confirm the final path is within an allowed root (e.g., backups/, models_dir, TLS paths).
+- For SQL:
+  - Only allow expected statement types (e.g., SELECT/PRAGMA).
+  - Enforce:
+    - Max SQL length (e.g., 16KB).
+    - Execution timeout (e.g., 10s).
+
+### 4) XSS and DOM insertion (frontend)
+
+- Never:
+  - Use innerHTML or insertAdjacentHTML with:
+    - Model responses,
+    - Chat messages,
+    - User-provided strings,
+    - Arbitrary JSON fields.
+- Must:
+  - Use textContent when inserting plain text from dynamic data.
+  - Use DOMPurify on HTML rendered from markdown or untrusted content.
+- For metrics/numbers:
+  - Use textContent instead of innerHTML unless you explicitly need HTML and have sanitized.
+
+### 5) Rate limiting and DoS resistance
+
+- For any endpoint that:
+  - Is expensive,
+  - Affects the running system (kill, restart),
+  - Touches the DB or agent
+  you must:
+  - Add:
+    - A reasonable global or per-endpoint rate limit.
+    - A cooldown between calls (e.g., 10–60 seconds).
+    - Body size limits (e.g., 256KB–2MB) where appropriate.
+- For long-running operations:
+  - Use timeouts (e.g., 10–30 seconds).
+  - Fail fast with a clear error instead of hanging.
+
+### 6) Protocol compatibility (remote agent and multi-instance)
+
+- When changing agent/dashboard protocol, metrics, or data formats:
+  - Use #[serde(default)] on all deserialized fields from the agent.
+  - Never allow a single missing field to fully disconnect the agent.
+  - Implement:
+    - A protocol_version in agent /info.
+    - A minimum enforced version in the dashboard.
+    - Degraded mode:
+      - Keep the agent connected.
+      - Log a warning.
+      - Disable only affected features instead of silently breaking.
+- Assume:
+  - Agents update slower than the dashboard.
+  - Multiple instances may coexist.
+
+### 7) Secrets handling
+
+- Never:
+  - Log full tokens, passwords, or keys.
+  - Store secrets in plaintext on disk when encryption is available.
+- Must:
+  - Use existing encryption helpers for sensitive config.
+  - Mask secrets in APIs meant for general UI consumers.
+  - Provide an “full” or “admin” endpoint for real tokens when needed, protected by auth.
+
+### 8) Security checklist (before marking PR ready)
+
+Before marking a PR ready-to-test, the agent MUST verify:
+
+- [ ] No new endpoint with elevated impact is unprotected (auth, confirm, cooldown).
+- [ ] All new file paths from user input are validated and confined to allowed roots.
+- [ ] No new innerHTML/insertAdjacentHTML with untrusted data; use textContent or DOMPurify.
+- [ ] Any new long-running or expensive operation has:
+  - A timeout,
+  - A size limit,
+  - A rate limit or cooldown where appropriate.
+- [ ] Any new agent or metrics fields use #[serde(default)] and won’t fully disconnect on missing fields.
+- [ ] Secrets are not logged or exposed in error messages.
+- [ ] Reference docs are updated to match new auth, tokens, and constraints.
+
+If any of these are unclear or not fully satisfied, the agent MUST:
+- Add the missing protections,
+- Or explicitly call out the gap and rationale in the PR description.

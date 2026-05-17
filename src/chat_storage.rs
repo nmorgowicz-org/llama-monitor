@@ -511,6 +511,18 @@ impl ChatStorage {
 
     // ── Full-text search ──────────────────────────────────────────────────────
 
+    fn escape_html_except_mark(s: &str) -> String {
+        // Escape all HTML, then restore <mark> and </mark> tags.
+        let escaped = s
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;");
+        escaped
+            .replace("&lt;mark&gt;", "<mark>")
+            .replace("&lt;/mark&gt;", "</mark>")
+    }
+
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
         let normalized_query = normalize_fts_query(query);
         if normalized_query.is_empty() {
@@ -531,12 +543,14 @@ impl ChatStorage {
              LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![normalized_query, limit as i64], |row| {
+            let raw_snippet: String = row.get(4)?;
+            let snippet = Self::escape_html_except_mark(&raw_snippet);
             Ok(SearchResult {
                 tab_id: row.get(0)?,
                 tab_name: row.get(1)?,
                 message_id: row.get(2)?,
                 role: row.get(3)?,
-                snippet: row.get(4)?,
+                snippet,
                 timestamp_ms: row.get(5)?,
             })
         })?;
