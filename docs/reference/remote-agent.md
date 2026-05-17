@@ -37,6 +37,44 @@ This panel exposes the full runtime controls:
 - Start, stop, restart, update, and remove
 - Saved agent URL, token, SSH target, optional autostart, and optional custom SSH start command
 
+## mTLS and trust
+
+- Remote agents communicate with the dashboard over mTLS.
+- The agent loads trust anchors from:
+  - A legacy single CA (ca.pem), if present, and
+  - All .pem files in the cas/ directory (multi-CA support).
+- This allows multiple independent CAs to be trusted across different agents.
+- If no CA is found, the agent refuses to start.
+
+## Agent tokens
+
+- The primary agent token is configured via --agent-token or the UI.
+- The agent also supports multiple allowed tokens via agent-tokens.json:
+  - File: ~/.config/llama-monitor/agent-tokens.json
+  - Format: { "tokens": ["<token1>", "<token2>"] }
+  - Any token in this list is accepted for authenticated agent endpoints.
+- On startup, the primary token is automatically ensured in this file, enabling multi-client setups (for example, multiple dashboards polling the same agent).
+
+## Protocol and versioning
+
+- Agent endpoints:
+  - GET /info: returns agent version and protocol_version.
+  - GET /agent/info: same, plus agent_token for verification.
+- The current protocol version is 1.0.0.
+- The dashboard enforces a minimum protocol version when polling the agent.
+- If the agent’s protocol_version is below 1.0.0 or missing:
+  - The dashboard enables degraded compatibility mode instead of fully disconnecting.
+  - Partial metrics may still be available; advanced features may be limited.
+
+## Version mismatch and degraded mode
+
+- If the remote agent’s protocol_version is too old or unknown:
+  - The dashboard continues to treat the agent as connected.
+  - It logs a warning and runs in degraded compatibility mode.
+- If metrics parsing fails:
+  - The dashboard prefers degraded mode over full disconnect,
+    preserving partial telemetry when possible.
+
 ## Current setup flow
 
 The real setup flow is now explicit and opt-in. Typing an endpoint or SSH target does not trigger SSH activity by itself.

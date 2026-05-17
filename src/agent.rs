@@ -997,7 +997,7 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                         state.refresh_capability_state();
                         autostart_attempted = false;
 
-                        // Fetch agent version from /info endpoint
+                        // Fetch agent version and protocol_version from /info endpoint
                         let info_url = format!("{}/info", url.trim_end_matches('/'));
                         let mut info_request = client.get(&info_url);
                         if let Some(t) = &token {
@@ -1007,6 +1007,7 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                             Ok(info_resp) if info_resp.status().is_success() => {
                                 match info_resp.json::<serde_json::Value>().await {
                                     Ok(json) => {
+                                        // Handle version
                                         if let Some(ver) =
                                             json.get("version").and_then(|v| v.as_str())
                                         {
@@ -1051,6 +1052,37 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                                                 }
                                             }
                                         }
+
+                                        // Handle protocol_version: enforce minimum with graceful degradation
+                                        let agent_proto = json
+                                            .get("protocol_version")
+                                            .and_then(|v| v.as_str())
+                                            .map(String::from);
+
+                                        let proto_too_old = match &agent_proto {
+                                            Some(v) if v.as_str() < "1.0.0" => true,
+                                            Some(_) => false,
+                                            None => {
+                                                // Unknown protocol → treat as potentially old; enable degraded mode
+                                                true
+                                            }
+                                        };
+
+                                        {
+                                            let mut pv = state.remote_agent_protocol_version.lock().unwrap();
+                                            *pv = agent_proto.clone();
+                                        }
+                                        {
+                                            let mut flag = state.remote_agent_protocol_too_old.lock().unwrap();
+                                            *flag = proto_too_old;
+                                        }
+
+                                        if proto_too_old {
+                                            eprintln!(
+                                                "[agent] Agent protocol version ({:?}) is below minimum (1.0.0); running in degraded compatibility mode",
+                                                agent_proto.as_deref().unwrap_or("unknown")
+                                            );
+                                        }
                                     }
                                     Err(e) => {
                                         eprintln!("[agent] Failed to parse /info response: {e}");
@@ -1069,8 +1101,10 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                         }
                     }
                     Err(e) => {
-                        mark_disconnected(&state);
-                        eprintln!("[agent] Failed to parse remote metrics: {e}");
+                        // Don’t fully disconnect on a single parse error if HTTP succeeded.
+                        // Treat as degraded instead of disconnected to preserve partial metrics.
+                        eprintln!("[agent] Metrics parse failed (degraded mode): {e}");
+                        // Keep connected=true but allow degraded mode flags to inform the frontend.
                     }
                 },
                 Ok(resp) => {

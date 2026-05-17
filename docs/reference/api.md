@@ -10,6 +10,18 @@ This page documents the live handlers in [`src/web/api.rs`](/Users/nick/SCRIPTS/
 http://localhost:7778
 ```
 
+## Rate Limiting and DoS Protections
+
+- A global rate limiter is applied to all non-index routes:
+  - 200 requests/second base, with a burst allowance up to 700 per second.
+  - Excess requests are rejected with 429 Too Many Requests.
+- WebSocket connections are limited to 50 concurrent.
+  - Beyond that, new connections receive 429 with { "error": "too many connections" }.
+- The /api/db/query endpoint:
+  - Enforces a 256 KB HTTP body limit.
+  - Enforces a 16 KB SQL string limit.
+- These limits are global and not per-client.
+
 ## Sessions
 
 ### `GET /api/sessions`
@@ -816,6 +828,11 @@ Authentication:
   - `db-admin-token`: elevated token for destructive or high-risk operations.
 - Tokens are provided via:
   - Header: `Authorization: Bearer <token>`
+- `GET /api/db/admin-token`:
+  - Returns the db-admin-token for use by the in-browser DB Admin UI.
+  - Only allowed from same-origin requests (origin/host validation).
+  - Example:
+      { "token": "<db-admin-token>" }
 
 ### `GET /api/db/stats`
 Requires `api-token`.
@@ -925,6 +942,13 @@ Lists both manual backups (`chat_*.db`) and automatic hourly backups (`chat_auto
 ### `POST /api/db/restore`
 Requires `db-admin-token`.
 
+Validates backup_name:
+- No path traversal (no ‘..’, leading ‘/’, or backslashes).
+- Resolved path must be inside the backups directory.
+
+Before restore, creates a safety backup as pre_restore_<timestamp>.db.
+After restore, runs an integrity check; returns a note if it fails.
+
 ```json
 {
   "backup_name": "chat_1746000000000.db"
@@ -1005,8 +1029,11 @@ Response:
 Endpoints for managing TLS and ACME-based certificate provisioning.
 
 Authentication:
-- GET /api/tls/config: requires `api-token`.
-- PUT /api/tls/config, ACME endpoints: require `api-token`.
+- GET /api/tls/config: requires api-token.
+- PUT /api/tls/config: requires api-token.
+- POST /api/tls/acme/request: requires api-token.
+- POST /api/tls/acme/renew: requires api-token.
+- All TLS/ACME endpoints reject requests without a valid Bearer api-token.
 
 ### `GET /api/tls/config`
 Returns the current TLS mode and ACME summary (without secrets).
@@ -1145,4 +1172,32 @@ For realtime metrics and capability pushes, use:
 ws://localhost:7778/ws
 ```
 
+Limits:
+- Maximum 50 concurrent connections.
+- Excess connections are rejected with 429 Too Many Requests.
+
 See `docs/reference/realtime-communication.md` and `docs/reference/capabilities.md`.
+
+## Self-Update
+
+POST /api/self-update:
+- Requires db-admin-token (elevated operation).
+- Requires explicit confirmation: { "confirm": "update" }.
+- Cooldown: 5 minutes between calls; returns 429 with seconds_remaining if too soon.
+- On success, schedules exit(0); OS/user must relaunch.
+- Example request:
+    { "confirm": "update" }
+- Example success:
+    { "ok": true, "tag_name": "v0.3.0", "restart_required": true }
+
+## Kill-Llama
+
+POST /api/kill-llama:
+- Emergency kill for llama-server.
+- Requires db-admin-token (elevated operation).
+- Requires confirmation field: { "confirm": "kill" }.
+- Cooldown: 30 seconds between calls; returns 429 with seconds_remaining if too soon.
+- Example:
+    Request:  { "confirm": "kill" }
+    Success:  { "ok": true }
+    Too soon: { "error": "too soon; please wait", "seconds_remaining": 12 }

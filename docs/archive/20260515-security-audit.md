@@ -256,9 +256,12 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
 
 ### 6. Basic Auth Weaknesses and Lack of TLS Enforcement
 
+- Status: FIXED (TLS added); PARTIALLY MITIGATED (basic auth behavior)
 - Files:
-  - src/web/mod.rs:56
-  - src/cli.rs
+  - src/web/mod.rs (basic auth guard)
+  - src/cli.rs (TLS flags)
+  - src/config.rs (TLSConfig, TlsMode)
+  - src/main.rs (TLS server branches, startup warnings)
 - Issue:
   - Basic auth:
     - Uses simple string comparison (user == expected_user && pass == expected_pass).
@@ -283,6 +286,12 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
     - Certificates managed via:
       - CLI flags (--tls, --tls-cert, --tls-key, --tls-self-signed).
       - Settings → Certificates tab.
+  - Startup warning:
+    - Logs a warning when:
+      - Listening on 0.0.0.0
+      - TLS is disabled
+      - Basic auth is not configured
+    - Advises that the UI is reachable without encryption or authentication.
   - Basic auth:
     - Still intended as lightweight protection for local/LAN use.
     - Now recommended to be used with TLS (built-in or reverse proxy).
@@ -292,6 +301,8 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
   - Low-Medium:
     - If user runs without TLS on 0.0.0.0, traffic remains in cleartext.
     - Basic auth comparison is not timing-safe (minor, local-only).
+    - No brute-force protection or per-IP rate limit on basic auth failures.
+    - No runtime guard enforcing TLS when basic auth is used (currently advisory only).
 
 ## MEDIUM
 
@@ -373,6 +384,45 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
 - Remaining Risk:
   - Low: defense-in-depth is solid; risk only if tokens are leaked.
 
+### 13. Remote Agent Protocol Compatibility and Silent Breakage
+
+- Status: FIXED
+- Scope:
+  - Remote agent metrics, protocol_version, and version mismatch handling.
+- Issue:
+  - Newer dashboard versions could break metrics (e.g., CPU temperature) when connected to very old agents.
+  - Causes:
+    - Strict struct deserialization (no #[serde(default)]).
+    - Single parse failure → full agent disconnect.
+    - No protocol_version enforcement or graceful degradation.
+- Impact:
+  - Loss of system/GPU metrics and CPU temperature display.
+  - Confusion for users with mixed versions.
+- Likelihood:
+  - Medium: common in multi-machine setups with infrequent agent updates.
+- Mitigation Applied (2026-05-17):
+  - Tolerant metrics structs:
+    - SystemMetrics and GpuMetrics now use #[serde(default)] on all fields.
+    - Missing fields default to 0/false/empty instead of failing.
+  - Degraded mode instead of full disconnect:
+    - If /metrics HTTP is successful but JSON parse fails:
+      - Log a warning.
+      - Do NOT call mark_disconnected.
+      - Keep connection alive; partial metrics continue to flow.
+  - Protocol versioning:
+    - Agent now reports protocol_version in /info and /agent/info.
+    - Dashboard enforces minimum protocol_version (1.0.0).
+    - If agent is too old or unknown:
+      - Runs in degraded compatibility mode.
+      - Flags set for potential frontend warnings.
+  - Multi-client support:
+    - Multi-CA trust (cas/ directory).
+    - Per-client tokens (agent-tokens.json).
+- Remaining Risk:
+  - Low:
+    - Very old agents may still have quirks, but are now handled gracefully.
+    - Protocol version enforcement is advisory (does not hard-block connections).
+
 ### 9. SSH Credentials and Agent Tokens Stored in Plaintext
 
 - Status: FULLY FIXED
@@ -440,10 +490,13 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
      - 200 req/s with 500 burst allowance.
      - Prevents trivial flooding and accidental loops.
   2. /api/self-update and /api/kill-llama:
-     - Now require api-token.
-     - Added cooldowns:
-       - /api/self-update: 30 seconds between calls.
-       - /api/kill-llama: 15 seconds between calls.
+      - Now require db-admin-token (elevated).
+      - Require confirmation fields:
+        - /api/self-update: { "confirm": "update" }
+        - /api/kill-llama: { "confirm": "kill" }
+      - Added cooldowns:
+        - /api/self-update: 5 minutes between calls.
+        - /api/kill-llama: 30 seconds between calls.
   3. /api/db/query:
      - Wrapped in tokio::time::timeout (10 seconds).
      - SQL length capped at 16KB.

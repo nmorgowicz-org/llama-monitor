@@ -395,6 +395,8 @@ pub struct AppState {
     pub remote_agent_url: Arc<Mutex<Option<String>>>,
     pub remote_agent_version: Arc<Mutex<Option<String>>>,
     pub remote_agent_update_available: Arc<Mutex<bool>>,
+    pub remote_agent_protocol_version: Arc<Mutex<Option<String>>>,
+    pub remote_agent_protocol_too_old: Arc<Mutex<bool>>,
     pub chat_storage: Arc<ChatStorage>,
     pub tls_config: Arc<Mutex<TLSConfig>>,
 }
@@ -477,6 +479,8 @@ impl AppState {
             remote_agent_url: Arc::new(Mutex::new(None)),
             remote_agent_version: Arc::new(Mutex::new(None)),
             remote_agent_update_available: Arc::new(Mutex::new(false)),
+            remote_agent_protocol_version: Arc::new(Mutex::new(None)),
+            remote_agent_protocol_too_old: Arc::new(Mutex::new(false)),
             chat_storage,
             tls_config: Arc::new(Mutex::new(tls_config)),
         };
