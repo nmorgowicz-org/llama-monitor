@@ -7341,8 +7341,8 @@
 .chat-controls-menu {
   position: absolute;
   bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%) translateY(4px);
+  left: 0;
+  transform: translateX(-20%) translateY(4px);
   min-width: 160px;
   background: linear-gradient(160deg, rgba(40, 48, 58, 0.96), rgba(28, 34, 42, 0.98));
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -7357,20 +7357,20 @@
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
-  z-index: 100;
+  z-index: 200;
 }
 
 .chat-controls-menu.open {
   opacity: 1;
   visibility: visible;
-  transform: translateX(-50%) translateY(0);
+  transform: translateX(-20%) translateY(0);
 }
 
 .chat-controls-menu::before {
   content: '';
   position: absolute;
   top: calc(100% - 6px);
-  left: 50%;
+  left: 20%;
   transform: translateX(-50%) rotate(45deg);
   width: 10px;
   height: 10px;

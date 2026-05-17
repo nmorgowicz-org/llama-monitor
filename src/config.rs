@@ -2,7 +2,212 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+use aes_gcm::{
+    Aes256Gcm,
+    aead::{Aead, KeyInit},
+};
+use generic_array::GenericArray;
+use rand_core::{OsRng, RngCore};
+
 use crate::cli::AppArgs;
+
+/// On Unix, restrict file permissions to owner-only (0600).
+/// On other platforms, no-op.
+pub(crate) fn harden_file_permissions(path: &std::path::Path) {
+    if !path.exists() {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(mut perms) = std::fs::metadata(path).map(|m| m.permissions()) {
+            perms.set_mode(0o600);
+            let _ = std::fs::set_permissions(path, perms);
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
+const ENCRYPTED_PREFIX: &str = "enc:";
+
+use once_cell::sync::OnceCell;
+
+static ENCRYPTION_KEY_CELL: OnceCell<[u8; 32]> = OnceCell::new();
+
+/// Derive a 256-bit key from a secret using a simple KDF.
+fn derive_key(secret: &[u8]) -> [u8; 32] {
+    use sha1::Digest;
+
+    let mut input = Vec::with_capacity(secret.len() + 17);
+    input.extend_from_slice(secret);
+    input.extend_from_slice(b"llama-monitor-key");
+    let mut ctx = sha1::Sha1::new();
+    ctx.update(&input);
+    let hash = ctx.finalize();
+    let mut key = [0u8; 32];
+    key[..20].copy_from_slice(&hash);
+
+    let mut ctx2 = sha1::Sha1::new();
+    let mut input2 = Vec::with_capacity(secret.len() + 18);
+    input2.extend_from_slice(secret);
+    input2.extend_from_slice(b"llama-monitor-key-2");
+    ctx2.update(&input2);
+    let hash2 = ctx2.finalize();
+    key[20..].copy_from_slice(&hash2[..12]);
+    key
+}
+
+/// Initialize the encryption key at startup.
+///
+/// Priority:
+/// 1) LLAMA_MONITOR_ENCRYPTION_KEY (if set and non-empty).
+/// 2) Auto-generated key stored in config_dir/encryption-key.
+///
+/// This ensures encryption is always enabled and fully automatic.
+pub fn init_encryption_key(config_dir: &std::path::Path) {
+    if ENCRYPTION_KEY_CELL.get().is_some() {
+        return;
+    }
+
+    // 1) Use env var if provided
+    if let Ok(secret) = std::env::var("LLAMA_MONITOR_ENCRYPTION_KEY")
+        && !secret.is_empty()
+        && secret.len() >= 16
+    {
+        let key = derive_key(secret.as_bytes());
+        let _ = ENCRYPTION_KEY_CELL.set(key);
+        eprintln!("[info] Using LLAMA_MONITOR_ENCRYPTION_KEY for at-rest encryption.");
+        return;
+    }
+
+    let key_file = config_dir.join("encryption-key");
+
+    // 2) Try to load existing auto-generated key
+    if key_file.exists()
+        && let Ok(raw) = std::fs::read(&key_file)
+        && raw.len() == 32
+    {
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&raw);
+        let _ = ENCRYPTION_KEY_CELL.set(key);
+        eprintln!("[info] Loaded auto-generated encryption key from {key_file:?}.");
+        return;
+    }
+
+    // 3) Generate and persist a new key
+    let mut key = [0u8; 32];
+    OsRng.fill_bytes(&mut key);
+    let _ = std::fs::create_dir_all(config_dir);
+    if std::fs::write(&key_file, key).is_ok() {
+        harden_file_permissions(&key_file);
+        eprintln!("[info] Generated and saved encryption key to {key_file:?}.");
+    } else {
+        eprintln!(
+            "[warn] Failed to write encryption key to {key_file:?}; \
+             continuing with in-memory key only."
+        );
+    }
+    let _ = ENCRYPTION_KEY_CELL.set(key);
+}
+
+/// Get the active encryption key, or None if initialization failed.
+fn encryption_key() -> Option<[u8; 32]> {
+    ENCRYPTION_KEY_CELL.get().copied()
+}
+
+/// Generate a random 12-byte nonce.
+fn random_nonce() -> [u8; 12] {
+    let mut buf = [0u8; 12];
+    OsRng.fill_bytes(&mut buf);
+    buf
+}
+
+/// Encrypt a plaintext value using AES-256-GCM if a key is configured.
+/// Returns "enc:<base64(nonce || ciphertext)>" on success, or the original plaintext if no key.
+pub(crate) fn encrypt_value(plaintext: &str) -> String {
+    let key_bytes = match encryption_key() {
+        Some(k) => k,
+        None => return plaintext.to_string(),
+    };
+
+    let key = GenericArray::<u8, _>::from(key_bytes);
+    let cipher = Aes256Gcm::new(&key);
+    let nonce = aes_gcm::Nonce::clone_from_slice(&random_nonce());
+
+    let ct = match cipher.encrypt(&nonce, plaintext.as_ref()) {
+        Ok(c) => c,
+        Err(_) => return plaintext.to_string(),
+    };
+
+    // Prepend nonce to ciphertext so we can recover it during decryption.
+    let mut payload = Vec::with_capacity(12 + ct.len());
+    payload.extend_from_slice(&nonce);
+    payload.extend_from_slice(&ct);
+
+    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &payload);
+    format!("{ENCRYPTED_PREFIX}{b64}")
+}
+
+/// Decrypt a value if it appears encrypted.
+/// If it starts with "enc:", attempts AES-256-GCM decryption using the active key.
+/// If no key or decryption fails, logs a warning and falls back to the original value.
+pub(crate) fn decrypt_value(ciphertext: &str) -> String {
+    if !ciphertext.starts_with(ENCRYPTED_PREFIX) {
+        return ciphertext.to_string();
+    }
+
+    let key_bytes = match encryption_key() {
+        Some(k) => k,
+        None => {
+            eprintln!(
+                "[warn] Decryption requested but no encryption key available; \
+                returning raw encrypted blob as-is."
+            );
+            return ciphertext.to_string();
+        }
+    };
+
+    let b64_part = &ciphertext[ENCRYPTED_PREFIX.len()..];
+    let payload = match base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        b64_part,
+    ) {
+        Ok(v) => v,
+        Err(_) => {
+            eprintln!("[warn] Failed to decode encrypted value (bad base64)");
+            return ciphertext.to_string();
+        }
+    };
+
+    if payload.len() < 12 {
+        eprintln!("[warn] Encrypted value too short to contain nonce");
+        return ciphertext.to_string();
+    }
+
+    let (nonce_bytes, ct_bytes) = payload.split_at(12);
+    let nonce = aes_gcm::Nonce::clone_from_slice(nonce_bytes);
+    let key = GenericArray::<u8, _>::from(key_bytes);
+    let cipher = Aes256Gcm::new(&key);
+
+    let pt = match cipher.decrypt(&nonce, ct_bytes) {
+        Ok(pt) => pt,
+        Err(_) => {
+            eprintln!("[warn] Decryption failed (bad key or corrupted data); returning raw value");
+            return ciphertext.to_string();
+        }
+    };
+
+    match String::from_utf8(pt) {
+        Ok(s) => s,
+        Err(_) => {
+            eprintln!("[warn] Decryption produced invalid UTF-8; returning raw value");
+            ciphertext.to_string()
+        }
+    }
+}
 
 /// TLS operating mode.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -81,10 +286,19 @@ pub fn load_tls_config(config_dir: &std::path::Path) -> TLSConfig {
         eprintln!("[warn] Failed to read tls-config.json, using defaults");
         return TLSConfig::default();
     };
-    let Ok(cfg) = serde_json::from_str::<TLSConfig>(&contents) else {
+    let Ok(mut cfg) = serde_json::from_str::<TLSConfig>(&contents) else {
         eprintln!("[warn] Invalid tls-config.json, using defaults");
         return TLSConfig::default();
     };
+
+    // Decrypt ACME dns_config values
+    cfg.acme.dns_config = cfg
+        .acme
+        .dns_config
+        .into_iter()
+        .map(|(k, v)| (k, decrypt_value(&v)))
+        .collect();
+
     sanitize_tls_config(cfg)
 }
 
@@ -94,10 +308,21 @@ pub fn save_tls_config(config_dir: &std::path::Path, cfg: &TLSConfig) -> std::io
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
+
+    // Encrypt ACME dns_config values before writing
+    let mut to_save = cfg.clone();
+    to_save.acme.dns_config = to_save
+        .acme
+        .dns_config
+        .into_iter()
+        .map(|(k, v)| (k, encrypt_value(&v)))
+        .collect();
+
     let tmp = path.with_extension("json.tmp");
-    let json = serde_json::to_string_pretty(cfg)?;
+    let json = serde_json::to_string_pretty(&to_save)?;
     fs::write(&tmp, json)?;
     fs::rename(&tmp, &path)?;
+    harden_file_permissions(&path);
     Ok(())
 }
 
@@ -184,18 +409,20 @@ impl AppConfig {
 fn ensure_db_admin_token(config_dir: &PathBuf) -> Option<String> {
     let token_file = config_dir.join("db-admin-token");
 
-    // Try to read existing token
+    // Try to read existing token (may be encrypted)
     if let Ok(content) = fs::read_to_string(&token_file) {
         let trimmed = content.trim().to_string();
         if !trimmed.is_empty() {
-            return Some(trimmed);
+            let token = decrypt_value(&trimmed);
+            return Some(token);
         }
     }
 
     // Generate new token
     let token = generate_random_token();
     let _ = fs::create_dir_all(config_dir);
-    if fs::write(&token_file, &token).is_ok() {
+    let stored = encrypt_value(&token);
+    if fs::write(&token_file, &stored).is_ok() {
         eprintln!("[config] Generated db-admin-token");
     }
     Some(token)
@@ -207,13 +434,15 @@ fn ensure_api_token(config_dir: &PathBuf) -> Option<String> {
     if let Ok(content) = fs::read_to_string(&token_file) {
         let trimmed = content.trim().to_string();
         if !trimmed.is_empty() {
-            return Some(trimmed);
+            let token = decrypt_value(&trimmed);
+            return Some(token);
         }
     }
 
     let token = generate_random_token();
     let _ = fs::create_dir_all(config_dir);
-    if fs::write(&token_file, &token).is_ok() {
+    let stored = encrypt_value(&token);
+    if fs::write(&token_file, &stored).is_ok() {
         eprintln!("[config] Generated api-token");
     }
     Some(token)

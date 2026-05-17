@@ -6,11 +6,50 @@ pub mod static_assets;
 pub mod ws;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use warp::Filter;
 use warp_helmet::{ContentSecurityPolicy, Helmet, HelmetFilter};
 
 use crate::config::AppConfig;
 use crate::state::AppState;
+
+/// Global rate limiter: 200 req/s with 500 burst (generous for local-first use).
+fn global_rate_limit() -> impl Filter<Extract = ((),), Error = warp::Rejection> + Clone {
+    static WINDOW_START: AtomicU64 = AtomicU64::new(0);
+    static REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
+
+    let max_per_second = 200u64;
+    let burst_allowance = 500u64;
+
+    warp::any().and_then(move || {
+        async move {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            let window_start = WINDOW_START.load(Ordering::Relaxed);
+            let count = REQUEST_COUNT.load(Ordering::Relaxed);
+
+            if now != window_start {
+                WINDOW_START.store(now, Ordering::Relaxed);
+                REQUEST_COUNT.store(1, Ordering::Relaxed);
+                Ok(())
+            } else if count >= max_per_second + burst_allowance {
+                Err(warp::reject::custom(RateLimitReject))
+            } else {
+                REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            }
+        }
+    })
+}
+
+#[derive(Debug)]
+struct RateLimitReject;
+
+impl warp::reject::Reject for RateLimitReject {}
 
 pub fn build_routes(
     state: AppState,
@@ -40,7 +79,6 @@ pub fn build_routes(
         .script_src(vec!["'self'", "https://cdn.jsdelivr.net"])
         .style_src(vec![
             "'self'",
-            "'unsafe-inline'",
             "https://fonts.googleapis.com",
             "https://cdn.jsdelivr.net",
         ])
@@ -52,6 +90,10 @@ pub fn build_routes(
 
     // Index route has its own per-request CSP with nonce; auth still applies.
     let index = index.and(auth).map(|reply, _: ()| reply);
+
+    // Apply global rate limit to all routes (200 req/s, 500 burst).
+    let rate_limited = global_rate_limit();
+    let non_index = non_index.and(rate_limited).map(|reply, ()| reply);
 
     index.or(non_index)
 }
@@ -119,9 +161,33 @@ fn compact_route(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     let port = app_config.port;
     warp::path("compact").and(warp::get()).map(move || {
-        let html = static_assets::COMPACT_HTML.replace("__PORT__", &port.to_string());
+        // Generate a per-request CSP nonce for inline script
+        let nonce_bytes: [u8; 16] = rand_core_getrandom_u128().to_be_bytes();
+        let nonce = BASE64.encode(nonce_bytes);
+
+        // Inject port and nonce
+        let html = static_assets::COMPACT_HTML
+            .replace("__PORT__", &port.to_string())
+            .replace("<script>", &format!("<script nonce=\"{}\">", nonce));
+
+        // CSP for compact: nonce for inline script; 'unsafe-inline' for styles (inline <style> tag)
+        let csp = format!(
+            "default-src 'self' data:; \
+             connect-src 'self' https: wss:; \
+             script-src 'self' 'nonce-{}'; \
+             style-src 'self' 'unsafe-inline'; \
+             font-src 'self'; \
+             img-src 'self' data:; \
+             frame-src 'self'",
+            nonce
+        );
+
         warp::reply::with_header(
-            warp::reply::with_header(html, "content-type", "text/html"),
+            warp::reply::with_header(
+                warp::reply::with_header(html, "content-type", "text/html"),
+                "content-security-policy",
+                csp,
+            ),
             "cache-control",
             "no-cache, no-store, must-revalidate",
         )
@@ -146,6 +212,7 @@ fn index_route() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rej
             .replace("{{ NONCE }}", &nonce);
 
         // CSP for index.html: same as global, plus nonce for the version script
+        // style-src keeps 'unsafe-inline' because index.html uses inline styles (display:none, etc.)
         let csp = format!(
             "default-src 'self' data:; \
              connect-src 'self' https: wss:; \

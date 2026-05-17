@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::chat_storage::ChatStorage;
-use crate::config::TLSConfig;
+use crate::config::{TLSConfig, decrypt_value, encrypt_value};
 use crate::gpu::GpuMetrics;
 use crate::gpu::env::GpuEnv;
 use crate::llama::metrics::LlamaMetrics;
@@ -286,8 +286,9 @@ impl Default for UiSettings {
 pub fn load_ui_settings(path: &Path) -> UiSettings {
     if path.exists()
         && let Ok(contents) = std::fs::read_to_string(path)
-        && let Ok(s) = serde_json::from_str::<UiSettings>(&contents)
+        && let Ok(mut s) = serde_json::from_str::<UiSettings>(&contents)
     {
+        s.remote_agent_token = decrypt_value(&s.remote_agent_token);
         return s;
     }
     UiSettings::default()
@@ -297,8 +298,13 @@ pub fn save_ui_settings(path: &Path, settings: &UiSettings) -> anyhow::Result<()
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+
+    // Encrypt remote_agent_token before writing
+    let mut to_save = settings.clone();
+    to_save.remote_agent_token = encrypt_value(&to_save.remote_agent_token);
+
     let tmp = path.with_extension("json.tmp");
-    let json = serde_json::to_string_pretty(settings)?;
+    let json = serde_json::to_string_pretty(&to_save)?;
     std::fs::write(&tmp, json)?;
     std::fs::rename(&tmp, path)?;
     Ok(())

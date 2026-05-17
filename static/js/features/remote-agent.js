@@ -929,11 +929,15 @@ async function finishRemoteAgentSetup() {
     const sshPortInput = document.getElementById('agent-setup-ssh-port');
     const sshAuthSelect = document.getElementById('agent-setup-ssh-auth');
 
-    // Fetch current settings to merge — avoids wiping unrelated settings
-    // (preset_id, port, llama_server_path, models_dir, server_endpoint, etc.)
+    // Fetch current settings (full) to merge — avoids wiping unrelated settings
+    // and preserves the real remote_agent_token (GET /api/settings masks it).
     let currentSettings = {};
     try {
-        const resp = await fetch('/api/settings');
+        const headers = {};
+        if (window.authHeaders) {
+            Object.assign(headers, window.authHeaders());
+        }
+        const resp = await fetch('/api/settings/full', { headers });
         if (resp.ok) {
             currentSettings = await resp.json();
         }

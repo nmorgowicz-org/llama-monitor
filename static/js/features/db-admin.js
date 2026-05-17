@@ -128,10 +128,23 @@ function switchTab(tabName) {
 
 async function loadDbStats() {
     try {
+        const token = (typeof window.__API_TOKEN !== 'undefined' && window.__API_TOKEN)
+            ? window.__API_TOKEN
+            : dbAdminToken;
+        const headers = {};
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
         const [statsRes, integrityRes] = await Promise.all([
-            fetch('/api/db/stats'),
-            fetch('/api/db/integrity'),
+            fetch('/api/db/stats', { headers }),
+            fetch('/api/db/integrity', { headers }),
         ]);
+
+        if (!statsRes.ok || !integrityRes.ok) {
+            addLogEntry('error', 'Failed to load DB stats/integrity (possible auth issue)');
+            return;
+        }
 
         const stats = await statsRes.json();
         const integrity = await integrityRes.json();
@@ -194,7 +207,15 @@ async function handleIntegrityCheck() {
     setButtonLoading('db-btn-check', true);
 
     try {
-        const res = await fetch('/api/db/integrity');
+        const token = (typeof window.__API_TOKEN !== 'undefined' && window.__API_TOKEN)
+            ? window.__API_TOKEN
+            : dbAdminToken;
+        const headers = {};
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const res = await fetch('/api/db/integrity', { headers });
         const result = await res.json();
 
         if (result.status === 'healthy') {
@@ -220,13 +241,25 @@ async function handleMaintenance(operation) {
     addLogEntry('info', `Running ${labels[operation] || operation}...`);
 
     try {
+        const headers = { 'Content-Type': 'application/json' };
+        const token = (typeof window.__API_TOKEN !== 'undefined' && window.__API_TOKEN)
+            ? window.__API_TOKEN
+            : dbAdminToken;
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
         const res = await fetch('/api/db/maintenance', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ operation }),
         });
         const result = await res.json();
-        addLogEntry('success', `${labels[operation] || operation}: ${result.status || 'completed'}`);
+        if (result.error) {
+            addLogEntry('error', `${labels[operation] || operation}: ${result.error}`);
+        } else {
+            addLogEntry('success', `${labels[operation] || operation}: ${result.status || 'completed'}`);
+        }
     } catch (error) {
         addLogEntry('error', `${labels[operation] || operation} failed: ${error.message}`);
     }
@@ -249,6 +282,11 @@ async function loadBackups() {
         const headers = {};
         if (token) headers['Authorization'] = `Bearer ${token}`;
         const res = await fetch('/api/db/backups', { headers });
+        if (!res.ok) {
+            addLogEntry('error', 'Failed to load backups (possible auth issue)');
+            if (emptyEl) emptyEl.innerHTML = '<p>Failed to load backups.</p>';
+            return;
+        }
         const data = await res.json();
 
         if (!data.backups || data.backups.length === 0) {
@@ -288,7 +326,21 @@ async function loadIndexes() {
     if (!listEl) return;
 
     try {
-        const res = await fetch('/api/db/indexes');
+        const token = (typeof window.__API_TOKEN !== 'undefined' && window.__API_TOKEN)
+            ? window.__API_TOKEN
+            : dbAdminToken;
+        const headers = {};
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const res = await fetch('/api/db/indexes', { headers });
+        if (!res.ok) {
+            addLogEntry('error', 'Failed to load indexes (possible auth issue)');
+            listEl.innerHTML = '<div class="db-empty-state"><p>Failed to load indexes.</p></div>';
+            return;
+        }
+
         const data = await res.json();
 
         if (!data.indexes || data.indexes.length === 0) {
@@ -318,13 +370,25 @@ async function handleRebuildAllIndexes() {
     setButtonLoading('db-btn-rebuild-all-indexes', true);
 
     try {
+        const headers = { 'Content-Type': 'application/json' };
+        const token = (typeof window.__API_TOKEN !== 'undefined' && window.__API_TOKEN)
+            ? window.__API_TOKEN
+            : dbAdminToken;
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
         const res = await fetch('/api/db/maintenance', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ operation: 'rebuild_fts' }),
         });
         const result = await res.json();
-        addLogEntry('success', `Index rebuild: ${result.status || 'completed'}`);
+        if (result.error) {
+            addLogEntry('error', `Index rebuild: ${result.error}`);
+        } else {
+            addLogEntry('success', `Index rebuild: ${result.status || 'completed'}`);
+        }
     } catch (error) {
         addLogEntry('error', `Index rebuild failed: ${error.message}`);
     } finally {
@@ -342,17 +406,40 @@ async function handleRepairIndexes() {
     setButtonLoading('db-btn-repair-indexes', true);
 
     try {
-        // First create a backup
-        await fetch('/api/db/backup', { method: 'POST' });
+        // First create a backup (requires api-token)
+        const backupHeaders = { 'Content-Type': 'application/json' };
+        const backupToken = (typeof window.__API_TOKEN !== 'undefined' && window.__API_TOKEN)
+            ? window.__API_TOKEN
+            : dbAdminToken;
+        if (backupToken) {
+            backupHeaders['Authorization'] = `Bearer ${backupToken}`;
+        }
+        const backupRes = await fetch('/api/db/backup', { method: 'POST', headers: backupHeaders });
+        if (!backupRes.ok) {
+            const err = await backupRes.json().catch(() => ({}));
+            addLogEntry('error', `Backup failed; aborting repair: ${err.error || 'unknown error'}`);
+            setButtonLoading('db-btn-repair-indexes', false);
+            return;
+        }
         addLogEntry('info', 'Backup created before repair');
+
+        // Repair requires db-admin-token
+        const headers = { 'Content-Type': 'application/json' };
+        if (dbAdminToken) {
+            headers['Authorization'] = `Bearer ${dbAdminToken}`;
+        }
 
         const res = await fetch('/api/db/repair', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ operation: 'repair_indexes' }),
         });
         const result = await res.json();
-        addLogEntry('success', `Index repair: ${result.status || 'completed'}`);
+        if (result.error) {
+            addLogEntry('error', `Index repair: ${result.error}`);
+        } else {
+            addLogEntry('success', `Index repair: ${result.status || 'completed'}`);
+        }
     } catch (error) {
         addLogEntry('error', `Index repair failed: ${error.message}`);
     } finally {
@@ -369,16 +456,40 @@ async function handleRepairCompact() {
     setButtonLoading('db-btn-repair-compact', true);
 
     try {
-        await fetch('/api/db/backup', { method: 'POST' });
+        // Backup (requires api-token)
+        const backupHeaders = { 'Content-Type': 'application/json' };
+        const backupToken = (typeof window.__API_TOKEN !== 'undefined' && window.__API_TOKEN)
+            ? window.__API_TOKEN
+            : dbAdminToken;
+        if (backupToken) {
+            backupHeaders['Authorization'] = `Bearer ${backupToken}`;
+        }
+        const backupRes = await fetch('/api/db/backup', { method: 'POST', headers: backupHeaders });
+        if (!backupRes.ok) {
+            const err = await backupRes.json().catch(() => ({}));
+            addLogEntry('error', `Backup failed; aborting compact: ${err.error || 'unknown error'}`);
+            setButtonLoading('db-btn-repair-compact', false);
+            return;
+        }
         addLogEntry('info', 'Backup created before compact');
+
+        // Vacuum (requires api-token)
+        const headers = { 'Content-Type': 'application/json' };
+        if (backupToken) {
+            headers['Authorization'] = `Bearer ${backupToken}`;
+        }
 
         const res = await fetch('/api/db/maintenance', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ operation: 'vacuum' }),
         });
         const result = await res.json();
-        addLogEntry('success', `Compact: ${result.status || 'completed'}`);
+        if (result.error) {
+            addLogEntry('error', `Compact: ${result.error}`);
+        } else {
+            addLogEntry('success', `Compact: ${result.status || 'completed'}`);
+        }
     } catch (error) {
         addLogEntry('error', `Compact failed: ${error.message}`);
     } finally {
@@ -395,16 +506,40 @@ async function handleRepairEmergency() {
     setButtonLoading('db-btn-repair-emergency', true);
 
     try {
-        await fetch('/api/db/backup', { method: 'POST' });
+        // Backup (requires api-token)
+        const backupHeaders = { 'Content-Type': 'application/json' };
+        const backupToken = (typeof window.__API_TOKEN !== 'undefined' && window.__API_TOKEN)
+            ? window.__API_TOKEN
+            : dbAdminToken;
+        if (backupToken) {
+            backupHeaders['Authorization'] = `Bearer ${backupToken}`;
+        }
+        const backupRes = await fetch('/api/db/backup', { method: 'POST', headers: backupHeaders });
+        if (!backupRes.ok) {
+            const err = await backupRes.json().catch(() => ({}));
+            addLogEntry('error', `Backup failed; aborting recovery: ${err.error || 'unknown error'}`);
+            setButtonLoading('db-btn-repair-emergency', false);
+            return;
+        }
         addLogEntry('info', 'Backup created before recovery');
+
+        // Repair (requires db-admin-token)
+        const headers = { 'Content-Type': 'application/json' };
+        if (dbAdminToken) {
+            headers['Authorization'] = `Bearer ${dbAdminToken}`;
+        }
 
         const res = await fetch('/api/db/repair', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ operation: 'emergency_recovery' }),
         });
         const result = await res.json();
-        addLogEntry('success', `Emergency recovery: ${result.status || 'completed'}`);
+        if (result.error) {
+            addLogEntry('error', `Emergency recovery: ${result.error}`);
+        } else {
+            addLogEntry('success', `Emergency recovery: ${result.status || 'completed'}`);
+        }
     } catch (error) {
         addLogEntry('error', `Emergency recovery failed: ${error.message}`);
     } finally {
@@ -472,14 +607,18 @@ window.restoreBackup = async function(name) {
     addLogEntry('warning', `Restoring from ${name}...`);
     try {
         await ensureDbAdminToken();
-        const token = dbAdminToken || (typeof window.__API_TOKEN !== 'undefined' ? window.__API_TOKEN : null);
+        if (!dbAdminToken) {
+            addLogEntry('error', 'Restore failed: db-admin-token not available');
+            return;
+        }
         const headers = { 'Content-Type': 'application/json' };
-        if (token) headers['Authorization'] = `Bearer ${token}`;
+        headers['Authorization'] = `Bearer ${dbAdminToken}`;
         const res = await fetch('/api/db/restore', {
             method: 'POST',
             headers,
             body: JSON.stringify({ backup_name: name }),
         });
+
         const result = await res.json();
         if (result.error) {
             addLogEntry('error', result.error);
@@ -497,9 +636,12 @@ window.deleteBackup = async function(name) {
 
     try {
         await ensureDbAdminToken();
-        const token = dbAdminToken || (typeof window.__API_TOKEN !== 'undefined' ? window.__API_TOKEN : null);
+        if (!dbAdminToken) {
+            addLogEntry('error', 'Delete failed: db-admin-token not available');
+            return;
+        }
         const headers = { 'Content-Type': 'application/json' };
-        if (token) headers['Authorization'] = `Bearer ${token}`;
+        headers['Authorization'] = `Bearer ${dbAdminToken}`;
         const res = await fetch('/api/db/backup', {
             method: 'DELETE',
             headers,
@@ -520,13 +662,25 @@ window.deleteBackup = async function(name) {
 window.rebuildIndex = async function(name) {
     addLogEntry('info', `Rebuilding index ${name}...`);
     try {
+        const headers = { 'Content-Type': 'application/json' };
+        const token = (typeof window.__API_TOKEN !== 'undefined' && window.__API_TOKEN)
+            ? window.__API_TOKEN
+            : dbAdminToken;
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
+
         const res = await fetch('/api/db/maintenance', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ operation: 'rebuild_fts' }),
         });
         const result = await res.json();
-        addLogEntry('success', `Index rebuild: ${result.status || 'completed'}`);
+        if (result.error) {
+            addLogEntry('error', `Index rebuild: ${result.error}`);
+        } else {
+            addLogEntry('success', `Index rebuild: ${result.status || 'completed'}`);
+        }
         loadIndexes();
     } catch (error) {
         addLogEntry('error', `Index rebuild failed: ${error.message}`);

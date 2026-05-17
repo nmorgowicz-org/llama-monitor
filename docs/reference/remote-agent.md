@@ -121,12 +121,29 @@ The app chooses an OS-appropriate install/start path and command for the managed
 
 ## Stored secrets and security
 
-Some credentials used by the remote agent and internal APIs are stored in plaintext in `~/.config/llama-monitor/`:
+Credentials used by the remote agent and internal APIs are encrypted at rest using AES-256-GCM and stored in `~/.config/llama-monitor/`.
+
+Encryption:
+- Llama-monitor:
+  - Uses an encryption key:
+    - From `LLAMA_MONITOR_ENCRYPTION_KEY` if set and ≥16 characters, or
+    - Auto-generated and stored in `encryption-key` in the config directory.
+  - Automatically encrypts:
+    - `remote_agent_token`
+    - `api-token`
+    - `db-admin-token`
+    - ACME `dns_config` values
+- No manual key management is required.
+
+Encrypted values:
 
 - **Agent Token** (`remote_agent_token`):
   - Used as a bearer token when polling the remote agent.
+  - Encrypted at rest.
+  - Masked in `GET /api/settings`; real value available via `GET /api/settings/full` with `api-token` auth.
 - **SSH password** (`remote_agent_ssh_password`):
   - Used for the current SSH operation when password auth is selected.
+  - Not persisted long-term; used in-memory for the session.
 - **Private key path** (`remote_agent_ssh_key_path`):
   - Path reference only; the key file itself is not copied into llama-monitor’s config.
 
@@ -143,13 +160,16 @@ Three tokens are used by llama-monitor:
 
 - **API Token**:
   - File: `api-token`
-  - Used to protect sensitive endpoints (attach, DB queries, etc.).
+  - Used to protect sensitive endpoints (attach, DB queries, TLS/ACME, etc.).
+  - Encrypted at rest.
 - **DB Admin Token**:
   - File: `db-admin-token`
   - Used for advanced database operations and restricted queries.
+  - Encrypted at rest.
 - **Agent Token**:
   - Stored in `ui-settings.json` as `remote_agent_token`.
   - Used to authenticate with the remote agent.
+  - Encrypted at rest.
 
 All three can be rotated from the UI:
 

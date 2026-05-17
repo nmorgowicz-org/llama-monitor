@@ -26,7 +26,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::chat_storage::ChatStorage;
-use crate::config::TlsMode;
+use crate::config::{TlsMode, harden_file_permissions};
 
 const GPU_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SYSTEM_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -34,6 +34,18 @@ const SYSTEM_POLL_INTERVAL: Duration = Duration::from_secs(5);
 fn main() -> Result<()> {
     let args = cli::AppArgs::parse();
     let app_config = Arc::new(config::AppConfig::from_args(args.clone()));
+
+    // Initialize at-rest encryption (auto-generates key if needed)
+    config::init_encryption_key(&app_config.config_dir);
+
+    // Harden permissions on secret files (Unix: 0600)
+    harden_file_permissions(&app_config.ui_settings_file);
+    harden_file_permissions(&app_config.sessions_file);
+    harden_file_permissions(&app_config.ssh_known_hosts_file);
+    harden_file_permissions(&app_config.config_dir.join("db-admin-token"));
+    harden_file_permissions(&app_config.config_dir.join("api-token"));
+    harden_file_permissions(&app_config.config_dir.join("tls-config.json"));
+    harden_file_permissions(&app_config.config_dir.join("encryption-key"));
 
     if args.agent {
         let runtime = tokio::runtime::Builder::new_multi_thread()

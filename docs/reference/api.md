@@ -343,7 +343,13 @@ Failure when no model directory is configured:
 ## Settings
 
 ### `GET /api/settings`
-Returns the persisted `UiSettings` object from `ui-settings.json`.
+Returns the persisted `UiSettings` object from `ui-settings.json`, with sensitive fields masked.
+
+Security:
+- No authentication is required.
+- `remote_agent_token` is masked (e.g., `"••••••••"`) to reduce exposure when consumed by the browser.
+
+Example:
 
 ```json
 {
@@ -355,7 +361,45 @@ Returns the persisted `UiSettings` object from `ui-settings.json`.
   "server_endpoint": "",
   "llama_poll_interval": 1,
   "remote_agent_url": "",
-  "remote_agent_token": "",
+  "remote_agent_token": "••••••••",
+  "remote_agent_ssh_autostart": false,
+  "remote_agent_ssh_target": "",
+  "remote_agent_ssh_command": "",
+  "explicit_mode_policy": "",
+  "context_card_view": "gauge",
+  "ws_push_interval_ms": 500,
+  "chat_input_height": "",
+  "enabled_context_notes": true,
+  "enabled_suggestions": true,
+  "enabled_quick_guide": true,
+  "default_sidebar_width": 280,
+  "suggestion_prompts": {},
+  "suggestion_count": 5,
+  "context_depth": 10
+}
+```
+
+### `GET /api/settings/full`
+Returns the same `UiSettings` object, but with the real `remote_agent_token` value instead of a masked placeholder.
+
+Security:
+- Requires `api-token` authentication:
+  - Header: `Authorization: Bearer <api-token>`
+- Intended for trusted clients (e.g., internal tools, remote-agent.js) that need the actual token.
+
+Example:
+
+```json
+{
+  "preset_id": "",
+  "port": 8001,
+  "llama_server_path": "",
+  "llama_server_cwd": "",
+  "models_dir": "",
+  "server_endpoint": "",
+  "llama_poll_interval": 1,
+  "remote_agent_url": "",
+  "remote_agent_token": "actual-token-value",
   "remote_agent_ssh_autostart": false,
   "remote_agent_ssh_target": "",
   "remote_agent_ssh_command": "",
@@ -766,7 +810,15 @@ Search notes:
 
 All `/api/db/*` routes operate on the SQLite chat database.
 
+Authentication:
+- Most endpoints require one of two tokens:
+  - `api-token`: general API token for routine admin operations.
+  - `db-admin-token`: elevated token for destructive or high-risk operations.
+- Tokens are provided via:
+  - Header: `Authorization: Bearer <token>`
+
 ### `GET /api/db/stats`
+Requires `api-token`.
 
 ```json
 {
@@ -777,6 +829,7 @@ All `/api/db/*` routes operate on the SQLite chat database.
 ```
 
 ### `GET /api/db/integrity`
+Requires `api-token`.
 
 ```json
 {
@@ -788,6 +841,7 @@ All `/api/db/*` routes operate on the SQLite chat database.
 If `detail` is not `"ok"`, `status` is `"corrupted"`.
 
 ### `POST /api/db/maintenance`
+Requires `api-token`.
 
 ```json
 { "operation": "checkpoint" }
@@ -818,6 +872,8 @@ Responses:
 ```
 
 ### `POST /api/db/backup`
+Requires `api-token`.
+
 Creates a manual backup in `~/.config/llama-monitor/backups/chat_<timestamp>.db`.
 
 ```json
@@ -831,6 +887,7 @@ Creates a manual backup in `~/.config/llama-monitor/backups/chat_<timestamp>.db`
 Manual backups are pruned to the 7 newest `chat_*.db` files.
 
 ### `DELETE /api/db/backup`
+Requires `db-admin-token`.
 
 ```json
 {
@@ -848,6 +905,8 @@ Response:
 ```
 
 ### `GET /api/db/backups`
+Requires `api-token`.
+
 Lists both manual backups (`chat_*.db`) and automatic hourly backups (`chat_auto_*.db`).
 
 ```json
@@ -864,6 +923,7 @@ Lists both manual backups (`chat_*.db`) and automatic hourly backups (`chat_auto
 ```
 
 ### `POST /api/db/restore`
+Requires `db-admin-token`.
 
 ```json
 {
@@ -883,6 +943,7 @@ Success:
 Before restore, the server creates `pre_restore_<timestamp>.db` in the same `backups/` directory.
 
 ### `POST /api/db/repair`
+Requires `db-admin-token`.
 
 ```json
 { "operation": "repair_indexes" }
@@ -903,6 +964,7 @@ Responses:
 ```
 
 ### `GET /api/db/indexes`
+Requires `api-token`.
 
 ```json
 [
@@ -916,6 +978,8 @@ Responses:
 ```
 
 ### `POST /api/db/query`
+Requires `db-admin-token`.
+
 Runs admin queries, limited to `SELECT` and `PRAGMA`.
 
 ```json
@@ -934,6 +998,101 @@ Response:
   ],
   "row_count": 1
 }
+```
+
+## TLS / ACME
+
+Endpoints for managing TLS and ACME-based certificate provisioning.
+
+Authentication:
+- GET /api/tls/config: requires `api-token`.
+- PUT /api/tls/config, ACME endpoints: require `api-token`.
+
+### `GET /api/tls/config`
+Returns the current TLS mode and ACME summary (without secrets).
+
+Header:
+- `Authorization: Bearer <api-token>`
+
+Response:
+
+```json
+{
+  "mode": "acme",
+  "customCertPath": null,
+  "customKeyPath": null,
+  "acme": {
+    "enabled": true,
+    "fqdn": "llama-monitor.example.com",
+    "environment": "staging",
+    "dnsProvider": "cloudflare",
+    "validationDelay": 300,
+    "lastRenewal": null,
+    "certPath": "/path/to/cert.pem",
+    "keyPath": "/path/to/key.pem"
+  }
+}
+```
+
+`mode` can be:
+- `"none"`
+- `"self-signed"`
+- `"custom"`
+- `"acme"`
+
+### `PUT /api/tls/config`
+Updates TLS configuration, including ACME settings.
+
+Header:
+- `Authorization: Bearer <api-token>`
+- `Content-Type: application/json`
+
+Example body (ACME):
+
+```json
+{
+  "mode": "acme",
+  "acme": {
+    "enabled": true,
+    "fqdn": "llama-monitor.example.com",
+    "environment": "staging",
+    "dnsProvider": "cloudflare",
+    "dnsConfig": {
+      "CF_API_TOKEN": "your-token-here"
+    },
+    "validationDelay": 300
+  }
+}
+```
+
+Response:
+
+```json
+{ "ok": true }
+```
+
+### `POST /api/tls/acme/request`
+Triggers an ACME certificate request.
+
+Header:
+- `Authorization: Bearer <api-token>`
+
+Response:
+
+```json
+{ "status": "requested" }
+```
+
+### `POST /api/tls/acme/renew`
+Triggers an ACME certificate renewal.
+
+Header:
+- `Authorization: Bearer <api-token>`
+
+Response:
+
+```json
+{ "status": "renewed" }
 ```
 
 ## Legacy Chat Fields

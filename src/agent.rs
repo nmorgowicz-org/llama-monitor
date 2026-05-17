@@ -327,7 +327,14 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
                 // Persist it
                 let _ = std::fs::create_dir_all(&config_dir);
                 let _ = std::fs::write(&token_file, &new_token);
-                eprintln!("[agent] Auto-generated token: {new_token}");
+                crate::config::harden_file_permissions(&token_file);
+                // Log only a redacted prefix to avoid exposing the full token.
+                let redacted = if new_token.len() > 8 {
+                    format!("{}••••••••", &new_token[..4])
+                } else {
+                    "••••••••".to_string()
+                };
+                eprintln!("[agent] Auto-generated token: {redacted}");
                 eprintln!("[agent] Token saved to {}", token_file.display());
                 new_token
             })

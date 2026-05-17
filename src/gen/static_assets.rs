@@ -19,6 +19,7 @@ pub const CSS_TOKENS: &str = include_str!("../../static/css/tokens.css");
 pub const ICON_SVG: &str = include_str!("../../static/icon.svg");
 pub const INDEX_HTML: &str = include_str!("../../static/index.html");
 pub const BOOTSTRAP_JS: &str = include_str!("../../static/js/bootstrap.js");
+pub const COMPACT_JS: &str = include_str!("../../static/js/compact.js");
 pub const COMPAT_GLOBALS_JS: &str = include_str!("../../static/js/compat/globals.js");
 pub const CONFIG_DOMPURIFY_INIT_JS: &str = include_str!("../../static/js/config/dompurify-init.js");
 pub const CORE_APP_STATE_JS: &str = include_str!("../../static/js/core/app-state.js");

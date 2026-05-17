@@ -175,10 +175,14 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
 
 ### 4. Overly Permissive CSP and unsafe-inline Script Usage
 
+- Status: FIXED (scripts); PARTIALLY MITIGATED (styles)
 - Files:
-  - src/web/mod.rs:34
+  - src/web/mod.rs (CSP headers, index route, compact route)
+  - static/index.html
+  - static/compact.html
+  - static/js/compact.js
 - Issue:
-  - CSP includes:
+  - Original CSP included:
     - script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net
     - style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net
   - 'unsafe-inline' allows:
@@ -188,11 +192,31 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
   - If any XSS exists (see below), 'unsafe-inline' makes exploitation easier.
 - Likelihood:
   - High: already in use.
-- Fix:
-  - Move to:
-    - Non-inline scripts.
-    - Use nonces or hashes.
-    - Remove 'unsafe-inline' where possible.
+- Mitigation Applied (2026-05-17):
+  - script-src:
+    - 'unsafe-inline' removed for scripts across all routes.
+    - Index route uses per-request nonce:
+      - script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net
+    - index.html inline script now uses nonce:
+      - <script nonce="{{ NONCE }}"> for APP_VERSION/APP_PLATFORM.
+    - No inline event handlers remain in index.html.
+    - compact.html:
+      - Inline script externalized to static/js/compact.js.
+      - Served with its own per-request nonce for the small inline script that sets __COMPACT_PORT__.
+  - style-src:
+    - 'unsafe-inline' removed from global CSP (non-index routes).
+    - Kept in index.html and compact.html where inline styles (display:none, etc.) are heavily used.
+- Remaining Risk:
+  - Low-Medium:
+    - 'unsafe-inline' for styles still allows inline style-based XSS vectors.
+    - For index.html and compact.html, removing 'unsafe-inline' from style-src would require:
+      - Moving all inline styles to external CSS, or
+      - Using style-src hashes for each inline style block.
+    - This is a significant refactor with limited security gain (styles are less exploitable than scripts).
+- Next Steps:
+  - Optional: remove 'unsafe-inline' from style-src by:
+    - Moving inline styles to external CSS.
+    - Using style-src hashes for necessary inline styles.
 
 ### 5. Potential XSS via Markdown Rendering and DOM Insertion
 
@@ -273,46 +297,44 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
 
 ### 7. Filesystem Exposure via /api/browse
 
-- Status: ASSESSED (not yet fixed)
+- Status: FIXED
 - Endpoint:
   - GET /api/browse
 - Files:
-  - src/web/api.rs (api_browse, around 1963–2074)
+  - src/web/api.rs (api_browse, around 2180–2245)
   - static/js/features/file-browser.js
 - Issue:
   - Accepts path query parameter.
   - Uses PathBuf::from(&requested) and canonicalize().
-  - No root restriction, no allowlist, no prefix check.
-  - Any directory reachable by the process is browsable.
-  - Only skips dotfiles (cosmetic).
-  - Symlinks resolve via canonicalize(), allowing escape from any intended root.
-  - Frontend file-browser modal:
-    - Used for selecting GGUF models, llama.cpp executable, and working directories.
-    - Path bar is user-editable and sends arbitrary paths to /api/browse.
+  - Originally:
+    - No root restriction, no allowlist, no prefix check.
+    - Any directory reachable by the process was browsable.
+    - Symlinks could escape via canonicalize().
 - Impact:
   - Medium:
-    - Attacker can enumerate the full filesystem tree readable by the process.
+    - Attacker could enumerate the full filesystem tree readable by the process.
     - Reveals usernames, project directories, config locations, installed software, model names.
-    - Does not read file contents; only names, sizes, and types.
-    - Dotfile skip reduces (but does not eliminate) exposure of typical secrets locations.
 - Likelihood:
   - Medium:
     - Endpoint is exposed on the same interface as the rest of the UI.
-    - On LAN, any client can call /api/browse?path=/ to walk the entire filesystem.
-- Recommended Fix (preferred):
-  - Restrict browsing to the user’s home directory and its subdirectories:
-    - Compute root:
-      - let root = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-    - After canonicalizing:
-      - if !dir.starts_with(&root) { return error_json("Path not allowed"); }
-  - This:
-    - Preserves all current use cases (models under ~/models, llama.cpp under home, etc.).
-    - Blocks traversal to /etc, /var, /proc, etc.
-    - Requires no frontend changes (file-browser starts at home and handles errors).
-- Alternative (slightly more permissive):
-  - Define a small allowlist of roots:
-    - e.g., [home, PathBuf::from("/models"), PathBuf::from("/opt")]
-  - Reject any path not starting with one of these roots.
+- Mitigation Applied (2026-05-17):
+  - Implemented allowlist of allowed roots:
+    - User’s home directory.
+    - Parent directory of the configured models_dir.
+    - Parent directories of configured TLS cert/key paths.
+  - Flow:
+    - Requested path is canonicalized.
+    - If canonicalized path does not start_with any allowed root:
+      - Return JSON: { "path": ..., "error": "Path not allowed" }.
+  - Symlink protection:
+    - Because canonicalization happens before the allowlist check, symlinks that resolve outside allowed roots are rejected.
+  - Frontend:
+    - file-browser.js continues to allow arbitrary path input.
+    - It now explicitly handles the "Path not allowed" error with a user-visible message.
+- Remaining Risk:
+  - Low:
+    - Browsing is confined to a small, predictable set of directories.
+    - No exposure of /etc, /var, /proc, or arbitrary system paths.
 
 ### 8. Overly Broad Database Restore and Backup Access
 
@@ -353,13 +375,15 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
 
 ### 9. SSH Credentials and Agent Tokens Stored in Plaintext
 
+- Status: FULLY FIXED
 - Files:
-  - src/state.rs:80
-  - src/web/api.rs
+  - src/config.rs (encryption helpers, AES-256-GCM)
+  - src/state.rs (UiSettings load/save with encryption)
+  - src/web/api.rs (token/ACME handling)
   - static/js/features/settings.js
   - static/js/features/remote-agent.js
 - Issue:
-  - SSH passwords, private key paths, passphrases, and agent tokens (e.g., remote_agent_token) are stored in:
+  - SSH passwords, private key paths, passphrases, and agent tokens (e.g., remote_agent_token) were stored in:
     - sessions.json
     - ui-settings.json
   - No encryption at rest.
@@ -367,54 +391,74 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
   - If filesystem is compromised, all secrets are exposed.
 - Likelihood:
   - Medium: depends on environment.
-- Assessment:
-  - App is local-first, single-user; full crypto-at-rest (KMS, envelope encryption) is overkill.
-  - Realistic risks:
-    - Another local user reading files.
-    - Accidental leak via logs, debug endpoints, or screenshots.
-- Status:
-  - Partially mitigated (see below).
-- Fix (implemented):
-  - UI masking:
-    - remote_agent_token and SSH password/passphrase fields are masked by default.
-    - Show/hide toggle (eye icon) allows temporary reveal with partial masking.
-  - No logging:
-    - Tokens are never logged in full; only “token generated”-style messages are used.
-  - Documentation:
-    - Added “Stored secrets and security” section in docs/reference/remote-agent.md:
-      - Notes that credentials are stored in plaintext.
-      - Advises treating ~/.config/llama-monitor/ as sensitive.
-  - Rotate Agent Token helper:
-    - New endpoint: POST /api/rotate-agent-token (requires api-token).
-    - Generates a new remote_agent_token, saves it, and notifies agent poll loop.
-    - Exposed in Settings → Security & Certificates → “Rotate Agent Token”.
-- Optional (future, non-blocking):
-  - Integrate with the OS keychain for these fields (opt-in only):
-    - macOS: Keychain
-    - Linux: Secret Service (if available)
-    - Windows: Credential Manager
+- Mitigation Applied (2026-05-17):
+  - Encryption at rest:
+    - AES-256-GCM via aes-gcm crate.
+    - Key management:
+      - Uses LLAMA_MONITOR_ENCRYPTION_KEY if set (≥16 chars), or
+      - Auto-generated 32-byte key stored in config_dir/encryption-key (Unix 0600).
+    - Encrypted values stored as: enc:<base64(nonce || ciphertext)>.
+    - Backward-compatible: values without "enc:" treated as plaintext.
+  - Encrypted fields:
+    - remote_agent_token in ui-settings.json.
+    - ACME dns_config in tls-config.json (DNS provider credentials).
+    - api-token file.
+    - db-admin-token file.
+  - SSH credentials:
+    - Not persisted to disk.
+    - Collected in-memory in the frontend and sent per-request (e.g., for host-key, detect, start).
+    - No long-term plaintext storage.
+  - UI and logging:
+    - remote_agent_token masked in GET /api/settings.
+    - Real token only via GET /api/settings/full with api-token auth.
+    - Tokens never logged in full.
+- Remaining Risk:
+  - Low:
+    - Secrets are exposed in plaintext only:
+      - In-memory during operation.
+      - Over the wire if TLS is not enabled.
+    - No OS keychain integration (optional future improvement).
 
 ### 10. Lack of Rate Limiting and DoS Resistance
 
+- Status: FIXED (core mitigations applied)
 - Scope:
   - All API endpoints.
 - Issue:
-  - No rate limiting.
-  - Endpoints like:
-    - /api/chat
-    - /api/db/query
-    - /api/self-update
-  - Can be abused to:
-    - Exhaust resources.
-    - Trigger long-running operations.
+  - Previously:
+    - No rate limiting.
+    - No per-client or global request throttling.
+    - No concurrency limits.
+    - Only partial timeout protection.
 - Impact:
   - Denial of service.
 - Likelihood:
   - Medium: if exposed on LAN or internet.
-- Fix:
-  - Add:
-    - Per-endpoint rate limiting.
-    - Timeouts and concurrency limits.
+- Mitigations Applied (2026-05-17):
+  1. Global rate limiter:
+     - Added a lightweight in-memory limiter to all routes.
+     - 200 req/s with 500 burst allowance.
+     - Prevents trivial flooding and accidental loops.
+  2. /api/self-update and /api/kill-llama:
+     - Now require api-token.
+     - Added cooldowns:
+       - /api/self-update: 30 seconds between calls.
+       - /api/kill-llama: 15 seconds between calls.
+  3. /api/db/query:
+     - Wrapped in tokio::time::timeout (10 seconds).
+     - SQL length capped at 16KB.
+     - Returns "query timed out" or "query too long" instead of hanging.
+  4. WebSocket (/ws):
+     - Max 50 concurrent connections.
+     - New connections rejected with 429 when limit is reached.
+  5. Body size limits:
+     - /api/chat: 2 MB.
+     - /api/db/query: 256KB.
+- Remaining Risk:
+  - Low:
+    - No per-client or per-IP tracking (intentional for local-first use).
+    - No fine-grained per-endpoint rate limits (global is sufficient for this app).
+    - Advanced SSRF/DoS via crafted traffic is still possible but significantly reduced.
 
 ## LOW
 
@@ -465,8 +509,14 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
 4. Improve XSS protection:
    - DONE: DOMPurify now applied to all marked-rendered content.
 5. Restrict /api/browse:
-   - PENDING: limit to home directory (recommended) or a small allowlist of roots.
-6. Add rate limiting:
+   - DONE: limited to home directory, models_dir parent, and TLS cert/key parent directories; symlink-escape protected.
+6. Fix CSP and compact.html:
+   - DONE:
+     - script-src: 'unsafe-inline' removed; nonces used for index.html and compact.html.
+     - compact.html inline script externalized to static/js/compact.js.
+   - PARTIAL:
+     - style-src: 'unsafe-inline' still present for index.html and compact.html (inline styles heavily used).
+7. Add rate limiting:
    - PENDING: protect against DoS and brute-force attacks.
-7. Encrypt sensitive data:
-   - PENDING: at least SSH credentials and agent tokens.
+8. Encrypt sensitive data:
+   - DONE: AES-256-GCM encryption at rest for agent tokens, ACME credentials, api-token, db-admin-token; SSH secrets in-memory only.
