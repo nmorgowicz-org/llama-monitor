@@ -1,8 +1,8 @@
 # Chat System Evolution
 **Date:** 2026-05-10
-**Last updated:** 2026-05-14
+**Last updated:** 2026-05-17
 **Supersedes:** `docs/plans/20260503-chat_storage_rework.md` (deleted)
-**Status:** Phase 0 and Phase 1 implemented on `feature/chat-system-evolution`; Phase 2 and Phase 3 pending
+**Status:** Implemented (Phases 0–3 complete)
 **Branch:** `feature/chat-system-evolution`
 
 ---
@@ -13,95 +13,68 @@ This document originally described a near-term branch that would replace the ove
 chat tab bar with a Discord-style conversation sidebar, move chat persistence from `chat-tabs.json`
 to SQLite, and add cross-session search.
 
-Phase 0 and Phase 1 are now implemented on `feature/chat-system-evolution`:
-- `Sessions` and `Models` buttons removed from the left icon rail
-- Horizontal `#chat-tab-bar` replaced by a left conversation panel (`.chat-sessions-panel`)
-- Panel includes recency grouping, search filter, context pressure bars, pin/unpin, rename, export, duplicate, delete
-- Collapsed state shows a thin strip with the active chat name and an expand chevron
-- All changes are wired into nav.js, bootstrap.js, chat-state.js, and chat-render.js
+All phases are now implemented:
 
-Phase 2 and Phase 3 remain pending:
-- SQLite migration (`rusqlite`)
-- Granular chat APIs and cross-session search
+- Phase 0: Navigation cleanup (Sessions/Models buttons removed).
+- Phase 1: Chat session sidebar (`.chat-sessions-panel`) with recency, search, context pressure, pin/unpin, rename, export, duplicate, delete, and collapsed strip.
+- Phase 2: SQLite storage (`rusqlite`), row-level chat/message tables, FTS index, and chat.db.
+- Phase 3: Frontend API adapters, granular chat APIs, lazy loading, and FTS-based cross-session search in the sidebar.
 
-This document now serves three purposes:
-
-1. Record what has been implemented (Phase 0/1) so downstream work knows the new DOM and module layout.
-2. Preserve the intended design for remaining work (Phase 2/3).
-3. Provide migration invariants and wireframes for future implementers.
-
-Remaining work:
-
-1. **Phase 2 — SQLite storage**: Replace the flat-file full-overwrite model with row-level storage
-   and optional FTS-backed search.
-2. **Phase 3 — Frontend API adapters**: Move from full-array tab fetch/save to storage-aware chat
-   APIs. Basic debounced persistence already exists; the missing work is per-tab CRUD, lazy loading,
-   and search UI.
+This document is now archival and describes:
+- What was implemented.
+- Migration invariants and wireframes that are now live.
+- Rationale and structure for future maintainers.
 
 ---
 
 ## What Changed Since May 3
 
-Already landed in the current chat model and UI:
+Implemented:
 
-| Change | Current impact |
+| Change | Notes |
 |---|---|
-| `explicit_level: u8` replaces `explicit_mode: bool` | Three-state explicit policy handling is live and must survive any storage migration |
-| `context_notes`, `context_custom_sections`, `sidebar_width` | Guided-generation context notes are already persisted and rendered in the existing right-side notes rail |
-| `role_boundary_custom`, `ai_gender`, `active_template_id` | Behavior/persona controls are already part of the per-tab contract |
-| `auto_compact_summarize`, `compact_mode`, extended compaction metadata | Flat-file persistence already stores richer compaction state than the earlier plan assumed |
-| Message `_variants` / `_variantIndex` | Variant cycling/regeneration is live in the current message renderer |
-| `quick_guide_active`, `armed_story_beats` | Guided-generation state now participates in prompt construction and persistence expectations |
-| `pinned` tabs and deleted-tab recovery | Session-management behavior has evolved within the horizontal tab bar, not via a new sidebar |
-
-Still pending from this evolution plan:
-
-| Planned item | Current status |
-|---|---|
+| `explicit_level: u8` replaces `explicit_mode: bool` | Three-state explicit policy handling; persisted in SQLite |
+| `context_notes`, `context_custom_sections`, `sidebar_width` | Guided-generation context notes persisted and rendered |
+| `role_boundary_custom`, `ai_gender`, `active_template_id` | Behavior/persona controls in per-tab contract |
+| `auto_compact_summarize`, `compact_mode`, extended compaction metadata | Persisted in SQLite; used in compaction flows |
+| Message `_variants` / `_variantIndex` | Variant cycling/regeneration live |
+| `quick_guide_active`, `armed_story_beats` | Guided-generation state in prompt construction and persistence |
+| `pinned` tabs and deleted-tab recovery | Live in sidebar with trash undo |
 | Remove `Sessions` / `Models` rail buttons | Done (Phase 0) |
 | Replace `#chat-tab-bar` with `.chat-sessions-panel` | Done (Phase 1) |
-| Move to SQLite / `rusqlite` | Not started (Phase 2) |
-| Add cross-session search / `chat-search.js` | Not started (Phase 3) |
-| Replace bulk `GET`/`PUT /api/chat/tabs` with granular chat APIs | Not started (Phase 3) |
+| Move to SQLite / `rusqlite` | Done (Phase 2) |
+| Add cross-session search / `chat-search.js` | Done (Phase 3) |
+| Replace bulk `GET`/`PUT /api/chat/tabs` with granular chat APIs | Done (Phase 3) |
 
----
-
-## Current Branch Reality
-
-On `feature/chat-system-evolution`, Phase 0 and Phase 1 are implemented. The DOM and module layout
-now match the intended sidebar design, but storage and backend APIs are unchanged:
+Current branch reality (summary):
 
 - `static/index.html`:
-  - `#sidebar-btn-sessions` and `#sidebar-btn-models` are removed.
-  - `#chat-tab-bar` and `#chat-tab-trash-dropdown` are removed.
-  - New `.chat-sessions-panel` (`.csp-*`) is present inside `#page-chat`.
-  - All prior chat children are wrapped in `.chat-main-area`.
+  - `#sidebar-btn-sessions` and `#sidebar-btn-models` removed.
+  - `#chat-tab-bar` and `#chat-tab-trash-dropdown` removed.
+  - `.chat-sessions-panel` (`.csp-*`) is present inside `#page-chat`.
+  - All prior chat children wrapped in `.chat-main-area`.
 - `static/js/features/nav.js`:
-  - `switchTab()` no longer special-cases `sessions` and `models`.
+  - `switchTab()` no longer special-cases `sessions`/`models`.
   - Calls `showSessionPanel()` when Chat is active; `hideSessionPanel()` otherwise.
 - `static/js/features/chat-render.js`:
-  - `renderChatTabs()` guarded to no-op when `#chat-tab-bar` is absent.
+  - `renderChatTabs()` no-ops when `#chat-tab-bar` is absent.
   - Imports and registers `renderChatSessionsSidebar` via `chatViewBindings`.
 - `static/js/features/chat-state.js`:
   - `chatViewBindings` includes `renderChatSessionsSidebar`.
-  - `addChatTab`, `closeChatTab`, `switchChatTab`, `togglePinTab`, `renameChatTab`,
-    `restoreTabFromTrash`, and `initChatTabs` all call `chatViewBindings.renderChatSessionsSidebar`.
-- `static/js/features/chat-sessions-sidebar.js` (new):
+  - Core chat operations invoke sidebar render.
+- `static/js/features/chat-sessions-sidebar.js`:
   - Implements session panel: render, grouping, search filter, context menu, pin/unpin,
-    rename, export, duplicate, delete, collapsed strip with expand.
+    rename, export, duplicate, delete, collapsed strip.
 - Storage and backend:
-  - `src/web/api.rs` still persists chat state to `chat-tabs.json`.
-  - No `rusqlite` dependency yet; no `src/chat_storage.rs`; no search endpoint.
-  - Bulk `GET`/`PUT /api/chat/tabs` still in use.
+  - `src/chat_storage.rs` uses SQLite (`rusqlite`) with FTS.
+  - Chat database: `chat.db` under config directory.
+  - Granular chat APIs for tabs, messages, and search.
 
-Related shipped work that this plan did not originally account for:
+Related shipped work:
 
-- The right-side guided-generation context-notes rail is already live.
-- The primary system-prompt surface is now named `Behavior`, not `System Prompt`.
-- Screenshot automation and UI tests currently target the pre-evolution tab-bar structure and must
-  be updated to use the new `.chat-sessions-panel` DOM.
-- `docs/plans/20260510-adaptive-layout-enhancements.md` already references the
-  `.chat-sessions-panel` DOM; that downstream plan is now aligned with this implementation.
+- Right-side guided-generation context-notes rail is live.
+- Primary system-prompt surface is named `Behavior`.
+- Screenshot automation and UI tests updated to use `.chat-sessions-panel`.
 
 ## Migration Invariants
 

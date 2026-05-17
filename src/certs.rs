@@ -463,9 +463,9 @@ mod tests {
     }
 
     // NOTE: The AgentClientCertVerifier currently uses a heuristic: it checks
-   // whether the PEM of the client cert contains the literal string "agent-client".
-   // This is not a robust SAN parser and will be improved in a future change.
-   // For now, we only test the negative path (reject when role is clearly absent).
+    // whether the PEM of the client cert contains the literal string "agent-client".
+    // This is not a robust SAN parser and will be improved in a future change.
+    // For now, we only test the negative path (reject when role is clearly absent).
 
     #[test]
     fn verify_agent_client_cert_rejects_missing_role() {

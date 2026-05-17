@@ -1,11 +1,17 @@
 # TLS / ACME / mTLS Implementation Plan
 
 Date: 2026-05-16  
+Last updated: 2026-05-17  
+Status: Implemented  
 Scope:  
 - Add optional TLS to the main web UI.  
 - Add Let’s Encrypt / ACME integration with DNS-01 challenge (provider-agnostic; Namecheap, Cloudflare, etc.).  
 - Extend existing mTLS infrastructure for remote-agent.  
 - Provide a simple, non-opinionated UX that still satisfies the security audit.
+
+Note: This plan is now archival. All phases are implemented.
+For operators and developers, see the reference doc:
+- docs/reference/tls-architecture.md
 
 ---
 

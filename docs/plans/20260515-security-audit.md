@@ -273,26 +273,46 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
 
 ### 7. Filesystem Exposure via /api/browse
 
+- Status: ASSESSED (not yet fixed)
 - Endpoint:
   - GET /api/browse
 - Files:
-  - src/web/api.rs:1913
+  - src/web/api.rs (api_browse, around 1963–2074)
+  - static/js/features/file-browser.js
 - Issue:
   - Accepts path query parameter.
   - Uses PathBuf::from(&requested) and canonicalize().
-  - Allows browsing the entire filesystem.
-  - Only skips dotfiles.
+  - No root restriction, no allowlist, no prefix check.
+  - Any directory reachable by the process is browsable.
+  - Only skips dotfiles (cosmetic).
+  - Symlinks resolve via canonicalize(), allowing escape from any intended root.
+  - Frontend file-browser modal:
+    - Used for selecting GGUF models, llama.cpp executable, and working directories.
+    - Path bar is user-editable and sends arbitrary paths to /api/browse.
 - Impact:
-  - Any authenticated user can:
-    - Read arbitrary files (config, SSH keys, tokens, etc.).
+  - Medium:
+    - Attacker can enumerate the full filesystem tree readable by the process.
+    - Reveals usernames, project directories, config locations, installed software, model names.
+    - Does not read file contents; only names, sizes, and types.
+    - Dotfile skip reduces (but does not eliminate) exposure of typical secrets locations.
 - Likelihood:
-  - High: directly callable via API.
-- Fix:
-  - Either:
-    - Restrict to a specific directory (e.g., models directory).
-    - Or:
-      - Add a strict allowlist of allowed root paths.
-      - Reject paths outside allowed roots.
+  - Medium:
+    - Endpoint is exposed on the same interface as the rest of the UI.
+    - On LAN, any client can call /api/browse?path=/ to walk the entire filesystem.
+- Recommended Fix (preferred):
+  - Restrict browsing to the user’s home directory and its subdirectories:
+    - Compute root:
+      - let root = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    - After canonicalizing:
+      - if !dir.starts_with(&root) { return error_json("Path not allowed"); }
+  - This:
+    - Preserves all current use cases (models under ~/models, llama.cpp under home, etc.).
+    - Blocks traversal to /etc, /var, /proc, etc.
+    - Requires no frontend changes (file-browser starts at home and handles errors).
+- Alternative (slightly more permissive):
+  - Define a small allowlist of roots:
+    - e.g., [home, PathBuf::from("/models"), PathBuf::from("/opt")]
+  - Reject any path not starting with one of these roots.
 
 ### 8. Overly Broad Database Restore and Backup Access
 
@@ -403,12 +423,12 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
 2. Harden remote-agent command execution:
    - DONE: strict allowlist validator added; both autostart and start fallback now enforce safe commands.
 3. Mitigate SSRF:
-   - Add stricter checks to attach endpoint and chat proxy.
+   - DONE: SSRF guard added to attach endpoint with IP/host allowlists and DNS checks.
 4. Improve XSS protection:
-   - Ensure all dynamic content is sanitized with DOMPurify.
+   - DONE: DOMPurify now applied to all marked-rendered content.
 5. Restrict /api/browse:
-   - Limit to a specific directory or allowlist.
+   - PENDING: limit to home directory (recommended) or a small allowlist of roots.
 6. Add rate limiting:
-   - Protect against DoS and brute-force attacks.
+   - PENDING: protect against DoS and brute-force attacks.
 7. Encrypt sensitive data:
-   - At least SSH credentials and agent tokens.
+   - PENDING: at least SSH credentials and agent tokens.

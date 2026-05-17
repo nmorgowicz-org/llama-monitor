@@ -1009,7 +1009,7 @@ pub fn api_routes(
     let put_gpu_env = api_put_gpu_env(state.clone());
     let get_settings = api_get_settings(state.clone());
     let put_settings = api_put_settings(state.clone());
-    let browse = api_browse();
+    let browse = api_browse(state.clone());
     let chat = api_chat(state.clone());
     let chat_abort = api_chat_abort(state.clone());
     let chat_suggestions = api_chat_suggestions(state.clone());
@@ -1960,11 +1960,53 @@ fn api_put_settings(
         })
 }
 
-fn api_browse() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn api_browse(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "browse")
         .and(warp::get())
         .and(warp::query::<std::collections::HashMap<String, String>>())
-        .map(|query: std::collections::HashMap<String, String>| {
+        .map(move |query: std::collections::HashMap<String, String>| {
+            // Build allowed roots:
+            // - Home directory (primary root).
+            // - Directories used for models, TLS certs, etc.
+            let mut allowed_roots: Vec<PathBuf> = Vec::new();
+
+            // Always allow home directory
+            if let Some(home) = dirs::home_dir()
+                && let Ok(canon) = home.canonicalize()
+            {
+                allowed_roots.push(canon);
+            }
+
+            // Allow models_dir (parent directory)
+            if let Some(ref models_dir) = state.models_dir
+                && let Some(parent) = models_dir.parent()
+                && let Ok(canon) = parent.canonicalize()
+            {
+                allowed_roots.push(canon);
+            }
+
+            // Allow TLS custom cert/key parent directories
+            if let Ok(tls) = state.tls_config.lock() {
+                if let Some(ref cert_path) = tls.custom_cert_path
+                    && let Some(parent) = cert_path.parent()
+                    && let Ok(canon) = parent.canonicalize()
+                {
+                    allowed_roots.push(canon);
+                }
+                if let Some(ref key_path) = tls.custom_key_path
+                    && let Some(parent) = key_path.parent()
+                    && let Ok(canon) = parent.canonicalize()
+                {
+                    allowed_roots.push(canon);
+                }
+            }
+
+            // Remove duplicates
+            allowed_roots.sort();
+            allowed_roots.dedup();
+
             let requested = query.get("path").cloned().unwrap_or_default();
             let filter = query.get("filter").cloned().unwrap_or_default();
 
@@ -1983,6 +2025,14 @@ fn api_browse() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reje
                     }));
                 }
             };
+
+            // Enforce allowlist: directory must be under one of the allowed roots
+            if !allowed_roots.iter().any(|root| dir.starts_with(root)) {
+                return warp::reply::json(&serde_json::json!({
+                    "path": dir.display().to_string(),
+                    "error": "Path not allowed"
+                }));
+            }
 
             if !dir.is_dir() {
                 return warp::reply::json(&serde_json::json!({
