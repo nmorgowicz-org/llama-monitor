@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::Arc;
 
 use warp::Filter;
@@ -4686,32 +4685,51 @@ fn api_kill_llama(
     warp::path!("api" / "kill-llama")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
         .and(with_app_config(app_config))
-        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+        .and_then(move |auth: Option<String>, body: serde_json::Value, cfg: Arc<AppConfig>| {
             async move {
+                // Require db-admin-token (elevated operation).
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-                let has_api_token =
-                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+                let has_admin_token =
+                    bearer.as_deref() == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
 
-                if !has_api_token {
+                if !has_admin_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized; db-admin-token required" })),
                             warp::http::StatusCode::UNAUTHORIZED,
                         ),
                     ));
                 }
 
-                // Cooldown: 15 seconds between calls.
+                // Require explicit confirmation.
+                let confirm = body.get("confirm")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if confirm != "kill" {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "missing confirmation; send { \"confirm\": \"kill\" }" })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ),
+                    ));
+                }
+
+                // Cooldown: 30 seconds between kills.
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
                 let last = LAST_KILL.load(Ordering::Relaxed);
-                if now - last < 15 {
+                if now - last < 30 {
+                    let remaining = 30 - (now - last);
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({ "error": "too soon; please wait" })),
+                            warp::reply::json(&serde_json::json!({
+                                "error": "too soon; please wait",
+                                "seconds_remaining": remaining
+                            })),
                             warp::http::StatusCode::TOO_MANY_REQUESTS,
                         ),
                     ));
@@ -4719,8 +4737,10 @@ fn api_kill_llama(
 
                 LAST_KILL.store(now, Ordering::Relaxed);
 
+                // Inline kill logic (platform-specific).
                 #[cfg(target_os = "windows")]
                 {
+                    use std::process::Command;
                     match Command::new("taskkill")
                         .args(["/IM", "llama-server.exe", "/F"])
                         .output()
@@ -4728,64 +4748,66 @@ fn api_kill_llama(
                         Ok(output) => {
                             if output.status.success() {
                                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                    warp::reply::json(&serde_json::json!({"ok": true})),
+                                    warp::reply::json(&serde_json::json!({ "ok": true })),
                                 ))
                             } else {
                                 let err = String::from_utf8_lossy(&output.stderr);
                                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                    warp::reply::json(&serde_json::json!({"ok": false, "error": err})),
+                                    warp::reply::json(&serde_json::json!({ "ok": false, "error": err })),
                                 ))
                             }
                         }
                         Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})),
+                            warp::reply::json(&serde_json::json!({ "ok": false, "error": e.to_string() })),
                         )),
                     }
                 }
                 #[cfg(target_os = "linux")]
                 {
+                    use std::process::Command;
                     match Command::new("pkill").args(["-f", "llama-server"]).output() {
                         Ok(output) => {
                             if output.status.success() {
                                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                    warp::reply::json(&serde_json::json!({"ok": true})),
+                                    warp::reply::json(&serde_json::json!({ "ok": true })),
                                 ))
                             } else {
                                 let err = String::from_utf8_lossy(&output.stderr);
                                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                    warp::reply::json(&serde_json::json!({"ok": false, "error": err})),
+                                    warp::reply::json(&serde_json::json!({ "ok": false, "error": err })),
                                 ))
                             }
                         }
                         Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})),
+                            warp::reply::json(&serde_json::json!({ "ok": false, "error": e.to_string() })),
                         )),
                     }
                 }
                 #[cfg(target_os = "macos")]
                 {
+                    use std::process::Command;
                     match Command::new("pkill").args(["-f", "llama-server"]).output() {
                         Ok(output) => {
                             if output.status.success() {
                                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                    warp::reply::json(&serde_json::json!({"ok": true})),
+                                    warp::reply::json(&serde_json::json!({ "ok": true })),
                                 ))
                             } else {
                                 let err = String::from_utf8_lossy(&output.stderr);
                                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                    warp::reply::json(&serde_json::json!({"ok": false, "error": err})),
+                                    warp::reply::json(&serde_json::json!({ "ok": false, "error": err })),
                                 ))
                             }
                         }
                         Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})),
+                            warp::reply::json(&serde_json::json!({ "ok": false, "error": e.to_string() })),
                         )),
                     }
                 }
                 #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
                 {
                     Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({"ok": false, "error": "Unsupported platform"})),
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": "Unsupported platform" })),
                     ))
                 }
             }
@@ -5255,32 +5277,51 @@ fn api_self_update(
     warp::path!("api" / "self-update")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
         .and(with_app_config(app_config))
-        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+        .and_then(move |auth: Option<String>, body: serde_json::Value, cfg: Arc<AppConfig>| {
             async move {
+                // Require db-admin-token (elevated operation).
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-                let has_api_token =
-                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+                let has_admin_token =
+                    bearer.as_deref() == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
 
-                if !has_api_token {
+                if !has_admin_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized; db-admin-token required" })),
                             warp::http::StatusCode::UNAUTHORIZED,
                         ),
                     ));
                 }
 
-                // Cooldown: 30 seconds between updates.
+                // Require explicit confirmation.
+                let confirm = body.get("confirm")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if confirm != "update" {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "missing confirmation; send { \"confirm\": \"update\" }" })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ),
+                    ));
+                }
+
+                // Cooldown: 5 minutes between updates.
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
                 let last = LAST_UPDATE.load(Ordering::Relaxed);
-                if now - last < 30 {
+                if now - last < 300 {
+                    let remaining = 300 - (now - last);
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({ "error": "too soon; please wait" })),
+                            warp::reply::json(&serde_json::json!({
+                                "error": "too soon; please wait",
+                                "seconds_remaining": remaining
+                            })),
                             warp::http::StatusCode::TOO_MANY_REQUESTS,
                         ),
                     ));

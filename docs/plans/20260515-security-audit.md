@@ -464,39 +464,57 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
 
 ### 11. Self-Update Endpoint Abuse
 
+- Status: FIXED
 - Endpoint:
   - POST /api/self-update
 - Files:
-  - src/web/api.rs:3987
-- Issue:
-  - Any authenticated user can trigger a self-update and restart.
+  - src/web/api.rs
+  - static/js/features/updates.js
+- Issue (original):
+  - Any authenticated user could trigger a self-update and restart.
   - No additional confirmation or admin-only protection.
-- Impact:
-  - Potential for forced updates or disruption.
-- Likelihood:
-  - Low: requires authenticated access.
-- Fix:
-  - Add:
-    - Confirmation step.
-    - Or admin-only protection.
+- Mitigation Applied (2026-05-17):
+  - Requires db-admin-token (elevated, not generic api-token).
+  - Requires JSON body: { "confirm": "update" }.
+  - Cooldown: 5 minutes between updates.
+  - Frontend:
+    - updates.js automatically:
+      - Fetches db-admin-token via /api/db/admin-token.
+      - Sends correct Authorization header.
+      - Sends confirmation field.
+      - Handles 429 with remaining-time message.
+- Remaining Risk:
+  - Low:
+    - If db-admin-token is leaked, endpoint is fully usable.
+    - No cryptographic verification of release assets yet (future improvement).
 
 ### 12. Kill-Llama Endpoint
 
+- Status: FIXED
 - Endpoint:
   - POST /api/kill-llama
 - Files:
-  - src/web/api.rs:3906
-- Issue:
-  - Any authenticated user can kill llama-server.
+  - src/web/api.rs
+  - static/js/features/attach-detach.js
+- Issue (original):
+  - Any authenticated user could kill llama-server.
   - No confirmation or admin-only protection.
-- Impact:
-  - Disruption of service.
-- Likelihood:
-  - Low: requires authenticated access.
-- Fix:
-  - Add:
-    - Confirmation step.
-    - Or admin-only protection.
+- Mitigation Applied (2026-05-17):
+  - Requires db-admin-token (elevated, not generic api-token).
+  - Requires JSON body: { "confirm": "kill" }.
+  - Cooldown: 30 seconds between kills.
+  - Frontend:
+    - attach-detach.js (user-facing kill):
+      - Automatically fetches db-admin-token.
+      - Sends correct Authorization header.
+      - Sends confirmation field.
+      - Handles 429 with “too soon” message.
+    - attach-detach.js (internal kill used by start/stop):
+      - Also uses db-admin-token + confirmation.
+      - Silently continues if token unavailable or endpoint fails.
+- Remaining Risk:
+  - Low:
+    - If db-admin-token is leaked, endpoint is fully usable.
 
 ## Recommended Next Steps (Prioritized)
 
