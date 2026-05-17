@@ -318,24 +318,38 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
 
 - Endpoints:
   - POST /api/db/restore
-  - POST /api/db/backup
+   - POST /api/db/backup
 - Files:
-  - src/web/api.rs:3292
-  - src/web/api.rs:3135
+  - src/web/api.rs:3235
+  - src/web/api.rs:3426
+  - src/web/api.rs:3498
+  - src/web/api.rs:3671
 - Issue:
   - Any authenticated user can:
     - List backups.
     - Restore from any backup.
     - Delete backups.
   - No separation between admin and normal user.
+  - backup_name used directly in path without validation (directory traversal risk).
 - Impact:
   - Data loss or tampering.
 - Likelihood:
   - Medium: if multiple users share the same instance.
-- Fix:
-  - Introduce:
-    - Admin-only endpoints or tokens.
-    - Or at least confirmations and rate limits.
+- Mitigation Applied (2026-05-17):
+  - Auth requirements:
+    - POST /api/db/backup: requires api-token.
+    - GET /api/db/backups: requires api-token.
+    - POST /api/db/restore: requires db-admin-token (high-impact).
+    - DELETE /api/db/backup: requires db-admin-token (high-impact).
+  - Path validation:
+    - backup_name validated: rejects "..", absolute paths, backslashes.
+    - Canonical path enforced: resolved path must stay within backups/ directory.
+  - Frontend:
+    - db-admin.js updated to send correct tokens:
+      - api-token for backup/list.
+      - db-admin-token for restore/delete.
+- Remaining Risk:
+  - Low: defense-in-depth is solid; risk only if tokens are leaked.
 
 ### 9. SSH Credentials and Agent Tokens Stored in Plaintext
 

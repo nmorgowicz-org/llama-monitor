@@ -3232,66 +3232,91 @@ fn api_db_maintenance(
         )
 }
 
-// POST /api/db/backup - Create database backup
+// POST /api/db/backup - Create database backup (requires api-token)
 fn api_db_backup(
     storage: Arc<ChatStorage>,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "db" / "backup")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(with_chat_storage(storage))
         .and(with_app_config(app_config))
-        .and_then(|store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
-            let config_dir = cfg.config_dir.clone();
+        .and_then(
+            move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| {
+                let cfg = cfg.clone();
+                async move {
+                    let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
 
-            let backup_dir = config_dir.join("backups");
-            if let Err(e) = std::fs::create_dir_all(&backup_dir) {
-                eprintln!("Failed to create backup directory: {e}");
-                return Ok(warp::reply::json(
-                    &serde_json::json!({"error": e.to_string()}),
-                ));
-            }
+                    let has_api_token =
+                        bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
 
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis().to_string())
-                .unwrap_or_else(|_| "0".to_string());
-            let backup_path = backup_dir.join(format!("chat_{}.db", timestamp));
-
-            match store.backup(&backup_path) {
-                Ok(()) => {
-                    let file_size = std::fs::metadata(&backup_path)
-                        .ok()
-                        .map(|m| m.len())
-                        .unwrap_or(0);
-
-                    // Clean up old backups (keep last 7)
-                    if let Ok(entries) = std::fs::read_dir(&backup_dir) {
-                        let mut backups: Vec<_> = entries
-                            .filter_map(|e| e.ok())
-                            .filter(|e| e.file_name().to_string_lossy().starts_with("chat_"))
-                            .collect();
-                        backups.sort_by_key(|e| e.path());
-                        while backups.len() > 7 {
-                            let old = backups.remove(0);
-                            let _ = std::fs::remove_file(old.path());
-                        }
+                    if !has_api_token {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
                     }
 
-                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                        "status": "backup_created",
-                        "path": backup_path.to_string_lossy().to_string(),
-                        "size_bytes": file_size,
-                    })))
+                    let config_dir = cfg.config_dir.clone();
+                    let backup_dir = config_dir.join("backups");
+
+                    if let Err(e) = std::fs::create_dir_all(&backup_dir) {
+                        eprintln!("Failed to create backup directory: {e}");
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                            warp::http::StatusCode::OK,
+                        ));
+                    }
+
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis().to_string())
+                        .unwrap_or_else(|_| "0".to_string());
+                    let backup_path = backup_dir.join(format!("chat_{}.db", timestamp));
+
+                    match store.backup(&backup_path) {
+                        Ok(()) => {
+                            let file_size = std::fs::metadata(&backup_path)
+                                .ok()
+                                .map(|m| m.len())
+                                .unwrap_or(0);
+
+                            // Clean up old backups (keep last 7)
+                            if let Ok(entries) = std::fs::read_dir(&backup_dir) {
+                                let mut backups: Vec<_> = entries
+                                    .filter_map(|e| e.ok())
+                                    .filter(|e| {
+                                        e.file_name().to_string_lossy().starts_with("chat_")
+                                    })
+                                    .collect();
+                                backups.sort_by_key(|e| e.path());
+                                while backups.len() > 7 {
+                                    let old = backups.remove(0);
+                                    let _ = std::fs::remove_file(old.path());
+                                }
+                            }
+
+                            Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "status": "backup_created",
+                                    "path": backup_path.to_string_lossy().to_string(),
+                                    "size_bytes": file_size,
+                                })),
+                                warp::http::StatusCode::OK,
+                            ))
+                        }
+                        Err(e) => {
+                            eprintln!("backup error: {e}");
+                            Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                                warp::http::StatusCode::OK,
+                            ))
+                        }
+                    }
                 }
-                Err(e) => {
-                    eprintln!("backup error: {e}");
-                    Ok(warp::reply::json(
-                        &serde_json::json!({"error": e.to_string()}),
-                    ))
-                }
-            }
-        })
+            },
+        )
 }
 
 // GET /api/db/indexes - List database indexes
@@ -3402,56 +3427,75 @@ fn api_db_query(
         )
 }
 
-// GET /api/db/backups - List available backups
+// GET /api/db/backups - List available backups (requires api-token)
 fn api_db_backups(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "db" / "backups")
         .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
         .and(with_app_config(app_config))
-        .and_then(|cfg: Arc<AppConfig>| async move {
-            let backup_dir = cfg.config_dir.join("backups");
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            let cfg = cfg.clone();
+            async move {
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
 
-            let mut backups = Vec::new();
-            let mut total_size = 0u64;
+                let has_api_token =
+                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
 
-            if let Ok(entries) = std::fs::read_dir(&backup_dir) {
-                for entry in entries.filter_map(|e| e.ok()) {
-                    if let Ok(metadata) = entry.metadata()
-                        && metadata.is_file()
-                    {
-                        let name = entry.file_name().to_string_lossy().to_string();
-                        if name.starts_with("chat_") || name.starts_with("chat_auto_") {
-                            let size = metadata.len();
-                            total_size += size;
-                            let modified = metadata
-                                .modified()
-                                .ok()
-                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                .map(|d| d.as_millis() as i64)
-                                .unwrap_or(0);
+                if !has_api_token {
+                    return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                        warp::http::StatusCode::UNAUTHORIZED,
+                    ));
+                }
 
-                            backups.push(serde_json::json!({
-                                "name": name,
-                                "size": size,
-                                "modified": modified,
-                            }));
+                let backup_dir = cfg.config_dir.join("backups");
+
+                let mut backups = Vec::new();
+                let mut total_size = 0u64;
+
+                if let Ok(entries) = std::fs::read_dir(&backup_dir) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        if let Ok(metadata) = entry.metadata()
+                            && metadata.is_file()
+                        {
+                            let name = entry.file_name().to_string_lossy().to_string();
+                            if name.starts_with("chat_") || name.starts_with("chat_auto_") {
+                                let size = metadata.len();
+                                total_size += size;
+                                let modified = metadata
+                                    .modified()
+                                    .ok()
+                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                    .map(|d| d.as_millis() as i64)
+                                    .unwrap_or(0);
+
+                                backups.push(serde_json::json!({
+                                    "name": name,
+                                    "size": size,
+                                    "modified": modified,
+                                }));
+                            }
                         }
                     }
                 }
+
+                backups.sort_by_key(|b| b["modified"].as_i64().unwrap_or(0));
+                backups.reverse();
+
+                Ok::<_, warp::Rejection>(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "backups": backups,
+                        "total_size": total_size,
+                    })),
+                    warp::http::StatusCode::OK,
+                ))
             }
-
-            backups.sort_by_key(|b| b["modified"].as_i64().unwrap_or(0));
-            backups.reverse();
-
-            Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                "backups": backups,
-                "total_size": total_size,
-            })))
         })
 }
 
-// POST /api/db/restore - Restore from backup
+// POST /api/db/restore - Restore from backup (requires db-admin-token)
 fn api_db_restore(
     storage: Arc<ChatStorage>,
     app_config: Arc<AppConfig>,
@@ -3463,60 +3507,116 @@ fn api_db_restore(
 
     warp::path!("api" / "db" / "restore")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json::<RestoreRequest>())
         .and(with_chat_storage(storage))
         .and(with_app_config(app_config))
         .and_then(
-            |req: RestoreRequest, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
-                let backup_path = cfg.config_dir.join("backups").join(&req.backup_name);
+            move |auth: Option<String>,
+                  req: RestoreRequest,
+                  store: Arc<ChatStorage>,
+                  cfg: Arc<AppConfig>| {
+                let cfg = cfg.clone();
+                async move {
+                    let bearer = auth
+                        .and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
 
-                if !backup_path.exists() {
-                    return Ok(warp::reply::json(&serde_json::json!({
-                        "error": format!("Backup not found: {}", req.backup_name)
-                    })));
-                }
+                    // Require db-admin-token for restore (high-impact operation)
+                    let has_admin_token =
+                        bearer.as_deref() == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
 
-                // Get the current database path
-                let db_path = store.get_db_path();
+                    if !has_admin_token {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
 
-                // Create a safety backup before restore
-                let safety_backup = cfg.config_dir.join("backups").join(format!(
-                    "pre_restore_{}.db",
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis().to_string())
-                        .unwrap_or_else(|_| "0".to_string())
-                ));
+                    // Validate backup_name (prevent directory traversal)
+                    let backup_name = req.backup_name.trim();
+                    if backup_name.is_empty()
+                        || backup_name.contains("..")
+                        || backup_name.starts_with('/')
+                        || backup_name.contains('\\')
+                    {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "invalid backup name" })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ));
+                    }
 
-                if std::fs::metadata(&db_path).is_ok() {
-                    let _ = std::fs::copy(&db_path, &safety_backup);
-                }
+                    let backup_dir = cfg.config_dir.join("backups");
+                    let backup_path = backup_dir.join(backup_name);
 
-                // Restore: copy backup over current database
-                match std::fs::copy(&backup_path, &db_path) {
-                    Ok(_) => {
-                        // Verify the restored database
-                        match store.integrity_check() {
-                            Ok(_) => {
-                                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                                    "status": "restored",
-                                    "backup": req.backup_name,
-                                })))
-                            }
-                            Err(e) => {
-                                eprintln!("Restored database integrity check failed: {e}");
-                                Ok(warp::reply::json(&serde_json::json!({
-                                    "error": "Restore succeeded but integrity check failed",
-                                    "safety_backup": safety_backup.to_string_lossy().to_string(),
-                                })))
+                    // Ensure resolved path is within backup_dir
+                    if matches!(
+                        (backup_path.canonicalize(), backup_dir.canonicalize()),
+                        (Ok(ref canonical), Ok(ref base)) if !canonical.starts_with(base)
+                    ) {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "path not allowed" })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ));
+                    }
+
+                    if !backup_path.exists() {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "error": format!("Backup not found: {}", backup_name)
+                            })),
+                            warp::http::StatusCode::OK,
+                        ));
+                    }
+
+                    // Get the current database path
+                    let db_path = store.get_db_path();
+
+                    // Create a safety backup before restore
+                    let safety_backup = cfg.config_dir.join("backups").join(format!(
+                        "pre_restore_{}.db",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis().to_string())
+                            .unwrap_or_else(|_| "0".to_string())
+                    ));
+
+                    if std::fs::metadata(&db_path).is_ok() {
+                        let _ = std::fs::copy(&db_path, &safety_backup);
+                    }
+
+                    // Restore: copy backup over current database
+                    match std::fs::copy(&backup_path, &db_path) {
+                        Ok(_) => {
+                            // Verify the restored database
+                            match store.integrity_check() {
+                                Ok(_) => {
+                                    Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                        warp::reply::json(&serde_json::json!({
+                                            "status": "restored",
+                                            "backup": backup_name,
+                                        })),
+                                        warp::http::StatusCode::OK,
+                                    ))
+                                }
+                                Err(e) => {
+                                    eprintln!("Restored database integrity check failed: {e}");
+                                    Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                        warp::reply::json(&serde_json::json!({
+                                            "error": "Restore succeeded but integrity check failed",
+                                            "safety_backup": safety_backup.to_string_lossy().to_string(),
+                                        })),
+                                        warp::http::StatusCode::OK,
+                                    ))
+                                }
                             }
                         }
-                    }
-                    Err(e) => {
-                        eprintln!("Restore error: {e}");
-                        Ok(warp::reply::json(
-                            &serde_json::json!({"error": e.to_string()}),
-                        ))
+                        Err(e) => {
+                            eprintln!("Restore error: {e}");
+                            Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                                warp::http::StatusCode::OK,
+                            ))
+                        }
                     }
                 }
             },
@@ -3567,7 +3667,7 @@ fn api_db_repair(
         })
 }
 
-// DELETE /api/db/backup - Delete a specific backup
+// DELETE /api/db/backup - Delete a specific backup (requires db-admin-token)
 fn api_db_delete_backup(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -3578,30 +3678,83 @@ fn api_db_delete_backup(
 
     warp::path!("api" / "db" / "backup")
         .and(warp::delete())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json::<DeleteBackupRequest>())
         .and(with_app_config(app_config))
-        .and_then(|req: DeleteBackupRequest, cfg: Arc<AppConfig>| async move {
-            let backup_path = cfg.config_dir.join("backups").join(&req.backup_name);
+        .and_then(
+            move |auth: Option<String>, req: DeleteBackupRequest, cfg: Arc<AppConfig>| {
+                let cfg = cfg.clone();
+                async move {
+                    let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
 
-            if !backup_path.exists() {
-                return Ok(warp::reply::json(&serde_json::json!({
-                    "error": format!("Backup not found: {}", req.backup_name)
-                })));
-            }
+                    // Require db-admin-token for delete (high-impact operation)
+                    let has_admin_token = bearer.as_deref()
+                        == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
 
-            match std::fs::remove_file(&backup_path) {
-                Ok(_) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                    "status": "deleted",
-                    "backup": req.backup_name,
-                }))),
-                Err(e) => {
-                    eprintln!("Delete backup error: {e}");
-                    Ok(warp::reply::json(
-                        &serde_json::json!({"error": e.to_string()}),
-                    ))
+                    if !has_admin_token {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
+
+                    // Validate backup_name (prevent directory traversal)
+                    let backup_name = req.backup_name.trim();
+                    if backup_name.is_empty()
+                        || backup_name.contains("..")
+                        || backup_name.starts_with('/')
+                        || backup_name.contains('\\')
+                    {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(
+                                &serde_json::json!({ "error": "invalid backup name" }),
+                            ),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ));
+                    }
+
+                    let backup_dir = cfg.config_dir.join("backups");
+                    let backup_path = backup_dir.join(backup_name);
+
+                    // Ensure resolved path is within backup_dir
+                    if matches!(
+                        (backup_path.canonicalize(), backup_dir.canonicalize()),
+                        (Ok(ref canonical), Ok(ref base)) if !canonical.starts_with(base)
+                    ) {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "path not allowed" })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ));
+                    }
+
+                    if !backup_path.exists() {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "error": format!("Backup not found: {}", backup_name)
+                            })),
+                            warp::http::StatusCode::OK,
+                        ));
+                    }
+
+                    match std::fs::remove_file(&backup_path) {
+                        Ok(_) => Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "status": "deleted",
+                                "backup": backup_name,
+                            })),
+                            warp::http::StatusCode::OK,
+                        )),
+                        Err(e) => {
+                            eprintln!("Delete backup error: {e}");
+                            Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                                warp::http::StatusCode::OK,
+                            ))
+                        }
+                    }
                 }
-            }
-        })
+            },
+        )
 }
 
 fn api_get_sessions(

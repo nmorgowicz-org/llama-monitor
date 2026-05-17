@@ -169,7 +169,12 @@ async function handleBackup() {
     setButtonLoading('db-btn-backup', true);
 
     try {
-        const res = await fetch('/api/db/backup', { method: 'POST' });
+        const token = typeof window.__API_TOKEN !== 'undefined' && window.__API_TOKEN
+            ? window.__API_TOKEN
+            : dbAdminToken;
+        const headers = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const res = await fetch('/api/db/backup', { method: 'POST', headers });
         const result = await res.json();
 
         if (result.status === 'backup_created') {
@@ -238,7 +243,12 @@ async function loadBackups() {
     if (!listEl) return;
 
     try {
-        const res = await fetch('/api/db/backups');
+        const token = typeof window.__API_TOKEN !== 'undefined' && window.__API_TOKEN
+            ? window.__API_TOKEN
+            : dbAdminToken;
+        const headers = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const res = await fetch('/api/db/backups', { headers });
         const data = await res.json();
 
         if (!data.backups || data.backups.length === 0) {
@@ -461,9 +471,13 @@ window.restoreBackup = async function(name) {
 
     addLogEntry('warning', `Restoring from ${name}...`);
     try {
+        await ensureDbAdminToken();
+        const token = dbAdminToken || (typeof window.__API_TOKEN !== 'undefined' ? window.__API_TOKEN : null);
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
         const res = await fetch('/api/db/restore', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ backup_name: name }),
         });
         const result = await res.json();
@@ -482,9 +496,13 @@ window.deleteBackup = async function(name) {
     if (!confirm(`Delete backup "${name}"?`)) return;
 
     try {
+        await ensureDbAdminToken();
+        const token = dbAdminToken || (typeof window.__API_TOKEN !== 'undefined' ? window.__API_TOKEN : null);
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
         const res = await fetch('/api/db/backup', {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ backup_name: name }),
         });
         const result = await res.json();
