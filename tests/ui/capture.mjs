@@ -116,6 +116,7 @@ Scenarios:
   Configuration
     settings         Settings modal, preferences, persona, models, shortcuts
     tls              TLS modes and ACME (Certificates tab, each TLS mode, custom certs, ACME config)
+    filebrowser      File browser modal (Browse buttons in Config modal, modal open)
     panels           Chat config panels (behavior, model, style, debug)
     dashboard        Server tab, GPU section
 
@@ -2055,6 +2056,100 @@ async function scenarioTls(ctx, options) {
     }
 }
 
+async function scenarioFilebrowser(ctx, options) {
+    const { page, baseUrl } = ctx;
+
+    try {
+        await gotoApp(page, baseUrl);
+
+        // Open Settings modal
+        const settingsBtn = await page.$('#sidebar-btn-settings');
+        if (!settingsBtn) {
+            console.log('[CAPTURE] Settings button not found');
+            return;
+        }
+        await settingsBtn.click();
+        await sleep(600);
+
+        // Ensure Settings modal is visible
+        const settingsModal = await page.$('#settings-modal');
+        if (!settingsModal) {
+            console.log('[CAPTURE] Settings modal not found');
+            return;
+        }
+
+        // Switch to Advanced tab
+        const advancedTab = await page.$('#settings-tab-advanced');
+        if (!advancedTab) {
+            console.log('[CAPTURE] Advanced tab not found');
+            return;
+        }
+        await advancedTab.click();
+        await sleep(600);
+
+        // Open Config modal from Advanced tab
+        const openConfigBtn = await page.$('#settings-open-config-btn');
+        if (!openConfigBtn) {
+            console.log('[CAPTURE] Open Config button not found');
+            return;
+        }
+        await openConfigBtn.click();
+        await sleep(800);
+
+        // Ensure Config modal is visible
+        const configModal = await page.$('#config-modal');
+        if (!configModal) {
+            console.log('[CAPTURE] Config modal not found');
+            return;
+        }
+
+        // Scroll to llama-server executable section
+        await page.evaluate(() => {
+            const section = document.querySelector('#config-modal .modal-section');
+            if (section) {
+                section.scrollIntoView({ behavior: 'instant', block: 'start' });
+            }
+        });
+        await sleep(400);
+
+        // Capture the llama-server executable section with Browse button visible
+        await captureShot(page, 'filebrowser-config-browse-btn.png', { fullPage: true });
+
+        // Click the Browse button for llama-server executable
+        const browseBtn = await page.$('#config-browse-server-path');
+        if (!browseBtn) {
+            console.log('[CAPTURE] Browse button for server path not found');
+            return;
+        }
+        await browseBtn.click();
+        await sleep(1000);
+
+        // Ensure file browser modal is visible
+        const fileBrowserModal = await page.$('#file-browser-modal');
+        if (!fileBrowserModal) {
+            console.log('[CAPTURE] File browser modal not found');
+            return;
+        }
+
+        // Capture the file browser modal open
+        await captureShot(page, 'filebrowser-modal-open.png', { fullPage: true });
+
+        // Close file browser modal
+        await page.keyboard.press('Escape');
+        await sleep(300);
+
+        // Close Config modal
+        await page.keyboard.press('Escape');
+        await sleep(300);
+
+        // Close Settings modal
+        await page.keyboard.press('Escape');
+        await sleep(300);
+    } catch (e) {
+        console.log('[CAPTURE] Filebrowser scenario failed:', e.message);
+    }
+}
+
 async function scenarioSmoke({ page, baseUrl }, options) {
     const criticalPatterns = [
         'import',
@@ -2124,6 +2219,7 @@ const SCENARIOS = {
     // Configuration
     settings: scenarioSettings,
     tls: scenarioTls,
+    filebrowser: scenarioFilebrowser,
     panels: scenarioPanels,
     dashboard: scenarioDashboard,
     // Validation
