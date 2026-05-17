@@ -1867,8 +1867,11 @@
             <button type="button" class="modal-close" id="filebrowser-close" aria-label="Close">&times;</button>
         </div>
         <div class="file-browser-bar">
-            <button class="btn-sm btn-preset" id="filebrowser-up" title="Parent directory">&uarr; Up</button>
+            <button class="btn-sm btn-preset" id="filebrowser-up" title="Parent folder">&uarr; Up</button>
             <input type="text" id="fb-path-input" class="fb-path-input" placeholder="Enter path and press Enter">
+        </div>
+        <div class="file-browser-hint" id="fb-hint">
+            Browse to select a file or folder. Only allowed directories are accessible.
         </div>
         <div class="modal-body" style="padding:0;">
             <div id="fb-entries" class="fb-entries"></div>

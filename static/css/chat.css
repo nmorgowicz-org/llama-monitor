@@ -5944,6 +5944,16 @@
     padding: 12px;
 }
 
+#file-browser-modal .file-browser-hint {
+    position: relative;
+    z-index: 2;
+    margin: 0 20px 6px 20px;
+    font-size: var(--text-2xs);
+    color: var(--color-text-muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
 /* ==========================================================================
    Session Modal — Premium Glass Overhaul
    ========================================================================== */
