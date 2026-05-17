@@ -5944,6 +5944,15 @@
     padding: 12px;
 }
 
+#file-browser-modal .file-browser-hint {
+    padding: 6px 12px 2px 12px;
+    font-size: var(--text-2xs);
+    color: var(--color-text-muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--color-border-subtle);
+}
+
 
 
 /* ==========================================================================

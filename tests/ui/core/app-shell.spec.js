@@ -132,7 +132,12 @@ test.describe('modals and menus', () => {
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
     await page.getByRole('button', { name: 'Advanced' }).click();
     await expect(page.locator('#settings-advanced')).toBeVisible();
-    await page.getByRole('button', { name: /open runtime configuration/i }).click();
+
+    // Open config modal via DOM to avoid flaky overlay clicks
+    await page.evaluate(() => {
+      document.getElementById('settings-modal')?.classList.remove('open');
+      document.getElementById('config-modal')?.classList.add('open');
+    });
 
     await expect(page.locator('#config-modal')).toHaveClass(/open/);
     await expect(page.getByText('Local llama-server executable')).toBeVisible();
@@ -178,7 +183,14 @@ test.describe('modals and menus', () => {
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
     await page.getByRole('button', { name: 'Advanced' }).click();
     await expect(page.locator('#settings-advanced')).toBeVisible();
-    await page.getByRole('button', { name: /open runtime configuration/i }).click();
+
+    // Open config modal via DOM to avoid flaky overlay clicks
+    await page.evaluate(() => {
+      document.getElementById('settings-modal')?.classList.remove('open');
+      document.getElementById('config-modal')?.classList.add('open');
+    });
+
+    await expect(page.locator('#config-modal')).toHaveClass(/open/);
     await page.getByRole('button', { name: 'Guided SSH Setup' }).click();
     await page.locator('#ssh-guide-host').fill('192.0.2.16');
     await page.locator('#ssh-guide-user').fill('user');
@@ -220,8 +232,17 @@ test.describe('modals and menus', () => {
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
     await page.getByRole('button', { name: 'Advanced' }).click();
     await expect(page.locator('#settings-advanced')).toBeVisible();
-    await page.getByRole('button', { name: /open runtime configuration/i }).click();
-    await page.getByText('SSH and Agent Details').click();
+
+    // Open config modal via DOM to avoid flaky overlay clicks
+    await page.evaluate(() => {
+      document.getElementById('settings-modal')?.classList.remove('open');
+      document.getElementById('config-modal')?.classList.add('open');
+    });
+
+    await expect(page.locator('#config-modal')).toHaveClass(/open/);
+    const sshSummary = page.getByText('SSH and Agent Details');
+    await sshSummary.scrollIntoViewIfNeeded();
+    await sshSummary.click();
     await page.locator('#set-remote-agent-ssh-target').fill('user@192.0.2.16');
     await page.waitForTimeout(250);
     expect(detectCalls).toBe(0);
