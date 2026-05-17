@@ -208,6 +208,52 @@ pub struct AgentMetrics {
     pub gpu: BTreeMap<String, GpuMetrics>,
 }
 
+const AGENT_PROTOCOL_VERSION: &str = "1.0.0";
+
+/// Load all allowed agent tokens from agent-tokens.json (if present).
+fn load_agent_tokens(config_dir: &std::path::Path) -> Vec<String> {
+    let path = config_dir.join("agent-tokens.json");
+    if !path.exists() {
+        return Vec::new();
+    }
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let Ok(file) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return Vec::new();
+    };
+    file.get("tokens")
+        .and_then(|t| t.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Write agent-tokens.json (atomic).
+fn save_agent_tokens(config_dir: &std::path::Path, tokens: &[String]) {
+    let path = config_dir.join("agent-tokens.json");
+    let file = serde_json::json!({ "tokens": tokens });
+    let Ok(json) = serde_json::to_string_pretty(&file) else {
+        return;
+    };
+    let tmp = path.with_extension("json.tmp");
+    let _ = std::fs::write(&tmp, json);
+    let _ = std::fs::rename(&tmp, &path);
+}
+
+/// Ensure token exists in agent-tokens.json; return the full token list.
+fn ensure_token_in_file(config_dir: &std::path::Path, token: &str) -> Vec<String> {
+    let mut tokens = load_agent_tokens(config_dir);
+    if !tokens.iter().any(|t| t == token) {
+        tokens.push(token.to_string());
+    }
+    save_agent_tokens(config_dir, &tokens);
+    tokens
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseAssetInfo {
     pub name: String,
@@ -286,13 +332,15 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
         .parse::<SocketAddr>()
         .context("invalid agent bind address")?;
 
+    let agent_config_dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("llama-monitor");
+
     // Use explicit token, or auto-generate and persist one
     let token = match app_config.agent_token.clone() {
         Some(t) => t,
         None => {
-            let config_dir = dirs::config_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("llama-monitor");
+            let config_dir = agent_config_dir.clone();
             let token_file = config_dir.join("agent-token");
 
             // Try to read existing token from disk
@@ -345,7 +393,10 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     // (needed on Windows where the agent runs as SYSTEM and the token file is in
     // the SYSTEM profile, inaccessible to the SSH user).
     // The temp file is cleaned up after a delay to give the main app time to read it.
-    let _ = write_token_to_temp_file(&token);
+          let _ = write_token_to_temp_file(&token);
+
+    // Ensure primary token is in agent-tokens.json (for multi-client support).
+         let _ = ensure_token_in_file(&agent_config_dir, &token);
 
     let backend = gpu::detect_backend(&app_config.gpu_backend);
     let gpu_metrics: Arc<Mutex<BTreeMap<String, GpuMetrics>>> =
@@ -393,25 +444,41 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     }
 
     let agent_info_token = token.clone(); // for authenticated /agent/info endpoint
-    let auth =
+
+    // Build token set: primary_token + all from agent-tokens.json
+    let agent_config_dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("llama-monitor");
+    let extra_tokens = load_agent_tokens(&agent_config_dir);
+    let mut allowed_tokens: Vec<String> = Vec::new();
+    allowed_tokens.push(token.clone());
+    for t in extra_tokens {
+        if !allowed_tokens.contains(&t) {
+            allowed_tokens.push(t);
+        }
+    }
+    let allowed_tokens = std::sync::Arc::new(allowed_tokens);
+
+    let auth = {
+        let allowed = allowed_tokens.clone();
         warp::any()
             .and(warp::header::headers_cloned())
             .and_then(move |headers: HeaderMap| {
-                let token = token.clone();
+                let allowed = allowed.clone();
                 async move {
-                    // Token is always present (explicit or auto-generated)
-                    let valid = headers
+                    let bearer = headers
                         .get("authorization")
                         .and_then(|value| value.to_str().ok())
-                        .is_some_and(|value| value == format!("Bearer {token}"));
+                        .and_then(|v| v.strip_prefix("Bearer "));
 
-                    if !valid {
-                        return Err(warp::reject::custom(AgentAuthError));
-                    }
-
-                    Ok::<(), warp::Rejection>(())
+                    if let Some(tok) = bearer
+                        && allowed.iter().any(|t| t == tok) {
+                            return Ok::<(), warp::Rejection>(());
+                        }
+                    Err(warp::reject::custom(AgentAuthError))
                 }
-            });
+            })
+    };
 
     let health = warp::path("health")
         .and(warp::get())
@@ -426,6 +493,7 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
                 warp::reply::json(&serde_json::json!({
                     "ok": true,
                     "version": env!("CARGO_PKG_VERSION"),
+                    "protocol_version": AGENT_PROTOCOL_VERSION,
                     "mode": "agent",
                     "pid": std::process::id(),
                     "executable": std::env::current_exe()
@@ -450,6 +518,7 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
                 warp::reply::json(&serde_json::json!({
                     "ok": true,
                     "version": env!("CARGO_PKG_VERSION"),
+                    "protocol_version": AGENT_PROTOCOL_VERSION,
                     "mode": "agent",
                     "pid": std::process::id(),
                     "executable": std::env::current_exe()
@@ -510,21 +579,45 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
         eprintln!("[agent] Using auto-generated token (persisted to config dir)");
     }
 
-    // mTLS: use integrated CA (tied to main TLSConfig) and enforce client auth.
-    let ca_pem = match crate::certs::get_agent_ca_for_mtls(&app_config.tls_config) {
-        Ok(pem) => pem,
-        Err(e) => {
-            eprintln!("[agent] Failed to get agent CA for mTLS: {e}");
-            return Err(anyhow::anyhow!("agent mTLS CA unavailable: {e}"));
+    // mTLS: load all CAs (legacy ca.pem + cas/ directory) and enforce client auth.
+    let mut ca_pems: Vec<String> = Vec::new();
+
+    // Legacy single CA (for backward compatibility)
+    if let Some(ca) = crate::certs::Cert::load(
+        &crate::certs::certs_dir().join("ca.pem"),
+        &crate::certs::certs_dir().join("ca.key"),
+    ) {
+        ca_pems.push(ca.pem);
+    }
+
+    // Multi-CA directory
+    let cas_dir = crate::certs::agent_cas_dir();
+    if let Ok(entries) = std::fs::read_dir(&cas_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("pem")
+                && let Ok(pem) = std::fs::read_to_string(&path) {
+                    ca_pems.push(pem);
+                }
         }
-    };
+    }
+
+    if ca_pems.is_empty() {
+        eprintln!("[agent] No CA found for mTLS; agent cannot start without trust anchors");
+        return Err(anyhow::anyhow!("agent mTLS: no CA found"));
+    }
+
+    eprintln!(
+        "[info] Agent mTLS: loaded {} CA(s) into trust store",
+        ca_pems.len()
+    );
 
     let agent_server_cert = crate::certs::ensure_agent_server_cert(vec![
         "localhost".to_string(),
         "127.0.0.1".to_string(),
     ]);
 
-    let tls_config = match crate::certs::build_agent_tls_config(Some(ca_pem), agent_server_cert) {
+    let tls_config = match crate::certs::build_agent_tls_config(ca_pems, agent_server_cert) {
         Ok(cfg) => cfg,
         Err(e) => {
             eprintln!("[agent] Failed to build mTLS config: {e}; agent cannot start without mTLS");
@@ -1771,11 +1864,32 @@ pub mod install {
             return;
         };
         let install_dir = &install_path[..dir_end];
+        let cas_dir = format!("{}{}cas", install_dir, sep);
 
-        // Ensure the CA cert exists locally
+        // Ensure cas/ directory exists on the remote
+        let mkdir_cmd = if os == RemoteOs::Windows {
+            format!("cmd.exe /C if not exist \"{}\" mkdir \"{}\"", cas_dir, cas_dir)
+        } else {
+            format!("mkdir -p '{}'", cas_dir)
+        };
+        let _ = remote_ssh::exec(connection.clone(), mkdir_cmd).await;
+
+        // Stable instance ID: hash of this instance's CA public key.
+        let instance_id = {
+            let ca = crate::certs::ensure_ca();
+            use sha1::Digest;
+            let mut ctx = sha1::Sha1::new();
+            ctx.update(ca.pem.as_bytes());
+            let hash = ctx.finalize();
+            let mut id = String::with_capacity(16);
+            for b in hash.as_slice().iter().take(8) {
+                id.push_str(&format!("{:02x}", b));
+            }
+            id
+        };
+
         let ca = crate::certs::ensure_ca();
-
-        let remote_ca_path = format!("{}{}ca.pem", install_dir, sep);
+        let remote_ca_path = format!("{}{}{}.pem", cas_dir, sep, instance_id);
 
         // Write CA cert to temp file and copy to remote
         let local_tmp = tempfile::NamedTempFile::new_in(std::env::temp_dir())
@@ -1786,10 +1900,14 @@ pub mod install {
             let _ = remote_ssh::copy_to_remote(
                 connection.clone(),
                 local_tmp.to_string_lossy().to_string(),
-                remote_ca_path,
+                remote_ca_path.clone(),
                 0o644,
             )
             .await;
+            eprintln!(
+                "[info] Installed CA as {} on remote agent",
+                remote_ca_path
+            );
         }
         let _ = std::fs::remove_file(&local_tmp);
     }

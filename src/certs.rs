@@ -20,6 +20,13 @@ pub fn certs_dir() -> PathBuf {
     dir
 }
 
+/// Returns the path to the agent's multi-CA directory, creating it if necessary.
+pub fn agent_cas_dir() -> PathBuf {
+    let dir = certs_dir().join("cas");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
 /// Represents a certificate and its key pair.
 #[derive(Debug)]
 pub struct Cert {
@@ -169,6 +176,7 @@ pub fn ensure_agent_server_cert(sans: Vec<String>) -> Cert {
 /// - If main TLS is active (SelfSigned/Custom/Acme), we still use this internal CA
 ///   for agent mTLS, keeping browser trust and agent trust separate.
 /// - If main TLS is None, agent mTLS is still enforced (non-breaking).
+#[allow(dead_code)]
 pub fn get_agent_ca_for_mtls(tls_config: &crate::config::TLSConfig) -> Result<String, String> {
     let ca = ensure_ca();
 
@@ -196,10 +204,10 @@ pub fn get_agent_ca_for_mtls(tls_config: &crate::config::TLSConfig) -> Result<St
 /// - A client is accepted as an "agent" only if:
 ///   - Its certificate chains to the configured CA.
 ///   - Its certificate includes the "agent-client" role marker.
-/// - If trust_ca_pem is missing or empty, this returns Err instead of silently
+/// - If trust_ca_pems is empty, this returns Err instead of silently
 ///   falling back to "no client auth".
 pub fn build_agent_tls_config(
-    trust_ca_pem: Option<String>,
+    trust_ca_pems: Vec<String>,
     server_cert: Cert,
 ) -> Result<rustls::ServerConfig, String> {
     use std::io::BufReader;
@@ -222,15 +230,16 @@ pub fn build_agent_tls_config(
             .map_err(|_| "failed to read agent server private key".to_string())?
             .ok_or_else(|| "no private key found in agent server key".to_string())?;
 
-    // mTLS is enforced: require a valid CA.
-    let ca_pem = match trust_ca_pem {
-        Some(p) if !p.trim().is_empty() => p,
-        _ => {
-            return Err("no CA configured for agent mTLS; agent requires mutual TLS".to_string());
-        }
-    };
+    // mTLS is enforced: require at least one CA.
+    let ca_pems: Vec<String> = trust_ca_pems
+        .into_iter()
+        .filter(|p| !p.trim().is_empty())
+        .collect();
+    if ca_pems.is_empty() {
+        return Err("no CA configured for agent mTLS; agent requires mutual TLS".to_string());
+    }
 
-    let verifier = AgentClientCertVerifier::new(ca_pem);
+    let verifier = AgentClientCertVerifier::new(ca_pems);
 
     let config = rustls::ServerConfig::builder()
         .with_client_cert_verifier(Arc::new(verifier))
@@ -259,16 +268,18 @@ pub struct AgentClientCertVerifier {
 }
 
 impl AgentClientCertVerifier {
-    pub fn new(ca_pem: String) -> Self {
+    pub fn new(ca_pems: Vec<String>) -> Self {
         use std::io::BufReader;
 
         let mut root_store = rustls::RootCertStore::empty();
-        let mut reader = BufReader::new(ca_pem.as_bytes());
-        let ca_certs: Vec<_> = rustls_pemfile::certs(&mut reader)
-            .filter_map(|c| c.ok())
-            .collect();
-        for ca in ca_certs {
-            let _ = root_store.add(ca);
+        for pem in ca_pems {
+            let mut reader = BufReader::new(pem.as_bytes());
+            let ca_certs: Vec<_> = rustls_pemfile::certs(&mut reader)
+                .filter_map(|c| c.ok())
+                .collect();
+            for ca in ca_certs {
+                let _ = root_store.add(ca);
+            }
         }
 
         let inner: std::sync::Arc<dyn rustls::server::danger::ClientCertVerifier> =
@@ -477,7 +488,7 @@ mod tests {
         let client_cert = client_cert_without_agent_role(&ca_key, ca_params);
         let client_der = der_from_cert(&client_cert);
 
-        let verifier = AgentClientCertVerifier::new(ca_pem);
+        let verifier = AgentClientCertVerifier::new(vec![ca_pem]);
 
         let now = rustls::pki_types::UnixTime::now();
 
