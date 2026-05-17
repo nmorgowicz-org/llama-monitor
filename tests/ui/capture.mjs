@@ -2079,7 +2079,7 @@ async function scenarioFilebrowser(ctx, options) {
         }
 
         // Switch to Advanced tab
-        const advancedTab = await page.$('#settings-tab-advanced');
+        const advancedTab = await page.$('.settings-tab[data-tab="advanced"]');
         if (!advancedTab) {
             console.log('[CAPTURE] Advanced tab not found');
             return;
@@ -2115,13 +2115,29 @@ async function scenarioFilebrowser(ctx, options) {
         // Capture the llama-server executable section with Browse button visible
         await captureShot(page, 'filebrowser-config-browse-btn.png', { fullPage: true });
 
-        // Click the Browse button for llama-server executable
+        // Ensure Browse button is visible and scroll into view if needed
         const browseBtn = await page.$('#config-browse-server-path');
         if (!browseBtn) {
             console.log('[CAPTURE] Browse button for server path not found');
             return;
         }
-        await browseBtn.click();
+
+        // Scroll the button into view within the modal
+        await page.evaluate(() => {
+            const btn = document.getElementById('config-browse-server-path');
+            if (btn) {
+                btn.scrollIntoView({ behavior: 'instant', block: 'center' });
+            }
+        });
+        await sleep(300);
+
+        // Use evaluate to trigger click directly (more robust)
+        await page.evaluate(() => {
+            const btn = document.getElementById('config-browse-server-path');
+            if (btn) {
+                btn.click();
+            }
+        });
         await sleep(1000);
 
         // Ensure file browser modal is visible
