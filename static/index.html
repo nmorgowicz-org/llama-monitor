@@ -1861,9 +1861,9 @@
 
 <!-- File Browser Modal (z-index above all modals) -->
 <div class="modal-overlay" id="file-browser-modal" style="z-index:1200;">
-    <div class="modal" style="width:560px;">
+    <div class="modal file-browser-modal" style="width:560px;">
         <div class="modal-header">
-            <h2>Browse</h2>
+            <h2 id="fb-title">Browse Files</h2>
             <button type="button" class="modal-close" id="filebrowser-close" aria-label="Close">&times;</button>
         </div>
         <div class="file-browser-bar">
@@ -1875,7 +1875,7 @@
         </div>
         <div class="modal-buttons">
             <button type="button" class="btn btn-modal-cancel" id="filebrowser-cancel">Cancel</button>
-            <button type="button" class="btn btn-modal-save" id="filebrowser-select">Select This Folder</button>
+            <button type="button" class="btn btn-modal-save" id="filebrowser-select">Select</button>
         </div>
     </div>
 </div>

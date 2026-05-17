@@ -12,17 +12,40 @@ export function openFileBrowser(targetId, filter) {
     fbTargetId = targetId;
     fbFilter = filter === 'dir' ? '' : (filter || '');
     const modal = document.getElementById('file-browser-modal');
+    const title = document.getElementById('fb-title');
+    const selectBtn = modal.querySelector('.btn-modal-save');
 
+    // Set title based on filter
+    if (filter === 'gguf') {
+        title.textContent = 'Browse Model Files';
+    } else if (filter === 'executable') {
+        title.textContent = 'Browse Executable';
+    } else if (filter === 'dir') {
+        title.textContent = 'Browse Directory';
+    } else {
+        title.textContent = 'Browse Files';
+    }
+
+    // Show/hide Select button based on mode
+    if (filter === 'dir') {
+        selectBtn.style.display = '';
+        selectBtn.textContent = 'Select This Folder';
+    } else {
+        selectBtn.style.display = '';
+        selectBtn.textContent = 'Select';
+    }
+
+    // Determine starting path from current input value
     const current = document.getElementById(targetId).value;
     let startPath = '';
     if (current) {
-        const parts = current.split('/');
+        // Try to extract parent directory from current path
+        const sep = current.includes('\\') ? '\\' : '/';
+        const parts = current.split(sep);
         parts.pop();
-        startPath = parts.join('/') || '/';
+        startPath = parts.join(sep) || (current.includes('\\') ? 'C:\\' : '/');
     }
 
-    const selectBtn = modal.querySelector('.btn-modal-save');
-    selectBtn.style.display = filter === 'dir' ? '' : 'none';
     modal.classList.add('open');
 
     fileBrowserGo(startPath);
@@ -44,7 +67,15 @@ export async function fileBrowserGo(path) {
         const resp = await fetch('/api/browse?' + params);
         const data = await resp.json();
         if (data.error) {
-            entriesEl.innerHTML = '<div class="fb-empty">' + escapeHtml(data.error) + '</div>';
+            // Handle "Path not allowed" with a clear message
+            if (data.error === 'Path not allowed') {
+                entriesEl.innerHTML =
+                    '<div class="fb-empty">' +
+                    'This path is not allowed. Only certain directories are accessible for security.' +
+                    '</div>';
+            } else {
+                entriesEl.innerHTML = '<div class="fb-empty">' + escapeHtml(data.error) + '</div>';
+            }
             return;
         }
 

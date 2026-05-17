@@ -831,3 +831,32 @@ Guidelines:
 
 Rule:
 - Keep DB admin UI self-contained in this card; do not scatter DB controls across other tabs.
+
+## 25. File Browser Modal
+
+Used in:
+- Presets modal (model path)
+- Sessions modal (model path)
+- Advanced settings (llama-server executable, working directory)
+
+Purpose:
+- Provide a consistent, secure filesystem browser for selecting files and directories.
+- Enforced by backend allowlist (home directory + parents of models_dir, TLS cert/key paths).
+
+Key elements:
+- #file-browser-modal
+- #fb-title (dynamic title: "Browse Model Files", "Browse Executable", "Browse Directory")
+- .file-browser-bar (Up button + path input)
+- #fb-entries (file/directory list)
+- .fb-entry, .fb-entry-dir, .fb-entry-file
+
+Guidelines:
+- Always use the existing file-browser modal; do not create new file pickers.
+- Use openDeferredFileBrowser(targetId, filter) from file-browser-launcher.js.
+- Filters:
+  - "gguf" for model files.
+  - "executable" for llama-server executable.
+  - "dir" for directories.
+- The backend (/api/browse) enforces allowed roots; the UI should:
+  - Show a clear message for “Path not allowed”.
+  - Not attempt to bypass or override the backend restriction.
