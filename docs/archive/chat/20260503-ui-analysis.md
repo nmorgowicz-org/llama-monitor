@@ -20,7 +20,7 @@ See commit 837e048 for implementation details.
 
 ### Implementation Status: ✅ Complete
 
-**Screenshot:** `docs/screenshots/06-tab-pinning.png` (267K)
+**Screenshot:** `docs/screenshots/chat-chat.png` (267K)
 
 **Features Working:**
 - ✓ Pin icon (SVG) appears on tab hover
@@ -50,7 +50,7 @@ See commit 837e048 for implementation details.
 
 ### Implementation Status: ✅ Complete
 
-**Screenshot:** `docs/screenshots/07-persona-strip.png` (267K)
+**Screenshot:** `docs/screenshots/guided-gen-persona-modal.png` (267K)
 
 **Features Working:**
 - ✓ Persona chips displayed in chat header

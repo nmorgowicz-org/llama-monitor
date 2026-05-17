@@ -118,22 +118,21 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
 
 ### 3. SSRF via Attach Endpoint and Chat Proxy
 
-- Status: ASSESSED (no fix implemented yet)
+- Status: MITIGATED
 - Endpoints:
   - POST /api/attach
   - POST /api/chat
 - Files:
-  - src/web/api.rs:3791–3964 (attach)
+  - src/web/api.rs:3822–3964 (attach)
   - src/web/api.rs:2040–2109 (chat proxy)
 - Issue:
   - Attach endpoint:
     - Accepts endpoint from client.
-    - Validates:
+    - Previously:
       - Must be http/https.
       - If IP is numeric, must be loopback or RFC1918 private.
-    - But:
-      - Hostnames are allowed without strict validation.
-      - Attacker can supply a hostname that resolves internally (e.g., via DNS rebinding or internal DNS) to reach internal services.
+      - Hostnames were allowed without strict validation.
+    - Attacker could supply a hostname that resolves internally (e.g., via DNS rebinding or internal DNS) to reach internal services.
   - Chat endpoint:
     - Proxies POST to the active session’s /v1/chat/completions.
     - If an attacker can control the active session’s endpoint (via SSRF/attach), they can:
@@ -144,18 +143,33 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
   - Potential access to internal services (metadata endpoints, other APIs).
 - Likelihood:
   - Medium: requires attacker to call attach with crafted endpoint.
-- Assessment (2026-05-16):
-  - Confirmed:
-    - Hostname bypass is real: any hostname is accepted, no DNS resolution or IP allowlist applied.
-    - Health checks (GET <endpoint>, GET <endpoint>/health) can probe internal services.
-    - Chat proxy is constrained (fixed path: /v1/chat/completions) but still a secondary SSRF channel.
-  - For typical local/LAN use, SSRF is limited (attacker is already on same network).
-  - SSRF becomes meaningful if llama-monitor is in a more segmented network, containerized, or in a cloud environment.
-- Fix (not yet implemented):
-  - Add:
-    - Blocklist for internal ranges (10/8, 172.16/12, 192.168/16, 127/8, 169.254/16, etc.).
-    - Optional DNS resolution check before attach.
-    - Optional allowlist of allowed domains.
+- Mitigation Applied (2026-05-16):
+  - Added validate_endpoint_for_ssrf() in src/web/api.rs:
+    - Rejects IPv4:
+      - 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+      - 169.254.0.0/16 (link-local)
+      - 100.64.0.0/16 (CGNAT)
+      - 198.18.0.0/15 (documentation)
+      - 224.0.0.0/4 multicast, 240.0.0.0/4 reserved
+      - 0.0.0.0
+    - Rejects IPv6:
+      - ::1, fc00::/7 (ULA), 2001:db8::/32, fe80::/10
+    - Rejects hostnames:
+      - "localhost", "metadata"
+      - containing "metadata.google.internal" or "instance-data"
+    - For non-IP hosts:
+      - Resolves via ToSocketAddrs.
+      - If any resolved IP is internal/metadata → reject.
+      - If DNS fails → allow with a warning log (no breakage).
+  - Integrated into api_attach:
+    - Runs after URL parsing and before health check.
+    - On block: returns 400 with "Endpoint blocked by SSRF protection".
+  - Chat proxy:
+    - Still constrained to /v1/chat/completions on the active session endpoint; SSRF risk primarily via attach, now mitigated.
+- Remaining Risk:
+  - Low:
+    - DNS resolution is best-effort; race conditions or DNS rebinding could theoretically bypass in advanced scenarios.
+    - For typical local/LAN use, SSRF is already limited.
 
 ## HIGH
 
@@ -232,11 +246,28 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
   - Credential sniffing on the same network.
 - Likelihood:
   - Medium: if user binds to 0.0.0.0 without TLS.
-- Fix:
-  - Recommend:
-    - Always use TLS (via reverse proxy or built-in).
-    - Use a constant-time comparison for credentials.
-    - Consider a more robust auth mechanism for LAN exposure.
+- Mitigation Applied (2026-05-16):
+  - Built-in TLS support added:
+    - Modes:
+      - No TLS (default).
+      - Self-signed.
+      - Custom certificate.
+      - ACME (Let’s Encrypt) with DNS-01 for automated certs.
+    - ACME:
+      - Provider-agnostic via lego.
+      - Supports 100+ DNS providers (Cloudflare, Route 53, DigitalOcean, Namecheap, etc.).
+    - Certificates managed via:
+      - CLI flags (--tls, --tls-cert, --tls-key, --tls-self-signed).
+      - Settings → Certificates tab.
+  - Basic auth:
+    - Still intended as lightweight protection for local/LAN use.
+    - Now recommended to be used with TLS (built-in or reverse proxy).
+  - Credential sniffing risk:
+    - Reduced: when TLS is enabled, all traffic (including basic auth) is encrypted.
+- Remaining Risk:
+  - Low-Medium:
+    - If user runs without TLS on 0.0.0.0, traffic remains in cleartext.
+    - Basic auth comparison is not timing-safe (minor, local-only).
 
 ## MEDIUM
 

@@ -38,10 +38,6 @@ impl AcmeConfig {
             && !self.dns_provider.is_empty()
             && !self.dns_config.is_empty()
     }
-
-    pub fn has_namecheap_creds(&self) -> bool {
-        self.dns_config.contains_key("username") && self.dns_config.contains_key("api_key")
-    }
 }
 
 /// TLS configuration persisted to tls-config.json.

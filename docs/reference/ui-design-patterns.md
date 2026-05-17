@@ -738,3 +738,96 @@ Example:
 - Menus: arrow key navigation where applicable.
 
 Rule: Treat accessibility as an incremental requirement. New code should be better than the average of the existing codebase.
+
+## 22. Settings Cards (shared across Settings modal)
+
+Used in: Settings modal panes (Session, GPU, Models, Appearance, Chat, Performance, Advanced, Security).
+
+Purpose:
+- Provide a consistent, glassmorphic container for groups of controls inside the Settings modal.
+- Keep content visually grouped and elevated without overwhelming the layout.
+
+Class:
+- .settings-card
+
+Guidelines:
+- Wrap related form fields in a single .settings-card.
+- Use a subtle label (uppercase, muted, letter-spacing) at the top for logical sections (e.g., “Suggestion Settings”, “Prompt Templates”).
+- Do not use .widget-card inside the Settings modal for simple form groups; use .settings-card instead.
+- Reserve .widget-card for special-purpose panels (Certificates, DB admin, Runtime Configuration).
+
+Example (HTML):
+  <div class="settings-card">
+      <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+          Suggestion Settings
+      </div>
+      <label class="modal-field">
+          Suggestion Count
+          <input type="range" id="settings-suggestion-count" min="3" max="8" value="5">
+      </label>
+  </div>
+
+Styling (components.css):
+- Soft gradient background, subtle border, layered shadow.
+- Hover: translateY(-1px), intensify border, soft indigo glow.
+- Includes prefers-reduced-motion override and [data-theme="light"] overrides.
+
+Rule:
+- Any new group of settings should use .settings-card unless it is a dashboard-style widget or a specialized panel.
+
+## 23. Certificate Mode Pills (Security tab)
+
+Used in: Security & Certificates tab, Certificates card.
+
+Purpose:
+- Provide a compact, premium way to select between TLS modes:
+  - No HTTPS
+  - Self-Signed
+  - Bring Your Own Key
+  - Let’s Encrypt (ACME)
+
+Class:
+- .cert-mode-pill
+- Active state: .cert-mode-pill.active
+
+Guidelines:
+- Use data-mode attribute to indicate mode: "none", "self-signed", "custom", "acme".
+- Only one pill may be active at a time.
+- The active pill uses a radial gradient (indigo/violet/cyan), glowing box-shadow, and bright border.
+- On click:
+  - Update active pill.
+  - Show the corresponding #cert-mode-{mode} content pane.
+  - Call TLS API if mode changes.
+
+Example (HTML):
+  <div id="cert-mode-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+      <button type="button" class="cert-mode-pill" data-mode="none">No HTTPS</button>
+      <button type="button" class="cert-mode-pill" data-mode="self-signed">Self-Signed</button>
+      <button type="button" class="cert-mode-pill" data-mode="custom">Bring Your Own Key</button>
+      <button type="button" class="cert-mode-pill" data-mode="acme">Let's Encrypt (ACME)</button>
+  </div>
+
+Rule:
+- Do not duplicate this pill bar; it is the canonical mode selector for TLS.
+
+## 24. DB Admin Card (Security tab)
+
+Used in: Database Administration section of the Security tab.
+
+Purpose:
+- Present DB stats, actions, and activity log in a premium, card-based layout.
+
+Classes:
+- .db-admin-card (outer widget-card)
+- .db-stat (stat blocks)
+- .db-admin-btn (action buttons)
+- .db-admin-log, .db-log-content (activity log)
+
+Guidelines:
+- Use .widget-card as the outer shell.
+- Use .db-stat for metric blocks (Conversations, Messages, Database Size, FTS Index).
+- Use .db-admin-btn for action buttons (Backup Now, Verify, Maintain, Query).
+- Use .db-admin-log with .db-log-content for the activity log (monospace, small, scrollable).
+
+Rule:
+- Keep DB admin UI self-contained in this card; do not scatter DB controls across other tabs.

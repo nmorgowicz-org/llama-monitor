@@ -15,25 +15,25 @@ Monitoring-first web dashboard for [llama.cpp](https://github.com/ggml-org/llama
 
 The top nav and Server tab show throughput, context pressure, request activity, slot state, and model/runtime details as your endpoint works. Local sessions read host telemetry directly; remote sessions gain the same depth through the remote agent.
 
-![Inference Metrics](docs/screenshots/02-inference-metrics.gif)
+![Inference Metrics](docs/screenshots/inference-metrics.gif)
 
 ### Remote Host Telemetry
 
 Attach to a remote llama.cpp server, then add the companion remote agent when you need GPU, CPU, RAM, and host-health metrics from that machine. The header Agent flow and runtime configuration panel handle install, start, update, and repair actions.
 
-![GPU & System Metrics](docs/screenshots/08-gpu-section.png)
+![GPU & System Metrics](docs/screenshots/dashboard-gpu-section.png)
 
 ### Multi-Session Chat Workspace
 
 Chat tabs, prompt controls, telemetry overlays, and logs live next to the monitoring dashboard so you can inspect behavior and interact with the model from the same app.
 
-![Chat Interface](docs/screenshots/03-chat.png)
+![Chat Interface](docs/screenshots/chat-chat.png)
 
 ### Guided Generation
 
 A per-tab notes sidebar, AI-generated suggestions, quick guide flows, and director/surprise tools let you steer the next reply without rebuilding the whole prompt stack.
 
-![Suggestions Results](docs/screenshots/09b-suggestions-results.png)
+![Suggestions Results](docs/screenshots/guided-gen-suggestions-results.png)
 
 ### Personas & Prompt Tooling
 
@@ -41,11 +41,18 @@ Manage built-in and custom personas, explicit-policy variants, and outbound prom
 
 ![Prompt Debug Inspector](docs/screenshots/panels-prompt-debug.png)
 
+### TLS, ACME & mTLS
+
+Built-in TLS with ACME (Let’s Encrypt) and mTLS for remote agents. Choose No HTTPS, Self-Signed, Bring Your Own Key, or fully automated ACME with DNS-01 and renewal. Optional, flexible, and designed for local-first and production deployments.
+
+![Security & Certificates](docs/screenshots/tls-certificates-tab.png)
+
 ---
 
 **Monitoring reference**: [Dashboard Capabilities](docs/reference/dashboard.md)  
 **Remote telemetry setup**: [Remote Agent](docs/reference/remote-agent.md)  
-**Chat and guided generation**: [Chat](docs/reference/chat.md)
+**Chat and guided generation**: [Chat](docs/reference/chat.md)  
+**TLS / ACME / mTLS**: [TLS Architecture](docs/reference/tls-architecture.md)
 
 ## Supported Hardware
 

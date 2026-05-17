@@ -329,10 +329,19 @@ function _bindSettingsEvents() {
             tab.classList.add('active');
             document.getElementById('settings-' + target)?.classList.add('active');
 
-            // Load TLS config when Certificates tab is opened
-            if (target === 'certificates') {
+            // Load TLS config when Security tab is opened
+            if (target === 'security') {
                 loadTlsConfig();
             }
+        });
+    });
+
+    // Certificate mode pills
+    document.querySelectorAll('.cert-mode-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+            const mode = pill.dataset.mode;
+            if (!mode) return;
+            setActiveCertMode(mode);
         });
     });
 
@@ -380,6 +389,26 @@ function _bindSettingsEvents() {
 
 // ── TLS / Certificates ────────────────────────────────────────────────────────
 
+function setActiveCertMode(mode) {
+    const pills = document.querySelectorAll('.cert-mode-pill');
+    const panes = document.querySelectorAll('.cert-mode-content');
+
+    pills.forEach(p => {
+        const m = p.dataset.mode;
+        if (m === mode) {
+            p.classList.add('active');
+        } else {
+            p.classList.remove('active');
+        }
+    });
+
+    panes.forEach(p => {
+        const id = p.id;
+        const show = id === 'cert-mode-' + mode;
+        p.style.display = show ? 'block' : 'none';
+    });
+}
+
 async function loadTlsConfig() {
     const statusEl = document.getElementById('tls-status-text');
     const detailsEl = document.getElementById('tls-details');
@@ -401,6 +430,9 @@ async function loadTlsConfig() {
         const data = await res.json();
         const mode = data?.mode || 'none';
         const host = data?.host || '';
+
+        // Set active pill and show corresponding pane
+        setActiveCertMode(mode);
 
         // Update status text
         if (mode === 'none') {
@@ -445,16 +477,32 @@ async function loadTlsConfig() {
             const acme = data.acme;
             const fqdnEl = document.getElementById('acme-fqdn');
             const providerEl = document.getElementById('acme-dns-provider');
+            const customWrapEl = document.getElementById('acme-provider-custom-wrap');
+            const customEl = document.getElementById('acme-dns-provider-custom');
             const stagingRadio = document.getElementById('acme-env-staging');
             const prodRadio = document.getElementById('acme-env-production');
             const delayEl = document.getElementById('acme-validation-delay');
-            const ncUserEl = document.getElementById('acme-nc-username');
-            const ncKeyEl = document.getElementById('acme-nc-api-key');
-            const ncIpEl = document.getElementById('acme-nc-source-ip');
-            const ncFieldsEl = document.getElementById('acme-nc-fields');
 
             if (fqdnEl) fqdnEl.value = acme.fqdn || '';
-            if (providerEl) providerEl.value = (acme.dns_provider || 'namecheap').toLowerCase();
+
+            const prov = (acme.dns_provider || '').toLowerCase();
+            if (providerEl) {
+                // If provider is in known list, select it; otherwise select __other__
+                const knownProviders = [
+                    'cloudflare', 'route53', 'gcloud', 'digitalocean',
+                    'namecheap', 'porkbun', 'godaddy', 'azure-dns',
+                    'hetzner', 'ovh', 'dnsmadeeasy', 'powerdns',
+                    'duckdns', 'inwx'
+                ];
+                if (knownProviders.includes(prov)) {
+                    providerEl.value = prov;
+                    if (customWrapEl) customWrapEl.style.display = 'none';
+                } else {
+                    providerEl.value = '__other__';
+                    if (customWrapEl) customWrapEl.style.display = 'block';
+                    if (customEl) customEl.value = acme.dns_provider || '';
+                }
+            }
 
             const env = (acme.environment || 'staging').toLowerCase();
             if (stagingRadio) stagingRadio.checked = env === 'staging';
@@ -462,18 +510,11 @@ async function loadTlsConfig() {
 
             if (delayEl) delayEl.value = acme.validation_delay ?? 300;
 
-            // Namecheap fields
+            // Populate key/value credentials from dnsConfig
+            clearAcmeCredentials();
             const dnsCfg = acme.dns_config || {};
-            if (ncUserEl) ncUserEl.value = dnsCfg.username || '';
-            if (ncKeyEl) ncKeyEl.value = ''; // never echo real key; show masked hint
-            if (ncIpEl) ncIpEl.value = dnsCfg.source_ip || '';
-
-            // Show/hide Namecheap fields based on provider
-            if (ncFieldsEl) {
-                ncFieldsEl.style.display =
-                    (acme.dns_provider || '').toLowerCase() === 'namecheap'
-                        ? 'block'
-                        : 'none';
+            for (const [k, v] of Object.entries(dnsCfg)) {
+                addAcmeCredentialRow(k, v);
             }
 
             // Show last renewal in tls-details if present
@@ -555,15 +596,22 @@ function _bindTlsEvents() {
         });
     }
 
-    // ACME: show/hide Namecheap fields based on provider selection
+    // ACME: show/hide custom provider input
     const providerSelect = document.getElementById('acme-dns-provider');
     if (providerSelect) {
         providerSelect.addEventListener('change', () => {
-            const ncFields = document.getElementById('acme-nc-fields');
-            if (ncFields) {
-                ncFields.style.display =
-                    providerSelect.value === 'namecheap' ? 'block' : 'none';
+            const customWrap = document.getElementById('acme-provider-custom-wrap');
+            if (customWrap) {
+                customWrap.style.display = providerSelect.value === '__other__' ? 'block' : 'none';
             }
+        });
+    }
+
+    // ACME: add credential row
+    const addCredBtn = document.getElementById('acme-add-credential');
+    if (addCredBtn) {
+        addCredBtn.addEventListener('click', () => {
+            addAcmeCredentialRow('', '');
         });
     }
 
@@ -574,33 +622,27 @@ function _bindTlsEvents() {
             const statusEl = document.getElementById('acme-status-text');
 
             const fqdn = (document.getElementById('acme-fqdn')?.value || '').trim();
-            const provider = document.getElementById('acme-dns-provider')?.value || 'namecheap';
+            const providerValue = providerSelect?.value || 'cloudflare';
+            const customProvider = (document.getElementById('acme-dns-provider-custom')?.value || '').trim();
+            const provider = providerValue === '__other__' ? customProvider : providerValue;
             const env = (document.querySelector('input[name="acme-env"]:checked')?.value || 'staging');
             const delay = parseInt(document.getElementById('acme-validation-delay')?.value || '300', 10);
 
-            const ncUsername = (document.getElementById('acme-nc-username')?.value || '').trim();
-            const ncApiKey = (document.getElementById('acme-nc-api-key')?.value || '').trim();
-            const ncSourceIp = (document.getElementById('acme-nc-source-ip')?.value || '').trim();
+            const dnsConfig = readAcmeCredentials();
 
             // Basic validation
             if (!fqdn) {
                 showToast('Missing domain', 'error', 'Enter a domain (FQDN) for your certificate.');
                 return;
             }
-            if (provider !== 'namecheap') {
-                showToast('Unsupported provider', 'error', 'Only Namecheap is currently supported.');
+            if (!provider || provider === '__other__') {
+                showToast('Missing provider', 'error', 'Select or type a DNS provider.');
                 return;
             }
-            if (!ncUsername || !ncApiKey) {
-                showToast('Missing credentials', 'error', 'Namecheap username and API key are required.');
+            if (Object.keys(dnsConfig).length === 0) {
+                showToast('Missing credentials', 'error', 'Add at least one credential key/value for your DNS provider.');
                 return;
             }
-
-            const dnsConfig = {
-                username: ncUsername,
-                api_key: ncApiKey,
-            };
-            if (ncSourceIp) dnsConfig.source_ip = ncSourceIp;
 
             const payload = {
                 mode: 'acme',
@@ -684,6 +726,70 @@ function _bindTlsEvents() {
             }
         });
     }
+}
+
+ // ── ACME credential helpers ──────────────────────────────────────────────────
+
+function acmeCredentialsGrid() {
+    return document.getElementById('acme-credentials-grid');
+}
+
+function addAcmeCredentialRow(key, value) {
+    const grid = acmeCredentialsGrid();
+    if (!grid) return;
+
+    const keyInput = document.createElement('input');
+    keyInput.type = 'text';
+    keyInput.placeholder = 'Key (e.g. CLOUDFLARE_API_TOKEN)';
+    keyInput.style.fontSize = '11px';
+    keyInput.value = key || '';
+
+    const valInput = document.createElement('input');
+    valInput.type = 'password';
+    valInput.placeholder = 'Value';
+    valInput.style.fontSize = '11px';
+    valInput.value = value || '';
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.textContent = '✕';
+    removeBtn.style.fontSize = '10px';
+    removeBtn.style.padding = '1px 5px';
+    removeBtn.style.cursor = 'pointer';
+    removeBtn.addEventListener('click', () => {
+        keyInput.remove();
+        valInput.remove();
+        removeBtn.remove();
+    });
+
+    grid.appendChild(keyInput);
+    grid.appendChild(valInput);
+    grid.appendChild(removeBtn);
+}
+
+function clearAcmeCredentials() {
+    const grid = acmeCredentialsGrid();
+    if (!grid) return;
+    // Keep header cells (first 3 children), remove the rest
+    while (grid.children.length > 3) {
+        grid.removeChild(grid.lastChild);
+    }
+}
+
+function readAcmeCredentials() {
+    const grid = acmeCredentialsGrid();
+    if (!grid) return {};
+
+    const inputs = Array.from(grid.querySelectorAll('input'));
+    const map = {};
+    for (let i = 0; i + 1 < inputs.length; i += 2) {
+        const k = (inputs[i]?.value || '').trim();
+        const v = (inputs[i + 1]?.value || '').trim();
+        if (k && v) {
+            map[k] = v;
+        }
+    }
+    return map;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@
 Date: 2026-05-16  
 Scope:  
 - Add optional TLS to the main web UI.  
-- Add Let’s Encrypt / ACME integration with DNS-01 challenge (Namecheap first-class).  
+- Add Let’s Encrypt / ACME integration with DNS-01 challenge (provider-agnostic; Namecheap, Cloudflare, etc.).  
 - Extend existing mTLS infrastructure for remote-agent.  
 - Provide a simple, non-opinionated UX that still satisfies the security audit.
 
@@ -54,7 +54,7 @@ This design directly addresses:
 - ACME integration:
   - Uses lego (Go ACME client) as subprocess:
     - DNS-01 challenge.
-    - Namecheap DNS provider.
+    - Any lego-supported DNS provider (Cloudflare, Route 53, Namecheap, etc.).
     - Staging vs production endpoints.
 - mTLS for remote-agent:
   - Reuses existing certs.rs infrastructure.
@@ -164,18 +164,22 @@ Constraints:
 - Verdict:
   - Best fit for us: predictable, embeddable, no shell weirdness.
 
-4.2 ACME flow (DNS-01, Namecheap)
+4.2 ACME flow (DNS-01, any provider)
+
+We support any DNS provider that lego supports.
 
 Steps (from user perspective, high-level):
 
 1) User enables ACME in Settings.
 2) User chooses:
    - FQDN (e.g., llama-monitor.example.com).
-   - DNS provider: Namecheap.
-   - Namecheap credentials:
-     - Username
-     - API key
-     - (Optional) Source IP
+   - DNS provider:
+     - Use the dropdown to select a known provider (Cloudflare, Route 53, Namecheap, etc.).
+     - Or choose "Other" and type the provider name (e.g., proxmox, linode).
+   - Provider credentials:
+     - Enter key/value pairs matching the provider's required environment variables.
+     - Example for Cloudflare: key = CLOUDFLARE_API_TOKEN, value = your-token.
+     - See lego documentation for your provider's required variables.
    - Environment:
      - Staging (for testing).
      - Production (for real certs).
@@ -184,9 +188,9 @@ Steps (from user perspective, high-level):
    - Calls lego to:
      - Register/update ACME account.
      - Request cert for FQDN.
-     - Use DNS-01 challenge.
+     - Use DNS-01 challenge with the selected provider.
    - lego:
-     - Adds TXT record via Namecheap API.
+     - Adds TXT record via your DNS provider's API.
      - Waits for propagation.
      - Lets Encrypt validates.
    - On success:
@@ -197,35 +201,48 @@ Steps (from user perspective, high-level):
    - If within renewal window (e.g., 30 days):
      - Repeat same ACME flow.
 
-4.3 Example: Namecheap DNS config (conceptual)
+4.3 Example: Cloudflare DNS config
 
 User provides (in UI):
 
 - FQDN: llama-monitor.example.com
-- DNS provider: Namecheap
+- DNS provider: Cloudflare (from dropdown)
 - Environment: Staging (first), then Production
 - Validation delay: 300 (seconds)
-- Namecheap fields:
-  - NAMECHEAP_USERNAME
-  - NAMECHEAP_API_KEY
-  - NAMECHEAP_SOURCEIP
+- Credentials:
+  - Key: CLOUDFLARE_API_TOKEN, Value: (your token)
 
-Internally:
-- We map these into lego environment variables.
+4.4 Example: Namecheap DNS config
+
+User provides:
+
+- FQDN: llama-monitor.example.com
+- DNS provider: Namecheap (from dropdown)
+- Credentials:
+  - Key: NAMECHEAP_USERNAME, Value: (username)
+  - Key: NAMECHEAP_API_KEY, Value: (api key)
+  - Key: NAMECHEAP_SOURCEIP (optional)
+
+4.5 Example: Using "Other" provider
+
+If your provider is not in the dropdown (e.g., Proxmox, Linode, etc.):
+
+- Select "Other" from the provider dropdown.
+- Type the lego provider name (e.g., "proxmox").
+- Enter the required environment variables as key/value pairs.
+- See lego documentation for the correct provider name and variables.
+
+Internally (all providers):
+- We pass each credential key/value as an environment variable to lego.
 - We never hardcode real values; we store them securely in config.
-
-Example internal mapping (conceptual, not literal):
-
-- NAMECHEAP_USERNAME → env for lego.
-- NAMECHEAP_API_KEY → env for lego.
-- NAMECHEAP_SOURCEIP → env for lego.
-- DNS propagation delay → lego’s propagation-check config.
+- DNS propagation delay → lego's propagation-check config.
 
 We will:
 - Show helper text explaining:
-  - “Use Staging first to test your DNS/API setup without hitting rate limits.”
+  - "Use Staging first to test your DNS/API setup without hitting rate limits."
 
-4.4 ACME data model (in config)
+
+4.6 ACME data model (in config)
 
 In ui-settings.json (or a dedicated tls.json), we store:
 
@@ -236,11 +253,9 @@ In ui-settings.json (or a dedicated tls.json), we store:
       "enabled": true,
       "fqdn": "llama-monitor.example.com",
       "environment": "production",
-      "dns_provider": "namecheap",
+      "dns_provider": "cloudflare",
       "dns_config": {
-        "username": "<from user>",
-        "api_key": "<from user>",
-        "source_ip": "<optional>"
+        "CLOUDFLARE_API_TOKEN": "<from user>"
       },
       "validation_delay": 300,
       "last_renewal": "2026-01-01T00:00:00Z",
@@ -250,11 +265,23 @@ In ui-settings.json (or a dedicated tls.json), we store:
   }
 }
 
+dns_config is a generic map<string, string> of environment variables for the chosen lego provider.
+Example for Namecheap:
+
+{
+  "dns_provider": "namecheap",
+  "dns_config": {
+    "NAMECHEAP_USERNAME": "<username>",
+    "NAMECHEAP_API_KEY": "<api key>",
+    "NAMECHEAP_SOURCEIP": "<optional>"
+  }
+}
+
 Security:
-- API_KEY is sensitive:
+- API keys are sensitive:
   - Stored in config directory.
   - Not logged.
-  - Masked in UI.
+  - Shown in the local UI (trusted environment).
 
 ---
 
@@ -390,7 +417,12 @@ Section 3: Let’s Encrypt (ACME)
   - “Domain (FQDN)”
     - Example: llama-monitor.example.com
   - “DNS provider”
-    - Dropdown: Namecheap (initially).
+    - Dropdown with curated list:
+      - Cloudflare, Amazon Route 53, Google Cloud DNS, DigitalOcean,
+        Namecheap, Porkbun, GoDaddy, Azure DNS, Hetzner, OVH,
+        DNS Made Easy, PowerDNS, Duck DNS, INWX.
+    - “Other (type provider name)” option:
+      - Opens an input for any lego provider name (e.g., proxmox, linode).
   - “Environment”
     - Radio:
       - “Staging (test)”
@@ -402,9 +434,11 @@ Section 3: Let’s Encrypt (ACME)
     - Helper:
       - “Time to wait for DNS propagation before validation.”
   - “DNS provider credentials”
-    - For Namecheap:
-      - “Username”
-      - “API Key” (masked)
+    - Generic key/value grid:
+      - Each row: Key | Value | Remove
+      - Helper:
+        - “Add the environment variables required by your DNS provider (see lego documentation).”
+      - Values are masked in the UI.
       - “Source IP” (optional)
 - Button: “Request certificate”
 - Behavior:
@@ -678,21 +712,21 @@ If you are a new agent:
 - Use lego as a subprocess:
   - Pros:
     - Stable, single binary.
-    - Native Namecheap provider.
+    - Wide provider support (Cloudflare, Route 53, Namecheap, etc.).
   - Implementation:
     - On ACME request:
       - Build command:
         - lego run with:
           - --email (can be a synthetic internal email)
           - --accept-tos
-          - --dns namecheap
+          - --dns <acme_dns_provider>
           - --domains <FQDN>
           - --path <internal dir for ACME state>
           - Staging or production endpoint.
       - Set environment:
-        - NAMECHEAP_USERNAME
-        - NAMECHEAP_API_KEY
-        - NAMECHEAP_SOURCEIP (if provided)
+        - For each (key, value) in acme_dns_config:
+          - Export key=value as an environment variable for lego.
+        - Example: CLOUDFLARE_API_TOKEN, NAMECHEAP_API_KEY, etc.
       - Stream logs to:
         - Backend logs.
         - UI progress (via WebSocket or polling).

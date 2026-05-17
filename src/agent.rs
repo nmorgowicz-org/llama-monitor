@@ -502,12 +502,93 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     if app_config.agent_token.is_none() {
         eprintln!("[agent] Using auto-generated token (persisted to config dir)");
     }
-    println!("[agent] Remote metrics agent listening on https://{bind_addr}");
 
-    // mTLS: cert infrastructure in place (certs.rs), CA shipped to remote agents
-    // Dashboard HTTP client accepts self-signed certs (danger_accept_invalid_certs)
-    warp::serve(routes).run(bind_addr).await;
-    Ok(())
+    // mTLS: use integrated CA (tied to main TLSConfig) and enforce client auth.
+    let ca_pem = match crate::certs::get_agent_ca_for_mtls(&app_config.tls_config) {
+        Ok(pem) => pem,
+        Err(e) => {
+            eprintln!("[agent] Failed to get agent CA for mTLS: {e}");
+            return Err(anyhow::anyhow!("agent mTLS CA unavailable: {e}"));
+        }
+    };
+
+    let agent_server_cert = crate::certs::ensure_agent_server_cert(vec![
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
+    ]);
+
+    let tls_config = match crate::certs::build_agent_tls_config(Some(ca_pem), agent_server_cert) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("[agent] Failed to build mTLS config: {e}; agent cannot start without mTLS");
+            return Err(anyhow::anyhow!("agent mTLS config build failed: {e}"));
+        }
+    };
+
+    let tls_acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(tls_config));
+    let listener = match tokio::net::TcpListener::bind(bind_addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[agent] Failed to bind TLS listener: {e}");
+            return Err(anyhow::anyhow!("Failed to bind TLS listener: {e}"));
+        }
+    };
+
+    println!("[agent] Remote metrics agent listening on https://{bind_addr} (mTLS enforced)");
+
+    loop {
+        let (stream, peer) = match listener.accept().await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[agent] accept error: {e}");
+                continue;
+            }
+        };
+
+        let acceptor = tls_acceptor.clone();
+        let routes_clone = routes.clone();
+
+        tokio::spawn(async move {
+            let tls_stream = match acceptor.accept(stream).await {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[agent] TLS handshake error from {peer}: {e}");
+                    return;
+                }
+            };
+
+            // Log client cert subject if present (mTLS)
+            {
+                let (_, conn) = tls_stream.get_ref();
+                let client_certs = conn.peer_certificates();
+                if let Some(certs) = client_certs
+                    && !certs.is_empty()
+                {
+                    let subject = crate::certs::extract_cert_subject_pem(&certs[0]);
+                    eprintln!(
+                        "[info] Agent mTLS connection accepted from {peer}, client subject: {subject}"
+                    );
+                } else {
+                    eprintln!(
+                        "[agent] connection from {peer} without client cert; mTLS will reject"
+                    );
+                }
+            }
+
+            let svc = warp::service(routes_clone);
+            let svc = hyper_util::service::TowerToHyperService::new(svc);
+            let io = hyper_util::rt::TokioIo::new(tls_stream);
+
+            if let Err(e) =
+                hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                    .http1()
+                    .serve_connection_with_upgrades(io, svc)
+                    .await
+            {
+                eprintln!("[agent] connection error from {peer}: {e}");
+            }
+        });
+    }
 }
 
 pub async fn latest_release_info() -> Result<LatestReleaseInfo> {
@@ -720,13 +801,60 @@ fn remote_release_asset_error(
 }
 
 pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
-    // Build HTTP client with TLS for mTLS (accept self-signed certs)
-    let client = match reqwest::Client::builder()
+    // Build HTTP client with mTLS:
+    // - Trust the shared CA as root for agent server certs.
+    // - Present an agent-client cert so the agent can verify our role.
+    let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
-        .pool_max_idle_per_host(0)
-        .danger_accept_invalid_certs(true) // Self-signed certs
-        .build()
-    {
+        .pool_max_idle_per_host(0);
+
+    // Load CA as root store
+    let ca_loaded = if let Some(ca) = crate::certs::Cert::load(
+        &crate::certs::certs_dir().join("ca.pem"),
+        &crate::certs::certs_dir().join("ca.key"),
+    ) {
+        match reqwest::Certificate::from_pem(ca.pem.as_bytes()) {
+            Ok(cert) => {
+                builder = builder.add_root_certificate(cert);
+                true
+            }
+            Err(e) => {
+                eprintln!(
+                    "[agent] Failed to load CA cert: {e}; falling back to danger_accept_invalid_certs"
+                );
+                builder = builder.danger_accept_invalid_certs(true);
+                false
+            }
+        }
+    } else {
+        eprintln!("[agent] No CA found; using danger_accept_invalid_certs for agent communication");
+        builder = builder.danger_accept_invalid_certs(true);
+        false
+    };
+
+    // Add client cert for mTLS (agent-client role)
+    if let Some(client_cert) = crate::certs::Cert::load(
+        &crate::certs::certs_dir().join("agent-client.pem"),
+        &crate::certs::certs_dir().join("agent-client.key"),
+    ) {
+        let combined_pem = format!("{}{}", client_cert.pem, client_cert.key);
+        match reqwest::Identity::from_pem(combined_pem.as_bytes()) {
+            Ok(id) => {
+                builder = builder.identity(id);
+            }
+            Err(e) => {
+                eprintln!(
+                    "[agent] Failed to load agent-client identity: {e}; continuing without mTLS client cert"
+                );
+            }
+        }
+    } else if ca_loaded {
+        eprintln!(
+            "[agent] No agent-client cert found; agent mTLS may reject dashboard connections"
+        );
+    }
+
+    let client = match builder.build() {
         Ok(client) => client,
         Err(e) => {
             eprintln!("[agent] Failed to build HTTP client: {e}");

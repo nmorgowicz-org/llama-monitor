@@ -32,20 +32,30 @@ fn acme_key_path(config_dir: &std::path::Path, fqdn: &str) -> PathBuf {
 
 /// Scrub sensitive values from a command or error string.
 fn scrub_secrets(input: &str) -> String {
-    let mut s = input.to_string();
-    for key in [
-        "NAMECHEAP_USERNAME",
-        "NAMECHEAP_API_KEY",
-        "NAMECHEAP_SOURCEIP",
-    ] {
-        if let Some(pos) = s.find(key) {
-            let rest = &s[pos..];
-            if let Some(end) = rest.find('\n').or(Some(rest.len())) {
-                s.replace_range(pos..pos + end, &format!("{}=[REDACTED]", key));
-            }
+    let s = input.to_string();
+    // Scrub any KEY=VALUE patterns on their own line
+    let mut out = String::with_capacity(s.len());
+    for line in s.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.contains('=')
+            && trimmed
+                .split('=')
+                .next()
+                .unwrap_or("")
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_')
+        {
+            let eq_pos = trimmed.find('=').unwrap_or(0);
+            out.push_str(&line[..line.len() - line.trim_start().len()]);
+            out.push_str(&trimmed[..eq_pos]);
+            out.push_str("=[REDACTED]");
+            out.push('\n');
+        } else {
+            out.push_str(line);
+            out.push('\n');
         }
     }
-    s
+    out.trim_end_matches('\n').to_string()
 }
 
 /// Run a lego subprocess, returning (exit_ok, stdout, stderr).
@@ -93,6 +103,72 @@ fn run_lego(args: &[&str], env: &HashMap<String, String>) -> (bool, String, Stri
     }
 }
 
+/// Build the lego command args and environment map for a given ACME config.
+/// Used by both request and renew operations.
+fn build_lego_command(
+    cfg: &TLSConfig,
+    config_dir: &std::path::Path,
+    acme_path: &std::path::Path,
+    fqdn: &str,
+    mode: &str, // "run" or "renew"
+) -> (Vec<String>, HashMap<String, String>) {
+    let acme = &cfg.acme;
+
+    let server = if acme.environment == "staging" {
+        STAGING_SERVER
+    } else {
+        PROD_SERVER
+    };
+
+    // Build environment: all key/value pairs from dns_config are passed as-is.
+    // lego providers document their required env vars (e.g., CLOUDFLARE_API_TOKEN).
+    let mut env = acme.dns_config.clone();
+
+    // Apply validation delay via lego's propagation check environment if present.
+    if acme.validation_delay > 0 {
+        env.insert(
+            "DNS_PROPAGATION_TIMEOUT".to_string(),
+            format!("{}s", acme.validation_delay),
+        );
+        env.insert(
+            "DNS_POLL_INTERVAL".to_string(),
+            format!("{}s", (acme.validation_delay / 4).max(5)),
+        );
+    }
+
+    let acme_path_str = acme_path.to_string_lossy().to_string();
+    let mut args: Vec<String> = vec![
+        mode.to_string(),
+        "--accept-tos".to_string(),
+        "--email".to_string(),
+        ACME_EMAIL.to_string(),
+        "--dns".to_string(),
+        acme.dns_provider.clone(),
+        "--server".to_string(),
+        server.to_string(),
+        "--path".to_string(),
+        acme_path_str,
+    ];
+
+    if mode == "run" {
+        args.push("--domains".to_string());
+        args.push(fqdn.to_string());
+    } else if mode == "renew" {
+        let cert_path = acme_cert_path(config_dir, fqdn)
+            .to_string_lossy()
+            .to_string();
+        let key_path = acme_key_path(config_dir, fqdn)
+            .to_string_lossy()
+            .to_string();
+        args.push("--cert-path".to_string());
+        args.push(cert_path);
+        args.push("--cert-key".to_string());
+        args.push(key_path);
+    }
+
+    (args, env)
+}
+
 /// High-level ACME certificate request using lego.
 ///
 /// Validates config, runs lego, and returns updated TLSConfig or an error.
@@ -129,13 +205,6 @@ pub fn acme_request_cert(
         return Err("acme_dns_config is required".to_string());
     }
 
-    // For Namecheap, require username and api_key.
-    if acme.dns_provider.to_lowercase() == "namecheap" && !acme.has_namecheap_creds() {
-        return Err(
-            "Namecheap provider requires 'username' and 'api_key' in acme_dns_config".to_string(),
-        );
-    }
-
     // Check lego is available.
     if !lego_available() {
         return Err("lego binary not found on PATH; install lego or add it to PATH".to_string());
@@ -144,59 +213,12 @@ pub fn acme_request_cert(
     let acme_path = acme_data_dir(config_dir);
     let _ = std::fs::create_dir_all(&acme_path);
 
-    let server = if acme.environment == "staging" {
-        STAGING_SERVER
-    } else {
-        PROD_SERVER
-    };
-
-    // Build environment for lego (Namecheap-specific mapping).
-    let mut env = HashMap::new();
-    if acme.dns_provider.to_lowercase() == "namecheap" {
-        if let Some(u) = acme.dns_config.get("username") {
-            env.insert("NAMECHEAP_USERNAME".to_string(), u.clone());
-        }
-        if let Some(k) = acme.dns_config.get("api_key") {
-            env.insert("NAMECHEAP_API_KEY".to_string(), k.clone());
-        }
-        if let Some(ip) = acme.dns_config.get("source_ip") {
-            env.insert("NAMECHEAP_SOURCEIP".to_string(), ip.clone());
-        }
-    }
-
-    // Apply validation delay via lego's propagation check environment if present.
-    // lego uses DNS_PROPAGATION_TIMEOUT and DNS_POLL_INTERVAL.
-    if acme.validation_delay > 0 {
-        env.insert(
-            "DNS_PROPAGATION_TIMEOUT".to_string(),
-            format!("{}s", acme.validation_delay),
-        );
-        env.insert(
-            "DNS_POLL_INTERVAL".to_string(),
-            format!("{}s", (acme.validation_delay / 4).max(5)),
-        );
-    }
-
     let fqdn = acme.fqdn.as_str();
-    let dns_provider = acme.dns_provider.as_str();
-    let acme_path_str = acme_path.to_string_lossy().to_string();
-    let domains_arg = format!("--domains={}", fqdn);
 
-    let args: Vec<&str> = vec![
-        "run",
-        "--accept-tos",
-        "--email",
-        ACME_EMAIL,
-        "--dns",
-        dns_provider,
-        "--server",
-        server,
-        "--path",
-        &acme_path_str,
-        &domains_arg[..],
-    ];
+    let (args, env) = build_lego_command(cfg, config_dir, &acme_path, fqdn, "run");
 
-    let (ok, stdout, stderr) = run_lego(&args, &env);
+    let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let (ok, stdout, stderr) = run_lego(&args_str, &env);
 
     if !ok {
         let combined = format!("{}\n{}", stdout, stderr);
@@ -257,65 +279,12 @@ pub fn acme_renew_cert(config_dir: &std::path::Path, cfg: &TLSConfig) -> Result<
     let acme_path = acme_data_dir(config_dir);
     let _ = std::fs::create_dir_all(&acme_path);
 
-    let server = if acme.environment == "staging" {
-        STAGING_SERVER
-    } else {
-        PROD_SERVER
-    };
-
-    // Build environment (same as request).
-    let mut env = HashMap::new();
-    if acme.dns_provider.to_lowercase() == "namecheap" {
-        if let Some(u) = acme.dns_config.get("username") {
-            env.insert("NAMECHEAP_USERNAME".to_string(), u.clone());
-        }
-        if let Some(k) = acme.dns_config.get("api_key") {
-            env.insert("NAMECHEAP_API_KEY".to_string(), k.clone());
-        }
-        if let Some(ip) = acme.dns_config.get("source_ip") {
-            env.insert("NAMECHEAP_SOURCEIP".to_string(), ip.clone());
-        }
-    }
-
-    if acme.validation_delay > 0 {
-        env.insert(
-            "DNS_PROPAGATION_TIMEOUT".to_string(),
-            format!("{}s", acme.validation_delay),
-        );
-        env.insert(
-            "DNS_POLL_INTERVAL".to_string(),
-            format!("{}s", (acme.validation_delay / 4).max(5)),
-        );
-    }
-
     let fqdn = acme.fqdn.as_str();
-    let dns_provider = acme.dns_provider.as_str();
-    let acme_path_str = acme_path.to_string_lossy().to_string();
 
-    // lego renew uses --cert-path and --cert-key to target specific certs.
-    let cert_path = acme_cert_path(config_dir, fqdn)
-        .to_string_lossy()
-        .to_string();
-    let key_path = acme_key_path(config_dir, fqdn)
-        .to_string_lossy()
-        .to_string();
+    let (args, env) = build_lego_command(cfg, config_dir, &acme_path, fqdn, "renew");
 
-    let args: Vec<&str> = vec![
-        "renew",
-        "--accept-tos",
-        "--dns",
-        dns_provider,
-        "--server",
-        server,
-        "--path",
-        &acme_path_str,
-        "--cert-path",
-        &cert_path[..],
-        "--cert-key",
-        &key_path[..],
-    ];
-
-    let (ok, stdout, stderr) = run_lego(&args, &env);
+    let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let (ok, stdout, stderr) = run_lego(&args_str, &env);
 
     if !ok {
         let combined = format!("{}\n{}", stdout, stderr);
@@ -432,7 +401,7 @@ mod tests {
 
     #[test]
     fn scrub_secrets_removes_api_key() {
-        let input = "NAMECHEAP_API_KEY=supersecret123\nother line";
+        let input = "CLOUDFLARE_API_TOKEN=supersecret123\nother line";
         let out = scrub_secrets(input);
         assert!(out.contains("[REDACTED]"));
         assert!(!out.contains("supersecret123"));

@@ -1062,6 +1062,7 @@ pub fn api_routes(
     let remote_agent_trust_host = api_remote_agent_ssh_trust(app_config.clone());
     let remote_agent_status = api_remote_agent_status(app_config.clone());
     let remote_agent_remove = api_remote_agent_remove(app_config.clone());
+    let remote_agent_tls_status = api_remote_agent_tls_status(state.clone(), app_config.clone());
     let sensor_bridge_status = api_sensor_bridge_status();
     let sensor_bridge_install = api_sensor_bridge_install();
     let sensor_bridge_uninstall = api_sensor_bridge_uninstall();
@@ -1125,6 +1126,7 @@ pub fn api_routes(
         .or(uninstall_lhm)
         .or(disable_lhm);
     let bridge_routes = remote_agent_remove
+        .or(remote_agent_tls_status)
         .or(sensor_bridge_status)
         .or(sensor_bridge_install)
         .or(sensor_bridge_uninstall);
@@ -1607,6 +1609,26 @@ fn api_remote_agent_remove(
                     )),
                 }
             }
+        })
+}
+
+fn api_remote_agent_tls_status(
+    _state: AppState,
+    _app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "remote-agent" / "tls-status")
+        .and(warp::get())
+        .map(move || {
+            let certs_dir = crate::certs::certs_dir();
+            let ca_present = certs_dir.join("ca.pem").exists();
+            let server_present = certs_dir.join("agent-server.pem").exists();
+            let client_present = certs_dir.join("agent-client.pem").exists();
+            warp::reply::json(&serde_json::json!({
+                "mtls_enforced": true,
+                "ca_present": ca_present,
+                "server_cert_present": server_present,
+                "client_cert_present": client_present,
+            }))
         })
 }
 
@@ -4568,6 +4590,210 @@ fn api_self_update() -> impl Filter<Extract = (impl warp::Reply,), Error = warp:
 #[cfg(test)]
 mod tests {
     use super::legacy_chat_types::*;
+
+    use crate::chat_storage::ChatStorage;
+    use crate::config::{self, AcmeConfig, TLSConfig, TlsMode};
+    use crate::gpu::env::GpuEnv;
+    use crate::state::{AppPaths, AppState};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use warp::Filter;
+
+    fn make_test_app_state(tls_config: TLSConfig) -> (AppState, Arc<config::AppConfig>) {
+        let paths = AppPaths {
+            presets_path: PathBuf::new(),
+            templates_path: PathBuf::new(),
+            models_dir: None,
+            gpu_env_path: PathBuf::new(),
+            ui_settings_path: PathBuf::new(),
+            sessions_path: PathBuf::new(),
+        };
+        let cs = Arc::new(
+            ChatStorage::open(&PathBuf::from(":memory:")).expect("open in-memory chat storage"),
+        );
+        let state = AppState::new(
+            vec![],
+            paths,
+            GpuEnv::default(),
+            crate::state::UiSettings::default(),
+            cs,
+            tls_config,
+        );
+        let app_config = Arc::new(config::AppConfig {
+            config_dir: PathBuf::from("/tmp/llama-monitor-test"),
+            llama_server_path: PathBuf::from("llama-server"),
+            llama_server_cwd: PathBuf::from("."),
+            port: 8001,
+            gpu_backend: String::new(),
+            llama_poll_interval: 1,
+            models_dir: None,
+            presets_file: PathBuf::new(),
+            templates_file: PathBuf::new(),
+            gpu_env_file: PathBuf::new(),
+            gpu_arch_override: None,
+            gpu_devices_override: None,
+            ui_settings_file: PathBuf::new(),
+            sessions_file: PathBuf::new(),
+            ssh_known_hosts_file: PathBuf::new(),
+            lhm_disabled_file: PathBuf::new(),
+            agent_host: "127.0.0.1".to_string(),
+            agent_port: 7777,
+            agent_token: None,
+            remote_agent_url: None,
+            remote_agent_token: None,
+            remote_agent_ssh_autostart: false,
+            remote_agent_ssh_target: None,
+            remote_agent_ssh_command: None,
+            db_admin_token: None,
+            api_token: Some("test-token".to_string()),
+            tls_config: TLSConfig::default(),
+        });
+        (state, app_config)
+    }
+
+    fn tls_routes_filter(
+        state: AppState,
+        app_config: Arc<config::AppConfig>,
+    ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+        let tls_get_config = super::api_get_tls_config(state.clone());
+        let tls_put_config = super::api_put_tls_config(state.clone(), app_config.clone());
+        let tls_acme_request = super::api_tls_acme_request(state.clone(), app_config.clone());
+        let tls_acme_renew = super::api_tls_acme_renew(state.clone(), app_config.clone());
+        tls_get_config
+            .or(tls_put_config)
+            .or(tls_acme_request)
+            .or(tls_acme_renew)
+    }
+
+    #[tokio::test]
+    async fn tls_config_get_returns_mode_none_by_default() {
+        let (state, _app_config) = make_test_app_state(TLSConfig::default());
+        let routes = tls_routes_filter(state, _app_config);
+
+        let resp = warp::test::request()
+            .method("GET")
+            .path("/api/tls/config")
+            .reply(&routes)
+            .await;
+
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = serde_json::from_slice(resp.body()).expect("valid JSON");
+        assert_eq!(body["mode"], "none");
+    }
+
+    #[tokio::test]
+    async fn tls_config_get_returns_acme_fields() {
+        let mut dns_config = HashMap::new();
+        dns_config.insert("CF_API_TOKEN".to_string(), "redacted".to_string());
+
+        let tls_config = TLSConfig {
+            mode: TlsMode::Acme,
+            custom_cert_path: None,
+            custom_key_path: None,
+            acme: AcmeConfig {
+                enabled: true,
+                fqdn: "llama-monitor.example.com".to_string(),
+                environment: "staging".to_string(),
+                dns_provider: "cloudflare".to_string(),
+                dns_config,
+                validation_delay: 300,
+                last_renewal: None,
+                cert_path: None,
+                key_path: None,
+            },
+        };
+
+        let (state, app_config) = make_test_app_state(tls_config);
+        let routes = tls_routes_filter(state, app_config);
+
+        let resp = warp::test::request()
+            .method("GET")
+            .path("/api/tls/config")
+            .reply(&routes)
+            .await;
+
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = serde_json::from_slice(resp.body()).expect("valid JSON");
+        assert_eq!(body["mode"], "acme");
+        assert_eq!(body["acme"]["fqdn"], "llama-monitor.example.com");
+        assert_eq!(body["acme"]["environment"], "staging");
+        assert_eq!(body["acme"]["dnsProvider"], "cloudflare");
+    }
+
+    #[tokio::test]
+    async fn tls_config_put_accepts_valid_acme() {
+        let (state, app_config) = make_test_app_state(TLSConfig::default());
+        let routes = tls_routes_filter(state.clone(), app_config);
+
+        let payload = serde_json::json!({
+            "mode": "acme",
+            "acme": {
+                "enabled": true,
+                "fqdn": "llama-monitor.example.com",
+                "environment": "staging",
+                "dnsProvider": "cloudflare",
+                "validationDelay": 300,
+                "dnsConfig": {
+                    "CF_API_TOKEN": "test-token"
+                }
+            }
+        });
+
+        let resp = warp::test::request()
+            .method("PUT")
+            .path("/api/tls/config")
+            .header("Authorization", "Bearer test-token")
+            .json(&payload)
+            .reply(&routes)
+            .await;
+
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = serde_json::from_slice(resp.body()).expect("valid JSON");
+        assert_eq!(body["ok"], true);
+
+        // Verify TLSConfig was updated in state
+        let cfg = state.get_tls_config();
+        assert_eq!(cfg.mode, TlsMode::Acme);
+        assert_eq!(cfg.acme.fqdn, "llama-monitor.example.com");
+        assert_eq!(cfg.acme.dns_provider, "cloudflare");
+    }
+
+    #[tokio::test]
+    async fn tls_config_put_rejects_invalid_acme_missing_provider() {
+        let (state, app_config) = make_test_app_state(TLSConfig::default());
+        let routes = tls_routes_filter(state, app_config);
+
+        let payload = serde_json::json!({
+            "mode": "acme",
+            "acme": {
+                "enabled": true,
+                "fqdn": "llama-monitor.example.com",
+                "environment": "staging",
+                "dnsProvider": "",
+                "dnsConfig": {
+                    "CF_API_TOKEN": "test-token"
+                }
+            }
+        });
+
+        let resp = warp::test::request()
+            .method("PUT")
+            .path("/api/tls/config")
+            .header("Authorization", "Bearer test-token")
+            .json(&payload)
+            .reply(&routes)
+            .await;
+
+        assert_eq!(resp.status(), 400);
+        let body: serde_json::Value = serde_json::from_slice(resp.body()).expect("valid JSON");
+        assert!(
+            body["error"]
+                .as_str()
+                .map(|s| s.contains("dnsProvider"))
+                .unwrap_or(false)
+        );
+    }
 
     fn make_minimal_chat_tab() -> ChatTab {
         ChatTab {
