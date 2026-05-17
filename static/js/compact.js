@@ -297,9 +297,9 @@ ws.onmessage = function(e) {
 
     if (contextCapacity > 0 && contextLiveAvailable) {
         const ctxPct = ((contextLive / contextCapacity) * 100).toFixed(0);
-        document.getElementById('inf-context').innerHTML = contextLive + ' / ' + contextCapacity + ' (' + ctxPct + '%)';
+        document.getElementById('inf-context').textContent = contextLive + ' / ' + contextCapacity + ' (' + ctxPct + '%)';
     } else if (contextCapacity > 0) {
-        document.getElementById('inf-context').innerHTML = 'cap ' + contextCapacity + (contextPeak > 0 ? ' · peak ' + contextPeak : '');
+        document.getElementById('inf-context').textContent = 'cap ' + contextCapacity + (contextPeak > 0 ? ' · peak ' + contextPeak : '');
     } else {
         document.getElementById('inf-context').innerHTML = '<span class="dash-line">—</span> %';
     }
