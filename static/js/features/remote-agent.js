@@ -1348,10 +1348,21 @@ function maybeAutoSaveAgentToken(token) {
     if (!token) return;
     const tokenInput = document.getElementById('set-remote-agent-token');
     if (!tokenInput) return;
-    const current = tokenInput.value.trim();
+    const current = tokenInput.dataset.fullValue || tokenInput.value.trim();
     if (current === token) return;
-    tokenInput.value = token;
+    tokenInput.dataset.fullValue = token;
+    tokenInput.value = maskSecret(token);
     saveSettings();
+}
+
+function maskSecret(value) {
+    if (!value || value.length <= 8) {
+        return '•'.repeat(value?.length || 0);
+    }
+    const start = value.slice(0, 4);
+    const end = value.slice(-4);
+    const mid = '•'.repeat(8);
+    return start + mid + end;
 }
 
 async function remoteAgentLatestRelease() {

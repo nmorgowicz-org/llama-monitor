@@ -9,6 +9,39 @@ import { showToast } from './toast.js';
 
 const DATE_FORMAT_KEY = 'llama-monitor-date-format';
 
+// ── Secret masking helpers ────────────────────────────────────────────────────
+
+function maskSecret(value) {
+    if (!value || value.length <= 8) {
+        return '•'.repeat(value?.length || 0);
+    }
+    const start = value.slice(0, 4);
+    const end = value.slice(-4);
+    const mid = '•'.repeat(8);
+    return start + mid + end;
+}
+
+function applySecretValue(input, value, showRaw) {
+    if (!input || value == null) return;
+    const v = String(value);
+    input.dataset.fullValue = v;
+    if (showRaw) {
+        input.value = v;
+    } else {
+        input.value = maskSecret(v);
+    }
+}
+
+function getSecretValue(id) {
+    const input = document.getElementById(id);
+    if (!input) return '';
+    const full = input.dataset.fullValue;
+    if (full !== undefined && full !== '') {
+        return full;
+    }
+    return (input.value || '').trim();
+}
+
 // ── Dirty tracking ────────────────────────────────────────────────────────────
 
 export function markSettingsDirty() {
@@ -51,7 +84,7 @@ export function collectSettings() {
         models_dir: '',
         server_endpoint: endpoint,
         remote_agent_url: document.getElementById('set-remote-agent-url')?.value.trim() || '',
-        remote_agent_token: document.getElementById('set-remote-agent-token')?.value.trim() || '',
+        remote_agent_token: getSecretValue('set-remote-agent-token') || '',
         remote_agent_ssh_autostart: !!document.getElementById('set-remote-agent-ssh-autostart')?.checked,
         remote_agent_ssh_target: document.getElementById('set-remote-agent-ssh-target')?.value.trim() || '',
         remote_agent_ssh_command: document.getElementById('set-remote-agent-ssh-command')?.value.trim() || '',
@@ -152,7 +185,7 @@ export function applySettings(s) {
 
     if (s.remote_agent_token !== undefined) {
         const el = document.getElementById('set-remote-agent-token');
-        if (el) el.value = s.remote_agent_token;
+        if (el) applySecretValue(el, s.remote_agent_token, false);
     }
 
     if (s.remote_agent_ssh_autostart !== undefined) {
@@ -368,6 +401,26 @@ function _bindSettingsEvents() {
     document.getElementById('settings-context-depth')?.addEventListener('input', (e) => {
         const valueEl = document.getElementById('settings-context-depth-value');
         if (valueEl) valueEl.textContent = String(e.target.value);
+    });
+
+    // Secret show/hide toggles
+    document.querySelectorAll('.secret-toggle').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const wrap = btn.parentElement;
+            const input = wrap.querySelector('input');
+            if (!input) return;
+            const full = input.dataset.fullValue;
+            if (!full) return;
+
+            const isShowing = btn.dataset.showing === 'true';
+            if (isShowing) {
+                input.value = maskSecret(full);
+                btn.dataset.showing = 'false';
+            } else {
+                input.value = full;
+                btn.dataset.showing = 'true';
+            }
+        });
     });
 
     // Reset prompts to defaults
@@ -803,6 +856,210 @@ export function initSettings() {
     document.getElementById('settings-modal-cancel')?.addEventListener('click', closeSettingsModal);
     document.getElementById('settings-modal-save')?.addEventListener('click', saveSettings);
 
+    // Rotate Agent Token
+    document.getElementById('btn-rotate-agent-token')?.addEventListener('click', async () => {
+        const statusEl = document.getElementById('rotate-agent-token-status');
+
+        if (!await confirmTokenRotation(
+            'Rotate Agent Token?',
+            'This will invalidate the current remote agent token immediately.'
+        )) {
+            return;
+        }
+
+        if (statusEl) statusEl.textContent = 'Rotating...';
+
+        try {
+            const res = await fetch('/api/rotate-agent-token', {
+                method: 'POST',
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
+            });
+
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                if (statusEl) statusEl.textContent = 'Failed: ' + (text || `Server responded ${res.status}`);
+                showToast('Rotate agent token failed', 'error', text || `Server responded ${res.status}`);
+                return;
+            }
+
+            if (statusEl) statusEl.textContent = 'Token rotated';
+            showToast('Agent token rotated', 'success', 'Previous token is now invalid.');
+
+            // Refresh settings so masked token updates
+            const settingsRes = await fetch('/api/settings', {
+                headers: window.authHeaders ? window.authHeaders() : {},
+            });
+            if (settingsRes.ok) {
+                const s = await settingsRes.json();
+                applySettings(s);
+            }
+        } catch (err) {
+            if (statusEl) statusEl.textContent = 'Failed: ' + (err.message || 'Network error');
+            showToast('Rotate agent token failed', 'error', err.message || 'Network error');
+        }
+    });
+
+    // Rotate API Token
+    document.getElementById('btn-rotate-api-token')?.addEventListener('click', async () => {
+        const statusEl = document.getElementById('rotate-api-token-status');
+
+        if (!await confirmTokenRotation(
+            'Rotate API Token?',
+            'This will invalidate the current API token immediately. Open browser tabs may lose access until refreshed.'
+        )) {
+            return;
+        }
+
+        if (statusEl) statusEl.textContent = 'Rotating...';
+
+        try {
+            const res = await fetch('/api/rotate-api-token', {
+                method: 'POST',
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
+            });
+
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                if (statusEl) statusEl.textContent = 'Failed: ' + (text || `Server responded ${res.status}`);
+                showToast('Rotate API token failed', 'error', text || `Server responded ${res.status}`);
+                return;
+            }
+
+            if (statusEl) statusEl.textContent = 'Token rotated';
+            showToast('API token rotated', 'success', 'Previous token is now invalid. Restart llama-monitor to fully apply.');
+        } catch (err) {
+            if (statusEl) statusEl.textContent = 'Failed: ' + (err.message || 'Network error');
+            showToast('Rotate API token failed', 'error', err.message || 'Network error');
+        }
+    });
+
+    // Rotate DB Admin Token
+    document.getElementById('btn-rotate-db-admin-token')?.addEventListener('click', async () => {
+        const statusEl = document.getElementById('rotate-db-admin-token-status');
+
+        if (!await confirmTokenRotation(
+            'Rotate DB Admin Token?',
+            'This will invalidate the current DB admin token immediately.'
+        )) {
+            return;
+        }
+
+        if (statusEl) statusEl.textContent = 'Rotating...';
+
+        try {
+            const res = await fetch('/api/rotate-db-admin-token', {
+                method: 'POST',
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
+            });
+
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                if (statusEl) statusEl.textContent = 'Failed: ' + (text || `Server responded ${res.status}`);
+                showToast('Rotate DB admin token failed', 'error', text || `Server responded ${res.status}`);
+                return;
+            }
+
+            if (statusEl) statusEl.textContent = 'Token rotated';
+            showToast('DB admin token rotated', 'success', 'Previous token is now invalid. Restart llama-monitor to fully apply.');
+        } catch (err) {
+            if (statusEl) statusEl.textContent = 'Failed: ' + (err.message || 'Network error');
+            showToast('Rotate DB admin token failed', 'error', err.message || 'Network error');
+        }
+    });
+
     _bindSettingsEvents();
     _bindTlsEvents();
+}
+
+// ── Token rotation confirmation helper ────────────────────────────────────────
+
+async function confirmTokenRotation(title, message) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '2000';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'modal';
+    dialog.style.width = '420px';
+    dialog.style.padding = '14px 16px 14px 16px';
+
+    const header = document.createElement('div');
+    header.style.display = 'flex';
+    header.style.alignItems = 'center';
+    header.style.justifyContent = 'space-between';
+    header.style.marginBottom = '8px';
+
+    const titleEl = document.createElement('div');
+    titleEl.style.fontSize = '15px';
+    titleEl.style.fontWeight = '600';
+    titleEl.textContent = title;
+
+    const msg = document.createElement('div');
+    msg.style.fontSize = '13px';
+    msg.style.color = 'var(--color-text-muted)';
+    msg.style.marginBottom = '12px';
+    msg.textContent = message;
+
+    const actions = document.createElement('div');
+    actions.style.display = 'flex';
+    actions.style.justifyContent = 'flex-end';
+    actions.style.gap = '8px';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn btn-modal-cancel';
+    cancelBtn.textContent = 'Cancel';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'btn btn-modal-save';
+    confirmBtn.textContent = 'Rotate';
+
+    const result = new Promise(resolve => {
+        let decided = false;
+
+        function cleanup() {
+            if (overlay.parentElement) overlay.remove();
+        }
+
+        cancelBtn.addEventListener('click', () => {
+            if (decided) return;
+            decided = true;
+            cleanup();
+            resolve(false);
+        });
+
+        confirmBtn.addEventListener('click', () => {
+            if (decided) return;
+            decided = true;
+            cleanup();
+            resolve(true);
+        });
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay && !decided) {
+                decided = true;
+                cleanup();
+                resolve(false);
+            }
+        });
+    });
+
+    header.appendChild(titleEl);
+    dialog.appendChild(header);
+    dialog.appendChild(msg);
+    dialog.appendChild(actions);
+    actions.appendChild(cancelBtn);
+    actions.appendChild(confirmBtn);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    confirmBtn.focus();
+
+    return result;
 }

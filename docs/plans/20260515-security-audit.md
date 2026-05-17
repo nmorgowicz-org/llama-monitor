@@ -354,10 +354,12 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
 ### 9. SSH Credentials and Agent Tokens Stored in Plaintext
 
 - Files:
-  - src/remote_ssh.rs:15
   - src/state.rs:80
+  - src/web/api.rs
+  - static/js/features/settings.js
+  - static/js/features/remote-agent.js
 - Issue:
-  - SSH passwords, private key paths, passphrases, and agent tokens are stored in:
+  - SSH passwords, private key paths, passphrases, and agent tokens (e.g., remote_agent_token) are stored in:
     - sessions.json
     - ui-settings.json
   - No encryption at rest.
@@ -365,10 +367,32 @@ Most issues are local/LAN-scoped, but they are real and exploitable. The audit b
   - If filesystem is compromised, all secrets are exposed.
 - Likelihood:
   - Medium: depends on environment.
-- Fix:
-  - Consider:
-    - Encrypting sensitive fields.
-    - Or at least documenting and warning users.
+- Assessment:
+  - App is local-first, single-user; full crypto-at-rest (KMS, envelope encryption) is overkill.
+  - Realistic risks:
+    - Another local user reading files.
+    - Accidental leak via logs, debug endpoints, or screenshots.
+- Status:
+  - Partially mitigated (see below).
+- Fix (implemented):
+  - UI masking:
+    - remote_agent_token and SSH password/passphrase fields are masked by default.
+    - Show/hide toggle (eye icon) allows temporary reveal with partial masking.
+  - No logging:
+    - Tokens are never logged in full; only “token generated”-style messages are used.
+  - Documentation:
+    - Added “Stored secrets and security” section in docs/reference/remote-agent.md:
+      - Notes that credentials are stored in plaintext.
+      - Advises treating ~/.config/llama-monitor/ as sensitive.
+  - Rotate Agent Token helper:
+    - New endpoint: POST /api/rotate-agent-token (requires api-token).
+    - Generates a new remote_agent_token, saves it, and notifies agent poll loop.
+    - Exposed in Settings → Security & Certificates → “Rotate Agent Token”.
+- Optional (future, non-blocking):
+  - Integrate with the OS keychain for these fields (opt-in only):
+    - macOS: Keychain
+    - Linux: Secret Service (if available)
+    - Windows: Credential Manager
 
 ### 10. Lack of Rate Limiting and DoS Resistance
 

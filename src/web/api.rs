@@ -1025,6 +1025,11 @@ pub fn api_routes(
     let chat_reorder_tabs = api_reorder_tabs(chat_storage.clone());
     let chat_search = api_chat_search(chat_storage.clone());
 
+    // Agent token rotation routes
+    let rotate_agent_token = api_rotate_agent_token(state.clone(), app_config.clone());
+    let rotate_api_token = api_rotate_api_token(app_config.clone());
+    let rotate_db_admin_token = api_rotate_db_admin_token(app_config.clone());
+
     // Database admin routes
     let db_stats = api_db_stats(chat_storage.clone());
     let db_integrity = api_db_integrity(chat_storage.clone());
@@ -1082,7 +1087,10 @@ pub fn api_routes(
     let config_routes = get_gpu_env
         .or(put_gpu_env)
         .or(get_settings)
-        .or(put_settings);
+        .or(put_settings)
+        .or(rotate_agent_token)
+        .or(rotate_api_token)
+        .or(rotate_db_admin_token);
     let analyze_context_notes = api_analyze_context_notes(state.clone());
     let chat_routes = browse
         .or(chat)
@@ -1957,6 +1965,146 @@ fn api_put_settings(
             }
 
             warp::reply::json(&serde_json::json!({"ok": true}))
+        })
+}
+
+fn api_rotate_agent_token(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let state = state.clone();
+    let app_config = app_config.clone();
+
+    warp::path!("api" / "rotate-agent-token")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            let state = state.clone();
+            async move {
+                // Require api-token
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                let has_api_token =
+                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+                if !has_api_token {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        )),
+                    );
+                }
+
+                // Generate new token
+                let new_token = crate::config::generate_random_token();
+
+                // Update ui_settings
+                let mut settings = state.ui_settings.lock().unwrap();
+                settings.remote_agent_token = new_token;
+                let _ = app_state::save_ui_settings(&state.ui_settings_path, &settings);
+                drop(settings);
+
+                // Notify agent poll loop to pick up new token
+                state.agent_poll_notify.notify_waiters();
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(&serde_json::json!({
+                        "ok": true,
+                        "message": "Agent token rotated"
+                    }))),
+                )
+            }
+        })
+}
+
+fn api_rotate_api_token(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
+
+    warp::path!("api" / "rotate-api-token")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            async move {
+                // Require api-token
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                let has_api_token =
+                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+                if !has_api_token {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        )),
+                    );
+                }
+
+                // Generate new token
+                let new_token = crate::config::generate_random_token();
+
+                // Persist to file
+                let config_dir = cfg.config_dir.clone();
+                let token_file = config_dir.join("api-token");
+                if let Err(e) = std::fs::write(&token_file, &new_token) {
+                    eprintln!("[api] Failed to write rotated api-token to {token_file:?}: {e}");
+                }
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(&serde_json::json!({
+                        "ok": true,
+                        "message": "API token rotated. Restart llama-monitor to fully apply."
+                    }))),
+                )
+            }
+        })
+}
+
+fn api_rotate_db_admin_token(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
+
+    warp::path!("api" / "rotate-db-admin-token")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            async move {
+                // Require api-token
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                let has_api_token =
+                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+                if !has_api_token {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        )),
+                    );
+                }
+
+                // Generate new token
+                let new_token = crate::config::generate_random_token();
+
+                // Persist to file
+                let config_dir = cfg.config_dir.clone();
+                let token_file = config_dir.join("db-admin-token");
+                if let Err(e) = std::fs::write(&token_file, &new_token) {
+                    eprintln!("[api] Failed to write rotated db-admin-token to {token_file:?}: {e}");
+                }
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(&serde_json::json!({
+                        "ok": true,
+                        "message": "DB admin token rotated. Restart llama-monitor to fully apply."
+                    }))),
+                )
+            }
         })
 }
 

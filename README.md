@@ -47,6 +47,10 @@ Built-in TLS with ACME (Let’s Encrypt) and mTLS for remote agents. Choose No H
 
 ![Security & Certificates](docs/screenshots/tls-certificates-tab.png)
 
+### Security & Token Rotation
+
+Token-protected endpoints for API access, database administration, and remote agents. Rotate tokens in-place from the UI (Settings → Security & Certificates) when credentials are suspected to be exposed or as part of routine hardening.
+
 ---
 
 **Monitoring reference**: [Dashboard Capabilities](docs/reference/dashboard.md)  

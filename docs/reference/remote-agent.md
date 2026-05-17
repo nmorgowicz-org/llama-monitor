@@ -119,6 +119,49 @@ The app chooses an OS-appropriate install/start path and command for the managed
 | Start/install buttons complain about missing SSH target | Guided settings were not applied or no target was saved | Run **Guided SSH Setup** and click **Use These Settings** |
 | Agent is reachable but some host metrics are missing | The remote system cannot provide those sensors | Check the underlying platform tools such as `nvidia-smi`, `rocm-smi`, or OS temperature access |
 
+## Stored secrets and security
+
+Some credentials used by the remote agent and internal APIs are stored in plaintext in `~/.config/llama-monitor/`:
+
+- **Agent Token** (`remote_agent_token`):
+  - Used as a bearer token when polling the remote agent.
+- **SSH password** (`remote_agent_ssh_password`):
+  - Used for the current SSH operation when password auth is selected.
+- **Private key path** (`remote_agent_ssh_key_path`):
+  - Path reference only; the key file itself is not copied into llama-monitor’s config.
+
+Notes:
+- These values are never logged in full (only “token generated”-style messages).
+- They are not included in generic debug or health responses.
+- For security-conscious setups:
+  - Treat `~/.config/llama-monitor/` as sensitive.
+  - Use file permissions and/or disk encryption where available.
+
+## Tokens and rotation
+
+Three tokens are used by llama-monitor:
+
+- **API Token**:
+  - File: `api-token`
+  - Used to protect sensitive endpoints (attach, DB queries, etc.).
+- **DB Admin Token**:
+  - File: `db-admin-token`
+  - Used for advanced database operations and restricted queries.
+- **Agent Token**:
+  - Stored in `ui-settings.json` as `remote_agent_token`.
+  - Used to authenticate with the remote agent.
+
+All three can be rotated from the UI:
+
+- Open `Settings → Security & Certificates`.
+- Use one of:
+  - `Rotate Agent Token`
+  - `Rotate API Token`
+  - `Rotate DB Admin Token`
+- Confirm the prompt. A new token is generated and the previous one is immediately invalid.
+
+After rotating the API Token or DB Admin Token, restart llama-monitor to fully apply the change.
+
 ## CLI equivalents
 
 The dashboard-side CLI flags for remote-agent integration are documented in [CLI Flags](cli-flags.md). The agent itself can be launched directly with `--agent`, `--agent-host`, `--agent-port`, and `--agent-token`.

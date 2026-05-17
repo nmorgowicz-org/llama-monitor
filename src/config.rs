@@ -219,7 +219,7 @@ fn ensure_api_token(config_dir: &PathBuf) -> Option<String> {
     Some(token)
 }
 
-fn generate_random_token() -> String {
+pub(crate) fn generate_random_token() -> String {
     // Read exactly 16 bytes from /dev/urandom (avoid reading all bytes)
     let mut buf = [0u8; 16];
     let value = if let Ok(mut f) = std::fs::File::open("/dev/urandom") {

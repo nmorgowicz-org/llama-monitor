@@ -1661,10 +1661,13 @@
                               Agent URL
                               <input type="text" id="set-remote-agent-url" placeholder="http://127.0.0.1:7779">
                           </label>
-                          <label class="modal-field" style="flex:1;" title="Optional bearer token used when polling the remote agent.">
-                              Agent Token
-                              <input type="text" id="set-remote-agent-token" placeholder="optional">
-                          </label>
+                         <label class="modal-field" style="flex:1;" title="Optional bearer token used when polling the remote agent.">
+                               Agent Token
+                               <div class="secret-input-wrap">
+                                   <input type="password" id="set-remote-agent-token" placeholder="optional">
+                                   <button type="button" class="secret-toggle" aria-label="Show/hide token">👁</button>
+                               </div>
+                           </label>
                       </div>
                       <div class="modal-row" style="gap:12px;">
                            <label class="modal-field checkbox-field" style="flex:1;">
@@ -2663,6 +2666,60 @@
                             </div>
 
                             <div id="acme-status-text" style="font-size:12px;color:var(--text-muted);margin-top:6px;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Agent Token Rotation -->
+                <div class="settings-section">
+                    <div class="widget-card" style="padding:14px;margin-bottom:16px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            Agent Token
+                        </div>
+                        <p class="settings-help" style="margin-bottom:8px;">
+                            Rotate the remote agent token used for authenticated communication. This invalidates the previous token immediately.
+                        </p>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <button type="button" class="btn btn-secondary" id="btn-rotate-agent-token">
+                                Rotate Agent Token
+                            </button>
+                            <span id="rotate-agent-token-status" style="font-size:11px;color:var(--color-text-muted);"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- API Token Rotation -->
+                <div class="settings-section">
+                    <div class="widget-card" style="padding:14px;margin-bottom:16px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            API Token
+                        </div>
+                        <p class="settings-help" style="margin-bottom:8px;">
+                            Rotate the API token used by the web UI and protected endpoints. This may briefly disrupt active browser sessions.
+                        </p>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <button type="button" class="btn btn-secondary" id="btn-rotate-api-token">
+                                Rotate API Token
+                            </button>
+                            <span id="rotate-api-token-status" style="font-size:11px;color:var(--color-text-muted);"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DB Admin Token Rotation -->
+                <div class="settings-section">
+                    <div class="widget-card" style="padding:14px;margin-bottom:16px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            DB Admin Token
+                        </div>
+                        <p class="settings-help" style="margin-bottom:8px;">
+                            Rotate the DB admin token used for advanced database operations. This invalidates the previous token immediately.
+                        </p>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <button type="button" class="btn btn-secondary" id="btn-rotate-db-admin-token">
+                                Rotate DB Admin Token
+                            </button>
+                            <span id="rotate-db-admin-token-status" style="font-size:11px;color:var(--color-text-muted);"></span>
                         </div>
                     </div>
                 </div>
