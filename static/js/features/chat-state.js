@@ -224,7 +224,8 @@ export async function addChatTab() {
         tab._loaded = true;
     } catch (e) {
         console.error('addChatTab failed:', e);
-        tab._loaded = true;
+        // If creation failed, do not add the tab to avoid orphaned tabs.
+        return;
     }
     chat.tabs.push(tab);
     await switchChatTab(tab.id);
@@ -395,15 +396,27 @@ export function scheduleChatPersist(tab) {
     const t = tab || activeChatTab();
     if (!t) return;
     if (!chat._persistTab) {
-        chat._persistTab = debounce((tabToSave) => {
+        chat._persistTab = debounce(async (tabToSave) => {
             const normalized = normalizeTabForSave(tabToSave);
-            fetch(`/api/chat/tabs/${tabToSave.id}`, {
-                method: 'PUT',
-                headers: window.authHeaders
-                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
-                    : { 'Content-Type': 'application/json' },
-                body: JSON.stringify(normalized),
-            }).catch(e => console.error('persist tab error:', e));
+            try {
+                const resp = await fetch(`/api/chat/tabs/${tabToSave.id}`, {
+                    method: 'PUT',
+                    headers: window.authHeaders
+                        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                        : { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(normalized),
+                });
+                if (!resp.ok) {
+                    if (resp.status === 404) {
+                        // Tab does not exist in DB; remove from local state.
+                        chat.tabs = chat.tabs.filter(tb => tb.id !== tabToSave.id);
+                    } else {
+                        console.error('persist tab error:', resp.status);
+                    }
+                }
+            } catch (e) {
+                console.error('persist tab error:', e);
+            }
         }, CHAT_TABS_PERSIST_DEBOUNCE_MS);
     }
     chat._persistTab(t);
