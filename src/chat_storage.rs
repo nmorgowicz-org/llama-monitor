@@ -121,6 +121,7 @@ pub struct ChatTabRow {
 pub struct MessageRow {
     #[serde(default)]
     pub id: i64,
+    #[serde(default)]
     pub tab_id: String,
     pub role: String,
     pub content: String,
@@ -134,6 +135,7 @@ pub struct MessageRow {
     pub compaction_marker: bool,
     pub variants: Option<serde_json::Value>,
     pub variant_index: Option<i64>,
+    #[serde(default)]
     pub seq: i64,
 }
 

@@ -248,6 +248,25 @@ struct AuthReject {
 
 impl warp::reject::Reject for AuthReject {}
 
+#[derive(Debug)]
+struct JsonParseError;
+
+impl warp::reject::Reject for JsonParseError {}
+
+/// A warp-compatible JSON body filter that:
+/// - Limits size to 2MB.
+/// - Returns 400 (via JsonParseError) on parse failure instead of letting it
+///   fall through as a generic rejection that could become 404.
+pub fn safe_json_body<T: serde::de::DeserializeOwned>()
+-> impl Filter<Extract = (T,), Error = warp::Rejection> + Clone {
+    warp::body::content_length_limit(2_000_000)
+        .and(warp::body::bytes())
+        .and_then(move |body: bytes::Bytes| async move {
+            let body = body.as_ref();
+            serde_json::from_slice::<T>(body).map_err(|_| warp::reject::custom(JsonParseError))
+        })
+}
+
 use base64::Engine;
 use once_cell::sync::Lazy;
 static BASE64: Lazy<base64::engine::GeneralPurpose> =
@@ -393,6 +412,16 @@ async fn handle_rejection(err: warp::Rejection) -> Result<Box<dyn warp::reply::R
         return Ok(Box::new(warp::reply::with_status(
             api_err.message.clone(),
             api_err.status,
+        )));
+    }
+
+    // JSON parse / invalid body → 400, not 404.
+    if err.find::<JsonParseError>().is_some() {
+        return Ok(Box::new(warp::reply::with_status(
+            warp::reply::json(
+                &serde_json::json!({ "ok": false, "error": "bad_request; invalid JSON" }),
+            ),
+            warp::http::StatusCode::BAD_REQUEST,
         )));
     }
 

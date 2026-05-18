@@ -4482,7 +4482,7 @@ fn api_put_tab(
     warp::path!("api" / "chat" / "tabs" / String)
         .and(warp::put())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<crate::chat_storage::ChatTabRow>())
+        .and(super::safe_json_body::<crate::chat_storage::ChatTabRow>())
         .and(with_chat_storage(storage))
         .and_then(
             move |id: String,

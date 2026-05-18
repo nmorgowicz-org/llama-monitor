@@ -870,3 +870,74 @@ These patterns must be followed when adding or modifying endpoints. Violations h
 - If a change affects how auth_guard or origin_guard interacts with a route, add a test that explicitly validates that behavior.
 
 If any item is unclear or not satisfied, the agent MUST either add the missing protection or explicitly document the gap and rationale in the PR description.
+
+## API, Serialization, and Data Safety Rules (MANDATORY)
+
+These rules prevent the class of bug where a JSON mismatch or auth guard silently turns into 404 and causes data loss (e.g., losing a chat tab).
+
+### 1) Serde defaults on API/DB structs
+
+- All structs that are:
+  - Sent/received via HTTP, or
+  - Stored in DB and serialized
+- MUST use #[serde(default)] on fields that:
+  - Have a sensible default (0, 0.0, false, empty string, empty array, etc.).
+- Rationale:
+  - A single missing field must not cause a hard deserialization failure.
+  - This prevents 404/500 from minor frontend-backend mismatches.
+- When changing such structs:
+  - Assume older clients and older DB rows coexist.
+  - Prefer adding fields with default over breaking existing payloads.
+
+### 2) JSON parse errors must be 400, never 404
+
+- A malformed or mismatched request body must:
+  - Return 400 (Bad Request) with a short error.
+- A missing resource (tab, backup, etc.) must:
+  - Return 404.
+- Never let warp’s default rejection mapping turn a JSON parse error into 404.
+- When adding a new endpoint with warp::body::json:
+  - Ensure:
+    - Parse failures → 400
+    - “Not found” → 404
+  - If unsure, add a small test that sends invalid JSON and asserts 400.
+
+### 3) No silent data loss on HTTP errors (frontend)
+
+When handling errors from the backend, never silently delete user data based on a single ambiguous error (especially 404).
+
+Rules:
+- For operations like:
+  - PUT /api/chat/tabs/:id
+  - PATCH /api/chat/tabs/:id/meta
+  - Any request that updates user-owned data:
+- On failure:
+  - If 404:
+    - Log it.
+    - Retry 2–3 times with short backoff.
+    - Only consider removal if:
+      - Every retry is 404, and
+      - The response explicitly indicates “not_found” (e.g. via error field).
+  - On other errors:
+    - Keep data in local state.
+    - Continue retrying silently.
+- For destructive operations (delete tab, delete backup, etc.):
+  - Require an explicit confirmation step in the UI.
+  - Never infer “delete” from unexpected errors.
+
+### 4) Contract and auth tests are mandatory for API changes
+
+When you:
+- Change an API struct (add/remove/renamed field).
+- Change auth, guards, or route wiring.
+- Introduce a new endpoint.
+
+You MUST:
+- Run:
+  - cargo test
+  - tests/auth_routing.rs
+- Add or update:
+  - A test for the new/changed endpoint’s auth behavior.
+  - (Recommended) A quick test that sends partial/legacy JSON to ensure robustness.
+
+If any item is unclear or not satisfied, the agent MUST either add the missing protection or explicitly document the gap and rationale in the PR description.
