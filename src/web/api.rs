@@ -278,6 +278,7 @@ fn check_db_admin_token(auth: &Option<String>, cfg: &AppConfig) -> bool {
 
 /// Compare an already-extracted bearer token against the live api-token (constant-time).
 /// If no api-token is configured, allow the request (local-first mode).
+/// If api-token is configured but no bearer is provided, reject.
 fn bearer_matches_api_token(bearer: Option<&str>, cfg: &AppConfig) -> bool {
     use subtle::ConstantTimeEq;
     let live = cfg.live_api_token();
@@ -285,13 +286,16 @@ fn bearer_matches_api_token(bearer: Option<&str>, cfg: &AppConfig) -> bool {
         (Some(got), Some(expected)) if !expected.is_empty() => {
             got.as_bytes().ct_eq(expected.as_bytes()).into()
         }
-        // If no api-token is configured, allow the request (local-first mode).
+        // Token is configured but no bearer provided → reject.
+        (None, Some(expected)) if !expected.is_empty() => false,
+        // No token configured → allow (local-first mode).
         _ => true,
     }
 }
 
 /// Compare an already-extracted bearer token against the live db-admin-token (constant-time).
 /// If no db-admin-token is configured, allow the request (local-first mode).
+/// If db-admin-token is configured but no bearer is provided, reject.
 fn bearer_matches_db_admin_token(bearer: Option<&str>, cfg: &AppConfig) -> bool {
     use subtle::ConstantTimeEq;
     let live = cfg.live_db_admin_token();
@@ -299,7 +303,9 @@ fn bearer_matches_db_admin_token(bearer: Option<&str>, cfg: &AppConfig) -> bool 
         (Some(got), Some(expected)) if !expected.is_empty() => {
             got.as_bytes().ct_eq(expected.as_bytes()).into()
         }
-        // If no db-admin-token is configured, allow the request (local-first mode).
+        // Token is configured but no bearer provided → reject.
+        (None, Some(expected)) if !expected.is_empty() => false,
+        // No token configured → allow (local-first mode).
         _ => true,
     }
 }
@@ -1338,7 +1344,7 @@ pub fn api_routes(
     state: AppState,
     app_config: Arc<AppConfig>,
     auth_manager: AuthManager,
-    bind_host: String,
+    _bind_host: String,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     let start = api_start(state.clone(), app_config.clone());
     let stop = api_stop(state.clone(), app_config.clone());
@@ -1392,10 +1398,7 @@ pub fn api_routes(
     let db_restore = api_db_restore(chat_storage.clone(), app_config.clone());
     let db_repair = api_db_repair(chat_storage.clone(), app_config.clone());
     let db_indexes = api_db_indexes(chat_storage.clone(), app_config.clone());
-    let db_admin_token =
-        api_db_admin_token(app_config.clone(), auth_manager.clone(), bind_host.clone());
     let db_query = api_db_query(chat_storage.clone(), app_config.clone());
-    let internal_token = api_internal_token(app_config.clone(), auth_manager, bind_host);
 
     let get_sessions = api_get_sessions(state.clone(), app_config.clone());
     let create_session = api_create_session(state.clone(), app_config.clone());
@@ -1472,9 +1475,7 @@ pub fn api_routes(
         .or(db_restore)
         .or(db_repair)
         .or(db_indexes)
-        .or(db_admin_token)
-        .or(db_query)
-        .or(internal_token);
+        .or(db_query);
     let session_routes = get_sessions
         .or(create_session)
         .or(delete_session)
@@ -1536,6 +1537,20 @@ pub fn auth_api_routes(
     api_auth_status(auth_manager.clone())
         .or(api_auth_login(auth_manager.clone()))
         .or(api_auth_logout(auth_manager))
+}
+
+/// Public token bootstrap routes.
+///
+/// Exposed before auth_guard so the frontend can retrieve api-token / db-admin-token
+/// without needing to be logged in via form/basic auth. Access is still constrained
+/// by token_bootstrap_allowed (loopback or no auth) and the caller's Origin.
+pub fn public_tokens_routes(
+    app_config: Arc<AppConfig>,
+    auth_manager: AuthManager,
+    bind_host: String,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    api_internal_token(app_config.clone(), auth_manager.clone(), bind_host.clone())
+        .or(api_db_admin_token(app_config, auth_manager, bind_host))
 }
 
 fn api_auth_status(
@@ -5048,9 +5063,12 @@ fn token_bootstrap_allowed(
     bind_host: &str,
     host_header: Option<&str>,
 ) -> bool {
-    auth_manager.has_any()
-        || bind_host_is_loopback(bind_host)
-        || host_header_is_loopback(host_header)
+    // No Auth mode: fully open (local-first).
+    if !auth_manager.has_any() {
+        return true;
+    }
+    // Auth configured: restrict token bootstrap to loopback clients.
+    bind_host_is_loopback(bind_host) || host_header_is_loopback(host_header)
 }
 
 // GET /api/internal/api-token - Return internal API token for UI use
@@ -6933,9 +6951,11 @@ mod tests {
     }
 
     #[test]
-    fn token_bootstrap_rejects_non_loopback_bind_without_basic_auth() {
+    fn token_bootstrap_allows_all_when_no_auth_configured() {
         let auth = AuthManager::new(None, None, &TlsMode::None);
-        assert!(!token_bootstrap_allowed(&auth, "0.0.0.0", None));
+        // No Auth mode: fully open (local-first)
+        assert!(token_bootstrap_allowed(&auth, "0.0.0.0", None));
+        assert!(token_bootstrap_allowed(&auth, "192.168.2.44", None));
     }
 
     #[test]
@@ -6949,9 +6969,10 @@ mod tests {
     }
 
     #[test]
-    fn token_bootstrap_rejects_non_loopback_host_on_non_loopback_bind() {
+    fn token_bootstrap_allows_non_loopback_host_when_no_auth() {
         let auth = AuthManager::new(None, None, &TlsMode::None);
-        assert!(!token_bootstrap_allowed(
+        // No Auth mode: fully open
+        assert!(token_bootstrap_allowed(
             &auth,
             "0.0.0.0",
             Some("192.168.2.44:8080"),
@@ -6959,23 +6980,25 @@ mod tests {
     }
 
     #[test]
-    fn token_bootstrap_allows_when_basic_auth_is_configured() {
+    fn token_bootstrap_allows_loopback_when_basic_auth_is_configured() {
         let auth = AuthManager::new(
             AuthManager::parse_credentials("admin:secret"),
             None,
             &TlsMode::None,
         );
-        assert!(token_bootstrap_allowed(&auth, "0.0.0.0", None));
+        assert!(token_bootstrap_allowed(&auth, "127.0.0.1", None));
+        assert!(!token_bootstrap_allowed(&auth, "0.0.0.0", None));
     }
 
     #[test]
-    fn token_bootstrap_allows_when_form_auth_is_configured() {
+    fn token_bootstrap_allows_loopback_when_form_auth_is_configured() {
         let auth = AuthManager::new(
             None,
             AuthManager::parse_credentials("admin:secret"),
             &TlsMode::None,
         );
-        assert!(token_bootstrap_allowed(&auth, "0.0.0.0", None));
+        assert!(token_bootstrap_allowed(&auth, "127.0.0.1", None));
+        assert!(!token_bootstrap_allowed(&auth, "0.0.0.0", None));
     }
 
     #[tokio::test]

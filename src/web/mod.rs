@@ -141,7 +141,11 @@ pub fn build_routes(
         auth_manager.clone(),
         bind_host.clone(),
     );
-    let public_api = api::auth_api_routes(auth_manager.clone());
+    let public_api = api::auth_api_routes(auth_manager.clone()).or(api::public_tokens_routes(
+        app_config.clone(),
+        auth_manager.clone(),
+        bind_host.clone(),
+    ));
     let static_files = static_routes();
     let compact = compact_route(app_config);
     let index = index_route(auth_manager.clone());
