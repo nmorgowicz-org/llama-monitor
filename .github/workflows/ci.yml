@@ -171,7 +171,7 @@ jobs:
           cache-dependency-path: tests/ui/package-lock.json
 
       - name: Check static JavaScript syntax
-        run: ./scripts/validate-js.sh
+        run: npm run validate-js
 
       - name: Install UI test dependencies
         working-directory: tests/ui

@@ -103,11 +103,34 @@ export async function doKillLlama() {
     if (btnKill) btnKill.disabled = true;
 
     try {
-        const resp = await fetch('/api/kill-llama', { method: 'POST' });
+        const tokenResp = await fetch('/api/db/admin-token');
+        const tokenData = await tokenResp.json();
+        const token = tokenData.token;
+        if (!token) {
+            showToast('Kill failed: admin token not available', 'error');
+            return;
+        }
+
+        const resp = await fetch('/api/kill-llama', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({ confirm: 'kill' }),
+        });
+
         const data = await resp.json();
 
-        if (!data.ok) showToast('Kill failed: ' + (data.error || 'unknown'), 'error');
-        else showToast('llama-server killed', 'success');
+        if (!data.ok) {
+            if (resp.status === 429) {
+                showToast('Kill failed: too soon; please wait', 'error');
+            } else {
+                showToast('Kill failed: ' + (data.error || 'unknown'), 'error');
+            }
+        } else {
+            showToast('llama-server killed', 'success');
+        }
     } catch (e) {
         showToast('Kill failed: ' + e.message, 'error');
     } finally {
@@ -117,7 +140,19 @@ export async function doKillLlama() {
 
 export async function doKillLlamaInternal() {
     try {
-        await fetch('/api/kill-llama', { method: 'POST' });
+        const tokenResp = await fetch('/api/db/admin-token');
+        const tokenData = await tokenResp.json();
+        const token = tokenData.token;
+        if (!token) return;
+
+        await fetch('/api/kill-llama', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({ confirm: 'kill' }),
+        });
     } catch(e) {
         // Ignore errors from kill, just try to continue
     }
@@ -136,7 +171,9 @@ export async function doAttach() {
 
     const resp = await fetch('/api/attach', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: (typeof window.authHeaders === 'function')
+            ? window.authHeaders({ 'Content-Type': 'application/json' })
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify({ endpoint }),
     });
     const data = await resp.json();

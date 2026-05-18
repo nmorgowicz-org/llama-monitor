@@ -1,0 +1,1040 @@
+use anyhow::{Context, Result};
+use rusqlite::backup::Backup;
+use rusqlite::{Connection, params};
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+const SCHEMA_SQL: &str = r#"
+PRAGMA journal_mode=WAL;
+PRAGMA foreign_keys=ON;
+
+CREATE TABLE IF NOT EXISTS tabs (
+    id                     TEXT    PRIMARY KEY,
+    name                   TEXT    NOT NULL,
+    system_prompt          TEXT    NOT NULL DEFAULT '',
+    ai_name                TEXT,
+    user_name              TEXT,
+    explicit_level         INTEGER NOT NULL DEFAULT 0,
+    active_template_id     TEXT,
+    auto_compact           INTEGER NOT NULL DEFAULT 1,
+    auto_compact_summarize INTEGER NOT NULL DEFAULT 0,
+    compact_mode           TEXT    NOT NULL DEFAULT 'percent',
+    compact_threshold      REAL    NOT NULL DEFAULT 0.8,
+    model_params           TEXT    NOT NULL DEFAULT '{}',
+    context_notes          TEXT    NOT NULL DEFAULT '[]',
+    sidebar_width          INTEGER NOT NULL DEFAULT 280,
+    tab_order              INTEGER NOT NULL DEFAULT 0,
+    pinned                 INTEGER NOT NULL DEFAULT 0,
+    last_ctx_pct           REAL,
+    total_input_tokens     INTEGER NOT NULL DEFAULT 0,
+    total_output_tokens    INTEGER NOT NULL DEFAULT 0,
+    created_at             INTEGER NOT NULL,
+    updated_at             INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+    tab_id                    TEXT    NOT NULL REFERENCES tabs(id) ON DELETE CASCADE,
+    role                      TEXT    NOT NULL CHECK(role IN ('user','assistant','system')),
+    content                   TEXT    NOT NULL,
+    timestamp_ms              INTEGER NOT NULL DEFAULT 0,
+    input_tokens              INTEGER,
+    output_tokens             INTEGER,
+    cumulative_input_tokens   INTEGER,
+    cumulative_output_tokens  INTEGER,
+    compaction_marker         INTEGER NOT NULL DEFAULT 0,
+    variants                  TEXT,
+    variant_index             INTEGER,
+    seq                       INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_tab ON messages(tab_id, seq);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+    content,
+    content='messages',
+    content_rowid='id'
+);
+
+CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+    INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+    INSERT INTO messages_fts(messages_fts, rowid, content)
+        VALUES ('delete', old.id, old.content);
+END;
+CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+    INSERT INTO messages_fts(messages_fts, rowid, content)
+        VALUES ('delete', old.id, old.content);
+    INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+END;
+"#;
+
+// ── Data types ────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TabMeta {
+    pub id: String,
+    pub name: String,
+    pub explicit_level: u8,
+    pub active_template_id: Option<String>,
+    pub pinned: bool,
+    pub tab_order: i64,
+    pub last_ctx_pct: Option<f64>,
+    pub total_input_tokens: i64,
+    pub total_output_tokens: i64,
+    pub message_count: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ChatTabRow {
+    pub id: String,
+    pub name: String,
+    pub system_prompt: String,
+    pub ai_name: Option<String>,
+    pub user_name: Option<String>,
+    pub explicit_level: u8,
+    pub active_template_id: Option<String>,
+    pub auto_compact: bool,
+    pub auto_compact_summarize: bool,
+    pub compact_mode: String,
+    pub compact_threshold: f64,
+    pub model_params: serde_json::Value,
+    pub context_notes: serde_json::Value,
+    pub sidebar_width: u32,
+    pub tab_order: i64,
+    pub pinned: bool,
+    pub last_ctx_pct: Option<f64>,
+    pub total_input_tokens: i64,
+    pub total_output_tokens: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+    #[serde(default)]
+    pub messages: Vec<MessageRow>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MessageRow {
+    #[serde(default)]
+    pub id: i64,
+    pub tab_id: String,
+    pub role: String,
+    pub content: String,
+    #[serde(default)]
+    pub timestamp_ms: i64,
+    pub input_tokens: Option<i64>,
+    pub output_tokens: Option<i64>,
+    pub cumulative_input_tokens: Option<i64>,
+    pub cumulative_output_tokens: Option<i64>,
+    #[serde(default)]
+    pub compaction_marker: bool,
+    pub variants: Option<serde_json::Value>,
+    pub variant_index: Option<i64>,
+    pub seq: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SearchResult {
+    pub tab_id: String,
+    pub tab_name: String,
+    pub message_id: i64,
+    pub role: String,
+    pub snippet: String,
+    pub timestamp_ms: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SearchResultsPage {
+    pub results: Vec<SearchResult>,
+    pub total: usize,
+    pub limit: usize,
+    pub offset: usize,
+    pub has_more: bool,
+}
+
+// ── Storage ───────────────────────────────────────────────────────────────────
+
+pub struct ChatStorage {
+    conn: std::sync::Mutex<Connection>,
+}
+
+impl ChatStorage {
+    pub fn open(db_path: &PathBuf) -> Result<Self> {
+        let conn = Connection::open(db_path)
+            .with_context(|| format!("opening chat.db at {}", db_path.display()))?;
+        conn.execute_batch(SCHEMA_SQL)?;
+        Ok(Self {
+            conn: std::sync::Mutex::new(conn),
+        })
+    }
+
+    // ── Migration ─────────────────────────────────────────────────────────────
+
+    pub fn migrate_from_legacy(&self, legacy_path: &PathBuf) -> Result<()> {
+        if !legacy_path.exists() {
+            return Ok(());
+        }
+        let raw = std::fs::read_to_string(legacy_path)?;
+        let tabs: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).context("parsing legacy chat-tabs.json")?;
+
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+
+        let mut migrated_tabs = 0u64;
+        let mut migrated_msgs = 0u64;
+
+        for (order, tab) in tabs.iter().enumerate() {
+            let id = tab["id"].as_str().unwrap_or_default().to_string();
+            if id.is_empty() {
+                continue;
+            }
+
+            tx.execute(
+                "INSERT OR REPLACE INTO tabs (
+                    id, name, system_prompt, ai_name, user_name,
+                    explicit_level, active_template_id,
+                    auto_compact, auto_compact_summarize, compact_mode, compact_threshold,
+                    model_params, context_notes, sidebar_width,
+                    tab_order, pinned, last_ctx_pct,
+                    total_input_tokens, total_output_tokens,
+                    created_at, updated_at
+                ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
+                params![
+                    id,
+                    tab["name"].as_str().unwrap_or("Untitled"),
+                    tab["system_prompt"].as_str().unwrap_or(""),
+                    tab["ai_name"].as_str(),
+                    tab["user_name"].as_str(),
+                    tab["explicit_level"].as_i64().or_else(|| {
+                        tab["explicit_mode"].as_bool().map(|b| if b { 1 } else { 0 })
+                    }).unwrap_or(0),
+                    tab["active_template_id"].as_str(),
+                    tab["auto_compact"].as_bool().unwrap_or(true) as i64,
+                    tab["auto_compact_summarize"].as_bool().unwrap_or(false) as i64,
+                    tab["compact_mode"].as_str().unwrap_or("percent"),
+                    tab["compact_threshold"].as_f64().unwrap_or(0.8),
+                    tab["model_params"].to_string(),
+                    tab["context_notes"].to_string(),
+                    tab["sidebar_width"].as_i64().unwrap_or(280),
+                    order as i64,
+                    tab["pinned"].as_bool().unwrap_or(false) as i64,
+                    tab["lastCtxPct"].as_f64(),
+                    tab["totalInputTokens"].as_i64().unwrap_or(0),
+                    tab["totalOutputTokens"].as_i64().unwrap_or(0),
+                    tab["created_at"].as_i64().unwrap_or(0),
+                    tab["updated_at"].as_i64().unwrap_or(0),
+                ],
+            )?;
+            migrated_tabs += 1;
+
+            if let Some(msgs) = tab["messages"].as_array() {
+                for (seq, msg) in msgs.iter().enumerate() {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO messages (tab_id, role, content, timestamp_ms,
+                             input_tokens, output_tokens, compaction_marker, seq)
+                          VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                        params![
+                            id,
+                            msg["role"].as_str().unwrap_or("user"),
+                            msg["content"].as_str().unwrap_or(""),
+                            msg["timestamp_ms"].as_i64().unwrap_or(0),
+                            msg["input_tokens"].as_i64(),
+                            msg["output_tokens"].as_i64(),
+                            msg["compaction_marker"].as_bool().unwrap_or(false) as i64,
+                            seq as i64,
+                        ],
+                    )?;
+                    migrated_msgs += 1;
+                }
+            }
+        }
+        tx.commit()?;
+        let tab_count = migrated_tabs;
+        let msg_count = migrated_msgs;
+        std::fs::rename(legacy_path, legacy_path.with_extension("json.bak"))?;
+        eprintln!(
+            "[info] Migrated {} tabs with {} messages from chat-tabs.json",
+            tab_count, msg_count
+        );
+        Ok(())
+    }
+
+    // ── Tab CRUD ──────────────────────────────────────────────────────────────
+
+    pub fn list_tabs(&self) -> Result<Vec<TabMeta>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT t.id, t.name, t.explicit_level, t.active_template_id,
+                    t.pinned, t.tab_order, t.last_ctx_pct,
+                    t.total_input_tokens, t.total_output_tokens,
+                    COUNT(m.id) as message_count,
+                    t.created_at, t.updated_at
+             FROM tabs t
+             LEFT JOIN messages m ON m.tab_id = t.id AND m.compaction_marker = 0
+             GROUP BY t.id
+             ORDER BY t.tab_order ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(TabMeta {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                explicit_level: row.get::<_, i64>(2)? as u8,
+                active_template_id: row.get(3)?,
+                pinned: row.get::<_, i64>(4)? != 0,
+                tab_order: row.get(5)?,
+                last_ctx_pct: row.get(6)?,
+                total_input_tokens: row.get(7)?,
+                total_output_tokens: row.get(8)?,
+                message_count: row.get(9)?,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
+    pub fn get_tab(&self, id: &str) -> Result<ChatTabRow> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, system_prompt, ai_name, user_name,
+                    explicit_level, active_template_id,
+                    auto_compact, auto_compact_summarize, compact_mode, compact_threshold,
+                    model_params, context_notes, sidebar_width,
+                    tab_order, pinned, last_ctx_pct,
+                    total_input_tokens, total_output_tokens,
+                    created_at, updated_at
+             FROM tabs WHERE id = ?1",
+        )?;
+        let mut tab = stmt.query_row(params![id], |row| {
+            Ok(ChatTabRow {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                system_prompt: row.get(2)?,
+                ai_name: row.get(3)?,
+                user_name: row.get(4)?,
+                explicit_level: row.get::<_, i64>(5)? as u8,
+                active_template_id: row.get(6)?,
+                auto_compact: row.get::<_, i64>(7)? != 0,
+                auto_compact_summarize: row.get::<_, i64>(8)? != 0,
+                compact_mode: row.get(9)?,
+                compact_threshold: row.get(10)?,
+                model_params: serde_json::from_str(&row.get::<_, String>(11)?).unwrap_or_default(),
+                context_notes: serde_json::from_str(&row.get::<_, String>(12)?).unwrap_or_default(),
+                sidebar_width: row.get::<_, i64>(13)? as u32,
+                tab_order: row.get(14)?,
+                pinned: row.get::<_, i64>(15)? != 0,
+                last_ctx_pct: row.get(16)?,
+                total_input_tokens: row.get(17)?,
+                total_output_tokens: row.get(18)?,
+                created_at: row.get(19)?,
+                updated_at: row.get(20)?,
+                messages: vec![],
+            })
+        })?;
+
+        tab.messages = self._load_messages_locked(&conn, id)?;
+        Ok(tab)
+    }
+
+    pub fn create_tab(&self, tab: &ChatTabRow) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO tabs (id, name, system_prompt, ai_name, user_name,
+                 explicit_level, active_template_id,
+                 auto_compact, auto_compact_summarize, compact_mode, compact_threshold,
+                 model_params, context_notes, sidebar_width,
+                 tab_order, pinned, last_ctx_pct,
+                 total_input_tokens, total_output_tokens,
+                 created_at, updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
+            params![
+                tab.id,
+                tab.name,
+                tab.system_prompt,
+                tab.ai_name,
+                tab.user_name,
+                tab.explicit_level as i64,
+                tab.active_template_id,
+                tab.auto_compact as i64,
+                tab.auto_compact_summarize as i64,
+                tab.compact_mode,
+                tab.compact_threshold,
+                serde_json::to_string(&tab.model_params)?,
+                serde_json::to_string(&tab.context_notes)?,
+                tab.sidebar_width as i64,
+                tab.tab_order,
+                tab.pinned as i64,
+                tab.last_ctx_pct,
+                tab.total_input_tokens,
+                tab.total_output_tokens,
+                tab.created_at,
+                tab.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_tab_meta(&self, tab: &ChatTabRow) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE tabs SET
+                name=?2, system_prompt=?3, ai_name=?4, user_name=?5,
+                explicit_level=?6, active_template_id=?7,
+                auto_compact=?8, auto_compact_summarize=?9, compact_mode=?10, compact_threshold=?11,
+                model_params=?12, context_notes=?13, sidebar_width=?14,
+                pinned=?15, last_ctx_pct=?16,
+                total_input_tokens=?17, total_output_tokens=?18,
+                updated_at=?19
+             WHERE id=?1",
+            params![
+                tab.id,
+                tab.name,
+                tab.system_prompt,
+                tab.ai_name,
+                tab.user_name,
+                tab.explicit_level as i64,
+                tab.active_template_id,
+                tab.auto_compact as i64,
+                tab.auto_compact_summarize as i64,
+                tab.compact_mode,
+                tab.compact_threshold,
+                serde_json::to_string(&tab.model_params)?,
+                serde_json::to_string(&tab.context_notes)?,
+                tab.sidebar_width as i64,
+                tab.pinned as i64,
+                tab.last_ctx_pct,
+                tab.total_input_tokens,
+                tab.total_output_tokens,
+                tab.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_tab(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM tabs WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    pub fn reorder_tabs(&self, ordered_ids: &[String]) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        for (i, id) in ordered_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE tabs SET tab_order = ?1 WHERE id = ?2",
+                params![i as i64, id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    // ── Message CRUD ──────────────────────────────────────────────────────────
+
+    fn _load_messages_locked(&self, conn: &Connection, tab_id: &str) -> Result<Vec<MessageRow>> {
+        let mut stmt = conn.prepare(
+            "SELECT id, tab_id, role, content, timestamp_ms,
+                    input_tokens, output_tokens,
+                    cumulative_input_tokens, cumulative_output_tokens,
+                    compaction_marker, variants, variant_index, seq
+             FROM messages WHERE tab_id = ?1 ORDER BY seq",
+        )?;
+        let rows = stmt.query_map(params![tab_id], |row| {
+            Ok(MessageRow {
+                id: row.get(0)?,
+                tab_id: row.get(1)?,
+                role: row.get(2)?,
+                content: row.get(3)?,
+                timestamp_ms: row.get(4)?,
+                input_tokens: row.get(5)?,
+                output_tokens: row.get(6)?,
+                cumulative_input_tokens: row.get(7)?,
+                cumulative_output_tokens: row.get(8)?,
+                compaction_marker: row.get::<_, i64>(9)? != 0,
+                variants: row
+                    .get::<_, Option<String>>(10)?
+                    .and_then(|s| serde_json::from_str(&s).ok()),
+                variant_index: row.get(11)?,
+                seq: row.get(12)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
+    pub fn append_message(&self, msg: &MessageRow) -> Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO messages (tab_id, role, content, timestamp_ms,
+                 input_tokens, output_tokens,
+                 cumulative_input_tokens, cumulative_output_tokens,
+                 compaction_marker, variants, variant_index, seq)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,
+                 COALESCE((SELECT MAX(seq)+1 FROM messages WHERE tab_id=?1), 0))",
+            params![
+                msg.tab_id,
+                msg.role,
+                msg.content,
+                msg.timestamp_ms,
+                msg.input_tokens,
+                msg.output_tokens,
+                msg.cumulative_input_tokens,
+                msg.cumulative_output_tokens,
+                msg.compaction_marker as i64,
+                msg.variants.as_ref().map(|v| v.to_string()),
+                msg.variant_index,
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn replace_messages(&self, tab_id: &str, messages: &[MessageRow]) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM messages WHERE tab_id = ?1", params![tab_id])?;
+        for (seq, msg) in messages.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO messages (tab_id, role, content, timestamp_ms,
+                     input_tokens, output_tokens, compaction_marker, seq)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                params![
+                    tab_id,
+                    msg.role,
+                    msg.content,
+                    msg.timestamp_ms,
+                    msg.input_tokens,
+                    msg.output_tokens,
+                    msg.compaction_marker as i64,
+                    seq as i64,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    // ── Full-text search ──────────────────────────────────────────────────────
+
+    fn escape_html_except_mark(s: &str) -> String {
+        // Escape all HTML, then restore <mark> and </mark> tags.
+        let escaped = s
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;");
+        escaped
+            .replace("&lt;mark&gt;", "<mark>")
+            .replace("&lt;/mark&gt;", "</mark>")
+    }
+
+    pub fn search(&self, query: &str, limit: usize, offset: usize) -> Result<SearchResultsPage> {
+        let normalized_query = normalize_fts_query(query);
+        if normalized_query.is_empty() {
+            return Ok(SearchResultsPage {
+                results: Vec::new(),
+                total: 0,
+                limit,
+                offset,
+                has_more: false,
+            });
+        }
+
+        let conn = self.conn.lock().unwrap();
+        let total: i64 = conn.query_row(
+            "SELECT COUNT(*)
+             FROM messages_fts
+             JOIN messages m ON m.id = messages_fts.rowid
+             WHERE messages_fts MATCH ?1
+               AND m.compaction_marker = 0",
+            params![normalized_query.as_str()],
+            |row| row.get(0),
+        )?;
+        let mut stmt = conn.prepare(
+            "SELECT t.id, t.name, m.id, m.role,
+                    snippet(messages_fts, 0, '<mark>', '</mark>', '…', 24),
+                    m.timestamp_ms
+             FROM messages_fts
+             JOIN messages m ON m.id = messages_fts.rowid
+             JOIN tabs t ON t.id = m.tab_id
+             WHERE messages_fts MATCH ?1
+               AND m.compaction_marker = 0
+             ORDER BY rank
+             LIMIT ?2 OFFSET ?3",
+        )?;
+        let rows = stmt.query_map(
+            params![normalized_query, limit as i64, offset as i64],
+            |row| {
+                let raw_snippet: String = row.get(4)?;
+                let snippet = Self::escape_html_except_mark(&raw_snippet);
+                Ok(SearchResult {
+                    tab_id: row.get(0)?,
+                    tab_name: row.get(1)?,
+                    message_id: row.get(2)?,
+                    role: row.get(3)?,
+                    snippet,
+                    timestamp_ms: row.get(5)?,
+                })
+            },
+        )?;
+        let results = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let total = total.max(0) as usize;
+        let has_more = offset.saturating_add(results.len()) < total;
+        Ok(SearchResultsPage {
+            results,
+            total,
+            limit,
+            offset,
+            has_more,
+        })
+    }
+
+    // ── Database Health Management ──────────────────────────────────────────────
+
+    /// Run integrity check on the database
+    pub fn integrity_check(&self) -> Result<String> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("PRAGMA integrity_check")?;
+        let result: String = stmt.query_row([], |row| row.get(0))?;
+        Ok(result)
+    }
+
+    /// Check database size and table counts
+    pub fn database_stats(&self) -> Result<serde_json::Value> {
+        let conn = self.conn.lock().unwrap();
+
+        // Get table counts
+        let tab_count: i64 = conn.query_row("SELECT COUNT(*) FROM tabs", [], |row| row.get(0))?;
+        let msg_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))?;
+        let fts_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM messages_fts", [], |row| row.get(0))?;
+
+        Ok(serde_json::json!({
+            "tab_count": tab_count,
+            "message_count": msg_count,
+            "fts_index_count": fts_count,
+        }))
+    }
+
+    /// Rebuild FTS index
+    pub fn rebuild_fts_index(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+
+        // Clear and rebuild FTS
+        tx.execute("DELETE FROM messages_fts", [])?;
+        tx.execute(
+            "INSERT INTO messages_fts(messages_fts) VALUES('rebuild')",
+            [],
+        )?;
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Run vacuum to optimize database
+    pub fn vacuum(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("VACUUM")?;
+        Ok(())
+    }
+
+    /// Checkpoint WAL
+    pub fn checkpoint(&self) -> Result<(i64, i64, i64)> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("PRAGMA wal_checkpoint(TRUNCATE)")?;
+        let row = stmt.query_row([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        Ok(row)
+    }
+
+    /// Create backup to specified path using SQLite online backup API
+    pub fn backup(&self, backup_path: &std::path::Path) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+
+        // Checkpoint before backup to ensure consistency
+        conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE)")?;
+
+        let mut dst = Connection::open(backup_path)
+            .with_context(|| format!("opening backup at {}", backup_path.display()))?;
+
+        let backup = Backup::new(&conn, &mut dst).context("creating backup handle")?;
+        backup
+            .run_to_completion(5, std::time::Duration::from_millis(250), None)
+            .context("backup operation")?;
+
+        Ok(())
+    }
+
+    /// Analyze database for query optimization
+    pub fn analyze(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch("ANALYZE")?;
+        Ok(())
+    }
+
+    /// Get list of indexes
+    pub fn list_indexes(&self) -> Result<Vec<serde_json::Value>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT name, tbl_name, sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let name: String = row.get(0)?;
+            let tbl_name: String = row.get(1)?;
+            let sql: String = row.get(2)?;
+            Ok(serde_json::json!({
+                "name": name,
+                "table": tbl_name,
+                "sql": sql,
+                "rebuildable": name.contains("fts") || name.contains("search"),
+            }))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
+
+    /// Execute arbitrary SQL query (admin only, restricted to safe operations)
+    pub fn execute_query(&self, sql: &str, is_admin: bool) -> Result<serde_json::Value> {
+        let conn = self.conn.lock().unwrap();
+
+        // Normalize for checks
+        let trimmed = sql.trim();
+        let upper = trimmed.to_uppercase();
+
+        // Blocklist: disallow dangerous operations
+        let dangerous_keywords = [
+            "ATTACH DATABASE",
+            "DETACH DATABASE",
+            "LOAD_EXTENSION",
+            "CREATE TABLE",
+            "DROP TABLE",
+            "ALTER TABLE",
+            "CREATE INDEX",
+            "DROP INDEX",
+            "CREATE TRIGGER",
+            "DROP TRIGGER",
+            "CREATE VIEW",
+            "DROP VIEW",
+            "INSERT INTO",
+            "UPDATE ",
+            "DELETE FROM",
+            "REPLACE INTO",
+            "BEGIN ",
+            "COMMIT",
+            "ROLLBACK",
+            "PRAGMA journal_mode",
+            "PRAGMA synchronous",
+            "PRAGMA foreign_keys",
+            "PRAGMA encoding",
+            "PRAGMA page_size",
+            "PRAGMA cache_size",
+            "PRAGMA temp_store",
+            "PRAGMA mmap_size",
+            "PRAGMA locking_mode",
+            "PRAGMA wal_checkpoint(PASSIVE)",
+            "PRAGMA wal_checkpoint(FULL)",
+            "PRAGMA wal_checkpoint(TRUNCATE)",
+            "PRAGMA wal_checkpoint(PASSIVE)",
+            "PRAGMA wal_checkpoint(FULL)",
+            "PRAGMA wal_checkpoint(TRUNCATE)",
+        ];
+
+        if dangerous_keywords.iter().any(|k| upper.contains(k)) {
+            return Err(anyhow::anyhow!("Query contains a disallowed operation"));
+        }
+
+        // Allowlist: only allow SELECT, PRAGMA, VACUUM, ANALYZE
+        if !upper.starts_with("SELECT")
+            && !upper.starts_with("PRAGMA")
+            && !upper.starts_with("VACUUM")
+            && !upper.starts_with("ANALYZE")
+        {
+            return Err(anyhow::anyhow!(
+                "Only SELECT, PRAGMA, VACUUM, and ANALYZE queries are allowed"
+            ));
+        }
+
+        // Restricted mode: limit exposure of sensitive columns when not using admin token
+        if !is_admin {
+            // Non-SELECT operations are allowed as-is (PRAGMA/VACUUM/ANALYZE).
+            if upper.starts_with("SELECT") {
+                // Check for queries that would expose sensitive content.
+                // We block:
+                // - SELECT * FROM messages
+                // - SELECT ... FROM messages where content is selected
+                // - SELECT system_prompt / context_notes / model_params from tabs
+                if is_select_exposing_sensitive(&upper) {
+                    return Err(anyhow::anyhow!(
+                        "Query accesses restricted columns; use admin token for full access"
+                    ));
+                }
+            }
+        }
+
+        // Try to execute as a query that returns multiple rows
+        let mut stmt = conn.prepare(trimmed)?;
+        let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+
+        let cols: Vec<String> = column_names.clone();
+        let rows = stmt.query_map([], |row| {
+            let mut row_data = serde_json::Map::new();
+            for (i, name) in cols.iter().enumerate() {
+                // Try to get the value as a string, falling back to null
+                let val: Option<String> = row.get_ref(i).ok().and_then(|v| match v {
+                    rusqlite::types::ValueRef::Text(b) => {
+                        Some(String::from_utf8_lossy(b).to_string())
+                    }
+                    rusqlite::types::ValueRef::Integer(i) => Some(i.to_string()),
+                    rusqlite::types::ValueRef::Real(f) => Some(f.to_string()),
+                    rusqlite::types::ValueRef::Blob(b) => Some(format!("[{} bytes]", b.len())),
+                    rusqlite::types::ValueRef::Null => None,
+                });
+                row_data.insert(name.clone(), val.into());
+            }
+            Ok(serde_json::Value::Object(row_data))
+        })?;
+
+        let collected: Vec<serde_json::Value> = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+
+        Ok(serde_json::json!({
+            "columns": column_names,
+            "rows": collected,
+            "row_count": collected.len(),
+        }))
+    }
+
+    /// Get the database file path via PRAGMA
+    pub fn get_db_path(&self) -> PathBuf {
+        let conn = self.conn.lock().unwrap();
+        let path: String = conn
+            .query_row("PRAGMA database_list", [], |row| row.get::<_, String>(1))
+            .unwrap_or_else(|_| "chat.db".to_string());
+        PathBuf::from(path)
+    }
+
+    /// Repair corrupted indexes by dropping and recreating them
+    pub fn repair_indexes(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+
+        // Drop FTS virtual table if it exists
+        conn.execute_batch("DROP TABLE IF EXISTS search_content")?;
+
+        // Recreate FTS index
+        conn.execute_batch(
+            r#"
+            CREATE VIRTUAL TABLE IF NOT EXISTS search_content USING fts5(
+                content,
+                content='messages',
+                content_rowid='rowid'
+            );
+            "#,
+        )?;
+
+        // Repopulate FTS index
+        conn.execute_batch(
+            r#"
+            INSERT INTO search_content(rowid, content)
+            SELECT rowid, content FROM messages WHERE content IS NOT NULL AND content != '';
+            "#,
+        )?;
+
+        Ok(())
+    }
+
+    /// Emergency recovery using SQLite's recovery extension
+    pub fn emergency_recovery(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+
+        // Attempt recovery mode (available in SQLite 3.36.0+)
+        // This tries to salvage as much data as possible from a corrupted database
+        conn.execute_batch("PRAGMA recovery_mode = 1")?;
+
+        // Run integrity check to identify issues
+        let integrity = conn.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0));
+
+        match integrity {
+            Ok(result) => {
+                if result != "ok" {
+                    return Err(anyhow::anyhow!(
+                        "Integrity check after recovery: {}",
+                        result
+                    ));
+                }
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!("Recovery integrity check failed: {}", e));
+            }
+        }
+
+        // Reset recovery mode
+        conn.execute_batch("PRAGMA recovery_mode = 0")?;
+
+        Ok(())
+    }
+}
+
+/// Returns true if this SELECT is likely to expose sensitive chat content or config
+/// and should be blocked in restricted (non-admin-token) mode.
+fn is_select_exposing_sensitive(upper: &str) -> bool {
+    // Quick checks: if there's no reference to sensitive tables, allow.
+    if !upper.contains("MESSAGES") && !upper.contains("TABS") {
+        return false;
+    }
+
+    // Block SELECT * from messages (would expose content).
+    if upper.contains("MESSAGES") && (upper.contains("SELECT *") || upper.contains("SELECT  *")) {
+        return true;
+    }
+
+    // Block if selecting messages.content explicitly.
+    if upper.contains("MESSAGES") && upper.contains("MESSAGES.CONTENT") {
+        return true;
+    }
+    if upper.contains("M.CONTENT") {
+        return true;
+    }
+
+    // Block if selecting tabs.system_prompt, context_notes, or model_params.
+    if upper.contains("TABS")
+        && (upper.contains("SYSTEM_PROMPT")
+            || upper.contains("CONTEXT_NOTES")
+            || upper.contains("MODEL_PARAMS"))
+    {
+        return true;
+    }
+
+    false
+}
+
+fn normalize_fts_query(query: &str) -> String {
+    query
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(|token| format!("{token}*"))
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn make_tab(id: &str, name: &str) -> ChatTabRow {
+        ChatTabRow {
+            id: id.to_string(),
+            name: name.to_string(),
+            system_prompt: String::new(),
+            ai_name: None,
+            user_name: None,
+            explicit_level: 0,
+            active_template_id: None,
+            auto_compact: true,
+            auto_compact_summarize: false,
+            compact_mode: "percent".to_string(),
+            compact_threshold: 0.8,
+            model_params: serde_json::json!({}),
+            context_notes: serde_json::json!([]),
+            sidebar_width: 280,
+            tab_order: 0,
+            pinned: false,
+            last_ctx_pct: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            created_at: 1,
+            updated_at: 1,
+            messages: Vec::new(),
+        }
+    }
+
+    fn make_message(tab_id: &str, role: &str, content: &str) -> MessageRow {
+        MessageRow {
+            id: 0,
+            tab_id: tab_id.to_string(),
+            role: role.to_string(),
+            content: content.to_string(),
+            timestamp_ms: 1,
+            input_tokens: None,
+            output_tokens: None,
+            cumulative_input_tokens: None,
+            cumulative_output_tokens: None,
+            compaction_marker: false,
+            variants: None,
+            variant_index: None,
+            seq: 0,
+        }
+    }
+
+    #[test]
+    fn normalize_fts_query_builds_prefix_and_terms() {
+        assert_eq!(normalize_fts_query("rain"), "rain*");
+        assert_eq!(normalize_fts_query("gpu-43c"), "gpu* AND 43c*");
+        assert_eq!(
+            normalize_fts_query("slow HTTP endpoint."),
+            "slow* AND HTTP* AND endpoint*"
+        );
+        assert_eq!(normalize_fts_query("..."), "");
+    }
+
+    #[test]
+    fn search_supports_prefix_matches() {
+        let dir = tempdir().expect("temp dir");
+        let db_path = dir.path().join("chat.db");
+        let store = ChatStorage::open(&db_path).expect("open storage");
+
+        let tab = make_tab("tab-1", "Noir Scene");
+        store.create_tab(&tab).expect("create tab");
+        store
+            .append_message(&make_message(
+                "tab-1",
+                "assistant",
+                "The rain fell like needles on the pavement.",
+            ))
+            .expect("append message");
+
+        let results = store.search("rai", 10, 0).expect("prefix search");
+        assert_eq!(results.total, 1);
+        assert_eq!(results.results.len(), 1);
+        assert_eq!(results.results[0].tab_name, "Noir Scene");
+        assert!(results.results[0].snippet.contains("<mark>rain</mark>"));
+    }
+
+    #[test]
+    fn search_tolerates_free_form_punctuation() {
+        let dir = tempdir().expect("temp dir");
+        let db_path = dir.path().join("chat.db");
+        let store = ChatStorage::open(&db_path).expect("open storage");
+
+        let tab = make_tab("tab-1", "Debug Session");
+        store.create_tab(&tab).expect("create tab");
+        store
+            .append_message(&make_message(
+                "tab-1",
+                "assistant",
+                "Check gpu-43c status before you debug the slow HTTP endpoint.",
+            ))
+            .expect("append message");
+
+        let hyphenated = store.search("gpu-43c", 10, 0).expect("hyphenated search");
+        assert_eq!(hyphenated.total, 1);
+        assert_eq!(hyphenated.results.len(), 1);
+
+        let punctuated = store
+            .search("slow HTTP endpoint.", 10, 0)
+            .expect("punctuated search");
+        assert_eq!(punctuated.total, 1);
+        assert_eq!(punctuated.results.len(), 1);
+        assert_eq!(punctuated.results[0].tab_name, "Debug Session");
+    }
+}

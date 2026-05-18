@@ -260,9 +260,13 @@ export function saveSession(event) {
         return;
     }
 
+    const headers = (typeof window.authHeaders === 'function')
+        ? window.authHeaders({ 'Content-Type': 'application/json' })
+        : { 'Content-Type': 'application/json' };
+
     fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
     })
     .then(r => r.json())

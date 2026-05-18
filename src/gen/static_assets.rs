@@ -5,6 +5,7 @@
 
 pub const COMPACT_HTML: &str = include_str!("../../static/compact.html");
 pub const CSS_AGENT_MODAL: &str = include_str!("../../static/css/agent-modal.css");
+pub const CSS_AUTH: &str = include_str!("../../static/css/auth.css");
 pub const CSS_BASE: &str = include_str!("../../static/css/base.css");
 pub const CSS_CARDS_HARDWARE: &str = include_str!("../../static/css/cards-hardware.css");
 pub const CSS_CARDS_INFERENCE: &str = include_str!("../../static/css/cards-inference.css");
@@ -20,17 +21,23 @@ pub const CSS_TOKENS: &str = include_str!("../../static/css/tokens.css");
 pub const ICON_SVG: &str = include_str!("../../static/icon.svg");
 pub const INDEX_HTML: &str = include_str!("../../static/index.html");
 pub const BOOTSTRAP_JS: &str = include_str!("../../static/js/bootstrap.js");
+pub const COMPACT_JS: &str = include_str!("../../static/js/compact.js");
 pub const COMPAT_GLOBALS_JS: &str = include_str!("../../static/js/compat/globals.js");
+pub const CONFIG_DOMPURIFY_INIT_JS: &str = include_str!("../../static/js/config/dompurify-init.js");
 pub const CORE_APP_STATE_JS: &str = include_str!("../../static/js/core/app-state.js");
 pub const CORE_FORMAT_JS: &str = include_str!("../../static/js/core/format.js");
 pub const FEATURES_ANIMATE_JS: &str = include_str!("../../static/js/features/animate.js");
 pub const FEATURES_ATTACH_DETACH_JS: &str =
     include_str!("../../static/js/features/attach-detach.js");
+pub const FEATURES_AUTH_JS: &str = include_str!("../../static/js/features/auth.js");
 pub const FEATURES_CHAT_NOTES_JS: &str = include_str!("../../static/js/features/chat-notes.js");
 pub const FEATURES_CHAT_PARAMS_JS: &str = include_str!("../../static/js/features/chat-params.js");
 pub const FEATURES_CHAT_QUICK_GUIDE_JS: &str =
     include_str!("../../static/js/features/chat-quick-guide.js");
 pub const FEATURES_CHAT_RENDER_JS: &str = include_str!("../../static/js/features/chat-render.js");
+pub const FEATURES_CHAT_SEARCH_JS: &str = include_str!("../../static/js/features/chat-search.js");
+pub const FEATURES_CHAT_SESSIONS_SIDEBAR_JS: &str =
+    include_str!("../../static/js/features/chat-sessions-sidebar.js");
 pub const FEATURES_CHAT_STATE_JS: &str = include_str!("../../static/js/features/chat-state.js");
 pub const FEATURES_CHAT_SUGGESTIONS_JS: &str =
     include_str!("../../static/js/features/chat-suggestions.js");
@@ -43,6 +50,7 @@ pub const FEATURES_CONTEXT_CARD_JS: &str = include_str!("../../static/js/feature
 pub const FEATURES_DASHBOARD_RENDER_JS: &str =
     include_str!("../../static/js/features/dashboard-render.js");
 pub const FEATURES_DASHBOARD_WS_JS: &str = include_str!("../../static/js/features/dashboard-ws.js");
+pub const FEATURES_DB_ADMIN_JS: &str = include_str!("../../static/js/features/db-admin.js");
 pub const FEATURES_FILE_BROWSER_LAUNCHER_JS: &str =
     include_str!("../../static/js/features/file-browser-launcher.js");
 pub const FEATURES_FILE_BROWSER_JS: &str = include_str!("../../static/js/features/file-browser.js");

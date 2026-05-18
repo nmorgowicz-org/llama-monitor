@@ -2,9 +2,8 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::Arc;
-use std::sync::OnceLock;
+
 use warp::Filter;
 use warp::reject::Reject;
 
@@ -21,7 +20,7 @@ impl std::error::Error for ApiError {}
 
 impl Reject for ApiError {}
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, DashboardAuthConfig, TlsMode, clear_auth_config, save_auth_config};
 use crate::gpu::env::{self as gpu_env, GPU_ARCHITECTURES, GpuEnv};
 
 #[cfg(target_os = "windows")]
@@ -33,53 +32,189 @@ use crate::models;
 use crate::presets::{self, ModelPreset};
 use crate::remote_ssh::{self, SshConnection};
 use crate::state::{self as app_state, AppState, SessionStatus, UiSettings};
+use crate::web::auth::{AuthManager, AuthMethod, AuthSource};
 
-/// Chat message structure for persistence
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct CompactionPreview {
-    pub role: String,
-    pub snippet: String,
-}
+#[allow(dead_code)]
+mod legacy_chat_types {
+    use super::ContextNote;
+    /// Chat message structure for persistence (legacy flat-file types, used by tests)
+    #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+    pub struct CompactionPreview {
+        pub role: String,
+        pub snippet: String,
+    }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct ChatMessage {
-    pub role: String,
-    pub content: String,
-    pub timestamp_ms: u64,
-    #[serde(default)]
-    pub input_tokens: Option<u64>,
-    #[serde(default)]
-    pub output_tokens: Option<u64>,
-    #[serde(default, alias = "cumulativeInputTokens")]
-    pub cumulative_input_tokens: Option<u64>,
-    #[serde(default, alias = "cumulativeOutputTokens")]
-    pub cumulative_output_tokens: Option<u64>,
-    #[serde(default)]
-    pub compaction_marker: Option<bool>,
-    #[serde(default)]
-    pub summarized: Option<bool>,
-    #[serde(default)]
-    pub dropped_count: Option<u64>,
-    #[serde(default)]
-    pub dropped_preview: Option<Vec<CompactionPreview>>,
-    #[serde(default)]
-    pub tokens_freed_estimate: Option<u64>,
-    #[serde(default)]
-    pub ctx_pct_before: Option<f32>,
-    #[serde(default)]
-    pub memory_version: Option<u32>,
-    #[serde(default)]
-    pub memory_domain: Option<String>,
-    #[serde(default)]
-    pub summary_kind: Option<String>,
-    #[serde(default)]
-    pub compacted_at: Option<u64>,
-    #[serde(default)]
-    pub compacted_message_count_total: Option<u64>,
-    #[serde(default)]
-    pub recent_tail_kept: Option<u64>,
-    #[serde(default)]
-    pub thinking_content: Option<String>,
+    #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+    pub struct ChatMessage {
+        pub role: String,
+        pub content: String,
+        pub timestamp_ms: u64,
+        #[serde(default)]
+        pub input_tokens: Option<u64>,
+        #[serde(default)]
+        pub output_tokens: Option<u64>,
+        #[serde(default, alias = "cumulativeInputTokens")]
+        pub cumulative_input_tokens: Option<u64>,
+        #[serde(default, alias = "cumulativeOutputTokens")]
+        pub cumulative_output_tokens: Option<u64>,
+        #[serde(default)]
+        pub compaction_marker: Option<bool>,
+        #[serde(default)]
+        pub summarized: Option<bool>,
+        #[serde(default)]
+        pub dropped_count: Option<u64>,
+        #[serde(default)]
+        pub dropped_preview: Option<Vec<CompactionPreview>>,
+        #[serde(default)]
+        pub tokens_freed_estimate: Option<u64>,
+        #[serde(default)]
+        pub ctx_pct_before: Option<f32>,
+        #[serde(default)]
+        pub memory_version: Option<u32>,
+        #[serde(default)]
+        pub memory_domain: Option<String>,
+        #[serde(default)]
+        pub summary_kind: Option<String>,
+        #[serde(default)]
+        pub compacted_at: Option<u64>,
+        #[serde(default)]
+        pub compacted_message_count_total: Option<u64>,
+        #[serde(default)]
+        pub recent_tail_kept: Option<u64>,
+        #[serde(default)]
+        pub thinking_content: Option<String>,
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+    pub struct ArmedStoryBeat {
+        pub id: String,
+        pub kind: String,
+        pub instruction: String,
+        #[serde(default)]
+        pub remaining_turns: u32,
+        #[serde(default)]
+        pub created_at: u64,
+        #[serde(default = "default_true")]
+        pub enabled: bool,
+    }
+
+    fn default_true() -> bool {
+        true
+    }
+
+    /// Model parameters for a chat tab
+    #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+    pub struct ChatModelParams {
+        pub temperature: f32,
+        pub top_p: f32,
+        pub top_k: u32,
+        pub min_p: f32,
+        pub repeat_penalty: f32,
+        pub max_tokens: Option<u32>,
+    }
+
+    impl Default for ChatModelParams {
+        fn default() -> Self {
+            Self {
+                temperature: 0.7,
+                top_p: 0.9,
+                top_k: 40,
+                min_p: 0.01,
+                repeat_penalty: 1.0,
+                max_tokens: None,
+            }
+        }
+    }
+
+    /// Deserialize explicit_level from bool (legacy), u8, or null.
+    /// Tolerates corrupted disk data by defaulting to 0.
+    fn deserialize_explicit_level<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <Option<serde_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        match value {
+            Some(v) if v.is_null() => Ok(None),
+            Some(v) => {
+                if let Some(n) = v.as_u64() {
+                    return Ok(Some(n as u8));
+                }
+                if let Some(b) = v.as_bool() {
+                    return Ok(Some(if b { 1 } else { 0 }));
+                }
+                if let Some(n) = v.as_i64() {
+                    return Ok(Some(n as u8));
+                }
+                // Tolerate corrupted data: default to unlocked (1)
+                Ok(Some(0))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Chat tab structure for persistence (legacy flat-file)
+    #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+    pub struct ChatTab {
+        pub id: String,
+        pub name: String,
+        pub system_prompt: String,
+        #[serde(default)]
+        pub ai_name: Option<String>,
+        #[serde(default)]
+        pub user_name: Option<String>,
+        #[serde(
+            default,
+            rename = "explicitLevel",
+            alias = "explicit_mode",
+            alias = "explicit_level",
+            deserialize_with = "deserialize_explicit_level"
+        )]
+        pub explicit_level: Option<u8>,
+        pub messages: Vec<ChatMessage>,
+        // Standardized on snake_case to avoid duplicate field errors.
+        #[serde(default)]
+        pub total_input_tokens: Option<u64>,
+        #[serde(default)]
+        pub total_output_tokens: Option<u64>,
+        #[serde(default)]
+        pub model_params: ChatModelParams,
+        #[serde(default)]
+        pub created_at: u64,
+        #[serde(default)]
+        pub updated_at: u64,
+        #[serde(default)]
+        pub auto_compact: Option<bool>,
+        #[serde(default)]
+        pub auto_compact_summarize: Option<bool>,
+        #[serde(default)]
+        pub compact_threshold: Option<f32>,
+        #[serde(default)]
+        pub compact_mode: Option<String>,
+        /// Last known context window percentage (0–100). Derived client-side and
+        /// persisted so the dashboard can show it on page load without a live session.
+        #[serde(rename = "lastCtxPct", default)]
+        pub last_ctx_pct: Option<f32>,
+        #[serde(rename = "activeTemplateId", default)]
+        pub active_template_id: Option<String>,
+        /// Guided generation: persistent context notes (character, setting, plot details)
+        #[serde(default)]
+        pub context_notes: Vec<ContextNote>,
+        /// Guided generation: remembered sidebar width in pixels (default: 280)
+        #[serde(default, rename = "sidebarWidth")]
+        pub sidebar_width: u32,
+        /// Guided generation: persistent quick guide applied to subsequent replies
+        #[serde(default)]
+        pub quick_guide_active: String,
+        /// Guided generation: delayed hidden story beats for future assistant turns
+        #[serde(default)]
+        pub armed_story_beats: Vec<ArmedStoryBeat>,
+        /// Custom role boundary instruction (overrides the default if set)
+        #[serde(default)]
+        pub role_boundary_custom: Option<String>,
+        /// Gender for {{gender}} token substitution: "male", "female", or "neutral"
+        #[serde(default)]
+        pub ai_gender: Option<String>,
+    }
 }
 
 /// Context note for guided generation (character details, setting info, etc.)
@@ -89,137 +224,6 @@ pub struct ContextNote {
     pub content: String,
     #[serde(default)]
     pub created_at: u64,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct ArmedStoryBeat {
-    pub id: String,
-    pub kind: String,
-    pub instruction: String,
-    #[serde(default)]
-    pub remaining_turns: u32,
-    #[serde(default)]
-    pub created_at: u64,
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-/// Model parameters for a chat tab
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct ChatModelParams {
-    pub temperature: f32,
-    pub top_p: f32,
-    pub top_k: u32,
-    pub min_p: f32,
-    pub repeat_penalty: f32,
-    pub max_tokens: Option<u32>,
-}
-
-impl Default for ChatModelParams {
-    fn default() -> Self {
-        Self {
-            temperature: 0.7,
-            top_p: 0.9,
-            top_k: 40,
-            min_p: 0.01,
-            repeat_penalty: 1.0,
-            max_tokens: None,
-        }
-    }
-}
-
-/// Deserialize explicit_level from bool (legacy), u8, or null.
-/// Tolerates corrupted disk data by defaulting to 0.
-fn deserialize_explicit_level<'de, D>(deserializer: D) -> Result<Option<u8>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = <Option<serde_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
-    match value {
-        Some(v) if v.is_null() => Ok(None),
-        Some(v) => {
-            if let Some(n) = v.as_u64() {
-                return Ok(Some(n as u8));
-            }
-            if let Some(b) = v.as_bool() {
-                return Ok(Some(if b { 1 } else { 0 }));
-            }
-            if let Some(n) = v.as_i64() {
-                return Ok(Some(n as u8));
-            }
-            // Tolerate corrupted data: default to unlocked (1)
-            Ok(Some(0))
-        }
-        None => Ok(None),
-    }
-}
-
-/// Chat tab structure for persistence
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct ChatTab {
-    pub id: String,
-    pub name: String,
-    pub system_prompt: String,
-    #[serde(default)]
-    pub ai_name: Option<String>,
-    #[serde(default)]
-    pub user_name: Option<String>,
-    #[serde(
-        default,
-        rename = "explicitLevel",
-        alias = "explicit_mode",
-        alias = "explicit_level",
-        deserialize_with = "deserialize_explicit_level"
-    )]
-    pub explicit_level: Option<u8>,
-    pub messages: Vec<ChatMessage>,
-    // Standardized on snake_case to avoid duplicate field errors.
-    #[serde(default)]
-    pub total_input_tokens: Option<u64>,
-    #[serde(default)]
-    pub total_output_tokens: Option<u64>,
-    #[serde(default)]
-    pub model_params: ChatModelParams,
-    #[serde(default)]
-    pub created_at: u64,
-    #[serde(default)]
-    pub updated_at: u64,
-    #[serde(default)]
-    pub auto_compact: Option<bool>,
-    #[serde(default)]
-    pub auto_compact_summarize: Option<bool>,
-    #[serde(default)]
-    pub compact_threshold: Option<f32>,
-    #[serde(default)]
-    pub compact_mode: Option<String>,
-    /// Last known context window percentage (0–100). Derived client-side and
-    /// persisted so the dashboard can show it on page load without a live session.
-    #[serde(rename = "lastCtxPct", default)]
-    pub last_ctx_pct: Option<f32>,
-    #[serde(rename = "activeTemplateId", default)]
-    pub active_template_id: Option<String>,
-    /// Guided generation: persistent context notes (character, setting, plot details)
-    #[serde(default)]
-    pub context_notes: Vec<ContextNote>,
-    /// Guided generation: remembered sidebar width in pixels (default: 280)
-    #[serde(default, rename = "sidebarWidth")]
-    pub sidebar_width: u32,
-    /// Guided generation: persistent quick guide applied to subsequent replies
-    #[serde(default)]
-    pub quick_guide_active: String,
-    /// Guided generation: delayed hidden story beats for future assistant turns
-    #[serde(default)]
-    pub armed_story_beats: Vec<ArmedStoryBeat>,
-    /// Custom role boundary instruction (overrides the default if set)
-    #[serde(default)]
-    pub role_boundary_custom: Option<String>,
-    /// Gender for {{gender}} token substitution: "male", "female", or "neutral"
-    #[serde(default)]
-    pub ai_gender: Option<String>,
 }
 
 /// Suggestion request for guided generation
@@ -360,13 +364,6 @@ fn suggestion_temperature(category: &str) -> f32 {
     }
 }
 
-static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
-
-/// Set the config directory (called once at startup from AppConfig).
-pub fn set_config_dir(path: PathBuf) {
-    CONFIG_DIR.set(path).ok();
-}
-
 /// Load prompts from static/prompts directory
 fn load_prompts_from_files() -> HashMap<String, String> {
     let mut prompts = HashMap::new();
@@ -389,16 +386,7 @@ fn load_prompts_from_files() -> HashMap<String, String> {
     prompts
 }
 
-fn chat_tabs_path() -> PathBuf {
-    if let Some(dir) = CONFIG_DIR.get() {
-        dir.join("chat-tabs.json")
-    } else {
-        dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("llama-monitor")
-            .join("chat-tabs.json")
-    }
-}
+use crate::chat_storage::ChatStorage;
 
 fn api_check_lhm() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "lhm" / "check")
@@ -1002,10 +990,12 @@ fn api_analyze_context_notes(
 pub fn api_routes(
     state: AppState,
     app_config: Arc<AppConfig>,
+    auth_manager: AuthManager,
+    bind_host: String,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     let start = api_start(state.clone(), app_config.clone());
     let stop = api_stop(state.clone());
-    let kill_llama = api_kill_llama(state.clone());
+    let kill_llama = api_kill_llama(state.clone(), app_config.clone());
     let get_presets = api_get_presets(state.clone());
     let create_preset = api_create_preset(state.clone());
     let update_preset = api_update_preset(state.clone());
@@ -1020,14 +1010,46 @@ pub fn api_routes(
     let get_gpu_env = api_get_gpu_env(state.clone());
     let put_gpu_env = api_put_gpu_env(state.clone());
     let get_settings = api_get_settings(state.clone());
+    let get_settings_full = api_get_settings_full(state.clone(), app_config.clone());
     let put_settings = api_put_settings(state.clone());
-    let browse = api_browse();
+    let browse = api_browse(state.clone());
     let chat = api_chat(state.clone());
     let chat_abort = api_chat_abort(state.clone());
     let chat_suggestions = api_chat_suggestions(state.clone());
     let generate_keywords = api_generate_keywords(state.clone());
-    let get_chat_tabs = api_get_chat_tabs();
-    let put_chat_tabs = api_put_chat_tabs();
+    let chat_storage = state.chat_storage.clone();
+    let chat_list_tabs = api_list_tabs(chat_storage.clone());
+    let chat_create_tab = api_create_tab(chat_storage.clone());
+    let chat_get_tab = api_get_tab(chat_storage.clone());
+    let chat_put_tab = api_put_tab(chat_storage.clone());
+    let chat_delete_tab = api_delete_tab(chat_storage.clone());
+    let chat_patch_tab_meta = api_patch_tab_meta(chat_storage.clone());
+    let chat_append_messages = api_append_messages(chat_storage.clone());
+    let chat_reorder_tabs = api_reorder_tabs(chat_storage.clone());
+    let chat_search = api_chat_search(chat_storage.clone());
+
+    // Agent token rotation routes
+    let rotate_agent_token = api_rotate_agent_token(state.clone(), app_config.clone());
+    let rotate_api_token = api_rotate_api_token(app_config.clone());
+    let rotate_db_admin_token = api_rotate_db_admin_token(app_config.clone());
+    let get_auth_config = api_get_auth_config(app_config.clone(), auth_manager.clone());
+    let put_auth_config = api_put_auth_config(app_config.clone(), auth_manager.clone());
+
+    // Database admin routes
+    let db_stats = api_db_stats(chat_storage.clone(), app_config.clone());
+    let db_integrity = api_db_integrity(chat_storage.clone(), app_config.clone());
+    let db_maintenance = api_db_maintenance(chat_storage.clone(), app_config.clone());
+    let db_backup = api_db_backup(chat_storage.clone(), app_config.clone());
+    let db_delete_backup = api_db_delete_backup(app_config.clone());
+    let db_backups = api_db_backups(app_config.clone());
+    let db_restore = api_db_restore(chat_storage.clone(), app_config.clone());
+    let db_repair = api_db_repair(chat_storage.clone(), app_config.clone());
+    let db_indexes = api_db_indexes(chat_storage.clone(), app_config.clone());
+    let db_admin_token =
+        api_db_admin_token(app_config.clone(), auth_manager.clone(), bind_host.clone());
+    let db_query = api_db_query(chat_storage.clone(), app_config.clone());
+    let internal_token = api_internal_token(app_config.clone(), auth_manager, bind_host);
+
     let get_sessions = api_get_sessions(state.clone());
     let create_session = api_create_session(state.clone());
     let delete_session = api_delete_session(state.clone());
@@ -1036,7 +1058,7 @@ pub fn api_routes(
     let get_capabilities = api_get_capabilities(state.clone());
     let spawn_session_with_preset =
         api_spawn_session_with_preset(state.clone(), app_config.clone());
-    let attach = api_attach(state.clone());
+    let attach = api_attach(state.clone(), app_config.clone());
     let detach = api_detach(state.clone());
     let check_lhm = api_check_lhm();
     let start_lhm = api_lhm_start();
@@ -1051,6 +1073,7 @@ pub fn api_routes(
     let remote_agent_trust_host = api_remote_agent_ssh_trust(app_config.clone());
     let remote_agent_status = api_remote_agent_status(app_config.clone());
     let remote_agent_remove = api_remote_agent_remove(app_config.clone());
+    let remote_agent_tls_status = api_remote_agent_tls_status(state.clone(), app_config.clone());
     let sensor_bridge_status = api_sensor_bridge_status();
     let sensor_bridge_install = api_sensor_bridge_install();
     let sensor_bridge_uninstall = api_sensor_bridge_uninstall();
@@ -1069,8 +1092,14 @@ pub fn api_routes(
     let model_routes = get_models.or(refresh_models);
     let config_routes = get_gpu_env
         .or(put_gpu_env)
+        .or(get_settings_full)
         .or(get_settings)
-        .or(put_settings);
+        .or(put_settings)
+        .or(rotate_agent_token)
+        .or(rotate_api_token)
+        .or(rotate_db_admin_token)
+        .or(get_auth_config)
+        .or(put_auth_config);
     let analyze_context_notes = api_analyze_context_notes(state.clone());
     let chat_routes = browse
         .or(chat)
@@ -1078,8 +1107,27 @@ pub fn api_routes(
         .or(chat_suggestions)
         .or(generate_keywords)
         .or(analyze_context_notes)
-        .or(get_chat_tabs)
-        .or(put_chat_tabs);
+        .or(chat_list_tabs)
+        .or(chat_create_tab)
+        .or(chat_get_tab)
+        .or(chat_put_tab)
+        .or(chat_delete_tab)
+        .or(chat_patch_tab_meta)
+        .or(chat_append_messages)
+        .or(chat_reorder_tabs)
+        .or(chat_search);
+    let db_routes = db_stats
+        .or(db_integrity)
+        .or(db_maintenance)
+        .or(db_backup)
+        .or(db_delete_backup)
+        .or(db_backups)
+        .or(db_restore)
+        .or(db_repair)
+        .or(db_indexes)
+        .or(db_admin_token)
+        .or(db_query)
+        .or(internal_token);
     let session_routes = get_sessions
         .or(create_session)
         .or(delete_session)
@@ -1094,6 +1142,22 @@ pub fn api_routes(
         .or(install_lhm)
         .or(uninstall_lhm)
         .or(disable_lhm);
+    let bridge_routes = remote_agent_remove
+        .or(remote_agent_tls_status)
+        .or(sensor_bridge_status)
+        .or(sensor_bridge_install)
+        .or(sensor_bridge_uninstall);
+
+    // TLS config routes
+    let tls_get_config = api_get_tls_config(state.clone(), app_config.clone());
+    let tls_put_config = api_put_tls_config(state.clone(), app_config.clone());
+    let tls_acme_request = api_tls_acme_request(state.clone(), app_config.clone());
+    let tls_acme_renew = api_tls_acme_renew(state.clone(), app_config.clone());
+    let tls_routes = tls_get_config
+        .or(tls_put_config)
+        .or(tls_acme_request)
+        .or(tls_acme_renew);
+
     let agent_routes = remote_agent_latest
         .or(remote_agent_detect)
         .or(remote_agent_host_key)
@@ -1102,11 +1166,7 @@ pub fn api_routes(
         .or(api_remote_agent_install(app_config.clone()))
         .or(api_remote_agent_start(app_config.clone()))
         .or(api_remote_agent_update(app_config.clone()))
-        .or(api_remote_agent_stop(app_config));
-    let bridge_routes = remote_agent_remove
-        .or(sensor_bridge_status)
-        .or(sensor_bridge_install)
-        .or(sensor_bridge_uninstall);
+        .or(api_remote_agent_stop(app_config.clone()));
 
     server_routes
         .or(preset_routes)
@@ -1114,11 +1174,295 @@ pub fn api_routes(
         .or(model_routes)
         .or(config_routes)
         .or(chat_routes)
+        .or(db_routes)
         .or(session_routes)
         .or(lhm_routes)
         .or(agent_routes)
         .or(bridge_routes)
-        .or(api_self_update())
+        .or(tls_routes)
+        .or(api_self_update(app_config.clone()))
+}
+
+pub fn auth_api_routes(
+    auth_manager: AuthManager,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    api_auth_status(auth_manager.clone())
+        .or(api_auth_login(auth_manager.clone()))
+        .or(api_auth_logout(auth_manager))
+}
+
+fn api_auth_status(
+    auth_manager: AuthManager,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "auth" / "status")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("Authorization"))
+        .and(warp::header::optional::<String>("cookie"))
+        .map(
+            move |auth_header: Option<String>, cookie_header: Option<String>| {
+                let status = auth_manager.status(auth_header.as_deref(), cookie_header.as_deref());
+                let method = match status.method {
+                    Some(AuthMethod::Basic) => Some("basic"),
+                    Some(AuthMethod::Form) => Some("form"),
+                    None => None,
+                };
+                warp::reply::json(&serde_json::json!({
+                    "enabled": auth_manager.has_any(),
+                    "methods": {
+                        "basic": auth_manager.has_basic(),
+                        "form": auth_manager.has_form(),
+                    },
+                    "managedByCli": matches!(auth_manager.source(), AuthSource::Cli),
+                    "recoveryCommand": "llama-monitor --clear-auth-config",
+                    "authenticated": status.authenticated,
+                    "method": method,
+                    "username": status.username,
+                }))
+            },
+        )
+}
+
+fn api_auth_login(
+    auth_manager: AuthManager,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct LoginRequest {
+        username: String,
+        password: String,
+    }
+
+    warp::path!("api" / "auth" / "login")
+        .and(warp::post())
+        .and(warp::body::content_length_limit(32 * 1024))
+        .and(warp::body::json())
+        .map(move |req: LoginRequest| {
+            if !auth_manager.has_form() {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({ "error": "form_auth_not_enabled" })),
+                    warp::http::StatusCode::BAD_REQUEST,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+            if !auth_manager.verify_form_credentials(&req.username, &req.password) {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({ "error": "invalid_credentials" })),
+                    warp::http::StatusCode::UNAUTHORIZED,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+            let Some(token) = auth_manager.create_form_session(&req.username) else {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({ "error": "form_auth_not_enabled" })),
+                    warp::http::StatusCode::BAD_REQUEST,
+                )) as Box<dyn warp::reply::Reply>;
+            };
+            Box::new(warp::reply::with_header(
+                warp::reply::json(&serde_json::json!({ "ok": true })),
+                "Set-Cookie",
+                auth_manager.session_cookie_header(&token),
+            )) as Box<dyn warp::reply::Reply>
+        })
+}
+
+fn api_auth_logout(
+    auth_manager: AuthManager,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "auth" / "logout")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("cookie"))
+        .map(move |cookie_header: Option<String>| {
+            auth_manager.revoke_form_session(cookie_header.as_deref());
+            warp::reply::with_header(
+                warp::reply::json(&serde_json::json!({ "ok": true })),
+                "Set-Cookie",
+                auth_manager.expired_session_cookie_header(),
+            )
+        })
+}
+
+fn api_get_auth_config(
+    app_config: Arc<AppConfig>,
+    auth_manager: AuthManager,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "auth" / "config")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .map(move |auth: Option<String>| {
+            let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+            match (&app_config.api_token, bearer.as_deref()) {
+                (Some(expected), Some(got)) if expected == got => {
+                    let view = auth_manager.config_view();
+                    Box::new(warp::reply::json(&serde_json::json!({
+                        "source": match view.source {
+                            AuthSource::None => "none",
+                            AuthSource::Config => "config",
+                            AuthSource::Cli => "cli",
+                        },
+                        "basicEnabled": view.basic_enabled,
+                        "formEnabled": view.form_enabled,
+                        "username": view.username,
+                        "managedByCli": matches!(view.source, AuthSource::Cli),
+                        "recoveryCommand": "llama-monitor --clear-auth-config",
+                        "recoveryFile": app_config.auth_config_file.display().to_string(),
+                    }))) as Box<dyn warp::reply::Reply>
+                }
+                _ => Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                    warp::http::StatusCode::UNAUTHORIZED,
+                )) as Box<dyn warp::reply::Reply>,
+            }
+        })
+}
+
+fn api_put_auth_config(
+    app_config: Arc<AppConfig>,
+    auth_manager: AuthManager,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct UpdateAuthConfigRequest {
+        basic_enabled: bool,
+        form_enabled: bool,
+        username: String,
+        #[serde(default)]
+        current_password: String,
+        #[serde(default)]
+        new_password: String,
+    }
+
+    warp::path!("api" / "auth" / "config")
+        .and(warp::put())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::content_length_limit(64 * 1024))
+        .and(warp::body::json())
+        .map(move |auth: Option<String>, req: UpdateAuthConfigRequest| {
+            let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+            match (&app_config.api_token, bearer.as_deref()) {
+                (Some(expected), Some(got)) if expected == got => {}
+                _ => {
+                    return Box::new(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                        warp::http::StatusCode::UNAUTHORIZED,
+                    )) as Box<dyn warp::reply::Reply>;
+                }
+            }
+
+            if matches!(auth_manager.source(), AuthSource::Cli) {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "error": "managed_by_cli",
+                        "message": "This instance is using startup auth flags. Remove --basic-auth/--form-auth to manage dashboard access in the app."
+                    })),
+                    warp::http::StatusCode::CONFLICT,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+
+            if !req.basic_enabled && !req.form_enabled {
+                if let Err(err) = clear_auth_config(&app_config.config_dir) {
+                    return Box::new(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "error": "save_failed",
+                            "message": err.to_string(),
+                        })),
+                        warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    )) as Box<dyn warp::reply::Reply>;
+                }
+                auth_manager.disable();
+                return Box::new(warp::reply::json(&serde_json::json!({
+                    "ok": true,
+                    "message": "Dashboard auth disabled.",
+                }))) as Box<dyn warp::reply::Reply>;
+            }
+
+            let username = req.username.trim();
+            if username.is_empty() {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "error": "invalid_username",
+                        "message": "Username is required when dashboard auth is enabled."
+                    })),
+                    warp::http::StatusCode::BAD_REQUEST,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+
+            let existing_view = auth_manager.config_view();
+            let changing_password = !req.new_password.trim().is_empty();
+            if changing_password && req.new_password.len() < 8 {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "error": "weak_password",
+                        "message": "Use at least 8 characters for the dashboard password."
+                    })),
+                    warp::http::StatusCode::BAD_REQUEST,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+
+            if matches!(existing_view.source, AuthSource::Config)
+                && existing_view.username.is_some()
+                && changing_password
+                && !auth_manager.verify_any_password(&req.current_password)
+            {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "error": "invalid_current_password",
+                        "message": "Current password did not match the stored dashboard password."
+                    })),
+                    warp::http::StatusCode::UNAUTHORIZED,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+
+            let password_hash = if changing_password {
+                match AuthManager::hash_password(&req.new_password) {
+                    Some(hash) => hash,
+                    None => {
+                        return Box::new(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "error": "hash_failed",
+                                "message": "Failed to hash the new password."
+                            })),
+                            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                        )) as Box<dyn warp::reply::Reply>;
+                    }
+                }
+            } else {
+                let current = crate::config::load_auth_config(&app_config.config_dir);
+                if current.password_hash.is_empty() {
+                    return Box::new(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "error": "missing_password",
+                            "message": "Enter a new password to enable dashboard auth."
+                        })),
+                        warp::http::StatusCode::BAD_REQUEST,
+                    )) as Box<dyn warp::reply::Reply>;
+                }
+                current.password_hash
+            };
+
+            let cfg = DashboardAuthConfig {
+                basic_enabled: req.basic_enabled,
+                form_enabled: req.form_enabled,
+                username: username.to_string(),
+                password_hash,
+            };
+
+            if let Err(err) = save_auth_config(&app_config.config_dir, &cfg) {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "error": "save_failed",
+                        "message": err.to_string(),
+                    })),
+                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+
+            auth_manager.replace_with_config(cfg);
+
+            Box::new(warp::reply::json(&serde_json::json!({
+                "ok": true,
+                "message": if changing_password {
+                    "Dashboard access updated and sessions refreshed."
+                } else {
+                    "Dashboard access updated."
+                }
+            }))) as Box<dyn warp::reply::Reply>
+        })
 }
 
 fn api_remote_agent_latest_release()
@@ -1402,7 +1746,19 @@ fn api_remote_agent_start(
                 } else {
                     // Fallback: use frontend's command or build default
                     match request.get("start_command") {
-                        Some(v) => v.as_str().unwrap_or("").to_string(),
+                        Some(v) => {
+                            let cmd = v.as_str().unwrap_or("").to_string();
+                            if crate::agent::validate_remote_command(&cmd) {
+                                cmd
+                            } else {
+                                // Invalid or unsafe command → fall back to safe default
+                                crate::agent::default_start_command_for_target(
+                                    &ssh_target,
+                                    &install_path,
+                                )
+                                .await
+                            }
+                        }
                         None => {
                             crate::agent::default_start_command_for_target(
                                 &ssh_target,
@@ -1552,6 +1908,26 @@ fn api_remote_agent_remove(
                     )),
                 }
             }
+        })
+}
+
+fn api_remote_agent_tls_status(
+    _state: AppState,
+    _app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "remote-agent" / "tls-status")
+        .and(warp::get())
+        .map(move || {
+            let certs_dir = crate::certs::certs_dir();
+            let ca_present = certs_dir.join("ca.pem").exists();
+            let server_present = certs_dir.join("agent-server.pem").exists();
+            let client_present = certs_dir.join("agent-client.pem").exists();
+            warp::reply::json(&serde_json::json!({
+                "mtls_enforced": true,
+                "ca_present": ca_present,
+                "server_cert_present": server_present,
+                "client_cert_present": client_present,
+            }))
         })
 }
 
@@ -1817,8 +2193,56 @@ fn api_get_settings(
         .and(warp::get())
         .map(move || {
             let settings = state.ui_settings.lock().unwrap().clone();
-            warp::reply::json(&settings)
+            let masked = mask_remote_agent_token(settings);
+            warp::reply::json(&masked)
         })
+}
+
+fn api_get_settings_full(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
+
+    warp::path!("api" / "settings" / "full")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .map(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+            let has_api_token =
+                bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+            if !has_api_token {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                    warp::http::StatusCode::UNAUTHORIZED,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+
+            let settings = state.ui_settings.lock().unwrap().clone();
+            Box::new(warp::reply::json(&settings))
+        })
+}
+
+/// Check if a token looks like a masked token (contains bullet characters).
+fn is_masked_token(t: &str) -> bool {
+    t.contains('•')
+}
+
+/// Mask remote_agent_token for normal GET /api/settings.
+/// Keeps first 4 and last 4 characters visible; replaces middle with bullets.
+fn mask_remote_agent_token(mut s: UiSettings) -> UiSettings {
+    if s.remote_agent_token.len() <= 8 {
+        if !s.remote_agent_token.is_empty() {
+            s.remote_agent_token = "••••".to_string();
+        }
+    } else {
+        let t = &s.remote_agent_token;
+        let masked = format!("{}••••••••••••••••{}", &t[..4], &t[t.len() - 4..]);
+        s.remote_agent_token = masked;
+    }
+    s
 }
 
 fn api_put_settings(
@@ -1827,7 +2251,7 @@ fn api_put_settings(
     warp::path!("api" / "settings")
         .and(warp::put())
         .and(warp::body::json())
-        .map(move |updated: UiSettings| {
+        .map(move |mut updated: UiSettings| {
             // Detect if this is a partial update (only ws_push_interval_ms set, rest are defaults)
             let is_partial = updated.preset_id.is_empty()
                 && updated.port == 8001
@@ -1854,6 +2278,12 @@ fn api_put_settings(
                 settings.ws_push_interval_ms = updated.ws_push_interval_ms;
             } else {
                 // Full update: replace all settings
+                // But protect against overwriting with a masked token.
+                let incoming_token = updated.remote_agent_token.clone();
+                if is_masked_token(&incoming_token) && !old_token.is_empty() {
+                    // Client sent a masked token; preserve the real one.
+                    updated.remote_agent_token = old_token.clone();
+                }
                 *settings = updated;
             }
 
@@ -1883,11 +2313,199 @@ fn api_put_settings(
         })
 }
 
-fn api_browse() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn api_rotate_agent_token(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let state = state.clone();
+    let app_config = app_config.clone();
+
+    warp::path!("api" / "rotate-agent-token")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            let state = state.clone();
+            async move {
+                // Require api-token
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                let has_api_token =
+                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+                if !has_api_token {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ),
+                    ));
+                }
+
+                // Generate new token
+                let new_token = crate::config::generate_random_token();
+
+                // Update ui_settings
+                let mut settings = state.ui_settings.lock().unwrap();
+                settings.remote_agent_token = new_token;
+                let _ = app_state::save_ui_settings(&state.ui_settings_path, &settings);
+                drop(settings);
+
+                // Notify agent poll loop to pick up new token
+                state.agent_poll_notify.notify_waiters();
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "message": "Agent token rotated"
+                    }),
+                )))
+            }
+        })
+}
+
+fn api_rotate_api_token(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
+
+    warp::path!("api" / "rotate-api-token")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            async move {
+                // Require api-token
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                let has_api_token =
+                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+                if !has_api_token {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ),
+                    ));
+                }
+
+                // Generate new token
+                let new_token = crate::config::generate_random_token();
+
+                // Persist to file (use encryption if configured)
+                let config_dir = cfg.config_dir.clone();
+                let token_file = config_dir.join("api-token");
+                let stored = crate::config::encrypt_value(&new_token);
+                if let Err(e) = std::fs::write(&token_file, &stored) {
+                    eprintln!("[api] Failed to write rotated api-token to {token_file:?}: {e}");
+                }
+                crate::config::harden_file_permissions(&token_file);
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "message": "API token rotated. Restart llama-monitor to fully apply."
+                    }),
+                )))
+            }
+        })
+}
+
+fn api_rotate_db_admin_token(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
+
+    warp::path!("api" / "rotate-db-admin-token")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            async move {
+                // Require api-token
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                let has_api_token =
+                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+                if !has_api_token {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ),
+                    ));
+                }
+
+                // Generate new token
+                let new_token = crate::config::generate_random_token();
+
+                // Persist to file (use encryption if configured)
+                let config_dir = cfg.config_dir.clone();
+                let token_file = config_dir.join("db-admin-token");
+                let stored = crate::config::encrypt_value(&new_token);
+                if let Err(e) = std::fs::write(&token_file, &stored) {
+                    eprintln!(
+                        "[api] Failed to write rotated db-admin-token to {token_file:?}: {e}"
+                    );
+                }
+                crate::config::harden_file_permissions(&token_file);
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "message": "DB admin token rotated. Restart llama-monitor to fully apply."
+                    }),
+                )))
+            }
+        })
+}
+
+fn api_browse(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "browse")
         .and(warp::get())
         .and(warp::query::<std::collections::HashMap<String, String>>())
-        .map(|query: std::collections::HashMap<String, String>| {
+        .map(move |query: std::collections::HashMap<String, String>| {
+            // Build allowed roots:
+            // - Home directory (primary root).
+            // - Directories used for models, TLS certs, etc.
+            let mut allowed_roots: Vec<PathBuf> = Vec::new();
+
+            // Always allow home directory
+            if let Some(home) = dirs::home_dir()
+                && let Ok(canon) = home.canonicalize()
+            {
+                allowed_roots.push(canon);
+            }
+
+            // Allow models_dir (parent directory)
+            if let Some(ref models_dir) = state.models_dir
+                && let Some(parent) = models_dir.parent()
+                && let Ok(canon) = parent.canonicalize()
+            {
+                allowed_roots.push(canon);
+            }
+
+            // Allow TLS custom cert/key parent directories
+            if let Ok(tls) = state.tls_config.lock() {
+                if let Some(ref cert_path) = tls.custom_cert_path
+                    && let Some(parent) = cert_path.parent()
+                    && let Ok(canon) = parent.canonicalize()
+                {
+                    allowed_roots.push(canon);
+                }
+                if let Some(ref key_path) = tls.custom_key_path
+                    && let Some(parent) = key_path.parent()
+                    && let Ok(canon) = parent.canonicalize()
+                {
+                    allowed_roots.push(canon);
+                }
+            }
+
+            // Remove duplicates
+            allowed_roots.sort();
+            allowed_roots.dedup();
+
             let requested = query.get("path").cloned().unwrap_or_default();
             let filter = query.get("filter").cloned().unwrap_or_default();
 
@@ -1906,6 +2524,14 @@ fn api_browse() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Reje
                     }));
                 }
             };
+
+            // Enforce allowlist: directory must be under one of the allowed roots
+            if !allowed_roots.iter().any(|root| dir.starts_with(root)) {
+                return warp::reply::json(&serde_json::json!({
+                    "path": dir.display().to_string(),
+                    "error": "Path not allowed"
+                }));
+            }
 
             if !dir.is_dir() {
                 return warp::reply::json(&serde_json::json!({
@@ -2001,6 +2627,7 @@ fn api_chat(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat")
         .and(warp::post())
+        .and(warp::body::content_length_limit(2 * 1024 * 1024))
         .and(warp::body::bytes())
         .and_then(move |body: bytes::Bytes| {
             let state = state.clone();
@@ -2121,28 +2748,30 @@ fn api_chat_suggestions(
                             req.quick_guide_active.clone().unwrap_or_default(),
                         )
                     } else {
-                        // Fallback for older clients: rebuild from persisted tabs on disk.
-                        let path = chat_tabs_path();
-                        let tabs: Vec<ChatTab> = tokio::fs::read_to_string(&path).await
+                        // Fallback for older clients: load tab from chat_storage.
+                        let tab = state
+                            .chat_storage
+                            .get_tab(&req.tab_id)
                             .ok()
-                            .and_then(|raw| serde_json::from_str(&raw).ok())
-                            .unwrap_or_default();
-
-                        let tab = tabs
-                            .iter()
-                            .find(|t| t.id == req.tab_id)
                             .ok_or(warp::reject::not_found())?;
 
+                        let messages: Vec<SuggestionContextMessage> = tab
+                            .messages
+                            .iter()
+                            .map(|msg| SuggestionContextMessage {
+                                role: msg.role.clone(),
+                                content: msg.content.clone(),
+                            })
+                            .collect();
+
+                        let system_prompt = tab.system_prompt.clone();
+                        let context_notes: Vec<ContextNote> =
+                            serde_json::from_value(tab.context_notes.clone()).unwrap_or_default();
+
                         (
-                            tab.messages
-                                .iter()
-                                .map(|msg| SuggestionContextMessage {
-                                    role: msg.role.clone(),
-                                    content: msg.content.clone(),
-                                })
-                                .collect(),
-                            tab.system_prompt.clone(),
-                            tab.context_notes.clone(),
+                            messages,
+                            system_prompt,
+                            context_notes,
                             String::new(),
                         )
                     };
@@ -2740,101 +3369,1089 @@ fn parse_director_cards(text: &str) -> Vec<SuggestionCard> {
         .collect()
 }
 
-fn compute_chat_tab_totals(mut tab: ChatTab) -> ChatTab {
-    if tab.total_input_tokens.is_none() || tab.total_output_tokens.is_none() {
-        let mut total_input: u64 = 0;
-        let mut total_output: u64 = 0;
-        for msg in &tab.messages {
-            if let Some(input) = msg.input_tokens {
-                total_input += input;
-            }
-            if let Some(output) = msg.output_tokens {
-                total_output += output;
-            }
-        }
-        tab.total_input_tokens = Some(total_input);
-        tab.total_output_tokens = Some(total_output);
-    }
-    tab
+// ── Chat storage helper ─────────────────────────────────────────────
+
+fn with_chat_storage(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (Arc<ChatStorage>,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || storage.clone())
 }
 
-fn api_get_chat_tabs() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
+fn with_app_config(
+    cfg: Arc<AppConfig>,
+) -> impl Filter<Extract = (Arc<AppConfig>,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || cfg.clone())
+}
+
+fn now_ts() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
+fn new_tab_id() -> String {
+    format!("tab_{}", now_ts())
+}
+
+// GET /api/chat/tabs — metadata only (no messages)
+fn api_list_tabs(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat" / "tabs")
         .and(warp::get())
-        .and_then(|| async move {
-            let path = chat_tabs_path();
-            if path.exists() {
-                match tokio::fs::read_to_string(&path).await {
-                    Ok(raw) => match serde_json::from_str::<Vec<ChatTab>>(&raw) {
-                        Ok(tabs) => {
-                            let tabs: Vec<ChatTab> =
-                                tabs.into_iter().map(compute_chat_tab_totals).collect();
-                            Ok::<_, warp::Rejection>(warp::reply::json(&tabs))
-                        }
-                        Err(_) => {
-                            Ok::<_, warp::Rejection>(warp::reply::json(&Vec::<ChatTab>::new()))
-                        }
-                    },
-                    Err(_) => Ok::<_, warp::Rejection>(warp::reply::json(&Vec::<ChatTab>::new())),
+        .and(with_chat_storage(storage))
+        .and_then(|store: Arc<ChatStorage>| async move {
+            match store.list_tabs() {
+                Ok(tabs) => Ok::<_, warp::Rejection>(warp::reply::json(&tabs)),
+                Err(e) => {
+                    eprintln!("list_tabs error: {e}");
+                    Ok(warp::reply::json(
+                        &Vec::<crate::chat_storage::TabMeta>::new(),
+                    ))
                 }
-            } else {
-                Ok::<_, warp::Rejection>(warp::reply::json(&Vec::<ChatTab>::new()))
             }
         })
 }
 
-fn api_put_chat_tabs() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
+// POST /api/chat/tabs — create new tab
+fn api_create_tab(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat" / "tabs")
-        .and(warp::put())
-        .and(warp::body::bytes())
-        .and_then(|body: bytes::Bytes| async move {
-            let body_str = String::from_utf8_lossy(&body);
-            let tabs: Vec<ChatTab> = match serde_json::from_slice(&body) {
-                Ok(t) => t,
-                Err(e) => {
-                    eprintln!("Chat tabs deserialize error: {} (body preview: {})", e, &body_str[..body_str.len().min(500)]);
-                    return Ok::<Box<dyn warp::reply::Reply + Send + Sync>, warp::Rejection>(Box::new(
-                        warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})),
-                            warp::http::StatusCode::BAD_REQUEST,
-                        )
-                    ));
+        .and(warp::post())
+        .and(warp::body::json::<crate::chat_storage::ChatTabRow>())
+        .and(with_chat_storage(storage))
+        .and_then(
+            move |mut tab: crate::chat_storage::ChatTabRow, store: Arc<ChatStorage>| async move {
+                if tab.id.is_empty() {
+                    tab.id = new_tab_id();
                 }
-            };
-            let path = chat_tabs_path();
-            // Protect against overwriting with fewer messages (stale frontend data)
-            let new_msg_count = tabs.iter().map(|t| t.messages.len()).sum::<usize>();
-            if let Ok(existing) = tokio::fs::read_to_string(&path).await
-                && let Ok(existing_tabs) = serde_json::from_str::<Vec<ChatTab>>(&existing)
-            {
-                let existing_msg_count = existing_tabs.iter().map(|t| t.messages.len()).sum::<usize>();
-                if new_msg_count < existing_msg_count && new_msg_count < 10 {
-                    eprintln!("Chat tabs: rejecting PUT - would lose {} messages ({} -> {})",
-                             existing_msg_count - new_msg_count, existing_msg_count, new_msg_count);
-                    return Ok::<Box<dyn warp::reply::Reply + Send + Sync>, warp::Rejection>(Box::new(
-                        warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({"ok": false, "error": "Would lose messages - rejecting stale data"})),
-                            warp::http::StatusCode::CONFLICT,
-                        )
-                    ));
+                tab.created_at = now_ts();
+                tab.updated_at = tab.created_at;
+                match store.create_tab(&tab) {
+                    Ok(_) => Ok::<_, warp::Rejection>(warp::reply::json(&tab)),
+                    Err(e) => Ok(warp::reply::json(
+                        &serde_json::json!({"ok":false,"error":e.to_string()}),
+                    )),
                 }
-            }
-            match serde_json::to_string_pretty(&tabs) {
-                Ok(json) => match tokio::fs::write(&path, json).await {
-                    Ok(_) => Ok::<Box<dyn warp::reply::Reply + Send + Sync>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({"ok": true})),
-                    )),
-                    Err(e) => Ok::<Box<dyn warp::reply::Reply + Send + Sync>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})),
-                    )),
-                },
-                Err(e) => Ok::<Box<dyn warp::reply::Reply + Send + Sync>, warp::Rejection>(Box::new(
-                    warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()})),
+            },
+        )
+}
+
+// GET /api/chat/tabs/:id — full tab with messages
+fn api_get_tab(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs" / String)
+        .and(warp::get())
+        .and(with_chat_storage(storage))
+        .and_then(|id: String, store: Arc<ChatStorage>| async move {
+            match store.get_tab(&id) {
+                Ok(tab) => Ok::<_, warp::Rejection>(warp::reply::json(&tab)),
+                Err(e) => Ok(warp::reply::json(
+                    &serde_json::json!({"ok":false,"error":e.to_string()}),
                 )),
             }
         })
+}
+
+// PUT /api/chat/tabs/:id — full save (meta + replace messages)
+fn api_put_tab(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs" / String)
+        .and(warp::put())
+        .and(warp::body::json::<crate::chat_storage::ChatTabRow>())
+        .and(with_chat_storage(storage))
+        .and_then(
+            move |id: String,
+                  mut tab: crate::chat_storage::ChatTabRow,
+                  store: Arc<ChatStorage>| async move {
+                tab.id = id;
+                tab.updated_at = now_ts();
+                let messages = std::mem::take(&mut tab.messages);
+                let msg_rows: Vec<crate::chat_storage::MessageRow> = messages
+                    .into_iter()
+                    .enumerate()
+                    .map(|(seq, m)| crate::chat_storage::MessageRow {
+                        seq: seq as i64,
+                        tab_id: tab.id.clone(),
+                        ..m
+                    })
+                    .collect();
+                let result = store
+                    .update_tab_meta(&tab)
+                    .and_then(|_| store.replace_messages(&tab.id, &msg_rows));
+                match result {
+                    Ok(_) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok":true}))),
+                    Err(e) => Ok(warp::reply::json(&serde_json::json!({"ok":false,"error":e.to_string()}))),
+                }
+            },
+        )
+}
+
+// DELETE /api/chat/tabs/:id
+fn api_delete_tab(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs" / String)
+        .and(warp::delete())
+        .and(with_chat_storage(storage))
+        .and_then(|id: String, store: Arc<ChatStorage>| async move {
+            match store.delete_tab(&id) {
+                Ok(_) => {
+                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok":true})))
+                }
+                Err(e) => Ok(warp::reply::json(
+                    &serde_json::json!({"ok":false,"error":e.to_string()}),
+                )),
+            }
+        })
+}
+
+// PATCH /api/chat/tabs/:id/meta — metadata only, no messages
+fn api_patch_tab_meta(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs" / String / "meta")
+        .and(warp::patch())
+        .and(warp::body::json::<crate::chat_storage::ChatTabRow>())
+        .and(with_chat_storage(storage))
+        .and_then(
+            move |id: String,
+                  mut tab: crate::chat_storage::ChatTabRow,
+                  store: Arc<ChatStorage>| async move {
+                tab.id = id;
+                tab.updated_at = now_ts();
+                match store.update_tab_meta(&tab) {
+                    Ok(_) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok":true}))),
+                    Err(e) => Ok(warp::reply::json(&serde_json::json!({"ok":false,"error":e.to_string()}))),
+                }
+            },
+        )
+}
+
+// POST /api/chat/tabs/:id/messages — append one or more messages
+fn api_append_messages(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs" / String / "messages")
+        .and(warp::post())
+        .and(warp::body::json::<serde_json::Value>())
+        .and(with_chat_storage(storage))
+        .and_then(
+            move |id: String, body: serde_json::Value, store: Arc<ChatStorage>| async move {
+                let msgs = body["messages"].as_array().cloned().unwrap_or_default();
+                let mut last_id = 0i64;
+                for msg_val in msgs {
+                    let msg: crate::chat_storage::MessageRow = serde_json::from_value(msg_val)
+                        .unwrap_or_else(|_| crate::chat_storage::MessageRow {
+                            tab_id: id.clone(),
+                            role: "user".into(),
+                            content: "".into(),
+                            id: 0,
+                            timestamp_ms: 0,
+                            input_tokens: None,
+                            output_tokens: None,
+                            cumulative_input_tokens: None,
+                            cumulative_output_tokens: None,
+                            compaction_marker: false,
+                            variants: None,
+                            variant_index: None,
+                            seq: 0,
+                        });
+                    let mut m = msg;
+                    m.tab_id = id.clone();
+                    match store.append_message(&m) {
+                        Ok(row_id) => last_id = row_id,
+                        Err(e) => eprintln!("append_message error: {e}"),
+                    }
+                }
+                Ok::<_, warp::Rejection>(warp::reply::json(
+                    &serde_json::json!({"ok":true,"last_id":last_id}),
+                ))
+            },
+        )
+}
+
+// PATCH /api/chat/tabs/order
+fn api_reorder_tabs(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs" / "order")
+        .and(warp::patch())
+        .and(warp::body::json::<serde_json::Value>())
+        .and(with_chat_storage(storage))
+        .and_then(
+            |body: serde_json::Value, store: Arc<ChatStorage>| async move {
+                let ids: Vec<String> = body["tab_order"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                match store.reorder_tabs(&ids) {
+                    Ok(_) => {
+                        Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok":true})))
+                    }
+                    Err(e) => Ok(warp::reply::json(
+                        &serde_json::json!({"ok":false,"error":e.to_string()}),
+                    )),
+                }
+            },
+        )
+}
+
+// GET /api/chat/search?q=…&limit=20&offset=0
+fn api_chat_search(
+    storage: Arc<ChatStorage>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct SearchParams {
+        q: String,
+        #[serde(default = "default_limit")]
+        limit: usize,
+        #[serde(default)]
+        offset: usize,
+    }
+    fn default_limit() -> usize {
+        20
+    }
+
+    warp::path!("api" / "chat" / "search")
+        .and(warp::get())
+        .and(warp::query::<SearchParams>())
+        .and(with_chat_storage(storage))
+        .and_then(|p: SearchParams, store: Arc<ChatStorage>| async move {
+            let limit = p.limit.clamp(1, 100);
+            match store.search(&p.q, limit, p.offset) {
+                Ok(results) => Ok::<_, warp::Rejection>(warp::reply::json(&results)),
+                Err(e) => {
+                    eprintln!("search error: {e}");
+                    Ok(warp::reply::json(&crate::chat_storage::SearchResultsPage {
+                        results: Vec::new(),
+                        total: 0,
+                        limit,
+                        offset: p.offset,
+                        has_more: false,
+                    }))
+                }
+            }
+        })
+}
+
+// ── Database Admin Endpoints ──────────────────────────────────────────────────
+
+// GET /api/db/stats (requires api-token)
+fn api_db_stats(
+    storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
+
+    warp::path!("api" / "db" / "stats")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_chat_storage(storage))
+        .and(with_app_config(app_config))
+        .and_then(
+            move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                let has_api_token =
+                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+                if !has_api_token {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ),
+                    ));
+                }
+
+                match store.database_stats() {
+                    Ok(stats) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&stats),
+                    )),
+                    Err(e) => {
+                        eprintln!("db stats error: {e}");
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                        ))
+                    }
+                }
+            },
+        )
+}
+
+// GET /api/db/integrity (requires api-token)
+fn api_db_integrity(
+    storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
+
+    warp::path!("api" / "db" / "integrity")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_chat_storage(storage))
+        .and(with_app_config(app_config))
+        .and_then(
+            move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                let has_api_token =
+                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+                if !has_api_token {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ),
+                    ));
+                }
+
+                match store.integrity_check() {
+                    Ok(result) => {
+                        let status = if result == "ok" {
+                            "healthy"
+                        } else {
+                            "corrupted"
+                        };
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "status": status,
+                                "detail": result,
+                            })),
+                        ))
+                    }
+                    Err(e) => {
+                        eprintln!("integrity check error: {e}");
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                        ))
+                    }
+                }
+            },
+        )
+}
+
+// POST /api/db/maintenance - Run maintenance operations (requires api-token)
+fn api_db_maintenance(
+    storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct MaintenanceRequest {
+        operation: String,
+    }
+
+    let app_config = app_config.clone();
+
+    warp::path!("api" / "db" / "maintenance")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<MaintenanceRequest>())
+        .and(with_chat_storage(storage))
+        .and(with_app_config(app_config))
+        .and_then(
+            move |auth: Option<String>, req: MaintenanceRequest, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| {
+                async move {
+                    // Require api-token
+                    let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                    let has_api_token =
+                        bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+                    if !has_api_token {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                                warp::http::StatusCode::UNAUTHORIZED,
+                            ),
+                        ));
+                    }
+
+                    let result = match req.operation.as_str() {
+                        "checkpoint" => store.checkpoint().map(
+                            |(a, b, c)| serde_json::json!({"backfilled": a, "deleted": b, "log": c}),
+                        ),
+                        "vacuum" => store
+                            .vacuum()
+                            .map(|_| serde_json::json!({"status": "vacuumed"})),
+                        "rebuild_fts" => store
+                            .rebuild_fts_index()
+                            .map(|_| serde_json::json!({"status": "fts_rebuilt"})),
+                        "analyze" => store
+                            .analyze()
+                            .map(|_| serde_json::json!({"status": "analyzed"})),
+                        _ => Err(anyhow::anyhow!("Unknown operation: {}", req.operation)),
+                    };
+
+                    match result {
+                        Ok(response) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&response)),
+                        ),
+                        Err(e) => {
+                            eprintln!("maintenance error: {e}");
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(
+                                    &serde_json::json!({"error": e.to_string()}),
+                                ),
+                            ))
+                        }
+                    }
+                }
+            },
+        )
+}
+
+// POST /api/db/backup - Create database backup (requires api-token)
+fn api_db_backup(
+    storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "db" / "backup")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_chat_storage(storage))
+        .and(with_app_config(app_config))
+        .and_then(
+            move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| {
+                let cfg = cfg.clone();
+                async move {
+                    let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+
+                    let has_api_token =
+                        bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+                    if !has_api_token {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
+
+                    let config_dir = cfg.config_dir.clone();
+                    let backup_dir = config_dir.join("backups");
+
+                    if let Err(e) = std::fs::create_dir_all(&backup_dir) {
+                        eprintln!("Failed to create backup directory: {e}");
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                            warp::http::StatusCode::OK,
+                        ));
+                    }
+
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis().to_string())
+                        .unwrap_or_else(|_| "0".to_string());
+                    let backup_path = backup_dir.join(format!("chat_{}.db", timestamp));
+
+                    match store.backup(&backup_path) {
+                        Ok(()) => {
+                            let file_size = std::fs::metadata(&backup_path)
+                                .ok()
+                                .map(|m| m.len())
+                                .unwrap_or(0);
+
+                            // Clean up old backups (keep last 7)
+                            if let Ok(entries) = std::fs::read_dir(&backup_dir) {
+                                let mut backups: Vec<_> = entries
+                                    .filter_map(|e| e.ok())
+                                    .filter(|e| {
+                                        e.file_name().to_string_lossy().starts_with("chat_")
+                                    })
+                                    .collect();
+                                backups.sort_by_key(|e| e.path());
+                                while backups.len() > 7 {
+                                    let old = backups.remove(0);
+                                    let _ = std::fs::remove_file(old.path());
+                                }
+                            }
+
+                            Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "status": "backup_created",
+                                    "path": backup_path.to_string_lossy().to_string(),
+                                    "size_bytes": file_size,
+                                })),
+                                warp::http::StatusCode::OK,
+                            ))
+                        }
+                        Err(e) => {
+                            eprintln!("backup error: {e}");
+                            Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                                warp::http::StatusCode::OK,
+                            ))
+                        }
+                    }
+                }
+            },
+        )
+}
+
+// GET /api/db/indexes - List database indexes
+// GET /api/db/indexes (requires api-token)
+fn api_db_indexes(
+    storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
+
+    warp::path!("api" / "db" / "indexes")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_chat_storage(storage))
+        .and(with_app_config(app_config))
+        .and_then(
+            move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                let has_api_token =
+                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+                if !has_api_token {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ),
+                    ));
+                }
+
+                match store.list_indexes() {
+                    Ok(indexes) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&indexes),
+                    )),
+                    Err(e) => {
+                        eprintln!("list indexes error: {e}");
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                        ))
+                    }
+                }
+            },
+        )
+}
+
+/// Token bootstrap policy:
+/// - When any auth mode is configured, the surrounding auth guard already
+///   authenticated the request, so bootstrap is allowed.
+/// - With no auth configured, bootstrap is restricted to loopback binds.
+fn bind_host_is_loopback(bind_host: &str) -> bool {
+    let host = bind_host.trim().trim_matches(['[', ']']);
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
+}
+
+fn token_bootstrap_allowed(auth_manager: &AuthManager, bind_host: &str) -> bool {
+    auth_manager.has_any() || bind_host_is_loopback(bind_host)
+}
+
+// GET /api/internal/api-token - Return internal API token for UI use
+fn api_internal_token(
+    app_config: Arc<AppConfig>,
+    auth_manager: AuthManager,
+    bind_host: String,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "internal" / "api-token")
+        .and(warp::get())
+        .and(with_app_config(app_config))
+        .map(move |cfg: Arc<AppConfig>| {
+            if !token_bootstrap_allowed(&auth_manager, &bind_host) {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({ "error": "forbidden" })),
+                    warp::http::StatusCode::FORBIDDEN,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+            let token = cfg.api_token.as_deref().unwrap_or("");
+            Box::new(warp::reply::json(&serde_json::json!({ "token": token })))
+        })
+}
+
+// GET /api/db/admin-token - Return DB admin token for authenticated UI use
+fn api_db_admin_token(
+    app_config: Arc<AppConfig>,
+    auth_manager: AuthManager,
+    bind_host: String,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "db" / "admin-token")
+        .and(warp::get())
+        .and(with_app_config(app_config))
+        .map(move |cfg: Arc<AppConfig>| {
+            if !token_bootstrap_allowed(&auth_manager, &bind_host) {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({ "error": "forbidden" })),
+                    warp::http::StatusCode::FORBIDDEN,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+            let token = cfg.db_admin_token.as_deref().unwrap_or("");
+            Box::new(warp::reply::json(&serde_json::json!({ "token": token })))
+        })
+}
+
+// POST /api/db/query - Execute admin query (SELECT only)
+fn api_db_query(
+    storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct QueryRequest {
+        sql: String,
+    }
+
+    let storage = storage.clone();
+    let app_config = app_config.clone();
+
+    warp::path!("api" / "db" / "query")
+        .and(warp::post())
+        .and(warp::body::content_length_limit(256 * 1024))
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<QueryRequest>())
+        .and(with_chat_storage(storage))
+        .and(with_app_config(app_config))
+        .and_then(
+            move |auth: Option<String>,
+                  req: QueryRequest,
+                  store: Arc<ChatStorage>,
+                  cfg: Arc<AppConfig>| {
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+
+                let store_clone = store.clone();
+                async move {
+                    // Require api-token for DB query (defense-in-depth)
+                    let has_api_token =
+                        bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+                    if !has_api_token {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                                warp::http::StatusCode::UNAUTHORIZED,
+                            ),
+                        ));
+                    }
+
+                    // Admin mode if db_admin_token is present and valid
+                    let is_admin = bearer.as_deref()
+                        == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
+
+                    // SQL length cap: 16KB
+                    if req.sql.len() > 16_000 {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(
+                                    &serde_json::json!({ "error": "query too long" }),
+                                ),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ),
+                        ));
+                    }
+
+                    let store = store_clone.clone();
+                    let sql = req.sql.clone();
+                    let result =
+                        tokio::time::timeout(std::time::Duration::from_secs(10), async move {
+                            store.execute_query(&sql, is_admin)
+                        })
+                        .await;
+
+                    match result {
+                        Ok(Ok(result)) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::with_status(
+                                warp::reply::json(&result),
+                                warp::http::StatusCode::OK,
+                            )),
+                        ),
+                        Ok(Err(e)) => {
+                            eprintln!("query error: {e}");
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                                    warp::http::StatusCode::OK,
+                                ),
+                            ))
+                        }
+                        Err(_) => {
+                            eprintln!("query timeout");
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(
+                                        &serde_json::json!({"error": "query timed out"}),
+                                    ),
+                                    warp::http::StatusCode::REQUEST_TIMEOUT,
+                                ),
+                            ))
+                        }
+                    }
+                }
+            },
+        )
+}
+
+// GET /api/db/backups - List available backups (requires api-token)
+fn api_db_backups(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "db" / "backups")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            let cfg = cfg.clone();
+            async move {
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+
+                let has_api_token =
+                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+                if !has_api_token {
+                    return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                        warp::http::StatusCode::UNAUTHORIZED,
+                    ));
+                }
+
+                let backup_dir = cfg.config_dir.join("backups");
+
+                let mut backups = Vec::new();
+                let mut total_size = 0u64;
+
+                if let Ok(entries) = std::fs::read_dir(&backup_dir) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        if let Ok(metadata) = entry.metadata()
+                            && metadata.is_file()
+                        {
+                            let name = entry.file_name().to_string_lossy().to_string();
+                            if name.starts_with("chat_") || name.starts_with("chat_auto_") {
+                                let size = metadata.len();
+                                total_size += size;
+                                let modified = metadata
+                                    .modified()
+                                    .ok()
+                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                    .map(|d| d.as_millis() as i64)
+                                    .unwrap_or(0);
+
+                                backups.push(serde_json::json!({
+                                    "name": name,
+                                    "size": size,
+                                    "modified": modified,
+                                }));
+                            }
+                        }
+                    }
+                }
+
+                backups.sort_by_key(|b| b["modified"].as_i64().unwrap_or(0));
+                backups.reverse();
+
+                Ok::<_, warp::Rejection>(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "backups": backups,
+                        "total_size": total_size,
+                    })),
+                    warp::http::StatusCode::OK,
+                ))
+            }
+        })
+}
+
+// POST /api/db/restore - Restore from backup (requires db-admin-token)
+fn api_db_restore(
+    storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct RestoreRequest {
+        backup_name: String,
+    }
+
+    warp::path!("api" / "db" / "restore")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<RestoreRequest>())
+        .and(with_chat_storage(storage))
+        .and(with_app_config(app_config))
+        .and_then(
+            move |auth: Option<String>,
+                  req: RestoreRequest,
+                  store: Arc<ChatStorage>,
+                  cfg: Arc<AppConfig>| {
+                let cfg = cfg.clone();
+                async move {
+                    let bearer = auth
+                        .and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+
+                    // Require db-admin-token for restore (high-impact operation)
+                    let has_admin_token =
+                        bearer.as_deref() == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
+
+                    if !has_admin_token {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
+
+                    // Validate backup_name (prevent directory traversal)
+                    let backup_name = req.backup_name.trim();
+                    if backup_name.is_empty()
+                        || backup_name.contains("..")
+                        || backup_name.starts_with('/')
+                        || backup_name.contains('\\')
+                    {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "invalid backup name" })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ));
+                    }
+
+                    let backup_dir = cfg.config_dir.join("backups");
+                    let backup_path = backup_dir.join(backup_name);
+
+                    // Ensure resolved path is within backup_dir
+                    if matches!(
+                        (backup_path.canonicalize(), backup_dir.canonicalize()),
+                        (Ok(ref canonical), Ok(ref base)) if !canonical.starts_with(base)
+                    ) {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "path not allowed" })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ));
+                    }
+
+                    if !backup_path.exists() {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "error": format!("Backup not found: {}", backup_name)
+                            })),
+                            warp::http::StatusCode::OK,
+                        ));
+                    }
+
+                    // Get the current database path
+                    let db_path = store.get_db_path();
+
+                    // Create a safety backup before restore
+                    let safety_backup = cfg.config_dir.join("backups").join(format!(
+                        "pre_restore_{}.db",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis().to_string())
+                            .unwrap_or_else(|_| "0".to_string())
+                    ));
+
+                    if std::fs::metadata(&db_path).is_ok() {
+                        let _ = std::fs::copy(&db_path, &safety_backup);
+                    }
+
+                    // Restore: copy backup over current database
+                    match std::fs::copy(&backup_path, &db_path) {
+                        Ok(_) => {
+                            // Verify the restored database
+                            match store.integrity_check() {
+                                Ok(_) => {
+                                    Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                        warp::reply::json(&serde_json::json!({
+                                            "status": "restored",
+                                            "backup": backup_name,
+                                        })),
+                                        warp::http::StatusCode::OK,
+                                    ))
+                                }
+                                Err(e) => {
+                                    eprintln!("Restored database integrity check failed: {e}");
+                                    Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                        warp::reply::json(&serde_json::json!({
+                                            "error": "Restore succeeded but integrity check failed",
+                                            "safety_backup": safety_backup.to_string_lossy().to_string(),
+                                        })),
+                                        warp::http::StatusCode::OK,
+                                    ))
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Restore error: {e}");
+                            Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                                warp::http::StatusCode::OK,
+                            ))
+                        }
+                    }
+                }
+            },
+        )
+}
+
+// POST /api/db/repair - Database repair operations (requires db-admin-token)
+fn api_db_repair(
+    storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct RepairRequest {
+        operation: String,
+    }
+
+    let app_config = app_config.clone();
+
+    warp::path!("api" / "db" / "repair")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<RepairRequest>())
+        .and(with_chat_storage(storage))
+        .and(with_app_config(app_config))
+        .and_then(
+            move |auth: Option<String>,
+                  req: RepairRequest,
+                  store: Arc<ChatStorage>,
+                  cfg: Arc<AppConfig>| {
+                async move {
+                    // Require db-admin-token
+                    let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                    let has_db_admin_token = bearer.as_deref()
+                        == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
+
+                    if !has_db_admin_token {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                                warp::http::StatusCode::UNAUTHORIZED,
+                            ),
+                        ));
+                    }
+
+                    match req.operation.as_str() {
+                        "repair_indexes" => match store.repair_indexes() {
+                            Ok(_) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "status": "indexes_repaired",
+                                })),
+                            )),
+                            Err(e) => {
+                                eprintln!("Repair indexes error: {e}");
+                                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                    warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                                ))
+                            }
+                        },
+                        "emergency_recovery" => match store.emergency_recovery() {
+                            Ok(_) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "status": "recovery_attempted",
+                                })),
+                            )),
+                            Err(e) => {
+                                eprintln!("Emergency recovery error: {e}");
+                                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                    warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                                ))
+                            }
+                        },
+                        _ => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "error": format!("Unknown repair operation: {}", req.operation)
+                            })),
+                        )),
+                    }
+                }
+            },
+        )
+}
+
+// DELETE /api/db/backup - Delete a specific backup (requires db-admin-token)
+fn api_db_delete_backup(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct DeleteBackupRequest {
+        backup_name: String,
+    }
+
+    warp::path!("api" / "db" / "backup")
+        .and(warp::delete())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<DeleteBackupRequest>())
+        .and(with_app_config(app_config))
+        .and_then(
+            move |auth: Option<String>, req: DeleteBackupRequest, cfg: Arc<AppConfig>| {
+                let cfg = cfg.clone();
+                async move {
+                    let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+
+                    // Require db-admin-token for delete (high-impact operation)
+                    let has_admin_token = bearer.as_deref()
+                        == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
+
+                    if !has_admin_token {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
+
+                    // Validate backup_name (prevent directory traversal)
+                    let backup_name = req.backup_name.trim();
+                    if backup_name.is_empty()
+                        || backup_name.contains("..")
+                        || backup_name.starts_with('/')
+                        || backup_name.contains('\\')
+                    {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(
+                                &serde_json::json!({ "error": "invalid backup name" }),
+                            ),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ));
+                    }
+
+                    let backup_dir = cfg.config_dir.join("backups");
+                    let backup_path = backup_dir.join(backup_name);
+
+                    // Ensure resolved path is within backup_dir
+                    if matches!(
+                        (backup_path.canonicalize(), backup_dir.canonicalize()),
+                        (Ok(ref canonical), Ok(ref base)) if !canonical.starts_with(base)
+                    ) {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "path not allowed" })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ));
+                    }
+
+                    if !backup_path.exists() {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "error": format!("Backup not found: {}", backup_name)
+                            })),
+                            warp::http::StatusCode::OK,
+                        ));
+                    }
+
+                    match std::fs::remove_file(&backup_path) {
+                        Ok(_) => Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "status": "deleted",
+                                "backup": backup_name,
+                            })),
+                            warp::http::StatusCode::OK,
+                        )),
+                        Err(e) => {
+                            eprintln!("Delete backup error: {e}");
+                            Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                                warp::http::StatusCode::OK,
+                            ))
+                        }
+                    }
+                }
+            },
+        )
 }
 
 fn api_get_sessions(
@@ -3126,22 +4743,42 @@ fn api_spawn_session_with_preset(
 
 fn api_attach(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "attach")
         .and(warp::path::end())
         .and(warp::post())
+        .and(warp::header::headers_cloned())
         .and(warp::body::json())
-        .and_then(move |payload: serde_json::Map<String, serde_json::Value>| {
+        .and(with_app_config(app_config))
+        .and_then(move |headers: warp::http::HeaderMap,
+                      payload: serde_json::Map<String, serde_json::Value>,
+                      cfg: Arc<AppConfig>| {
             let state = state.clone();
             async move {
+                // Require api-token for attach
+                let has_token = headers
+                    .get("authorization")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.strip_prefix("Bearer "))
+                    .is_some_and(|t| t == cfg.api_token.as_deref().unwrap_or(""));
+
+                if !has_token {
+                    return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": "unauthorized" })),
+                        warp::http::StatusCode::UNAUTHORIZED,
+                    ));
+                }
+
                 let endpoint: String = match payload.get("endpoint") {
                     Some(v) => {
                         if let Some(s) = v.as_str() {
                             // Validate: must be http/https scheme with private/loopback host
                             let parsed = url::Url::parse(s).map_err(|_| warp::reject::not_found())?;
                             if !["http", "https"].contains(&parsed.scheme()) {
-                                return Ok::<_, warp::Rejection>(warp::reply::json(
-                                    &serde_json::json!({"ok": false, "error": "Endpoint must use http:// or https://"}),
+                                return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({"ok": false, "error": "Endpoint must use http:// or https://"})),
+                                    warp::http::StatusCode::OK,
                                 ));
                             }
                             if let Some(host) = parsed.host_str()
@@ -3152,49 +4789,64 @@ fn api_attach(
                                             || (v4.octets()[0] == 172 && (4..=11).contains(&v4.octets()[1]))
                                             || (v4.octets()[0] == 192 && v4.octets()[1] == 168));
                                     if !ip.is_loopback() && !private {
-                                        return Ok::<_, warp::Rejection>(warp::reply::json(
-                                            &serde_json::json!({"ok": false, "error": "Endpoint must be on a private network"}),
+                                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                            warp::reply::json(&serde_json::json!({"ok": false, "error": "Endpoint must be on a private network"})),
+                                            warp::http::StatusCode::OK,
                                         ));
                                     }
                                 }
                             s.to_string()
                         } else {
-                            return Ok::<_, warp::Rejection>(warp::reply::json(
-                                &serde_json::json!({"ok": false, "error": "Invalid endpoint"}),
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({"ok": false, "error": "Invalid endpoint"})),
+                                warp::http::StatusCode::OK,
                             ));
                         }
                     }
                     None => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": "Missing endpoint"}),
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({"ok": false, "error": "Missing endpoint"})),
+                            warp::http::StatusCode::OK,
                         ));
                     }
                 };
 
                 // Pre-attach health check
                 let client = match reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(5))
+                    .timeout(std::time::Duration::from_secs(15))
                     .build()
                 {
                     Ok(c) => c,
                     Err(e) => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
                                 "ok": false,
                                 "error": format!("Failed to create HTTP client: {}", e)
-                            }),
+                            })),
+                            warp::http::StatusCode::OK,
                         ));
                     }
                 };
 
                 // Check if server is reachable
-                let server_up = client.get(&endpoint).send().await.is_ok();
+                eprintln!("[info] Health-checking llama-server at {}", endpoint);
+                let server_up = match client.get(&endpoint).send().await {
+                    Ok(resp) => {
+                        eprintln!("[info] llama-server health check status: {}", resp.status());
+                        true
+                    }
+                    Err(e) => {
+                        eprintln!("[warn] llama-server health check failed: {}", e);
+                        false
+                    }
+                };
                 if !server_up {
-                    return Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({
+                    return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
                             "ok": false,
                             "error": format!("Cannot reach llama-server at {}. Is it running?", endpoint)
-                        }),
+                        })),
+                        warp::http::StatusCode::OK,
                     ));
                 }
 
@@ -3230,8 +4882,9 @@ fn api_attach(
                         endpoint,
                     );
                     if !state.add_session(session) {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": "Maximum sessions reached"}),
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({"ok": false, "error": "Maximum sessions reached"})),
+                            warp::http::StatusCode::OK,
                         ));
                     }
                     session_id
@@ -3239,14 +4892,17 @@ fn api_attach(
 
                 state.set_active_session(&session_id);
                 state.llama_poll_notify.notify_waiters();
-                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                    "ok": true,
-                    "warning": if !metrics_available {
-                        Some("llama-server is running but metrics endpoint (/health) is unavailable. Inference metrics will not be available. Start llama-server with --metrics flag to enable metrics.")
-                    } else {
-                        None
-                    }
-                })))
+                Ok::<_, warp::Rejection>(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "ok": true,
+                        "warning": if !metrics_available {
+                            Some("llama-server is running but metrics endpoint (/health) is unavailable. Inference metrics will not be available. Start llama-server with --metrics flag to enable metrics.")
+                        } else {
+                            None
+                        }
+                    })),
+                    warp::http::StatusCode::OK,
+                ))
             }
         })
 }
@@ -3289,117 +4945,1035 @@ fn api_detach(
 }
 
 fn api_kill_llama(
-    state: AppState,
+    _state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_KILL: AtomicU64 = AtomicU64::new(0);
+
+    let app_config = app_config.clone();
+
     warp::path!("api" / "kill-llama")
         .and(warp::post())
-        .and_then(move || {
-            let _state = state.clone();
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, body: serde_json::Value, cfg: Arc<AppConfig>| {
             async move {
+                // Require db-admin-token (elevated operation).
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                let has_admin_token =
+                    bearer.as_deref() == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
+
+                if !has_admin_token {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized; db-admin-token required" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ),
+                    ));
+                }
+
+                // Require explicit confirmation.
+                let confirm = body.get("confirm")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if confirm != "kill" {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "missing confirmation; send { \"confirm\": \"kill\" }" })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ),
+                    ));
+                }
+
+                // Cooldown: 30 seconds between kills.
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let last = LAST_KILL.load(Ordering::Relaxed);
+                if now - last < 30 {
+                    let remaining = 30 - (now - last);
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "error": "too soon; please wait",
+                                "seconds_remaining": remaining
+                            })),
+                            warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        ),
+                    ));
+                }
+
+                LAST_KILL.store(now, Ordering::Relaxed);
+
+                // Inline kill logic (platform-specific).
                 #[cfg(target_os = "windows")]
                 {
+                    use std::process::Command;
                     match Command::new("taskkill")
                         .args(["/IM", "llama-server.exe", "/F"])
                         .output()
                     {
                         Ok(output) => {
                             if output.status.success() {
-                                Ok::<_, warp::Rejection>(warp::reply::json(
-                                    &serde_json::json!({"ok": true}),
+                                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                    warp::reply::json(&serde_json::json!({ "ok": true })),
                                 ))
                             } else {
                                 let err = String::from_utf8_lossy(&output.stderr);
-                                Ok::<_, warp::Rejection>(warp::reply::json(
-                                    &serde_json::json!({"ok": false, "error": err}),
+                                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                    warp::reply::json(&serde_json::json!({ "ok": false, "error": err })),
                                 ))
                             }
                         }
-                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": e.to_string()}),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({ "ok": false, "error": e.to_string() })),
                         )),
                     }
                 }
                 #[cfg(target_os = "linux")]
                 {
+                    use std::process::Command;
                     match Command::new("pkill").args(["-f", "llama-server"]).output() {
                         Ok(output) => {
                             if output.status.success() {
-                                Ok::<_, warp::Rejection>(warp::reply::json(
-                                    &serde_json::json!({"ok": true}),
+                                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                    warp::reply::json(&serde_json::json!({ "ok": true })),
                                 ))
                             } else {
                                 let err = String::from_utf8_lossy(&output.stderr);
-                                Ok::<_, warp::Rejection>(warp::reply::json(
-                                    &serde_json::json!({"ok": false, "error": err}),
+                                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                    warp::reply::json(&serde_json::json!({ "ok": false, "error": err })),
                                 ))
                             }
                         }
-                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": e.to_string()}),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({ "ok": false, "error": e.to_string() })),
                         )),
                     }
                 }
                 #[cfg(target_os = "macos")]
                 {
+                    use std::process::Command;
                     match Command::new("pkill").args(["-f", "llama-server"]).output() {
                         Ok(output) => {
                             if output.status.success() {
-                                Ok::<_, warp::Rejection>(warp::reply::json(
-                                    &serde_json::json!({"ok": true}),
+                                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                    warp::reply::json(&serde_json::json!({ "ok": true })),
                                 ))
                             } else {
                                 let err = String::from_utf8_lossy(&output.stderr);
-                                Ok::<_, warp::Rejection>(warp::reply::json(
-                                    &serde_json::json!({"ok": false, "error": err}),
+                                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                    warp::reply::json(&serde_json::json!({ "ok": false, "error": err })),
                                 ))
                             }
                         }
-                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": e.to_string()}),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({ "ok": false, "error": e.to_string() })),
                         )),
                     }
                 }
                 #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
                 {
-                    Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({"ok": false, "error": "Unsupported platform"}),
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": "Unsupported platform" })),
                     ))
                 }
             }
         })
 }
 
-fn api_self_update() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
+/// GET /api/tls/config — returns current TLS configuration (non-sensitive).
+fn api_get_tls_config(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
+
+    warp::path!("api" / "tls" / "config")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .map(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+            let has_api_token =
+                bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+
+            if !has_api_token {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                    warp::http::StatusCode::UNAUTHORIZED,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+
+            let tls_cfg = state.get_tls_config();
+
+            let mode_str = match tls_cfg.mode {
+                TlsMode::None => "none",
+                TlsMode::SelfSigned => "self-signed",
+                TlsMode::Custom => "custom",
+                TlsMode::Acme => "acme",
+            };
+
+            // Build a safe ACME summary (no secrets).
+            let acme_summary: serde_json::Value = if matches!(tls_cfg.mode, TlsMode::Acme) {
+                serde_json::json!({
+                    "enabled": tls_cfg.acme.enabled,
+                    "fqdn": tls_cfg.acme.fqdn,
+                    "environment": tls_cfg.acme.environment,
+                    "dnsProvider": tls_cfg.acme.dns_provider,
+                    "validationDelay": tls_cfg.acme.validation_delay,
+                    "lastRenewal": tls_cfg.acme.last_renewal,
+                    "certPath": tls_cfg.acme.cert_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+                    "keyPath": tls_cfg.acme.key_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+                })
+            } else {
+                serde_json::json!({
+                    "enabled": tls_cfg.acme.enabled,
+                })
+            };
+
+            Box::new(warp::reply::json(&serde_json::json!({
+                "mode": mode_str,
+                "customCertPath": tls_cfg.custom_cert_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+                "customKeyPath": tls_cfg.custom_key_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+                "acme": acme_summary,
+            })))
+        })
+}
+
+/// PUT /api/tls/config — update TLS configuration (requires api-token).
+/// In Phase 1, changes require a restart; we only persist to tls-config.json.
+fn api_put_tls_config(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "tls" / "config")
+        .and(warp::put())
+        .and(warp::header::optional::<String>("Authorization"))
+        .and(warp::body::json())
+        .and_then(
+            move |auth_header: Option<String>, body: serde_json::Value| {
+                let state = state.clone();
+                let app_config = app_config.clone();
+                async move {
+                    // Require api-token in Authorization: Bearer <token>
+                    let expected = match &app_config.api_token {
+                        Some(t) => t,
+                        None => {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "API token not configured"
+                                })),
+                                warp::http::StatusCode::UNAUTHORIZED,
+                            ));
+                        }
+                    };
+
+                    let token = match auth_header.as_ref().and_then(|h| h.strip_prefix("Bearer ")) {
+                        Some(t) => t.trim(),
+                        None => {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Missing or invalid Authorization header"
+                                })),
+                                warp::http::StatusCode::UNAUTHORIZED,
+                            ));
+                        }
+                    };
+
+                    if token != expected {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Invalid API token"
+                            })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
+
+                    // Extract mode
+                    let mode_str = body.get("mode").and_then(|v| v.as_str()).unwrap_or("none");
+
+                    let mode = match mode_str {
+                        "none" => TlsMode::None,
+                        "self-signed" => TlsMode::SelfSigned,
+                        "custom" => TlsMode::Custom,
+                        "acme" => TlsMode::Acme,
+                        _ => {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": format!("Invalid mode: {}", mode_str)
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+                    };
+
+                    // For custom mode, validate cert/key paths
+                    if mode == TlsMode::Custom {
+                        let cert_path_str = body.get("customCertPath").and_then(|v| v.as_str());
+                        let key_path_str = body.get("customKeyPath").and_then(|v| v.as_str());
+
+                        if cert_path_str.is_none() || key_path_str.is_none() {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "custom mode requires customCertPath and customKeyPath"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+                    }
+
+                    // Build ACME config from request (or keep existing if not acme mode)
+                    let existing = state.get_tls_config();
+                    let acme_cfg = if mode == TlsMode::Acme {
+                        // Read acme fields from body
+                        let acme_obj = body.get("acme").and_then(|v| v.as_object());
+
+                        let enabled = acme_obj
+                            .and_then(|o| o.get("enabled").and_then(|v| v.as_bool()))
+                            .unwrap_or(true);
+
+                        let fqdn = acme_obj
+                            .and_then(|o| o.get("fqdn").and_then(|v| v.as_str()))
+                            .unwrap_or("")
+                            .to_string();
+
+                        let environment = acme_obj
+                            .and_then(|o| o.get("environment").and_then(|v| v.as_str()))
+                            .unwrap_or("staging")
+                            .to_string();
+
+                        let dns_provider = acme_obj
+                            .and_then(|o| o.get("dnsProvider").and_then(|v| v.as_str()))
+                            .unwrap_or("")
+                            .to_string();
+
+                        let validation_delay = acme_obj
+                            .and_then(|o| o.get("validationDelay").and_then(|v| v.as_u64()))
+                            .unwrap_or(300);
+
+                        // Parse dnsConfig as a map
+                        let dns_config: HashMap<String, String> = acme_obj
+                            .and_then(|o| o.get("dnsConfig").and_then(|v| v.as_object()))
+                            .map(|map| {
+                                map.iter()
+                                    .filter_map(|(k, v)| {
+                                        v.as_str().map(|s| (k.clone(), s.to_string()))
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+
+                        // Validate ACME fields
+                        if fqdn.is_empty() {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "acme mode requires acme.fqdn"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+
+                        if environment != "staging" && environment != "production" {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "acme.environment must be 'staging' or 'production'"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+
+                        if dns_provider.is_empty() {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "acme mode requires acme.dnsProvider"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+
+                        if dns_config.is_empty() {
+                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "acme mode requires acme.dnsConfig"
+                                })),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ));
+                        }
+
+                        crate::config::AcmeConfig {
+                            enabled,
+                            fqdn,
+                            environment,
+                            dns_provider,
+                            dns_config,
+                            validation_delay,
+                            last_renewal: existing.acme.last_renewal.clone(),
+                            cert_path: existing.acme.cert_path.clone(),
+                            key_path: existing.acme.key_path.clone(),
+                        }
+                    } else {
+                        // Non-acme mode: disable ACME fields but preserve existing cert paths
+                        // (they may still be valid) until mode changes.
+                        existing.acme
+                    };
+
+                    let new_cfg = crate::config::TLSConfig {
+                        mode,
+                        custom_cert_path: body
+                            .get("customCertPath")
+                            .and_then(|v| v.as_str())
+                            .map(PathBuf::from),
+                        custom_key_path: body
+                            .get("customKeyPath")
+                            .and_then(|v| v.as_str())
+                            .map(PathBuf::from),
+                        acme: acme_cfg,
+                    };
+
+                    // Update in-memory state
+                    state.set_tls_config(new_cfg.clone());
+
+                    // Persist to disk (restart required to apply)
+                    if let Err(e) = crate::config::save_tls_config(&app_config.config_dir, &new_cfg)
+                    {
+                        eprintln!("[error] Failed to save tls-config.json: {}", e);
+                        // Still return success; in-memory state updated.
+                    }
+
+                    Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": true,
+                            "requires_restart": true
+                        })),
+                        warp::http::StatusCode::OK,
+                    ))
+                }
+            },
+        )
+}
+
+/// POST /api/tls/acme/request — trigger ACME certificate request (requires api-token).
+fn api_tls_acme_request(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "tls" / "acme" / "request")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("Authorization"))
+        .and_then(move |auth_header: Option<String>| {
+            let state = state.clone();
+            let app_config = app_config.clone();
+            async move {
+                // Auth check
+                let expected = match &app_config.api_token {
+                    Some(t) => t,
+                    None => {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "API token not configured"
+                            })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
+                };
+
+                let token = match auth_header.as_ref().and_then(|h| h.strip_prefix("Bearer ")) {
+                    Some(t) => t.trim(),
+                    None => {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Missing or invalid Authorization header"
+                            })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
+                };
+
+                if token != expected {
+                    return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Invalid API token"
+                        })),
+                        warp::http::StatusCode::UNAUTHORIZED,
+                    ));
+                }
+
+                let cfg = state.get_tls_config();
+                let config_dir = app_config.config_dir.clone();
+
+                match crate::acme::acme_request_cert(&config_dir, &cfg) {
+                    Ok(new_cfg) => {
+                        eprintln!("[info] ACME certificate request succeeded");
+                        state.set_tls_config(new_cfg.clone());
+                        if let Err(e) = crate::config::save_tls_config(&config_dir, &new_cfg) {
+                            eprintln!(
+                                "[error] Failed to save tls-config.json after ACME request: {}",
+                                e
+                            );
+                        }
+                        Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": true,
+                                "requires_restart": true
+                            })),
+                            warp::http::StatusCode::OK,
+                        ))
+                    }
+                    Err(e) => {
+                        eprintln!("[error] ACME certificate request failed: {}", e);
+                        Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": e
+                            })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ))
+                    }
+                }
+            }
+        })
+}
+
+/// POST /api/tls/acme/renew — trigger ACME certificate renewal (requires api-token).
+fn api_tls_acme_renew(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "tls" / "acme" / "renew")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("Authorization"))
+        .and_then(move |auth_header: Option<String>| {
+            let state = state.clone();
+            let app_config = app_config.clone();
+            async move {
+                // Auth check
+                let expected = match &app_config.api_token {
+                    Some(t) => t,
+                    None => {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "API token not configured"
+                            })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
+                };
+
+                let token = match auth_header.as_ref().and_then(|h| h.strip_prefix("Bearer ")) {
+                    Some(t) => t.trim(),
+                    None => {
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Missing or invalid Authorization header"
+                            })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ));
+                    }
+                };
+
+                if token != expected {
+                    return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Invalid API token"
+                        })),
+                        warp::http::StatusCode::UNAUTHORIZED,
+                    ));
+                }
+
+                let cfg = state.get_tls_config();
+                let config_dir = app_config.config_dir.clone();
+
+                match crate::acme::acme_renew_cert(&config_dir, &cfg) {
+                    Ok(new_cfg) => {
+                        eprintln!("[info] ACME renewal succeeded (manual)");
+                        state.set_tls_config(new_cfg.clone());
+                        if let Err(e) = crate::config::save_tls_config(&config_dir, &new_cfg) {
+                            eprintln!(
+                                "[error] Failed to save tls-config.json after ACME renewal: {}",
+                                e
+                            );
+                        }
+                        Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": true,
+                                "requires_restart": true
+                            })),
+                            warp::http::StatusCode::OK,
+                        ))
+                    }
+                    Err(e) => {
+                        eprintln!("[error] ACME renewal failed: {}", e);
+                        Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": e
+                            })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ))
+                    }
+                }
+            }
+        })
+}
+
+fn api_self_update(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_UPDATE: AtomicU64 = AtomicU64::new(0);
+
+    let app_config = app_config.clone();
+
     warp::path!("api" / "self-update")
         .and(warp::post())
-        .and_then(|| async move {
-            match crate::agent::self_update_binary().await {
-                Ok(result) => {
-                    // All platforms: schedule exit so the OS / user can relaunch with
-                    // the freshly written binary. On Windows the batch helper also
-                    // restarts automatically once this PID disappears.
-                    tokio::spawn(async {
-                        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-                        std::process::exit(0);
-                    });
-                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                        "ok": true,
-                        "tag_name": result.tag_name,
-                        "restart_required": true
-                    })))
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, body: serde_json::Value, cfg: Arc<AppConfig>| {
+            async move {
+                // Require db-admin-token (elevated operation).
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                let has_admin_token =
+                    bearer.as_deref() == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
+
+                if !has_admin_token {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized; db-admin-token required" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ),
+                    ));
                 }
-                Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                    "ok": false,
-                    "error": e.to_string()
-                }))),
+
+                // Require explicit confirmation.
+                let confirm = body.get("confirm")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if confirm != "update" {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "missing confirmation; send { \"confirm\": \"update\" }" })),
+                            warp::http::StatusCode::BAD_REQUEST,
+                        ),
+                    ));
+                }
+
+                // Cooldown: 5 minutes between updates.
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let last = LAST_UPDATE.load(Ordering::Relaxed);
+                if now - last < 300 {
+                    let remaining = 300 - (now - last);
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "error": "too soon; please wait",
+                                "seconds_remaining": remaining
+                            })),
+                            warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        ),
+                    ));
+                }
+
+                LAST_UPDATE.store(now, Ordering::Relaxed);
+
+                match crate::agent::self_update_binary().await {
+                    Ok(result) => {
+                        // All platforms: schedule exit so the OS / user can relaunch with
+                        // the freshly written binary. On Windows the batch helper also
+                        // restarts automatically once this PID disappears.
+                        tokio::spawn(async {
+                            tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                            std::process::exit(0);
+                        });
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": true,
+                                "tag_name": result.tag_name,
+                                "restart_required": true
+                            })),
+                        ))
+                    }
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": e.to_string()
+                        })),
+                    )),
+                }
             }
         })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::legacy_chat_types::*;
+    use super::token_bootstrap_allowed;
+
+    use crate::chat_storage::ChatStorage;
+    use crate::config::{self, AcmeConfig, TLSConfig, TlsMode};
+    use crate::gpu::env::GpuEnv;
+    use crate::state::{AppPaths, AppState};
+    use crate::web::auth::AuthManager;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use warp::Filter;
+
+    fn make_test_app_state(tls_config: TLSConfig) -> (AppState, Arc<config::AppConfig>) {
+        let paths = AppPaths {
+            presets_path: PathBuf::new(),
+            templates_path: PathBuf::new(),
+            models_dir: None,
+            gpu_env_path: PathBuf::new(),
+            ui_settings_path: PathBuf::new(),
+            sessions_path: PathBuf::new(),
+        };
+        let cs = Arc::new(
+            ChatStorage::open(&PathBuf::from(":memory:")).expect("open in-memory chat storage"),
+        );
+        let state = AppState::new(
+            vec![],
+            paths,
+            GpuEnv::default(),
+            crate::state::UiSettings::default(),
+            cs,
+            tls_config,
+        );
+        let app_config = Arc::new(config::AppConfig {
+            config_dir: PathBuf::from("/tmp/llama-monitor-test"),
+            llama_server_path: PathBuf::from("llama-server"),
+            llama_server_cwd: PathBuf::from("."),
+            port: 8001,
+            gpu_backend: String::new(),
+            llama_poll_interval: 1,
+            models_dir: None,
+            presets_file: PathBuf::new(),
+            templates_file: PathBuf::new(),
+            gpu_env_file: PathBuf::new(),
+            gpu_arch_override: None,
+            gpu_devices_override: None,
+            ui_settings_file: PathBuf::new(),
+            auth_config_file: PathBuf::new(),
+            sessions_file: PathBuf::new(),
+            ssh_known_hosts_file: PathBuf::new(),
+            lhm_disabled_file: PathBuf::new(),
+            agent_host: "127.0.0.1".to_string(),
+            agent_port: 7777,
+            agent_token: None,
+            remote_agent_url: None,
+            remote_agent_token: None,
+            remote_agent_ssh_autostart: false,
+            remote_agent_ssh_target: None,
+            remote_agent_ssh_command: None,
+            db_admin_token: None,
+            api_token: Some("test-token".to_string()),
+            tls_config: TLSConfig::default(),
+        });
+        (state, app_config)
+    }
+
+    fn tls_routes_filter(
+        state: AppState,
+        app_config: Arc<config::AppConfig>,
+    ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+        let tls_get_config = super::api_get_tls_config(state.clone(), app_config.clone());
+        let tls_put_config = super::api_put_tls_config(state.clone(), app_config.clone());
+        let tls_acme_request = super::api_tls_acme_request(state.clone(), app_config.clone());
+        let tls_acme_renew = super::api_tls_acme_renew(state.clone(), app_config.clone());
+        tls_get_config
+            .or(tls_put_config)
+            .or(tls_acme_request)
+            .or(tls_acme_renew)
+    }
+
+    fn auth_routes_filter(
+        auth_manager: AuthManager,
+    ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+        super::auth_api_routes(auth_manager)
+    }
+
+    #[test]
+    fn token_bootstrap_allows_loopback_without_basic_auth() {
+        let auth = AuthManager::new(None, None, &TlsMode::None);
+        assert!(token_bootstrap_allowed(&auth, "127.0.0.1"));
+        assert!(token_bootstrap_allowed(&auth, "localhost"));
+    }
+
+    #[test]
+    fn token_bootstrap_rejects_non_loopback_bind_without_basic_auth() {
+        let auth = AuthManager::new(None, None, &TlsMode::None);
+        assert!(!token_bootstrap_allowed(&auth, "0.0.0.0"));
+    }
+
+    #[test]
+    fn token_bootstrap_allows_when_basic_auth_is_configured() {
+        let auth = AuthManager::new(
+            AuthManager::parse_credentials("admin:secret"),
+            None,
+            &TlsMode::None,
+        );
+        assert!(token_bootstrap_allowed(&auth, "0.0.0.0"));
+    }
+
+    #[test]
+    fn token_bootstrap_allows_when_form_auth_is_configured() {
+        let auth = AuthManager::new(
+            None,
+            AuthManager::parse_credentials("admin:secret"),
+            &TlsMode::None,
+        );
+        assert!(token_bootstrap_allowed(&auth, "0.0.0.0"));
+    }
+
+    #[tokio::test]
+    async fn form_auth_login_sets_session_cookie_and_status_reflects_it() {
+        let auth = AuthManager::new(
+            None,
+            AuthManager::parse_credentials("admin:secret123"),
+            &TlsMode::None,
+        );
+        let routes = auth_routes_filter(auth);
+
+        let login_resp = warp::test::request()
+            .method("POST")
+            .path("/api/auth/login")
+            .json(&serde_json::json!({
+                "username": "admin",
+                "password": "secret123",
+            }))
+            .reply(&routes)
+            .await;
+
+        assert_eq!(login_resp.status(), 200);
+        let set_cookie = login_resp
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("set-cookie header");
+        assert!(set_cookie.contains("llama_monitor_session="));
+
+        let status_resp = warp::test::request()
+            .method("GET")
+            .path("/api/auth/status")
+            .header("cookie", set_cookie)
+            .reply(&routes)
+            .await;
+
+        assert_eq!(status_resp.status(), 200);
+        let body: serde_json::Value =
+            serde_json::from_slice(status_resp.body()).expect("valid JSON");
+        assert_eq!(body["enabled"], true);
+        assert_eq!(body["methods"]["form"], true);
+        assert_eq!(body["authenticated"], true);
+        assert_eq!(body["method"], "form");
+        assert_eq!(body["username"], "admin");
+    }
+
+    #[tokio::test]
+    async fn form_auth_logout_clears_session_cookie() {
+        let auth = AuthManager::new(
+            None,
+            AuthManager::parse_credentials("admin:secret123"),
+            &TlsMode::None,
+        );
+        let routes = auth_routes_filter(auth);
+
+        let login_resp = warp::test::request()
+            .method("POST")
+            .path("/api/auth/login")
+            .json(&serde_json::json!({
+                "username": "admin",
+                "password": "secret123",
+            }))
+            .reply(&routes)
+            .await;
+
+        let set_cookie = login_resp
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("set-cookie header");
+
+        let logout_resp = warp::test::request()
+            .method("POST")
+            .path("/api/auth/logout")
+            .header("cookie", set_cookie)
+            .reply(&routes)
+            .await;
+
+        assert_eq!(logout_resp.status(), 200);
+        let clear_cookie = logout_resp
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("set-cookie clear header");
+        assert!(clear_cookie.contains("Max-Age=0"));
+    }
+
+    #[tokio::test]
+    async fn tls_config_get_requires_api_token() {
+        let (state, app_config) = make_test_app_state(TLSConfig::default());
+        let routes = tls_routes_filter(state, app_config);
+
+        // Without token -> 401
+        let resp = warp::test::request()
+            .method("GET")
+            .path("/api/tls/config")
+            .reply(&routes)
+            .await;
+        assert_eq!(resp.status(), 401);
+
+        // With correct token -> 200
+        let resp = warp::test::request()
+            .method("GET")
+            .path("/api/tls/config")
+            .header("Authorization", "Bearer test-token")
+            .reply(&routes)
+            .await;
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = serde_json::from_slice(resp.body()).expect("valid JSON");
+        assert_eq!(body["mode"], "none");
+    }
+
+    #[tokio::test]
+    async fn tls_config_get_returns_acme_fields() {
+        let mut dns_config = HashMap::new();
+        dns_config.insert("CF_API_TOKEN".to_string(), "redacted".to_string());
+
+        let tls_config = TLSConfig {
+            mode: TlsMode::Acme,
+            custom_cert_path: None,
+            custom_key_path: None,
+            acme: AcmeConfig {
+                enabled: true,
+                fqdn: "llama-monitor.example.com".to_string(),
+                environment: "staging".to_string(),
+                dns_provider: "cloudflare".to_string(),
+                dns_config,
+                validation_delay: 300,
+                last_renewal: None,
+                cert_path: None,
+                key_path: None,
+            },
+        };
+
+        let (state, app_config) = make_test_app_state(tls_config);
+        let routes = tls_routes_filter(state, app_config);
+
+        let resp = warp::test::request()
+            .method("GET")
+            .path("/api/tls/config")
+            .header("Authorization", "Bearer test-token")
+            .reply(&routes)
+            .await;
+
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = serde_json::from_slice(resp.body()).expect("valid JSON");
+        assert_eq!(body["mode"], "acme");
+        assert_eq!(body["acme"]["fqdn"], "llama-monitor.example.com");
+        assert_eq!(body["acme"]["environment"], "staging");
+        assert_eq!(body["acme"]["dnsProvider"], "cloudflare");
+    }
+
+    #[tokio::test]
+    async fn tls_config_put_accepts_valid_acme() {
+        let (state, app_config) = make_test_app_state(TLSConfig::default());
+        let routes = tls_routes_filter(state.clone(), app_config);
+
+        let payload = serde_json::json!({
+            "mode": "acme",
+            "acme": {
+                "enabled": true,
+                "fqdn": "llama-monitor.example.com",
+                "environment": "staging",
+                "dnsProvider": "cloudflare",
+                "validationDelay": 300,
+                "dnsConfig": {
+                    "CF_API_TOKEN": "test-token"
+                }
+            }
+        });
+
+        let resp = warp::test::request()
+            .method("PUT")
+            .path("/api/tls/config")
+            .header("Authorization", "Bearer test-token")
+            .json(&payload)
+            .reply(&routes)
+            .await;
+
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = serde_json::from_slice(resp.body()).expect("valid JSON");
+        assert_eq!(body["ok"], true);
+
+        // Verify TLSConfig was updated in state
+        let cfg = state.get_tls_config();
+        assert_eq!(cfg.mode, TlsMode::Acme);
+        assert_eq!(cfg.acme.fqdn, "llama-monitor.example.com");
+        assert_eq!(cfg.acme.dns_provider, "cloudflare");
+    }
+
+    #[tokio::test]
+    async fn tls_config_put_rejects_invalid_acme_missing_provider() {
+        let (state, app_config) = make_test_app_state(TLSConfig::default());
+        let routes = tls_routes_filter(state, app_config);
+
+        let payload = serde_json::json!({
+            "mode": "acme",
+            "acme": {
+                "enabled": true,
+                "fqdn": "llama-monitor.example.com",
+                "environment": "staging",
+                "dnsProvider": "",
+                "dnsConfig": {
+                    "CF_API_TOKEN": "test-token"
+                }
+            }
+        });
+
+        let resp = warp::test::request()
+            .method("PUT")
+            .path("/api/tls/config")
+            .header("Authorization", "Bearer test-token")
+            .json(&payload)
+            .reply(&routes)
+            .await;
+
+        assert_eq!(resp.status(), 400);
+        let body: serde_json::Value = serde_json::from_slice(resp.body()).expect("valid JSON");
+        assert!(
+            body["error"]
+                .as_str()
+                .map(|s| s.contains("dnsProvider"))
+                .unwrap_or(false)
+        );
+    }
 
     fn make_minimal_chat_tab() -> ChatTab {
         ChatTab {

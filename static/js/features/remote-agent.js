@@ -929,11 +929,15 @@ async function finishRemoteAgentSetup() {
     const sshPortInput = document.getElementById('agent-setup-ssh-port');
     const sshAuthSelect = document.getElementById('agent-setup-ssh-auth');
 
-    // Fetch current settings to merge — avoids wiping unrelated settings
-    // (preset_id, port, llama_server_path, models_dir, server_endpoint, etc.)
+    // Fetch current settings (full) to merge — avoids wiping unrelated settings
+    // and preserves the real remote_agent_token (GET /api/settings masks it).
     let currentSettings = {};
     try {
-        const resp = await fetch('/api/settings');
+        const headers = {};
+        if (window.authHeaders) {
+            Object.assign(headers, window.authHeaders());
+        }
+        const resp = await fetch('/api/settings/full', { headers });
         if (resp.ok) {
             currentSettings = await resp.json();
         }
@@ -1348,10 +1352,21 @@ function maybeAutoSaveAgentToken(token) {
     if (!token) return;
     const tokenInput = document.getElementById('set-remote-agent-token');
     if (!tokenInput) return;
-    const current = tokenInput.value.trim();
+    const current = tokenInput.dataset.fullValue || tokenInput.value.trim();
     if (current === token) return;
-    tokenInput.value = token;
+    tokenInput.dataset.fullValue = token;
+    tokenInput.value = maskSecret(token);
     saveSettings();
+}
+
+function maskSecret(value) {
+    if (!value || value.length <= 8) {
+        return '•'.repeat(value?.length || 0);
+    }
+    const start = value.slice(0, 4);
+    const end = value.slice(-4);
+    const mid = '•'.repeat(8);
+    return start + mid + end;
 }
 
 async function remoteAgentLatestRelease() {

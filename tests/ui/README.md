@@ -1,112 +1,152 @@
 # UI Test Documentation
 
-## Setup
+## Automated UI tests
+
+Install dependencies from the repository root:
 
 ```bash
-cd tests/ui
 npm install
 ```
 
-## Run Tests
+Run the Playwright suite:
 
 ```bash
-# Run all tests
 npm test
-
-# Run specific test file
-npm test capability-rendering.spec.js
-
-# Run with browser visible
+npm test tests/ui/capability-rendering.spec.js
 npm test -- --headless=false
-
-# Debug mode
 npm test -- --debug
 ```
 
-## Test Coverage
-
-- ✅ Top navigation bar rendering
-- ✅ Sidebar navigation rendering
-- ✅ Dashboard grid rendering
-- ✅ Inference metrics rendering
-- ✅ GPU table rendering
-- ✅ Chat and Logs tabs
-- ✅ Session modal structure
-- ✅ Settings modal with tabs
-- ✅ Analytics modal structure
-- ✅ Export modal structure
-- ✅ Keyboard shortcuts modal
-- ✅ User preferences modal
-- ✅ Theme system (light/dark)
-- ✅ Responsive design (desktop/laptop/mobile)
-- ✅ Remote agent mode
-- ✅ Error states
-- ✅ Keyboard shortcuts
-- ✅ Accessibility features
-- ✅ Console error detection (no fatal JS errors, no assignment to constant errors)
-
-## Manual Testing
+To exercise form-auth mode, pass extra server args through `LLAMA_MONITOR_TEST_ARGS`:
 
 ```bash
-# Start server with headless mode
-cargo run -- --headless --port 9999
-
-# Open browser
-open http://localhost:9999
-
-# Test each UI component
-# 1. Navigate through all tabs
-# 2. Test Start/Stop server
-# 3. Test Settings modal
-# 4. Test Analytics modal
-# 5. Test Export modal
-# 6. Test keyboard shortcuts (Ctrl+? or Shift+/)
-# 7. Test theme toggle
+LLAMA_MONITOR_TEST_ARGS="--form-auth admin:secret123" npm test -- tests/ui/chat/auth-shell.spec.js
 ```
 
-## Capture Harness
+The UI suite covers:
 
-Use the consolidated capture harness for repo screenshots and GIF assets:
+- Top navigation, sidebar, and tab navigation
+- Server/dashboard rendering
+- Chat, logs, and chat-side controls
+- Settings and configuration entry points
+- Remote-agent flows
+- Theme and responsive behavior
+- Console/runtime regressions
+
+## Screenshot and GIF capture harness
+
+All repo-managed screenshots and GIFs go through `tests/ui/capture.mjs`.
+
+The harness:
+
+- launches `target/release/llama-monitor` on a temporary local port
+- seeds a temporary config from local `ui-settings.json`, `presets.json`, and `gpu-env.json` when present
+- attaches to `REMOTE_SERVER` unless the scenario is explicitly no-attach
+
+If any `static/` file changed, rebuild first:
 
 ```bash
-# List available scenarios
+cargo build --release
+```
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SCREENSHOT_PORT` | `8892` | Base port to try for the spawned dashboard |
+| `REMOTE_SERVER` | `http://192.168.2.16:8001` | Remote llama.cpp server used by attach-based scenarios |
+| `SCREENSHOT_FORM_AUTH` | `admin:secret123` | Credentials used for the auth-shell still captured by the `welcome` scenario |
+
+### Listing scenarios
+
+```bash
 node tests/ui/capture.mjs --list-scenarios
+```
 
-# Core artifact screenshots
-SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario artifacts
+### Current scenarios
 
-# Chat-only artifact refresh
-SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario artifacts --chat-only
+| Scenario | Purpose |
+|----------|---------|
+| `welcome` | Welcome/setup screen plus form-auth shell without remote attach |
+| `chat` | Core chat view, telemetry overlay, and logs |
+| `guided-gen` | Context notes, suggestions, quick guide, director, surprise, explicit mode |
+| `sidebar` | Chat sidebar, message-search flyout, context menu, title filter |
+| `settings` | Settings modal, performance tab, advanced tab, user preferences, persona, models, shortcuts |
+| `panels` | Behavior, model, style, and prompt-debug surfaces |
+| `dashboard` | Server tab and GPU section |
+| `sparkline` | Sparkline validation stills and clipped metric captures |
+| `gifs` | Animated inference and GPU/system captures |
+| `smoke` | Startup smoke validation |
 
-# Guided generation screenshots
-SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario new-features
+### Common commands
 
-# Docs/review stills
-# Captures chat panels plus current modal surfaces like settings, user preferences,
-# personas, models, keyboard shortcuts, and prompt debug.
-SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario docs
+```bash
+# Welcome screen only
+node tests/ui/capture.mjs --scenario welcome
 
-# Sparkline validation captures
+# Core chat / logs / telemetry
+SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario chat
+
+# Guided-generation surfaces
+SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario guided-gen
+
+# Sidebar and search surfaces
+SCREENSHOT_PORT=8893 node tests/ui/capture.mjs --scenario sidebar
+
+# Settings and modal surfaces
+SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario settings
+
+# Chat configuration panels
+SCREENSHOT_PORT=8896 node tests/ui/capture.mjs --scenario panels
+
+# Server tab and GPU section
+SCREENSHOT_PORT=8897 node tests/ui/capture.mjs --scenario dashboard
+
+# Sparkline validation
 SCREENSHOT_PORT=8898 node tests/ui/capture.mjs --scenario sparkline
 
-# Animated GIFs
+# GIFs
 SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs
 SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
 SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --inference-only
+
+# Smoke run
+SCREENSHOT_PORT=8899 node tests/ui/capture.mjs --scenario smoke
 ```
 
-When adding screenshots for a new feature:
+### Useful options
 
-1. Add a new scenario function to `tests/ui/capture.mjs` or extend an existing one.
-2. Reuse the shared helpers there for boot, attach, screenshot tab cleanup, and capture logging.
-3. Register the scenario in the `SCENARIOS` map and add a usage example here.
+| Option | Description |
+|--------|-------------|
+| `--gpu-only` | For `gifs`, capture only GPU/system animation |
+| `--inference-only` | For `gifs`, capture only inference animation |
+| `--no-attach` | Skip remote attach for scenarios that can run locally |
+| `--close-up` | Capture extra element-level detail shots for debugging |
+| `--list-scenarios` | Print the registered scenario names |
 
-Troubleshooting:
+## Output locations
 
-- If screenshots do not match your source edits, rebuild first with `cargo build --release`.
-- If remote metrics or agent connectivity are missing, verify `REMOTE_SERVER` and the local config/token state.
-- If a capture depends on a popup or hover surface, log geometry/state from the scenario so invisible/clipped UI is obvious in CI logs.
+| Path | Purpose |
+|------|---------|
+| `docs/screenshots/` | Promoted hero assets used directly in `README.md` |
+| `docs/screenshots/artifacts/` | Raw harness output for stills, GIFs, and validation captures |
 
----
+The harness now writes its outputs to `docs/screenshots/artifacts/`. Promote selected stills or GIFs into `docs/screenshots/` only when you intentionally want a README-facing hero asset.
 
-**Last Updated**: 2026-05-10
+## Updating the harness
+
+When adding or changing screenshot coverage:
+
+1. Extend an existing scenario in `tests/ui/capture.mjs` when the surface already belongs to one.
+2. Add a new scenario only when the coverage area is clearly distinct.
+3. Register the scenario in the `SCENARIOS` map.
+4. Update the usage text in `printUsage()`.
+5. Update this README in the same change.
+
+## Troubleshooting
+
+- If captures do not reflect your latest UI edits, rebuild with `cargo build --release`.
+- If attach-based scenarios fail, confirm `REMOTE_SERVER` is reachable and returns normal llama.cpp responses.
+- If a port is busy, raise `SCREENSHOT_PORT`; the harness scans forward from that base.
+- If a popover or panel appears missing, add geometry/state logging to the scenario before skipping the capture.
+- If the scenario leaves extra test chats behind, use the shared screenshot-tab helpers in the harness instead of ad hoc tab mutations.

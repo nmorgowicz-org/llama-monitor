@@ -147,7 +147,7 @@ cargo clippy -- -D warnings
 cargo fmt
 
 # Validate JavaScript syntax (catches errors before browser load)
-./scripts/validate-js.sh
+npm run validate-js
 
 # Lint static/js with ESLint (catches XSS, no-undef, import-assign)
 npm run lint
@@ -249,20 +249,26 @@ The harness spawns a fresh `target/release/llama-monitor` binary on a temporary 
 |----------|---------|-------------|
 | `SCREENSHOT_PORT` | `8892` | Base port for the spawned monitor instance |
 | `REMOTE_SERVER` | `http://192.168.2.16:8001` | llama.cpp server to attach to |
+| `SCREENSHOT_FORM_AUTH` | `admin:secret123` | Credentials used for the auth-shell still captured by the `welcome` scenario |
 
 ### Scenarios
 
 | Scenario | What It Captures | Saves To |
 |----------|-----------------|----------|
-| `artifacts` | Welcome screen, chat with response, telemetry, logs | `docs/screenshots/` |
-| `new-features` | Context notes, suggestions, tag cloud, quick guide, director mode, explicit mode, manage categories | `docs/screenshots/` |
-| `docs` | Chat panels (behavior, response settings, style), debug modal, settings, preferences, persona modal, models, keyboard shortcuts, GPU section | `docs/screenshots/artifacts/` |
+| `welcome` | Welcome/setup screen plus form-auth shell without attach | `docs/screenshots/artifacts/` |
+| `chat` | Chat, telemetry, logs | `docs/screenshots/artifacts/` |
+| `guided-gen` | Context notes, suggestions, quick guide, director mode, surprise, explicit mode, categories | `docs/screenshots/artifacts/` |
+| `sidebar` | Chat sidebar, FTS search, context menu, title filter | `docs/screenshots/artifacts/` |
+| `settings` | Settings modal, preferences, persona, models, shortcuts | `docs/screenshots/artifacts/` |
+| `panels` | Chat config panels, style, prompt debug | `docs/screenshots/artifacts/` |
+| `dashboard` | Server tab and GPU section | `docs/screenshots/artifacts/` |
 | `sparkline` | Throughput sparkline validation stills | `docs/screenshots/artifacts/` |
-| `gifs` | Inference and GPU/system animated GIFs | `docs/screenshots/` |
+| `gifs` | Inference and GPU/system animated GIFs | `docs/screenshots/artifacts/` |
+| `smoke` | Startup smoke validation | no screenshots unless the scenario is extended |
 
 **Output directory convention:**
-- `docs/screenshots/` — hero shots used directly in `README.md` and reference docs
-- `docs/screenshots/artifacts/` — supplemental stills for reference docs and debugging; not linked from README
+- `docs/screenshots/` — promoted hero shots used directly in `README.md`
+- `docs/screenshots/artifacts/` — raw harness output for stills, GIFs, reference-doc images, and debugging
 
 ### Running Captures
 
@@ -270,16 +276,30 @@ The harness spawns a fresh `target/release/llama-monitor` binary on a temporary 
 # Rebuild release binary first if UI code changed
 cargo build --release
 
-# Core hero shots
-SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario artifacts
+# Welcome screen only
+node tests/ui/capture.mjs --scenario welcome
 
-# Guided generation and chat-input features
-SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario new-features
+# Core chat surfaces
+SCREENSHOT_PORT=8892 node tests/ui/capture.mjs --scenario chat
 
-# Settings, panels, modals, debug surfaces
-SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario docs
+# Guided-generation features
+SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario guided-gen
+
+# Sidebar and search surfaces
+SCREENSHOT_PORT=8893 node tests/ui/capture.mjs --scenario sidebar
+
+# Settings, panels, modals
+SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario settings
+SCREENSHOT_PORT=8896 node tests/ui/capture.mjs --scenario panels
+
+# Dashboard/server surfaces
+SCREENSHOT_PORT=8897 node tests/ui/capture.mjs --scenario dashboard
+
+# Validation stills
+SCREENSHOT_PORT=8898 node tests/ui/capture.mjs --scenario sparkline
 
 # Animated GIFs
+SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs
 SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
 SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --inference-only
 ```
@@ -292,7 +312,7 @@ SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --inference-only
 | Existing UI surface visually changed | Re-run the scenario that covers it; commit updated screenshots |
 | Element ID or selector changed | Update the selector in `capture.mjs` first, then re-run |
 | Screenshot referenced in docs but no longer accurate | Regenerate or remove; never leave stale screenshots in docs |
-| README hero shot is outdated | Re-run `artifacts` or `new-features` and update the file in-place |
+| README hero shot is outdated | Re-run the relevant scenario, then explicitly promote the best artifact into `docs/screenshots/` |
 
 ### Rules for Agents
 
@@ -318,6 +338,137 @@ When adding a new screenshot:
 - Pick the next available number in the relevant range
 - Use a slug that describes the UI surface, not the commit or feature branch
 - Never reuse a number that already refers to a different surface (readers bookmark images by URL)
+
+## Playwright UI E2E Tests
+
+Playwright UI tests are separate from the Puppeteer screenshot harness. They:
+
+- Run anywhere (local and CI).
+- Validate behavior and flows, not pixel-perfect visuals.
+- Are typically run near the end of a feature branch before marking a PR ready.
+
+### Running Locally
+
+From the repository root:
+
+```bash
+cd tests/ui
+npm install
+npx playwright install chromium
+npm test
+```
+
+Useful variants:
+
+- `npm test` — run all tests (headless)
+- `npm run test:headed` — run with browser visible
+- `npm run test:debug` — run in Playwright inspector
+- `npm run test:ssh` — run SSH integration tests (requires LLAMA_MONITOR_SSH_TARGET)
+- `LLAMA_MONITOR_HAS_AI=1 npm run test:ai` — include AI-dependent tests
+
+Notes:
+
+- Tests use a fresh temporary config dir via `run-server.sh`; they do not depend on your local `~/.config/llama-monitor/`.
+- The UI URL defaults to `http://127.0.0.1:7778`. You can override with `LLAMA_MONITOR_UI_URL`.
+
+### When to Run
+
+- Before adding the `ready-to-test` label to a PR.
+- After any change that affects:
+  - Chat behavior (tabs, messages, compaction, guided generation).
+  - Navigation, modals, panels, or settings flows.
+  - Remote-agent or SSH-related flows.
+- Near the end of a feature branch, as part of final validation.
+
+If a change is small and clearly isolated (e.g., internal refactor, docs-only), you may skip e2e, but you must still run the Rust checks and JS linting.
+
+### CI Behavior
+
+In CI:
+
+- Triggered by the `ui` job when:
+  - The PR has `ready-to-test` label or is from `dependabot`.
+  - One or more files under `static/**` or `tests/ui/**` changed.
+- Runs:
+  - `npm run validate-js` (syntax).
+  - `npm ci` in `tests/ui`.
+  - `npx playwright install chromium`.
+  - `npm test` against a freshly built release binary.
+- Skips:
+  - SSH integration tests unless `LLAMA_MONITOR_SSH_TARGET` is configured.
+  - AI-dependent tests: excluded from CI by default because runners have no live endpoint.
+    - If a test is valuable but requires AI, keep it in the suite as disabled/manual-only:
+      - Gate it with `LLAMA_MONITOR_HAS_AI=1`.
+      - Use `test.skip(!hasAi, 'Set LLAMA_MONITOR_HAS_AI=1 to run AI-dependent tests.')`.
+      - Never make AI-dependent tests mandatory for CI.
+
+### Maintenance Rules
+
+UI e2e tests are first-class and must be kept in sync with the application. Agents MUST treat them similarly to reference documentation: update them as part of the same PR that changes the feature.
+
+#### Must Update
+
+Update e2e tests when:
+
+- A UI element’s ID, label, or structure changes that tests rely on.
+- A flow is modified (e.g., new step, removed step, changed default behavior).
+- A feature is renamed or moved (e.g., tab name, settings section, menu item).
+- A new non-trivial feature or flow is added (see “When to Add” below).
+
+#### Must Prune
+
+Remove or adjust tests when:
+
+- A feature is removed or deprecated.
+- A test no longer reflects the intended behavior of the app.
+- A test is flaky and depends on transient or external behavior that is not stable or testable.
+
+Never leave dead tests that pass for the wrong reasons or test removed functionality.
+
+#### When to Add
+
+Add or extend e2e tests when:
+
+- The feature is:
+  - Visually or functionally significant (new modal, panel, sidebar, chat mode).
+  - Easy to regress (multi-step flows, configuration toggles, persistence).
+- The test can be:
+  - Deterministic and fast.
+  - Independent of AI responses (preferred), or:
+    - If it requires AI, keep it disabled and manual-only:
+      - Gate with `LLAMA_MONITOR_HAS_AI=1`.
+      - Use `test.skip(!hasAi, 'Set LLAMA_MONITOR_HAS_AI=1 to run AI-dependent tests.')`.
+      - Never make it mandatory for CI.
+
+Prefer:
+
+- Short, focused tests that validate key behaviors.
+- Tests that assert meaningful outcomes (e.g., “chat tab created”, “settings persisted”, “search filters results”) rather than internal implementation details.
+
+Avoid:
+
+- Tests that:
+  - Rely on exact visual layout or pixel positions (use screenshot harness for that).
+  - Depend on external AI responses without being gated and idempotent.
+  - Are so tightly coupled to internal structure that every refactor breaks them.
+  - Require AI and are not disabled via `LLAMA_MONITOR_HAS_AI=1` (CI must never fail because a runner lacks a live endpoint).
+
+If a change is minor (e.g., small UX tweak, internal refactor, non-user-facing fix) and existing tests already cover the broader area, you can skip adding a new test.
+
+### Relationship to Screenshot Harness
+
+- Playwright tests:
+  - Purpose: validate functional behavior and flows.
+  - Environment: local and CI.
+- Puppeteer screenshot harness (`capture.mjs`):
+  - Purpose: capture reference visuals for docs and design.
+  - Environment: local only, requires a release binary and (often) a remote llama.cpp server.
+
+Do not conflate them:
+
+- When a feature’s behavior changes:
+  - Update Playwright tests if it affects automated flows.
+  - Update screenshot scenarios only if visuals/docs are impacted.
 
 ## Static Asset Registration (AUTO-GENERATED)
 
@@ -367,7 +518,7 @@ Always run `npm run lint` after modifying any `.js` files under `static/js/`. Th
 - `no-undef` — catches bare references to functions no longer on `window` after ES module extraction
 - `no-unsanitized/property` and `/method` — catches `innerHTML`/`insertAdjacentHTML` with unescaped user data (XSS); `escapeHtml()` is the approved sanitizer
 
-The lint job runs automatically in CI on every PR push that touches `static/**` or `tests/ui/**`, without requiring the `ready-to-test` label. Also run `./scripts/validate-js.sh` for syntax-only validation on all JS files.
+The lint job runs automatically in CI on every PR push that touches `static/**` or `tests/ui/**`, without requiring the `ready-to-test` label. Also run `npm run validate-js` for syntax-only validation on all JS files.
 
 ## Pre-PR Validation
 
@@ -418,7 +569,7 @@ Required checks (every time):
 - `cargo clippy -- -D warnings`
 - `cargo test`
 - `cargo build --release`
-- `./scripts/validate-js.sh`
+- `npm run validate-js`
 - `npm run lint` (if `static/**` or `tests/ui/**` changed)
 
 Hard rules:
@@ -461,14 +612,27 @@ All user data persists to `~/.config/llama-monitor/`:
 
 | File | Purpose |
 |------|---------|
-| `sessions.json` | Session definitions (spawn/attach mode, ports, server configs) |
-| `presets.json` | Model presets with all llama.cpp parameters |
-| `ui-settings.json` | Web UI preferences (paths, ports, presets) |
-| `gpu-env.json` | GPU environment config (architecture, device indices) |
+| `chat.db` | SQLite chat storage for tabs, messages, full-text search index, and chat metadata |
+| `backups/` | Manual `chat_*.db`, automatic hourly `chat_auto_*.db`, and pre-restore `pre_restore_*.db` database backups |
+| `sessions.json` | Persisted session list (`Session` objects with spawn/attach mode, status, preset ID, timestamps) |
+| `presets.json` | Model presets with llama.cpp launch parameters |
+| `templates.json` | User-created or user-modified chat persona templates and explicit policy overrides |
+| `ui-settings.json` | Persisted `UiSettings` values such as paths, ports, remote-agent settings, explicit policy, guided-generation defaults, and chat input height |
+| `auth-config.json` | Persisted dashboard auth mode (`basic`, `form`, or both), username, and hashed password for the Security tab |
+| `gpu-env.json` | GPU environment overrides (`arch`, `devices`, `rocm_path`, `extra_env`) |
+| `ssh-known-hosts.json` | Trusted SSH host keys for remote-agent workflows |
+| `lhm-disabled.json` | Persisted Windows LibreHardwareMonitor disabled/enabled state |
 
 Data is persisted:
-- Sessions: every 30 seconds + on explicit save
-- Presets/Settings: on explicit save via API
+- Sessions: autosaved every 30 seconds
+- Presets: saved immediately by the preset CRUD API
+- Templates: saved immediately by the template CRUD API
+- UI settings: saved immediately by `PUT /api/settings`
+- GPU environment: saved immediately by `PUT /api/gpu-env`
+- Chat database: updated live by chat tab/message APIs; WAL checkpointed hourly
+- Chat backups: automatic hourly backup plus manual `/api/db/backup`
+
+Frontend-only browser persistence also exists in `localStorage` and is not mirrored into `~/.config/llama-monitor/`. This includes UI state such as chat style, chat font, enter-to-send, telemetry pinning, nav/sidebar collapse state, visualization preferences, last attached endpoint, last session/setup positioning, date format, update dismissals, and some guided-generation UI toggles/categories.
 
 ## Git Branch Strategy
 
@@ -478,3 +642,134 @@ Data is persisted:
 - **`hotfix/*`**: Critical bug fixes for production
 
 All branches should be deleted after merge.
+
+## Security Requirements (MANDATORY)
+
+All changes MUST follow these rules. Treat them as hard constraints, not suggestions.
+
+### Canonical Security References
+
+Use the current code and `docs/reference/` as the primary sources of truth for active behavior.
+
+- `docs/reference/tls-architecture.md` describes the current TLS / ACME / mTLS design.
+- `docs/archive/security/20260515-security-audit.md` is an audit record and remediation history.
+- `docs/archive/security/20260516-tls_acme_implementation.md` is implementation history for the TLS/ACME rollout.
+
+Archive docs are useful context, but they are not the canonical definition of current behavior unless the code and reference docs still match them.
+
+### 1) Threat model (always assume)
+
+- Local-first, but:
+  - Likely exposed to LAN.
+  - Possibly exposed via reverse proxy or port forwarding.
+- Assume:
+  - Any HTTP client on the network can send crafted requests.
+  - Chat/model responses are untrusted.
+  - Multiple llama-monitor instances may connect to the same agent or llama-server.
+
+### 2) Authentication and authorization
+
+- Any endpoint that:
+  - Starts/stops/kills processes,
+  - Restores/deletes DB backups,
+  - Changes security-sensitive config (TLS, tokens, SSH),
+  - Exposes secrets or tokens
+  must:
+  - Require an appropriate token:
+    - api-token for general operations.
+    - db-admin-token for high-impact/irreversible operations.
+  - Never rely on “same machine” or “same browser” as security.
+- New destructive or elevated endpoints:
+  - Must use db-admin-token or a dedicated elevated token.
+  - Must include a confirmation field (e.g., { "confirm": "action" }) to prevent accidental use.
+- When in doubt:
+  - Prefer stricter auth (db-admin-token) over weaker (api-token).
+
+### 3) Input validation
+
+- Treat all user input as untrusted:
+  - HTTP params, JSON fields, WebSocket messages, chat content, model outputs.
+- For file paths:
+  - Never trust raw user input.
+  - Rules:
+    - Reject "..", leading "/", leading "\\", and embedded path separators when expecting a filename.
+    - Canonicalize and confirm the final path is within an allowed root (e.g., backups/, models_dir, TLS paths).
+- For SQL:
+  - Only allow expected statement types (e.g., SELECT/PRAGMA).
+  - Enforce:
+    - Max SQL length (e.g., 16KB).
+    - Execution timeout (e.g., 10s).
+
+### 4) XSS and DOM insertion (frontend)
+
+- Never:
+  - Use innerHTML or insertAdjacentHTML with:
+    - Model responses,
+    - Chat messages,
+    - User-provided strings,
+    - Arbitrary JSON fields.
+- Must:
+  - Use textContent when inserting plain text from dynamic data.
+  - Use DOMPurify on HTML rendered from markdown or untrusted content.
+- For metrics/numbers:
+  - Use textContent instead of innerHTML unless you explicitly need HTML and have sanitized.
+
+### 5) Rate limiting and DoS resistance
+
+- For any endpoint that:
+  - Is expensive,
+  - Affects the running system (kill, restart),
+  - Touches the DB or agent
+  you must:
+  - Add:
+    - A reasonable global or per-endpoint rate limit.
+    - A cooldown between calls (e.g., 10–60 seconds).
+    - Body size limits (e.g., 256KB–2MB) where appropriate.
+- For long-running operations:
+  - Use timeouts (e.g., 10–30 seconds).
+  - Fail fast with a clear error instead of hanging.
+
+### 6) Protocol compatibility (remote agent and multi-instance)
+
+- When changing agent/dashboard protocol, metrics, or data formats:
+  - Use #[serde(default)] on all deserialized fields from the agent.
+  - Never allow a single missing field to fully disconnect the agent.
+  - Implement:
+    - A protocol_version in agent /info.
+    - A minimum enforced version in the dashboard.
+    - Degraded mode:
+      - Keep the agent connected.
+      - Log a warning.
+      - Disable only affected features instead of silently breaking.
+- Assume:
+  - Agents update slower than the dashboard.
+  - Multiple instances may coexist.
+
+### 7) Secrets handling
+
+- Never:
+  - Log full tokens, passwords, or keys.
+  - Store secrets in plaintext on disk when encryption is available.
+- Must:
+  - Use existing encryption helpers for sensitive config.
+  - Mask secrets in APIs meant for general UI consumers.
+  - Provide an “full” or “admin” endpoint for real tokens when needed, protected by auth.
+
+### 8) Security checklist (before marking PR ready)
+
+Before marking a PR ready-to-test, the agent MUST verify:
+
+- [ ] No new endpoint with elevated impact is unprotected (auth, confirm, cooldown).
+- [ ] All new file paths from user input are validated and confined to allowed roots.
+- [ ] No new innerHTML/insertAdjacentHTML with untrusted data; use textContent or DOMPurify.
+- [ ] Any new long-running or expensive operation has:
+  - A timeout,
+  - A size limit,
+  - A rate limit or cooldown where appropriate.
+- [ ] Any new agent or metrics fields use #[serde(default)] and won’t fully disconnect on missing fields.
+- [ ] Secrets are not logged or exposed in error messages.
+- [ ] Reference docs are updated to match new auth, tokens, and constraints.
+
+If any of these are unclear or not fully satisfied, the agent MUST:
+- Add the missing protections,
+- Or explicitly call out the gap and rationale in the PR description.

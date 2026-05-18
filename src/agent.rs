@@ -52,6 +52,90 @@ fn shell_quote_path_cmd(path: &str) -> String {
     format!("\"{}\"", path.replace('"', "\"^\""))
 }
 
+/// Validates a user-supplied shell command for remote-agent autostart/start.
+///
+/// Enforces a strict allowlist:
+/// - Must start with a plausible llama-monitor binary path.
+/// - Only known, safe flags are permitted.
+/// - No shell metacharacters or arbitrary tokens.
+///
+/// This prevents command injection when the command is sent to
+/// `remote_ssh::exec` (which runs via `channel.exec()` on the remote shell).
+pub(crate) fn validate_remote_command(cmd: &str) -> bool {
+    let trimmed = cmd.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    // Shell metacharacters that could be used to chain or inject commands.
+    // Note: spaces are allowed (for flags), but these are not.
+    let dangerous = ";|&$`(){}[]!#<>?*~\n\r\\";
+    if trimmed.chars().any(|c| dangerous.contains(c)) {
+        return false;
+    }
+
+    // Split into tokens by spaces; enforce structure.
+    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+    if tokens.is_empty() {
+        return false;
+    }
+
+    // First token must be a plausible llama-monitor binary path.
+    let first = tokens[0];
+    let stem = first
+        .split('/')
+        .next_back()
+        .unwrap_or(first)
+        .split('\\')
+        .next_back()
+        .unwrap_or(first);
+    if !(stem == "llama-monitor" || stem == "llama-monitor.exe") {
+        return false;
+    }
+
+    // Allowed flags (prefix-based) and whether they take an argument.
+    let allowed_flags = [
+        "--agent",
+        "--agent-host",
+        "--agent-port",
+        "--models-dir",
+        "--version",
+        "--help",
+    ];
+
+    let mut i = 1usize;
+    while i < tokens.len() {
+        let tok = tokens[i];
+        if tok.starts_with("--") {
+            if allowed_flags.iter().any(|f| tok.starts_with(f)) {
+                // Flags that take a value are allowed if followed by a simple value token.
+                if ["--agent-host", "--agent-port", "--models-dir"]
+                    .iter()
+                    .any(|f| tok.starts_with(f))
+                {
+                    i += 1;
+                    if i >= tokens.len() {
+                        return false;
+                    }
+                    // Value token must be simple (no shell chars)
+                    if tokens[i].chars().any(|c| dangerous.contains(c)) {
+                        return false;
+                    }
+                }
+                i += 1;
+            } else {
+                // Unknown flag → reject.
+                return false;
+            }
+        } else {
+            // Positional / unknown token → reject.
+            return false;
+        }
+    }
+
+    true
+}
+
 /// Validates an install path to ensure it does not contain shell metacharacters
 /// or target suspicious directories.
 ///
@@ -122,6 +206,52 @@ const GITHUB_LATEST_RELEASE_URL: &str =
 pub struct AgentMetrics {
     pub system: SystemMetrics,
     pub gpu: BTreeMap<String, GpuMetrics>,
+}
+
+const AGENT_PROTOCOL_VERSION: &str = "1.0.0";
+
+/// Load all allowed agent tokens from agent-tokens.json (if present).
+fn load_agent_tokens(config_dir: &std::path::Path) -> Vec<String> {
+    let path = config_dir.join("agent-tokens.json");
+    if !path.exists() {
+        return Vec::new();
+    }
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let Ok(file) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return Vec::new();
+    };
+    file.get("tokens")
+        .and_then(|t| t.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Write agent-tokens.json (atomic).
+fn save_agent_tokens(config_dir: &std::path::Path, tokens: &[String]) {
+    let path = config_dir.join("agent-tokens.json");
+    let file = serde_json::json!({ "tokens": tokens });
+    let Ok(json) = serde_json::to_string_pretty(&file) else {
+        return;
+    };
+    let tmp = path.with_extension("json.tmp");
+    let _ = std::fs::write(&tmp, json);
+    let _ = std::fs::rename(&tmp, &path);
+}
+
+/// Ensure token exists in agent-tokens.json; return the full token list.
+fn ensure_token_in_file(config_dir: &std::path::Path, token: &str) -> Vec<String> {
+    let mut tokens = load_agent_tokens(config_dir);
+    if !tokens.iter().any(|t| t == token) {
+        tokens.push(token.to_string());
+    }
+    save_agent_tokens(config_dir, &tokens);
+    tokens
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -202,13 +332,15 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
         .parse::<SocketAddr>()
         .context("invalid agent bind address")?;
 
+    let agent_config_dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("llama-monitor");
+
     // Use explicit token, or auto-generate and persist one
     let token = match app_config.agent_token.clone() {
         Some(t) => t,
         None => {
-            let config_dir = dirs::config_dir()
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("llama-monitor");
+            let config_dir = agent_config_dir.clone();
             let token_file = config_dir.join("agent-token");
 
             // Try to read existing token from disk
@@ -243,7 +375,14 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
                 // Persist it
                 let _ = std::fs::create_dir_all(&config_dir);
                 let _ = std::fs::write(&token_file, &new_token);
-                eprintln!("[agent] Auto-generated token: {new_token}");
+                crate::config::harden_file_permissions(&token_file);
+                // Log only a redacted prefix to avoid exposing the full token.
+                let redacted = if new_token.len() > 8 {
+                    format!("{}••••••••", &new_token[..4])
+                } else {
+                    "••••••••".to_string()
+                };
+                eprintln!("[agent] Auto-generated token: {redacted}");
                 eprintln!("[agent] Token saved to {}", token_file.display());
                 new_token
             })
@@ -255,6 +394,9 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     // the SYSTEM profile, inaccessible to the SSH user).
     // The temp file is cleaned up after a delay to give the main app time to read it.
     let _ = write_token_to_temp_file(&token);
+
+    // Ensure primary token is in agent-tokens.json (for multi-client support).
+    let _ = ensure_token_in_file(&agent_config_dir, &token);
 
     let backend = gpu::detect_backend(&app_config.gpu_backend);
     let gpu_metrics: Arc<Mutex<BTreeMap<String, GpuMetrics>>> =
@@ -302,25 +444,42 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     }
 
     let agent_info_token = token.clone(); // for authenticated /agent/info endpoint
-    let auth =
+
+    // Build token set: primary_token + all from agent-tokens.json
+    let agent_config_dir = dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("llama-monitor");
+    let extra_tokens = load_agent_tokens(&agent_config_dir);
+    let mut allowed_tokens: Vec<String> = Vec::new();
+    allowed_tokens.push(token.clone());
+    for t in extra_tokens {
+        if !allowed_tokens.contains(&t) {
+            allowed_tokens.push(t);
+        }
+    }
+    let allowed_tokens = std::sync::Arc::new(allowed_tokens);
+
+    let auth = {
+        let allowed = allowed_tokens.clone();
         warp::any()
             .and(warp::header::headers_cloned())
             .and_then(move |headers: HeaderMap| {
-                let token = token.clone();
+                let allowed = allowed.clone();
                 async move {
-                    // Token is always present (explicit or auto-generated)
-                    let valid = headers
+                    let bearer = headers
                         .get("authorization")
                         .and_then(|value| value.to_str().ok())
-                        .is_some_and(|value| value == format!("Bearer {token}"));
+                        .and_then(|v| v.strip_prefix("Bearer "));
 
-                    if !valid {
-                        return Err(warp::reject::custom(AgentAuthError));
+                    if let Some(tok) = bearer
+                        && allowed.iter().any(|t| t == tok)
+                    {
+                        return Ok::<(), warp::Rejection>(());
                     }
-
-                    Ok::<(), warp::Rejection>(())
+                    Err(warp::reject::custom(AgentAuthError))
                 }
-            });
+            })
+    };
 
     let health = warp::path("health")
         .and(warp::get())
@@ -335,6 +494,7 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
                 warp::reply::json(&serde_json::json!({
                     "ok": true,
                     "version": env!("CARGO_PKG_VERSION"),
+                    "protocol_version": AGENT_PROTOCOL_VERSION,
                     "mode": "agent",
                     "pid": std::process::id(),
                     "executable": std::env::current_exe()
@@ -359,6 +519,7 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
                 warp::reply::json(&serde_json::json!({
                     "ok": true,
                     "version": env!("CARGO_PKG_VERSION"),
+                    "protocol_version": AGENT_PROTOCOL_VERSION,
                     "mode": "agent",
                     "pid": std::process::id(),
                     "executable": std::env::current_exe()
@@ -418,12 +579,118 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     if app_config.agent_token.is_none() {
         eprintln!("[agent] Using auto-generated token (persisted to config dir)");
     }
-    println!("[agent] Remote metrics agent listening on https://{bind_addr}");
 
-    // mTLS: cert infrastructure in place (certs.rs), CA shipped to remote agents
-    // Dashboard HTTP client accepts self-signed certs (danger_accept_invalid_certs)
-    warp::serve(routes).run(bind_addr).await;
-    Ok(())
+    // mTLS: load all CAs (legacy ca.pem + cas/ directory) and enforce client auth.
+    let mut ca_pems: Vec<String> = Vec::new();
+
+    // Legacy single CA (for backward compatibility)
+    if let Some(ca) = crate::certs::Cert::load(
+        &crate::certs::certs_dir().join("ca.pem"),
+        &crate::certs::certs_dir().join("ca.key"),
+    ) {
+        ca_pems.push(ca.pem);
+    }
+
+    // Multi-CA directory
+    let cas_dir = crate::certs::agent_cas_dir();
+    if let Ok(entries) = std::fs::read_dir(&cas_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("pem")
+                && let Ok(pem) = std::fs::read_to_string(&path)
+            {
+                ca_pems.push(pem);
+            }
+        }
+    }
+
+    if ca_pems.is_empty() {
+        eprintln!("[agent] No CA found for mTLS; agent cannot start without trust anchors");
+        return Err(anyhow::anyhow!("agent mTLS: no CA found"));
+    }
+
+    eprintln!(
+        "[info] Agent mTLS: loaded {} CA(s) into trust store",
+        ca_pems.len()
+    );
+
+    let agent_server_cert = crate::certs::ensure_agent_server_cert(vec![
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
+    ]);
+
+    let tls_config = match crate::certs::build_agent_tls_config(ca_pems, agent_server_cert) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("[agent] Failed to build mTLS config: {e}; agent cannot start without mTLS");
+            return Err(anyhow::anyhow!("agent mTLS config build failed: {e}"));
+        }
+    };
+
+    let tls_acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(tls_config));
+    let listener = match tokio::net::TcpListener::bind(bind_addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[agent] Failed to bind TLS listener: {e}");
+            return Err(anyhow::anyhow!("Failed to bind TLS listener: {e}"));
+        }
+    };
+
+    println!("[agent] Remote metrics agent listening on https://{bind_addr} (mTLS enforced)");
+
+    loop {
+        let (stream, peer) = match listener.accept().await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[agent] accept error: {e}");
+                continue;
+            }
+        };
+
+        let acceptor = tls_acceptor.clone();
+        let routes_clone = routes.clone();
+
+        tokio::spawn(async move {
+            let tls_stream = match acceptor.accept(stream).await {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[agent] TLS handshake error from {peer}: {e}");
+                    return;
+                }
+            };
+
+            // Log client cert subject if present (mTLS)
+            {
+                let (_, conn) = tls_stream.get_ref();
+                let client_certs = conn.peer_certificates();
+                if let Some(certs) = client_certs
+                    && !certs.is_empty()
+                {
+                    let subject = crate::certs::extract_cert_subject_pem(&certs[0]);
+                    eprintln!(
+                        "[info] Agent mTLS connection accepted from {peer}, client subject: {subject}"
+                    );
+                } else {
+                    eprintln!(
+                        "[agent] connection from {peer} without client cert; mTLS will reject"
+                    );
+                }
+            }
+
+            let svc = warp::service(routes_clone);
+            let svc = hyper_util::service::TowerToHyperService::new(svc);
+            let io = hyper_util::rt::TokioIo::new(tls_stream);
+
+            if let Err(e) =
+                hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                    .http1()
+                    .serve_connection_with_upgrades(io, svc)
+                    .await
+            {
+                eprintln!("[agent] connection error from {peer}: {e}");
+            }
+        });
+    }
 }
 
 pub async fn latest_release_info() -> Result<LatestReleaseInfo> {
@@ -636,13 +903,60 @@ fn remote_release_asset_error(
 }
 
 pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
-    // Build HTTP client with TLS for mTLS (accept self-signed certs)
-    let client = match reqwest::Client::builder()
+    // Build HTTP client with mTLS:
+    // - Trust the shared CA as root for agent server certs.
+    // - Present an agent-client cert so the agent can verify our role.
+    let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
-        .pool_max_idle_per_host(0)
-        .danger_accept_invalid_certs(true) // Self-signed certs
-        .build()
-    {
+        .pool_max_idle_per_host(0);
+
+    // Load CA as root store
+    let ca_loaded = if let Some(ca) = crate::certs::Cert::load(
+        &crate::certs::certs_dir().join("ca.pem"),
+        &crate::certs::certs_dir().join("ca.key"),
+    ) {
+        match reqwest::Certificate::from_pem(ca.pem.as_bytes()) {
+            Ok(cert) => {
+                builder = builder.add_root_certificate(cert);
+                true
+            }
+            Err(e) => {
+                eprintln!(
+                    "[agent] Failed to load CA cert: {e}; falling back to danger_accept_invalid_certs"
+                );
+                builder = builder.danger_accept_invalid_certs(true);
+                false
+            }
+        }
+    } else {
+        eprintln!("[agent] No CA found; using danger_accept_invalid_certs for agent communication");
+        builder = builder.danger_accept_invalid_certs(true);
+        false
+    };
+
+    // Add client cert for mTLS (agent-client role)
+    if let Some(client_cert) = crate::certs::Cert::load(
+        &crate::certs::certs_dir().join("agent-client.pem"),
+        &crate::certs::certs_dir().join("agent-client.key"),
+    ) {
+        let combined_pem = format!("{}{}", client_cert.pem, client_cert.key);
+        match reqwest::Identity::from_pem(combined_pem.as_bytes()) {
+            Ok(id) => {
+                builder = builder.identity(id);
+            }
+            Err(e) => {
+                eprintln!(
+                    "[agent] Failed to load agent-client identity: {e}; continuing without mTLS client cert"
+                );
+            }
+        }
+    } else if ca_loaded {
+        eprintln!(
+            "[agent] No agent-client cert found; agent mTLS may reject dashboard connections"
+        );
+    }
+
+    let client = match builder.build() {
         Ok(client) => client,
         Err(e) => {
             eprintln!("[agent] Failed to build HTTP client: {e}");
@@ -685,7 +999,7 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                         state.refresh_capability_state();
                         autostart_attempted = false;
 
-                        // Fetch agent version from /info endpoint
+                        // Fetch agent version and protocol_version from /info endpoint
                         let info_url = format!("{}/info", url.trim_end_matches('/'));
                         let mut info_request = client.get(&info_url);
                         if let Some(t) = &token {
@@ -695,6 +1009,7 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                             Ok(info_resp) if info_resp.status().is_success() => {
                                 match info_resp.json::<serde_json::Value>().await {
                                     Ok(json) => {
+                                        // Handle version
                                         if let Some(ver) =
                                             json.get("version").and_then(|v| v.as_str())
                                         {
@@ -739,6 +1054,39 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                                                 }
                                             }
                                         }
+
+                                        // Handle protocol_version: enforce minimum with graceful degradation
+                                        let agent_proto = json
+                                            .get("protocol_version")
+                                            .and_then(|v| v.as_str())
+                                            .map(String::from);
+
+                                        let proto_too_old = match &agent_proto {
+                                            Some(v) if v.as_str() < "1.0.0" => true,
+                                            Some(_) => false,
+                                            None => {
+                                                // Unknown protocol → treat as potentially old; enable degraded mode
+                                                true
+                                            }
+                                        };
+
+                                        {
+                                            let mut pv =
+                                                state.remote_agent_protocol_version.lock().unwrap();
+                                            *pv = agent_proto.clone();
+                                        }
+                                        {
+                                            let mut flag =
+                                                state.remote_agent_protocol_too_old.lock().unwrap();
+                                            *flag = proto_too_old;
+                                        }
+
+                                        if proto_too_old {
+                                            eprintln!(
+                                                "[agent] Agent protocol version ({:?}) is below minimum (1.0.0); running in degraded compatibility mode",
+                                                agent_proto.as_deref().unwrap_or("unknown")
+                                            );
+                                        }
                                     }
                                     Err(e) => {
                                         eprintln!("[agent] Failed to parse /info response: {e}");
@@ -757,8 +1105,10 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                         }
                     }
                     Err(e) => {
-                        mark_disconnected(&state);
-                        eprintln!("[agent] Failed to parse remote metrics: {e}");
+                        // Don’t fully disconnect on a single parse error if HTTP succeeded.
+                        // Treat as degraded instead of disconnected to preserve partial metrics.
+                        eprintln!("[agent] Metrics parse failed (degraded mode): {e}");
+                        // Keep connected=true but allow degraded mode flags to inform the frontend.
                     }
                 },
                 Ok(resp) => {
@@ -877,8 +1227,13 @@ async fn maybe_autostart_remote_agent(
     ]) {
         if remote_os == RemoteOs::Windows && command.contains('~') {
             default_command
-        } else {
+        } else if validate_remote_command(&command) {
             command
+        } else {
+            eprintln!(
+                "[agent] Autostart: remote_agent_ssh_command failed validation; using default command"
+            );
+            default_command
         }
     } else {
         default_command
@@ -1547,11 +1902,35 @@ pub mod install {
             return;
         };
         let install_dir = &install_path[..dir_end];
+        let cas_dir = format!("{}{}cas", install_dir, sep);
 
-        // Ensure the CA cert exists locally
+        // Ensure cas/ directory exists on the remote
+        let mkdir_cmd = if os == RemoteOs::Windows {
+            format!(
+                "cmd.exe /C if not exist \"{}\" mkdir \"{}\"",
+                cas_dir, cas_dir
+            )
+        } else {
+            format!("mkdir -p '{}'", cas_dir)
+        };
+        let _ = remote_ssh::exec(connection.clone(), mkdir_cmd).await;
+
+        // Stable instance ID: hash of this instance's CA public key.
+        let instance_id = {
+            let ca = crate::certs::ensure_ca();
+            use sha1::Digest;
+            let mut ctx = sha1::Sha1::new();
+            ctx.update(ca.pem.as_bytes());
+            let hash = ctx.finalize();
+            let mut id = String::with_capacity(16);
+            for b in hash.as_slice().iter().take(8) {
+                id.push_str(&format!("{:02x}", b));
+            }
+            id
+        };
+
         let ca = crate::certs::ensure_ca();
-
-        let remote_ca_path = format!("{}{}ca.pem", install_dir, sep);
+        let remote_ca_path = format!("{}{}{}.pem", cas_dir, sep, instance_id);
 
         // Write CA cert to temp file and copy to remote
         let local_tmp = tempfile::NamedTempFile::new_in(std::env::temp_dir())
@@ -1562,10 +1941,11 @@ pub mod install {
             let _ = remote_ssh::copy_to_remote(
                 connection.clone(),
                 local_tmp.to_string_lossy().to_string(),
-                remote_ca_path,
+                remote_ca_path.clone(),
                 0o644,
             )
             .await;
+            eprintln!("[info] Installed CA as {} on remote agent", remote_ca_path);
         }
         let _ = std::fs::remove_file(&local_tmp);
     }
@@ -2613,7 +2993,7 @@ Start-Sleep -Seconds 2\""
             .map_err(|e| anyhow::anyhow!("Cannot write update helper to temp dir: {e}"))?;
 
         std::process::Command::new("cmd.exe")
-            .args(["/C", &batch_path.to_string_lossy().into_owned()])
+            .args(["/C", &batch_path.to_string_lossy()])
             .creation_flags(DETACHED_PROCESS)
             .spawn()
             .map_err(|e| anyhow::anyhow!("Cannot launch update helper: {e}"))?;

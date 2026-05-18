@@ -2091,7 +2091,37 @@ document.addEventListener('DOMContentLoaded', () => {
     const copyPayloadBtn = document.getElementById('debug-copy-payload-btn');
     const hidePayloadBtn = document.getElementById('debug-hide-payload-btn');
 
-    btn?.addEventListener('click', openDebugModal);
+    // Dropdown toggle
+    const dropdownBtn = document.getElementById('btn-debug-dropdown');
+    const dropdownMenu = document.getElementById('debug-dropdown-menu');
+
+    dropdownBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdownMenu?.classList.toggle('open');
+    });
+
+    document.addEventListener('click', (e) => {
+        if (dropdownMenu && !dropdownBtn?.contains(e.target)) {
+            dropdownMenu.classList.remove('open');
+        }
+    });
+
+    // Dropdown menu item handlers
+    document.getElementById('btn-debug-prompt')?.addEventListener('click', () => {
+        dropdownMenu?.classList.remove('open');
+        openDebugModal();
+    });
+
+    document.getElementById('btn-db-admin')?.addEventListener('click', () => {
+        dropdownMenu?.classList.remove('open');
+        openDbAdminModal();
+    });
+
+    btn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdownMenu?.classList.remove('open');
+        openDebugModal();
+    });
     closeBtn?.addEventListener('click', closeDebugModal);
     overlay?.addEventListener('click', (e) => {
         if (e.target === overlay) closeDebugModal();
@@ -2101,6 +2131,13 @@ document.addEventListener('DOMContentLoaded', () => {
             closeDebugModal();
         }
     });
+
+    function openDbAdminModal() {
+        const dbOverlay = document.getElementById('db-admin-modal');
+        if (dbOverlay) {
+            dbOverlay.classList.add('active');
+        }
+    }
 
     const onSliceSelect = (e) => {
         const target = e.target.closest('[data-debug-slice]');

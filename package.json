@@ -1,10 +1,12 @@
 {
   "type": "module",
   "scripts": {
-    "lint": "eslint static/js/"
+    "lint": "eslint static/js/",
+    "validate-js": "node scripts/validate-js.mjs"
   },
   "devDependencies": {
-    "eslint": "^10.3.0",
+    "eslint": "^9.0.0",
+    "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-no-unsanitized": "^4.1.5",
     "globals": "^17.6.0",
     "puppeteer": "^24.42.0"

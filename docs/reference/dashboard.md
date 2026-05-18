@@ -1,283 +1,146 @@
 # Dashboard Capabilities & Metrics
 
-Llama Monitor provides real-time visibility into your inference stack through a nav cockpit, inference metrics cards, and GPU/system hardware monitoring.
+Llama Monitor's monitoring surface is split between a live top-nav cockpit, the Server tab, and host telemetry cards that light up when the app can read local hardware or reach a remote agent.
 
-## Nav Cockpit
+## Monitoring Surfaces
 
-The nav cockpit replaces the old search bar with a live metrics strip visible on every tab:
+### Top-nav cockpit
+
+The compact strip in the top navigation shows the current endpoint state without leaving the active tab:
 
 | Chip | Description |
 |------|-------------|
-| **State** | Current server state: idle, attach, prompting, generating |
-| **Throughput** | Prompt processing speed (P) and generation speed (G) in tokens/sec |
-| **Context** | Highest context pressure percentage across all active chat tabs |
-| **GPU** | Temperature of the hottest GPU in the system |
-| **Sparkline** | Mini throughput chart showing recent generation speed over time |
+| **State** | Current llama.cpp activity such as idle, attach, prompting, or generating |
+| **Throughput** | Prompt (`P`) and generation (`G`) speed in tokens/sec |
+| **Context** | Highest context-pressure percentage across open chat tabs |
+| **GPU** | Temperature of the hottest available GPU |
+| **Sparkline** | Recent generation-speed history |
 
-Click the cockpit to navigate to the Server tab for full metrics. On narrow viewports, GPU and sparkline hide at 980px and context hides at 820px.
+Clicking the cockpit jumps to the Server tab. On narrower layouts the GPU and sparkline chips collapse first, then the context chip.
 
-## Inference Metrics
+### Server tab
 
-The Server tab displays inference metrics sourced from llama.cpp's Prometheus `/metrics` endpoint and `/slots` JSON:
+The Server tab is the main monitoring dashboard. It combines llama.cpp inference data from `/metrics` and `/slots` with host telemetry when available.
 
-### Throughput Card
-- Prompt processing speed (tokens/sec) with live sparkline
-- Generation speed (tokens/sec) with live sparkline
-- Prompt/generation ratio bar showing relative speeds
-- Activity timeline showing recent task history
-
-### Generation Card
-- Current output token count and remaining context
-- Prompt ingest and output generation progress stages
-- Live generation estimate based on recent throughput samples
-- Task metadata: task ID, max context, tokens remaining
-
-### Context Window Card
-Two views toggle between gauge and fleet:
-
-**Gauge view** — Single large ring showing context pressure for the most loaded chat tab.
-
-**Fleet view** — Per-chat context usage bars showing:
-- Tab name and context percentage
-- Stale chat indicators (tabs with no recent activity)
-- Total context window size from the active server
-- Falls back to chat-derived estimates when the server doesn't expose per-slot token counts
-
-### Slot Activity Card
-Per-slot status showing:
-- Slot state: idle, loading, processing
-- Current task output token count
-- Context tokens in use
-- Slot utilization sparkline
-
-### Request Activity Card
-Recent task history with:
-- Request count and average duration
-- Completion markers for finished tasks
-- Activity timeline with 5-minute rolling window
-
-### Model & Decoding Card
-- Model name, parameter count, and quantization
-- Speculative decoding state (ngram-mod, draft model)
-- Sampler chain configuration
+| Card | What it shows |
+|------|----------------|
+| **Throughput** | Prompt and generation speeds, ratio bar, and recent activity |
+| **Generation** | Current output count, remaining context, and live generation estimate |
+| **Context Window** | Gauge or fleet view of context pressure across chat tabs |
+| **Slot Activity** | Per-slot state, output tokens, context usage, and slot utilization |
+| **Request Activity** | Recent request timeline, counts, and durations |
+| **Model & Decoding** | Active model name, quantization, sampler chain, and speculative decoding details |
 
 ![Server Tab](../screenshots/07-server-tab.png)
 
-## GPU & System Metrics
+## Host Telemetry
 
-Local sessions show real-time hardware monitoring. Remote sessions require a remote agent.
+Host metrics are available in two ways:
 
-### GPU Metrics
-| Metric | Source |
-|--------|--------|
-| GPU utilization (%) | `rocm-smi`, `nvidia-smi`, `mactop` |
-| Power draw (W) | `rocm-smi`, `nvidia-smi` |
-| VRAM usage (GB) | `rocm-smi`, `nvidia-smi`, `mactop` |
-| Core clock (GHz) | `rocm-smi`, `nvidia-smi` |
-| Memory clock (GHz) | `rocm-smi`, `nvidia-smi` |
-| Temperature (°C) | `rocm-smi`, `nvidia-smi`, `mactop` |
+- **Local session**: the dashboard reads GPU/system data directly from the same machine.
+- **Remote session with agent**: the remote agent reports GPU/system/process telemetry back to the dashboard.
+- **Remote session without agent**: you still get inference metrics, but GPU/system cards stay limited.
 
-Each metric displays a live sparkline, current value, and peak indicator.
+### GPU metrics
+
+| Metric | Local sources |
+|--------|---------------|
+| Utilization | `rocm-smi`, `nvidia-smi`, `mactop` |
+| Power draw | `rocm-smi`, `nvidia-smi` |
+| VRAM usage | `rocm-smi`, `nvidia-smi`, `mactop` |
+| Core clock | `rocm-smi`, `nvidia-smi` |
+| Memory clock | `rocm-smi`, `nvidia-smi` |
+| Temperature | `rocm-smi`, `nvidia-smi`, `mactop` |
+
+Each metric shows a current value plus a sparkline or alternate visualization where supported.
 
 ![GPU & System Metrics](../screenshots/08-gpu-section.png)
 
-### System Metrics
+### System metrics
+
 | Metric | Source |
 |--------|--------|
-| CPU model and load (%) | sysinfo crate |
-| CPU temperature (°C) | Linux thermal zones, `mactop`, or `sensor_bridge.exe` on Windows |
-| CPU clock speed (GHz) | Linux `/proc/cpuinfo`, `mactop` |
-| RAM usage (GB) | sysinfo crate |
-| Motherboard model | Linux `dmidecode`, Apple system profiler |
+| CPU load and model | `sysinfo` |
+| CPU temperature | Linux thermal zones, `mactop`, or `sensor_bridge.exe` on Windows |
+| CPU clock | `/proc/cpuinfo` on Linux, `mactop` on macOS |
+| RAM usage | `sysinfo` |
+| Motherboard / platform info | platform-specific host inspection |
 
-## Capability-Aware UI
+## Capability states
 
-The top nav status pill reflects the live telemetry level:
+The UI exposes telemetry availability directly:
 
-| State | Color | Meaning |
-|-------|-------|---------|
-| **Full telemetry** | Green | All metrics available (local session or remote with agent) |
-| **Inference only** | Yellow | Only llama.cpp metrics (remote attach without agent) |
-| **Limited** | Orange | Partial metrics (agent connected but some sensors unavailable) |
-| **Error** | Red | Connection lost or metrics endpoint unreachable |
+| State | Meaning |
+|-------|---------|
+| **Full telemetry** | Inference metrics plus host GPU/system data |
+| **Inference only** | Connected to llama.cpp, but no host telemetry source is available |
+| **Limited** | Partial host telemetry is available but some sensors are missing |
+| **Error** | The dashboard cannot reach the required endpoint |
 
-## Refresh Rate
+This matters most for remote endpoints: attaching to a remote llama.cpp server alone does not grant GPU or system metrics.
 
-Dashboard WebSocket refresh rate is configurable from 200ms to 10s via Settings > Performance. The default is 500ms. Network quality detection can auto-adjust the interval based on observed connection conditions.
+## Refresh rate
 
-## Settings Modal
+The dashboard pushes live data over WebSocket. The backend clamps the interval to **200 ms minimum** and **10 s maximum**; the default is **500 ms**.
 
-Open with Ctrl+, or the settings button in the header. Changes are auto-saved (debounced 400ms). Ctrl+S forces a save, Escape closes the modal. A dirty indicator appears on the header when unsaved changes exist.
+In the UI, go to **Settings → Performance → Dashboard Refresh Rate**. The current presets are:
 
-### Session Tab
+| UI choice | Effective interval |
+|-----------|--------------------|
+| **Auto** | Adapts to network conditions using the browser Network Information API when available |
+| **Normal** | 500 ms |
+| **Balanced** | 1 s |
+| **Battery Saver** | 2 s |
+| **Slow Connection** | 5 s |
 
-| Setting | Description |
-|---------|-------------|
-| **Endpoint URL** | Remote llama.cpp server address |
-| **Port** | Local server port |
-| **Server path** | Path to `llama-server` binary for spawn mode |
-| **Working directory** | CWD for the spawned server process |
-| **Model preset** | Preset configuration with default parameters |
+`Auto` currently resolves to 500 ms, 1 s, 2 s, or 5 s depending on detected connection quality and Data Saver mode. If the browser cannot report network quality, it falls back to 500 ms.
 
-### GPU Tab
+## Settings vs. Configuration
 
-| Setting | Description |
-|---------|-------------|
-| **Device indices** | Comma-separated GPU device IDs to monitor |
-| **Architecture** | GPU architecture: `auto`, `nvidia`, `amd`, `apple` |
+The UI now separates **user-facing settings** from **runtime configuration**:
 
-### Models Tab
+### Settings modal
 
-Manage model presets — named configurations with default parameters, model paths, and quantization settings.
+Open **Settings** from the header or with `Ctrl+,`.
 
-### Appearance Tab
+This modal owns:
 
-| Setting | Description |
-|---------|-------------|
-| **Theme** | `auto` (system), `light`, `dark` |
-| **Date format** | Timestamp format for chat messages |
-| **Context card view** | Toggle between gauge (single ring) and fleet (per-tab bars) |
+- Guided-generation toggles and prompt defaults under **Chat**
+- Dashboard refresh rate under **Performance**
+- The handoff to runtime controls under **Advanced → Open Runtime Configuration**
 
-### Performance Tab
+Do not rely on the Settings tab labels as the place to configure process launch paths or remote-agent connectivity. Those runtime controls live in the separate Configuration modal.
 
-| Setting | Description |
-|---------|-------------|
-| **WS push interval** | Manual interval (200ms–10s) or `auto` (network-adaptive) |
+### Configuration modal
 
-### Advanced Tab
+Open **Configuration** from **Settings → Advanced → Open Runtime Configuration**.
 
-| Setting | Description |
-|---------|-------------|
-| **Remote agent URL** | Override agent polling URL |
-| **Agent token** | Bearer token for agent authentication |
-| **SSH target** | `user@host` for SSH-based agent management |
-| **SSH command** | Custom remote command to start the agent |
-| **Explicit mode** | 3-level explicit mode: Off (🔒), Unlocked (🔓, level 1), Unrestricted (🔥, level 2). Each level applies different persona-specific policies. |
+This modal owns the runtime-specific controls:
 
-## User Preferences
+- **Local llama-server executable**: executable path and optional process working directory
+- **GPU Environment**: local ROCm architecture, local GPU device list, local ROCm path
+- **Remote Agent**: agent URL/token, SSH target, optional SSH autostart, guided SSH setup, install/start/update/remove actions
 
-Accessible via the user menu button. Preferences persist in `localStorage` and affect the entire UI:
+The endpoint you attach to is still chosen from the main session/setup flow. Configuration does not replace the attach/spawn session controls.
 
-| Preference | Options |
-|------------|---------|
-| **Theme mode** | `auto`, `light`, `dark` |
-| **Font scale** | Global font size multiplier |
-| **Spacing scale** | Adjusts `--gap-md` CSS variable for tighter/wider layout |
-| **Chat style** | `rounded`, `compact`, `minimal`, `bubbly` |
-| **Enter-to-send** | Toggle Enter key behavior |
+## Visualization options
 
-## Chat Input Buttons
+Many hardware cards offer alternate visualizations from their gear menu, such as bars, rings, sparklines, or chip displays. These preferences are UI-level choices and persist locally for the dashboard.
 
-The chat input bar includes toggle buttons for guided generation features:
+## Keyboard shortcuts
 
-| Button | Description |
-|--------|-------------|
-| **Context notes** | Opens sidebar with inline notes for context management |
-| **Suggestions** | Dropdown with category chips for quick suggestion insertion |
-| **Quick guide** | Inline instruction panel for guided prompts |
-| **Explicit mode** | 3-state toggle (🔒 Off, 🔓 Unlocked, 🔥 Unrestricted) |
-
-![Chat Input Buttons](../screenshots/11-chat-input-buttons.png)
-
-## Guided Generation
-
-The guided generation features help users craft better prompts and manage context:
-
-- **Context notes** — Sidebar panel for adding structured notes that feed into the conversation context
-- **Suggestions** — Category-based suggestion chips that auto-complete common prompt patterns
-- **Quick guide** — Inline instruction panel with persona-specific guidance for generation
-
-See [Chat Reference](chat.md) for detailed usage of these features.
-
-## Visualization Switchers
-
-Each GPU and System metrics card has a gear button to switch its visualization style:
-
-| Metric | Available Views |
-|--------|-----------------|
-| **GPU load** | Bar, ring, sparkline, stacked bar |
-| **GPU power** | Bar, ring, sparkline |
-| **GPU VRAM** | Bar, ring, sparkline |
-| **GPU clocks** | Chips |
-| **CPU load** | Bar, ring, sparkline |
-| **RAM** | Bar, ring, sparkline |
-| **CPU clock** | Chip |
-
-Selections persist in `localStorage` (`llama-monitor-gpu-viz`, `llama-monitor-system-viz`).
-
-## Keyboard Shortcuts
-
-Open the shortcuts modal with Ctrl+/:
+Open the shortcuts modal with `Ctrl+/`.
 
 | Shortcut | Action |
 |----------|--------|
 | `Ctrl+1` | Server tab |
 | `Ctrl+2` | Chat tab |
 | `Ctrl+3` | Logs tab |
-| `Ctrl+1–9` | Chat tab N |
-| `Ctrl+Shift+←/→` | Previous/next chat tab |
-| `Ctrl+,` | Settings |
-| `Ctrl+A` | Analytics |
-| `Ctrl+E` | Export |
-| `Ctrl+N` | New session |
-| `Ctrl+S` | Save |
+| `Ctrl+1-9` | Jump to chat tab N |
+| `Ctrl+Shift+Left/Right` | Previous or next chat tab |
+| `Ctrl+,` | Open Settings |
 | `Ctrl+Enter` | Start server |
 | `Ctrl+.` | Stop server |
-| `Ctrl+T` | Toggle theme |
-| `Escape` | Close modals |
+| `Escape` | Close the active modal |
 
-![Keyboard Shortcuts](../screenshots/06-keyboard-shortcuts.png)
-
-## Self-Update
-
-Llama Monitor checks for new releases by polling GitHub. When an update is available:
-
-1. An update pill appears in the header (dismissible for 24 hours)
-2. Click to view release notes in a rendered markdown panel
-3. Click "Update" to download and install — the app restarts automatically
-4. The dashboard polls for the server to come back online, then reloads
-
-## File Browser
-
-The file browser modal provides directory navigation for selecting model files, presets, and configuration paths:
-
-- **Directory listing** — Navigate folders by clicking; up button for parent directory
-- **Path input** — Type a path directly and press Enter
-- **Extension filter** — Filter by file type (e.g., `.gguf` for models)
-- **Directory mode** — Select a folder instead of a file when prompted
-
-Used in the session modal for model path selection and preset management.
-
-## Session Management
-
-Two session modes control how Llama Monitor connects to llama.cpp:
-
-| Mode | Description |
-|------|-------------|
-| **Spawn** | Launches `llama-server` locally with configured path, CWD, and preset |
-| **Attach** | Connects to an existing running server at the given endpoint URL |
-
-- **Session list** — Shows active sessions with start/delete actions
-- **Switching** — Switch between sessions; each maintains independent state
-- **Persistence** — Sessions stored in `~/.config/llama-monitor/sessions.json`, auto-saved every 30 seconds
-
-## Tray Features
-
-### macOS / Linux
-
-Clicking the tray icon opens a compact WebView popover (240×220px) showing a mini dashboard with key metrics. The popover resizes dynamically based on content.
-
-### Windows
-
-Native tray menu with live metrics:
-
-| Item | Description |
-|------|-------------|
-| **Endpoint** | Current endpoint label |
-| **Prompt / Generation** | Token processing speeds |
-| **Inference** | Slot status (processing / idle) |
-| **Host** | CPU load and temperature |
-| **Open Dashboard** | Opens browser at `127.0.0.1:{port}` |
-| **Quit** | Exit application |
-
-All platforms show a dynamic tooltip with endpoint kind, session mode, CPU%, temperature, GPU temp/VRAM, and token speed. Tray refreshes every 500ms.
+![Keyboard Shortcuts](../screenshots/panels-keyboard-shortcuts.png)

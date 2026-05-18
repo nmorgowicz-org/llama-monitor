@@ -114,9 +114,13 @@ function openUserHelp(event) {
 
 // ── Logout ────────────────────────────────────────────────────────────────────
 
-function logoutUser(event) {
+async function logoutUser(event) {
     event?.preventDefault();
     closeUserMenu();
+    if (typeof window.logoutCurrentUser === 'function') {
+        await window.logoutCurrentUser();
+        return;
+    }
     showToast('No signed-in account is configured for this local app.', 'info');
 }
 

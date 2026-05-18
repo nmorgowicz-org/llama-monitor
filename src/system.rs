@@ -2,13 +2,21 @@ use sysinfo::System;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SystemMetrics {
+    #[serde(default)]
     pub cpu_name: String,
+    #[serde(default)]
     pub cpu_temp: f32,
+    #[serde(default)]
     pub cpu_temp_available: bool,
+    #[serde(default)]
     pub cpu_load: u32,
+    #[serde(default)]
     pub cpu_clock_mhz: u32,
+    #[serde(default)]
     pub ram_total_gb: f64,
+    #[serde(default)]
     pub ram_used_gb: f64,
+    #[serde(default)]
     pub motherboard: String,
 }
 

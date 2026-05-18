@@ -12,6 +12,7 @@ const TRASH_PURGE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // check every hour
 const chatViewBindings = {
     renderChatTabs: null,
     renderChatMessages: null,
+    renderChatSessionsSidebar: null,
     loadChatNames: null,
     updateExplicitToggleUI: null,
     updateParamsDirtyIndicator: null,
@@ -65,6 +66,9 @@ export function newChatTab(name = 'New Chat') {
         },
         context_notes: [],
         context_custom_sections: [],
+        compact_mode: 'percent',
+        compact_threshold: 0.8,
+        tab_order: 0,
         sidebar_width: 280,
         quick_guide_draft: '',
         quick_guide_active: '',
@@ -109,18 +113,48 @@ function normalizeChatTab(tab) {
 export async function initChatTabs() {
     try {
         const resp = await fetch('/api/chat/tabs');
-        const data = await resp.json();
-        chat.tabs = data.length ? data.map(normalizeChatTab) : [newChatTab('Chat 1')];
+        const metas = await resp.json();
+        if (metas.length) {
+            chat.tabs = metas.map(meta => ({
+                ...meta,
+                messages: null,
+                _loaded: false,
+            }));
+        } else {
+            await addChatTab();
+            chatViewBindings.renderChatSessionsSidebar?.();
+            chatViewBindings.renderChatMessages?.();
+            chatViewBindings.loadChatNames?.();
+            chatViewBindings.updateExplicitToggleUI?.();
+            chatViewBindings.updateParamsDirtyIndicator?.();
+            chatViewBindings.syncMessageLimitInput?.();
+            chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
+            chatViewBindings.refreshChatTelemetry?.();
+            chatViewBindings.updatePersonaMenuName?.();
+            refreshTopCockpit();
+            return;
+        }
     } catch {
-        chat.tabs = [newChatTab('Chat 1')];
+        await addChatTab();
+        chatViewBindings.renderChatSessionsSidebar?.();
+        chatViewBindings.renderChatMessages?.();
+        chatViewBindings.loadChatNames?.();
+        chatViewBindings.updateExplicitToggleUI?.();
+        chatViewBindings.updateParamsDirtyIndicator?.();
+        chatViewBindings.syncMessageLimitInput?.();
+        chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
+        chatViewBindings.refreshChatTelemetry?.();
+        chatViewBindings.updatePersonaMenuName?.();
+        refreshTopCockpit();
+        return;
     }
     chat.activeTabId = chat.tabs[0].id;
 
-    // Render (legacy — Phase 6b)
-    chatViewBindings.renderChatTabs?.();
-    chatViewBindings.renderChatMessages?.();
+    await _loadTabMessages(chat.activeTabId);
 
-    // Load UI state from tab
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
+    chatViewBindings.renderChatMessages?.();
     chatViewBindings.loadChatNames?.();
     chatViewBindings.updateExplicitToggleUI?.();
     chatViewBindings.updateParamsDirtyIndicator?.();
@@ -130,43 +164,54 @@ export async function initChatTabs() {
     chatViewBindings.updatePersonaMenuName?.();
     refreshTopCockpit();
 
-   // Trigger context card update - mark that chat tabs loaded so dashboard can poll
-      if (typeof window.onChatTabsLoaded === 'function') {
-          window.onChatTabsLoaded();
-      }
+    if (typeof window.onChatTabsLoaded === 'function') {
+        window.onChatTabsLoaded();
+    }
 
-      // Notify subscribers that tabs are loaded and a tab is active.
-      // Defer to next macrotask so any in-flight user interactions (e.g. sidebar
-      // toggle) have already painted their CSS transitions before this fires.
-      setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('activeTabChanged', { detail: { tabId: chat.activeTabId } }));
-      }, 0);
+    setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('activeTabChanged', { detail: { tabId: chat.activeTabId } }));
+    }, 0);
+}
 
-     // Show chat tip only when user is on monitor view with an active chat session
-     const { setupViewState } = await import('../core/app-state.js');
-     if (setupViewState.view === 'monitor') {
-         const activeTab = activeChatTab();
-         if (activeTab && activeTab.messages.length > 0) {
-             if (!localStorage.getItem('llama-monitor-chat-tips-seen')) {
-                 localStorage.setItem('llama-monitor-chat-tips-seen', 'true');
-                 setTimeout(() => {
-                     showToast('Tip: try a suggested prompt below to get started', 'info');
-                 }, 800);
-             }
-         }
-     }
+// ── Lazy Tab Loading ───────────────────────────────────────────────────────────
+
+async function _loadTabMessages(id) {
+    const tab = chat.tabs.find(t => t.id === id);
+    if (!tab || tab._loaded) return;
+    try {
+        const resp = await fetch(`/api/chat/tabs/${id}`);
+        const full = await resp.json();
+        Object.assign(tab, full);
+        tab._loaded = true;
+    } catch (e) {
+        console.error(`_loadTabMessages failed for ${id}:`, e);
+    }
 }
 
 // ── Tab CRUD ───────────────────────────────────────────────────────────────────
 
-export function addChatTab() {
+export async function addChatTab() {
     const tab = newChatTab(`Chat ${chat.tabs.length + 1}`);
+    try {
+        const resp = await fetch('/api/chat/tabs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(tab),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const created = await resp.json();
+        Object.assign(tab, created);
+        tab._loaded = true;
+    } catch (e) {
+        console.error('addChatTab failed:', e);
+        tab._loaded = true;
+    }
     chat.tabs.push(tab);
-    switchChatTab(tab.id);
-    scheduleChatPersist();
+    await switchChatTab(tab.id);
+    chatViewBindings.renderChatSessionsSidebar?.();
 }
 
-export function closeChatTab(id) {
+export async function closeChatTab(id) {
     const tabIdx = chat.tabs.findIndex(t => t.id === id);
     if (tabIdx === -1) return;
     if (chat.tabs.length === 1) return;
@@ -176,11 +221,15 @@ export function closeChatTab(id) {
 
     if (chat.activeTabId === id) {
         chat.activeTabId = chat.tabs[chat.tabs.length - 1].id;
+        await _loadTabMessages(chat.activeTabId);
     }
 
     chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
     chatViewBindings.renderChatMessages?.();
-    scheduleChatPersist();
+
+    // Fire-and-forget: delete from server
+    fetch(`/api/chat/tabs/${id}`, { method: 'DELETE' }).catch(() => {});
 
     showToastWithActions('Tab deleted', 'info', '', [
         {
@@ -201,6 +250,7 @@ export function restoreTabFromTrash(id) {
     chat.activeTabId = trashEntry.tab.id;
 
     chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
     chatViewBindings.renderChatMessages?.();
     chatViewBindings.loadChatNames?.();
     chatViewBindings.updateExplicitToggleUI?.();
@@ -209,13 +259,15 @@ export function restoreTabFromTrash(id) {
     chatViewBindings.refreshChatTelemetry?.();
     chatViewBindings.updatePersonaMenuName?.();
     refreshTopCockpit();
-    scheduleChatPersist();
+    scheduleChatPersist(normalizeChatTab(trashEntry.tab));
 }
 
-export function switchChatTab(id) {
+export async function switchChatTab(id) {
     if (chat.busy) return;
     chat.activeTabId = id;
+    await _loadTabMessages(id);
     chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
     chatViewBindings.renderChatMessages?.();
     chatViewBindings.loadChatNames?.();
     chatViewBindings.updateExplicitToggleUI?.();
@@ -235,7 +287,8 @@ export function renameChatTab(id, newName) {
     if (tab) {
         tab.name = newName.trim() || tab.name;
         chatViewBindings.renderChatTabs?.();
-        scheduleChatPersist();
+        chatViewBindings.renderChatSessionsSidebar?.();
+        scheduleChatPersist(tab);
     }
 }
 
@@ -247,7 +300,9 @@ export function togglePinTab(id) {
     const unpinned = chat.tabs.filter(t => !t.pinned);
     chat.tabs = [...pinned, ...unpinned];
     chatViewBindings.renderChatTabs?.();
-    scheduleChatPersist();
+    chatViewBindings.renderChatSessionsSidebar?.();
+    scheduleChatPersist(tab);
+    persistTabOrder();
 }
 
 // ── Tab Field Updates ─────────────────────────────────────────────────────────
@@ -271,7 +326,7 @@ export function updateChatName(field, value) {
     const tab = activeChatTab();
     if (tab) {
         tab[field] = value.trim();
-        scheduleChatPersist();
+        scheduleChatPersist(tab);
         chatViewBindings.renderChatMessages?.();
     }
 }
@@ -293,10 +348,28 @@ export function normalizeTabForSave(tab) {
     return t;
 }
 
-export function scheduleChatPersist() {
-    chat.tabsDirty = true;
-    clearTimeout(chat.persistTimer);
-    chat.persistTimer = setTimeout(persistChatTabs, CHAT_TABS_PERSIST_DEBOUNCE_MS);
+export function scheduleChatPersist(tab) {
+    const t = tab || activeChatTab();
+    if (!t) return;
+    if (!chat._persistTab) {
+        chat._persistTab = debounce((tabToSave) => {
+            const normalized = normalizeTabForSave(tabToSave);
+            fetch(`/api/chat/tabs/${tabToSave.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(normalized),
+            }).catch(e => console.error('persist tab error:', e));
+        }, CHAT_TABS_PERSIST_DEBOUNCE_MS);
+    }
+    chat._persistTab(t);
+}
+
+function debounce(fn, ms) {
+    let timer = null;
+    return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), ms);
+    };
 }
 
 export function purgeOldTrash() {
@@ -315,37 +388,31 @@ export function markChatTabsDirty() {
 }
 
 export async function persistChatTabs() {
-    if (!chat.tabsDirty) return;
-    try {
-        const tabsToSave = chat.tabs.map(normalizeTabForSave);
-        const totalMessages = tabsToSave.reduce((sum, t) => sum + (t.messages?.length || 0), 0);
-        if (totalMessages === 0 && tabsToSave.length > 0) {
-            return;
-        }
-        const response = await fetch('/api/chat/tabs', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(tabsToSave),
-        });
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-        chat.tabsDirty = false;
-    } catch (e) {
-        console.error('persistChatTabs error:', e);
-        throw e;
-    }
+    // No longer used — individual tab persistence via scheduleChatPersist(tab)
+    // Kept for backward compatibility but does nothing.
+}
+
+export function persistTabOrder() {
+    const ids = chat.tabs.map(t => t.id);
+    fetch('/api/chat/tabs/order', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tab_order: ids }),
+    }).catch(e => console.error('persistTabOrder error:', e));
 }
 
 export function flushChatPersist() {
     clearTimeout(chat.persistTimer);
     clearInterval(chat.periodicSaveTimer);
     if (chat.tabs && chat.tabs.length) {
-        fetch('/api/chat/tabs', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(chat.tabs.map(normalizeTabForSave)),
-            keepalive: true,
+        chat.tabs.forEach(tab => {
+            const normalized = normalizeTabForSave(tab);
+            fetch(`/api/chat/tabs/${tab.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(normalized),
+                keepalive: true,
+            }).catch(() => {});
         });
     }
 }
@@ -398,10 +465,4 @@ export function initChatState() {
     window.addEventListener('beforeunload', flushChatPersist);
     chat.trashPurgeTimer = setInterval(purgeOldTrash, TRASH_PURGE_CHECK_INTERVAL_MS);
     purgeOldTrash();
-    // Periodic save to prevent data loss on force-kill
-    chat.periodicSaveTimer = setInterval(() => {
-        if (chat.tabsDirty) {
-            persistChatTabs();
-        }
-    }, CHAT_TABS_PERIODIC_SAVE_MS);
 }

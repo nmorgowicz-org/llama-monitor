@@ -694,9 +694,10 @@
   width: 208px;
   padding: 20px 14px;
   overflow-y: auto;
+  background-color: rgb(14, 18, 24);
   background:
-    linear-gradient(180deg, rgba(20, 23, 29, 0.96), rgba(14, 18, 24, 0.98)),
-    rgba(22, 25, 30, 0.9);
+    linear-gradient(180deg, rgb(20, 23, 29), rgb(14, 18, 24)),
+    rgb(22, 25, 30);
   border-right: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.03);
   transition: width 250ms cubic-bezier(0.16, 1, 0.3, 1), padding 250ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -897,6 +898,52 @@ body.sidebar-collapsed .content-area {
 
 .page.active {
   display: flex;
+}
+
+#page-chat {
+  flex-direction: row;
+  position: relative;
+}
+
+.chat-main-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-sessions-panel {
+  position: relative;
+  z-index: 90;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  background: var(--surface-card-base);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  transition: width 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.chat-sessions-panel.visible {
+  width: 240px;
+  min-width: 240px;
+}
+
+.chat-sessions-panel.visible.collapsed {
+  width: 24px;
+  min-width: 24px;
+}
+
+[data-theme="light"] .chat-sessions-panel {
+  background: var(--surface-card-elevated);
+  border-right-color: rgba(0, 0, 0, 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-sessions-panel { transition: none; }
 }
 
 /* ── Version Display ──────────────────────────────────────────────────────── */

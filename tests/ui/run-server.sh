@@ -15,4 +15,4 @@ cleanup() {
 }
 trap cleanup EXIT
 
-exec cargo run -- --headless --port 7778 --config-dir "$TEST_CONFIG_DIR"
+exec cargo run -- --headless --port 7778 --config-dir "$TEST_CONFIG_DIR" ${LLAMA_MONITOR_TEST_ARGS:-}

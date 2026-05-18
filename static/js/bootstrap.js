@@ -9,7 +9,9 @@ import { initWebSocket } from './features/dashboard-ws.js';
 import { initPresets } from './features/presets.js';
 import { initSessions } from './features/sessions.js';
 import { activeChatTab, addChatTab, autoResizeChatInput, initChatState, initChatTabs, restoreTabFromTrash } from './features/chat-state.js';
-import { chatScroll, initChatRender, renderTrashDropdown } from './features/chat-render.js';
+import { chatScroll, initChatRender } from './features/chat-render.js';
+import { initChatSessionsSidebar, renderChatSessionsSidebar } from './features/chat-sessions-sidebar.js';
+import { initChatSearch } from './features/chat-search.js';
 import { initAttachDetach } from './features/attach-detach.js';
 import { initRemoteAgent } from './features/remote-agent.js';
 import { initChatTransport } from './features/chat-transport.js';
@@ -29,9 +31,20 @@ import { initNetworkDetection } from './features/network-detection.js';
 import { initContextSidebar } from './features/chat-notes.js';
 import { initSuggestionsDropdown, closeSuggestionsDropdown } from './features/chat-suggestions.js';
 import { initQuickGuide, closeQuickGuide } from './features/chat-quick-guide.js';
+import { initDbAdmin } from './features/db-admin.js';
+import { initAuthGate, logoutCurrentUser } from './features/auth.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
+
+// Helper for modules: returns headers object with Authorization if token is available.
+window.authHeaders = function(extra = {}) {
+    const headers = { ...extra };
+    if (window.__API_TOKEN && !headers['Authorization']) {
+        headers['Authorization'] = `Bearer ${window.__API_TOKEN}`;
+    }
+    return headers;
+};
 
 // Set app version in sidebar (lightweight, no module dependency)
 (function() {
@@ -41,90 +54,77 @@ console.log('[bootstrap] Module entrypoint loaded');
     }
 })();
 
-// Phase 1: Initialize rendering functions, then WebSocket.
-initDashboardRender();
-initWebSocket();
+window.logoutCurrentUser = logoutCurrentUser;
 
-// Phase 4: Initialize extracted features.
-initPresets();
-initSessions();
-initAttachDetach();
-initRemoteAgent();
+async function initializeApp() {
+    const auth = await initAuthGate();
+    if (!auth.ready) return;
 
-// Phase 6a: Chat state before transport (transport imports from state)
-initChatState();
-initChatTransport();
-
-// Phase 6b: Chat rendering, templates, and params (after state/transport)
-initChatRender();
-
-// Bind chat scroll button
-document.getElementById('chat-scroll-bottom')?.addEventListener('click', () => chatScroll(true));
-
-// Bind chat tab add button
-document.getElementById('chat-tab-add-btn')?.addEventListener('click', addChatTab);
-
-// Bind trash dropdown toggle
-document.getElementById('chat-tab-trash-btn')?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const dropdown = document.getElementById('chat-tab-trash-dropdown');
-    if (!dropdown) return;
-    const isOpen = dropdown.classList.contains('open');
-    if (!isOpen) {
-        renderTrashDropdown();
-        const rect = e.currentTarget.getBoundingClientRect();
-        dropdown.style.top = (rect.bottom + 4) + 'px';
-        dropdown.style.right = (window.innerWidth - rect.right) + 'px';
+    try {
+        const res = await fetch('/api/internal/api-token');
+        if (res.ok) {
+            const data = await res.json();
+            if (data.token) {
+                window.__API_TOKEN = data.token;
+            }
+        }
+    } catch {
+        // Non-critical: continue without token if fetch fails.
     }
-    dropdown.classList.toggle('open');
-});
 
-// Close trash dropdown when clicking outside
-document.addEventListener('click', (e) => {
-    const dropdown = document.getElementById('chat-tab-trash-dropdown');
-    const trashBtn = document.getElementById('chat-tab-trash-btn');
-    if (dropdown && dropdown.classList.contains('open') &&
-        !trashBtn.contains(e.target) && !dropdown.contains(e.target)) {
-        dropdown.classList.remove('open');
-    }
-});
+    // Phase 1: Initialize rendering functions, then WebSocket.
+    initDashboardRender();
+    initWebSocket();
 
-// Event delegation for trash restore buttons
-document.getElementById('chat-tab-trash-dropdown')?.addEventListener('click', (e) => {
-    const restoreBtn = e.target.closest('[data-trash-restore]');
-    if (restoreBtn) {
-        e.stopPropagation();
-        const tabId = restoreBtn.dataset.trashRestore;
-        restoreTabFromTrash(tabId);
-        document.getElementById('chat-tab-trash-dropdown')?.classList.remove('open');
-    }
-});
+    // Phase 4: Initialize extracted features.
+    initPresets();
+    initSessions();
+    initAttachDetach();
+    initRemoteAgent();
 
-initChatTemplates();
-initChatParams();
+    // Phase 6a: Chat state before transport (transport imports from state)
+    initChatState();
+    initChatTransport();
 
-// Resize chat input to fit content
-autoResizeChatInput();
+    // Phase 6b: Chat rendering, templates, and params (after state/transport)
+    initChatRender();
+    initChatSessionsSidebar();
+    initChatSearch();
 
-// Phase 7: setup view, updates, shortcuts (LHM is deferred)
-initSetupView();
-initShortcuts();
+    // Bind chat scroll button
+    document.getElementById('chat-scroll-bottom')?.addEventListener('click', () => chatScroll(true));
 
-// Phase 8: Nav, animate, settings, user menu, config, models, sensor bridge, toast
-initNav();
-initAnimate();
-initSettings();
-initUserMenu();
-initConfig();
-initModels();
-initSensorBridge();
-initToast();
-initNetworkDetection();
+    initChatTemplates();
+    initChatParams();
 
-// Phase 9: Guided generation features
-initContextSidebar();
-initSuggestionsDropdown();
-initQuickGuide();
+    // Resize chat input to fit content
+    autoResizeChatInput();
+
+    // Phase 7: setup view, updates, shortcuts (LHM is deferred)
+    initSetupView();
+    initShortcuts();
+
+    // Phase 8: Nav, animate, settings, user menu, config, models, sensor bridge, toast
+    initNav();
+    initAnimate();
+    initSettings();
+    initUserMenu();
+    initConfig();
+    initModels();
+    initSensorBridge();
+    initToast();
+    initNetworkDetection();
+
+    // Phase 9: Guided generation features
+    initContextSidebar();
+    initSuggestionsDropdown();
+    initQuickGuide();
+
+    // Phase 10: Database administration
+    initDbAdmin();
+}
+
+initializeApp();
 
 // Mutual exclusion: opening one guided panel closes the other.
 window.addEventListener('suggestionsOpened', () => closeQuickGuide());
