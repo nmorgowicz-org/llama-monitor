@@ -480,8 +480,8 @@ impl AppConfig {
         *self.live_db_admin_token_store.write().unwrap() = Some(token);
     }
 
-    /// Construct an `AppConfig` for unit tests without reading from disk.
-    #[cfg(test)]
+    /// Construct an `AppConfig` for unit/integration tests without reading from disk.
+    #[allow(dead_code)]
     pub fn for_test(api_token: Option<String>, db_admin_token: Option<String>) -> Self {
         Self {
             config_dir: std::path::PathBuf::from("/tmp/llama-monitor-test"),

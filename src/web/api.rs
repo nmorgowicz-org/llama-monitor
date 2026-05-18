@@ -696,29 +696,42 @@ fn try_cooldown(last: &std::sync::atomic::AtomicU64, now: u64, cooldown_secs: u6
     (ok, 0)
 }
 
-fn api_check_lhm() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn api_check_lhm(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "lhm" / "check")
         .and(warp::get())
-        .and_then(move || async move {
-            #[cfg(target_os = "windows")]
-            {
-                let running = lhm::is_lhm_running();
-                let installed = lhm::is_lhm_installed();
-                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                    "running": running,
-                    "installed": installed,
-                    "available": running
-                })))
-            }
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    let running = lhm::is_lhm_running();
+                    let installed = lhm::is_lhm_installed();
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({
+                            "running": running,
+                            "installed": installed,
+                            "available": running
+                        }),
+                    )))
+                }
 
-            #[cfg(not(target_os = "windows"))]
-            {
-                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                    "running": false,
-                    "installed": false,
-                    "available": false,
-                    "error": "Not supported on this platform"
-                })))
+                #[cfg(not(target_os = "windows"))]
+                {
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({
+                            "running": false,
+                            "installed": false,
+                            "available": false,
+                            "error": "Not supported on this platform"
+                        }),
+                    )))
+                }
             }
         })
 }
@@ -763,47 +776,63 @@ fn api_lhm_status(
     let lhm_disabled_file = app_config.lhm_disabled_file.clone();
     warp::path!("api" / "lhm" / "status")
         .and(warp::get())
-        .and_then(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
             #[allow(unused_variables)]
             let file = lhm_disabled_file.clone();
             async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
                 #[cfg(target_os = "windows")]
                 {
                     match lhm_persist::load_lhm_disabled(&file) {
-                        Ok(disabled) => Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"disabled": disabled}),
-                        )),
-                        Err(_) => Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"disabled": false}),
+                        Ok(disabled) => {
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({"disabled": disabled})),
+                            ))
+                        }
+                        Err(_) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"disabled": false})),
                         )),
                     }
                 }
 
                 #[cfg(not(target_os = "windows"))]
                 {
-                    Ok::<_, warp::Rejection>(warp::reply::json(
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                         &serde_json::json!({"disabled": false}),
-                    ))
+                    )))
                 }
             }
         })
 }
 
-fn api_lhm_progress() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
+fn api_lhm_progress(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "lhm" / "progress")
         .and(warp::get())
-        .and_then(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
             #[cfg(target_os = "windows")]
             {
                 async move {
                     use std::fs;
 
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+
                     let local_app_data = match std::env::var("LOCALAPPDATA") {
                         Ok(val) => val,
                         Err(_) => {
-                            return Ok::<_, warp::Rejection>(warp::reply::json(
-                                &serde_json::json!({"progress": "error: LOCALAPPDATA not set"}),
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(
+                                    &serde_json::json!({"progress": "error: LOCALAPPDATA not set"}),
+                                ),
                             ));
                         }
                     };
@@ -815,18 +844,21 @@ fn api_lhm_progress() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
                         .map(|s| s.trim().to_string())
                         .unwrap_or_else(|_| "not_started".to_string());
 
-                    Ok::<_, warp::Rejection>(warp::reply::json(
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                         &serde_json::json!({"progress": progress}),
-                    ))
+                    )))
                 }
             }
 
             #[cfg(not(target_os = "windows"))]
             {
                 async move {
-                    Ok::<_, warp::Rejection>(warp::reply::json(
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                         &serde_json::json!({"progress": "not_supported"}),
-                    ))
+                    )))
                 }
             }
         })
@@ -1358,9 +1390,9 @@ pub fn api_routes(
     let create_template = api_create_template(state.clone(), app_config.clone());
     let update_template = api_update_template(state.clone(), app_config.clone());
     let delete_template = api_delete_template(state.clone(), app_config.clone());
-    let get_models = api_get_models(state.clone());
+    let get_models = api_get_models(state.clone(), app_config.clone());
     let refresh_models = api_refresh_models(state.clone(), app_config.clone());
-    let get_gpu_env = api_get_gpu_env(state.clone());
+    let get_gpu_env = api_get_gpu_env(state.clone(), app_config.clone());
     let put_gpu_env = api_put_gpu_env(state.clone(), app_config.clone());
     let get_settings = api_get_settings(state.clone(), app_config.clone());
     let get_settings_full = api_get_settings_full(state.clone(), app_config.clone());
@@ -1410,11 +1442,11 @@ pub fn api_routes(
         api_spawn_session_with_preset(state.clone(), app_config.clone());
     let attach = api_attach(state.clone(), app_config.clone());
     let detach = api_detach(state.clone(), app_config.clone());
-    let check_lhm = api_check_lhm();
+    let check_lhm = api_check_lhm(app_config.clone());
     let start_lhm = api_lhm_start(app_config.clone());
     let install_lhm = api_lhm_install(app_config.clone());
     let uninstall_lhm = api_lhm_uninstall(app_config.clone());
-    let progress_lhm = api_lhm_progress();
+    let progress_lhm = api_lhm_progress(app_config.clone());
     let status_lhm = api_lhm_status(app_config.clone());
     let disable_lhm = api_disable_lhm(app_config.clone());
     let remote_agent_latest = api_remote_agent_latest_release(app_config.clone());
@@ -1598,6 +1630,29 @@ fn api_auth_login(
         .and(warp::body::content_length_limit(32 * 1024))
         .and(warp::body::json())
         .map(move |req: LoginRequest| {
+            #[cfg(not(test))]
+            {
+                use std::sync::atomic::AtomicU64;
+                use std::time::{SystemTime, UNIX_EPOCH};
+
+                static LOGIN_LAST_ATTEMPT: AtomicU64 = AtomicU64::new(0);
+
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let (ok, _remaining) = try_cooldown(&LOGIN_LAST_ATTEMPT, now, 2);
+                if !ok {
+                    return Box::new(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "too_many_login_attempts"
+                        })),
+                        warp::http::StatusCode::TOO_MANY_REQUESTS,
+                    )) as Box<dyn warp::reply::Reply>;
+                }
+            }
+
             if !auth_manager.has_form() {
                 return Box::new(warp::reply::with_status(
                     warp::reply::json(&serde_json::json!({ "error": "form_auth_not_enabled" })),
@@ -1837,7 +1892,7 @@ fn api_remote_agent_latest_release(
         .and_then(
             move |auth: Option<String>, cfg: Arc<AppConfig>| async move {
                 let bearer = extract_bearer(auth);
-                if bearer.as_deref() != cfg.live_api_token().as_deref().filter(|t| !t.is_empty()) {
+                if !bearer_matches_api_token(bearer.as_deref(), &cfg) {
                     return Ok(unauthorized_api_token());
                 }
 
@@ -1891,12 +1946,7 @@ fn api_remote_agent_detect(
                 let app_config = app_config.clone();
                 async move {
                     let bearer = extract_bearer(auth);
-                    if bearer.as_deref()
-                        != app_config
-                            .live_api_token()
-                            .as_deref()
-                            .filter(|t| !t.is_empty())
-                    {
+                    if !bearer_matches_api_token(bearer.as_deref(), &app_config) {
                         return Ok(unauthorized_api_token());
                     }
 
@@ -1958,12 +2008,7 @@ fn api_remote_agent_ssh_host_key(
                 let app_config = app_config.clone();
                 async move {
                     let bearer = extract_bearer(auth);
-                    if bearer.as_deref()
-                        != app_config
-                            .live_api_token()
-                            .as_deref()
-                            .filter(|t| !t.is_empty())
-                    {
+                    if !bearer_matches_api_token(bearer.as_deref(), &app_config) {
                         return Ok(unauthorized_api_token());
                     }
 
@@ -2027,7 +2072,7 @@ fn api_remote_agent_ssh_trust(
             let app_config = app_config.clone();
             async move {
                 let bearer = extract_bearer(auth);
-                if bearer.as_deref() != app_config.live_api_token().as_deref().filter(|t| !t.is_empty()) {
+                if !bearer_matches_api_token(bearer.as_deref(), &app_config) {
                     return Ok(unauthorized_api_token());
                 }
 
@@ -2212,12 +2257,7 @@ fn api_remote_agent_status(
                 let app_config = app_config.clone();
                 async move {
                     let bearer = extract_bearer(auth);
-                    if bearer.as_deref()
-                        != app_config
-                            .live_api_token()
-                            .as_deref()
-                            .filter(|t| !t.is_empty())
-                    {
+                    if !bearer_matches_api_token(bearer.as_deref(), &app_config) {
                         return Ok(unauthorized_api_token());
                     }
 
@@ -2296,12 +2336,7 @@ fn api_remote_agent_start(
                 let app_config = app_config.clone();
                 async move {
                     let bearer = extract_bearer(auth);
-                    if bearer.as_deref()
-                        != app_config
-                            .live_api_token()
-                            .as_deref()
-                            .filter(|t| !t.is_empty())
-                    {
+                    if !bearer_matches_api_token(bearer.as_deref(), &app_config) {
                         return Ok(unauthorized_api_token());
                     }
 
@@ -2425,12 +2460,7 @@ fn api_remote_agent_update(
                 let app_config = app_config.clone();
                 async move {
                     let bearer = extract_bearer(auth);
-                    if bearer.as_deref()
-                        != app_config
-                            .live_api_token()
-                            .as_deref()
-                            .filter(|t| !t.is_empty())
-                    {
+                    if !bearer_matches_api_token(bearer.as_deref(), &app_config) {
                         return Ok(unauthorized_api_token());
                     }
 
@@ -2510,12 +2540,7 @@ fn api_remote_agent_stop(
                 let app_config = app_config.clone();
                 async move {
                     let bearer = extract_bearer(auth);
-                    if bearer.as_deref()
-                        != app_config
-                            .live_api_token()
-                            .as_deref()
-                            .filter(|t| !t.is_empty())
-                    {
+                    if !bearer_matches_api_token(bearer.as_deref(), &app_config) {
                         return Ok(unauthorized_api_token());
                     }
 
@@ -2666,12 +2691,7 @@ fn api_remote_agent_tls_status(
         .and(warp::header::optional::<String>("authorization"))
         .map(move |auth: Option<String>| {
             let bearer = extract_bearer(auth);
-            if bearer.as_deref()
-                != app_config
-                    .live_api_token()
-                    .as_deref()
-                    .filter(|t| !t.is_empty())
-            {
+            if !bearer_matches_api_token(bearer.as_deref(), &app_config) {
                 return unauthorized_api_token();
             }
             let certs_dir = crate::certs::certs_dir();
@@ -2996,11 +3016,21 @@ fn api_delete_template(
 
 fn api_get_models(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("api" / "models").and(warp::get()).map(move || {
-        let models = state.discovered_models.lock().unwrap().clone();
-        warp::reply::json(&models)
-    })
+    warp::path!("api" / "models")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
+            let models = state.discovered_models.lock().unwrap().clone();
+            futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                Box::new(warp::reply::json(&models)),
+            ))
+        })
 }
 
 fn api_refresh_models(
@@ -3040,17 +3070,25 @@ fn api_refresh_models(
 
 fn api_get_gpu_env(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "gpu-env")
         .and(warp::get())
-        .map(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
             let env = state.gpu_env.lock().unwrap().clone();
             let detected = gpu_env::detect_gpus();
-            warp::reply::json(&serde_json::json!({
-                "env": env,
-                "architectures": GPU_ARCHITECTURES,
-                "detected": detected,
-            }))
+            futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                Box::new(warp::reply::json(&serde_json::json!({
+                    "env": env,
+                    "architectures": GPU_ARCHITECTURES,
+                    "detected": detected,
+                }))),
+            ))
         })
 }
 
@@ -5527,11 +5565,7 @@ fn api_db_delete_backup(
                     let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
 
                     // Require db-admin-token for delete (high-impact operation)
-                    let has_admin_token = bearer.as_deref()
-                        == cfg
-                            .live_db_admin_token()
-                            .as_deref()
-                            .filter(|t| !t.is_empty());
+                    let has_admin_token = bearer_matches_db_admin_token(bearer.as_deref(), &cfg);
 
                     if !has_admin_token {
                         return Ok::<_, warp::Rejection>(warp::reply::with_status(
