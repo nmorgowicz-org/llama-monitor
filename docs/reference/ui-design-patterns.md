@@ -274,17 +274,18 @@ Example:
 
 ### FTS search (cross-session search)
 - Implemented in static/js/features/chat-search.js.
-- Triggered by a search button in .csp-header.
+- Triggered by a dedicated `.csp-search-launch-btn` below the title filter.
 - Key elements:
-  - .csp-search-btn (button)
-  - .csp-search-input-wrap (inline input container)
+  - .csp-search-launch-btn (entry point)
+  - .csp-search-panel (floating results surface)
+  - .csp-search-input-wrap (input container)
   - #csp-search-input (input)
   - .csp-search-results (results list)
   - .csp-search-result (individual result card)
 - Behavior:
-  - openSearch() shows input, hides .csp-list, shows .csp-search-results.
-  - closeSearch() restores normal list.
-  - onSearchInput() debounces and calls /api/chat/search.
+  - openSearch() opens a flyout beside the sidebar and keeps the conversation list visible.
+  - closeSearch() dismisses the flyout and restores the prior collapsed state if needed.
+  - onSearchInput() debounces and calls `/api/chat/search?q=…&limit=…&offset=…`.
 - Styling in chat.css under .csp-search-* rules.
 
 ## 5. Dashboard Cards

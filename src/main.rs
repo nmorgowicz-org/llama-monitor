@@ -26,7 +26,11 @@ use std::thread;
 use std::time::Duration;
 
 use crate::chat_storage::ChatStorage;
-use crate::config::{TlsMode, harden_file_permissions};
+use crate::config::{
+    DashboardAuthConfig, TlsMode, clear_auth_config, harden_file_permissions, load_auth_config,
+    save_auth_config,
+};
+use crate::web::auth::AuthManager;
 
 const GPU_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SYSTEM_POLL_INTERVAL: Duration = Duration::from_secs(5);
@@ -34,6 +38,31 @@ const SYSTEM_POLL_INTERVAL: Duration = Duration::from_secs(5);
 fn main() -> Result<()> {
     let args = cli::AppArgs::parse();
     let app_config = Arc::new(config::AppConfig::from_args(args.clone()));
+
+    if args.clear_auth_config {
+        match clear_auth_config(&app_config.config_dir) {
+            Ok(true) => {
+                println!(
+                    "[info] Cleared dashboard auth config at {}",
+                    app_config.auth_config_file.display()
+                );
+            }
+            Ok(false) => {
+                println!(
+                    "[info] No dashboard auth config found at {}",
+                    app_config.auth_config_file.display()
+                );
+            }
+            Err(err) => {
+                eprintln!(
+                    "[error] Failed to clear dashboard auth config at {}: {err}",
+                    app_config.auth_config_file.display()
+                );
+                std::process::exit(1);
+            }
+        }
+        return Ok(());
+    }
 
     // Initialize at-rest encryption (auto-generates key if needed)
     config::init_encryption_key(&app_config.config_dir);
@@ -46,6 +75,7 @@ fn main() -> Result<()> {
     harden_file_permissions(&app_config.config_dir.join("api-token"));
     harden_file_permissions(&app_config.config_dir.join("tls-config.json"));
     harden_file_permissions(&app_config.config_dir.join("encryption-key"));
+    harden_file_permissions(&app_config.auth_config_file);
 
     if args.agent {
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -196,17 +226,24 @@ fn main() -> Result<()> {
     let port = app_config.port;
     let host = args.host.clone();
 
-    // Parse basic auth credentials
-    let basic_auth_enabled = match args.basic_auth.as_ref() {
-        Some(s) => {
-            let parts: Vec<&str> = s.splitn(2, ':').collect();
-            if parts.len() == 2 {
-                Some((parts[0].to_string(), parts[1].to_string()))
-            } else {
+    let basic_auth = match args.basic_auth.as_deref() {
+        Some(spec) => match AuthManager::parse_credentials(spec) {
+            Some(creds) => Some(creds),
+            None => {
                 eprintln!("[error] Invalid --basic-auth format. Expected: user:password");
                 std::process::exit(1);
             }
-        }
+        },
+        None => None,
+    };
+    let form_auth = match args.form_auth.as_deref() {
+        Some(spec) => match AuthManager::parse_credentials(spec) {
+            Some(creds) => Some(creds),
+            None => {
+                eprintln!("[error] Invalid --form-auth format. Expected: user:password");
+                std::process::exit(1);
+            }
+        },
         None => None,
     };
 
@@ -227,14 +264,28 @@ fn main() -> Result<()> {
     // Update in-memory state with final TLSConfig
     state.set_tls_config(tls_config.clone());
 
+    migrate_legacy_dashboard_auth(
+        &app_config.config_dir,
+        &app_config.auth_config_file,
+        basic_auth.as_ref(),
+        form_auth.as_ref(),
+    );
+
+    let auth_manager = if basic_auth.is_some() || form_auth.is_some() {
+        AuthManager::new(basic_auth.clone(), form_auth.clone(), &tls_config.mode)
+    } else {
+        AuthManager::from_config(load_auth_config(&app_config.config_dir), &tls_config.mode)
+    };
+
     let routes = web::build_routes(
         state.clone(),
         app_config.clone(),
-        basic_auth_enabled.clone(),
+        auth_manager.clone(),
+        host.clone(),
     );
 
     // Warn when listening on all interfaces without TLS or auth
-    if host == "0.0.0.0" && tls_config.mode == TlsMode::None && basic_auth_enabled.is_none() {
+    if host == "0.0.0.0" && tls_config.mode == TlsMode::None && !auth_manager.has_any() {
         eprintln!(
             "[warn] Listening on all interfaces without TLS or authentication. \
             Anyone on your network can access the UI."
@@ -716,6 +767,50 @@ fn main() -> Result<()> {
     }
 }
 
+fn migrate_legacy_dashboard_auth(
+    config_dir: &std::path::Path,
+    auth_config_file: &std::path::Path,
+    basic_auth: Option<&crate::web::auth::AuthCredentials>,
+    form_auth: Option<&crate::web::auth::AuthCredentials>,
+) {
+    if auth_config_file.exists() {
+        return;
+    }
+
+    let Some(creds) = basic_auth.or(form_auth) else {
+        return;
+    };
+
+    if let (Some(basic), Some(form)) = (basic_auth, form_auth)
+        && (basic.username != form.username || basic.password != form.password)
+    {
+        eprintln!(
+            "[warn] Skipping auth-config migration because --basic-auth and --form-auth use different credentials."
+        );
+        return;
+    }
+
+    let Some(password_hash) = AuthManager::hash_password(&creds.password) else {
+        eprintln!(
+            "[warn] Failed to hash dashboard auth during migration; skipping auth-config migration."
+        );
+        return;
+    };
+
+    let cfg = DashboardAuthConfig {
+        basic_enabled: basic_auth.is_some(),
+        form_enabled: form_auth.is_some(),
+        username: creds.username.clone(),
+        password_hash,
+    };
+
+    if let Err(err) = save_auth_config(config_dir, &cfg) {
+        eprintln!("[warn] Failed to migrate dashboard auth into auth-config.json: {err}");
+    } else {
+        eprintln!("[config] Migrated dashboard auth into auth-config.json for future builds.");
+    }
+}
+
 #[cfg(target_os = "linux")]
 pub fn should_start_tray(args: &cli::AppArgs) -> bool {
     if args.headless || args.no_tray {
@@ -775,6 +870,8 @@ mod tests {
                 agent_host: "127.0.0.1".to_string(),
                 host: "127.0.0.1".to_string(),
                 basic_auth: None,
+                form_auth: None,
+                clear_auth_config: false,
                 agent_port: 7779,
                 agent_token: None,
                 remote_agent_url: None,
@@ -817,6 +914,8 @@ mod tests {
             agent_host: "127.0.0.1".to_string(),
             host: "127.0.0.1".to_string(),
             basic_auth: None,
+            form_auth: None,
+            clear_auth_config: false,
             agent_port: 7779,
             agent_token: None,
             remote_agent_url: None,
@@ -851,6 +950,8 @@ mod tests {
             agent_host: "127.0.0.1".to_string(),
             host: "127.0.0.1".to_string(),
             basic_auth: None,
+            form_auth: None,
+            clear_auth_config: false,
             agent_port: 7779,
             agent_token: None,
             remote_agent_url: None,
@@ -886,6 +987,8 @@ mod tests {
             agent_host: "127.0.0.1".to_string(),
             host: "127.0.0.1".to_string(),
             basic_auth: None,
+            form_auth: None,
+            clear_auth_config: false,
             agent_port: 7779,
             agent_token: None,
             remote_agent_url: None,
@@ -922,6 +1025,8 @@ mod tests {
             agent_host: "127.0.0.1".to_string(),
             host: "127.0.0.1".to_string(),
             basic_auth: None,
+            form_auth: None,
+            clear_auth_config: false,
             agent_port: 7779,
             agent_token: None,
             remote_agent_url: None,
@@ -958,6 +1063,8 @@ mod tests {
             agent_host: "127.0.0.1".to_string(),
             host: "127.0.0.1".to_string(),
             basic_auth: None,
+            form_auth: None,
+            clear_auth_config: false,
             agent_port: 7779,
             agent_token: None,
             remote_agent_url: None,

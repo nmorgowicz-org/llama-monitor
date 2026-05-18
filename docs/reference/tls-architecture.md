@@ -244,4 +244,4 @@ Common issues:
     - Certificate includes "agent-client" role marker.
 
 For deeper technical details and code references, see:
-- docs/plans/20260516-tls_acme_implementation.md
+- docs/archive/security/20260516-tls_acme_implementation.md

@@ -289,25 +289,12 @@ fn generate_routes(files: &[(String, String, String)], output: &str) {
     } else if total_routes == 1 {
         writeln!(f, "    route_0").unwrap();
     } else {
-        // Create a balanced binary tree of .or() chains
-        let mut current_level: Vec<String> = route_files
+        let routes: Vec<String> = route_files
             .iter()
             .enumerate()
             .map(|(i, _)| format!("route_{}", i))
             .collect();
-
-        while current_level.len() > 1 {
-            let mut next_level = Vec::new();
-            for chunk in current_level.chunks(2) {
-                if chunk.len() == 1 {
-                    next_level.push(chunk[0].clone());
-                } else {
-                    next_level.push(format!("{} .or({})", chunk[0], chunk[1]));
-                }
-            }
-            current_level = next_level;
-        }
-        writeln!(f, "    {}", current_level[0]).unwrap();
+        writeln!(f, "    {}", build_balanced_or(&routes)).unwrap();
     }
     writeln!(f, "}}").unwrap();
 
@@ -326,4 +313,15 @@ fn content_type_for(path: &str) -> &'static str {
     } else {
         "application/octet-stream"
     }
+}
+
+fn build_balanced_or(routes: &[String]) -> String {
+    if routes.len() == 1 {
+        return routes[0].clone();
+    }
+
+    let mid = routes.len() / 2;
+    let left = build_balanced_or(&routes[..mid]);
+    let right = build_balanced_or(&routes[mid..]);
+    format!("({left}).or({right})")
 }

@@ -19,11 +19,55 @@ llama-monitor --host 0.0.0.0
 
 Enable HTTP Basic Auth for the dashboard in `user:password` form.
 
-This is only useful when the dashboard is reachable by other machines, usually alongside `--host 0.0.0.0`.
+This keeps browser-native Basic Auth in front of the protected dashboard routes.
+It is most useful when the dashboard is reachable by other machines, usually alongside `--host 0.0.0.0`.
+
+On first run with the newer auth system, compatible CLI auth settings are also migrated into
+`auth-config.json` so users can later manage dashboard access from the Security tab instead of
+retyping credentials by hand.
 
 ```bash
 llama-monitor --host 0.0.0.0 --basic-auth admin:secret123
 ```
+
+### `--form-auth`
+
+Enable an in-app sign-in screen for the dashboard in `user:password` form.
+
+When set, unauthenticated users can still load the shell page, but protected API, WebSocket,
+and control routes stay locked until a valid form-auth session is created.
+
+Like `--basic-auth`, compatible credentials are migrated into `auth-config.json` on first run
+so the instance can cut over to config-managed dashboard auth once startup flags are removed.
+
+```bash
+llama-monitor --host 0.0.0.0 --form-auth admin:secret123
+```
+
+### Choosing An Auth Mode
+
+- Default: no auth. This matches local-only use on `127.0.0.1`.
+- `--basic-auth`: browser-level challenge before protected routes are usable.
+- `--form-auth`: modern in-app login screen backed by an HttpOnly session cookie.
+- Both flags may be configured together; protected routes accept either valid Basic credentials or a valid form session.
+- When no startup flags are present, dashboard auth can be managed from `Settings → Security`
+  and is persisted in `auth-config.json` with a hashed password.
+
+### `--clear-auth-config`
+
+Delete the persisted dashboard auth config and exit.
+
+Use this for local password recovery when a user is locked out of the in-app form or Basic Auth
+managed through `auth-config.json`.
+
+```bash
+llama-monitor --clear-auth-config
+```
+
+After clearing the file, restart llama-monitor and set a new password from
+`Settings → Security → Dashboard Access`.
+
+See also: [Security Reference](security.md).
 
 ### `--port`, `-p` (default: `7778`)
 

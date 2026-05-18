@@ -393,10 +393,10 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     // (needed on Windows where the agent runs as SYSTEM and the token file is in
     // the SYSTEM profile, inaccessible to the SSH user).
     // The temp file is cleaned up after a delay to give the main app time to read it.
-          let _ = write_token_to_temp_file(&token);
+    let _ = write_token_to_temp_file(&token);
 
     // Ensure primary token is in agent-tokens.json (for multi-client support).
-         let _ = ensure_token_in_file(&agent_config_dir, &token);
+    let _ = ensure_token_in_file(&agent_config_dir, &token);
 
     let backend = gpu::detect_backend(&app_config.gpu_backend);
     let gpu_metrics: Arc<Mutex<BTreeMap<String, GpuMetrics>>> =
@@ -472,9 +472,10 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
                         .and_then(|v| v.strip_prefix("Bearer "));
 
                     if let Some(tok) = bearer
-                        && allowed.iter().any(|t| t == tok) {
-                            return Ok::<(), warp::Rejection>(());
-                        }
+                        && allowed.iter().any(|t| t == tok)
+                    {
+                        return Ok::<(), warp::Rejection>(());
+                    }
                     Err(warp::reject::custom(AgentAuthError))
                 }
             })
@@ -596,9 +597,10 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("pem")
-                && let Ok(pem) = std::fs::read_to_string(&path) {
-                    ca_pems.push(pem);
-                }
+                && let Ok(pem) = std::fs::read_to_string(&path)
+            {
+                ca_pems.push(pem);
+            }
         }
     }
 
@@ -1069,11 +1071,13 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                                         };
 
                                         {
-                                            let mut pv = state.remote_agent_protocol_version.lock().unwrap();
+                                            let mut pv =
+                                                state.remote_agent_protocol_version.lock().unwrap();
                                             *pv = agent_proto.clone();
                                         }
                                         {
-                                            let mut flag = state.remote_agent_protocol_too_old.lock().unwrap();
+                                            let mut flag =
+                                                state.remote_agent_protocol_too_old.lock().unwrap();
                                             *flag = proto_too_old;
                                         }
 
@@ -1902,7 +1906,10 @@ pub mod install {
 
         // Ensure cas/ directory exists on the remote
         let mkdir_cmd = if os == RemoteOs::Windows {
-            format!("cmd.exe /C if not exist \"{}\" mkdir \"{}\"", cas_dir, cas_dir)
+            format!(
+                "cmd.exe /C if not exist \"{}\" mkdir \"{}\"",
+                cas_dir, cas_dir
+            )
         } else {
             format!("mkdir -p '{}'", cas_dir)
         };
@@ -1938,10 +1945,7 @@ pub mod install {
                 0o644,
             )
             .await;
-            eprintln!(
-                "[info] Installed CA as {} on remote agent",
-                remote_ca_path
-            );
+            eprintln!("[info] Installed CA as {} on remote agent", remote_ca_path);
         }
         let _ = std::fs::remove_file(&local_tmp);
     }

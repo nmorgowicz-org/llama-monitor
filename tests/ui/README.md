@@ -17,6 +17,12 @@ npm test -- --headless=false
 npm test -- --debug
 ```
 
+To exercise form-auth mode, pass extra server args through `LLAMA_MONITOR_TEST_ARGS`:
+
+```bash
+LLAMA_MONITOR_TEST_ARGS="--form-auth admin:secret123" npm test -- tests/ui/chat/auth-shell.spec.js
+```
+
 The UI suite covers:
 
 - Top navigation, sidebar, and tab navigation
@@ -49,6 +55,7 @@ cargo build --release
 |----------|---------|-------------|
 | `SCREENSHOT_PORT` | `8892` | Base port to try for the spawned dashboard |
 | `REMOTE_SERVER` | `http://192.168.2.16:8001` | Remote llama.cpp server used by attach-based scenarios |
+| `SCREENSHOT_FORM_AUTH` | `admin:secret123` | Credentials used for the auth-shell still captured by the `welcome` scenario |
 
 ### Listing scenarios
 
@@ -60,10 +67,10 @@ node tests/ui/capture.mjs --list-scenarios
 
 | Scenario | Purpose |
 |----------|---------|
-| `welcome` | Welcome/setup screen without remote attach |
+| `welcome` | Welcome/setup screen plus form-auth shell without remote attach |
 | `chat` | Core chat view, telemetry overlay, and logs |
 | `guided-gen` | Context notes, suggestions, quick guide, director, surprise, explicit mode |
-| `sidebar` | Chat sidebar, search, context menu, name filter |
+| `sidebar` | Chat sidebar, message-search flyout, context menu, title filter |
 | `settings` | Settings modal, performance tab, advanced tab, user preferences, persona, models, shortcuts |
 | `panels` | Behavior, model, style, and prompt-debug surfaces |
 | `dashboard` | Server tab and GPU section |

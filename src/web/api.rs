@@ -20,7 +20,7 @@ impl std::error::Error for ApiError {}
 
 impl Reject for ApiError {}
 
-use crate::config::{AppConfig, TlsMode};
+use crate::config::{AppConfig, DashboardAuthConfig, TlsMode, clear_auth_config, save_auth_config};
 use crate::gpu::env::{self as gpu_env, GPU_ARCHITECTURES, GpuEnv};
 
 #[cfg(target_os = "windows")]
@@ -32,6 +32,7 @@ use crate::models;
 use crate::presets::{self, ModelPreset};
 use crate::remote_ssh::{self, SshConnection};
 use crate::state::{self as app_state, AppState, SessionStatus, UiSettings};
+use crate::web::auth::{AuthManager, AuthMethod, AuthSource};
 
 #[allow(dead_code)]
 mod legacy_chat_types {
@@ -989,6 +990,8 @@ fn api_analyze_context_notes(
 pub fn api_routes(
     state: AppState,
     app_config: Arc<AppConfig>,
+    auth_manager: AuthManager,
+    bind_host: String,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     let start = api_start(state.clone(), app_config.clone());
     let stop = api_stop(state.clone());
@@ -1029,6 +1032,8 @@ pub fn api_routes(
     let rotate_agent_token = api_rotate_agent_token(state.clone(), app_config.clone());
     let rotate_api_token = api_rotate_api_token(app_config.clone());
     let rotate_db_admin_token = api_rotate_db_admin_token(app_config.clone());
+    let get_auth_config = api_get_auth_config(app_config.clone(), auth_manager.clone());
+    let put_auth_config = api_put_auth_config(app_config.clone(), auth_manager.clone());
 
     // Database admin routes
     let db_stats = api_db_stats(chat_storage.clone(), app_config.clone());
@@ -1040,9 +1045,10 @@ pub fn api_routes(
     let db_restore = api_db_restore(chat_storage.clone(), app_config.clone());
     let db_repair = api_db_repair(chat_storage.clone(), app_config.clone());
     let db_indexes = api_db_indexes(chat_storage.clone(), app_config.clone());
-    let db_admin_token = api_db_admin_token(app_config.clone());
+    let db_admin_token =
+        api_db_admin_token(app_config.clone(), auth_manager.clone(), bind_host.clone());
     let db_query = api_db_query(chat_storage.clone(), app_config.clone());
-    let internal_token = api_internal_token(app_config.clone());
+    let internal_token = api_internal_token(app_config.clone(), auth_manager, bind_host);
 
     let get_sessions = api_get_sessions(state.clone());
     let create_session = api_create_session(state.clone());
@@ -1091,7 +1097,9 @@ pub fn api_routes(
         .or(put_settings)
         .or(rotate_agent_token)
         .or(rotate_api_token)
-        .or(rotate_db_admin_token);
+        .or(rotate_db_admin_token)
+        .or(get_auth_config)
+        .or(put_auth_config);
     let analyze_context_notes = api_analyze_context_notes(state.clone());
     let chat_routes = browse
         .or(chat)
@@ -1173,6 +1181,288 @@ pub fn api_routes(
         .or(bridge_routes)
         .or(tls_routes)
         .or(api_self_update(app_config.clone()))
+}
+
+pub fn auth_api_routes(
+    auth_manager: AuthManager,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    api_auth_status(auth_manager.clone())
+        .or(api_auth_login(auth_manager.clone()))
+        .or(api_auth_logout(auth_manager))
+}
+
+fn api_auth_status(
+    auth_manager: AuthManager,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "auth" / "status")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("Authorization"))
+        .and(warp::header::optional::<String>("cookie"))
+        .map(
+            move |auth_header: Option<String>, cookie_header: Option<String>| {
+                let status = auth_manager.status(auth_header.as_deref(), cookie_header.as_deref());
+                let method = match status.method {
+                    Some(AuthMethod::Basic) => Some("basic"),
+                    Some(AuthMethod::Form) => Some("form"),
+                    None => None,
+                };
+                warp::reply::json(&serde_json::json!({
+                    "enabled": auth_manager.has_any(),
+                    "methods": {
+                        "basic": auth_manager.has_basic(),
+                        "form": auth_manager.has_form(),
+                    },
+                    "managedByCli": matches!(auth_manager.source(), AuthSource::Cli),
+                    "recoveryCommand": "llama-monitor --clear-auth-config",
+                    "authenticated": status.authenticated,
+                    "method": method,
+                    "username": status.username,
+                }))
+            },
+        )
+}
+
+fn api_auth_login(
+    auth_manager: AuthManager,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct LoginRequest {
+        username: String,
+        password: String,
+    }
+
+    warp::path!("api" / "auth" / "login")
+        .and(warp::post())
+        .and(warp::body::content_length_limit(32 * 1024))
+        .and(warp::body::json())
+        .map(move |req: LoginRequest| {
+            if !auth_manager.has_form() {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({ "error": "form_auth_not_enabled" })),
+                    warp::http::StatusCode::BAD_REQUEST,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+            if !auth_manager.verify_form_credentials(&req.username, &req.password) {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({ "error": "invalid_credentials" })),
+                    warp::http::StatusCode::UNAUTHORIZED,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+            let Some(token) = auth_manager.create_form_session(&req.username) else {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({ "error": "form_auth_not_enabled" })),
+                    warp::http::StatusCode::BAD_REQUEST,
+                )) as Box<dyn warp::reply::Reply>;
+            };
+            Box::new(warp::reply::with_header(
+                warp::reply::json(&serde_json::json!({ "ok": true })),
+                "Set-Cookie",
+                auth_manager.session_cookie_header(&token),
+            )) as Box<dyn warp::reply::Reply>
+        })
+}
+
+fn api_auth_logout(
+    auth_manager: AuthManager,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "auth" / "logout")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("cookie"))
+        .map(move |cookie_header: Option<String>| {
+            auth_manager.revoke_form_session(cookie_header.as_deref());
+            warp::reply::with_header(
+                warp::reply::json(&serde_json::json!({ "ok": true })),
+                "Set-Cookie",
+                auth_manager.expired_session_cookie_header(),
+            )
+        })
+}
+
+fn api_get_auth_config(
+    app_config: Arc<AppConfig>,
+    auth_manager: AuthManager,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "auth" / "config")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .map(move |auth: Option<String>| {
+            let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+            match (&app_config.api_token, bearer.as_deref()) {
+                (Some(expected), Some(got)) if expected == got => {
+                    let view = auth_manager.config_view();
+                    Box::new(warp::reply::json(&serde_json::json!({
+                        "source": match view.source {
+                            AuthSource::None => "none",
+                            AuthSource::Config => "config",
+                            AuthSource::Cli => "cli",
+                        },
+                        "basicEnabled": view.basic_enabled,
+                        "formEnabled": view.form_enabled,
+                        "username": view.username,
+                        "managedByCli": matches!(view.source, AuthSource::Cli),
+                        "recoveryCommand": "llama-monitor --clear-auth-config",
+                        "recoveryFile": app_config.auth_config_file.display().to_string(),
+                    }))) as Box<dyn warp::reply::Reply>
+                }
+                _ => Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                    warp::http::StatusCode::UNAUTHORIZED,
+                )) as Box<dyn warp::reply::Reply>,
+            }
+        })
+}
+
+fn api_put_auth_config(
+    app_config: Arc<AppConfig>,
+    auth_manager: AuthManager,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    #[derive(serde::Deserialize)]
+    struct UpdateAuthConfigRequest {
+        basic_enabled: bool,
+        form_enabled: bool,
+        username: String,
+        #[serde(default)]
+        current_password: String,
+        #[serde(default)]
+        new_password: String,
+    }
+
+    warp::path!("api" / "auth" / "config")
+        .and(warp::put())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::content_length_limit(64 * 1024))
+        .and(warp::body::json())
+        .map(move |auth: Option<String>, req: UpdateAuthConfigRequest| {
+            let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+            match (&app_config.api_token, bearer.as_deref()) {
+                (Some(expected), Some(got)) if expected == got => {}
+                _ => {
+                    return Box::new(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                        warp::http::StatusCode::UNAUTHORIZED,
+                    )) as Box<dyn warp::reply::Reply>;
+                }
+            }
+
+            if matches!(auth_manager.source(), AuthSource::Cli) {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "error": "managed_by_cli",
+                        "message": "This instance is using startup auth flags. Remove --basic-auth/--form-auth to manage dashboard access in the app."
+                    })),
+                    warp::http::StatusCode::CONFLICT,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+
+            if !req.basic_enabled && !req.form_enabled {
+                if let Err(err) = clear_auth_config(&app_config.config_dir) {
+                    return Box::new(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "error": "save_failed",
+                            "message": err.to_string(),
+                        })),
+                        warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    )) as Box<dyn warp::reply::Reply>;
+                }
+                auth_manager.disable();
+                return Box::new(warp::reply::json(&serde_json::json!({
+                    "ok": true,
+                    "message": "Dashboard auth disabled.",
+                }))) as Box<dyn warp::reply::Reply>;
+            }
+
+            let username = req.username.trim();
+            if username.is_empty() {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "error": "invalid_username",
+                        "message": "Username is required when dashboard auth is enabled."
+                    })),
+                    warp::http::StatusCode::BAD_REQUEST,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+
+            let existing_view = auth_manager.config_view();
+            let changing_password = !req.new_password.trim().is_empty();
+            if changing_password && req.new_password.len() < 8 {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "error": "weak_password",
+                        "message": "Use at least 8 characters for the dashboard password."
+                    })),
+                    warp::http::StatusCode::BAD_REQUEST,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+
+            if matches!(existing_view.source, AuthSource::Config)
+                && existing_view.username.is_some()
+                && changing_password
+                && !auth_manager.verify_any_password(&req.current_password)
+            {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "error": "invalid_current_password",
+                        "message": "Current password did not match the stored dashboard password."
+                    })),
+                    warp::http::StatusCode::UNAUTHORIZED,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+
+            let password_hash = if changing_password {
+                match AuthManager::hash_password(&req.new_password) {
+                    Some(hash) => hash,
+                    None => {
+                        return Box::new(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "error": "hash_failed",
+                                "message": "Failed to hash the new password."
+                            })),
+                            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                        )) as Box<dyn warp::reply::Reply>;
+                    }
+                }
+            } else {
+                let current = crate::config::load_auth_config(&app_config.config_dir);
+                if current.password_hash.is_empty() {
+                    return Box::new(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "error": "missing_password",
+                            "message": "Enter a new password to enable dashboard auth."
+                        })),
+                        warp::http::StatusCode::BAD_REQUEST,
+                    )) as Box<dyn warp::reply::Reply>;
+                }
+                current.password_hash
+            };
+
+            let cfg = DashboardAuthConfig {
+                basic_enabled: req.basic_enabled,
+                form_enabled: req.form_enabled,
+                username: username.to_string(),
+                password_hash,
+            };
+
+            if let Err(err) = save_auth_config(&app_config.config_dir, &cfg) {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "error": "save_failed",
+                        "message": err.to_string(),
+                    })),
+                    warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+
+            auth_manager.replace_with_config(cfg);
+
+            Box::new(warp::reply::json(&serde_json::json!({
+                "ok": true,
+                "message": if changing_password {
+                    "Dashboard access updated and sessions refreshed."
+                } else {
+                    "Dashboard access updated."
+                }
+            }))) as Box<dyn warp::reply::Reply>
+        })
 }
 
 fn api_remote_agent_latest_release()
@@ -3315,7 +3605,7 @@ fn api_reorder_tabs(
         )
 }
 
-// GET /api/chat/search?q=…&limit=50
+// GET /api/chat/search?q=…&limit=20&offset=0
 fn api_chat_search(
     storage: Arc<ChatStorage>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -3324,9 +3614,11 @@ fn api_chat_search(
         q: String,
         #[serde(default = "default_limit")]
         limit: usize,
+        #[serde(default)]
+        offset: usize,
     }
     fn default_limit() -> usize {
-        50
+        20
     }
 
     warp::path!("api" / "chat" / "search")
@@ -3334,13 +3626,18 @@ fn api_chat_search(
         .and(warp::query::<SearchParams>())
         .and(with_chat_storage(storage))
         .and_then(|p: SearchParams, store: Arc<ChatStorage>| async move {
-            match store.search(&p.q, p.limit) {
+            let limit = p.limit.clamp(1, 100);
+            match store.search(&p.q, limit, p.offset) {
                 Ok(results) => Ok::<_, warp::Rejection>(warp::reply::json(&results)),
                 Err(e) => {
                     eprintln!("search error: {e}");
-                    Ok(warp::reply::json(
-                        &Vec::<crate::chat_storage::SearchResult>::new(),
-                    ))
+                    Ok(warp::reply::json(&crate::chat_storage::SearchResultsPage {
+                        results: Vec::new(),
+                        total: 0,
+                        limit,
+                        offset: p.offset,
+                        has_more: false,
+                    }))
                 }
             }
         })
@@ -3361,33 +3658,29 @@ fn api_db_stats(
         .and(with_chat_storage(storage))
         .and(with_app_config(app_config))
         .and_then(
-            move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| {
-                async move {
-                    let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-                    let has_api_token =
-                        bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+            move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                let has_api_token =
+                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
 
-                    if !has_api_token {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::with_status(
-                                warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
-                                warp::http::StatusCode::UNAUTHORIZED,
-                            ),
-                        ));
-                    }
-
-                    match store.database_stats() {
-                        Ok(stats) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                            Box::new(warp::reply::json(&stats)),
+                if !has_api_token {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
                         ),
-                        Err(e) => {
-                            eprintln!("db stats error: {e}");
-                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                warp::reply::json(
-                                    &serde_json::json!({"error": e.to_string()}),
-                                ),
-                            ))
-                        }
+                    ));
+                }
+
+                match store.database_stats() {
+                    Ok(stats) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&stats),
+                    )),
+                    Err(e) => {
+                        eprintln!("db stats error: {e}");
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                        ))
                     }
                 }
             },
@@ -3407,43 +3700,39 @@ fn api_db_integrity(
         .and(with_chat_storage(storage))
         .and(with_app_config(app_config))
         .and_then(
-            move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| {
-                async move {
-                    let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-                    let has_api_token =
-                        bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+            move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                let has_api_token =
+                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
 
-                    if !has_api_token {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::with_status(
-                                warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
-                                warp::http::StatusCode::UNAUTHORIZED,
-                            ),
-                        ));
+                if !has_api_token {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
+                        ),
+                    ));
+                }
+
+                match store.integrity_check() {
+                    Ok(result) => {
+                        let status = if result == "ok" {
+                            "healthy"
+                        } else {
+                            "corrupted"
+                        };
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "status": status,
+                                "detail": result,
+                            })),
+                        ))
                     }
-
-                    match store.integrity_check() {
-                        Ok(result) => {
-                            let status = if result == "ok" {
-                                "healthy"
-                            } else {
-                                "corrupted"
-                            };
-                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                warp::reply::json(&serde_json::json!({
-                                    "status": status,
-                                    "detail": result,
-                                })),
-                            ))
-                        }
-                        Err(e) => {
-                            eprintln!("integrity check error: {e}");
-                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                warp::reply::json(
-                                    &serde_json::json!({"error": e.to_string()}),
-                                ),
-                            ))
-                        }
+                    Err(e) => {
+                        eprintln!("integrity check error: {e}");
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                        ))
                     }
                 }
             },
@@ -3620,108 +3909,88 @@ fn api_db_indexes(
         .and(with_chat_storage(storage))
         .and(with_app_config(app_config))
         .and_then(
-            move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| {
-                async move {
-                    let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-                    let has_api_token =
-                        bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+            move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
+                let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
+                let has_api_token =
+                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
 
-                    if !has_api_token {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::with_status(
-                                warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
-                                warp::http::StatusCode::UNAUTHORIZED,
-                            ),
-                        ));
-                    }
-
-                    match store.list_indexes() {
-                        Ok(indexes) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                            Box::new(warp::reply::json(&indexes)),
+                if !has_api_token {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                            warp::http::StatusCode::UNAUTHORIZED,
                         ),
-                        Err(e) => {
-                            eprintln!("list indexes error: {e}");
-                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                warp::reply::json(
-                                    &serde_json::json!({"error": e.to_string()}),
-                                ),
-                            ))
-                        }
+                    ));
+                }
+
+                match store.list_indexes() {
+                    Ok(indexes) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&indexes),
+                    )),
+                    Err(e) => {
+                        eprintln!("list indexes error: {e}");
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"error": e.to_string()})),
+                        ))
                     }
                 }
             },
         )
 }
 
-/// Check if the Origin header is allowed:
-/// - If no Origin (same-site or tools): allow.
-/// - If Origin matches the Host header: allow.
-/// - Otherwise: reject with 403.
-fn origin_allowed(origin: Option<String>, host: Option<String>) -> bool {
-    match (origin, host) {
-        (None, _) => true,
-        (Some(o), Some(h)) => {
-            let o = o.trim().to_lowercase();
-            let h = h.trim().to_lowercase();
-            if o.is_empty() || h.is_empty() {
-                return true;
-            }
-            // Normalize origin to "http(s)://host"
-            let server_origin = if h.starts_with("http://") || h.starts_with("https://") {
-                h
-            } else {
-                format!("http://{}", h)
-            };
-            o == server_origin
-        }
-        _ => true,
-    }
+/// Token bootstrap policy:
+/// - When any auth mode is configured, the surrounding auth guard already
+///   authenticated the request, so bootstrap is allowed.
+/// - With no auth configured, bootstrap is restricted to loopback binds.
+fn bind_host_is_loopback(bind_host: &str) -> bool {
+    let host = bind_host.trim().trim_matches(['[', ']']);
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
+}
+
+fn token_bootstrap_allowed(auth_manager: &AuthManager, bind_host: &str) -> bool {
+    auth_manager.has_any() || bind_host_is_loopback(bind_host)
 }
 
 // GET /api/internal/api-token - Return internal API token for UI use
 fn api_internal_token(
     app_config: Arc<AppConfig>,
+    auth_manager: AuthManager,
+    bind_host: String,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "internal" / "api-token")
         .and(warp::get())
-        .and(warp::header::optional::<String>("origin"))
-        .and(warp::header::optional::<String>("host"))
         .and(with_app_config(app_config))
-        .map(
-            |origin: Option<String>, host: Option<String>, cfg: Arc<AppConfig>| {
-                if !origin_allowed(origin, host) {
-                    return Box::new(warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({ "error": "forbidden" })),
-                        warp::http::StatusCode::FORBIDDEN,
-                    )) as Box<dyn warp::reply::Reply>;
-                }
-                let token = cfg.api_token.as_deref().unwrap_or("");
-                Box::new(warp::reply::json(&serde_json::json!({ "token": token })))
-            },
-        )
+        .map(move |cfg: Arc<AppConfig>| {
+            if !token_bootstrap_allowed(&auth_manager, &bind_host) {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({ "error": "forbidden" })),
+                    warp::http::StatusCode::FORBIDDEN,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+            let token = cfg.api_token.as_deref().unwrap_or("");
+            Box::new(warp::reply::json(&serde_json::json!({ "token": token })))
+        })
 }
 
 // GET /api/db/admin-token - Return DB admin token for authenticated UI use
 fn api_db_admin_token(
     app_config: Arc<AppConfig>,
+    auth_manager: AuthManager,
+    bind_host: String,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "db" / "admin-token")
         .and(warp::get())
-        .and(warp::header::optional::<String>("origin"))
-        .and(warp::header::optional::<String>("host"))
         .and(with_app_config(app_config))
-        .map(
-            |origin: Option<String>, host: Option<String>, cfg: Arc<AppConfig>| {
-                if !origin_allowed(origin, host) {
-                    return Box::new(warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({ "error": "forbidden" })),
-                        warp::http::StatusCode::FORBIDDEN,
-                    )) as Box<dyn warp::reply::Reply>;
-                }
-                let token = cfg.db_admin_token.as_deref().unwrap_or("");
-                Box::new(warp::reply::json(&serde_json::json!({ "token": token })))
-            },
-        )
+        .map(move |cfg: Arc<AppConfig>| {
+            if !token_bootstrap_allowed(&auth_manager, &bind_host) {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({ "error": "forbidden" })),
+                    warp::http::StatusCode::FORBIDDEN,
+                )) as Box<dyn warp::reply::Reply>;
+            }
+            let token = cfg.db_admin_token.as_deref().unwrap_or("");
+            Box::new(warp::reply::json(&serde_json::json!({ "token": token })))
+        })
 }
 
 // POST /api/db/query - Execute admin query (SELECT only)
@@ -3774,7 +4043,9 @@ fn api_db_query(
                     if req.sql.len() > 16_000 {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::with_status(
-                                warp::reply::json(&serde_json::json!({ "error": "query too long" })),
+                                warp::reply::json(
+                                    &serde_json::json!({ "error": "query too long" }),
+                                ),
                                 warp::http::StatusCode::BAD_REQUEST,
                             ),
                         ));
@@ -3782,19 +4053,19 @@ fn api_db_query(
 
                     let store = store_clone.clone();
                     let sql = req.sql.clone();
-                    let result = tokio::time::timeout(
-                        std::time::Duration::from_secs(10),
-                        async move { store.execute_query(&sql, is_admin) },
-                    )
-                    .await;
+                    let result =
+                        tokio::time::timeout(std::time::Duration::from_secs(10), async move {
+                            store.execute_query(&sql, is_admin)
+                        })
+                        .await;
 
                     match result {
-                        Ok(Ok(result)) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::with_status(
+                        Ok(Ok(result)) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::with_status(
                                 warp::reply::json(&result),
                                 warp::http::StatusCode::OK,
-                            ),
-                        )),
+                            )),
+                        ),
                         Ok(Err(e)) => {
                             eprintln!("query error: {e}");
                             Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -3808,7 +4079,9 @@ fn api_db_query(
                             eprintln!("query timeout");
                             Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                                 warp::reply::with_status(
-                                    warp::reply::json(&serde_json::json!({"error": "query timed out"})),
+                                    warp::reply::json(
+                                        &serde_json::json!({"error": "query timed out"}),
+                                    ),
                                     warp::http::StatusCode::REQUEST_TIMEOUT,
                                 ),
                             ))
@@ -5360,11 +5633,13 @@ fn api_self_update(
 #[cfg(test)]
 mod tests {
     use super::legacy_chat_types::*;
+    use super::token_bootstrap_allowed;
 
     use crate::chat_storage::ChatStorage;
     use crate::config::{self, AcmeConfig, TLSConfig, TlsMode};
     use crate::gpu::env::GpuEnv;
     use crate::state::{AppPaths, AppState};
+    use crate::web::auth::AuthManager;
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -5404,6 +5679,7 @@ mod tests {
             gpu_arch_override: None,
             gpu_devices_override: None,
             ui_settings_file: PathBuf::new(),
+            auth_config_file: PathBuf::new(),
             sessions_file: PathBuf::new(),
             ssh_known_hosts_file: PathBuf::new(),
             lhm_disabled_file: PathBuf::new(),
@@ -5434,6 +5710,130 @@ mod tests {
             .or(tls_put_config)
             .or(tls_acme_request)
             .or(tls_acme_renew)
+    }
+
+    fn auth_routes_filter(
+        auth_manager: AuthManager,
+    ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+        super::auth_api_routes(auth_manager)
+    }
+
+    #[test]
+    fn token_bootstrap_allows_loopback_without_basic_auth() {
+        let auth = AuthManager::new(None, None, &TlsMode::None);
+        assert!(token_bootstrap_allowed(&auth, "127.0.0.1"));
+        assert!(token_bootstrap_allowed(&auth, "localhost"));
+    }
+
+    #[test]
+    fn token_bootstrap_rejects_non_loopback_bind_without_basic_auth() {
+        let auth = AuthManager::new(None, None, &TlsMode::None);
+        assert!(!token_bootstrap_allowed(&auth, "0.0.0.0"));
+    }
+
+    #[test]
+    fn token_bootstrap_allows_when_basic_auth_is_configured() {
+        let auth = AuthManager::new(
+            AuthManager::parse_credentials("admin:secret"),
+            None,
+            &TlsMode::None,
+        );
+        assert!(token_bootstrap_allowed(&auth, "0.0.0.0"));
+    }
+
+    #[test]
+    fn token_bootstrap_allows_when_form_auth_is_configured() {
+        let auth = AuthManager::new(
+            None,
+            AuthManager::parse_credentials("admin:secret"),
+            &TlsMode::None,
+        );
+        assert!(token_bootstrap_allowed(&auth, "0.0.0.0"));
+    }
+
+    #[tokio::test]
+    async fn form_auth_login_sets_session_cookie_and_status_reflects_it() {
+        let auth = AuthManager::new(
+            None,
+            AuthManager::parse_credentials("admin:secret123"),
+            &TlsMode::None,
+        );
+        let routes = auth_routes_filter(auth);
+
+        let login_resp = warp::test::request()
+            .method("POST")
+            .path("/api/auth/login")
+            .json(&serde_json::json!({
+                "username": "admin",
+                "password": "secret123",
+            }))
+            .reply(&routes)
+            .await;
+
+        assert_eq!(login_resp.status(), 200);
+        let set_cookie = login_resp
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("set-cookie header");
+        assert!(set_cookie.contains("llama_monitor_session="));
+
+        let status_resp = warp::test::request()
+            .method("GET")
+            .path("/api/auth/status")
+            .header("cookie", set_cookie)
+            .reply(&routes)
+            .await;
+
+        assert_eq!(status_resp.status(), 200);
+        let body: serde_json::Value =
+            serde_json::from_slice(status_resp.body()).expect("valid JSON");
+        assert_eq!(body["enabled"], true);
+        assert_eq!(body["methods"]["form"], true);
+        assert_eq!(body["authenticated"], true);
+        assert_eq!(body["method"], "form");
+        assert_eq!(body["username"], "admin");
+    }
+
+    #[tokio::test]
+    async fn form_auth_logout_clears_session_cookie() {
+        let auth = AuthManager::new(
+            None,
+            AuthManager::parse_credentials("admin:secret123"),
+            &TlsMode::None,
+        );
+        let routes = auth_routes_filter(auth);
+
+        let login_resp = warp::test::request()
+            .method("POST")
+            .path("/api/auth/login")
+            .json(&serde_json::json!({
+                "username": "admin",
+                "password": "secret123",
+            }))
+            .reply(&routes)
+            .await;
+
+        let set_cookie = login_resp
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("set-cookie header");
+
+        let logout_resp = warp::test::request()
+            .method("POST")
+            .path("/api/auth/logout")
+            .header("cookie", set_cookie)
+            .reply(&routes)
+            .await;
+
+        assert_eq!(logout_resp.status(), 200);
+        let clear_cookie = logout_resp
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("set-cookie clear header");
+        assert!(clear_cookie.contains("Max-Age=0"));
     }
 
     #[tokio::test]

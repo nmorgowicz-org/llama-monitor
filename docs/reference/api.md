@@ -790,39 +790,74 @@ Full-text search over non-compaction-marker messages in `chat.db`.
 
 Query params:
 - `q`: required search string
-- `limit`: optional result limit, default `50`
+- `limit`: optional page size, default `20`, max `100`
+- `offset`: optional result offset, default `0`
 
 Example:
 
 ```text
-/api/chat/search?q=slow%20endpoint&limit=20
+/api/chat/search?q=slow%20endpoint&limit=20&offset=0
 ```
 
 Response:
 
 ```json
-[
-  {
-    "tab_id": "tab_1746000000000",
-    "tab_name": "Debug Session",
-    "message_id": 17,
-    "role": "assistant",
-    "snippet": "Check <mark>slow</mark> HTTP <mark>endpoint</mark> first.",
-    "timestamp_ms": 1746000002000
-  }
-]
+{
+  "results": [
+    {
+      "tab_id": "tab_1746000000000",
+      "tab_name": "Debug Session",
+      "message_id": 17,
+      "role": "assistant",
+      "snippet": "Check <mark>slow</mark> HTTP <mark>endpoint</mark> first.",
+      "timestamp_ms": 1746000002000
+    }
+  ],
+  "total": 37,
+  "limit": 20,
+  "offset": 0,
+  "has_more": true
+}
 ```
 
 Search notes:
 - punctuation is normalized before FTS lookup
 - prefix matching is used internally
-- empty or unparseable queries return `[]`
+- empty or unparseable queries return an empty paged result object
 
 ## Database Admin
 
 All `/api/db/*` routes operate on the SQLite chat database.
 
 Authentication:
+- `GET /api/auth/status`:
+  - Public endpoint used by the frontend to discover whether auth is enabled.
+  - Returns enabled methods, whether auth is managed by startup flags, a local recovery command,
+    and whether the current request is already authenticated.
+- `POST /api/auth/login`:
+  - Public endpoint used by in-app form auth.
+  - Expects JSON:
+      { "username": "<user>", "password": "<password>" }
+  - On success, sets an HttpOnly session cookie.
+- `POST /api/auth/logout`:
+  - Public endpoint that clears the in-app form-auth session cookie.
+- `GET /api/auth/config`:
+  - Protected endpoint for the Security tab.
+  - Requires `api-token`.
+  - Returns the current dashboard auth mode, username, whether it is CLI-managed, and local recovery metadata.
+- `PUT /api/auth/config`:
+  - Protected endpoint for updating dashboard auth.
+  - Requires `api-token`.
+  - Expects JSON:
+      {
+        "basic_enabled": true|false,
+        "form_enabled": true|false,
+        "username": "<user>",
+        "current_password": "<old-password-or-empty>",
+        "new_password": "<new-password-or-empty>"
+      }
+  - Use `new_password` when setting a password for the first time or changing it.
+  - Sending both mode flags as `false` disables dashboard auth and clears `auth-config.json`.
 - Most endpoints require one of two tokens:
   - `api-token`: general API token for routine admin operations.
   - `db-admin-token`: elevated token for destructive or high-risk operations.
@@ -830,9 +865,10 @@ Authentication:
   - Header: `Authorization: Bearer <token>`
 - `GET /api/db/admin-token`:
   - Returns the db-admin-token for use by the in-browser DB Admin UI.
-  - Only allowed from same-origin requests (origin/host validation).
+  - Allowed whenever a request has already passed configured auth, or when the server is bound to loopback with no auth configured.
   - Example:
       { "token": "<db-admin-token>" }
+- `GET /api/internal/api-token` follows the same bootstrap policy for the main UI.
 
 ### `GET /api/db/stats`
 Requires `api-token`.

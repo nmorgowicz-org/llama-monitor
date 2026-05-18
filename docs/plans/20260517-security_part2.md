@@ -6,7 +6,7 @@ Focus: remaining gaps after initial hardening pass.
 
 ### 1. Search Snippet XSS (chat-search)
 
-- Status: OPEN
+- Status: FIXED
 - Files:
   - src/chat_storage.rs (snippet generation)
   - static/js/features/chat-search.js (snippet rendering)
@@ -72,10 +72,15 @@ Focus: remaining gaps after initial hardening pass.
 
     - Rationale:
       - Adds frontend protection in case snippet contents are ever reused or misused.
-- Next Steps:
-  - Implement backend escape (primary fix).
-  - Optionally add DOMPurify guard in chat-search.js.
-  - Confirm no other snippet-based XSS vectors (e.g., compaction preview snippets).
+- Mitigation Applied (2026-05-17):
+  - Backend (src/chat_storage.rs):
+    - Added escape_html_except_mark to HTML-escape snippet content while preserving <mark> tags.
+  - Frontend (static/js/features/chat-search.js):
+    - Added DOMPurify.sanitize(snippet, { ALLOWED_TAGS: ['mark'] }) as secondary guard.
+  - Screenshots validated:
+    - sidebar-fts-search-active.png and sidebar-fts-search-results.png confirm highlights still render correctly.
+- Remaining Risk:
+  - Low: no other snippet-based XSS vectors identified.
 
 ### 2. Unprotected Remote-Agent Endpoints
 

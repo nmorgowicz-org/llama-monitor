@@ -365,6 +365,7 @@ function _bindSettingsEvents() {
             // Load TLS config when Security tab is opened
             if (target === 'security') {
                 loadTlsConfig();
+                loadDashboardAuthConfig();
             }
         });
     });
@@ -375,6 +376,14 @@ function _bindSettingsEvents() {
             const mode = pill.dataset.mode;
             if (!mode) return;
             setActiveCertMode(mode);
+        });
+    });
+
+    document.querySelectorAll('#dashboard-auth-mode-pills .cert-mode-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+            const mode = pill.dataset.authMode;
+            if (!mode) return;
+            setActiveDashboardAuthMode(mode);
         });
     });
 
@@ -845,11 +854,139 @@ function readAcmeCredentials() {
     return map;
 }
 
+// ── Dashboard auth / password reset ─────────────────────────────────────────
+
+function selectedDashboardAuthMode() {
+    return document.querySelector('#dashboard-auth-mode-pills .cert-mode-pill.active')?.dataset.authMode || 'none';
+}
+
+function setActiveDashboardAuthMode(mode) {
+    document.querySelectorAll('#dashboard-auth-mode-pills .cert-mode-pill').forEach(pill => {
+        pill.classList.toggle('active', pill.dataset.authMode === mode);
+    });
+}
+
+async function loadDashboardAuthConfig() {
+    const statusEl = document.getElementById('dashboard-auth-status');
+    const warningEl = document.getElementById('dashboard-auth-managed-warning');
+    const controlsEl = document.getElementById('dashboard-auth-controls');
+    const userEl = document.getElementById('dashboard-auth-username');
+
+    if (statusEl) statusEl.textContent = 'Loading dashboard access…';
+
+    try {
+        const res = await fetch('/api/auth/config', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            if (statusEl) statusEl.textContent = data.message || data.error || `Failed to load dashboard access (${res.status})`;
+            return;
+        }
+
+        if (warningEl) warningEl.style.display = data.managedByCli ? '' : 'none';
+        if (controlsEl) {
+            controlsEl.style.opacity = data.managedByCli ? '0.6' : '1';
+            controlsEl.style.pointerEvents = data.managedByCli ? 'none' : 'auto';
+        }
+
+        if (userEl) userEl.value = data.username || '';
+
+        if (data.basicEnabled && data.formEnabled) {
+            setActiveDashboardAuthMode('both');
+        } else if (data.basicEnabled) {
+            setActiveDashboardAuthMode('basic');
+        } else if (data.formEnabled) {
+            setActiveDashboardAuthMode('form');
+        } else {
+            setActiveDashboardAuthMode('none');
+        }
+
+        if (statusEl) {
+            const sourceLabel = data.managedByCli ? 'startup flags' : 'auth-config.json';
+            const modeLabel = data.basicEnabled && data.formEnabled
+                ? 'Basic Auth + form login'
+                : data.basicEnabled
+                    ? 'Basic Auth'
+                    : data.formEnabled
+                        ? 'Form login'
+                        : 'No dashboard auth';
+            statusEl.textContent = `${modeLabel} • managed via ${sourceLabel}`;
+        }
+    } catch (err) {
+        if (statusEl) statusEl.textContent = err.message || 'Failed to load dashboard access';
+    }
+}
+
+async function saveDashboardAuthConfig() {
+    const statusEl = document.getElementById('dashboard-auth-save-status');
+    const username = document.getElementById('dashboard-auth-username')?.value.trim() || '';
+    const currentPassword = document.getElementById('dashboard-auth-current-password')?.value || '';
+    const newPassword = document.getElementById('dashboard-auth-new-password')?.value || '';
+    const confirmPassword = document.getElementById('dashboard-auth-confirm-password')?.value || '';
+    const mode = selectedDashboardAuthMode();
+
+    const basicEnabled = mode === 'basic' || mode === 'both';
+    const formEnabled = mode === 'form' || mode === 'both';
+
+    if (newPassword || confirmPassword) {
+        if (newPassword !== confirmPassword) {
+            if (statusEl) statusEl.textContent = 'Passwords do not match';
+            showToast('Dashboard access not saved', 'error', 'New password and confirmation must match.');
+            return;
+        }
+    }
+
+    if ((basicEnabled || formEnabled) && !username) {
+        if (statusEl) statusEl.textContent = 'Username required';
+        showToast('Dashboard access not saved', 'error', 'Enter a username when auth is enabled.');
+        return;
+    }
+
+    if (statusEl) statusEl.textContent = 'Saving…';
+
+    try {
+        const res = await fetch('/api/auth/config', {
+            method: 'PUT',
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                basic_enabled: basicEnabled,
+                form_enabled: formEnabled,
+                username,
+                current_password: currentPassword,
+                new_password: newPassword,
+            }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            if (statusEl) statusEl.textContent = data.message || data.error || `Failed (${res.status})`;
+            showToast('Dashboard access not saved', 'error', data.message || data.error || `Server responded ${res.status}`);
+            return;
+        }
+
+        if (statusEl) statusEl.textContent = data.message || 'Saved';
+        showToast('Dashboard access saved', 'success', data.message || 'Dashboard access updated.');
+
+        ['dashboard-auth-current-password', 'dashboard-auth-new-password', 'dashboard-auth-confirm-password'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = '';
+        });
+
+        await loadDashboardAuthConfig();
+    } catch (err) {
+        if (statusEl) statusEl.textContent = err.message || 'Network error';
+        showToast('Dashboard access not saved', 'error', err.message || 'Network error');
+    }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initSettings() {
     // Bind settings button (sidebar button also bound by nav.js with data-tab="settings")
     document.getElementById('settings-btn')?.addEventListener('click', openSettingsModal);
+    document.getElementById('btn-save-dashboard-auth')?.addEventListener('click', saveDashboardAuthConfig);
 
     // Bind settings modal buttons
     document.getElementById('settings-modal-close')?.addEventListener('click', closeSettingsModal);
@@ -975,6 +1112,9 @@ export function initSettings() {
 
     _bindSettingsEvents();
     _bindTlsEvents();
+    if (document.getElementById('settings-security')?.classList.contains('active')) {
+        loadDashboardAuthConfig();
+    }
 }
 
 // ── Token rotation confirmation helper ────────────────────────────────────────

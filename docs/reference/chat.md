@@ -21,18 +21,21 @@ The left conversation sidebar is the main organizer for chat sessions.
 - **Recency groups** — Conversations are grouped into `Pinned`, `Today`, `Yesterday`, `This Week`, and `Older`
 - **Per-conversation status** — Each row shows the conversation name, persona label, explicit-mode badge, message count, and a context-pressure bar derived from the last known context percentage
 - **Collapse/expand** — The collapsed state persists in `localStorage` and is restored when the page is reopened
-- **Name filter** — The inline filter in the sidebar header matches conversation names and visible persona labels only
+- **Title filter** — The inline filter narrows the sidebar list by conversation names and visible persona labels only
+- **Message search entry point** — A dedicated `Search Messages` button sits under the title filter so full-text search is visible without hunting for a header icon
 - **Context menu** — Rename, pin/unpin, export JSON, export Markdown, duplicate, and delete are available from the `...` menu
 
 ![Conversation Context Menu](../screenshots/chat-context-menu.png)
 
 ### Cross-Conversation Message Search
 
-The magnifying-glass button opens a separate full-text search mode that searches message bodies across stored conversations.
+The sidebar's `Search Messages` button opens a larger flyout beside the conversation rail and searches message bodies across stored conversations.
 
 ![Conversation Search](../screenshots/sidebar-fts-search-active.png)
 
 - **Message search** — Searches stored message content, not just conversation names
+- **Wider results surface** — Matches render in a dedicated flyout instead of replacing the narrow sidebar list
+- **Result paging** — Results load in pages so long histories stay scannable even when a query returns dozens of matches
 - **Prefix and punctuation tolerant** — Short fragments and punctuation-heavy queries are normalized before matching
 - **Collapse-safe** — If the sidebar was collapsed before search, closing search restores that state
 - **Jump to match** — Clicking a result switches to the matching tab, scrolls to the stored message row, and briefly highlights it

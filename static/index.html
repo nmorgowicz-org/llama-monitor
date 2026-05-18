@@ -20,6 +20,7 @@
     <link rel="stylesheet" href="/css/components.css">
     <link rel="stylesheet" href="/css/chat.css">
     <link rel="stylesheet" href="/css/chat-guided-generation.css">
+    <link rel="stylesheet" href="/css/auth.css">
     <link rel="stylesheet" href="/css/setup-view.css">
     <link rel="stylesheet" href="/css/settings-modal.css">
     <link rel="stylesheet" href="/css/logs.css">
@@ -32,6 +33,34 @@
     <script nonce="{{ NONCE }}">const APP_VERSION = '{{ VERSION }}'; const APP_PLATFORM = '{{ PLATFORM }}';</script>
 </head>
 <body>
+      <div class="auth-shell hidden" id="auth-shell" aria-hidden="true">
+        <div class="auth-shell-backdrop"></div>
+        <div class="auth-shell-card">
+            <div class="auth-shell-brand">
+                <span class="auth-shell-eyebrow">Secure Access</span>
+                <h1 class="auth-shell-title">Sign in to Llama Monitor</h1>
+                <p class="auth-shell-subtitle" id="auth-shell-subtitle">Enter your credentials to unlock protected routes.</p>
+            </div>
+            <div class="auth-shell-badges" id="auth-shell-badges"></div>
+            <form class="auth-shell-form" id="auth-shell-form">
+                <label class="auth-shell-field">
+                    <span>Username</span>
+                    <input type="text" id="auth-username" autocomplete="username" required>
+                </label>
+                <label class="auth-shell-field">
+                    <span>Password</span>
+                    <input type="password" id="auth-password" autocomplete="current-password" required>
+                </label>
+                <button class="auth-shell-submit" id="auth-submit" type="submit">Sign In</button>
+                <p class="auth-shell-error" id="auth-shell-error" role="alert"></p>
+            </form>
+            <div class="auth-shell-footer">
+                <div class="auth-shell-note" id="auth-shell-note"></div>
+                <div class="auth-shell-recovery" id="auth-shell-recovery"></div>
+                <div class="auth-shell-meta">Local-first dashboard access with optional extra protection.</div>
+            </div>
+        </div>
+      </div>
       <!-- Shared SVG filters for sparkline visualizations -->
       <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
         <defs>
@@ -632,7 +661,7 @@
                 </div>
                 <div class="csp-search-wrap">
                     <input class="csp-search" id="csp-search" type="search"
-                           placeholder="Search conversations…" autocomplete="off">
+                           placeholder="Filter chat titles…" autocomplete="off">
                 </div>
                 <div class="csp-list" id="csp-list"></div>
                 <div class="csp-trash-strip hidden" id="csp-trash-strip"></div>
@@ -2666,6 +2695,60 @@
                             </div>
 
                             <div id="acme-status-text" style="font-size:12px;color:var(--text-muted);margin-top:6px;"></div>
+                        </div>
+                    </div>
+
+                    <div class="widget-card" style="padding:14px;margin-bottom:16px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            Dashboard Access
+                        </div>
+                        <p class="settings-help" style="margin-bottom:8px;">
+                            Control whether the dashboard uses no auth, HTTP Basic Auth, the in-app sign-in form, or both. Stored passwords are hashed locally and the auth config file is owner-only.
+                        </p>
+                        <div id="dashboard-auth-status" style="font-size:12px;color:var(--color-text-muted);margin-bottom:10px;">Checking dashboard access…</div>
+
+                        <div id="dashboard-auth-managed-warning" class="settings-warning" style="display:none;margin-bottom:12px;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,165,0,0.35);background:radial-gradient(circle at top,rgba(255,165,0,0.12),rgba(255,165,0,0.04));font-size:12px;color:var(--accent-orange);">
+                            This instance is using startup auth flags. Remove <code>--basic-auth</code> or <code>--form-auth</code> to manage dashboard access here.
+                        </div>
+
+                        <div id="dashboard-auth-controls">
+                            <div id="dashboard-auth-mode-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+                                <button type="button" class="cert-mode-pill" data-auth-mode="none">No Auth</button>
+                                <button type="button" class="cert-mode-pill" data-auth-mode="form">Form Login</button>
+                                <button type="button" class="cert-mode-pill" data-auth-mode="basic">Basic Auth</button>
+                                <button type="button" class="cert-mode-pill" data-auth-mode="both">Both</button>
+                            </div>
+
+                            <label class="modal-field">
+                                Username
+                                <input type="text" id="dashboard-auth-username" autocomplete="username" placeholder="admin">
+                            </label>
+
+                            <label class="modal-field">
+                                Current password
+                                <input type="password" id="dashboard-auth-current-password" autocomplete="current-password" placeholder="Needed only when replacing an existing password">
+                            </label>
+
+                            <label class="modal-field">
+                                New password
+                                <input type="password" id="dashboard-auth-new-password" autocomplete="new-password" placeholder="At least 8 characters">
+                            </label>
+
+                            <label class="modal-field">
+                                Confirm new password
+                                <input type="password" id="dashboard-auth-confirm-password" autocomplete="new-password" placeholder="Re-enter the new password">
+                            </label>
+
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                <button type="button" class="btn btn-secondary" id="btn-save-dashboard-auth">
+                                    Save Dashboard Access
+                                </button>
+                                <span id="dashboard-auth-save-status" style="font-size:11px;color:var(--color-text-muted);"></span>
+                            </div>
+                        </div>
+
+                        <div style="margin-top:10px;font-size:12px;color:var(--color-text-muted);line-height:1.5;">
+                            Forgot the password? Run <code>llama-monitor --clear-auth-config</code> on this machine, restart, and then set a new password here.
                         </div>
                     </div>
                 </div>

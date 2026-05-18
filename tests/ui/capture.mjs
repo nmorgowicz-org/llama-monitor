@@ -53,6 +53,7 @@ const DEFAULT_VIEWPORT = { width: 1440, height: 900, deviceScaleFactor: 1 };
 const DEFAULT_PORT = parseInt(process.env.SCREENSHOT_PORT || '8892', 10);
 const REMOTE_SERVER = process.env.REMOTE_SERVER || 'http://192.168.2.16:8001';
 const BINARY_PATH = join(ROOT_DIR, 'target/release/llama-monitor');
+const CAPTURE_FORM_AUTH = process.env.SCREENSHOT_FORM_AUTH || 'admin:secret123';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -106,12 +107,12 @@ function printUsage() {
 
 Scenarios:
   Core
-    welcome          Welcome screen (no attach required)
+    welcome          Welcome screen and auth shell (no attach required)
     chat             Chat, telemetry, logs
 
   Chat Features
     guided-gen       Suggestions, quick guide, director, surprise, explicit mode
-    sidebar          Sidebar, FTS search, context menu, name filter
+    sidebar          Sidebar, FTS search flyout, context menu, title filter
 
   Configuration
     settings         Settings modal, preferences, persona, models, shortcuts
@@ -186,8 +187,8 @@ async function waitForHttp(url, timeout = 30000) {
     throw new Error(`Server did not become ready at ${url} within ${timeout}ms`);
 }
 
-async function spawnLlamaMonitor(port) {
-    const proc = spawn(BINARY_PATH, ['--port', String(port), '--headless'], {
+async function spawnLlamaMonitor(port, extraArgs = []) {
+    const proc = spawn(BINARY_PATH, ['--port', String(port), '--headless', ...extraArgs], {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
             ...process.env,
@@ -316,6 +317,24 @@ async function attachToServer(page, remoteServer = REMOTE_SERVER) {
 async function gotoApp(page, baseUrl) {
     await page.goto(baseUrl, { waitUntil: 'networkidle0' });
     await sleep(1500);
+}
+
+async function captureAuthShell(port, viewport = DEFAULT_VIEWPORT) {
+    console.log('[CAPTURE] Capturing form-auth welcome shell...');
+    const authServer = await spawnLlamaMonitor(port, ['--form-auth', CAPTURE_FORM_AUTH]);
+    let authBrowser = null;
+
+    try {
+        const launched = await launchBrowser(viewport);
+        authBrowser = launched.browser;
+        const authPage = launched.page;
+        await gotoApp(authPage, authServer.url);
+        await authPage.waitForSelector('#auth-shell:not(.hidden)', { visible: true, timeout: 15000 });
+        await captureShot(authPage, 'welcome-auth-shell.png', { fullPage: true });
+    } finally {
+        if (authBrowser) await authBrowser.close();
+        await cleanupServer(authServer);
+    }
 }
 
 async function cleanupScreenshotTabs(page, { keepOne = false } = {}) {
@@ -626,6 +645,15 @@ function attachSuggestionsResponseLogger(page) {
 }
 
 async function captureShot(page, filename, options = {}) {
+    const fullPage = options.fullPage ?? true;
+
+    // Non-full-page captures are disabled by default.
+    // To temporarily enable for debugging, change this guard or remove fullPage: false.
+    if (!fullPage) {
+        console.log(`[CAPTURE] Skipped non-full-page: ${filename}`);
+        return;
+    }
+
     await page.screenshot({ path: join(ARTIFACTS_DIR, filename), ...options });
     console.log(`[CAPTURE] Saved ${filename}`);
 }
@@ -820,6 +848,8 @@ async function scenarioWelcome(ctx, options) {
     const { page, baseUrl } = ctx;
     await gotoApp(page, baseUrl);
     await captureShot(page, 'welcome-welcome.png', { fullPage: true });
+    const authPort = await findAvailablePort(DEFAULT_PORT + 1);
+    await captureAuthShell(authPort, options.viewport);
 }
 
 // ── Core Chat ───────────────────────────────────────────────────────────────────
@@ -1514,7 +1544,7 @@ async function scenarioGifs(ctx, options) {
 
 // Sidebar features capture: expanded panel, collapsed strip, FTS search, context menu
 // ── Sidebar ─────────────────────────────────────────────────────────────────────
-// Chat sidebar, FTS search, context menu, name filter.
+// Chat sidebar, FTS search flyout, context menu, title filter.
 
 async function scenarioSidebar(ctx, options) {
     const { page, baseUrl } = ctx;
@@ -1544,7 +1574,7 @@ async function scenarioSidebar(ctx, options) {
     // Create multiple chats with distinct content for sidebar and FTS search
     await page.evaluate(async () => {
         const { addChatTab } = await import('/js/features/chat-state.js');
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 8; i++) {
             addChatTab();
         }
     });
@@ -1557,11 +1587,19 @@ async function scenarioSidebar(ctx, options) {
         const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
         const tabs = chat.tabs;
 
+        const repeated = [
+            'The ledger vanished into the rain before dawn.',
+            'Rain washed the alley clean, but the ledger stayed hidden.',
+            'She traced the ledger route through rain-soaked streets.',
+        ];
+
         if (tabs[0]) {
             tabs[0].name = 'Noir Scene';
             tabs[0].messages = [
                 { role: 'user', content: 'Write a noir scene in progress.' },
                 { role: 'assistant', content: 'The rain fell like needles on the pavement, each drop a tiny hammer against the silence. She stood in the shadow of the alley, her trench coat soaked through, her eyes scanning the street for the man who had promised to deliver the ledger.' },
+                { role: 'user', content: repeated[0] },
+                { role: 'assistant', content: repeated[1] },
             ];
             tabs[0].pinned = true;
         }
@@ -1570,6 +1608,8 @@ async function scenarioSidebar(ctx, options) {
             tabs[1].messages = [
                 { role: 'user', content: 'Help me debug a slow HTTP endpoint.' },
                 { role: 'assistant', content: 'Start by profiling the request duration, then inspect database queries, external service calls, and any retries or timeouts in the logs.' },
+                { role: 'user', content: repeated[1] },
+                { role: 'assistant', content: repeated[2] },
             ];
         }
         if (tabs[2]) {
@@ -1577,6 +1617,7 @@ async function scenarioSidebar(ctx, options) {
             tabs[2].messages = [
                 { role: 'user', content: 'Outline a simple CI pipeline for a Rust backend.' },
                 { role: 'assistant', content: 'Use GitHub Actions: run cargo fmt, cargo clippy, cargo test, then build a release binary and upload artifacts.' },
+                { role: 'assistant', content: repeated[0] },
             ];
         }
         if (tabs[3]) {
@@ -1584,6 +1625,7 @@ async function scenarioSidebar(ctx, options) {
             tabs[3].messages = [
                 { role: 'user', content: 'Suggest 3 quick dinner recipes using chicken and rice.' },
                 { role: 'assistant', content: '- Chicken and rice skillet with vegetables.\n- One-pot lemon herb chicken rice.\n- Stir-fried chicken with soy-ginger rice.' },
+                { role: 'user', content: repeated[2] },
             ];
         }
         if (tabs[4]) {
@@ -1591,6 +1633,30 @@ async function scenarioSidebar(ctx, options) {
             tabs[4].messages = [
                 { role: 'user', content: 'How can I monitor GPU temperature and utilization from the CLI?' },
                 { role: 'assistant', content: 'Use tools like nvidia-smi, nvtop, or custom scripts reading from /sys/class/thermal and GPU management APIs.' },
+                { role: 'assistant', content: repeated[0] },
+            ];
+        }
+        if (tabs[5]) {
+            tabs[5].name = 'Rain Ledger Notes';
+            tabs[5].messages = [
+                { role: 'user', content: repeated[0] },
+                { role: 'assistant', content: repeated[1] },
+                { role: 'user', content: repeated[2] },
+            ];
+        }
+        if (tabs[6]) {
+            tabs[6].name = 'Shadow Draft';
+            tabs[6].messages = [
+                { role: 'assistant', content: repeated[1] },
+                { role: 'assistant', content: repeated[0] },
+            ];
+        }
+        if (tabs[7]) {
+            tabs[7].name = 'Archive Search';
+            tabs[7].messages = [
+                { role: 'user', content: repeated[2] },
+                { role: 'assistant', content: repeated[0] },
+                { role: 'assistant', content: repeated[1] },
             ];
         }
 
@@ -1698,7 +1764,7 @@ await captureShot(page, 'sidebar-sidebar-expanded.png', { fullPage: true });
     await sleep(1000);
 
     // Test FTS search: open search mode, query across multiple chats, capture results
-    const searchBtn = await page.$('.csp-search-btn');
+    const searchBtn = await page.$('#csp-message-search-btn');
     if (searchBtn) {
         console.log('[CAPTURE] FTS search button found, opening search mode...');
         await page.evaluate(async () => {
@@ -1710,8 +1776,7 @@ await captureShot(page, 'sidebar-sidebar-expanded.png', { fullPage: true });
         const searchInput = await page.$('#csp-search-input');
         if (searchInput) {
             console.log('[CAPTURE] Search input found, typing query that matches multiple chats...');
-            // "rain" matches Noir Scene; "debug" matches Debug Session; "rain" is enough for a clear demo.
-            await page.type('#csp-search-input', 'rain');
+            await page.type('#csp-search-input', 'ledger');
             await sleep(1200);
 
             // Ensure results area is visible
@@ -1725,10 +1790,10 @@ await captureShot(page, 'sidebar-sidebar-expanded.png', { fullPage: true });
             await captureShot(page, 'sidebar-fts-search-active.png', { fullPage: true });
 
             // Capture close-up of search results
-            const searchResults = await page.$('.csp-search-results');
+            const searchResults = await page.$('.csp-search-panel');
             if (searchResults) {
-                await captureElementScreenshot(page, '.csp-search-results', 'sidebar-fts-search-results.png', { padding: 12 });
-                await captureCloseUp(page, '.csp-search-results', 'sidebar-fts-search-results.png', options);
+                await captureElementScreenshot(page, '.csp-search-panel', 'sidebar-fts-search-results.png', { padding: 12 });
+                await captureCloseUp(page, '.csp-search-panel', 'sidebar-fts-search-results.png', options);
             }
 
             // Close search
@@ -1807,10 +1872,10 @@ await captureShot(page, 'sidebar-sidebar-expanded.png', { fullPage: true });
     await page.keyboard.press('Escape');
     await sleep(300);
 
-    // Test search filter (name filter, not FTS)
+    // Test search filter (title filter, not FTS)
     await page.type('#csp-search', 'Noir');
     await sleep(500);
-    await captureShot(page, 'sidebar-sidebar-name-filter.png', { fullPage: true });
+    await captureShot(page, 'sidebar-sidebar-title-filter.png', { fullPage: true });
 
     // Clear filter
     await page.evaluate(() => {

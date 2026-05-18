@@ -249,15 +249,16 @@ The harness spawns a fresh `target/release/llama-monitor` binary on a temporary 
 |----------|---------|-------------|
 | `SCREENSHOT_PORT` | `8892` | Base port for the spawned monitor instance |
 | `REMOTE_SERVER` | `http://192.168.2.16:8001` | llama.cpp server to attach to |
+| `SCREENSHOT_FORM_AUTH` | `admin:secret123` | Credentials used for the auth-shell still captured by the `welcome` scenario |
 
 ### Scenarios
 
 | Scenario | What It Captures | Saves To |
 |----------|-----------------|----------|
-| `welcome` | Welcome/setup screen without attach | `docs/screenshots/artifacts/` |
+| `welcome` | Welcome/setup screen plus form-auth shell without attach | `docs/screenshots/artifacts/` |
 | `chat` | Chat, telemetry, logs | `docs/screenshots/artifacts/` |
 | `guided-gen` | Context notes, suggestions, quick guide, director mode, surprise, explicit mode, categories | `docs/screenshots/artifacts/` |
-| `sidebar` | Chat sidebar, FTS search, context menu, name filter | `docs/screenshots/artifacts/` |
+| `sidebar` | Chat sidebar, FTS search, context menu, title filter | `docs/screenshots/artifacts/` |
 | `settings` | Settings modal, preferences, persona, models, shortcuts | `docs/screenshots/artifacts/` |
 | `panels` | Chat config panels, style, prompt debug | `docs/screenshots/artifacts/` |
 | `dashboard` | Server tab and GPU section | `docs/screenshots/artifacts/` |
@@ -617,6 +618,7 @@ All user data persists to `~/.config/llama-monitor/`:
 | `presets.json` | Model presets with llama.cpp launch parameters |
 | `templates.json` | User-created or user-modified chat persona templates and explicit policy overrides |
 | `ui-settings.json` | Persisted `UiSettings` values such as paths, ports, remote-agent settings, explicit policy, guided-generation defaults, and chat input height |
+| `auth-config.json` | Persisted dashboard auth mode (`basic`, `form`, or both), username, and hashed password for the Security tab |
 | `gpu-env.json` | GPU environment overrides (`arch`, `devices`, `rocm_path`, `extra_env`) |
 | `ssh-known-hosts.json` | Trusted SSH host keys for remote-agent workflows |
 | `lhm-disabled.json` | Persisted Windows LibreHardwareMonitor disabled/enabled state |
@@ -644,6 +646,16 @@ All branches should be deleted after merge.
 ## Security Requirements (MANDATORY)
 
 All changes MUST follow these rules. Treat them as hard constraints, not suggestions.
+
+### Canonical Security References
+
+Use the current code and `docs/reference/` as the primary sources of truth for active behavior.
+
+- `docs/reference/tls-architecture.md` describes the current TLS / ACME / mTLS design.
+- `docs/archive/security/20260515-security-audit.md` is an audit record and remediation history.
+- `docs/archive/security/20260516-tls_acme_implementation.md` is implementation history for the TLS/ACME rollout.
+
+Archive docs are useful context, but they are not the canonical definition of current behavior unless the code and reference docs still match them.
 
 ### 1) Threat model (always assume)
 

@@ -145,6 +145,15 @@ pub struct SearchResult {
     pub timestamp_ms: Option<i64>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct SearchResultsPage {
+    pub results: Vec<SearchResult>,
+    pub total: usize,
+    pub limit: usize,
+    pub offset: usize,
+    pub has_more: bool,
+}
+
 // ── Storage ───────────────────────────────────────────────────────────────────
 
 pub struct ChatStorage {
@@ -523,13 +532,28 @@ impl ChatStorage {
             .replace("&lt;/mark&gt;", "</mark>")
     }
 
-    pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
+    pub fn search(&self, query: &str, limit: usize, offset: usize) -> Result<SearchResultsPage> {
         let normalized_query = normalize_fts_query(query);
         if normalized_query.is_empty() {
-            return Ok(Vec::new());
+            return Ok(SearchResultsPage {
+                results: Vec::new(),
+                total: 0,
+                limit,
+                offset,
+                has_more: false,
+            });
         }
 
         let conn = self.conn.lock().unwrap();
+        let total: i64 = conn.query_row(
+            "SELECT COUNT(*)
+             FROM messages_fts
+             JOIN messages m ON m.id = messages_fts.rowid
+             WHERE messages_fts MATCH ?1
+               AND m.compaction_marker = 0",
+            params![normalized_query.as_str()],
+            |row| row.get(0),
+        )?;
         let mut stmt = conn.prepare(
             "SELECT t.id, t.name, m.id, m.role,
                     snippet(messages_fts, 0, '<mark>', '</mark>', '…', 24),
@@ -540,22 +564,33 @@ impl ChatStorage {
              WHERE messages_fts MATCH ?1
                AND m.compaction_marker = 0
              ORDER BY rank
-             LIMIT ?2",
+             LIMIT ?2 OFFSET ?3",
         )?;
-        let rows = stmt.query_map(params![normalized_query, limit as i64], |row| {
-            let raw_snippet: String = row.get(4)?;
-            let snippet = Self::escape_html_except_mark(&raw_snippet);
-            Ok(SearchResult {
-                tab_id: row.get(0)?,
-                tab_name: row.get(1)?,
-                message_id: row.get(2)?,
-                role: row.get(3)?,
-                snippet,
-                timestamp_ms: row.get(5)?,
-            })
-        })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(Into::into)
+        let rows = stmt.query_map(
+            params![normalized_query, limit as i64, offset as i64],
+            |row| {
+                let raw_snippet: String = row.get(4)?;
+                let snippet = Self::escape_html_except_mark(&raw_snippet);
+                Ok(SearchResult {
+                    tab_id: row.get(0)?,
+                    tab_name: row.get(1)?,
+                    message_id: row.get(2)?,
+                    role: row.get(3)?,
+                    snippet,
+                    timestamp_ms: row.get(5)?,
+                })
+            },
+        )?;
+        let results = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let total = total.max(0) as usize;
+        let has_more = offset.saturating_add(results.len()) < total;
+        Ok(SearchResultsPage {
+            results,
+            total,
+            limit,
+            offset,
+            has_more,
+        })
     }
 
     // ── Database Health Management ──────────────────────────────────────────────
@@ -968,10 +1003,11 @@ mod tests {
             ))
             .expect("append message");
 
-        let results = store.search("rai", 10).expect("prefix search");
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].tab_name, "Noir Scene");
-        assert!(results[0].snippet.contains("<mark>rain</mark>"));
+        let results = store.search("rai", 10, 0).expect("prefix search");
+        assert_eq!(results.total, 1);
+        assert_eq!(results.results.len(), 1);
+        assert_eq!(results.results[0].tab_name, "Noir Scene");
+        assert!(results.results[0].snippet.contains("<mark>rain</mark>"));
     }
 
     #[test]
@@ -990,13 +1026,15 @@ mod tests {
             ))
             .expect("append message");
 
-        let hyphenated = store.search("gpu-43c", 10).expect("hyphenated search");
-        assert_eq!(hyphenated.len(), 1);
+        let hyphenated = store.search("gpu-43c", 10, 0).expect("hyphenated search");
+        assert_eq!(hyphenated.total, 1);
+        assert_eq!(hyphenated.results.len(), 1);
 
         let punctuated = store
-            .search("slow HTTP endpoint.", 10)
+            .search("slow HTTP endpoint.", 10, 0)
             .expect("punctuated search");
-        assert_eq!(punctuated.len(), 1);
-        assert_eq!(punctuated[0].tab_name, "Debug Session");
+        assert_eq!(punctuated.total, 1);
+        assert_eq!(punctuated.results.len(), 1);
+        assert_eq!(punctuated.results[0].tab_name, "Debug Session");
     }
 }

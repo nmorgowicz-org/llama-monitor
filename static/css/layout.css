@@ -902,6 +902,7 @@ body.sidebar-collapsed .content-area {
 
 #page-chat {
   flex-direction: row;
+  position: relative;
 }
 
 .chat-main-area {

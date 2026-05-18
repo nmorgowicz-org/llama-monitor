@@ -85,6 +85,94 @@ test.describe('chat tabs', () => {
     await page.keyboard.press('Control+Shift+ArrowRight');
     await expect(page.locator('#csp-list .csp-item').first()).toHaveClass(/active/, { timeout: 3000 });
   });
+
+  test('title filter only narrows sidebar items by tab name', async ({ page }) => {
+    await page.evaluate(async () => {
+      const { chat } = await import('/js/core/app-state.js');
+      const { newChatTab } = await import('/js/features/chat-state.js');
+      const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
+
+      chat.tabs = [newChatTab('Noir Scene'), newChatTab('Build Logs'), newChatTab('Recipe Ideas')];
+      chat.activeTabId = chat.tabs[0].id;
+      renderChatSessionsSidebar();
+    });
+
+    await page.locator('#csp-search').fill('Noir');
+    await expect(page.locator('#csp-list .csp-item:visible')).toHaveCount(1);
+    await expect(page.locator('#csp-list .csp-item:visible')).toContainText('Noir Scene');
+  });
+
+  test('message search opens flyout and paginates results', async ({ page }) => {
+    await page.evaluate(async () => {
+      const { chat } = await import('/js/core/app-state.js');
+      const { newChatTab, persistChatTabs } = await import('/js/features/chat-state.js');
+      const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
+
+      chat.tabs = [];
+      for (let i = 0; i < 12; i += 1) {
+        const tab = newChatTab(`Search Seed ${i + 1}`);
+        tab.messages = Array.from({ length: 3 }, (_, idx) => ({
+          role: idx % 2 === 0 ? 'user' : 'assistant',
+          content: `ledger trail ${i}-${idx} in the rain`,
+          timestamp_ms: Date.now() - ((i * 3) + idx) * 1000,
+        }));
+        tab.updated_at = Date.now();
+        chat.tabs.push(tab);
+      }
+      chat.activeTabId = chat.tabs[0].id;
+      renderChatSessionsSidebar();
+
+      for (const [tabIndex, tab] of chat.tabs.entries()) {
+        const tabPayload = {
+          id: tab.id,
+          name: tab.name,
+          system_prompt: '',
+          explicit_level: 0,
+          auto_compact: true,
+          auto_compact_summarize: false,
+          compact_mode: 'summarize',
+          compact_threshold: 0.8,
+          model_params: {},
+          context_notes: [],
+          sidebar_width: 320,
+          tab_order: tabIndex,
+          pinned: false,
+          total_input_tokens: 0,
+          total_output_tokens: 0,
+          created_at: Date.now(),
+          updated_at: Date.now(),
+          messages: [],
+        };
+        await fetch('/api/chat/tabs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(tabPayload),
+        });
+        await fetch(`/api/chat/tabs/${tab.id}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: tab.messages.map((message, idx) => ({
+              tab_id: tab.id,
+              role: message.role,
+              content: message.content,
+              timestamp_ms: message.timestamp_ms,
+              seq: idx,
+            })),
+          }),
+        });
+      }
+      await persistChatTabs();
+    });
+
+    await page.locator('#csp-message-search-btn').click();
+    await expect(page.locator('.csp-search-panel')).toBeVisible();
+    await page.locator('#csp-search-input').fill('ledger');
+    await expect(page.locator('.csp-search-result')).toHaveCount(20);
+    await expect(page.locator('.csp-search-count')).toContainText('36 matches');
+    await page.locator('.csp-search-load-more').click();
+    await expect(page.locator('.csp-search-result')).toHaveCount(36);
+  });
 });
 
 test.describe('pin and favorite tabs', () => {

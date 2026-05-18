@@ -7,7 +7,8 @@ use super::static_assets;
 use warp::Filter;
 
 /// Returns a warp Filter that serves all static assets.
-pub fn static_routes() -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+pub fn static_routes()
+-> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     // Helper: serve static JS with no-cache (force browser to reload on every request)
     fn js_reply(content: &'static str) -> impl warp::Reply {
         warp::reply::with_header(
@@ -48,320 +49,348 @@ pub fn static_routes() -> impl warp::Filter<Extract = (impl warp::Reply,), Error
         .and(warp::get())
         .map(|| css_reply(static_assets::CSS_AGENT_MODAL));
     let route_2 = warp::path("css")
+        .and(warp::path("auth.css"))
+        .and(warp::get())
+        .map(|| css_reply(static_assets::CSS_AUTH));
+    let route_3 = warp::path("css")
         .and(warp::path("base.css"))
         .and(warp::get())
         .map(|| css_reply(static_assets::CSS_BASE));
-    let route_3 = warp::path("css")
+    let route_4 = warp::path("css")
         .and(warp::path("cards-hardware.css"))
         .and(warp::get())
         .map(|| css_reply(static_assets::CSS_CARDS_HARDWARE));
-    let route_4 = warp::path("css")
+    let route_5 = warp::path("css")
         .and(warp::path("cards-inference.css"))
         .and(warp::get())
         .map(|| css_reply(static_assets::CSS_CARDS_INFERENCE));
-    let route_5 = warp::path("css")
+    let route_6 = warp::path("css")
         .and(warp::path("chat-guided-generation.css"))
         .and(warp::get())
         .map(|| css_reply(static_assets::CSS_CHAT_GUIDED_GENERATION));
-    let route_6 = warp::path("css")
+    let route_7 = warp::path("css")
         .and(warp::path("chat.css"))
         .and(warp::get())
         .map(|| css_reply(static_assets::CSS_CHAT));
-    let route_7 = warp::path("css")
+    let route_8 = warp::path("css")
         .and(warp::path("components.css"))
         .and(warp::get())
         .map(|| css_reply(static_assets::CSS_COMPONENTS));
-    let route_8 = warp::path("css")
+    let route_9 = warp::path("css")
         .and(warp::path("layout.css"))
         .and(warp::get())
         .map(|| css_reply(static_assets::CSS_LAYOUT));
-    let route_9 = warp::path("css")
+    let route_10 = warp::path("css")
         .and(warp::path("logs.css"))
         .and(warp::get())
         .map(|| css_reply(static_assets::CSS_LOGS));
-    let route_10 = warp::path("css")
+    let route_11 = warp::path("css")
         .and(warp::path("settings-modal.css"))
         .and(warp::get())
         .map(|| css_reply(static_assets::CSS_SETTINGS_MODAL));
-    let route_11 = warp::path("css")
+    let route_12 = warp::path("css")
         .and(warp::path("setup-view.css"))
         .and(warp::get())
         .map(|| css_reply(static_assets::CSS_SETUP_VIEW));
-    let route_12 = warp::path("css")
+    let route_13 = warp::path("css")
         .and(warp::path("tokens.css"))
         .and(warp::get())
         .map(|| css_reply(static_assets::CSS_TOKENS));
-    let route_13 = warp::path("icon.svg")
+    let route_14 = warp::path("icon.svg")
         .and(warp::get())
         .map(|| other_reply(static_assets::ICON_SVG, "image/svg+xml"));
-    let route_14 = warp::path("js")
+    let route_15 = warp::path("js")
         .and(warp::path("bootstrap.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::BOOTSTRAP_JS));
-    let route_15 = warp::path("js")
+    let route_16 = warp::path("js")
         .and(warp::path("compact.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::COMPACT_JS));
-    let route_16 = warp::path("js")
+    let route_17 = warp::path("js")
         .and(warp::path("compat"))
         .and(warp::path("globals.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::COMPAT_GLOBALS_JS));
-    let route_17 = warp::path("js")
+    let route_18 = warp::path("js")
         .and(warp::path("config"))
         .and(warp::path("dompurify-init.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::CONFIG_DOMPURIFY_INIT_JS));
-    let route_18 = warp::path("js")
+    let route_19 = warp::path("js")
         .and(warp::path("core"))
         .and(warp::path("app-state.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::CORE_APP_STATE_JS));
-    let route_19 = warp::path("js")
+    let route_20 = warp::path("js")
         .and(warp::path("core"))
         .and(warp::path("format.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::CORE_FORMAT_JS));
-    let route_20 = warp::path("js")
+    let route_21 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("animate.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_ANIMATE_JS));
-    let route_21 = warp::path("js")
+    let route_22 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("attach-detach.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_ATTACH_DETACH_JS));
-    let route_22 = warp::path("js")
+    let route_23 = warp::path("js")
+        .and(warp::path("features"))
+        .and(warp::path("auth.js"))
+        .and(warp::get())
+        .map(|| js_reply(static_assets::FEATURES_AUTH_JS));
+    let route_24 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("chat-notes.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_CHAT_NOTES_JS));
-    let route_23 = warp::path("js")
+    let route_25 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("chat-params.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_CHAT_PARAMS_JS));
-    let route_24 = warp::path("js")
+    let route_26 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("chat-quick-guide.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_CHAT_QUICK_GUIDE_JS));
-    let route_25 = warp::path("js")
+    let route_27 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("chat-render.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_CHAT_RENDER_JS));
-    let route_26 = warp::path("js")
+    let route_28 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("chat-search.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_CHAT_SEARCH_JS));
-    let route_27 = warp::path("js")
+    let route_29 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("chat-sessions-sidebar.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_CHAT_SESSIONS_SIDEBAR_JS));
-    let route_28 = warp::path("js")
+    let route_30 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("chat-state.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_CHAT_STATE_JS));
-    let route_29 = warp::path("js")
+    let route_31 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("chat-suggestions.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_CHAT_SUGGESTIONS_JS));
-    let route_30 = warp::path("js")
+    let route_32 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("chat-templates.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_CHAT_TEMPLATES_JS));
-    let route_31 = warp::path("js")
+    let route_33 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("chat-transport.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_CHAT_TRANSPORT_JS));
-    let route_32 = warp::path("js")
+    let route_34 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("config.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_CONFIG_JS));
-    let route_33 = warp::path("js")
+    let route_35 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("context-card.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_CONTEXT_CARD_JS));
-    let route_34 = warp::path("js")
+    let route_36 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("dashboard-render.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_DASHBOARD_RENDER_JS));
-    let route_35 = warp::path("js")
+    let route_37 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("dashboard-ws.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_DASHBOARD_WS_JS));
-    let route_36 = warp::path("js")
+    let route_38 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("db-admin.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_DB_ADMIN_JS));
-    let route_37 = warp::path("js")
+    let route_39 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("file-browser-launcher.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_FILE_BROWSER_LAUNCHER_JS));
-    let route_38 = warp::path("js")
+    let route_40 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("file-browser.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_FILE_BROWSER_JS));
-    let route_39 = warp::path("js")
+    let route_41 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("lhm.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_LHM_JS));
-    let route_40 = warp::path("js")
+    let route_42 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("models.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_MODELS_JS));
-    let route_41 = warp::path("js")
+    let route_43 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("nav.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_NAV_JS));
-    let route_42 = warp::path("js")
+    let route_44 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("network-detection.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_NETWORK_DETECTION_JS));
-    let route_43 = warp::path("js")
+    let route_45 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("presets.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_PRESETS_JS));
-    let route_44 = warp::path("js")
+    let route_46 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("remote-agent.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_REMOTE_AGENT_JS));
-    let route_45 = warp::path("js")
+    let route_47 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("sensor-bridge.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_SENSOR_BRIDGE_JS));
-    let route_46 = warp::path("js")
+    let route_48 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("sessions.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_SESSIONS_JS));
-    let route_47 = warp::path("js")
+    let route_49 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("settings.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_SETTINGS_JS));
-    let route_48 = warp::path("js")
+    let route_50 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("setup-view.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_SETUP_VIEW_JS));
-    let route_49 = warp::path("js")
+    let route_51 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("shortcuts.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_SHORTCUTS_JS));
-    let route_50 = warp::path("js")
+    let route_52 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("toast.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_TOAST_JS));
-    let route_51 = warp::path("js")
+    let route_53 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("updates.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_UPDATES_JS));
-    let route_52 = warp::path("js")
+    let route_54 = warp::path("js")
         .and(warp::path("features"))
         .and(warp::path("user-menu.js"))
         .and(warp::get())
         .map(|| js_reply(static_assets::FEATURES_USER_MENU_JS));
-    let route_53 = warp::path("manifest.json")
+    let route_55 = warp::path("manifest.json")
         .and(warp::get())
         .map(|| other_reply(static_assets::MANIFEST_JSON, "application/json"));
-    let route_54 = warp::path("prompts")
+    let route_56 = warp::path("prompts")
         .and(warp::path("action.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::ACTION_MD, "application/octet-stream"));
-    let route_55 = warp::path("prompts")
+    let route_57 = warp::path("prompts")
         .and(warp::path("character.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::CHARACTER_MD, "application/octet-stream"));
-    let route_56 = warp::path("prompts")
+    let route_58 = warp::path("prompts")
         .and(warp::path("comedy.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::COMEDY_MD, "application/octet-stream"));
-    let route_57 = warp::path("prompts")
+    let route_59 = warp::path("prompts")
         .and(warp::path("context.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::CONTEXT_MD, "application/octet-stream"));
-    let route_58 = warp::path("prompts")
+    let route_60 = warp::path("prompts")
         .and(warp::path("director.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::DIRECTOR_MD, "application/octet-stream"));
-    let route_59 = warp::path("prompts")
+    let route_61 = warp::path("prompts")
         .and(warp::path("explicit.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::EXPLICIT_MD, "application/octet-stream"));
-    let route_60 = warp::path("prompts")
+    let route_62 = warp::path("prompts")
         .and(warp::path("fantasy.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::FANTASY_MD, "application/octet-stream"));
-    let route_61 = warp::path("prompts")
+    let route_63 = warp::path("prompts")
         .and(warp::path("general.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::GENERAL_MD, "application/octet-stream"));
-    let route_62 = warp::path("prompts")
+    let route_64 = warp::path("prompts")
         .and(warp::path("horror.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::HORROR_MD, "application/octet-stream"));
-    let route_63 = warp::path("prompts")
+    let route_65 = warp::path("prompts")
         .and(warp::path("mystery.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::MYSTERY_MD, "application/octet-stream"));
-    let route_64 = warp::path("prompts")
+    let route_66 = warp::path("prompts")
         .and(warp::path("new-character.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::NEW_CHARACTER_MD, "application/octet-stream"));
-    let route_65 = warp::path("prompts")
+    let route_67 = warp::path("prompts")
         .and(warp::path("noir.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::NOIR_MD, "application/octet-stream"));
-    let route_66 = warp::path("prompts")
+    let route_68 = warp::path("prompts")
         .and(warp::path("plot-twist.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::PLOT_TWIST_MD, "application/octet-stream"));
-    let route_67 = warp::path("prompts")
+    let route_69 = warp::path("prompts")
         .and(warp::path("romance.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::ROMANCE_MD, "application/octet-stream"));
-    let route_68 = warp::path("prompts")
+    let route_70 = warp::path("prompts")
         .and(warp::path("sci-fi.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::SCI_FI_MD, "application/octet-stream"));
-    let route_69 = warp::path("prompts")
+    let route_71 = warp::path("prompts")
         .and(warp::path("template.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::TEMPLATE_MD, "application/octet-stream"));
-    let route_70 = warp::path("prompts")
+    let route_72 = warp::path("prompts")
         .and(warp::path("thriller.md"))
         .and(warp::get())
         .map(|| other_reply(static_assets::THRILLER_MD, "application/octet-stream"));
-    let route_71 = warp::path("sw.js")
+    let route_73 = warp::path("sw.js")
         .and(warp::get())
         .map(|| js_reply(static_assets::SW_JS));
 
     // Chain all routes using balanced tree structure
-    route_0 .or(route_1) .or(route_2 .or(route_3)) .or(route_4 .or(route_5) .or(route_6 .or(route_7))) .or(route_8 .or(route_9) .or(route_10 .or(route_11)) .or(route_12 .or(route_13) .or(route_14 .or(route_15)))) .or(route_16 .or(route_17) .or(route_18 .or(route_19)) .or(route_20 .or(route_21) .or(route_22 .or(route_23))) .or(route_24 .or(route_25) .or(route_26 .or(route_27)) .or(route_28 .or(route_29) .or(route_30 .or(route_31))))) .or(route_32 .or(route_33) .or(route_34 .or(route_35)) .or(route_36 .or(route_37) .or(route_38 .or(route_39))) .or(route_40 .or(route_41) .or(route_42 .or(route_43)) .or(route_44 .or(route_45) .or(route_46 .or(route_47)))) .or(route_48 .or(route_49) .or(route_50 .or(route_51)) .or(route_52 .or(route_53) .or(route_54 .or(route_55))) .or(route_56 .or(route_57) .or(route_58 .or(route_59)) .or(route_60 .or(route_61) .or(route_62 .or(route_63)))))) .or(route_64 .or(route_65) .or(route_66 .or(route_67)) .or(route_68 .or(route_69) .or(route_70 .or(route_71))))
+    ((((((route_0).or(route_1)).or((route_2).or(route_3)))
+        .or(((route_4).or(route_5)).or((route_6).or((route_7).or(route_8)))))
+    .or((((route_9).or(route_10)).or((route_11).or(route_12)))
+        .or(((route_13).or(route_14)).or((route_15).or((route_16).or(route_17))))))
+    .or(((((route_18).or(route_19)).or((route_20).or(route_21)))
+        .or(((route_22).or(route_23)).or((route_24).or((route_25).or(route_26)))))
+    .or(
+        (((route_27).or(route_28)).or((route_29).or((route_30).or(route_31))))
+            .or(((route_32).or(route_33)).or((route_34).or((route_35).or(route_36)))),
+    )))
+    .or((((((route_37).or(route_38)).or((route_39).or(route_40)))
+        .or(((route_41).or(route_42)).or((route_43).or((route_44).or(route_45)))))
+    .or((((route_46).or(route_47)).or((route_48).or(route_49)))
+        .or(((route_50).or(route_51)).or((route_52).or((route_53).or(route_54))))))
+    .or(((((route_55).or(route_56)).or((route_57).or(route_58)))
+        .or(((route_59).or(route_60)).or((route_61).or((route_62).or(route_63)))))
+    .or(
+        (((route_64).or(route_65)).or((route_66).or((route_67).or(route_68))))
+            .or(((route_69).or(route_70)).or((route_71).or((route_72).or(route_73)))),
+    )))
 }

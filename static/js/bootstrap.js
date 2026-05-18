@@ -32,24 +32,10 @@ import { initContextSidebar } from './features/chat-notes.js';
 import { initSuggestionsDropdown, closeSuggestionsDropdown } from './features/chat-suggestions.js';
 import { initQuickGuide, closeQuickGuide } from './features/chat-quick-guide.js';
 import { initDbAdmin } from './features/db-admin.js';
+import { initAuthGate, logoutCurrentUser } from './features/auth.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
-
-// Fetch internal API token (transparent to user; used for protected endpoints)
-(async () => {
-    try {
-        const res = await fetch('/api/internal/api-token');
-        if (res.ok) {
-            const data = await res.json();
-            if (data.token) {
-                window.__API_TOKEN = data.token;
-            }
-        }
-    } catch {
-        // Non-critical: continue without token if fetch fails.
-    }
-})();
 
 // Helper for modules: returns headers object with Authorization if token is available.
 window.authHeaders = function(extra = {}) {
@@ -68,56 +54,77 @@ window.authHeaders = function(extra = {}) {
     }
 })();
 
-// Phase 1: Initialize rendering functions, then WebSocket.
-initDashboardRender();
-initWebSocket();
+window.logoutCurrentUser = logoutCurrentUser;
 
-// Phase 4: Initialize extracted features.
-initPresets();
-initSessions();
-initAttachDetach();
-initRemoteAgent();
+async function initializeApp() {
+    const auth = await initAuthGate();
+    if (!auth.ready) return;
 
-// Phase 6a: Chat state before transport (transport imports from state)
-initChatState();
-initChatTransport();
+    try {
+        const res = await fetch('/api/internal/api-token');
+        if (res.ok) {
+            const data = await res.json();
+            if (data.token) {
+                window.__API_TOKEN = data.token;
+            }
+        }
+    } catch {
+        // Non-critical: continue without token if fetch fails.
+    }
 
-// Phase 6b: Chat rendering, templates, and params (after state/transport)
-initChatRender();
-initChatSessionsSidebar();
-initChatSearch();
+    // Phase 1: Initialize rendering functions, then WebSocket.
+    initDashboardRender();
+    initWebSocket();
 
-// Bind chat scroll button
-document.getElementById('chat-scroll-bottom')?.addEventListener('click', () => chatScroll(true));
+    // Phase 4: Initialize extracted features.
+    initPresets();
+    initSessions();
+    initAttachDetach();
+    initRemoteAgent();
 
-initChatTemplates();
-initChatParams();
+    // Phase 6a: Chat state before transport (transport imports from state)
+    initChatState();
+    initChatTransport();
 
-// Resize chat input to fit content
-autoResizeChatInput();
+    // Phase 6b: Chat rendering, templates, and params (after state/transport)
+    initChatRender();
+    initChatSessionsSidebar();
+    initChatSearch();
 
-// Phase 7: setup view, updates, shortcuts (LHM is deferred)
-initSetupView();
-initShortcuts();
+    // Bind chat scroll button
+    document.getElementById('chat-scroll-bottom')?.addEventListener('click', () => chatScroll(true));
 
-// Phase 8: Nav, animate, settings, user menu, config, models, sensor bridge, toast
-initNav();
-initAnimate();
-initSettings();
-initUserMenu();
-initConfig();
-initModels();
-initSensorBridge();
-initToast();
-initNetworkDetection();
+    initChatTemplates();
+    initChatParams();
 
-// Phase 9: Guided generation features
-initContextSidebar();
-initSuggestionsDropdown();
-initQuickGuide();
+    // Resize chat input to fit content
+    autoResizeChatInput();
 
-// Phase 10: Database administration
-initDbAdmin();
+    // Phase 7: setup view, updates, shortcuts (LHM is deferred)
+    initSetupView();
+    initShortcuts();
+
+    // Phase 8: Nav, animate, settings, user menu, config, models, sensor bridge, toast
+    initNav();
+    initAnimate();
+    initSettings();
+    initUserMenu();
+    initConfig();
+    initModels();
+    initSensorBridge();
+    initToast();
+    initNetworkDetection();
+
+    // Phase 9: Guided generation features
+    initContextSidebar();
+    initSuggestionsDropdown();
+    initQuickGuide();
+
+    // Phase 10: Database administration
+    initDbAdmin();
+}
+
+initializeApp();
 
 // Mutual exclusion: opening one guided panel closes the other.
 window.addEventListener('suggestionsOpened', () => closeQuickGuide());

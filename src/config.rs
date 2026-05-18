@@ -171,10 +171,8 @@ pub(crate) fn decrypt_value(ciphertext: &str) -> String {
     };
 
     let b64_part = &ciphertext[ENCRYPTED_PREFIX.len()..];
-    let payload = match base64::Engine::decode(
-        &base64::engine::general_purpose::STANDARD,
-        b64_part,
-    ) {
+    let payload = match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64_part)
+    {
         Ok(v) => v,
         Err(_) => {
             eprintln!("[warn] Failed to decode encrypted value (bad base64)");
@@ -255,6 +253,24 @@ pub struct TLSConfig {
     pub acme: AcmeConfig,
 }
 
+/// Persisted dashboard auth configuration stored separately from UI settings.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DashboardAuthConfig {
+    pub basic_enabled: bool,
+    pub form_enabled: bool,
+    pub username: String,
+    pub password_hash: String,
+}
+
+impl DashboardAuthConfig {
+    pub fn is_usable(&self) -> bool {
+        (self.basic_enabled || self.form_enabled)
+            && !self.username.trim().is_empty()
+            && !self.password_hash.trim().is_empty()
+    }
+}
+
 impl Default for TLSConfig {
     fn default() -> Self {
         Self {
@@ -326,6 +342,48 @@ pub fn save_tls_config(config_dir: &std::path::Path, cfg: &TLSConfig) -> std::io
     Ok(())
 }
 
+pub fn load_auth_config(config_dir: &std::path::Path) -> DashboardAuthConfig {
+    let path = config_dir.join("auth-config.json");
+    if !path.exists() {
+        return DashboardAuthConfig::default();
+    }
+    let Ok(contents) = fs::read_to_string(&path) else {
+        eprintln!("[warn] Failed to read auth-config.json, using defaults");
+        return DashboardAuthConfig::default();
+    };
+    let Ok(cfg) = serde_json::from_str::<DashboardAuthConfig>(&contents) else {
+        eprintln!("[warn] Invalid auth-config.json, using defaults");
+        return DashboardAuthConfig::default();
+    };
+    cfg
+}
+
+pub fn save_auth_config(
+    config_dir: &std::path::Path,
+    cfg: &DashboardAuthConfig,
+) -> std::io::Result<()> {
+    let path = config_dir.join("auth-config.json");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let tmp = path.with_extension("json.tmp");
+    let json = serde_json::to_string_pretty(cfg)?;
+    fs::write(&tmp, json)?;
+    fs::rename(&tmp, &path)?;
+    harden_file_permissions(&path);
+    Ok(())
+}
+
+pub fn clear_auth_config(config_dir: &std::path::Path) -> std::io::Result<bool> {
+    let path = config_dir.join("auth-config.json");
+    if !path.exists() {
+        return Ok(false);
+    }
+    fs::remove_file(path)?;
+    Ok(true)
+}
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct AppConfig {
@@ -342,6 +400,7 @@ pub struct AppConfig {
     pub gpu_arch_override: Option<String>,
     pub gpu_devices_override: Option<String>,
     pub ui_settings_file: PathBuf,
+    pub auth_config_file: PathBuf,
     pub sessions_file: PathBuf,
     pub ssh_known_hosts_file: PathBuf,
     pub lhm_disabled_file: PathBuf,
@@ -385,6 +444,7 @@ impl AppConfig {
             gpu_arch_override: args.gpu_arch,
             gpu_devices_override: args.gpu_devices,
             ui_settings_file: config_dir.join("ui-settings.json"),
+            auth_config_file: config_dir.join("auth-config.json"),
             sessions_file: args
                 .sessions_file
                 .unwrap_or_else(|| config_dir.join("sessions.json")),
