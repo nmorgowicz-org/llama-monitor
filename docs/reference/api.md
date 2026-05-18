@@ -1346,9 +1346,14 @@ Response:
 No authentication header is required.
 
 Returns the api-token for use by the in-browser UI. Access is governed by a bootstrap policy:
-- Allowed when any auth mode (basic or form) is configured (outer auth guard authenticates the request).
-- When no auth is configured, allowed only if the server is bound to a loopback address (127.0.0.1, localhost, ::1).
-- Otherwise returns 403.
+
+- If “No Auth” is configured:
+  - Always allowed (local-first mode).
+- If any auth mode (basic or form) is configured:
+  - Allowed only from:
+    - Same-origin browser requests (via Origin checks), or
+    - Loopback clients (127.0.0.1, localhost, ::1).
+  - Otherwise returns 403.
 
 Response:
 ```json

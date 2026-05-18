@@ -9,7 +9,11 @@ Llama Monitor supports four dashboard access states:
 
 - `No Auth`
   - Default behavior.
-  - Intended for local-only use on `127.0.0.1`.
+  - Intended for local-only use on `127.0.0.1` or trusted LAN.
+  - When “No Auth” is configured:
+    - No endpoints are gated behind a login.
+    - The api-token is still auto-generated and used internally for protected endpoints.
+    - Token bootstrap (`/api/internal/api-token`) is fully allowed, even for non-loopback llama-server endpoints.
 - `Form Login`
   - Shows the in-app sign-in shell before protected routes are available.
   - Uses an HttpOnly session cookie after a successful login.
