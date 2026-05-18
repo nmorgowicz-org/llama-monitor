@@ -265,7 +265,7 @@ fn unauthorized_db_admin_token() -> Box<dyn warp::reply::Reply> {
 }
 
 /// Check if the Authorization header matches the configured api-token.
-fn check_api_token(auth: &Option<String>, cfg: &AppConfig) -> bool {
+pub fn check_api_token(auth: &Option<String>, cfg: &AppConfig) -> bool {
     let bearer = auth.as_ref().and_then(|v| v.strip_prefix("Bearer "));
     bearer_matches_api_token(bearer, cfg)
 }

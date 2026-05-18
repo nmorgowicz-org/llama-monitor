@@ -147,7 +147,7 @@ pub fn build_routes(
         bind_host.clone(),
     ));
     let static_files = static_routes();
-    let compact = compact_route(app_config);
+    let compact = compact_route(app_config.clone());
     let index = index_route(auth_manager.clone());
 
     // Apply Origin guard to api routes (mutating methods with Origin must match)
@@ -155,7 +155,7 @@ pub fn build_routes(
 
     let protected = ws.or(api_protected).or(compact);
     let protected = protected
-        .and(auth_guard(auth_manager.clone()))
+        .and(auth_guard(auth_manager.clone(), app_config.clone()))
         .map(|reply, _: ()| reply);
 
     // Combine all non-index routes; helmet applies its CSP to these
@@ -188,30 +188,57 @@ pub fn build_routes(
 }
 
 /// Auth guard for protected routes.
+///
+/// Allows:
+/// - No auth configured.
+/// - Valid session cookie (Form Login).
+/// - Valid Basic Auth header.
+/// - Valid api-token (Bearer) for programmatic and internal API calls.
 fn auth_guard(
     auth_manager: AuthManager,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = ((),), Error = warp::Rejection> + Clone {
     warp::header::optional::<String>("Authorization")
         .and(warp::header::optional::<String>("cookie"))
         .and_then(
             move |auth_header: Option<String>, cookie_header: Option<String>| {
                 let auth_manager = auth_manager.clone();
+                let cfg = app_config.clone();
                 async move {
+                    // No auth configured: allow all requests.
                     if !auth_manager.has_any() {
                         return Ok(());
                     }
+
+                    // Allow if Form Login session is valid.
                     if auth_manager
                         .authenticate_request(auth_header.as_deref(), cookie_header.as_deref())
                     {
-                        Ok(())
-                    } else {
-                        Err(warp::reject::custom(AuthReject {
-                            challenge_basic: auth_manager.has_basic() && !auth_manager.has_form(),
-                        }))
+                        return Ok(());
                     }
+
+                    // Allow if a valid api-token is present (Bearer).
+                    // This lets internal/API callers (chat, remote-agent, etc.) bypass
+                    // the UI-level auth guard while still enforcing their own token auth.
+                    if let Some(token) = extract_bearer_token(auth_header.as_deref())
+                        && api::check_api_token(&Some(format!("Bearer {token}")), &cfg)
+                    {
+                        return Ok(());
+                    }
+
+                    Err(warp::reject::custom(AuthReject {
+                        challenge_basic: auth_manager.has_basic() && !auth_manager.has_form(),
+                    }))
                 }
             },
         )
+}
+
+fn extract_bearer_token(header: Option<&str>) -> Option<&str> {
+    let header = header?;
+    let without_prefix = header.strip_prefix("Bearer ")?;
+    let token = without_prefix.trim();
+    if token.is_empty() { None } else { Some(token) }
 }
 
 #[derive(Debug)]
