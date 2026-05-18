@@ -399,6 +399,7 @@ pub struct AppState {
     pub remote_agent_protocol_too_old: Arc<Mutex<bool>>,
     pub chat_storage: Arc<ChatStorage>,
     pub tls_config: Arc<Mutex<TLSConfig>>,
+    pub monitor_inference_gate: Arc<tokio::sync::Semaphore>,
 }
 
 impl AppState {
@@ -483,6 +484,7 @@ impl AppState {
             remote_agent_protocol_too_old: Arc::new(Mutex::new(false)),
             chat_storage,
             tls_config: Arc::new(Mutex::new(tls_config)),
+            monitor_inference_gate: Arc::new(tokio::sync::Semaphore::new(1)),
         };
 
         // Prune old inactive sessions on startup (older than 7 days)

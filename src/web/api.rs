@@ -3,22 +3,239 @@ use std::fmt;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use warp::Filter;
+use warp::http::StatusCode;
 use warp::reject::Reject;
 
 #[derive(Debug)]
-struct ApiError(String);
+pub(crate) struct ApiError {
+    pub(crate) status: StatusCode,
+    pub(crate) message: String,
+}
+
+impl ApiError {
+    fn new(status: StatusCode, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+        }
+    }
+
+    fn internal(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, message)
+    }
+
+    fn busy(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::TOO_MANY_REQUESTS, message)
+    }
+
+    fn gateway(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_GATEWAY, message)
+    }
+
+    fn gateway_timeout(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::GATEWAY_TIMEOUT, message)
+    }
+
+    fn from_reqwest(err: reqwest::Error) -> Self {
+        if err.is_timeout() {
+            return Self::gateway_timeout("Timed out waiting for the active llama-server.");
+        }
+
+        if err.is_connect() {
+            return Self::gateway("Cannot connect to the active llama-server.");
+        }
+
+        let detail = err.to_string();
+        if detail.contains("error sending request") || detail.contains("connection reset") {
+            return Self::gateway(
+                "The active llama-server dropped the request before streaming started.",
+            );
+        }
+
+        Self::gateway(format!("Upstream request failed: {detail}"))
+    }
+
+    fn from_upstream_status(status: StatusCode, body: String) -> Self {
+        let detail = body.trim();
+        let lower = detail.to_ascii_lowercase();
+        if status == StatusCode::TOO_MANY_REQUESTS
+            || lower.contains("busy")
+            || lower.contains("no slot")
+            || lower.contains("no available slot")
+        {
+            let message = if detail.is_empty() {
+                "The active llama-server is busy with another request."
+            } else {
+                detail
+            };
+            return Self::busy(message.to_string());
+        }
+
+        let message = if detail.is_empty() {
+            format!("Upstream llama-server returned HTTP {}.", status.as_u16())
+        } else {
+            format!("Upstream HTTP {}: {detail}", status.as_u16())
+        };
+        Self::new(status, message)
+    }
+}
 
 impl fmt::Display for ApiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "API error: {}", self.0)
+        write!(f, "{}", self.message)
     }
 }
 
 impl std::error::Error for ApiError {}
 
 impl Reject for ApiError {}
+
+const MONITOR_INFERENCE_QUEUE_TIMEOUT: Duration = Duration::from_secs(30);
+const UPSTREAM_BUSY_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
+const UPSTREAM_BUSY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const UPSTREAM_SEND_RETRIES: usize = 3;
+const UPSTREAM_SEND_RETRY_BACKOFF_MS: u64 = 250;
+
+fn active_chat_completions_url(state: &AppState) -> Result<String, warp::Rejection> {
+    let session = state
+        .get_active_session()
+        .ok_or(warp::reject::not_found())?;
+    Ok(match &session.mode {
+        crate::state::SessionMode::Spawn { port } => {
+            format!("http://127.0.0.1:{port}/v1/chat/completions")
+        }
+        crate::state::SessionMode::Attach { endpoint } => {
+            format!("{endpoint}/v1/chat/completions")
+        }
+    })
+}
+
+fn upstream_has_capacity(state: &AppState) -> Result<bool, warp::Rejection> {
+    let server_running = *state.server_running.lock().map_err(|e| {
+        warp::reject::custom(ApiError::internal(format!(
+            "Failed to read server state: {e}"
+        )))
+    })?;
+    if !server_running {
+        return Err(warp::reject::custom(ApiError::gateway(
+            "Cannot reach the active llama-server.",
+        )));
+    }
+
+    let metrics = state.llama_metrics.lock().map_err(|e| {
+        warp::reject::custom(ApiError::internal(format!(
+            "Failed to read llama metrics: {e}"
+        )))
+    })?;
+    let total_slots = metrics.slots_idle.saturating_add(metrics.slots_processing);
+    if total_slots > 0 {
+        return Ok(metrics.slots_idle > 0 || metrics.slots_processing == 0);
+    }
+
+    Ok(metrics.requests_processing == 0)
+}
+
+async fn wait_for_upstream_capacity(state: &AppState) -> Result<(), warp::Rejection> {
+    let deadline = tokio::time::Instant::now() + UPSTREAM_BUSY_WAIT_TIMEOUT;
+
+    loop {
+        if upstream_has_capacity(state)? {
+            return Ok(());
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            return Err(warp::reject::custom(ApiError::busy(
+                "The active llama-server is busy with another request. Wait for the current request to finish and retry.",
+            )));
+        }
+
+        tokio::time::sleep(UPSTREAM_BUSY_POLL_INTERVAL).await;
+    }
+}
+
+async fn acquire_inference_permit(
+    state: &AppState,
+) -> Result<tokio::sync::OwnedSemaphorePermit, warp::Rejection> {
+    tokio::time::timeout(
+        MONITOR_INFERENCE_QUEUE_TIMEOUT,
+        state.monitor_inference_gate.clone().acquire_owned(),
+    )
+    .await
+    .map_err(|_| {
+        warp::reject::custom(ApiError::busy(
+            "Another llama-monitor inference request has been queued for too long. Retry in a moment.",
+        ))
+    })?
+    .map_err(|_| warp::reject::custom(ApiError::internal("Inference gate was closed.")))
+}
+
+async fn prepare_inference_request(
+    state: &AppState,
+) -> Result<(String, tokio::sync::OwnedSemaphorePermit), warp::Rejection> {
+    let url = active_chat_completions_url(state)?;
+    let permit = acquire_inference_permit(state).await?;
+    wait_for_upstream_capacity(state).await?;
+    Ok((url, permit))
+}
+
+fn build_upstream_client(timeout: Duration) -> Result<reqwest::Client, warp::Rejection> {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .build()
+        .map_err(|e| {
+            warp::reject::custom(ApiError::internal(format!(
+                "Failed to create HTTP client: {e}"
+            )))
+        })
+}
+
+fn should_retry_send_error(err: &reqwest::Error) -> bool {
+    err.is_timeout()
+        || err.is_connect()
+        || err.to_string().contains("error sending request")
+        || err.to_string().contains("connection reset")
+}
+
+async fn send_upstream_request_with_retry<F>(
+    mut make_request: F,
+) -> Result<reqwest::Response, warp::Rejection>
+where
+    F: FnMut() -> reqwest::RequestBuilder,
+{
+    let mut attempt = 0usize;
+    let mut backoff_ms = UPSTREAM_SEND_RETRY_BACKOFF_MS;
+
+    loop {
+        attempt += 1;
+
+        match make_request().send().await {
+            Ok(resp) if resp.status().is_success() => return Ok(resp),
+            Ok(resp) => {
+                let status = resp.status();
+                let err_body = resp.text().await.unwrap_or_default();
+                let mapped = ApiError::from_upstream_status(status, err_body);
+                if attempt < UPSTREAM_SEND_RETRIES && mapped.status == StatusCode::TOO_MANY_REQUESTS
+                {
+                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                    backoff_ms *= 2;
+                    continue;
+                }
+                return Err(warp::reject::custom(mapped));
+            }
+            Err(err) => {
+                if attempt < UPSTREAM_SEND_RETRIES && should_retry_send_error(&err) {
+                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                    backoff_ms *= 2;
+                    continue;
+                }
+                return Err(warp::reject::custom(ApiError::from_reqwest(err)));
+            }
+        }
+    }
+}
 
 /// Extract bearer token from Authorization header.
 fn extract_bearer(auth: Option<String>) -> Option<String> {
@@ -456,11 +673,7 @@ use crate::chat_storage::ChatStorage;
 /// Returns `(allowed, remaining_secs)`. `allowed` is `true` only if the cooldown
 /// has elapsed AND this caller atomically claimed the slot (preventing concurrent
 /// double-execution). `remaining_secs` gives a hint for the retry-after header.
-fn try_cooldown(
-    last: &std::sync::atomic::AtomicU64,
-    now: u64,
-    cooldown_secs: u64,
-) -> (bool, u64) {
+fn try_cooldown(last: &std::sync::atomic::AtomicU64, now: u64, cooldown_secs: u64) -> (bool, u64) {
     use std::sync::atomic::Ordering;
     let prev = last.load(Ordering::Acquire);
     let elapsed = now.saturating_sub(prev);
@@ -709,23 +922,23 @@ fn api_sensor_bridge_status(
                 {
                     let installed = lhm::is_local_sensor_bridge_service_installed();
                     let running = lhm::is_local_sensor_bridge_running();
-                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({
                             "installed": installed,
                             "running": running,
                             "available": lhm::is_sensor_bridge_available(),
-                        }))),
-                    )
+                        }),
+                    )))
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
-                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({
                             "installed": false,
                             "running": false,
                             "available": false,
-                        }))),
-                    )
+                        }),
+                    )))
                 }
             }
         })
@@ -833,9 +1046,14 @@ fn api_disable_lhm(
                     return Ok(unauthorized_api_token());
                 }
                 let result = lhm_persist::save_lhm_disabled(&file, disabled)
-                    .map(|_| Box::new(warp::reply::json(&serde_json::json!({"ok": true}))) as Box<dyn warp::reply::Reply>)
+                    .map(|_| {
+                        Box::new(warp::reply::json(&serde_json::json!({"ok": true})))
+                            as Box<dyn warp::reply::Reply>
+                    })
                     .unwrap_or_else(|e| {
-                        Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": e})))
+                        Box::new(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": e}),
+                        ))
                     });
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(result)
             }
@@ -857,53 +1075,33 @@ fn api_generate_keywords(
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
                 }
-                let session = state.get_active_session()
-                    .ok_or(warp::reject::not_found())?;
-
-                let url = match &session.mode {
-                    crate::state::SessionMode::Spawn { port } => {
-                        format!("http://127.0.0.1:{port}/v1/chat/completions")
-                    }
-                    crate::state::SessionMode::Attach { endpoint } => {
-                        format!("{endpoint}/v1/chat/completions")
-                    }
-                };
+                let (url, _permit) = prepare_inference_request(&state).await?;
 
                 let prompt = format!(
                     "Generate 3-5 focus keywords for a story category called \"{}\". Return only the keywords, separated by commas. No explanation.",
                     req.category
                 );
 
-                let client = reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(30))
-                    .build()
-                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                let client = build_upstream_client(Duration::from_secs(30))?;
+                let payload = serde_json::json!({
+                    "messages": [
+                        {"role": "system", "content": "You generate focus keywords. Return only the keywords, comma-separated, with no explanation."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "stream": true,
+                    "thinking_budget_tokens": 0,
+                    "chat_template_kwargs": {"enable_thinking": false},
+                    "temperature": 0.7,
+                    "max_tokens": 128,
+                });
 
-                let response = client
-                    .post(&url)
-                    .header("Content-Type", "application/json")
-                    .json(&serde_json::json!({
-                        "messages": [
-                            {"role": "system", "content": "You generate focus keywords. Return only the keywords, comma-separated, with no explanation."},
-                            {"role": "user", "content": prompt},
-                        ],
-                        "stream": true,
-                        "thinking_budget_tokens": 0,
-                        "chat_template_kwargs": {"enable_thinking": false},
-                        "temperature": 0.7,
-                        "max_tokens": 128,
-                    }))
-                    .send()
-                    .await
-                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
-
-                if !response.status().is_success() {
-                    let status = response.status();
-                    let err_body = response.text().await.unwrap_or_default();
-                    return Err(warp::reject::custom(ApiError(format!(
-                        "upstream {}: {}", status, err_body
-                    ))));
-                }
+                let response = send_upstream_request_with_retry(|| {
+                    client
+                        .post(&url)
+                        .header("Content-Type", "application/json")
+                        .json(&payload)
+                })
+                .await?;
 
                 use futures_util::StreamExt;
                 let mut upstream = response.bytes_stream();
@@ -911,7 +1109,7 @@ fn api_generate_keywords(
                 let mut content = String::new();
 
                 while let Some(chunk) = upstream.next().await {
-                    let chunk = chunk.map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                    let chunk = chunk.map_err(|e| warp::reject::custom(ApiError::from_reqwest(e)))?;
                     buf.push_str(&String::from_utf8_lossy(&chunk));
 
                     while let Some(pos) = buf.find('\n') {
@@ -923,7 +1121,7 @@ fn api_generate_keywords(
                         if data.is_empty() || data == "[DONE]" { continue; }
 
                         let event: serde_json::Value = serde_json::from_str(data)
-                            .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                            .map_err(|e| warp::reject::custom(ApiError::internal(e.to_string())))?;
                         if let Some(delta) = event.get("choices")
                             .and_then(|c| c.as_array())
                             .and_then(|c| c.first())
@@ -938,7 +1136,7 @@ fn api_generate_keywords(
 
                 let content = content.trim().to_string();
                 if content.is_empty() {
-                    return Err(warp::reject::custom(ApiError(
+                    return Err(warp::reject::custom(ApiError::gateway(
                         "upstream returned empty keyword content".to_string(),
                     )));
                 }
@@ -950,7 +1148,7 @@ fn api_generate_keywords(
                     .collect();
 
                 if keywords.is_empty() {
-                    return Err(warp::reject::custom(ApiError(
+                    return Err(warp::reject::custom(ApiError::gateway(
                         "upstream returned no parseable keywords".to_string(),
                     )));
                 }
@@ -977,17 +1175,7 @@ fn api_analyze_context_notes(
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
                 }
-                let session = state.get_active_session()
-                    .ok_or(warp::reject::not_found())?;
-
-                let url = match &session.mode {
-                    crate::state::SessionMode::Spawn { port } => {
-                        format!("http://127.0.0.1:{port}/v1/chat/completions")
-                    }
-                    crate::state::SessionMode::Attach { endpoint } => {
-                        format!("{endpoint}/v1/chat/completions")
-                    }
-                };
+                let (url, _permit) = prepare_inference_request(&state).await?;
 
                 // Build a trimmed conversation excerpt (last 20 messages)
                 let recent: Vec<_> = req.messages.iter().rev().take(20).rev().collect();
@@ -1036,36 +1224,26 @@ fn api_analyze_context_notes(
                     {{\"sections\":[{{\"section\":\"<name>\",\"suggested\":\"<note text>\",\"status\":\"new|current|stale\",\"reason\":\"<only if stale>\"}}]}}"
                 );
 
-                let client = reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(60))
-                    .build()
-                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                let client = build_upstream_client(Duration::from_secs(60))?;
+                let payload = serde_json::json!({
+                    "messages": [
+                        {"role": "system", "content": system_msg},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    "stream": true,
+                    "thinking_budget_tokens": 0,
+                    "chat_template_kwargs": {"enable_thinking": false},
+                    "temperature": 0.4,
+                    "max_tokens": 1024,
+                });
 
-                let response = client
-                    .post(&url)
-                    .header("Content-Type", "application/json")
-                    .json(&serde_json::json!({
-                        "messages": [
-                            {"role": "system", "content": system_msg},
-                            {"role": "user", "content": user_msg},
-                        ],
-                        "stream": true,
-                        "thinking_budget_tokens": 0,
-                        "chat_template_kwargs": {"enable_thinking": false},
-                        "temperature": 0.4,
-                        "max_tokens": 1024,
-                    }))
-                    .send()
-                    .await
-                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
-
-                if !response.status().is_success() {
-                    let status = response.status();
-                    let err_body = response.text().await.unwrap_or_default();
-                    return Err(warp::reject::custom(ApiError(format!(
-                        "upstream {}: {}", status, err_body
-                    ))));
-                }
+                let response = send_upstream_request_with_retry(|| {
+                    client
+                        .post(&url)
+                        .header("Content-Type", "application/json")
+                        .json(&payload)
+                })
+                .await?;
 
                 use futures_util::StreamExt;
                 let mut upstream = response.bytes_stream();
@@ -1073,7 +1251,7 @@ fn api_analyze_context_notes(
                 let mut content = String::new();
 
                 while let Some(chunk) = upstream.next().await {
-                    let chunk = chunk.map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                    let chunk = chunk.map_err(|e| warp::reject::custom(ApiError::from_reqwest(e)))?;
                     buf.push_str(&String::from_utf8_lossy(&chunk));
 
                     while let Some(pos) = buf.find('\n') {
@@ -1102,7 +1280,7 @@ fn api_analyze_context_notes(
 
                 let content = content.trim().to_string();
                 if content.is_empty() {
-                    return Err(warp::reject::custom(ApiError(
+                    return Err(warp::reject::custom(ApiError::gateway(
                         "upstream returned empty analysis".to_string(),
                     )));
                 }
@@ -1117,13 +1295,13 @@ fn api_analyze_context_notes(
                 };
 
                 let parsed: serde_json::Value = serde_json::from_str(&json_str)
-                    .map_err(|e| warp::reject::custom(ApiError(format!(
+                    .map_err(|e| warp::reject::custom(ApiError::internal(format!(
                         "failed to parse analysis JSON: {e} — raw: {json_str}"
                     ))))?;
 
                 let sections_arr = parsed.get("sections")
                     .and_then(|v| v.as_array())
-                    .ok_or_else(|| warp::reject::custom(ApiError(
+                    .ok_or_else(|| warp::reject::custom(ApiError::internal(
                         "analysis JSON missing 'sections' array".to_string()
                     )))?;
 
@@ -1140,7 +1318,7 @@ fn api_analyze_context_notes(
                 }
 
                 if sections.is_empty() {
-                    return Err(warp::reject::custom(ApiError(
+                    return Err(warp::reject::custom(ApiError::gateway(
                         "analysis returned no usable section data".to_string(),
                     )));
                 }
@@ -1695,7 +1873,10 @@ fn api_remote_agent_detect(
                 async move {
                     let bearer = extract_bearer(auth);
                     if bearer.as_deref()
-                        != app_config.live_api_token().as_deref().filter(|t| !t.is_empty())
+                        != app_config
+                            .live_api_token()
+                            .as_deref()
+                            .filter(|t| !t.is_empty())
                     {
                         return Ok(unauthorized_api_token());
                     }
@@ -1759,7 +1940,10 @@ fn api_remote_agent_ssh_host_key(
                 async move {
                     let bearer = extract_bearer(auth);
                     if bearer.as_deref()
-                        != app_config.live_api_token().as_deref().filter(|t| !t.is_empty())
+                        != app_config
+                            .live_api_token()
+                            .as_deref()
+                            .filter(|t| !t.is_empty())
                     {
                         return Ok(unauthorized_api_token());
                     }
@@ -2010,7 +2194,10 @@ fn api_remote_agent_status(
                 async move {
                     let bearer = extract_bearer(auth);
                     if bearer.as_deref()
-                        != app_config.live_api_token().as_deref().filter(|t| !t.is_empty())
+                        != app_config
+                            .live_api_token()
+                            .as_deref()
+                            .filter(|t| !t.is_empty())
                     {
                         return Ok(unauthorized_api_token());
                     }
@@ -2091,7 +2278,10 @@ fn api_remote_agent_start(
                 async move {
                     let bearer = extract_bearer(auth);
                     if bearer.as_deref()
-                        != app_config.live_api_token().as_deref().filter(|t| !t.is_empty())
+                        != app_config
+                            .live_api_token()
+                            .as_deref()
+                            .filter(|t| !t.is_empty())
                     {
                         return Ok(unauthorized_api_token());
                     }
@@ -2217,7 +2407,10 @@ fn api_remote_agent_update(
                 async move {
                     let bearer = extract_bearer(auth);
                     if bearer.as_deref()
-                        != app_config.live_api_token().as_deref().filter(|t| !t.is_empty())
+                        != app_config
+                            .live_api_token()
+                            .as_deref()
+                            .filter(|t| !t.is_empty())
                     {
                         return Ok(unauthorized_api_token());
                     }
@@ -2299,7 +2492,10 @@ fn api_remote_agent_stop(
                 async move {
                     let bearer = extract_bearer(auth);
                     if bearer.as_deref()
-                        != app_config.live_api_token().as_deref().filter(|t| !t.is_empty())
+                        != app_config
+                            .live_api_token()
+                            .as_deref()
+                            .filter(|t| !t.is_empty())
                     {
                         return Ok(unauthorized_api_token());
                     }
@@ -2451,7 +2647,12 @@ fn api_remote_agent_tls_status(
         .and(warp::header::optional::<String>("authorization"))
         .map(move |auth: Option<String>| {
             let bearer = extract_bearer(auth);
-            if bearer.as_deref() != app_config.live_api_token().as_deref().filter(|t| !t.is_empty()) {
+            if bearer.as_deref()
+                != app_config
+                    .live_api_token()
+                    .as_deref()
+                    .filter(|t| !t.is_empty())
+            {
                 return unauthorized_api_token();
             }
             let certs_dir = crate::certs::certs_dir();
@@ -2491,12 +2692,14 @@ fn api_start(
                     eff_config.llama_server_cwd = PathBuf::from(&ui.llama_server_cwd);
                 }
                 match server::start_server(&state, config, &eff_config).await {
-                    Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({"ok": true}))),
-                    ),
-                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()}))),
-                    ),
+                    Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({"ok": true})),
+                    )),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": e.to_string()}),
+                        ),
+                    )),
                 }
             }
         })
@@ -2517,12 +2720,14 @@ fn api_stop(
                     return Ok(unauthorized_api_token());
                 }
                 match server::stop_server(&state).await {
-                    Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({"ok": true}))),
-                    ),
-                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()}))),
-                    ),
+                    Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({"ok": true})),
+                    )),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": e.to_string()}),
+                        ),
+                    )),
                 }
             }
         })
@@ -2564,7 +2769,9 @@ fn api_create_preset(
             presets.push(preset.clone());
             let _ = presets::save_presets(&state.presets_path, &presets);
             futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                Box::new(warp::reply::json(&serde_json::json!({"ok": true, "preset": preset}))),
+                Box::new(warp::reply::json(
+                    &serde_json::json!({"ok": true, "preset": preset}),
+                )),
             ))
         })
 }
@@ -2577,24 +2784,30 @@ fn api_update_preset(
         .and(warp::put())
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |id: String, auth: Option<String>, updated: ModelPreset| {
-            let cfg = app_config.clone();
-            if !check_api_token(&auth, &cfg) {
-                return futures_util::future::ready(Ok(unauthorized_api_token()));
-            }
-            let mut presets = state.presets.lock().unwrap();
-            if let Some(existing) = presets.iter_mut().find(|p| p.id == id) {
-                *existing = updated.clone();
-                let _ = presets::save_presets(&state.presets_path, &presets);
-                futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                    Box::new(warp::reply::json(&serde_json::json!({"ok": true, "preset": updated}))),
-                ))
-            } else {
-                futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                    Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": "preset not found"}))),
-                ))
-            }
-        })
+        .and_then(
+            move |id: String, auth: Option<String>, updated: ModelPreset| {
+                let cfg = app_config.clone();
+                if !check_api_token(&auth, &cfg) {
+                    return futures_util::future::ready(Ok(unauthorized_api_token()));
+                }
+                let mut presets = state.presets.lock().unwrap();
+                if let Some(existing) = presets.iter_mut().find(|p| p.id == id) {
+                    *existing = updated.clone();
+                    let _ = presets::save_presets(&state.presets_path, &presets);
+                    futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(
+                            &serde_json::json!({"ok": true, "preset": updated}),
+                        )),
+                    ))
+                } else {
+                    futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": "preset not found"}),
+                        )),
+                    ))
+                }
+            },
+        )
 }
 
 fn api_delete_preset(
@@ -2619,7 +2832,9 @@ fn api_delete_preset(
                 ))
             } else {
                 futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                    Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": "preset not found"}))),
+                    Box::new(warp::reply::json(
+                        &serde_json::json!({"ok": false, "error": "preset not found"}),
+                    )),
                 ))
             }
         })
@@ -2678,18 +2893,22 @@ fn api_create_template(
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |auth: Option<String>, template: presets::SystemPromptTemplate| {
-            let cfg = app_config.clone();
-            if !check_api_token(&auth, &cfg) {
-                return futures_util::future::ready(Ok(unauthorized_api_token()));
-            }
-            let mut templates = state.templates.lock().unwrap();
-            templates.push(template.clone());
-            let _ = presets::save_templates(&state.templates_path, &templates);
-            futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                Box::new(warp::reply::json(&serde_json::json!({"ok": true, "template": template}))),
-            ))
-        })
+        .and_then(
+            move |auth: Option<String>, template: presets::SystemPromptTemplate| {
+                let cfg = app_config.clone();
+                if !check_api_token(&auth, &cfg) {
+                    return futures_util::future::ready(Ok(unauthorized_api_token()));
+                }
+                let mut templates = state.templates.lock().unwrap();
+                templates.push(template.clone());
+                let _ = presets::save_templates(&state.templates_path, &templates);
+                futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(
+                        &serde_json::json!({"ok": true, "template": template}),
+                    )),
+                ))
+            },
+        )
 }
 
 fn api_update_template(
@@ -2700,24 +2919,30 @@ fn api_update_template(
         .and(warp::put())
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |id: String, auth: Option<String>, updated: presets::SystemPromptTemplate| {
-            let cfg = app_config.clone();
-            if !check_api_token(&auth, &cfg) {
-                return futures_util::future::ready(Ok(unauthorized_api_token()));
-            }
-            let mut templates = state.templates.lock().unwrap();
-            if let Some(existing) = templates.iter_mut().find(|t| t.id == id) {
-                *existing = updated.clone();
-                let _ = presets::save_templates(&state.templates_path, &templates);
-                futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                    Box::new(warp::reply::json(&serde_json::json!({"ok": true, "template": updated}))),
-                ))
-            } else {
-                futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                    Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": "template not found"}))),
-                ))
-            }
-        })
+        .and_then(
+            move |id: String, auth: Option<String>, updated: presets::SystemPromptTemplate| {
+                let cfg = app_config.clone();
+                if !check_api_token(&auth, &cfg) {
+                    return futures_util::future::ready(Ok(unauthorized_api_token()));
+                }
+                let mut templates = state.templates.lock().unwrap();
+                if let Some(existing) = templates.iter_mut().find(|t| t.id == id) {
+                    *existing = updated.clone();
+                    let _ = presets::save_templates(&state.templates_path, &templates);
+                    futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(
+                            &serde_json::json!({"ok": true, "template": updated}),
+                        )),
+                    ))
+                } else {
+                    futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": "template not found"}),
+                        )),
+                    ))
+                }
+            },
+        )
 }
 
 fn api_delete_template(
@@ -2742,7 +2967,9 @@ fn api_delete_template(
                 ))
             } else {
                 futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                    Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": "template not found"}))),
+                    Box::new(warp::reply::json(
+                        &serde_json::json!({"ok": false, "error": "template not found"}),
+                    )),
                 ))
             }
         })
@@ -2862,8 +3089,7 @@ fn api_get_settings_full(
         .and(with_app_config(app_config))
         .map(move |auth: Option<String>, cfg: Arc<AppConfig>| {
             let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-            let has_api_token =
-                bearer_matches_api_token(bearer.as_deref(), &cfg);
+            let has_api_token = bearer_matches_api_token(bearer.as_deref(), &cfg);
 
             if !has_api_token {
                 return Box::new(warp::reply::with_status(
@@ -2989,8 +3215,7 @@ fn api_rotate_agent_token(
             async move {
                 // Require api-token
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-                let has_api_token =
-                    bearer_matches_api_token(bearer.as_deref(), &cfg);
+                let has_api_token = bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                 if !has_api_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -3036,8 +3261,7 @@ fn api_rotate_api_token(
             async move {
                 // Require api-token
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-                let has_api_token =
-                    bearer_matches_api_token(bearer.as_deref(), &cfg);
+                let has_api_token = bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                 if !has_api_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -3084,8 +3308,7 @@ fn api_rotate_db_admin_token(
             async move {
                 // Require api-token
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-                let has_api_token =
-                    bearer_matches_api_token(bearer.as_deref(), &cfg);
+                let has_api_token = bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                 if !has_api_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -3134,207 +3357,210 @@ fn api_browse(
         .and(warp::get())
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::query::<std::collections::HashMap<String, String>>())
-        .and_then(move |auth: Option<String>, query: std::collections::HashMap<String, String>| {
-            let cfg = app_config.clone();
-            let state = state.clone();
-            async move {
-                if !check_api_token(&auth, &cfg) {
-                    return Ok(unauthorized_api_token());
-                }
-                // Cooldown: 1 second
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                let last = LAST_BROWSE.load(Ordering::Acquire);
-                if now - last < 1 {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({
-                                "error": "too soon; please wait",
-                                "seconds_remaining": 1
-                            })),
-                            warp::http::StatusCode::TOO_MANY_REQUESTS,
-                        ),
-                    ));
-                }
-                LAST_BROWSE.store(now, Ordering::Release);
-
-                // Build allowed roots:
-                // - Home directory (primary root).
-                // - Directories used for models, TLS certs, etc.
-                let mut allowed_roots: Vec<PathBuf> = Vec::new();
-
-                // Always allow home directory
-                if let Some(home) = dirs::home_dir()
-                    && let Ok(canon) = home.canonicalize()
-                {
-                    allowed_roots.push(canon);
-                }
-
-                // Allow models_dir (parent directory)
-                if let Some(ref models_dir) = state.models_dir
-                    && let Some(parent) = models_dir.parent()
-                    && let Ok(canon) = parent.canonicalize()
-                {
-                    allowed_roots.push(canon);
-                }
-
-                // Allow TLS custom cert/key parent directories
-                if let Ok(tls) = state.tls_config.lock() {
-                    if let Some(ref cert_path) = tls.custom_cert_path
-                        && let Some(parent) = cert_path.parent()
-                        && let Ok(canon) = parent.canonicalize()
-                    {
-                        allowed_roots.push(canon);
+        .and_then(
+            move |auth: Option<String>, query: std::collections::HashMap<String, String>| {
+                let cfg = app_config.clone();
+                let state = state.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
                     }
-                    if let Some(ref key_path) = tls.custom_key_path
-                        && let Some(parent) = key_path.parent()
-                        && let Ok(canon) = parent.canonicalize()
-                    {
-                        allowed_roots.push(canon);
-                    }
-                }
-
-                // Remove duplicates
-                allowed_roots.sort();
-                allowed_roots.dedup();
-
-                let requested = query.get("path").cloned().unwrap_or_default();
-                let filter = query.get("filter").cloned().unwrap_or_default();
-
-                let dir = if requested.is_empty() {
-                    dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
-                } else {
-                    PathBuf::from(&requested)
-                };
-
-                let dir = match dir.canonicalize() {
-                    Ok(p) => p,
-                    Err(_) => {
+                    // Cooldown: 1 second
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let last = LAST_BROWSE.load(Ordering::Acquire);
+                    if now - last < 1 {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::with_status(
                                 warp::reply::json(&serde_json::json!({
-                                    "path": requested,
-                                    "error": "Path not found"
+                                    "error": "too soon; please wait",
+                                    "seconds_remaining": 1
+                                })),
+                                warp::http::StatusCode::TOO_MANY_REQUESTS,
+                            ),
+                        ));
+                    }
+                    LAST_BROWSE.store(now, Ordering::Release);
+
+                    // Build allowed roots:
+                    // - Home directory (primary root).
+                    // - Directories used for models, TLS certs, etc.
+                    let mut allowed_roots: Vec<PathBuf> = Vec::new();
+
+                    // Always allow home directory
+                    if let Some(home) = dirs::home_dir()
+                        && let Ok(canon) = home.canonicalize()
+                    {
+                        allowed_roots.push(canon);
+                    }
+
+                    // Allow models_dir (parent directory)
+                    if let Some(ref models_dir) = state.models_dir
+                        && let Some(parent) = models_dir.parent()
+                        && let Ok(canon) = parent.canonicalize()
+                    {
+                        allowed_roots.push(canon);
+                    }
+
+                    // Allow TLS custom cert/key parent directories
+                    if let Ok(tls) = state.tls_config.lock() {
+                        if let Some(ref cert_path) = tls.custom_cert_path
+                            && let Some(parent) = cert_path.parent()
+                            && let Ok(canon) = parent.canonicalize()
+                        {
+                            allowed_roots.push(canon);
+                        }
+                        if let Some(ref key_path) = tls.custom_key_path
+                            && let Some(parent) = key_path.parent()
+                            && let Ok(canon) = parent.canonicalize()
+                        {
+                            allowed_roots.push(canon);
+                        }
+                    }
+
+                    // Remove duplicates
+                    allowed_roots.sort();
+                    allowed_roots.dedup();
+
+                    let requested = query.get("path").cloned().unwrap_or_default();
+                    let filter = query.get("filter").cloned().unwrap_or_default();
+
+                    let dir = if requested.is_empty() {
+                        dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+                    } else {
+                        PathBuf::from(&requested)
+                    };
+
+                    let dir = match dir.canonicalize() {
+                        Ok(p) => p,
+                        Err(_) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({
+                                        "path": requested,
+                                        "error": "Path not found"
+                                    })),
+                                    warp::http::StatusCode::OK,
+                                ),
+                            ));
+                        }
+                    };
+
+                    // Enforce allowlist: directory must be under one of the allowed roots
+                    if !allowed_roots.iter().any(|root| dir.starts_with(root)) {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "path": dir.display().to_string(),
+                                    "error": "Path not allowed"
                                 })),
                                 warp::http::StatusCode::OK,
                             ),
                         ));
                     }
-                };
 
-                // Enforce allowlist: directory must be under one of the allowed roots
-                if !allowed_roots.iter().any(|root| dir.starts_with(root)) {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({
-                                "path": dir.display().to_string(),
-                                "error": "Path not allowed"
-                            })),
-                            warp::http::StatusCode::OK,
-                        ),
-                    ));
-                }
+                    if !dir.is_dir() {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "path": dir.display().to_string(),
+                                    "error": "Not a directory"
+                                })),
+                                warp::http::StatusCode::OK,
+                            ),
+                        ));
+                    }
 
-                if !dir.is_dir() {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({
-                                "path": dir.display().to_string(),
-                                "error": "Not a directory"
-                            })),
-                            warp::http::StatusCode::OK,
-                        ),
-                    ));
-                }
+                    let parent = dir
+                        .parent()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default();
 
-                let parent = dir
-                    .parent()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default();
-
-                let mut entries: Vec<serde_json::Value> = Vec::new();
-                if let Ok(read_dir) = std::fs::read_dir(&dir) {
-                    for entry in read_dir.flatten() {
-                        let name = entry.file_name().to_string_lossy().to_string();
-                        if name.starts_with('.') {
-                            continue;
-                        }
-                        let meta = entry.metadata().ok();
-                        let is_dir = meta.as_ref().is_some_and(|m| m.is_dir());
-
-                        if !is_dir && !filter.is_empty() {
-                            let pass = match filter.as_str() {
-                                "gguf" => name.ends_with(".gguf"),
-                                "executable" => {
-                                    #[cfg(unix)]
-                                    {
-                                        use std::os::unix::fs::PermissionsExt;
-                                        meta.as_ref()
-                                            .is_some_and(|m| m.permissions().mode() & 0o111 != 0)
-                                    }
-                                    #[cfg(not(unix))]
-                                    {
-                                        true
-                                    }
-                                }
-                                _ => true,
-                            };
-                            if !pass {
+                    let mut entries: Vec<serde_json::Value> = Vec::new();
+                    if let Ok(read_dir) = std::fs::read_dir(&dir) {
+                        for entry in read_dir.flatten() {
+                            let name = entry.file_name().to_string_lossy().to_string();
+                            if name.starts_with('.') {
                                 continue;
                             }
+                            let meta = entry.metadata().ok();
+                            let is_dir = meta.as_ref().is_some_and(|m| m.is_dir());
+
+                            if !is_dir && !filter.is_empty() {
+                                let pass = match filter.as_str() {
+                                    "gguf" => name.ends_with(".gguf"),
+                                    "executable" => {
+                                        #[cfg(unix)]
+                                        {
+                                            use std::os::unix::fs::PermissionsExt;
+                                            meta.as_ref().is_some_and(|m| {
+                                                m.permissions().mode() & 0o111 != 0
+                                            })
+                                        }
+                                        #[cfg(not(unix))]
+                                        {
+                                            true
+                                        }
+                                    }
+                                    _ => true,
+                                };
+                                if !pass {
+                                    continue;
+                                }
+                            }
+
+                            let size = if is_dir {
+                                0
+                            } else {
+                                meta.as_ref().map(|m| m.len()).unwrap_or(0)
+                            };
+                            let size_display = if is_dir {
+                                String::new()
+                            } else if size >= 1_000_000_000 {
+                                format!("{:.1} GB", size as f64 / 1_000_000_000.0)
+                            } else if size >= 1_000_000 {
+                                format!("{:.0} MB", size as f64 / 1_000_000.0)
+                            } else {
+                                format!("{:.0} KB", size as f64 / 1_000.0)
+                            };
+
+                            entries.push(serde_json::json!({
+                                "name": name,
+                                "is_dir": is_dir,
+                                "size": size,
+                                "size_display": size_display,
+                                "path": entry.path().display().to_string(),
+                            }));
                         }
-
-                        let size = if is_dir {
-                            0
-                        } else {
-                            meta.as_ref().map(|m| m.len()).unwrap_or(0)
-                        };
-                        let size_display = if is_dir {
-                            String::new()
-                        } else if size >= 1_000_000_000 {
-                            format!("{:.1} GB", size as f64 / 1_000_000_000.0)
-                        } else if size >= 1_000_000 {
-                            format!("{:.0} MB", size as f64 / 1_000_000.0)
-                        } else {
-                            format!("{:.0} KB", size as f64 / 1_000.0)
-                        };
-
-                        entries.push(serde_json::json!({
-                            "name": name,
-                            "is_dir": is_dir,
-                            "size": size,
-                            "size_display": size_display,
-                            "path": entry.path().display().to_string(),
-                        }));
                     }
+
+                    entries.sort_by(|a, b| {
+                        let a_dir = a["is_dir"].as_bool().unwrap_or(false);
+                        let b_dir = b["is_dir"].as_bool().unwrap_or(false);
+                        b_dir.cmp(&a_dir).then_with(|| {
+                            a["name"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_lowercase()
+                                .cmp(&b["name"].as_str().unwrap_or("").to_lowercase())
+                        })
+                    });
+
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "path": dir.display().to_string(),
+                                "parent": parent,
+                                "entries": entries,
+                            })),
+                            warp::http::StatusCode::OK,
+                        ),
+                    ))
                 }
-
-                entries.sort_by(|a, b| {
-                    let a_dir = a["is_dir"].as_bool().unwrap_or(false);
-                    let b_dir = b["is_dir"].as_bool().unwrap_or(false);
-                    b_dir.cmp(&a_dir).then_with(|| {
-                        a["name"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_lowercase()
-                            .cmp(&b["name"].as_str().unwrap_or("").to_lowercase())
-                    })
-                });
-
-                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                    warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({
-                            "path": dir.display().to_string(),
-                            "parent": parent,
-                            "entries": entries,
-                        })),
-                        warp::http::StatusCode::OK,
-                    ),
-                ))
-            }
-        })
+            },
+        )
 }
 
 fn api_chat(
@@ -3354,41 +3580,18 @@ fn api_chat(
                     return Ok(unauthorized_api_token());
                 }
                 // Derive endpoint from active session — no user-controlled input
-                let session = state
-                    .get_active_session()
-                    .ok_or(warp::reject::not_found())?;
-
-                let url = match &session.mode {
-                    crate::state::SessionMode::Spawn { port } => {
-                        format!("http://127.0.0.1:{port}/v1/chat/completions")
-                    }
-                    crate::state::SessionMode::Attach { endpoint } => {
-                        format!("{endpoint}/v1/chat/completions")
-                    }
-                };
-
-                let client = reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(120))
-                    .build()
-                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                let (url, permit) = prepare_inference_request(&state).await?;
+                let client = build_upstream_client(Duration::from_secs(120))?;
+                let request_body = body.to_vec();
 
                 // Stream response from upstream — Tokio cancels automatically on client disconnect
-                let resp = client
-                    .post(&url)
-                    .header("Content-Type", "application/json")
-                    .body(body.to_vec())
-                    .send()
-                    .await
-                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
-
-                if !resp.status().is_success() {
-                    let status = resp.status();
-                    let err_body = resp.text().await.unwrap_or_default();
-                    return Err(warp::reject::custom(ApiError(format!(
-                        "upstream {}: {}",
-                        status, err_body
-                    ))));
-                }
+                let resp = send_upstream_request_with_retry(|| {
+                    client
+                        .post(&url)
+                        .header("Content-Type", "application/json")
+                        .body(request_body.clone())
+                })
+                .await?;
 
                 let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
                 let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
@@ -3396,6 +3599,7 @@ fn api_chat(
                 // Forward SSE events to client — stops if client disconnects (tx closed)
                 tokio::spawn(async move {
                     use futures_util::StreamExt;
+                    let _permit = permit;
                     let mut stream = resp.bytes_stream();
                     let mut buf = String::new();
 
@@ -3436,9 +3640,9 @@ fn api_chat(
                     }
                 });
 
-                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                    warp::sse::reply(stream),
-                ))
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::sse::reply(
+                    stream,
+                )))
             }
         })
 }
@@ -3456,9 +3660,9 @@ fn api_chat_abort(
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
                 }
-                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                    warp::reply::json(&serde_json::json!({"ok": true})),
-                ))
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({"ok": true}),
+                )))
             }
         })
 }
@@ -3593,48 +3797,26 @@ fn api_chat_suggestions(
                 ];
 
                 // Call llama.cpp
-                let session = state.get_active_session()
-                    .ok_or(warp::reject::not_found())?;
+                let (url, _permit) = prepare_inference_request(&state).await?;
+                let client = build_upstream_client(Duration::from_secs(30))?;
+                let payload = serde_json::json!({
+                    "messages": suggestion_messages,
+                    "stream": true,
+                    "thinking_budget_tokens": 0,
+                    "chat_template_kwargs": {
+                        "enable_thinking": false
+                    },
+                    "temperature": temperature,
+                    "max_tokens": 512,
+                });
 
-                let url = match &session.mode {
-                    crate::state::SessionMode::Spawn { port } => {
-                        format!("http://127.0.0.1:{port}/v1/chat/completions")
-                    }
-                    crate::state::SessionMode::Attach { endpoint } => {
-                        format!("{endpoint}/v1/chat/completions")
-                    }
-                };
-
-                let client = reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(30))
-                    .build()
-                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
-
-                let response = client
-                    .post(&url)
-                    .header("Content-Type", "application/json")
-                    .json(&serde_json::json!({
-                        "messages": suggestion_messages,
-                        "stream": true,
-                        "thinking_budget_tokens": 0,
-                        "chat_template_kwargs": {
-                            "enable_thinking": false
-                        },
-                        "temperature": temperature,
-                        "max_tokens": 512,
-                    }))
-                    .send()
-                    .await
-                    .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
-
-                if !response.status().is_success() {
-                    let status = response.status();
-                    let err_body = response.text().await.unwrap_or_default();
-                    return Err(warp::reject::custom(ApiError(format!(
-                        "upstream {}: {}",
-                        status, err_body
-                    ))));
-                }
+                let response = send_upstream_request_with_retry(|| {
+                    client
+                        .post(&url)
+                        .header("Content-Type", "application/json")
+                        .json(&payload)
+                })
+                .await?;
 
                 use futures_util::StreamExt;
 
@@ -3644,8 +3826,8 @@ fn api_chat_suggestions(
                 let mut reasoning_content = String::new();
 
                 while let Some(chunk) = upstream.next().await {
-                    let chunk =
-                        chunk.map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                    let chunk = chunk
+                        .map_err(|e| warp::reject::custom(ApiError::from_reqwest(e)))?;
                     buf.push_str(&String::from_utf8_lossy(&chunk));
 
                     while let Some(pos) = buf.find('\n') {
@@ -3661,7 +3843,7 @@ fn api_chat_suggestions(
                         }
 
                         let event: serde_json::Value = serde_json::from_str(data)
-                            .map_err(|e| warp::reject::custom(ApiError(e.to_string())))?;
+                            .map_err(|e| warp::reject::custom(ApiError::internal(e.to_string())))?;
                         if let Some(delta) = event.get("choices")
                             .and_then(|c| c.as_array())
                             .and_then(|c| c.first())
@@ -3696,7 +3878,7 @@ fn api_chat_suggestions(
                     content.trim()
                 };
                 if content.is_empty() {
-                    return Err(warp::reject::custom(ApiError(
+                    return Err(warp::reject::custom(ApiError::gateway(
                         "upstream returned empty suggestion content".to_string(),
                     )));
                 }
@@ -3715,7 +3897,7 @@ fn api_chat_suggestions(
                     parse_suggestions(content)
                 };
                 if suggestions.is_empty() {
-                    return Err(warp::reject::custom(ApiError(
+                    return Err(warp::reject::custom(ApiError::gateway(
                         "upstream returned no parseable suggestions".to_string(),
                     )));
                 }
@@ -4157,9 +4339,7 @@ fn api_list_tabs(
                     Err(e) => {
                         eprintln!("list_tabs error: {e}");
                         Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(
-                                &Vec::<crate::chat_storage::TabMeta>::new(),
-                            ),
+                            warp::reply::json(&Vec::<crate::chat_storage::TabMeta>::new()),
                         ))
                     }
                 }
@@ -4215,24 +4395,26 @@ fn api_get_tab(
         .and(warp::get())
         .and(warp::header::optional::<String>("authorization"))
         .and(with_chat_storage(storage))
-        .and_then(move |id: String, auth: Option<String>, store: Arc<ChatStorage>| {
-            let cfg = app_config.clone();
-            async move {
-                if !check_api_token(&auth, &cfg) {
-                    return Ok(unauthorized_api_token());
+        .and_then(
+            move |id: String, auth: Option<String>, store: Arc<ChatStorage>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    match store.get_tab(&id) {
+                        Ok(tab) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&tab),
+                        )),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(
+                                &serde_json::json!({"ok":false,"error":e.to_string()}),
+                            ),
+                        )),
+                    }
                 }
-                match store.get_tab(&id) {
-                    Ok(tab) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&tab),
-                    )),
-                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(
-                            &serde_json::json!({"ok":false,"error":e.to_string()}),
-                        ),
-                    )),
-                }
-            }
-        })
+            },
+        )
 }
 
 // PUT /api/chat/tabs/:id — full save (meta + replace messages)
@@ -4275,7 +4457,9 @@ fn api_put_tab(
                             warp::reply::json(&serde_json::json!({"ok":true})),
                         )),
                         Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&serde_json::json!({"ok":false,"error":e.to_string()})),
+                            warp::reply::json(
+                                &serde_json::json!({"ok":false,"error":e.to_string()}),
+                            ),
                         )),
                     }
                 }
@@ -4292,26 +4476,26 @@ fn api_delete_tab(
         .and(warp::delete())
         .and(warp::header::optional::<String>("authorization"))
         .and(with_chat_storage(storage))
-        .and_then(move |id: String, auth: Option<String>, store: Arc<ChatStorage>| {
-            let cfg = app_config.clone();
-            async move {
-                if !check_api_token(&auth, &cfg) {
-                    return Ok(unauthorized_api_token());
-                }
-                match store.delete_tab(&id) {
-                    Ok(_) => {
-                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&serde_json::json!({"ok":true})),
-                        ))
+        .and_then(
+            move |id: String, auth: Option<String>, store: Arc<ChatStorage>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
                     }
-                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(
-                            &serde_json::json!({"ok":false,"error":e.to_string()}),
-                        ),
-                    )),
+                    match store.delete_tab(&id) {
+                        Ok(_) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"ok":true})),
+                        )),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(
+                                &serde_json::json!({"ok":false,"error":e.to_string()}),
+                            ),
+                        )),
+                    }
                 }
-            }
-        })
+            },
+        )
 }
 
 // PATCH /api/chat/tabs/:id/meta — metadata only, no messages
@@ -4341,7 +4525,9 @@ fn api_patch_tab_meta(
                             warp::reply::json(&serde_json::json!({"ok":true})),
                         )),
                         Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&serde_json::json!({"ok":false,"error":e.to_string()})),
+                            warp::reply::json(
+                                &serde_json::json!({"ok":false,"error":e.to_string()}),
+                            ),
                         )),
                     }
                 }
@@ -4395,11 +4581,9 @@ fn api_append_messages(
                             Err(e) => eprintln!("append_message error: {e}"),
                         }
                     }
-                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(
-                            &serde_json::json!({"ok":true,"last_id":last_id}),
-                        ),
-                    ))
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({"ok":true,"last_id":last_id}),
+                    )))
                 }
             },
         )
@@ -4415,7 +4599,7 @@ fn api_reorder_tabs(
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json::<serde_json::Value>())
         .and(with_chat_storage(storage))
-        . and_then(
+        .and_then(
             move |auth: Option<String>, body: serde_json::Value, store: Arc<ChatStorage>| {
                 let cfg = app_config.clone();
                 async move {
@@ -4431,11 +4615,9 @@ fn api_reorder_tabs(
                         })
                         .unwrap_or_default();
                     match store.reorder_tabs(&ids) {
-                        Ok(_) => {
-                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                warp::reply::json(&serde_json::json!({"ok":true})),
-                            ))
-                        }
+                        Ok(_) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"ok":true})),
+                        )),
                         Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::json(
                                 &serde_json::json!({"ok":false,"error":e.to_string()}),
@@ -4474,51 +4656,53 @@ fn api_chat_search(
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::query::<SearchParams>())
         .and(with_chat_storage(storage))
-        .and_then(move |auth: Option<String>, p: SearchParams, store: Arc<ChatStorage>| {
-            let cfg = app_config.clone();
-            async move {
-                if !check_api_token(&auth, &cfg) {
-                    return Ok(unauthorized_api_token());
-                }
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                let last = LAST_CHAT_SEARCH.load(Ordering::Acquire);
-                if now - last < 1 {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": "too many searches; please wait",
-                                "seconds_remaining": 1
-                            })),
-                            warp::http::StatusCode::TOO_MANY_REQUESTS,
-                        ),
-                    ));
-                }
-                LAST_CHAT_SEARCH.store(now, Ordering::Release);
+        .and_then(
+            move |auth: Option<String>, p: SearchParams, store: Arc<ChatStorage>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let last = LAST_CHAT_SEARCH.load(Ordering::Acquire);
+                    if now - last < 1 {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "too many searches; please wait",
+                                    "seconds_remaining": 1
+                                })),
+                                warp::http::StatusCode::TOO_MANY_REQUESTS,
+                            ),
+                        ));
+                    }
+                    LAST_CHAT_SEARCH.store(now, Ordering::Release);
 
-                let limit = p.limit.clamp(1, 100);
-                match store.search(&p.q, limit, p.offset) {
-                    Ok(results) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&results),
-                    )),
-                    Err(e) => {
-                        eprintln!("search error: {e}");
-                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                            &crate::chat_storage::SearchResultsPage {
-                                results: Vec::new(),
-                                total: 0,
-                                limit,
-                                offset: p.offset,
-                                has_more: false,
-                            },
-                        )))
+                    let limit = p.limit.clamp(1, 100);
+                    match store.search(&p.q, limit, p.offset) {
+                        Ok(results) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&results)),
+                        ),
+                        Err(e) => {
+                            eprintln!("search error: {e}");
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&crate::chat_storage::SearchResultsPage {
+                                    results: Vec::new(),
+                                    total: 0,
+                                    limit,
+                                    offset: p.offset,
+                                    has_more: false,
+                                }),
+                            ))
+                        }
                     }
                 }
-            }
-        })
+            },
+        )
 }
 
 // ── Database Admin Endpoints ──────────────────────────────────────────────────
@@ -4538,8 +4722,7 @@ fn api_db_stats(
         .and_then(
             move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-                let has_api_token =
-                    bearer_matches_api_token(bearer.as_deref(), &cfg);
+                let has_api_token = bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                 if !has_api_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -4580,8 +4763,7 @@ fn api_db_integrity(
         .and_then(
             move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-                let has_api_token =
-                    bearer_matches_api_token(bearer.as_deref(), &cfg);
+                let has_api_token = bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                 if !has_api_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -4813,8 +4995,7 @@ fn api_db_indexes(
         .and_then(
             move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-                let has_api_token =
-                    bearer_matches_api_token(bearer.as_deref(), &cfg);
+                let has_api_token = bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                 if !has_api_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -5005,8 +5186,7 @@ fn api_db_backups(
             async move {
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
 
-                let has_api_token =
-                    bearer_matches_api_token(bearer.as_deref(), &cfg);
+                let has_api_token = bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                 if !has_api_token {
                     return Ok::<_, warp::Rejection>(warp::reply::with_status(
@@ -5238,8 +5418,7 @@ fn api_db_repair(
                 async move {
                     // Require db-admin-token
                     let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-                    let has_db_admin_token =
-                        bearer_matches_db_admin_token(bearer.as_deref(), &cfg);
+                    let has_db_admin_token = bearer_matches_db_admin_token(bearer.as_deref(), &cfg);
 
                     if !has_db_admin_token {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -5310,7 +5489,10 @@ fn api_db_delete_backup(
 
                     // Require db-admin-token for delete (high-impact operation)
                     let has_admin_token = bearer.as_deref()
-                        == cfg.live_db_admin_token().as_deref().filter(|t| !t.is_empty());
+                        == cfg
+                            .live_db_admin_token()
+                            .as_deref()
+                            .filter(|t| !t.is_empty());
 
                     if !has_admin_token {
                         return Ok::<_, warp::Rejection>(warp::reply::with_status(
@@ -5565,8 +5747,8 @@ fn api_get_capabilities(
                 let (system_reason, gpu_reason, cpu_temp_reason) =
                     state.calculate_availability_reasons();
 
-                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                    warp::reply::json(&serde_json::json!({
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
                         "capabilities": capabilities,
                         "endpoint_kind": endpoint_kind,
                         "session_kind": session_kind,
@@ -5576,8 +5758,8 @@ fn api_get_capabilities(
                             "gpu": gpu_reason,
                             "cpu_temp": cpu_temp_reason
                         }
-                    })),
-                ))
+                    }),
+                )))
             }
         })
 }

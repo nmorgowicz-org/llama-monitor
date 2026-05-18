@@ -378,7 +378,8 @@ async function fetchDirectorIdeas() {
             body: JSON.stringify(payload),
         });
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            const errText = await response.text().catch(() => '');
+            throw new Error(`HTTP ${response.status}: ${errText || response.statusText}`);
         }
 
         const data = await response.json();

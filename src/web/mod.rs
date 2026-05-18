@@ -16,6 +16,7 @@ use warp_helmet::{ContentSecurityPolicy, Helmet, HelmetFilter};
 
 use crate::config::AppConfig;
 use crate::state::AppState;
+use api::ApiError;
 use auth::AuthManager;
 
 /// Global rate limiter: 200 req/s with 500 burst (generous for local-first use).
@@ -76,8 +77,10 @@ fn origin_guard(
         .and_then(move |origin: Option<String>, method: Method| {
             let server_origin = server_origin.clone();
             async move {
-                if matches!(method, Method::POST | Method::PUT | Method::PATCH | Method::DELETE)
-                    && origin.is_some()
+                if matches!(
+                    method,
+                    Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+                ) && origin.is_some()
                 {
                     let origin = origin.unwrap_or_default();
                     let origin_host = origin
@@ -88,8 +91,7 @@ fn origin_guard(
                     if !origin_host.is_empty() {
                         // If bound to 0.0.0.0 accept any host on the correct port.
                         // Use exact port comparison, not ends_with, to prevent suffix bypass.
-                        if server_origin.starts_with("0.0.0.0:") {
-                            let server_port = &server_origin["0.0.0.0:".len()..];
+                        if let Some(server_port) = server_origin.strip_prefix("0.0.0.0:") {
                             let origin_port = origin_host.rsplit(':').next().unwrap_or("");
                             if origin_port != server_port {
                                 return Err(warp::reject::custom(OriginReject));
@@ -340,6 +342,13 @@ async fn handle_rejection(err: warp::Rejection) -> Result<Box<dyn warp::reply::R
                 "error": "forbidden; invalid origin"
             })),
             warp::http::StatusCode::FORBIDDEN,
+        )));
+    }
+
+    if let Some(api_err) = err.find::<ApiError>() {
+        return Ok(Box::new(warp::reply::with_status(
+            api_err.message.clone(),
+            api_err.status,
         )));
     }
 

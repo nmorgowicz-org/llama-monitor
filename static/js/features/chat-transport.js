@@ -737,7 +737,7 @@ export async function _doSendChat(tab, options = {}) {
 
     } catch (err) {
         // Detect connection/network errors (404, 503, network failures, etc.)
-        const isConnectionError = /HTTP (404|503)|Failed to fetch|network/i.test(err.message);
+        const isConnectionError = /HTTP (404|502|503|504)|Failed to fetch|network/i.test(err.message);
         
         if (!msgContent && tab._pendingVariants && err.name !== 'AbortError') {
             regenReverted = true;

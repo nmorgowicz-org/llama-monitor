@@ -394,10 +394,10 @@ fn parse_cookie(cookie_header: Option<&str>, name: &str) -> Option<String> {
     for part in header.split(';') {
         let trimmed = part.trim();
         // split_once preserves '=' inside the value; skip parts with no '='
-        if let Some((cookie_name, cookie_value)) = trimmed.split_once('=') {
-            if cookie_name.trim() == name {
-                return Some(cookie_value.to_string());
-            }
+        if let Some((cookie_name, cookie_value)) = trimmed.split_once('=')
+            && cookie_name.trim() == name
+        {
+            return Some(cookie_value.to_string());
         }
     }
     None

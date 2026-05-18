@@ -547,6 +547,13 @@ The request body is forwarded as raw bytes. The server does not validate or resh
 
 The response is an SSE stream that forwards upstream `data: ...` events.
 
+Inference admission behavior:
+- llama-monitor serializes its own inference requests per active session before forwarding them upstream.
+- On single-slot llama.cpp servers, the route waits briefly for the current upstream request to finish instead of immediately issuing a competing request.
+- If the upstream server stays occupied, the route returns `429 Too Many Requests` with a plain-text busy message instead of a generic `500`.
+- If the upstream server cannot be reached, the route returns `502 Bad Gateway`.
+- If the upstream server accepts the connection but does not respond in time, the route returns `504 Gateway Timeout`.
+
 ### `POST /api/chat/abort`
 Auth: api-token.
 Current no-op acknowledgement endpoint:
@@ -558,6 +565,8 @@ Current no-op acknowledgement endpoint:
 ### `POST /api/chat/suggestions`
 Auth: api-token.
 Generates guided-generation suggestions using either supplied chat context or a fallback tab lookup.
+
+This route uses the same monitor-side inference queue and busy/offline/timeout handling as `POST /api/chat`.
 
 Request:
 
@@ -605,6 +614,8 @@ For `category: "director"`, `cards` can contain structured entries:
 ### `POST /api/keywords/generate`
 Auth: api-token.
 
+This route uses the same monitor-side inference queue and busy/offline/timeout handling as `POST /api/chat`.
+
 ```json
 { "category": "noir" }
 ```
@@ -617,6 +628,8 @@ Response:
 
 ### `POST /api/context-notes/analyze`
 Auth: api-token.
+
+This route uses the same monitor-side inference queue and busy/offline/timeout handling as `POST /api/chat`.
 
 ```json
 {

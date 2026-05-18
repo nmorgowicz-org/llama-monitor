@@ -451,9 +451,9 @@ impl AppConfig {
             remote_agent_ssh_target: args.remote_agent_ssh_target,
             remote_agent_ssh_command: args.remote_agent_ssh_command,
             tls_config: load_tls_config(&config_dir),
-            live_api_token_store: std::sync::Arc::new(std::sync::RwLock::new(
-                ensure_api_token(&config_dir),
-            )),
+            live_api_token_store: std::sync::Arc::new(std::sync::RwLock::new(ensure_api_token(
+                &config_dir,
+            ))),
             live_db_admin_token_store: std::sync::Arc::new(std::sync::RwLock::new(
                 ensure_db_admin_token(&config_dir),
             )),
