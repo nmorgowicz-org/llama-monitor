@@ -96,8 +96,21 @@ fn origin_guard(
                             if origin_port != server_port {
                                 return Err(warp::reject::custom(OriginReject));
                             }
-                        } else if origin_host != server_origin {
-                            return Err(warp::reject::custom(OriginReject));
+                        } else {
+                            // Normalize localhost <-> 127.0.0.1: browsers may use either
+                            // for the same loopback address.
+                            let normalize = |h: &str| {
+                                if let Some(port) = h.strip_prefix("localhost:") {
+                                    format!("127.0.0.1:{}", port)
+                                } else if let Some(port) = h.strip_prefix("127.0.0.1:") {
+                                    format!("127.0.0.1:{}", port)
+                                } else {
+                                    h.to_string()
+                                }
+                            };
+                            if normalize(origin_host) != normalize(&server_origin) {
+                                return Err(warp::reject::custom(OriginReject));
+                            }
                         }
                     }
                 }

@@ -9,7 +9,7 @@ The chat tab provides multi-conversation streaming chat against the connected ll
 - **Drag reorder** — Drag tabs within the pinned or unpinned section to change order
 - **Keyboard switching** — `Ctrl+1` through `Ctrl+9` jump by tab position; `Ctrl+Shift+Left/Right` cycles
 - **Rename** — Double-click the top tab label or use the sidebar context menu
-- **Delete with undo** — Closing a tab moves it into an in-memory trash bin with an Undo toast; the trash list is not persisted across reloads. The trash auto-purges entries older than 24 hours and can be cleared with "Clear all".
+- **Delete with undo** — Closing a tab moves it into an in-memory trash bin with an Undo toast; the trash list is not persisted across reloads. This includes the last remaining tab, which leaves the chat view in an empty-state screen until you create or restore a conversation. Trash entries auto-purge after 24 hours and can be cleared with `Clear all`.
 
 ## Conversation Sidebar
 

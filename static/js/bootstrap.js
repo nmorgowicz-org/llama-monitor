@@ -135,9 +135,12 @@ async function initializeApp() {
 
     // Phase 10: Database administration
     initDbAdmin();
+
+    // Initialize chat tabs only after token bootstrap and feature init complete.
+    await initChatTabs();
 }
 
-initializeApp();
+initializeApp().catch(err => console.error('[bootstrap] initializeApp failed:', err));
 
 // Mutual exclusion: opening one guided panel closes the other.
 window.addEventListener('suggestionsOpened', () => closeQuickGuide());
@@ -392,6 +395,3 @@ scheduleDeferredUpdateCheck();
 
 // Signal that all modules are loaded and initialized
 document.documentElement.classList.add('modules-ready');
-
-// Initialize chat tabs (async — fetches tabs from API)
-initChatTabs().catch(err => console.error('[bootstrap] initChatTabs failed:', err));

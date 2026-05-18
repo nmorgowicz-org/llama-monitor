@@ -6,6 +6,7 @@ import { chat, lastLlamaMetrics } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import {
     activeChatTab,
+    addChatTab,
     getChatViewBindings,
     registerChatViewBindings,
     scheduleChatPersist,
@@ -401,7 +402,9 @@ export function renderChatTabs() {
 
     for (const tab of chat.tabs) {
         const el = document.createElement('div');
-        const msgCount = tab.messages.filter(m => m.role !== 'system').length;
+        const msgCount = Array.isArray(tab.messages)
+            ? tab.messages.filter(m => m.role !== 'system').length
+            : (tab.message_count || 0);
         let extraClasses = '';
         if (msgCount > 50) extraClasses = ' tab-hot';
         else if (msgCount > 20) extraClasses = ' tab-warm';
@@ -577,7 +580,26 @@ export function renderChatMessages() {
     const container = chatMessagesEl;
     const tab = activeChatTab();
 
-    if (!tab || tab.messages.filter(m => m.role !== 'system').length === 0) {
+    if (!tab) {
+        container.innerHTML = `
+          <div class="chat-empty">
+            <div class="chat-empty-icon">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="1.2" opacity="0.25">
+                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+              </svg>
+            </div>
+            <p class="chat-empty-title">No chats open</p>
+            <p class="chat-empty-hint">Create a new chat or restore one from trash.</p>
+            <button class="btn btn-primary" id="chat-empty-create-btn">New Chat</button>
+          </div>`;
+        document.getElementById('chat-empty-create-btn')?.addEventListener('click', () => {
+            addChatTab().catch(err => console.error('chat empty create failed:', err));
+        });
+        return;
+    }
+
+    if (tab.messages.filter(m => m.role !== 'system').length === 0) {
         const prompts = [
             { icon: '💡', text: 'Explain a complex topic simply', label: 'Learn something' },
             { icon: '✍️', text: 'Help me write an email about...', label: 'Write something' },

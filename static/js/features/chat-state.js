@@ -115,7 +115,17 @@ export async function initChatTabs() {
         const resp = await fetch('/api/chat/tabs', {
             headers: window.authHeaders ? window.authHeaders() : {},
         });
+        if (!resp.ok) {
+            let detail = `Chat tabs request failed (${resp.status})`;
+            if (resp.status === 401 || resp.status === 403) {
+                detail = 'This browser could not authenticate to load saved chats.';
+            }
+            throw new Error(detail);
+        }
         const metas = await resp.json();
+        if (!Array.isArray(metas)) {
+            throw new Error('Chat tabs response was invalid.');
+        }
         if (metas.length) {
             chat.tabs = metas.map(meta => ({
                 ...meta,
@@ -136,8 +146,11 @@ export async function initChatTabs() {
             refreshTopCockpit();
             return;
         }
-    } catch {
-        await addChatTab();
+    } catch (e) {
+        console.error('initChatTabs failed:', e);
+        chat.tabs = [];
+        chat.activeTabId = null;
+        chatViewBindings.renderChatTabs?.();
         chatViewBindings.renderChatSessionsSidebar?.();
         chatViewBindings.renderChatMessages?.();
         chatViewBindings.loadChatNames?.();
@@ -148,6 +161,7 @@ export async function initChatTabs() {
         chatViewBindings.refreshChatTelemetry?.();
         chatViewBindings.updatePersonaMenuName?.();
         refreshTopCockpit();
+        showToast('Could not load chats', 'error', e?.message || 'Saved chats could not be loaded.');
         return;
     }
     chat.activeTabId = chat.tabs[0].id;
@@ -220,25 +234,45 @@ export async function addChatTab() {
 export async function closeChatTab(id) {
     const tabIdx = chat.tabs.findIndex(t => t.id === id);
     if (tabIdx === -1) return;
-    if (chat.tabs.length === 1) return;
 
     const [tab] = chat.tabs.splice(tabIdx, 1);
     chat.tabTrash.push({ tab, trashedAt: Date.now() });
 
     if (chat.activeTabId === id) {
-        chat.activeTabId = chat.tabs[chat.tabs.length - 1].id;
-        await _loadTabMessages(chat.activeTabId);
+        if (chat.tabs.length) {
+            chat.activeTabId = chat.tabs[chat.tabs.length - 1].id;
+            await _loadTabMessages(chat.activeTabId);
+        } else {
+            chat.activeTabId = null;
+        }
     }
 
     chatViewBindings.renderChatTabs?.();
     chatViewBindings.renderChatSessionsSidebar?.();
     chatViewBindings.renderChatMessages?.();
+    chatViewBindings.loadChatNames?.();
+    chatViewBindings.updateExplicitToggleUI?.();
+    chatViewBindings.updateParamsDirtyIndicator?.();
+    chatViewBindings.syncMessageLimitInput?.();
+    chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
+    chatViewBindings.refreshChatTelemetry?.();
+    chatViewBindings.updatePersonaMenuName?.();
+    refreshTopCockpit();
 
-    // Fire-and-forget: delete from server
-    fetch(`/api/chat/tabs/${id}`, {
+    try {
+        const resp = await fetch(`/api/chat/tabs/${id}`, {
             method: 'DELETE',
             headers: window.authHeaders ? window.authHeaders() : {},
-        }).catch(() => {});
+        });
+        const body = await resp.json().catch(() => null);
+        if (!resp.ok || body?.ok === false) {
+            throw new Error(body?.error || `Delete failed (${resp.status})`);
+        }
+    } catch (e) {
+        restoreTabFromTrash(id);
+        showToast('Could not delete tab', 'error', e?.message || 'The tab was restored because deletion failed.');
+        return;
+    }
 
     showToastWithActions('Tab deleted', 'info', '', [
         {
