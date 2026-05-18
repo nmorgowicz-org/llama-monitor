@@ -807,3 +807,66 @@ Before marking a PR ready-to-test, the agent MUST verify every item below. This 
 - [ ] **Reference docs** are updated to match new auth requirements, token types, and constraints.
 
 If any item is unclear or not satisfied, the agent MUST either add the missing protection or explicitly document the gap and rationale in the PR description.
+
+## Security & Auth Patterns (MANDATORY)
+
+These patterns must be followed when adding or modifying endpoints. Violations have caused real shipped bugs.
+
+### 1) Auth layers (do not mix)
+
+- UI auth (Form Login / Basic Auth):
+  - Enforced by auth_guard in mod.rs.
+  - Protects the browser UI and general routes.
+- API auth (api-token / db-admin-token):
+  - Enforced per-endpoint in api.rs.
+  - Protects programmatic access and internal API calls.
+- Rules:
+  - Any endpoint that reads or modifies user-owned data (settings, presets, templates, chat, config) MUST require api-token.
+  - Destructive or high-impact operations MUST require db-admin-token.
+  - “Read-only” does NOT mean unauthenticated.
+  - Never rely solely on the UI auth_guard to protect API endpoints.
+
+### 2) auth_guard behavior
+
+- auth_guard allows:
+  - No auth configured (local-first).
+  - Valid session cookie (Form Login).
+  - Valid Basic Auth header.
+  - Valid api-token (Bearer).
+- When adding new API endpoints:
+  - Assume callers may use api-token only (no browser session).
+  - Ensure your endpoint:
+    - Is reachable when auth_guard is satisfied via api-token.
+    - Performs its own check_api_token / bearer_matches_api_token.
+
+### 3) Token comparison
+
+- Always use constant-time comparison for tokens:
+  - bearer_matches_api_token(bearer, cfg)
+  - bearer_matches_db_admin_token(bearer, cfg)
+- Never use == or != directly on token strings.
+
+### 4) Rate limiting and brute-force resistance
+
+- For:
+  - Login endpoints.
+  - Expensive or destructive operations.
+  - Any endpoint callable without strong auth.
+- You MUST add:
+  - A reasonable cooldown (e.g., 2–10 seconds) or rate limit.
+- Use existing patterns (try_cooldown / AtomicU64) instead of inventing new ones.
+
+### 5) Tests are mandatory for auth changes
+
+- When you:
+  - Add a new endpoint.
+  - Change auth behavior.
+  - Introduce a new auth mode or token.
+- You MUST:
+  - Add or update tests in tests/auth_routing.rs covering:
+    - No auth mode.
+    - api-token-only caller.
+    - Form Login / Basic Auth enabled.
+- If a change affects how auth_guard or origin_guard interacts with a route, add a test that explicitly validates that behavior.
+
+If any item is unclear or not satisfied, the agent MUST either add the missing protection or explicitly document the gap and rationale in the PR description.
