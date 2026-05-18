@@ -26,7 +26,7 @@ http://localhost:7778
 
 All session endpoints require authentication via `Authorization: Bearer <token>`.
 Most require the `api-token`; a few elevated operations require the `db-admin-token`.
-Without a valid token, the endpoint returns 401 with `{ "ok": false, "error": "unauthorized" }`.
+Without a valid token, the endpoint returns 401.
 
 ### `GET /api/sessions`
 Auth: api-token.
@@ -130,6 +130,16 @@ Response:
 Auth: db-admin-token.
 Creates a spawn session, starts `llama-server` from a saved preset, and makes it active.
 
+This endpoint enforces a 15-second cooldown between calls. If called too soon, it returns 429 with:
+
+```json
+{
+  "ok": false,
+  "error": "too soon; please wait",
+  "seconds_remaining": 10
+}
+```
+
 Request:
 
 ```json
@@ -172,7 +182,16 @@ Success response:
 }
 ```
 
-If `/health` is unavailable the attach still succeeds, but `warning` explains that inference metrics will be missing.
+Before attaching, the server checks that the endpoint is reachable by sending a GET request to the endpoint URL. If the server cannot be reached, attach fails with:
+
+```json
+{
+  "ok": false,
+  "error": "Cannot reach llama-server at <endpoint>. Is it running?"
+}
+```
+
+If the server is reachable but `/health` is unavailable, attach still succeeds and `warning` explains that inference metrics will be missing.
 
 ### `POST /api/detach`
 Auth: api-token.
@@ -183,6 +202,7 @@ Detaches only if the active session is an attach session.
 ```
 
 ### `GET /api/capabilities`
+Auth: api-token.
 Returns the current metrics capability state.
 
 ```json
@@ -211,9 +231,11 @@ Returns the current metrics capability state.
 ## Server Control
 
 ### `POST /api/start`
+Auth: api-token.
 Starts `llama-server` for the active spawn session. Request body is the full server config payload used by the launcher.
 
 ### `POST /api/stop`
+Auth: api-token.
 Stops the managed `llama-server`.
 
 ### `POST /api/kill-llama`
@@ -224,6 +246,7 @@ Emergency process kill for `llama-server`.
 Presets are stored in `presets.json` and use the `ModelPreset` struct.
 
 ### `GET /api/presets`
+Auth: api-token.
 
 ```json
 [
@@ -268,6 +291,7 @@ Presets are stored in `presets.json` and use the `ModelPreset` struct.
 ```
 
 ### `POST /api/presets`
+Auth: api-token.
 Creates a preset from a full `ModelPreset` payload. If `id` is omitted, serde supplies one.
 
 Response:
@@ -277,15 +301,18 @@ Response:
 ```
 
 ### `PUT /api/presets/{id}`
+Auth: api-token.
 Updates the preset matched by the path `id`.
 
 ### `DELETE /api/presets/{id}`
+Auth: api-token.
 
 ```json
 { "ok": true }
 ```
 
 ### `POST /api/presets/reset`
+Auth: api-token.
 Replaces the in-memory and on-disk preset list with factory defaults.
 
 ```json
@@ -297,6 +324,7 @@ Replaces the in-memory and on-disk preset list with factory defaults.
 Templates are stored in `templates.json`. Built-in personas live in the frontend and are merged client-side; this API only returns user-stored entries.
 
 ### `GET /api/templates`
+Auth: api-token.
 
 ```json
 [
@@ -315,6 +343,7 @@ Templates are stored in `templates.json`. Built-in personas live in the frontend
 `explicit_policies` is optional, and each level field is optional.
 
 ### `POST /api/templates`
+Auth: api-token.
 Creates a template from a full `SystemPromptTemplate` payload.
 
 ```json
@@ -322,9 +351,11 @@ Creates a template from a full `SystemPromptTemplate` payload.
 ```
 
 ### `PUT /api/templates/{id}`
+Auth: api-token.
 Updates the template matched by the path `id`.
 
 ### `DELETE /api/templates/{id}`
+Auth: api-token.
 
 ```json
 { "ok": true }
@@ -350,6 +381,7 @@ Returns the current scan result for the configured `models_dir`.
 ```
 
 ### `POST /api/models/refresh`
+Auth: api-token.
 Rescans `models_dir`.
 
 Success:
@@ -367,10 +399,10 @@ Failure when no model directory is configured:
 ## Settings
 
 ### `GET /api/settings`
+Auth: api-token.
 Returns the persisted `UiSettings` object from `ui-settings.json`, with sensitive fields masked.
 
 Security:
-- No authentication is required.
 - `remote_agent_token` is masked (e.g., `"••••••••"`) to reduce exposure when consumed by the browser.
 
 Example:
@@ -442,6 +474,7 @@ Example:
 ```
 
 ### `PUT /api/settings`
+Auth: api-token.
 Saves the `UiSettings` object to disk.
 
 Response:
@@ -480,6 +513,7 @@ Notes:
 `detected` can be `null` if no GPU probe succeeds.
 
 ### `PUT /api/gpu-env`
+Auth: api-token.
 Request body is the persisted `GpuEnv` object:
 
 ```json
@@ -1078,9 +1112,9 @@ Requires `api-token`.
 ```
 
 ### `POST /api/db/query`
-Requires `db-admin-token`.
+Requires `api-token` or `db-admin-token` (dual-token).
 
-Runs admin queries, limited to `SELECT` and `PRAGMA`.
+Runs admin queries. When called with `api-token`, queries are limited to `SELECT`. When called with `db-admin-token`, additional operations (including `PRAGMA`) are permitted.
 
 ```json
 {
@@ -1277,6 +1311,163 @@ POST /api/kill-llama:
     Request:  { "confirm": "kill" }
     Success:  { "ok": true }
     Too soon: { "error": "too soon; please wait", "seconds_remaining": 12 }
+
+## Token Rotation
+
+All three endpoints require `api-token` and return a 401 if the token is missing or invalid.
+
+### `POST /api/rotate-agent-token`
+Rotates the remote-agent token stored in `UiSettings`. Updates both on-disk and in-memory state, and notifies the agent-poll loop.
+
+Response:
+```json
+{ "ok": true, "message": "Agent token rotated" }
+```
+
+### `POST /api/rotate-api-token`
+Generates a new api-token, writes it to disk (encrypted if configured), and updates the live in-memory value atomically.
+
+Response:
+```json
+{ "ok": true, "message": "API token rotated successfully." }
+```
+
+### `POST /api/rotate-db-admin-token`
+Generates a new db-admin-token, writes it to disk (encrypted if configured), and updates the live in-memory value atomically.
+
+Response:
+```json
+{ "ok": true, "message": "DB admin token rotated successfully." }
+```
+
+## Internal Token Bootstrap
+
+### `GET /api/internal/api-token`
+No authentication header is required.
+
+Returns the api-token for use by the in-browser UI. Access is governed by a bootstrap policy:
+- Allowed when any auth mode (basic or form) is configured (outer auth guard authenticates the request).
+- When no auth is configured, allowed only if the server is bound to a loopback address (127.0.0.1, localhost, ::1).
+- Otherwise returns 403.
+
+Response:
+```json
+{ "token": "<api-token>" }
+```
+
+## LibreHardwareMonitor (LHM) (Windows-only)
+
+These endpoints manage LibreHardwareMonitor on Windows. On non-Windows platforms they return a “Not supported on this platform” error.
+
+### `GET /api/lhm/check`
+No authentication required.
+Returns whether LHM is installed and currently running.
+
+Response:
+```json
+{ "running": true, "installed": true, "available": true }
+```
+
+On non-Windows:
+```json
+{ "running": false, "installed": false, "available": false, "error": "Not supported on this platform" }
+```
+
+### `POST /api/lhm/start`
+Auth: api-token.
+Starts LHM if installed.
+
+Response:
+```json
+{ "success": true }
+```
+
+### `GET /api/lhm/progress`
+No authentication required.
+Returns the current LHM installation progress string (e.g. "not_started", "downloading", "installing", "completed").
+
+Response:
+```json
+{ "progress": "completed" }
+```
+
+### `GET /api/lhm/status`
+No authentication required.
+Returns whether LHM is disabled via the persisted flag.
+
+Response:
+```json
+{ "disabled": false }
+```
+
+### `POST /api/lhm/install`
+Auth: api-token.
+Downloads and installs LHM.
+
+Response:
+```json
+{ "success": true }
+```
+
+### `POST /api/lhm/uninstall`
+Auth: api-token.
+Uninstalls LHM.
+
+Response:
+```json
+{ "success": true }
+```
+
+### `POST /api/lhm/disable`
+Auth: api-token.
+Sets the LHM disabled flag.
+
+Request:
+```json
+{ "disabled": true }
+```
+
+Response:
+```json
+{ "ok": true }
+```
+
+## Sensor Bridge (Windows-only)
+
+Manages the local sensor-bridge service on Windows. On non-Windows platforms these endpoints return a “Not supported on this platform” error.
+
+### `GET /api/sensor-bridge/status`
+Auth: api-token.
+Returns whether the sensor-bridge service is installed, running, and available.
+
+Response:
+```json
+{ "installed": true, "running": true, "available": true }
+```
+
+### `POST /api/sensor-bridge/install`
+Auth: api-token.
+Installs the sensor-bridge service via UAC prompt.
+
+Response:
+```json
+{
+  "started": true,
+  "message": "UAC prompt launched — approve it on your desktop to install the sensor service"
+}
+```
+
+### `POST /api/sensor-bridge/uninstall`
+Auth: api-token.
+Uninstalls the sensor-bridge service via UAC prompt.
+
+Response:
+```json
+{
+  "started": true,
+  "message": "UAC prompt launched — approve it on your desktop to remove the sensor service"
+}
+```
 
 ## Remote Agent
 

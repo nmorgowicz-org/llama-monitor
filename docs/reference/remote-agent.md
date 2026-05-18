@@ -12,6 +12,32 @@ When a remote agent is installed and reachable, the dashboard can show:
 
 This is what upgrades a remote attach session from **Inference only** to **Full telemetry**.
 
+## Agent states and indicators
+
+When attached to a remote endpoint, the header Agent button and Remote Agent panel reflect several states:
+
+- **Connected**:
+  - Agent process is reachable and HTTP health checks succeed.
+  - Shows “Remote Agent” with a connected indicator.
+
+- **Firewall blocked**:
+  - Agent process is considered connected (e.g., started via SSH), but the dashboard cannot reach its HTTP endpoint.
+  - Triggered when `remote_agent_connected` is true but `remote_agent_health_reachable` is false.
+  - Header shows “Firewall blocked” with a **Fix** button.
+  - Remote Agent panel shows “Agent Started, HTTP Blocked” with firewall guidance.
+
+- **Update Available**:
+  - The dashboard compares the agent’s version (from `/info`) against the latest release.
+  - If the running version is older, it sets `remote_agent_update_available`.
+  - Header shows “Update Available” with an **Upgrade** button.
+  - Remote Agent panel shows an “Update available” indicator and an **Upgrade** / **Update Agent** button.
+
+- **Agent tooltip**:
+  - Hovering the Agent button shows a tooltip with:
+    - Status line (Connected / Not connected / Firewall blocked / Update available).
+    - Running version (e.g., “Running v1.2.3”) if known.
+    - Agent URL if configured.
+
 ## Entry points in the UI
 
 There are two current ways into remote-agent setup:
@@ -45,6 +71,7 @@ This panel exposes the full runtime controls:
   - All .pem files in the cas/ directory (multi-CA support).
 - This allows multiple independent CAs to be trusted across different agents.
 - If no CA is found, the agent refuses to start.
+- Each dashboard instance can place its own CA into cas/ so that agents trust multiple dashboards (e.g., during migration or in multi-instance setups).
 
 ## Agent tokens
 
@@ -62,17 +89,21 @@ This panel exposes the full runtime controls:
   - GET /agent/info: same, plus agent_token for verification.
 - The current protocol version is 1.0.0.
 - The dashboard enforces a minimum protocol version when polling the agent.
-- If the agent’s protocol_version is below 1.0.0 or missing:
-  - The dashboard enables degraded compatibility mode instead of fully disconnecting.
-  - Partial metrics may still be available; advanced features may be limited.
 
 ## Version mismatch and degraded mode
 
-- If the remote agent’s protocol_version is too old or unknown:
-  - The dashboard continues to treat the agent as connected.
-  - It logs a warning and runs in degraded compatibility mode.
-- If metrics parsing fails:
-  - The dashboard prefers degraded mode over full disconnect,
+- On each agent poll, the dashboard:
+  - Reads the agent’s `protocol_version` from `/info`.
+  - Compares it to its enforced minimum (currently 1.0.0).
+- If `protocol_version` is:
+  - Below 1.0.0, or
+  - Missing (older agents that don’t report it),
+  then:
+  - The dashboard keeps the agent marked as connected.
+  - It sets a “protocol too old” flag and logs a warning.
+  - It runs in degraded compatibility mode: partial metrics may be available, advanced features may be limited.
+- If metrics parsing fails after a successful HTTP response:
+  - The dashboard treats this as degraded instead of disconnected,
     preserving partial telemetry when possible.
 
 ## Current setup flow

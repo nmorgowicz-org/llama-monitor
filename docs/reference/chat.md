@@ -9,7 +9,7 @@ The chat tab provides multi-conversation streaming chat against the connected ll
 - **Drag reorder** — Drag tabs within the pinned or unpinned section to change order
 - **Keyboard switching** — `Ctrl+1` through `Ctrl+9` jump by tab position; `Ctrl+Shift+Left/Right` cycles
 - **Rename** — Double-click the top tab label or use the sidebar context menu
-- **Delete with undo** — Closing a tab moves it into an in-memory trash bin with an Undo toast; the trash list is not persisted across reloads
+- **Delete with undo** — Closing a tab moves it into an in-memory trash bin with an Undo toast; the trash list is not persisted across reloads. The trash auto-purges entries older than 24 hours and can be cleared with "Clear all".
 
 ## Conversation Sidebar
 
@@ -39,6 +39,7 @@ The sidebar's `Search Messages` button opens a larger flyout beside the conversa
 - **Prefix and punctuation tolerant** — Short fragments and punctuation-heavy queries are normalized before matching
 - **Collapse-safe** — If the sidebar was collapsed before search, closing search restores that state
 - **Jump to match** — Clicking a result switches to the matching tab, scrolls to the stored message row, and briefly highlights it
+- **Open via shortcut** — `Ctrl+Shift+F` opens the search flyout
 
 ## Messaging
 
@@ -51,24 +52,16 @@ The sidebar's `Search Messages` button opens a larger flyout beside the conversa
 - **History pagination** — Long conversations render only the newest messages first (default 15) and expose older history through `Load More`
 - **RP dialogue highlighting** — Quoted dialogue is colorized even when Markdown formatting splits the text across inline tags
 
-### Upstream Busy Handling
-
-- **Monitor-side serialization** — llama-monitor now serializes its own chat-adjacent inference requests so it does not issue overlapping requests from the same app session.
-- **Single-slot upstream protection** — When the active llama.cpp server is already occupied, the chat transport waits briefly for the current request to finish before attempting a new one.
-- **Explicit transport errors** — If the upstream stays busy, the transport now surfaces a busy response instead of a generic `500`. Offline or dropped-upstream cases are also reported explicitly.
-- **Shared behavior across tools** — The same admission logic applies to normal chat sends, guided suggestions, quick-guide rewrites, keyword generation, and context-note analysis because they all share the same upstream chat-completions transport.
-
 ### Message Actions
 
-| Action | Description |
-|--------|-------------|
-| **Edit** | Edit a user message and regenerate from that point |
-| **Regenerate** | Re-run from a prior user turn to get a different assistant reply |
-| **Copy** | Copy message text to the clipboard |
-| **Export JSON** | Download the active tab as a single-item JSON array containing the current in-memory tab object |
-| **Export Markdown** | Download only the visible conversation transcript as `**You**` / `**Assistant**` blocks separated by `---` |
-| **Import JSON** | Create a new tab from the first element of the JSON array |
-| **Import Markdown** | Parse `**You**` and `**Assistant**` blocks and append them to the active tab as new messages |
+Each message exposes action buttons in its footer:
+
+- **Copy** — Copy message text to the clipboard
+- **Edit** — Inline-edit any message. For user messages, "Save and Resend" regenerates from that point onward; for assistant messages, "Save" updates the content in-place
+- **Regenerate (assistant)** — Right arrow on the variant badge (when only one response exists) truncates after the preceding user message and re-generates; if generation fails or times out, the previous response is restored
+- **Branch / variant navigation** — When multiple variants exist for an assistant response, left/right arrows cycle through them; the badge shows current position (e.g. `2/3`)
+- **Resend (user)** — On user messages, a "Resend" button truncates history after that message and re-sends it
+- **Delete** — Removes the message from the conversation (with confirmation)
 
 ## Personas & Template Manager
 
@@ -104,9 +97,9 @@ System prompts support:
 | `{{user}}` | The user name for the tab |
 | `{{gender}}` | The AI gender (`male`, `female`, or `neutral`) |
 
-### Custom Role Boundary
+### Role Boundary
 
-Each tab can override the default role-boundary instruction with `role_boundary_custom`. If blank, the app generates a default boundary from the current AI and user names.
+The Behavior panel lets you override the default role-boundary instruction for the current tab. This value is held in memory and applied at send time; it is not part of the persisted SQLite schema. If blank, the app generates a default boundary from the current AI and user names.
 
 ## Behavior Panel
 
@@ -130,6 +123,17 @@ Per-tab controls for generation behavior. A dot indicator appears when the activ
 
 ![Response Settings](../screenshots/panels-model-settings.png)
 
+## Context Pressure Bar
+
+A thin progress bar in the chat header reflects the estimated context-usage percentage for the active tab.
+
+- **Color levels**:
+  - Yellow (medium) at 50%+
+  - Orange (high) at 75%+
+  - Red (critical) at 90%+
+- The chat input border mirrors the same color at high usage.
+- When usage is near capacity, attempting to send a message triggers a "Context overflow" toast with a "Compact now" action.
+
 ## Context Compaction
 
 Compaction turns older history into a memory/tombstone entry so the conversation can continue inside the model context window.
@@ -145,11 +149,12 @@ Compaction turns older history into a memory/tombstone entry so the conversation
 | Mode | Behavior |
 |------|----------|
 | **Percent** | Triggers once context usage passes the configured threshold |
-| **Optimized** | Triggers when the remaining context budget drops below a fixed reserve |
+| **Optimized** | Triggers when the remaining context budget drops below 25k tokens |
 
 - **Auto-summarize** — Uses the model to summarize dropped history instead of only trimming it
-- **Threshold slider** — Per-tab auto-compact threshold
+- **Threshold slider** — Per-tab auto-compact threshold (used in "Percent" mode)
 - **Rolling memory aware** — Existing compaction markers are folded back into later requests as `COMPACTED MEMORY`
+- **Defer** — Auto-compact prompts can be deferred; the system will check again after the next response
 
 ## Prompt Debug Inspector
 
@@ -191,6 +196,18 @@ The panel can float as a popover or be pinned inline below the toolbar.
 
 ![Chat Telemetry](../screenshots/chat-chat-telemetry.png)
 ![Chat Telemetry Pinned](../screenshots/chat-chat-telemetry-pinned.png)
+
+### Per-Message Metrics
+
+Each assistant message footer shows:
+
+- `↓N` — prompt tokens used for that request
+- `↑N` — tokens generated in that reply
+- `RN` — running total of all tokens in the conversation
+- `N% ctx` — estimated context-usage percentage at that point
+- Model name (if known)
+
+These values are derived from the live llama.cpp metrics and the token counts reported per message.
 
 ## Chat Style
 
@@ -272,6 +289,38 @@ The browser sends recent messages, the current system prompt, non-empty context 
 ![Search Filter](../screenshots/guided-gen-suggestions-search-filter.png)
 ![Suggestions Results](../screenshots/guided-gen-suggestions-results.png)
 
+#### When They Appear
+
+Suggestions appear after you:
+
+1. Open the dropdown
+2. Select a category
+3. Trigger generation
+
+They are generated on demand; there is no always-on suggestion stream.
+
+#### Built-In Categories
+
+The dropdown ships with categories for different styles and tones:
+
+- General, Plot Twist, New Character, Director
+- Action, Comedy, Fantasy, Horror, Mystery, Noir, Romance, Sci-Fi, Thriller, Character
+- Explicit (visible when explicit mode is enabled)
+
+Each category has a tunable prompt template.
+
+#### Custom Categories
+
+Custom categories appear alongside built-in ones and persist to `localStorage` (not the server config).
+
+#### Manage Categories
+
+![Manage Categories](../screenshots/guided-gen-manage-categories.png)
+
+- **Built-in prompts** — Editable, reorderable, and individually disableable
+- **Custom categories** — Add your own groups and prompt lists
+- **Per-prompt edits** — Name, description, and prompt text
+
 #### Focus Keywords
 
 The setup panel can auto-generate focus keywords through `POST /api/keywords/generate`. That request disables model thinking for a fast keyword-only result.
@@ -279,18 +328,6 @@ The setup panel can auto-generate focus keywords through `POST /api/keywords/gen
 #### Suggestion Draft Rewrite
 
 `Edit Draft` opens a workspace that turns a suggestion into a fuller user-side message. The rewrite pass tries to match recent user voice and point of view before dropping the result into the main composer.
-
-#### Custom Categories
-
-Custom categories appear alongside built-in ones and persist to `~/.config/llama-monitor/suggestion-categories.json`.
-
-### Manage Categories
-
-![Manage Categories](../screenshots/guided-gen-manage-categories.png)
-
-- **Built-in prompts** — Editable, reorderable, and individually disableable
-- **Custom categories** — Add your own groups and prompt lists
-- **Per-prompt edits** — Name, description, and prompt text
 
 ### Quick Guide
 
@@ -311,6 +348,12 @@ Quick Guide is the inline steering surface for one-off reply direction.
 - **Draft persistence** — The unsent quick-guide draft is stored on the tab
 - **Immediate guided follow-up** — Submitting a quick guide triggers a guided reply flow instead of only changing future defaults
 - **Restore previous guide** — If the last quick-guide reply is restorable, the app removes that assistant reply and reopens the instruction for editing
+
+#### Director Mode Details
+
+- Enter a short directing note
+- The app calls the suggestions API to generate four distinct continuation options (e.g. Pressure, Reveal, Escalation, Twist)
+- Apply one; it becomes the steering instruction for the next assistant reply
 
 #### Surprise Mode Details
 
@@ -381,7 +424,7 @@ Thinking blocks are currently a live-session UI feature, not a durable storage f
 
 ```text
 User message -> /v1/chat/completions (SSE stream) -> Browser renders tokens live
-                                                   -> Chat telemetry updates from live metrics
+                                                    -> Chat telemetry updates from live metrics
 ```
 
 ## Persistence
