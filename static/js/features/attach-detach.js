@@ -69,7 +69,9 @@ export async function doStart() {
 
     const resp = await fetch('/api/start', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
     });
     const data = await resp.json();
@@ -90,7 +92,10 @@ export async function doStop() {
     const btnStop = document.getElementById('btn-stop');
     if (btnStop) btnStop.disabled = true;
 
-    await fetch('/api/stop', { method: 'POST' });
+    await fetch('/api/stop', {
+            method: 'POST',
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
     await doKillLlamaInternal();
 }
 

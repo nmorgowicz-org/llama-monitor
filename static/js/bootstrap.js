@@ -46,6 +46,19 @@ window.authHeaders = function(extra = {}) {
     return headers;
 };
 
+// fetch wrapper that shows "Authentication required" on 401.
+// Use as: const res = await authFetch(url, options);
+window.authFetch = async function(url, options = {}) {
+    const res = await fetch(url, options);
+    if (res.status === 401) {
+        const toast = (await import('./features/toast.js')).showToast;
+        if (typeof toast === 'function') {
+            toast('Authentication required', 'error', 'API token is missing or invalid.');
+        }
+    }
+    return res;
+};
+
 // Set app version in sidebar (lightweight, no module dependency)
 (function() {
     const el = document.getElementById('app-version');

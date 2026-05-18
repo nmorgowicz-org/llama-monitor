@@ -51,7 +51,10 @@ async function refreshModels() {
     const summary = document.getElementById('models-summary');
     if (summary) summary.textContent = 'Refreshing...';
     try {
-        const resp = await fetch('/api/models/refresh', { method: 'POST' });
+        const resp = await fetch('/api/models/refresh', {
+            method: 'POST',
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         const data = await resp.json();
         if (!data.ok) showToast('Model refresh failed: ' + (data.error || 'unknown'), 'error');
     } catch (err) {

@@ -63,7 +63,9 @@ function saveConfig() {
     clearTimeout(settingsState.saveTimer);
     fetch('/api/settings', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify(collectSettings()),
     }).catch(() => {});
 
@@ -75,7 +77,9 @@ function saveConfig() {
     };
     fetch('/api/gpu-env', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify(env),
     }).catch(() => {});
 

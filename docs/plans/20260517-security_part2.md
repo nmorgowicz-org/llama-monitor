@@ -266,23 +266,49 @@ Focus: remaining gaps after initial hardening pass.
 
 ### 6. Same-Origin Assumptions
 
-- Status: OPEN
+- Status: FIXED
 - Files:
-  - src/web/api.rs (all endpoints)
+  - src/web/api.rs
+  - src/web/mod.rs
+  - static/js/features/settings.js
+  - static/js/features/presets.js
+  - static/js/features/chat-templates.js
+  - static/js/features/models.js
+  - static/js/features/config.js
+  - static/js/features/lhm.js
+  - static/js/features/sensor-bridge.js
+  - static/js/features/attach-detach.js
+  - static/js/features/context-card.js
+  - static/js/features/network-detection.js
+  - static/js/features/remote-agent.js
+  - static/js/bootstrap.js
+  - docs/reference/api.md
 - Issue:
-  - Many endpoints rely on “same-origin only” assumptions.
-  - This is by design (local-first), but:
-    - Not all endpoints enforce Origin checks.
-    - Not all endpoints use strict CORS policies.
+  - Many endpoints relied on “same-origin only” assumptions.
+  - Not all endpoints enforced Origin checks.
+  - Not all endpoints used strict CORS policies.
 - Impact:
   - Low: potential for CSRF or cross-origin attacks.
 - Likelihood:
   - Low: depends on deployment.
-- Fix:
-  - Add Origin checks to:
-    - All endpoints that modify state.
-    - All endpoints that access resources.
-  - Use strict CORS policies.
-- Next Steps:
-  - Implement Origin checks.
-  - Update reference docs.
+- Mitigation Applied:
+  - Added api-token auth (Authorization: Bearer <api-token>) to previously unprotected state-mutating endpoints:
+    - PUT /api/settings
+    - POST /api/start, /api/stop
+    - Preset CRUD (POST/PUT/DELETE /api/presets/*)
+    - Template CRUD (POST/PUT/DELETE /api/templates/*)
+    - PUT /api/gpu-env
+    - POST /api/models/refresh
+    - LHM endpoints (start, install, uninstall, disable)
+    - Sensor-bridge endpoints (install, uninstall, status)
+  - Added global Origin validation in mod.rs:
+    - For mutating methods (POST/PUT/PATCH/DELETE):
+      - If Origin is present and does not match the server’s own origin → reject with 403.
+      - If Origin is absent (curl/tools) → allow.
+    - For GET:
+      - Allowed (no restriction).
+  - Updated frontend:
+    - All affected fetch calls now include Authorization header using existing api-token helpers.
+    - 401 responses show a concise “Authentication required” message.
+  - Updated docs:
+    - api.md now documents that all affected endpoints require api-token.

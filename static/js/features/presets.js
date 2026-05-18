@@ -209,7 +209,9 @@ export async function savePreset(event) {
         if (id) {
             resp = await fetch('/api/presets/' + encodeURIComponent(id), {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
                 body: JSON.stringify(preset),
             });
             if (!resp.ok) {
@@ -221,7 +223,9 @@ export async function savePreset(event) {
         } else {
             resp = await fetch('/api/presets', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
                 body: JSON.stringify(preset),
             });
             if (!resp.ok) {
@@ -255,7 +259,9 @@ export async function copyPreset() {
     try {
         const resp = await fetch('/api/presets', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
             body: JSON.stringify(copy),
         });
         if (!resp.ok) {
@@ -278,7 +284,10 @@ export async function deletePreset() {
     if (!confirm('Delete preset "' + p.name + '"?')) return;
 
     try {
-        const resp = await fetch('/api/presets/' + encodeURIComponent(id), { method: 'DELETE' });
+        const resp = await fetch('/api/presets/' + encodeURIComponent(id), {
+            method: 'DELETE',
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         if (!resp.ok) {
             const err = await resp.text().catch(() => 'Unknown error');
             showToast('Delete failed: ' + err, 'error');
@@ -294,7 +303,10 @@ export async function deletePreset() {
 export async function resetPresets() {
     if (!confirm('Reset all presets to built-in defaults? Custom presets will be removed.')) return;
     try {
-        const resp = await fetch('/api/presets/reset', { method: 'POST' });
+        const resp = await fetch('/api/presets/reset', {
+            method: 'POST',
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         if (!resp.ok) {
             const err = await resp.text().catch(() => 'Unknown error');
             showToast('Reset failed: ' + err, 'error');

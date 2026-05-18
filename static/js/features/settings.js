@@ -145,9 +145,11 @@ export function saveSettings() {
     clearSettingsDirty();
 
     settingsState.saveTimer = setTimeout(() => {
-        fetch('/api/settings', {
+        (window.authFetch || fetch)('/api/settings', {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
             body: JSON.stringify(collectSettings()),
         }).catch(() => {});
     }, 400);
@@ -282,7 +284,9 @@ function applyWsIntervalLive() {
     // Send just the interval change to the backend
     fetch('/api/settings', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ws_push_interval_ms: interval }),
     }).catch(() => {});
 }

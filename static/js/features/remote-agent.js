@@ -1023,7 +1023,9 @@ async function finishRemoteAgentSetup() {
     try {
         await fetch('/api/settings', {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
             body: JSON.stringify(settings),
         });
     } catch (_) {}
@@ -2135,7 +2137,10 @@ export function initRemoteAgent() {
             sensorBtn.textContent = 'Installing...';
             const callout = document.getElementById('sensor-bridge-setup-callout');
             try {
-                const res = await fetch('/api/sensor-bridge/install', { method: 'POST' });
+                const res = await fetch('/api/sensor-bridge/install', {
+                            method: 'POST',
+                            headers: window.authHeaders ? window.authHeaders() : {},
+                        });
                 const data = await res.json();
                 if (!data.started) {
                     sensorBtn.textContent = 'Setup';
@@ -2153,7 +2158,9 @@ export function initRemoteAgent() {
                 const poll = setInterval(async () => {
                     elapsed += 2000;
                     try {
-                        const s = await fetch('/api/sensor-bridge/status');
+                        const s = await fetch('/api/sensor-bridge/status', {
+                                headers: window.authHeaders ? window.authHeaders() : {},
+                            });
                         const sd = await s.json();
                         if (sd.running) {
                             clearInterval(poll);

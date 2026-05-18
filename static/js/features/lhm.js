@@ -77,7 +77,9 @@ export async function showLHMNotification() {
                     try {
                         const disableResp = await fetch('/api/lhm/disable', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: window.authHeaders
+                                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                                : { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ disabled: false })
                         });
                         if (disableResp.ok) {
@@ -98,7 +100,10 @@ export async function showLHMNotification() {
                     const uninstallConfirm = confirm('Are you sure you want to uninstall LibreHardwareMonitor? This will disable CPU temperature monitoring.');
                     if (uninstallConfirm) {
                         try {
-                            const uninstallResp = await fetch('/api/lhm/uninstall', { method: 'POST' });
+                            const uninstallResp = await fetch('/api/lhm/uninstall', {
+                                method: 'POST',
+                                headers: window.authHeaders ? window.authHeaders() : {},
+                            });
                             if (uninstallResp.ok) {
                                 showToast('LHM uninstalled successfully', 'success');
                                 setTimeout(() => location.reload(), 1500);
@@ -123,7 +128,10 @@ export async function showLHMNotification() {
                     if (!userConfirmed) return;
 
                     try {
-                        const startResp = await fetch('/api/lhm/start', { method: 'POST' });
+                        const startResp = await fetch('/api/lhm/start', {
+                                method: 'POST',
+                                headers: window.authHeaders ? window.authHeaders() : {},
+                            });
                         if (startResp.ok) {
                             showToast('LHM started successfully', 'success');
                             setTimeout(() => location.reload(), 2000);
@@ -141,7 +149,10 @@ export async function showLHMNotification() {
                     const uninstallConfirm = confirm('Are you sure you want to uninstall LibreHardwareMonitor?');
                     if (uninstallConfirm) {
                         try {
-                            const uninstallResp = await fetch('/api/lhm/uninstall', { method: 'POST' });
+                            const uninstallResp = await fetch('/api/lhm/uninstall', {
+                                method: 'POST',
+                                headers: window.authHeaders ? window.authHeaders() : {},
+                            });
                             if (uninstallResp.ok) {
                                 showToast('LHM uninstalled successfully', 'success');
                                 setTimeout(() => location.reload(), 1500);
@@ -163,7 +174,9 @@ export async function showLHMNotification() {
                     try {
                         const disableResp = await fetch('/api/lhm/disable', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: window.authHeaders
+                                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                                : { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ disabled: true })
                         });
                         if (disableResp.ok) {
@@ -230,7 +243,9 @@ export async function showLHMNotification() {
                     try {
                         const response = await fetch('/api/lhm/install', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' }
+                            headers: window.authHeaders
+                                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                                : { 'Content-Type': 'application/json' }
                         });
                         console.log('[LHM UI] /api/lhm/install response status:', response.status);
 

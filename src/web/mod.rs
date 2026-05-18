@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use warp::Filter;
+use warp::http::Method;
 use warp_helmet::{ContentSecurityPolicy, Helmet, HelmetFilter};
 
 use crate::config::AppConfig;
@@ -52,12 +53,61 @@ struct RateLimitReject;
 
 impl warp::reject::Reject for RateLimitReject {}
 
+/// Warp filter: validate Origin header for mutating methods on /api/* routes.
+/// - If Origin is present and method is POST/PUT/PATCH/DELETE, it must match
+///   the server's own origin (host:port). Mismatch → 403.
+/// - If Origin is absent, allow the request (curl, tools, etc.).
+/// - GET is always allowed.
+/// - When server is bound to 0.0.0.0, only the port is validated.
+fn origin_guard(
+    server_origin: String,
+) -> impl Filter<Extract = ((),), Error = warp::Rejection> + Clone {
+    let server_origin = server_origin.clone();
+    warp::header::optional::<String>("origin")
+        .and(warp::method())
+        .and_then(move |origin: Option<String>, method: Method| {
+            let server_origin = server_origin.clone();
+            async move {
+                if matches!(method, Method::POST | Method::PUT | Method::PATCH | Method::DELETE)
+                    && origin.is_some()
+                {
+                    let origin = origin.unwrap_or_default();
+                    let origin_host = origin
+                        .trim_start_matches("http://")
+                        .trim_start_matches("https://")
+                        .trim_end_matches('/');
+
+                    if !origin_host.is_empty() {
+                        // If bound to 0.0.0.0, only check port matches
+                        if server_origin.starts_with("0.0.0.0:") {
+                            if !origin_host.ends_with(&server_origin[5..]) {
+                                return Err(warp::reject::custom(OriginReject));
+                            }
+                        } else if origin_host != server_origin {
+                            return Err(warp::reject::custom(OriginReject));
+                        }
+                    }
+                }
+                Ok(())
+            }
+        })
+}
+
+#[derive(Debug)]
+struct OriginReject;
+
+impl warp::reject::Reject for OriginReject {}
+
 pub fn build_routes(
     state: AppState,
     app_config: Arc<AppConfig>,
     auth_manager: AuthManager,
     bind_host: String,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = Infallible> + Clone {
+    // Construct the server origin for Origin validation (host:port).
+    // For 0.0.0.0, we accept any host with the correct port.
+    let server_origin = format!("{}:{}", bind_host, app_config.port);
+
     let ws = ws::ws_route(state.clone());
     let api = api::api_routes(
         state,
@@ -70,7 +120,10 @@ pub fn build_routes(
     let compact = compact_route(app_config);
     let index = index_route(auth_manager.clone());
 
-    let protected = ws.or(api).or(compact);
+    // Apply Origin guard to api routes (mutating methods with Origin must match)
+    let api_protected = api.and(origin_guard(server_origin)).map(|reply, ()| reply);
+
+    let protected = ws.or(api_protected).or(compact);
     let protected = protected
         .and(auth_guard(auth_manager.clone()))
         .map(|reply, _: ()| reply);
@@ -269,6 +322,16 @@ async fn handle_rejection(err: warp::Rejection) -> Result<Box<dyn warp::reply::R
         return Ok(Box::new(warp::reply::with_status(
             warp::reply::json(&serde_json::json!({ "error": "rate_limited" })),
             warp::http::StatusCode::TOO_MANY_REQUESTS,
+        )));
+    }
+
+    if err.find::<OriginReject>().is_some() {
+        return Ok(Box::new(warp::reply::with_status(
+            warp::reply::json(&serde_json::json!({
+                "ok": false,
+                "error": "forbidden; invalid origin"
+            })),
+            warp::http::StatusCode::FORBIDDEN,
         )));
     }
 

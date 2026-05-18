@@ -373,7 +373,9 @@ function saveViewPreference() {
             if (!settings) return;
             return fetch('/api/settings', {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ...settings, context_card_view: currentView }),
             });
         })

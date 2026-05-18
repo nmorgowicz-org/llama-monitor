@@ -470,28 +470,35 @@ fn api_check_lhm() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::R
         })
 }
 
-fn api_lhm_start() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn api_lhm_start(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "lhm" / "start")
         .and(warp::post())
-        .and_then(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
             async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
                 #[cfg(target_os = "windows")]
                 {
                     match lhm::start_lhm().await {
-                        Ok(()) => Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"success": true}),
-                        )),
-                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"success": false, "error": e}),
-                        )),
+                        Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({"success": true}))),
+                        ),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({"success": false, "error": e}))),
+                        ),
                     }
                 }
 
                 #[cfg(not(target_os = "windows"))]
                 {
-                    Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({"success": false, "error": "Not supported on this platform"}),
-                    ))
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({"success": false, "error": "Not supported on this platform"}))),
+                    )
                 }
             }
         })
@@ -572,27 +579,33 @@ fn api_lhm_progress() -> impl Filter<Extract = (impl warp::Reply,), Error = warp
         })
 }
 
-fn api_lhm_install() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
+fn api_lhm_install(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "lhm" / "install")
         .and(warp::post())
-        .and_then(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
             async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
                 #[cfg(target_os = "windows")]
                 {
                     eprintln!("[API] /api/lhm/install called");
                     match lhm::download_and_install_lhm().await {
                         Ok(()) => {
                             eprintln!("[API] LHM install succeeded");
-                            Ok::<_, warp::Rejection>(warp::reply::json(
-                                &serde_json::json!({"success": true}),
-                            ))
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                Box::new(warp::reply::json(&serde_json::json!({"success": true}))),
+                            )
                         }
                         Err(e) => {
                             eprintln!("[API] LHM install failed: {}", e);
-                            Ok::<_, warp::Rejection>(warp::reply::json(
-                                &serde_json::json!({"success": false, "error": e}),
-                            ))
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                Box::new(warp::reply::json(&serde_json::json!({"success": false, "error": e}))),
+                            )
                         }
                     }
                 }
@@ -600,35 +613,41 @@ fn api_lhm_install() -> impl Filter<Extract = (impl warp::Reply,), Error = warp:
                 #[cfg(not(target_os = "windows"))]
                 {
                     eprintln!("[API] /api/lhm/install called (non-Windows, not supported)");
-                    Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({"success": false, "error": "Not supported on this platform"}),
-                    ))
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({"success": false, "error": "Not supported on this platform"}))),
+                    )
                 }
             }
         })
 }
 
-fn api_lhm_uninstall() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone
-{
+fn api_lhm_uninstall(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "lhm" / "uninstall")
         .and(warp::post())
-        .and_then(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
             async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
                 #[cfg(target_os = "windows")]
                 {
                     eprintln!("[API] /api/lhm/uninstall called");
                     match lhm::uninstall_lhm() {
                         Ok(()) => {
                             eprintln!("[API] LHM uninstall succeeded");
-                            Ok::<_, warp::Rejection>(warp::reply::json(
-                                &serde_json::json!({"success": true}),
-                            ))
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                Box::new(warp::reply::json(&serde_json::json!({"success": true}))),
+                            )
                         }
                         Err(e) => {
                             eprintln!("[API] LHM uninstall failed: {}", e);
-                            Ok::<_, warp::Rejection>(warp::reply::json(
-                                &serde_json::json!({"success": false, "error": e}),
-                            ))
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                Box::new(warp::reply::json(&serde_json::json!({"success": false, "error": e}))),
+                            )
                         }
                     }
                 }
@@ -636,92 +655,132 @@ fn api_lhm_uninstall() -> impl Filter<Extract = (impl warp::Reply,), Error = war
                 #[cfg(not(target_os = "windows"))]
                 {
                     eprintln!("[API] /api/lhm/uninstall called (non-Windows, not supported)");
-                    Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({"success": false, "error": "Not supported on this platform"}),
-                    ))
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({"success": false, "error": "Not supported on this platform"}))),
+                    )
                 }
             }
         })
 }
 
-fn api_sensor_bridge_status()
--> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn api_sensor_bridge_status(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "sensor-bridge" / "status")
         .and(warp::get())
-        .and_then(|| async move {
-            #[cfg(target_os = "windows")]
-            {
-                let installed = lhm::is_local_sensor_bridge_service_installed();
-                let running = lhm::is_local_sensor_bridge_running();
-                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                    "installed": installed,
-                    "running": running,
-                    "available": lhm::is_sensor_bridge_available(),
-                })))
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                    "installed": false,
-                    "running": false,
-                    "available": false,
-                })))
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    let installed = lhm::is_local_sensor_bridge_service_installed();
+                    let running = lhm::is_local_sensor_bridge_running();
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({
+                            "installed": installed,
+                            "running": running,
+                            "available": lhm::is_sensor_bridge_available(),
+                        }))),
+                    )
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({
+                            "installed": false,
+                            "running": false,
+                            "available": false,
+                        }))),
+                    )
+                }
             }
         })
 }
 
-fn api_sensor_bridge_install()
--> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn api_sensor_bridge_install(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "sensor-bridge" / "install")
         .and(warp::post())
-        .and_then(|| async move {
-            #[cfg(target_os = "windows")]
-            {
-                match lhm::install_local_sensor_bridge() {
-                    Ok(()) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                        "started": true,
-                        "message": "UAC prompt launched — approve it on your desktop to install the sensor service",
-                    }))),
-                    Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                        "started": false,
-                        "error": e,
-                    }))),
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
                 }
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                    "started": false,
-                    "error": "Not supported on this platform",
-                })))
+                #[cfg(target_os = "windows")]
+                {
+                    match lhm::install_local_sensor_bridge() {
+                        Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({
+                                "started": true,
+                                "message": "UAC prompt launched — approve it on your desktop to install the sensor service",
+                            }))),
+                        ),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({
+                                "started": false,
+                                "error": e,
+                            }))),
+                        ),
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({
+                            "started": false,
+                            "error": "Not supported on this platform",
+                        }))),
+                    )
+                }
             }
         })
 }
 
-fn api_sensor_bridge_uninstall()
--> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn api_sensor_bridge_uninstall(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "sensor-bridge" / "uninstall")
         .and(warp::post())
-        .and_then(|| async move {
-            #[cfg(target_os = "windows")]
-            {
-                match lhm::uninstall_local_sensor_bridge() {
-                    Ok(()) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                        "started": true,
-                        "message": "UAC prompt launched — approve it on your desktop to remove the sensor service",
-                    }))),
-                    Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                        "started": false,
-                        "error": e,
-                    }))),
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
                 }
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                    "started": false,
-                    "error": "Not supported on this platform",
-                })))
+                #[cfg(target_os = "windows")]
+                {
+                    match lhm::uninstall_local_sensor_bridge() {
+                        Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({
+                                "started": true,
+                                "message": "UAC prompt launched — approve it on your desktop to remove the sensor service",
+                            }))),
+                        ),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({
+                                "started": false,
+                                "error": e,
+                            }))),
+                        ),
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({
+                            "started": false,
+                            "error": "Not supported on this platform",
+                        }))),
+                    )
+                }
             }
         })
 }
@@ -732,18 +791,23 @@ fn api_disable_lhm(
     let lhm_disabled_file = app_config.lhm_disabled_file.clone();
     warp::path!("api" / "lhm" / "disable")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |body: serde_json::Value| {
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
             let disabled = body["disabled"].as_bool().unwrap_or(false);
             #[allow(unused_variables)]
             let file = lhm_disabled_file.clone();
             async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
                 let result = lhm_persist::save_lhm_disabled(&file, disabled)
-                    .map(|_| warp::reply::json(&serde_json::json!({"ok": true})))
+                    .map(|_| Box::new(warp::reply::json(&serde_json::json!({"ok": true}))) as Box<dyn warp::reply::Reply>)
                     .unwrap_or_else(|e| {
-                        warp::reply::json(&serde_json::json!({"ok": false, "error": e}))
+                        Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": e})))
                     });
-                Ok::<_, warp::Rejection>(result)
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(result)
             }
         })
 }
@@ -1065,24 +1129,24 @@ pub fn api_routes(
     bind_host: String,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     let start = api_start(state.clone(), app_config.clone());
-    let stop = api_stop(state.clone());
+    let stop = api_stop(state.clone(), app_config.clone());
     let kill_llama = api_kill_llama(state.clone(), app_config.clone());
     let get_presets = api_get_presets(state.clone());
-    let create_preset = api_create_preset(state.clone());
-    let update_preset = api_update_preset(state.clone());
-    let delete_preset = api_delete_preset(state.clone());
+    let create_preset = api_create_preset(state.clone(), app_config.clone());
+    let update_preset = api_update_preset(state.clone(), app_config.clone());
+    let delete_preset = api_delete_preset(state.clone(), app_config.clone());
     let reset_presets = api_reset_presets(state.clone());
     let get_templates = api_get_templates(state.clone());
-    let create_template = api_create_template(state.clone());
-    let update_template = api_update_template(state.clone());
-    let delete_template = api_delete_template(state.clone());
+    let create_template = api_create_template(state.clone(), app_config.clone());
+    let update_template = api_update_template(state.clone(), app_config.clone());
+    let delete_template = api_delete_template(state.clone(), app_config.clone());
     let get_models = api_get_models(state.clone());
-    let refresh_models = api_refresh_models(state.clone());
+    let refresh_models = api_refresh_models(state.clone(), app_config.clone());
     let get_gpu_env = api_get_gpu_env(state.clone());
-    let put_gpu_env = api_put_gpu_env(state.clone());
+    let put_gpu_env = api_put_gpu_env(state.clone(), app_config.clone());
     let get_settings = api_get_settings(state.clone());
     let get_settings_full = api_get_settings_full(state.clone(), app_config.clone());
-    let put_settings = api_put_settings(state.clone());
+    let put_settings = api_put_settings(state.clone(), app_config.clone());
     let browse = api_browse(state.clone(), app_config.clone());
     let chat = api_chat(state.clone(), app_config.clone());
     let chat_abort = api_chat_abort(state.clone(), app_config.clone());
@@ -1132,9 +1196,9 @@ pub fn api_routes(
     let attach = api_attach(state.clone(), app_config.clone());
     let detach = api_detach(state.clone(), app_config.clone());
     let check_lhm = api_check_lhm();
-    let start_lhm = api_lhm_start();
-    let install_lhm = api_lhm_install();
-    let uninstall_lhm = api_lhm_uninstall();
+    let start_lhm = api_lhm_start(app_config.clone());
+    let install_lhm = api_lhm_install(app_config.clone());
+    let uninstall_lhm = api_lhm_uninstall(app_config.clone());
     let progress_lhm = api_lhm_progress();
     let status_lhm = api_lhm_status(app_config.clone());
     let disable_lhm = api_disable_lhm(app_config.clone());
@@ -1145,9 +1209,9 @@ pub fn api_routes(
     let remote_agent_status = api_remote_agent_status(app_config.clone());
     let remote_agent_remove = api_remote_agent_remove(app_config.clone());
     let remote_agent_tls_status = api_remote_agent_tls_status(app_config.clone());
-    let sensor_bridge_status = api_sensor_bridge_status();
-    let sensor_bridge_install = api_sensor_bridge_install();
-    let sensor_bridge_uninstall = api_sensor_bridge_uninstall();
+    let sensor_bridge_status = api_sensor_bridge_status(app_config.clone());
+    let sensor_bridge_install = api_sensor_bridge_install(app_config.clone());
+    let sensor_bridge_uninstall = api_sensor_bridge_uninstall(app_config.clone());
 
     // Group routes to avoid compiler overflow on long .or() chains
     let server_routes = start.or(stop).or(kill_llama).or(attach).or(detach);
@@ -2394,11 +2458,15 @@ fn api_start(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "start")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |config: ServerConfig| {
+        .and_then(move |auth: Option<String>, config: ServerConfig| {
             let state = state.clone();
             let app_config = app_config.clone();
             async move {
+                if !check_api_token(&auth, &app_config) {
+                    return Ok(unauthorized_api_token());
+                }
                 let ui = state.ui_settings.lock().unwrap().clone();
                 let mut eff_config = (*app_config).clone();
                 if !ui.llama_server_path.is_empty() {
@@ -2408,12 +2476,12 @@ fn api_start(
                     eff_config.llama_server_cwd = PathBuf::from(&ui.llama_server_cwd);
                 }
                 match server::start_server(&state, config, &eff_config).await {
-                    Ok(()) => Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({"ok": true}),
-                    )),
-                    Err(e) => Ok(warp::reply::json(
-                        &serde_json::json!({"ok": false, "error": e.to_string()}),
-                    )),
+                    Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({"ok": true}))),
+                    ),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()}))),
+                    ),
                 }
             }
         })
@@ -2421,19 +2489,25 @@ fn api_start(
 
 fn api_stop(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "stop")
         .and(warp::post())
-        .and_then(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
             let state = state.clone();
+            let app_config = app_config.clone();
             async move {
+                if !check_api_token(&auth, &app_config) {
+                    return Ok(unauthorized_api_token());
+                }
                 match server::stop_server(&state).await {
-                    Ok(()) => Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({"ok": true}),
-                    )),
-                    Err(e) => Ok(warp::reply::json(
-                        &serde_json::json!({"ok": false, "error": e.to_string()}),
-                    )),
+                    Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({"ok": true}))),
+                    ),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()}))),
+                    ),
                 }
             }
         })
@@ -2452,50 +2526,78 @@ fn api_get_presets(
 
 fn api_create_preset(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "presets")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .map(move |preset: ModelPreset| {
+        .and_then(move |auth: Option<String>, preset: ModelPreset| {
+            let cfg = app_config.clone();
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
             let mut presets = state.presets.lock().unwrap();
             presets.push(preset.clone());
             let _ = presets::save_presets(&state.presets_path, &presets);
-            warp::reply::json(&serde_json::json!({"ok": true, "preset": preset}))
+            futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                Box::new(warp::reply::json(&serde_json::json!({"ok": true, "preset": preset}))),
+            ))
         })
 }
 
 fn api_update_preset(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "presets" / String)
         .and(warp::put())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .map(move |id: String, updated: ModelPreset| {
+        .and_then(move |id: String, auth: Option<String>, updated: ModelPreset| {
+            let cfg = app_config.clone();
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
             let mut presets = state.presets.lock().unwrap();
             if let Some(existing) = presets.iter_mut().find(|p| p.id == id) {
                 *existing = updated.clone();
                 let _ = presets::save_presets(&state.presets_path, &presets);
-                warp::reply::json(&serde_json::json!({"ok": true, "preset": updated}))
+                futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(&serde_json::json!({"ok": true, "preset": updated}))),
+                ))
             } else {
-                warp::reply::json(&serde_json::json!({"ok": false, "error": "preset not found"}))
+                futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": "preset not found"}))),
+                ))
             }
         })
 }
 
 fn api_delete_preset(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "presets" / String)
         .and(warp::delete())
-        .map(move |id: String| {
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |id: String, auth: Option<String>| {
+            let cfg = app_config.clone();
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
             let mut presets = state.presets.lock().unwrap();
             let before = presets.len();
             presets.retain(|p| p.id != id);
             if presets.len() < before {
                 let _ = presets::save_presets(&state.presets_path, &presets);
-                warp::reply::json(&serde_json::json!({"ok": true}))
+                futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(&serde_json::json!({"ok": true}))),
+                ))
             } else {
-                warp::reply::json(&serde_json::json!({"ok": false, "error": "preset not found"}))
+                futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": "preset not found"}))),
+                ))
             }
         })
 }
@@ -2531,50 +2633,78 @@ fn api_get_templates(
 
 fn api_create_template(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "templates")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .map(move |template: presets::SystemPromptTemplate| {
+        .and_then(move |auth: Option<String>, template: presets::SystemPromptTemplate| {
+            let cfg = app_config.clone();
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
             let mut templates = state.templates.lock().unwrap();
             templates.push(template.clone());
             let _ = presets::save_templates(&state.templates_path, &templates);
-            warp::reply::json(&serde_json::json!({"ok": true, "template": template}))
+            futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                Box::new(warp::reply::json(&serde_json::json!({"ok": true, "template": template}))),
+            ))
         })
 }
 
 fn api_update_template(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "templates" / String)
         .and(warp::put())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .map(move |id: String, updated: presets::SystemPromptTemplate| {
+        .and_then(move |id: String, auth: Option<String>, updated: presets::SystemPromptTemplate| {
+            let cfg = app_config.clone();
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
             let mut templates = state.templates.lock().unwrap();
             if let Some(existing) = templates.iter_mut().find(|t| t.id == id) {
                 *existing = updated.clone();
                 let _ = presets::save_templates(&state.templates_path, &templates);
-                warp::reply::json(&serde_json::json!({"ok": true, "template": updated}))
+                futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(&serde_json::json!({"ok": true, "template": updated}))),
+                ))
             } else {
-                warp::reply::json(&serde_json::json!({"ok": false, "error": "template not found"}))
+                futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": "template not found"}))),
+                ))
             }
         })
 }
 
 fn api_delete_template(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "templates" / String)
         .and(warp::delete())
-        .map(move |id: String| {
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |id: String, auth: Option<String>| {
+            let cfg = app_config.clone();
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
             let mut templates = state.templates.lock().unwrap();
             let before = templates.len();
             templates.retain(|t| t.id != id);
             if templates.len() < before {
                 let _ = presets::save_templates(&state.templates_path, &templates);
-                warp::reply::json(&serde_json::json!({"ok": true}))
+                futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(&serde_json::json!({"ok": true}))),
+                ))
             } else {
-                warp::reply::json(&serde_json::json!({"ok": false, "error": "template not found"}))
+                futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": "template not found"}))),
+                ))
             }
         })
 }
@@ -2590,25 +2720,35 @@ fn api_get_models(
 
 fn api_refresh_models(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "models" / "refresh")
         .and(warp::post())
-        .map(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
             if let Some(ref dir) = state.models_dir {
                 match models::scan_models_dir(dir) {
                     Ok(discovered) => {
                         let count = discovered.len();
                         *state.discovered_models.lock().unwrap() = discovered;
-                        warp::reply::json(&serde_json::json!({"ok": true, "count": count}))
+                        futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({"ok": true, "count": count}))),
+                        ))
                     }
                     Err(e) => {
-                        warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()}))
+                        futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": e.to_string()}))),
+                        ))
                     }
                 }
             } else {
-                warp::reply::json(
-                    &serde_json::json!({"ok": false, "error": "no models directory configured (use --models-dir)"}),
-                )
+                futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": "no models directory configured (use --models-dir)"}))),
+                ))
             }
         })
 }
@@ -2631,15 +2771,23 @@ fn api_get_gpu_env(
 
 fn api_put_gpu_env(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "gpu-env")
         .and(warp::put())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .map(move |updated: GpuEnv| {
+        .and_then(move |auth: Option<String>, updated: GpuEnv| {
+            let cfg = app_config.clone();
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
             let mut env = state.gpu_env.lock().unwrap();
             *env = updated;
             let _ = gpu_env::save_gpu_env(&state.gpu_env_path, &env);
-            warp::reply::json(&serde_json::json!({"ok": true}))
+            futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                Box::new(warp::reply::json(&serde_json::json!({"ok": true}))),
+            ))
         })
 }
 
@@ -2704,11 +2852,17 @@ fn mask_remote_agent_token(mut s: UiSettings) -> UiSettings {
 
 fn api_put_settings(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "settings")
         .and(warp::put())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .map(move |mut updated: UiSettings| {
+        .and_then(move |auth: Option<String>, mut updated: UiSettings| {
+            let cfg = app_config.clone();
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
             // Detect if this is a partial update (only ws_push_interval_ms set, rest are defaults)
             let is_partial = updated.preset_id.is_empty()
                 && updated.port == 8001
@@ -2766,7 +2920,9 @@ fn api_put_settings(
                 *state.discovered_models.lock().unwrap() = discovered;
             }
 
-            warp::reply::json(&serde_json::json!({"ok": true}))
+            futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                Box::new(warp::reply::json(&serde_json::json!({"ok": true}))),
+            ))
         })
 }
 
