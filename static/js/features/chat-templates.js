@@ -839,8 +839,14 @@ export function resolveActiveTemplate(templateId) {
 export async function loadTemplates() {
     if (!_userTemplates) {
         try {
-            const res = await fetch('/api/templates');
-            _userTemplates = await res.json();
+            const auth = window.authHeaders ? window.authHeaders() : {};
+            const res = await fetch('/api/templates', { headers: auth });
+            if (res.status === 401) {
+                showToast('Unauthorized: API token missing or invalid', 'error');
+                _userTemplates = [];
+            } else {
+                _userTemplates = await res.json();
+            }
         } catch (e) {
             console.error('Failed to load templates from API:', e);
             _userTemplates = [];
@@ -855,7 +861,13 @@ export async function loadTemplates() {
 
 async function saveUserTemplates(templates) {
     try {
-        const existing = await fetch('/api/templates').then(r => r.json());
+        const auth = window.authHeaders ? window.authHeaders() : {};
+        const existingRes = await fetch('/api/templates', { headers: auth });
+        if (existingRes.status === 401) {
+            showToast('Unauthorized: API token missing or invalid', 'error');
+            return;
+        }
+        const existing = await existingRes.json();
         for (const t of existing) {
             await fetch(`/api/templates/${t.id}`, {
                 method: 'DELETE',

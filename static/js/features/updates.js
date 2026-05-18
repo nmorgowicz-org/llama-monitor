@@ -25,7 +25,9 @@ export async function checkForUpdate() {
     updateCheckStarted = true;
 
     try {
-        const resp = await fetch('/api/remote-agent/releases/latest');
+        const resp = await fetch('/api/remote-agent/releases/latest', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         if (!resp.ok) return;
         const data = await resp.json();
         const latest = data.release || data;

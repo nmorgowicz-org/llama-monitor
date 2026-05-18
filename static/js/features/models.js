@@ -24,7 +24,9 @@ async function loadModels() {
     list.innerHTML = '';
 
     try {
-        const resp = await fetch('/api/models');
+        const resp = await fetch('/api/models', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         const models = await resp.json();
         summary.textContent = models.length ? models.length + ' model' + (models.length === 1 ? '' : 's') + ' found' : 'No models found';
         // eslint-disable-next-line no-unsanitized/property -- all server strings (path, name, filename, meta) wrapped in escapeHtml()

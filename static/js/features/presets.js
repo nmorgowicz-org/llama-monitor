@@ -24,13 +24,27 @@ function clearFieldErrors() {
 // ── Load ───────────────────────────────────────────────────────────────────────
 
 export async function loadPresets(selectId) {
+    const auth = window.authHeaders ? window.authHeaders() : {};
+
     const [presetsResp, settingsResp] = await Promise.all([
-        fetch('/api/presets'),
-        selectId === undefined ? fetch('/api/settings') : Promise.resolve(null),
+        fetch('/api/presets', { headers: auth }),
+        selectId === undefined ? fetch('/api/settings', { headers: auth }) : Promise.resolve(null),
     ]);
 
+    if (presetsResp.status === 401) {
+        showToast('Unauthorized: API token missing or invalid', 'error');
+        return;
+    }
+
     sessionState.presets = await presetsResp.json();
-    const saved = settingsResp ? await settingsResp.json() : null;
+    let saved = null;
+    if (settingsResp) {
+        if (settingsResp.status === 401) {
+            console.warn('[presets] /api/settings returned 401');
+        } else {
+            saved = await settingsResp.json();
+        }
+    }
 
     const sel = document.getElementById('preset-select');
     sel.innerHTML = '';
