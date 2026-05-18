@@ -14,7 +14,12 @@ import { showToast } from './toast.js';
 
 export async function loadSessions() {
     try {
-        const resp = await fetch('/api/sessions');
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const resp = await fetch('/api/sessions', { headers });
+        if (resp.status === 401) {
+            console.error('Failed to load sessions: authentication required');
+            return;
+        }
         sessionState.sessions = await resp.json();
         renderSessionList();
 
@@ -117,7 +122,21 @@ export function quickStartSession(sessionId) {
 export async function deleteSession(sessionId) {
     if (!confirm('Delete this session?')) return;
     try {
-        const resp = await fetch('/api/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' });
+        const tokenResp = await fetch('/api/db/admin-token');
+        const tokenData = await tokenResp.json();
+        const token = tokenData.token;
+        if (!token) {
+            showToast('Delete failed: authentication required', 'error');
+            return;
+        }
+        const resp = await fetch('/api/sessions/' + encodeURIComponent(sessionId), {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (resp.status === 401) {
+            showToast('Delete failed: authentication required', 'error');
+            return;
+        }
         const data = await resp.json();
         if (data.ok) {
             showToast('Session deleted', 'success');
@@ -132,11 +151,18 @@ export async function deleteSession(sessionId) {
 
 export async function switchSession(sessionId) {
     try {
+        const headers = window.authHeaders
+            ? window.authHeaders({ 'Content-Type': 'application/json' })
+            : { 'Content-Type': 'application/json' };
         const resp = await fetch('/api/sessions/active', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: sessionId })
+            headers,
+            body: JSON.stringify({ id: sessionId }),
         });
+        if (resp.status === 401) {
+            showToast('Failed to switch session: authentication required', 'error');
+            return;
+        }
         const data = await resp.json();
         if (data.ok) {
             sessionState.activeSessionId = sessionId;
@@ -221,7 +247,7 @@ export function closeSessionModal() {
     document.getElementById('session-modal').classList.remove('open');
 }
 
-export function saveSession(event) {
+export async function saveSession(event) {
     event.preventDefault();
 
     const mode = document.getElementById('modal-session-mode').value;
@@ -260,34 +286,61 @@ export function saveSession(event) {
         return;
     }
 
-    const headers = (typeof window.authHeaders === 'function')
-        ? window.authHeaders({ 'Content-Type': 'application/json' })
-        : { 'Content-Type': 'application/json' };
+    let headers;
+    if (url === '/api/sessions/spawn') {
+        // spawn requires db-admin-token
+        try {
+            const tokenResp = await fetch('/api/db/admin-token');
+            const tokenData = await tokenResp.json();
+            const token = tokenData.token;
+            if (!token) {
+                showToast('Failed: authentication required', 'error');
+                return;
+            }
+            headers = {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            };
+        } catch (e) {
+            showToast('Failed: authentication required', 'error');
+            return;
+        }
+    } else {
+        headers = (typeof window.authHeaders === 'function')
+            ? window.authHeaders({ 'Content-Type': 'application/json' })
+            : { 'Content-Type': 'application/json' };
+    }
 
-    fetch(url, {
+    const resp = await fetch(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.ok) {
-            closeSessionModal();
-            loadSessions();
-            updateActiveSessionInfo();
-            showToast(mode === 'attach' ? 'Attached to endpoint' : 'Session created', 'success');
-        } else {
-            showToast('Failed to create session: ' + data.error, 'error');
-        }
-    })
-    .catch(err => showToast('Failed to create session: ' + err.message, 'error'));
+    });
+    if (resp.status === 401) {
+        showToast('Failed: authentication required', 'error');
+        return;
+    }
+    const data = await resp.json();
+    if (data.ok) {
+        closeSessionModal();
+        loadSessions();
+        updateActiveSessionInfo();
+        showToast(mode === 'attach' ? 'Attached to endpoint' : 'Session created', 'success');
+    } else {
+        showToast('Failed to create session: ' + data.error, 'error');
+    }
 }
 
 // ── Active session info ────────────────────────────────────────────────────────
 
 export async function updateActiveSessionInfo() {
     try {
-        const resp = await fetch('/api/sessions/active');
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const resp = await fetch('/api/sessions/active', { headers });
+        if (resp.status === 401) {
+            console.error('Failed to update active session info: authentication required');
+            return;
+        }
         const data = await resp.json();
         if (data && data.mode) {
             const modeParts = data.mode.split(':');

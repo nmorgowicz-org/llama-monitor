@@ -6,7 +6,9 @@ use std::path::PathBuf;
 
 const SCHEMA_SQL: &str = r#"
 PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
 PRAGMA foreign_keys=ON;
+PRAGMA wal_autocheckpoint=200;
 
 CREATE TABLE IF NOT EXISTS tabs (
     id                     TEXT    PRIMARY KEY,
@@ -500,8 +502,10 @@ impl ChatStorage {
         for (seq, msg) in messages.iter().enumerate() {
             tx.execute(
                 "INSERT INTO messages (tab_id, role, content, timestamp_ms,
-                     input_tokens, output_tokens, compaction_marker, seq)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                     input_tokens, output_tokens,
+                     cumulative_input_tokens, cumulative_output_tokens,
+                     compaction_marker, variants, variant_index, seq)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
                 params![
                     tab_id,
                     msg.role,
@@ -509,7 +513,11 @@ impl ChatStorage {
                     msg.timestamp_ms,
                     msg.input_tokens,
                     msg.output_tokens,
+                    msg.cumulative_input_tokens,
+                    msg.cumulative_output_tokens,
                     msg.compaction_marker as i64,
+                    msg.variants.as_ref().map(|v| v.to_string()),
+                    msg.variant_index,
                     seq as i64,
                 ],
             )?;
@@ -624,16 +632,9 @@ impl ChatStorage {
     /// Rebuild FTS index
     pub fn rebuild_fts_index(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        let tx = conn.unchecked_transaction()?;
-
-        // Clear and rebuild FTS
-        tx.execute("DELETE FROM messages_fts", [])?;
-        tx.execute(
-            "INSERT INTO messages_fts(messages_fts) VALUES('rebuild')",
-            [],
-        )?;
-
-        tx.commit()?;
+        // The 'rebuild' special command drops and repopulates the index from the
+        // content table in one step; no separate DELETE is needed.
+        conn.execute_batch("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")?;
         Ok(())
     }
 
@@ -817,70 +818,66 @@ impl ChatStorage {
     /// Get the database file path via PRAGMA
     pub fn get_db_path(&self) -> PathBuf {
         let conn = self.conn.lock().unwrap();
+        // PRAGMA database_list columns: 0=seq, 1=name ("main"), 2=file
         let path: String = conn
-            .query_row("PRAGMA database_list", [], |row| row.get::<_, String>(1))
+            .query_row("PRAGMA database_list", [], |row| row.get::<_, String>(2))
             .unwrap_or_else(|_| "chat.db".to_string());
         PathBuf::from(path)
     }
 
-    /// Repair corrupted indexes by dropping and recreating them
+    /// Repair corrupted FTS index by dropping and recreating it
     pub fn repair_indexes(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
 
-        // Drop FTS virtual table if it exists
-        conn.execute_batch("DROP TABLE IF EXISTS search_content")?;
-
-        // Recreate FTS index
+        // Drop the FTS virtual table and its associated triggers, then recreate from scratch.
         conn.execute_batch(
             r#"
-            CREATE VIRTUAL TABLE IF NOT EXISTS search_content USING fts5(
+            DROP TRIGGER IF EXISTS messages_ai;
+            DROP TRIGGER IF EXISTS messages_ad;
+            DROP TRIGGER IF EXISTS messages_au;
+            DROP TABLE IF EXISTS messages_fts;
+
+            CREATE VIRTUAL TABLE messages_fts USING fts5(
                 content,
                 content='messages',
-                content_rowid='rowid'
+                content_rowid='id'
             );
-            "#,
-        )?;
 
-        // Repopulate FTS index
-        conn.execute_batch(
-            r#"
-            INSERT INTO search_content(rowid, content)
-            SELECT rowid, content FROM messages WHERE content IS NOT NULL AND content != '';
+            CREATE TRIGGER messages_ai AFTER INSERT ON messages BEGIN
+                INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+            END;
+            CREATE TRIGGER messages_ad AFTER DELETE ON messages BEGIN
+                INSERT INTO messages_fts(messages_fts, rowid, content)
+                    VALUES ('delete', old.id, old.content);
+            END;
+            CREATE TRIGGER messages_au AFTER UPDATE ON messages BEGIN
+                INSERT INTO messages_fts(messages_fts, rowid, content)
+                    VALUES ('delete', old.id, old.content);
+                INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+            END;
+
+            INSERT INTO messages_fts(messages_fts) VALUES('rebuild');
             "#,
         )?;
 
         Ok(())
     }
 
-    /// Emergency recovery using SQLite's recovery extension
-    pub fn emergency_recovery(&self) -> Result<()> {
+    /// Emergency recovery: run a full integrity check and return any errors found.
+    ///
+    /// If the database is corrupted beyond what integrity_check can read, restore
+    /// from one of the backups in the `backups/` directory beside the database file.
+    pub fn emergency_recovery(&self) -> Result<String> {
         let conn = self.conn.lock().unwrap();
-
-        // Attempt recovery mode (available in SQLite 3.36.0+)
-        // This tries to salvage as much data as possible from a corrupted database
-        conn.execute_batch("PRAGMA recovery_mode = 1")?;
-
-        // Run integrity check to identify issues
-        let integrity = conn.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0));
-
-        match integrity {
-            Ok(result) => {
-                if result != "ok" {
-                    return Err(anyhow::anyhow!(
-                        "Integrity check after recovery: {}",
-                        result
-                    ));
-                }
-            }
-            Err(e) => {
-                return Err(anyhow::anyhow!("Recovery integrity check failed: {}", e));
-            }
+        let mut stmt = conn.prepare("PRAGMA integrity_check")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let lines: rusqlite::Result<Vec<String>> = rows.collect();
+        let report = lines?.join("\n");
+        if report.trim() == "ok" {
+            Ok("ok".to_string())
+        } else {
+            Err(anyhow::anyhow!("Integrity issues found:\n{}", report))
         }
-
-        // Reset recovery mode
-        conn.execute_batch("PRAGMA recovery_mode = 0")?;
-
-        Ok(())
     }
 }
 

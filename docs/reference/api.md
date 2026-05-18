@@ -24,7 +24,12 @@ http://localhost:7778
 
 ## Sessions
 
+All session endpoints require authentication via `Authorization: Bearer <token>`.
+Most require the `api-token`; a few elevated operations require the `db-admin-token`.
+Without a valid token, the endpoint returns 401 with `{ "ok": false, "error": "unauthorized" }`.
+
 ### `GET /api/sessions`
+Auth: api-token.
 Returns the persisted session list from `sessions.json`.
 
 ```json
@@ -52,6 +57,7 @@ Returns the persisted session list from `sessions.json`.
 - `{ "Error": "message" }`
 
 ### `POST /api/sessions`
+Auth: api-token.
 Creates a session record only. It does not start a server.
 
 Request body must be a full `Session` object:
@@ -81,12 +87,14 @@ On failure:
 ```
 
 ### `DELETE /api/sessions/{id}`
+Auth: db-admin-token.
 
 ```json
 { "ok": true }
 ```
 
 ### `GET /api/sessions/active`
+Auth: api-token.
 Returns a compact active-session summary, not the full `Session` object.
 
 ```json
@@ -106,6 +114,7 @@ If there is no active session:
 ```
 
 ### `POST /api/sessions/active`
+Auth: api-token.
 
 ```json
 { "id": "session_1746000000000" }
@@ -118,6 +127,7 @@ Response:
 ```
 
 ### `POST /api/sessions/spawn`
+Auth: db-admin-token.
 Creates a spawn session, starts `llama-server` from a saved preset, and makes it active.
 
 Request:
@@ -142,6 +152,7 @@ Success response:
 ```
 
 ### `POST /api/attach`
+Auth: api-token.
 Attaches to a reachable private-network or loopback endpoint.
 
 Request:
@@ -164,6 +175,7 @@ Success response:
 If `/health` is unavailable the attach still succeeds, but `warning` explains that inference metrics will be missing.
 
 ### `POST /api/detach`
+Auth: api-token.
 Detaches only if the active session is an attach session.
 
 ```json
@@ -1237,3 +1249,78 @@ POST /api/kill-llama:
     Request:  { "confirm": "kill" }
     Success:  { "ok": true }
     Too soon: { "error": "too soon; please wait", "seconds_remaining": 12 }
+
+## Remote Agent
+
+All `/api/remote-agent/*` endpoints require a bearer token.
+
+- api-token: `Authorization: Bearer <api-token>`
+- db-admin-token: `Authorization: Bearer <db-admin-token>`
+
+Without a valid token, endpoints return 401 with `{ "ok": false, "error": "unauthorized; <token-type> required" }`.
+
+### `GET /api/remote-agent/releases/latest`
+
+- Auth: api-token.
+- Returns the latest GitHub release and assets.
+
+### `POST /api/remote-agent/detect`
+
+- Auth: api-token.
+- Body: `{ ssh_target, ssh_connection?, agent_url? }`
+- Detects remote OS, architecture, installed version, and matching release asset via SSH.
+
+### `POST /api/remote-agent/ssh/host-key`
+
+- Auth: api-token.
+- Body: `{ ssh_target, ssh_connection }`
+- Scans the SSH host key for the given target.
+
+### `POST /api/remote-agent/ssh/trust`
+
+- Auth: api-token.
+- Body: `{ ssh_target, ssh_connection, key_hex }`
+- Trusts the scanned host key for future SSH operations.
+
+### `POST /api/remote-agent/status`
+
+- Auth: api-token.
+- Body: `{ ssh_target, ssh_connection? }`
+- Checks the status of a managed remote agent (installed, running, task health).
+
+### `POST /api/remote-agent/start`
+
+- Auth: api-token.
+- Body: `{ ssh_target, ssh_connection?, install_path?, start_command? }`
+- Starts the remote agent on the target host.
+
+### `POST /api/remote-agent/update`
+
+- Auth: api-token.
+- Body: `{ ssh_target, ssh_connection?, agent_url? }`
+- Stops the existing agent, installs the latest release, and restarts it.
+
+### `POST /api/remote-agent/stop`
+
+- Auth: api-token.
+- Body: `{ ssh_target, ssh_connection? }`
+- Stops the remote agent process.
+
+### `POST /api/remote-agent/install`
+
+- Auth: db-admin-token (elevated).
+- Body: `{ ssh_target, ssh_connection?, asset, install_path? }`
+- Installs the remote agent binary and writes a `remote-agent-config.json` with the api-token.
+
+### `POST /api/remote-agent/remove`
+
+- Auth: db-admin-token (elevated).
+- Body: `{ ssh_target, ssh_connection? }`
+- Removes the managed remote agent (stops process, deletes startup task, removes binary).
+
+### `GET /api/remote-agent/tls-status`
+
+- Auth: api-token.
+- Returns mTLS certificate status (CA, server, client).
+
+For full details on the remote agent flow, see [Remote Agent](remote-agent.md).

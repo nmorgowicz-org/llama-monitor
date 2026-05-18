@@ -192,17 +192,50 @@ Notes:
   - Treat `~/.config/llama-monitor/` as sensitive.
   - Use file permissions and/or disk encryption where available.
 
+## Endpoint authentication
+
+All `/api/remote-agent/*` endpoints require a bearer token.
+
+- **api-token** (standard operations):
+  - `GET /api/remote-agent/releases/latest`
+  - `POST /api/remote-agent/detect`
+  - `POST /api/remote-agent/ssh/host-key`
+  - `POST /api/remote-agent/ssh/trust`
+  - `POST /api/remote-agent/status`
+  - `POST /api/remote-agent/start`
+  - `POST /api/remote-agent/update`
+  - `POST /api/remote-agent/stop`
+  - `GET /api/remote-agent/tls-status`
+
+- **db-admin-token** (elevated operations):
+  - `POST /api/remote-agent/install`
+  - `POST /api/remote-agent/remove`
+
+Requests must include:
+- Header: `Authorization: Bearer <token>`
+- If missing or invalid, the endpoint returns 401 with an error message.
+
+The frontend automatically includes the appropriate token via `window.authHeaders()` (api-token) or by fetching the db-admin-token for install/remove.
+
+## Remote agent config file
+
+During install, the dashboard writes a `remote-agent-config.json` file next to the agent binary with:
+
+- `api_token`: the dashboard's api-token, used by the agent (or SSH-managed operations) to authenticate to `/api/remote-agent/*` endpoints.
+
+This file is written with restrictive permissions (0600 on Unix/macOS) so only the agent process can read it.
+
 ## Tokens and rotation
 
 Three tokens are used by llama-monitor:
 
 - **API Token**:
   - File: `api-token`
-  - Used to protect sensitive endpoints (attach, DB queries, TLS/ACME, etc.).
+  - Used to protect sensitive endpoints (attach, DB queries, TLS/ACME, remote-agent endpoints, etc.).
   - Encrypted at rest.
 - **DB Admin Token**:
   - File: `db-admin-token`
-  - Used for advanced database operations and restricted queries.
+  - Used for advanced database operations and restricted queries, plus elevated remote-agent endpoints (install/remove).
   - Encrypted at rest.
 - **Agent Token**:
   - Stored in `ui-settings.json` as `remote_agent_token`.

@@ -1950,12 +1950,65 @@ pub mod install {
         let _ = std::fs::remove_file(&local_tmp);
     }
 
+    /// Writes remote-agent-config.json next to the agent binary with the api-token
+    /// so the agent (or dashboard SSH operations) can authenticate to
+    /// /api/remote-agent/* endpoints.
+    async fn drop_remote_agent_config(
+        connection: &SshConnection,
+        install_path: &str,
+        os: RemoteOs,
+        api_token: Option<&str>,
+    ) {
+        let sep = if os == RemoteOs::Windows { '\\' } else { '/' };
+        let Some(dir_end) = install_path.rfind(sep) else {
+            return;
+        };
+        let install_dir = &install_path[..dir_end];
+        let config_path = if os == RemoteOs::Windows {
+            format!("{}{}remote-agent-config.json", install_dir, sep)
+        } else {
+            format!("{}/remote-agent-config.json", install_dir)
+        };
+
+        let token = match api_token {
+            Some(t) if !t.is_empty() => t.to_string(),
+            _ => return,
+        };
+
+        let config_json = serde_json::json!({
+            "api_token": token,
+        });
+        let content = serde_json::to_string(&config_json).unwrap_or_default();
+
+        // Write to temp file locally, then SCP to remote
+        let local_tmp = tempfile::NamedTempFile::new_in(std::env::temp_dir())
+            .map(|f| f.path().to_path_buf())
+            .unwrap_or_else(|_| std::env::temp_dir().join("remote-agent-config.json"));
+
+        if std::fs::write(&local_tmp, content).is_err() {
+            let _ = std::fs::remove_file(&local_tmp);
+            return;
+        }
+
+        // On Unix/macOS, use restrictive permissions (0600) so only the agent process can read it.
+        let _ = remote_ssh::copy_to_remote(
+            connection.clone(),
+            local_tmp.to_string_lossy().to_string(),
+            config_path,
+            0o600,
+        )
+        .await;
+
+        let _ = std::fs::remove_file(&local_tmp);
+    }
+
     pub async fn install_remote_agent(
         ssh_target: &str,
         ssh_connection: Option<SshConnection>,
         asset: &ReleaseAssetInfo,
         install_path: Option<String>,
         os: RemoteOs,
+        api_token: Option<String>,
     ) -> Result<RemoteAgentInstallResponse> {
         let install_path = install_path
             .or_else(|| install_path_for_os(os).map(ToOwned::to_owned))
@@ -1994,6 +2047,12 @@ pub mod install {
 
         // Ship the CA certificate so the agent can generate a server cert
         drop_ca_certificate(&connection, &install_path, os).await;
+
+        // Write remote-agent-config.json with api-token so the agent can authenticate
+        // to the dashboard's /api/remote-agent/* endpoints.
+        if api_token.is_some() {
+            drop_remote_agent_config(&connection, &install_path, os, api_token.as_deref()).await;
+        }
 
         let installed = remote_file_exists_with(&connection, os, &install_path).await;
 
@@ -2607,6 +2666,7 @@ Start-Sleep -Seconds 2\""
             &matching_asset.unwrap(),
             Some(install_path_clone),
             remote_os,
+            None,
         )
         .await?;
 

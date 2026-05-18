@@ -26,11 +26,23 @@ function connectionFromTarget(target) {
   return connection;
 }
 
+async function getApiToken(request) {
+  const res = await request.get('/api/internal/api-token');
+  if (res.ok()) {
+    const data = await res.json();
+    return data?.token || null;
+  }
+  return null;
+}
+
 // Disabled by default. CI has no SSH target.
 // Run manually: LLAMA_MONITOR_SSH_TARGET=user@host npm test -- ssh.integration
 test.describe.skip('remote agent SSH integration', () => {
   test('detects a real SSH target when explicitly enabled', async ({ request }) => {
     test.skip(!sshTarget, 'Set LLAMA_MONITOR_SSH_TARGET=user@host to run the SSH integration test.');
+
+    const apiToken = await getApiToken(request);
+    const authHeaders = apiToken ? { Authorization: `Bearer ${apiToken}` } : {};
 
     const payload = {
       ssh_target: sshTarget,
@@ -39,7 +51,10 @@ test.describe.skip('remote agent SSH integration', () => {
     const sshConnection = connectionFromTarget(sshTarget);
     if (sshConnection) payload.ssh_connection = sshConnection;
 
-    const hostKeyResponse = await request.post('/api/remote-agent/ssh/host-key', { data: payload });
+    const hostKeyResponse = await request.post('/api/remote-agent/ssh/host-key', {
+      data: payload,
+      headers: authHeaders,
+    });
     expect(hostKeyResponse.ok()).toBe(true);
 
     const hostKeyData = await hostKeyResponse.json();
@@ -52,13 +67,17 @@ test.describe.skip('remote agent SSH integration', () => {
           ...payload,
           key_hex: hostKeyData.host_key.key_hex,
         },
+        headers: authHeaders,
       });
       expect(trustResponse.ok()).toBe(true);
       const trustData = await trustResponse.json();
       expect(trustData.ok, trustData.error || 'host key should be trusted').toBe(true);
     }
 
-    const response = await request.post('/api/remote-agent/detect', { data: payload });
+    const response = await request.post('/api/remote-agent/detect', {
+      data: payload,
+      headers: authHeaders,
+    });
 
     expect(response.ok()).toBe(true);
 

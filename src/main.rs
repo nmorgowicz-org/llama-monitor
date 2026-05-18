@@ -335,24 +335,25 @@ fn main() -> Result<()> {
         });
     }
 
-    // Database maintenance timer (checkpoint WAL, periodic backup)
+    // Hourly database maintenance: WAL checkpoint, ANALYZE, rolling backup (keep 24h)
     {
         let chat_storage = state.chat_storage.clone();
         let config_dir = app_config.config_dir.clone();
         runtime.spawn(async move {
-            // Run maintenance every hour
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
 
-                // WAL checkpoint
                 if let Err(e) = chat_storage.checkpoint() {
                     eprintln!("[error] WAL checkpoint failed: {}", e);
                 }
 
-                // Create backup
-                let backup_dir = config_dir.join("backups");
-                if let Err(e) = std::fs::create_dir_all(&backup_dir) {
-                    eprintln!("[error] Failed to create backup directory: {}", e);
+                if let Err(e) = chat_storage.analyze() {
+                    eprintln!("[error] ANALYZE failed: {}", e);
+                }
+
+                let auto_backup_dir = config_dir.join("backups").join("auto");
+                if let Err(e) = std::fs::create_dir_all(&auto_backup_dir) {
+                    eprintln!("[error] Failed to create auto backup directory: {}", e);
                     continue;
                 }
 
@@ -360,17 +361,62 @@ fn main() -> Result<()> {
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis().to_string())
                     .unwrap_or_else(|_| "0".to_string());
-                let backup_path = backup_dir.join(format!("chat_auto_{}.db", timestamp));
+                let backup_path = auto_backup_dir.join(format!("chat_auto_{}.db", timestamp));
 
                 if let Err(e) = chat_storage.backup(&backup_path) {
-                    eprintln!("[error] Auto backup failed: {}", e);
+                    eprintln!("[error] Hourly auto backup failed: {}", e);
                 }
 
-                // Clean up old backups (keep last 7)
-                if let Ok(entries) = std::fs::read_dir(&backup_dir) {
+                // Keep the last 24 hourly backups
+                if let Ok(entries) = std::fs::read_dir(&auto_backup_dir) {
                     let mut backups: Vec<_> = entries
                         .filter_map(|e| e.ok())
                         .filter(|e| e.file_name().to_string_lossy().starts_with("chat_auto_"))
+                        .collect();
+                    backups.sort_by_key(|e| e.path());
+                    while backups.len() > 24 {
+                        let old = backups.remove(0);
+                        let _ = std::fs::remove_file(old.path());
+                    }
+                }
+            }
+        });
+    }
+
+    // Daily database backup: runs every 24 hours, keeps 7 days
+    {
+        let chat_storage = state.chat_storage.clone();
+        let config_dir = app_config.config_dir.clone();
+        runtime.spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(86400)).await;
+
+                let daily_backup_dir = config_dir.join("backups").join("daily");
+                if let Err(e) = std::fs::create_dir_all(&daily_backup_dir) {
+                    eprintln!("[error] Failed to create daily backup directory: {}", e);
+                    continue;
+                }
+
+                let date = {
+                    let secs = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    // Format as YYYYMMDD using integer arithmetic (no chrono dep here)
+                    let days = secs / 86400;
+                    format!("{:08}", days)
+                };
+                let backup_path = daily_backup_dir.join(format!("chat_daily_{}.db", date));
+
+                if let Err(e) = chat_storage.backup(&backup_path) {
+                    eprintln!("[error] Daily backup failed: {}", e);
+                }
+
+                // Keep the last 7 daily backups
+                if let Ok(entries) = std::fs::read_dir(&daily_backup_dir) {
+                    let mut backups: Vec<_> = entries
+                        .filter_map(|e| e.ok())
+                        .filter(|e| e.file_name().to_string_lossy().starts_with("chat_daily_"))
                         .collect();
                     backups.sort_by_key(|e| e.path());
                     while backups.len() > 7 {

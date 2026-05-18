@@ -300,10 +300,17 @@ async function loadBackups() {
         sizeEl.textContent = formatBytes(data.total_size || 0);
 
         // eslint-disable-next-line no-unsanitized/property -- all content escaped via escapeHtml()
-        listEl.innerHTML = data.backups.map(b => `
+        listEl.innerHTML = data.backups.map(b => {
+            const displayName = b.name.includes('/') ? b.name.split('/').pop() : b.name;
+            const kind = b.kind || (b.name.startsWith('auto/') ? 'auto' : b.name.startsWith('daily/') ? 'daily' : 'manual');
+            const kindLabel = { auto: 'hourly', daily: 'daily', manual: 'manual' }[kind] || kind;
+            return `
             <div class="db-backup-item">
                 <div class="db-backup-info">
-                    <span class="db-backup-name">${escapeHtml(b.name)}</span>
+                    <div class="db-backup-name-row">
+                        <span class="db-backup-name">${escapeHtml(displayName)}</span>
+                        <span class="db-backup-kind db-backup-kind-${escapeHtml(kind)}">${escapeHtml(kindLabel)}</span>
+                    </div>
                     <span class="db-backup-meta">${formatBytes(b.size)} &middot; ${formatDate(b.modified)}</span>
                 </div>
                 <div class="db-backup-actions">
@@ -314,8 +321,8 @@ async function loadBackups() {
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
                     </button>
                 </div>
-            </div>
-        `).join('');
+            </div>`;
+        }).join('');
     } catch (error) {
         console.error('[db-admin] Failed to load backups:', error);
     }

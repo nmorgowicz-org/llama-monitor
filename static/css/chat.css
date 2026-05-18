@@ -9019,7 +9019,13 @@
 .db-backup-info {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
+}
+
+.db-backup-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .db-backup-name {
@@ -9032,6 +9038,18 @@
   font-size: 11px;
   color: rgba(255, 255, 255, 0.4);
 }
+
+.db-backup-kind {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.db-backup-kind-auto    { background: rgba(99, 179, 237, 0.15); color: #63b3ed; }
+.db-backup-kind-daily   { background: rgba(154, 230, 180, 0.15); color: #9ae6b4; }
+.db-backup-kind-manual  { background: rgba(246, 173, 85, 0.15); color: #f6ad55; }
 
 .db-backup-actions {
   display: flex;

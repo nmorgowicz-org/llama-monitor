@@ -20,6 +20,61 @@ impl std::error::Error for ApiError {}
 
 impl Reject for ApiError {}
 
+/// Extract bearer token from Authorization header.
+fn extract_bearer(auth: Option<String>) -> Option<String> {
+    auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string))
+}
+
+/// 401 JSON reply for missing api-token.
+fn unauthorized_api_token() -> Box<dyn warp::reply::Reply> {
+    Box::new(warp::reply::with_status(
+        warp::reply::json(&serde_json::json!({
+            "ok": false,
+            "error": "unauthorized; api-token required"
+        })),
+        warp::http::StatusCode::UNAUTHORIZED,
+    ))
+}
+
+/// 401 JSON reply for missing db-admin-token.
+fn unauthorized_db_admin_token() -> Box<dyn warp::reply::Reply> {
+    Box::new(warp::reply::with_status(
+        warp::reply::json(&serde_json::json!({
+            "ok": false,
+            "error": "unauthorized; db-admin-token required"
+        })),
+        warp::http::StatusCode::UNAUTHORIZED,
+    ))
+}
+
+/// Check if the Authorization header matches the configured api-token.
+fn check_api_token(auth: &Option<String>, cfg: &AppConfig) -> bool {
+    if let Some(ref token) = cfg.api_token {
+        if token.is_empty() {
+            return false;
+        }
+        auth.as_ref()
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .is_some_and(|t| t == token.as_str())
+    } else {
+        false
+    }
+}
+
+/// Check if the Authorization header matches the configured db-admin-token.
+fn check_db_admin_token(auth: &Option<String>, cfg: &AppConfig) -> bool {
+    if let Some(ref token) = cfg.db_admin_token {
+        if token.is_empty() {
+            return false;
+        }
+        auth.as_ref()
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .is_some_and(|t| t == token.as_str())
+    } else {
+        false
+    }
+}
+
 use crate::config::{AppConfig, DashboardAuthConfig, TlsMode, clear_auth_config, save_auth_config};
 use crate::gpu::env::{self as gpu_env, GPU_ARCHITECTURES, GpuEnv};
 
@@ -1050,16 +1105,16 @@ pub fn api_routes(
     let db_query = api_db_query(chat_storage.clone(), app_config.clone());
     let internal_token = api_internal_token(app_config.clone(), auth_manager, bind_host);
 
-    let get_sessions = api_get_sessions(state.clone());
-    let create_session = api_create_session(state.clone());
-    let delete_session = api_delete_session(state.clone());
-    let get_active_session = api_get_active_session(state.clone());
-    let set_active_session = api_set_active_session(state.clone());
+    let get_sessions = api_get_sessions(state.clone(), app_config.clone());
+    let create_session = api_create_session(state.clone(), app_config.clone());
+    let delete_session = api_delete_session(state.clone(), app_config.clone());
+    let get_active_session = api_get_active_session(state.clone(), app_config.clone());
+    let set_active_session = api_set_active_session(state.clone(), app_config.clone());
     let get_capabilities = api_get_capabilities(state.clone());
     let spawn_session_with_preset =
         api_spawn_session_with_preset(state.clone(), app_config.clone());
     let attach = api_attach(state.clone(), app_config.clone());
-    let detach = api_detach(state.clone());
+    let detach = api_detach(state.clone(), app_config.clone());
     let check_lhm = api_check_lhm();
     let start_lhm = api_lhm_start();
     let install_lhm = api_lhm_install();
@@ -1067,13 +1122,13 @@ pub fn api_routes(
     let progress_lhm = api_lhm_progress();
     let status_lhm = api_lhm_status(app_config.clone());
     let disable_lhm = api_disable_lhm(app_config.clone());
-    let remote_agent_latest = api_remote_agent_latest_release();
+    let remote_agent_latest = api_remote_agent_latest_release(app_config.clone());
     let remote_agent_detect = api_remote_agent_detect(app_config.clone());
     let remote_agent_host_key = api_remote_agent_ssh_host_key(app_config.clone());
     let remote_agent_trust_host = api_remote_agent_ssh_trust(app_config.clone());
     let remote_agent_status = api_remote_agent_status(app_config.clone());
     let remote_agent_remove = api_remote_agent_remove(app_config.clone());
-    let remote_agent_tls_status = api_remote_agent_tls_status(state.clone(), app_config.clone());
+    let remote_agent_tls_status = api_remote_agent_tls_status(app_config.clone());
     let sensor_bridge_status = api_sensor_bridge_status();
     let sensor_bridge_install = api_sensor_bridge_install();
     let sensor_bridge_uninstall = api_sensor_bridge_uninstall();
@@ -1465,20 +1520,31 @@ fn api_put_auth_config(
         })
 }
 
-fn api_remote_agent_latest_release()
--> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+fn api_remote_agent_latest_release(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "remote-agent" / "releases" / "latest")
         .and(warp::get())
-        .and_then(move || async move {
-            match crate::agent::latest_release_info().await {
-                Ok(release) => Ok::<_, warp::Rejection>(warp::reply::json(
-                    &serde_json::json!({"ok": true, "release": release}),
-                )),
-                Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(
-                    &serde_json::json!({"ok": false, "error": e.to_string()}),
-                )),
-            }
-        })
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(
+            move |auth: Option<String>, cfg: Arc<AppConfig>| async move {
+                let bearer = extract_bearer(auth);
+                if bearer.as_deref() != cfg.api_token.as_deref().filter(|t| !t.is_empty()) {
+                    return Ok(unauthorized_api_token());
+                }
+                match crate::agent::latest_release_info().await {
+                    Ok(release) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({"ok": true, "release": release}),
+                    ))
+                        as Box<dyn warp::reply::Reply>),
+                    Err(e) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({"ok": false, "error": e.to_string()}),
+                    ))
+                        as Box<dyn warp::reply::Reply>),
+                }
+            },
+        )
 }
 
 fn api_remote_agent_detect(
@@ -1486,26 +1552,38 @@ fn api_remote_agent_detect(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "remote-agent" / "detect")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |mut request: crate::agent::RemoteAgentDetectRequest| {
-            let app_config = app_config.clone();
-            async move {
-                match hydrate_ssh_connection(
-                    request.ssh_connection.take(),
-                    &request.ssh_target,
-                    &app_config,
-                ) {
-                    Ok(connection) => request.ssh_connection = Some(connection),
-                    Err(e) => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": e.to_string()}),
-                        ));
+        .and_then(
+            move |auth: Option<String>, mut request: crate::agent::RemoteAgentDetectRequest| {
+                let app_config = app_config.clone();
+                async move {
+                    let bearer = extract_bearer(auth);
+                    if bearer.as_deref()
+                        != app_config.api_token.as_deref().filter(|t| !t.is_empty())
+                    {
+                        return Ok(unauthorized_api_token());
                     }
+                    match hydrate_ssh_connection(
+                        request.ssh_connection.take(),
+                        &request.ssh_target,
+                        &app_config,
+                    ) {
+                        Ok(connection) => request.ssh_connection = Some(connection),
+                        Err(e) => {
+                            return Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": e.to_string()}),
+                            ))
+                                as Box<dyn warp::reply::Reply>);
+                        }
+                    }
+                    let response = crate::agent::detect_remote_agent(request).await;
+                    Ok::<_, warp::Rejection>(
+                        Box::new(warp::reply::json(&response)) as Box<dyn warp::reply::Reply>
+                    )
                 }
-                let response = crate::agent::detect_remote_agent(request).await;
-                Ok::<_, warp::Rejection>(warp::reply::json(&response))
-            }
-        })
+            },
+        )
 }
 
 fn api_remote_agent_ssh_host_key(
@@ -1513,27 +1591,41 @@ fn api_remote_agent_ssh_host_key(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "remote-agent" / "ssh" / "host-key")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |request: serde_json::Map<String, serde_json::Value>| {
-            let app_config = app_config.clone();
-            async move {
-                let target = request
-                    .get("ssh_target")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("");
-                let connection = ssh_connection_from_request(&request, target);
-                match remote_ssh::scan_host_key(connection, app_config.ssh_known_hosts_file.clone())
+        .and_then(
+            move |auth: Option<String>, request: serde_json::Map<String, serde_json::Value>| {
+                let app_config = app_config.clone();
+                async move {
+                    let bearer = extract_bearer(auth);
+                    if bearer.as_deref()
+                        != app_config.api_token.as_deref().filter(|t| !t.is_empty())
+                    {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let target = request
+                        .get("ssh_target")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("");
+                    let connection = ssh_connection_from_request(&request, target);
+                    match remote_ssh::scan_host_key(
+                        connection,
+                        app_config.ssh_known_hosts_file.clone(),
+                    )
                     .await
-                {
-                    Ok(info) => Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({"ok": true, "host_key": info}),
-                    )),
-                    Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({"ok": false, "error": e.to_string()}),
-                    )),
+                    {
+                        Ok(info) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                            &serde_json::json!({"ok": true, "host_key": info}),
+                        ))
+                            as Box<dyn warp::reply::Reply>),
+                        Err(e) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": e.to_string()}),
+                        ))
+                            as Box<dyn warp::reply::Reply>),
+                    }
                 }
-            }
-        })
+            },
+        )
 }
 
 fn api_remote_agent_ssh_trust(
@@ -1541,10 +1633,15 @@ fn api_remote_agent_ssh_trust(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "remote-agent" / "ssh" / "trust")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |request: serde_json::Map<String, serde_json::Value>| {
+        .and_then(move |auth: Option<String>, request: serde_json::Map<String, serde_json::Value>| {
             let app_config = app_config.clone();
             async move {
+                let bearer = extract_bearer(auth);
+                if bearer.as_deref() != app_config.api_token.as_deref().filter(|t| !t.is_empty()) {
+                    return Ok(unauthorized_api_token());
+                }
                 let target = request
                     .get("ssh_target")
                     .and_then(|value| value.as_str())
@@ -1562,14 +1659,14 @@ fn api_remote_agent_ssh_trust(
                 {
                     Ok(info) if info.key_hex == key_hex.trim().to_ascii_lowercase() => {}
                     Ok(_) => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
+                        return Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
                             &serde_json::json!({"ok": false, "error": "Host key changed between scan and trust confirmation"}),
-                        ));
+                        )) as Box<dyn warp::reply::Reply>);
                     }
                     Err(e) => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
+                        return Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
                             &serde_json::json!({"ok": false, "error": e.to_string()}),
-                        ));
+                        )) as Box<dyn warp::reply::Reply>);
                     }
                 }
                 match remote_ssh::trust_host_key(
@@ -1577,12 +1674,12 @@ fn api_remote_agent_ssh_trust(
                     &connection,
                     key_hex,
                 ) {
-                    Ok(()) => Ok::<_, warp::Rejection>(warp::reply::json(
+                    Ok(()) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
                         &serde_json::json!({"ok": true}),
-                    )),
-                    Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(
+                    )) as Box<dyn warp::reply::Reply>),
+                    Err(e) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
                         &serde_json::json!({"ok": false, "error": e.to_string()}),
-                    )),
+                    )) as Box<dyn warp::reply::Reply>),
                 }
             }
         })
@@ -1612,11 +1709,21 @@ fn api_remote_agent_install(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "remote-agent" / "install")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
         .and_then(
-            move |mut request: crate::agent::RemoteAgentInstallRequest| {
+            move |auth: Option<String>, mut request: crate::agent::RemoteAgentInstallRequest| {
                 let app_config = app_config.clone();
                 async move {
+                    let bearer = extract_bearer(auth);
+                    if bearer.as_deref()
+                        != app_config
+                            .db_admin_token
+                            .as_deref()
+                            .filter(|t| !t.is_empty())
+                    {
+                        return Ok(unauthorized_db_admin_token());
+                    }
                     crate::agent::suppress_remote_agent_autostart();
                     request.ssh_connection = match hydrate_ssh_connection(
                         request.ssh_connection.take(),
@@ -1625,9 +1732,10 @@ fn api_remote_agent_install(
                     ) {
                         Ok(connection) => Some(connection),
                         Err(e) => {
-                            return Ok::<_, warp::Rejection>(warp::reply::json(
+                            return Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
                                 &serde_json::json!({"ok": false, "error": e.to_string()}),
-                            ));
+                            ))
+                                as Box<dyn warp::reply::Reply>);
                         }
                     };
                     let remote_os = if let Some(connection) = request.ssh_connection.clone() {
@@ -1635,19 +1743,25 @@ fn api_remote_agent_install(
                     } else {
                         crate::agent::detect_remote_os_simple(&request.ssh_target).await
                     };
+                    let api_token = app_config.api_token.clone();
                     match crate::agent::install_remote_agent(
                         request.ssh_target.trim(),
                         request.ssh_connection.clone(),
                         &request.asset,
                         request.install_path.clone(),
                         remote_os,
+                        api_token,
                     )
                     .await
                     {
-                        Ok(response) => Ok::<_, warp::Rejection>(warp::reply::json(&response)),
-                        Err(e) => Ok::<_, warp::Rejection>(warp::reply::json(
+                        Ok(response) => {
+                            Ok::<_, warp::Rejection>(Box::new(warp::reply::json(&response))
+                                as Box<dyn warp::reply::Reply>)
+                        }
+                        Err(e) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
                             &serde_json::json!({"ok": false, "error": e.to_string()}),
-                        )),
+                        ))
+                            as Box<dyn warp::reply::Reply>),
                     }
                 }
             },
@@ -1659,40 +1773,55 @@ fn api_remote_agent_status(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "remote-agent" / "status")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |request: serde_json::Map<String, serde_json::Value>| {
-            let app_config = app_config.clone();
-            async move {
-                let ssh_target = match request.get("ssh_target") {
-                    Some(v) => v.as_str().unwrap_or("").to_string(),
-                    None => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": "Missing ssh_target"}),
-                        ));
+        .and_then(
+            move |auth: Option<String>, request: serde_json::Map<String, serde_json::Value>| {
+                let app_config = app_config.clone();
+                async move {
+                    let bearer = extract_bearer(auth);
+                    if bearer.as_deref()
+                        != app_config.api_token.as_deref().filter(|t| !t.is_empty())
+                    {
+                        return Ok(unauthorized_api_token());
                     }
-                };
-                let ssh_connection = match hydrate_ssh_connection(
-                    request
-                        .get("ssh_connection")
-                        .and_then(|value| serde_json::from_value(value.clone()).ok()),
-                    &ssh_target,
-                    &app_config,
-                ) {
-                    Ok(connection) => Some(connection),
-                    Err(e) => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
+                    let ssh_target = match request.get("ssh_target") {
+                        Some(v) => v.as_str().unwrap_or("").to_string(),
+                        None => {
+                            return Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": "Missing ssh_target"}),
+                            ))
+                                as Box<dyn warp::reply::Reply>);
+                        }
+                    };
+                    let ssh_connection = match hydrate_ssh_connection(
+                        request
+                            .get("ssh_connection")
+                            .and_then(|value| serde_json::from_value(value.clone()).ok()),
+                        &ssh_target,
+                        &app_config,
+                    ) {
+                        Ok(connection) => Some(connection),
+                        Err(e) => {
+                            return Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": e.to_string()}),
+                            ))
+                                as Box<dyn warp::reply::Reply>);
+                        }
+                    };
+                    match crate::agent::status_remote_agent(&ssh_target, ssh_connection).await {
+                        Ok(response) => {
+                            Ok::<_, warp::Rejection>(Box::new(warp::reply::json(&response))
+                                as Box<dyn warp::reply::Reply>)
+                        }
+                        Err(e) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
                             &serde_json::json!({"ok": false, "error": e.to_string()}),
-                        ));
+                        ))
+                            as Box<dyn warp::reply::Reply>),
                     }
-                };
-                match crate::agent::status_remote_agent(&ssh_target, ssh_connection).await {
-                    Ok(response) => Ok(warp::reply::json(&response)),
-                    Err(e) => Ok(warp::reply::json(
-                        &serde_json::json!({"ok": false, "error": e.to_string()}),
-                    )),
                 }
-            }
-        })
+            },
+        )
 }
 
 fn api_remote_agent_start(
@@ -1700,58 +1829,72 @@ fn api_remote_agent_start(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "remote-agent" / "start")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |request: serde_json::Map<String, serde_json::Value>| {
-            let app_config = app_config.clone();
-            async move {
-                crate::agent::suppress_remote_agent_autostart();
-                let ssh_target = match request.get("ssh_target") {
-                    Some(v) => v.as_str().unwrap_or("").to_string(),
-                    None => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": "Missing ssh_target"}),
-                        ));
+        .and_then(
+            move |auth: Option<String>, request: serde_json::Map<String, serde_json::Value>| {
+                let app_config = app_config.clone();
+                async move {
+                    let bearer = extract_bearer(auth);
+                    if bearer.as_deref()
+                        != app_config.api_token.as_deref().filter(|t| !t.is_empty())
+                    {
+                        return Ok(unauthorized_api_token());
                     }
-                };
-                let install_path = match request.get("install_path") {
-                    Some(v) => v.as_str().unwrap_or("").to_string(),
-                    None => crate::agent::default_install_path_for_target(&ssh_target).await,
-                };
-                let ssh_connection = match hydrate_ssh_connection(
-                    request
-                        .get("ssh_connection")
-                        .and_then(|value| serde_json::from_value(value.clone()).ok()),
-                    &ssh_target,
-                    &app_config,
-                ) {
-                    Ok(connection) => Some(connection),
-                    Err(e) => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": e.to_string()}),
-                        ));
-                    }
-                };
-                let command = if let Some(ref conn) = ssh_connection {
-                    // Detect OS via SSH for accurate command building
-                    let remote_os = crate::agent::detect_remote_os_with(conn).await;
-                    // Derive install path from detected OS instead of trusting frontend
-                    let resolved_install_path =
-                        crate::agent::default_install_path_for_os(remote_os);
-                    crate::agent::default_start_command_for_os_with(
-                        conn,
-                        remote_os,
-                        &resolved_install_path,
-                    )
-                    .await
-                } else {
-                    // Fallback: use frontend's command or build default
-                    match request.get("start_command") {
-                        Some(v) => {
-                            let cmd = v.as_str().unwrap_or("").to_string();
-                            if crate::agent::validate_remote_command(&cmd) {
-                                cmd
-                            } else {
-                                // Invalid or unsafe command → fall back to safe default
+                    crate::agent::suppress_remote_agent_autostart();
+                    let ssh_target = match request.get("ssh_target") {
+                        Some(v) => v.as_str().unwrap_or("").to_string(),
+                        None => {
+                            return Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": "Missing ssh_target"}),
+                            ))
+                                as Box<dyn warp::reply::Reply>);
+                        }
+                    };
+                    let install_path = match request.get("install_path") {
+                        Some(v) => v.as_str().unwrap_or("").to_string(),
+                        None => crate::agent::default_install_path_for_target(&ssh_target).await,
+                    };
+                    let ssh_connection = match hydrate_ssh_connection(
+                        request
+                            .get("ssh_connection")
+                            .and_then(|value| serde_json::from_value(value.clone()).ok()),
+                        &ssh_target,
+                        &app_config,
+                    ) {
+                        Ok(connection) => Some(connection),
+                        Err(e) => {
+                            return Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": e.to_string()}),
+                            ))
+                                as Box<dyn warp::reply::Reply>);
+                        }
+                    };
+                    let command = if let Some(ref conn) = ssh_connection {
+                        let remote_os = crate::agent::detect_remote_os_with(conn).await;
+                        let resolved_install_path =
+                            crate::agent::default_install_path_for_os(remote_os);
+                        crate::agent::default_start_command_for_os_with(
+                            conn,
+                            remote_os,
+                            &resolved_install_path,
+                        )
+                        .await
+                    } else {
+                        match request.get("start_command") {
+                            Some(v) => {
+                                let cmd = v.as_str().unwrap_or("").to_string();
+                                if crate::agent::validate_remote_command(&cmd) {
+                                    cmd
+                                } else {
+                                    crate::agent::default_start_command_for_target(
+                                        &ssh_target,
+                                        &install_path,
+                                    )
+                                    .await
+                                }
+                            }
+                            None => {
                                 crate::agent::default_start_command_for_target(
                                     &ssh_target,
                                     &install_path,
@@ -1759,30 +1902,27 @@ fn api_remote_agent_start(
                                 .await
                             }
                         }
-                        None => {
-                            crate::agent::default_start_command_for_target(
-                                &ssh_target,
-                                &install_path,
-                            )
-                            .await
+                    };
+                    match crate::agent::start_remote_agent(
+                        &ssh_target,
+                        ssh_connection,
+                        &install_path,
+                        &command,
+                    )
+                    .await
+                    {
+                        Ok(response) => {
+                            Ok::<_, warp::Rejection>(Box::new(warp::reply::json(&response))
+                                as Box<dyn warp::reply::Reply>)
                         }
+                        Err(e) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": e.to_string()}),
+                        ))
+                            as Box<dyn warp::reply::Reply>),
                     }
-                };
-                match crate::agent::start_remote_agent(
-                    &ssh_target,
-                    ssh_connection,
-                    &install_path,
-                    &command,
-                )
-                .await
-                {
-                    Ok(response) => Ok(warp::reply::json(&response)),
-                    Err(e) => Ok(warp::reply::json(
-                        &serde_json::json!({"ok": false, "error": e.to_string()}),
-                    )),
                 }
-            }
-        })
+            },
+        )
 }
 
 fn api_remote_agent_update(
@@ -1790,41 +1930,56 @@ fn api_remote_agent_update(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "remote-agent" / "update")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |request: serde_json::Map<String, serde_json::Value>| {
-            let app_config = app_config.clone();
-            async move {
-                crate::agent::suppress_remote_agent_autostart();
-                let ssh_target = match request.get("ssh_target") {
-                    Some(v) => v.as_str().unwrap_or("").to_string(),
-                    None => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": "Missing ssh_target"}),
-                        ));
+        .and_then(
+            move |auth: Option<String>, request: serde_json::Map<String, serde_json::Value>| {
+                let app_config = app_config.clone();
+                async move {
+                    let bearer = extract_bearer(auth);
+                    if bearer.as_deref()
+                        != app_config.api_token.as_deref().filter(|t| !t.is_empty())
+                    {
+                        return Ok(unauthorized_api_token());
                     }
-                };
-                let ssh_connection = match hydrate_ssh_connection(
-                    request
-                        .get("ssh_connection")
-                        .and_then(|value| serde_json::from_value(value.clone()).ok()),
-                    &ssh_target,
-                    &app_config,
-                ) {
-                    Ok(connection) => Some(connection),
-                    Err(e) => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
+                    crate::agent::suppress_remote_agent_autostart();
+                    let ssh_target = match request.get("ssh_target") {
+                        Some(v) => v.as_str().unwrap_or("").to_string(),
+                        None => {
+                            return Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": "Missing ssh_target"}),
+                            ))
+                                as Box<dyn warp::reply::Reply>);
+                        }
+                    };
+                    let ssh_connection = match hydrate_ssh_connection(
+                        request
+                            .get("ssh_connection")
+                            .and_then(|value| serde_json::from_value(value.clone()).ok()),
+                        &ssh_target,
+                        &app_config,
+                    ) {
+                        Ok(connection) => Some(connection),
+                        Err(e) => {
+                            return Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": e.to_string()}),
+                            ))
+                                as Box<dyn warp::reply::Reply>);
+                        }
+                    };
+                    match crate::agent::update_remote_agent(&ssh_target, ssh_connection).await {
+                        Ok(response) => {
+                            Ok::<_, warp::Rejection>(Box::new(warp::reply::json(&response))
+                                as Box<dyn warp::reply::Reply>)
+                        }
+                        Err(e) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
                             &serde_json::json!({"ok": false, "error": e.to_string()}),
-                        ));
+                        ))
+                            as Box<dyn warp::reply::Reply>),
                     }
-                };
-                match crate::agent::update_remote_agent(&ssh_target, ssh_connection).await {
-                    Ok(response) => Ok(warp::reply::json(&response)),
-                    Err(e) => Ok(warp::reply::json(
-                        &serde_json::json!({"ok": false, "error": e.to_string()}),
-                    )),
                 }
-            }
-        })
+            },
+        )
 }
 
 fn api_remote_agent_stop(
@@ -1832,41 +1987,56 @@ fn api_remote_agent_stop(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "remote-agent" / "stop")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |request: serde_json::Map<String, serde_json::Value>| {
-            let app_config = app_config.clone();
-            async move {
-                crate::agent::suppress_remote_agent_autostart();
-                let ssh_target = match request.get("ssh_target") {
-                    Some(v) => v.as_str().unwrap_or("").to_string(),
-                    None => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": "Missing ssh_target"}),
-                        ));
+        .and_then(
+            move |auth: Option<String>, request: serde_json::Map<String, serde_json::Value>| {
+                let app_config = app_config.clone();
+                async move {
+                    let bearer = extract_bearer(auth);
+                    if bearer.as_deref()
+                        != app_config.api_token.as_deref().filter(|t| !t.is_empty())
+                    {
+                        return Ok(unauthorized_api_token());
                     }
-                };
-                let ssh_connection = match hydrate_ssh_connection(
-                    request
-                        .get("ssh_connection")
-                        .and_then(|value| serde_json::from_value(value.clone()).ok()),
-                    &ssh_target,
-                    &app_config,
-                ) {
-                    Ok(connection) => Some(connection),
-                    Err(e) => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
+                    crate::agent::suppress_remote_agent_autostart();
+                    let ssh_target = match request.get("ssh_target") {
+                        Some(v) => v.as_str().unwrap_or("").to_string(),
+                        None => {
+                            return Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": "Missing ssh_target"}),
+                            ))
+                                as Box<dyn warp::reply::Reply>);
+                        }
+                    };
+                    let ssh_connection = match hydrate_ssh_connection(
+                        request
+                            .get("ssh_connection")
+                            .and_then(|value| serde_json::from_value(value.clone()).ok()),
+                        &ssh_target,
+                        &app_config,
+                    ) {
+                        Ok(connection) => Some(connection),
+                        Err(e) => {
+                            return Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": e.to_string()}),
+                            ))
+                                as Box<dyn warp::reply::Reply>);
+                        }
+                    };
+                    match crate::agent::stop_remote_agent(&ssh_target, ssh_connection).await {
+                        Ok(response) => {
+                            Ok::<_, warp::Rejection>(Box::new(warp::reply::json(&response))
+                                as Box<dyn warp::reply::Reply>)
+                        }
+                        Err(e) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
                             &serde_json::json!({"ok": false, "error": e.to_string()}),
-                        ));
+                        ))
+                            as Box<dyn warp::reply::Reply>),
                     }
-                };
-                match crate::agent::stop_remote_agent(&ssh_target, ssh_connection).await {
-                    Ok(response) => Ok(warp::reply::json(&response)),
-                    Err(e) => Ok(warp::reply::json(
-                        &serde_json::json!({"ok": false, "error": e.to_string()}),
-                    )),
                 }
-            }
-        })
+            },
+        )
 }
 
 fn api_remote_agent_remove(
@@ -1874,60 +2044,82 @@ fn api_remote_agent_remove(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "remote-agent" / "remove")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |request: serde_json::Map<String, serde_json::Value>| {
-            let app_config = app_config.clone();
-            async move {
-                crate::agent::suppress_remote_agent_autostart();
-                let ssh_target = match request.get("ssh_target") {
-                    Some(v) => v.as_str().unwrap_or("").to_string(),
-                    None => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": "Missing ssh_target"}),
-                        ));
+        .and_then(
+            move |auth: Option<String>, request: serde_json::Map<String, serde_json::Value>| {
+                let app_config = app_config.clone();
+                async move {
+                    let bearer = extract_bearer(auth);
+                    if bearer.as_deref()
+                        != app_config
+                            .db_admin_token
+                            .as_deref()
+                            .filter(|t| !t.is_empty())
+                    {
+                        return Ok(unauthorized_db_admin_token());
                     }
-                };
-                let ssh_connection = match hydrate_ssh_connection(
-                    request
-                        .get("ssh_connection")
-                        .and_then(|value| serde_json::from_value(value.clone()).ok()),
-                    &ssh_target,
-                    &app_config,
-                ) {
-                    Ok(connection) => Some(connection),
-                    Err(e) => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
+                    crate::agent::suppress_remote_agent_autostart();
+                    let ssh_target = match request.get("ssh_target") {
+                        Some(v) => v.as_str().unwrap_or("").to_string(),
+                        None => {
+                            return Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": "Missing ssh_target"}),
+                            ))
+                                as Box<dyn warp::reply::Reply>);
+                        }
+                    };
+                    let ssh_connection = match hydrate_ssh_connection(
+                        request
+                            .get("ssh_connection")
+                            .and_then(|value| serde_json::from_value(value.clone()).ok()),
+                        &ssh_target,
+                        &app_config,
+                    ) {
+                        Ok(connection) => Some(connection),
+                        Err(e) => {
+                            return Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": e.to_string()}),
+                            ))
+                                as Box<dyn warp::reply::Reply>);
+                        }
+                    };
+                    match crate::agent::remove_remote_agent(&ssh_target, ssh_connection).await {
+                        Ok(response) => {
+                            Ok::<_, warp::Rejection>(Box::new(warp::reply::json(&response))
+                                as Box<dyn warp::reply::Reply>)
+                        }
+                        Err(e) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
                             &serde_json::json!({"ok": false, "error": e.to_string()}),
-                        ));
+                        ))
+                            as Box<dyn warp::reply::Reply>),
                     }
-                };
-                match crate::agent::remove_remote_agent(&ssh_target, ssh_connection).await {
-                    Ok(response) => Ok(warp::reply::json(&response)),
-                    Err(e) => Ok(warp::reply::json(
-                        &serde_json::json!({"ok": false, "error": e.to_string()}),
-                    )),
                 }
-            }
-        })
+            },
+        )
 }
 
 fn api_remote_agent_tls_status(
-    _state: AppState,
-    _app_config: Arc<AppConfig>,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "remote-agent" / "tls-status")
         .and(warp::get())
-        .map(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .map(move |auth: Option<String>| {
+            let bearer = extract_bearer(auth);
+            if bearer.as_deref() != app_config.api_token.as_deref().filter(|t| !t.is_empty()) {
+                return unauthorized_api_token();
+            }
             let certs_dir = crate::certs::certs_dir();
             let ca_present = certs_dir.join("ca.pem").exists();
             let server_present = certs_dir.join("agent-server.pem").exists();
             let client_present = certs_dir.join("agent-client.pem").exists();
-            warp::reply::json(&serde_json::json!({
+            Box::new(warp::reply::json(&serde_json::json!({
                 "mtls_enforced": true,
                 "ca_present": ca_present,
                 "server_cert_present": server_present,
                 "client_cert_present": client_present,
-            }))
+            }))) as Box<dyn warp::reply::Reply>
         })
 }
 
@@ -3835,10 +4027,11 @@ fn api_db_backup(
                     }
 
                     let config_dir = cfg.config_dir.clone();
-                    let backup_dir = config_dir.join("backups");
+                    // Manual backups live in their own subdirectory, separate from auto backups.
+                    let backup_dir = config_dir.join("backups").join("manual");
 
                     if let Err(e) = std::fs::create_dir_all(&backup_dir) {
-                        eprintln!("Failed to create backup directory: {e}");
+                        eprintln!("Failed to create manual backup directory: {e}");
                         return Ok::<_, warp::Rejection>(warp::reply::with_status(
                             warp::reply::json(&serde_json::json!({"error": e.to_string()})),
                             warp::http::StatusCode::OK,
@@ -3858,7 +4051,7 @@ fn api_db_backup(
                                 .map(|m| m.len())
                                 .unwrap_or(0);
 
-                            // Clean up old backups (keep last 7)
+                            // Keep the last 7 manual backups
                             if let Ok(entries) = std::fs::read_dir(&backup_dir) {
                                 let mut backups: Vec<_> = entries
                                     .filter_map(|e| e.ok())
@@ -3876,7 +4069,7 @@ fn api_db_backup(
                             Ok::<_, warp::Rejection>(warp::reply::with_status(
                                 warp::reply::json(&serde_json::json!({
                                     "status": "backup_created",
-                                    "path": backup_path.to_string_lossy().to_string(),
+                                    "name": format!("manual/{}", backup_path.file_name().unwrap_or_default().to_string_lossy()),
                                     "size_bytes": file_size,
                                 })),
                                 warp::http::StatusCode::OK,
@@ -4115,18 +4308,23 @@ fn api_db_backups(
                     ));
                 }
 
-                let backup_dir = cfg.config_dir.join("backups");
+                let backups_root = cfg.config_dir.join("backups");
 
                 let mut backups = Vec::new();
                 let mut total_size = 0u64;
 
-                if let Ok(entries) = std::fs::read_dir(&backup_dir) {
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        if let Ok(metadata) = entry.metadata()
-                            && metadata.is_file()
-                        {
-                            let name = entry.file_name().to_string_lossy().to_string();
-                            if name.starts_with("chat_") || name.starts_with("chat_auto_") {
+                // Scan auto/, daily/, and manual/ subdirectories.
+                for (kind, subdir) in [("auto", "auto"), ("daily", "daily"), ("manual", "manual")] {
+                    let dir = backups_root.join(subdir);
+                    if let Ok(entries) = std::fs::read_dir(&dir) {
+                        for entry in entries.filter_map(|e| e.ok()) {
+                            if let Ok(metadata) = entry.metadata()
+                                && metadata.is_file()
+                            {
+                                let filename = entry.file_name().to_string_lossy().to_string();
+                                if !filename.ends_with(".db") {
+                                    continue;
+                                }
                                 let size = metadata.len();
                                 total_size += size;
                                 let modified = metadata
@@ -4135,9 +4333,10 @@ fn api_db_backups(
                                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                                     .map(|d| d.as_millis() as i64)
                                     .unwrap_or(0);
-
+                                // Name includes the subdirectory so restore/delete can resolve it.
                                 backups.push(serde_json::json!({
-                                    "name": name,
+                                    "name": format!("{}/{}", subdir, filename),
+                                    "kind": kind,
                                     "size": size,
                                     "modified": modified,
                                 }));
@@ -4236,8 +4435,10 @@ fn api_db_restore(
                     // Get the current database path
                     let db_path = store.get_db_path();
 
-                    // Create a safety backup before restore
-                    let safety_backup = cfg.config_dir.join("backups").join(format!(
+                    // Safety backup goes into manual/ so it doesn't evict auto backups.
+                    let manual_dir = cfg.config_dir.join("backups").join("manual");
+                    let _ = std::fs::create_dir_all(&manual_dir);
+                    let safety_backup = manual_dir.join(format!(
                         "pre_restore_{}.db",
                         std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -4456,35 +4657,55 @@ fn api_db_delete_backup(
 
 fn api_get_sessions(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
     warp::path!("api" / "sessions")
         .and(warp::path::end())
         .and(warp::get())
-        .and_then(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
             let state = state.clone();
             async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
                 let sessions = state.get_sessions();
-                Ok::<_, warp::Rejection>(warp::reply::json(&sessions))
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &sessions,
+                )))
             }
         })
 }
 
 fn api_create_session(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
     warp::path!("api" / "sessions")
         .and(warp::path::end())
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |session: app_state::Session| {
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, session: app_state::Session, cfg: Arc<AppConfig>| {
             let state = state.clone();
             async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
                 if state.add_session(session) {
-                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({"ok": true}))),
+                    )
                 } else {
-                    Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({"ok": false, "error": "Maximum sessions reached"}),
-                    ))
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": "Maximum sessions reached"}),
+                        )),
+                    )
                 }
             }
         })
@@ -4492,33 +4713,53 @@ fn api_create_session(
 
 fn api_delete_session(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
     warp::path!("api" / "sessions" / String)
         .and(warp::path::end())
         .and(warp::delete())
-        .and_then(move |session_id: String| {
-            let state = state.clone();
-            async move {
-                if state.remove_session(&session_id) {
-                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
-                } else {
-                    Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({"ok": false, "error": "Session not found"}),
-                    ))
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(
+            move |session_id: String, auth: Option<String>, cfg: Arc<AppConfig>| {
+                let state = state.clone();
+                async move {
+                    if !check_db_admin_token(&auth, &cfg) {
+                        return Ok(unauthorized_db_admin_token());
+                    }
+                    if state.remove_session(&session_id) {
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"ok": true})),
+                        ))
+                    } else {
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": "Session not found"}),
+                            ),
+                        ))
+                    }
                 }
-            }
-        })
+            },
+        )
 }
 
 fn api_get_active_session(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
     warp::path!("api" / "sessions" / "active")
         .and(warp::path::end())
         .and(warp::get())
-        .and_then(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
             let state = state.clone();
             async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
                 let session_id = state.active_session_id.lock().unwrap().clone();
                 let sessions = state.sessions.lock().unwrap();
                 let session = sessions.iter().find(|s| s.id == session_id).cloned();
@@ -4532,16 +4773,18 @@ fn api_get_active_session(
                                 format!("Attach:{}", endpoint)
                             }
                         };
-                        Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                            "id": s.id,
-                            "name": s.name,
-                            "mode": mode_str,
-                            "status": s.status,
-                            "last_active": s.last_active
-                        })))
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "id": s.id,
+                                "name": s.name,
+                                "mode": mode_str,
+                                "status": s.status,
+                                "last_active": s.last_active
+                            })),
+                        ))
                     }
-                    None => Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({"error": "No active session"}),
+                    None => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({"error": "No active session"})),
                     )),
                 }
             }
@@ -4582,28 +4825,39 @@ fn api_get_capabilities(
 
 fn api_set_active_session(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
     warp::path!("api" / "sessions" / "active")
         .and(warp::path::end())
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |payload: serde_json::Value| {
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, payload: serde_json::Value, cfg: Arc<AppConfig>| {
             let state = state.clone();
             async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
                 let session_id = match payload.get("id") {
                     Some(v) => v.as_str().unwrap_or("").to_string(),
                     None => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                             &serde_json::json!({"ok": false, "error": "Missing session id"}),
-                        ));
+                        )));
                     }
                 };
                 if state.set_active_session(&session_id) {
-                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({"ok": true}))),
+                    )
                 } else {
-                    Ok::<_, warp::Rejection>(warp::reply::json(
-                        &serde_json::json!({"ok": false, "error": "Session not found"}),
-                    ))
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": "Session not found"}),
+                        )),
+                    )
                 }
             }
         })
@@ -4613,14 +4867,20 @@ fn api_spawn_session_with_preset(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config_inner = app_config.clone();
     warp::path!("api" / "sessions" / "spawn")
         .and(warp::path::end())
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json())
-        .and_then(move |payload: serde_json::Value| {
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, payload: serde_json::Value, cfg: Arc<AppConfig>| {
             let state = state.clone();
-            let app_config = app_config.clone();
+            let app_config = app_config_inner.clone();
             async move {
+                if !check_db_admin_token(&auth, &cfg) {
+                    return Ok(unauthorized_db_admin_token());
+                }
                 let port: u16 = match payload.get("port") {
                     Some(v) => {
                         if let Some(p) = v.as_u64() {
@@ -4646,15 +4906,15 @@ fn api_spawn_session_with_preset(
                         if let Some(s) = v.as_str() {
                             s.to_string()
                         } else {
-                            return Ok::<_, warp::Rejection>(warp::reply::json(
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                                 &serde_json::json!({"ok": false, "error": "Invalid preset_id"}),
-                            ));
+                            )));
                         }
                     }
                     None => {
-                        return Ok::<_, warp::Rejection>(warp::reply::json(
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                             &serde_json::json!({"ok": false, "error": "Missing preset_id"}),
-                        ));
+                        )));
                     }
                 };
 
@@ -4663,9 +4923,9 @@ fn api_spawn_session_with_preset(
                     match presets.iter().find(|p| p.id == preset_id).cloned() {
                         Some(p) => p,
                         None => {
-                            return Ok::<_, warp::Rejection>(warp::reply::json(
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                                 &serde_json::json!({"ok": false, "error": "Preset not found"}),
-                            ));
+                            )));
                         }
                     }
                 };
@@ -4679,9 +4939,9 @@ fn api_spawn_session_with_preset(
                 );
 
                 if !state.add_session(session) {
-                    return Ok::<_, warp::Rejection>(warp::reply::json(
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                         &serde_json::json!({"ok": false, "error": "Failed to create session"}),
-                    ));
+                    )));
                 }
 
                 state.set_active_session(&session_id);
@@ -4726,15 +4986,15 @@ fn api_spawn_session_with_preset(
                 match crate::llama::server::start_server(&state, config, &app_config).await {
                     Ok(()) => {
                         state.update_session_status(&session_id, SessionStatus::Running);
-                        Ok::<_, warp::Rejection>(warp::reply::json(
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                             &serde_json::json!({"ok": true, "session_id": session_id}),
-                        ))
+                        )))
                     }
                     Err(e) => {
                         state.remove_session(&session_id);
-                        Ok::<_, warp::Rejection>(warp::reply::json(
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                             &serde_json::json!({"ok": false, "error": e.to_string()}),
-                        ))
+                        )))
                     }
                 }
             }
@@ -4909,18 +5169,25 @@ fn api_attach(
 
 fn api_detach(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
     warp::path!("api" / "detach")
         .and(warp::path::end())
         .and(warp::post())
-        .and_then(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
             let state = state.clone();
             async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
                 let active_id = state.active_session_id.lock().unwrap().clone();
                 if active_id.is_empty() {
-                    return Ok::<_, warp::Rejection>(warp::reply::json(
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                         &serde_json::json!({"ok": false, "error": "No active session to detach from"}),
-                    ));
+                    )));
                 }
 
                 // Check if the active session is an attach session
@@ -4930,16 +5197,16 @@ fn api_detach(
                 let is_attach = session.map(|s| matches!(s.mode, crate::state::SessionMode::Attach { .. }));
 
                 if !is_attach.unwrap_or(false) {
-                    return Ok::<_, warp::Rejection>(warp::reply::json(
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                         &serde_json::json!({"ok": false, "error": "Active session is not an attach session"}),
-                    ));
+                    )));
                 }
 
                 drop(sessions);
                 // Clear the active session only - server_running is managed by the poller
                 state.set_active_session("");
 
-                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(&serde_json::json!({"ok": true}))))
             }
         })
 }
@@ -5315,9 +5582,15 @@ fn api_put_tls_config(
                             ));
                         }
 
+                        let email = acme_obj
+                            .and_then(|o| o.get("email").and_then(|v| v.as_str()))
+                            .unwrap_or("")
+                            .to_string();
+
                         crate::config::AcmeConfig {
                             enabled,
                             fqdn,
+                            email,
                             environment,
                             dns_provider,
                             dns_config,
@@ -5873,6 +6146,7 @@ mod tests {
             acme: AcmeConfig {
                 enabled: true,
                 fqdn: "llama-monitor.example.com".to_string(),
+                email: String::new(),
                 environment: "staging".to_string(),
                 dns_provider: "cloudflare".to_string(),
                 dns_config,

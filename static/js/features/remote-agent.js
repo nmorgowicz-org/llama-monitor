@@ -26,6 +26,57 @@ const remoteAgentSetupState = {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+// Cached db-admin-token for install/remove endpoints.
+let cachedDbAdminToken = null;
+
+async function getDbAdminToken() {
+    if (cachedDbAdminToken) return cachedDbAdminToken;
+    try {
+        const res = await fetch('/api/db/admin-token');
+        if (res.ok) {
+            const data = await res.json();
+            if (data.token) {
+                cachedDbAdminToken = data.token;
+            }
+        }
+    } catch {
+        // Non-critical
+    }
+    return cachedDbAdminToken;
+}
+
+// Returns headers with api-token (Bearer) for all remote-agent endpoints.
+function remoteAgentHeaders(contentType = 'application/json') {
+    const base = window.authHeaders
+        ? window.authHeaders({ 'Content-Type': contentType })
+        : { 'Content-Type': contentType };
+    return base;
+}
+
+// Returns headers with db-admin-token for install/remove endpoints.
+async function remoteAgentAdminHeaders(contentType = 'application/json') {
+    const token = await getDbAdminToken();
+    const headers = { 'Content-Type': contentType };
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+}
+
+// Wrap a fetch call and show a 401-friendly message if auth fails.
+async function remoteAgentFetch(url, options) {
+    try {
+        const resp = await fetch(url, options);
+        if (resp.status === 401) {
+            showToast('Authentication required for this operation');
+            return { ok: false, status: 401, error: 'unauthorized' };
+        }
+        return resp;
+    } catch (err) {
+        throw err;
+    }
+}
+
 function inferredAgentUrl() {
     const explicit = document.getElementById('set-remote-agent-url')?.value.trim();
     if (explicit) return explicit;
@@ -271,10 +322,10 @@ async function scanRemoteAgentHostKey() {
     }
     if (trustBtn) trustBtn.style.display = 'none';
 
-    try {
-        const resp = await fetch('/api/remote-agent/ssh/host-key', {
+      try {
+        const resp = await remoteAgentFetch('/api/remote-agent/ssh/host-key', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: remoteAgentHeaders(),
             body: JSON.stringify({
                 ssh_target: sshTargetFromSetup(),
                 ssh_connection: connection,
@@ -316,9 +367,9 @@ async function trustRemoteAgentHostKey() {
         return;
     }
 
-    const resp = await fetch('/api/remote-agent/ssh/trust', {
+    const resp = await remoteAgentFetch('/api/remote-agent/ssh/trust', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: remoteAgentHeaders(),
         body: JSON.stringify({
             ssh_target: sshTargetFromSetup(),
             ssh_connection: connection,
@@ -353,8 +404,10 @@ async function checkRemoteAgentVersions() {
 
     if (latestEl) latestEl.textContent = 'Checking\u2026';
 
-    try {
-        const resp = await fetch('/api/remote-agent/releases/latest');
+     try {
+        const resp = await remoteAgentFetch('/api/remote-agent/releases/latest', {
+            headers: remoteAgentHeaders()
+        });
         const data = await resp.json();
         if (data.ok && data.release?.tag_name) {
             remoteAgentSetupState.latestVersion = data.release.tag_name;
@@ -401,9 +454,9 @@ async function checkRemoteAgentVersions() {
     }
 
     try {
-        const resp = await fetch('/api/remote-agent/detect', {
+        const resp = await remoteAgentFetch('/api/remote-agent/detect', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: remoteAgentHeaders(),
             body: JSON.stringify({
                 ssh_target: sshTargetFromSetup(),
                 ssh_connection: connection,
@@ -522,11 +575,11 @@ async function checkManagedRemoteAgent() {
         return { ok: false, error: 'No SSH host' };
     }
 
-    showAgentSetupProgress('Checking managed agent\u2026', 20);
+     showAgentSetupProgress('Checking managed agent\u2026', 20);
     try {
-        const resp = await fetch('/api/remote-agent/status', {
+        const resp = await remoteAgentFetch('/api/remote-agent/status', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: remoteAgentHeaders(),
             body: JSON.stringify(remoteAgentSetupRequestPayload())
         });
         const data = await resp.json();
@@ -555,9 +608,9 @@ async function installRemoteAgent() {
     if (!remoteAgentSetupState.hostKey) {
         showAgentSetupProgress('Scanning host key\u2026', 5);
         try {
-            const resp = await fetch('/api/remote-agent/ssh/host-key', {
+            const resp = await remoteAgentFetch('/api/remote-agent/ssh/host-key', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: remoteAgentHeaders(),
                 body: JSON.stringify({
                     ssh_target: sshTargetFromSetup(),
                     ssh_connection: connection,
@@ -579,9 +632,9 @@ async function installRemoteAgent() {
     if (!remoteAgentSetupState.hostKey.trusted) {
         showAgentSetupProgress('Trusting host key\u2026', 10);
         try {
-            const resp = await fetch('/api/remote-agent/ssh/trust', {
+            const resp = await remoteAgentFetch('/api/remote-agent/ssh/trust', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: remoteAgentHeaders(),
                 body: JSON.stringify({
                     ssh_target: sshTargetFromSetup(),
                     ssh_connection: connection,
@@ -603,9 +656,9 @@ async function installRemoteAgent() {
     showAgentSetupProgress('Detecting remote OS\u2026', 15);
 
     try {
-        const detectResp = await fetch('/api/remote-agent/detect', {
+        const detectResp = await remoteAgentFetch('/api/remote-agent/detect', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: remoteAgentHeaders(),
             body: JSON.stringify({
                 ssh_target: sshTargetFromSetup(),
                 ssh_connection: connection,
@@ -633,9 +686,10 @@ async function installRemoteAgent() {
 
         showAgentSetupProgress('Downloading ' + asset.name + '\u2026', 20);
 
-        const resp = await fetch('/api/remote-agent/install', {
+        const installHeaders = await remoteAgentAdminHeaders();
+        const resp = await remoteAgentFetch('/api/remote-agent/install', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: installHeaders,
             body: JSON.stringify({
                 ssh_target: sshTargetFromSetup(),
                 ssh_connection: connection,
@@ -680,9 +734,9 @@ async function upgradeRemoteAgent() {
     if (!remoteAgentSetupState.hostKey) {
         showAgentSetupProgress('Scanning host key\u2026', 5);
         try {
-            const resp = await fetch('/api/remote-agent/ssh/host-key', {
+            const resp = await remoteAgentFetch('/api/remote-agent/ssh/host-key', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: remoteAgentHeaders(),
                 body: JSON.stringify({
                     ssh_target: sshTargetFromSetup(),
                     ssh_connection: connection,
@@ -704,9 +758,9 @@ async function upgradeRemoteAgent() {
     if (!remoteAgentSetupState.hostKey.trusted) {
         showAgentSetupProgress('Trusting host key\u2026', 10);
         try {
-            const resp = await fetch('/api/remote-agent/ssh/trust', {
+            const resp = await remoteAgentFetch('/api/remote-agent/ssh/trust', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: remoteAgentHeaders(),
                 body: JSON.stringify({
                     ssh_target: sshTargetFromSetup(),
                     ssh_connection: connection,
@@ -728,9 +782,9 @@ async function upgradeRemoteAgent() {
     showAgentSetupProgress('Detecting remote OS\u2026', 15);
 
     try {
-        const detectResp = await fetch('/api/remote-agent/detect', {
+        const detectResp = await remoteAgentFetch('/api/remote-agent/detect', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: remoteAgentHeaders(),
             body: JSON.stringify({
                 ssh_target: sshTargetFromSetup(),
                 ssh_connection: connection,
@@ -751,9 +805,9 @@ async function upgradeRemoteAgent() {
 
         showAgentSetupProgress('Upgrading agent\u2026', 30);
 
-        const resp = await fetch('/api/remote-agent/update', {
+        const resp = await remoteAgentFetch('/api/remote-agent/update', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: remoteAgentHeaders(),
             body: JSON.stringify({
                 ssh_target: sshTargetFromSetup(),
                 ssh_connection: connection,
@@ -802,9 +856,9 @@ async function startRemoteAgent() {
     showAgentSetupProgress('Starting agent\u2026', 30);
 
     try {
-        const resp = await fetch('/api/remote-agent/start', {
+        const resp = await remoteAgentFetch('/api/remote-agent/start', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: remoteAgentHeaders(),
             body: JSON.stringify({
                 ssh_target: sshTargetFromSetup(),
                 ssh_connection: connection,
@@ -825,9 +879,9 @@ async function startRemoteAgent() {
 
         await new Promise(r => setTimeout(r, 2000));
 
-        const verifyResp = await fetch('/api/remote-agent/detect', {
+        const verifyResp = await remoteAgentFetch('/api/remote-agent/detect', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: remoteAgentHeaders(),
             body: JSON.stringify({
                 ssh_target: sshTargetFromSetup(),
                 ssh_connection: connection,
@@ -865,9 +919,9 @@ async function stopManagedRemoteAgent() {
 
     showAgentSetupProgress('Stopping managed agent\u2026', 30);
     try {
-        const resp = await fetch('/api/remote-agent/stop', {
+        const resp = await remoteAgentFetch('/api/remote-agent/stop', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: remoteAgentHeaders(),
             body: JSON.stringify(remoteAgentSetupRequestPayload())
         });
         const data = await resp.json();
@@ -899,9 +953,10 @@ async function removeManagedRemoteAgent() {
 
     showAgentSetupProgress('Removing managed agent\u2026', 30);
     try {
-        const resp = await fetch('/api/remote-agent/remove', {
+        const removeHeaders = await remoteAgentAdminHeaders();
+        const resp = await remoteAgentFetch('/api/remote-agent/remove', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: removeHeaders,
             body: JSON.stringify(remoteAgentSetupRequestPayload())
         });
         const data = await resp.json();
@@ -1086,9 +1141,9 @@ async function scanSshHostKey() {
     if (trustBtn) trustBtn.style.display = 'none';
 
     try {
-        const resp = await fetch('/api/remote-agent/ssh/host-key', {
+        const resp = await remoteAgentFetch('/api/remote-agent/ssh/host-key', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: remoteAgentHeaders(),
             body: JSON.stringify({
                 ssh_target: sshTargetFromConnection(connection),
                 ssh_connection: connection,
@@ -1125,9 +1180,9 @@ async function trustSshHostKey() {
         return;
     }
 
-    const resp = await fetch('/api/remote-agent/ssh/trust', {
+    const resp = await remoteAgentFetch('/api/remote-agent/ssh/trust', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: remoteAgentHeaders(),
         body: JSON.stringify({
             ssh_target: sshTargetFromConnection(connection),
             ssh_connection: connection,
@@ -1374,7 +1429,9 @@ async function remoteAgentLatestRelease() {
     setRemoteAgentButtonsDisabled(true);
 
     try {
-        const resp = await fetch('/api/remote-agent/releases/latest');
+        const resp = await remoteAgentFetch('/api/remote-agent/releases/latest', {
+            headers: remoteAgentHeaders()
+        });
         const data = await resp.json();
 
         if (!data.ok) {
@@ -1418,9 +1475,9 @@ async function remoteAgentDetect(showProgress = false) {
     }
 
     try {
-        const resp = await fetch('/api/remote-agent/detect', {
+        const resp = await remoteAgentFetch('/api/remote-agent/detect', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: remoteAgentHeaders(),
             body: JSON.stringify({
                 ...remoteAgentSshPayload(),
                 agent_url: inferredAgentUrl() || null,
@@ -1508,9 +1565,10 @@ async function remoteAgentInstall() {
             return;
         }
 
-        const resp = await fetch('/api/remote-agent/install', {
+        const installHeaders = await remoteAgentAdminHeaders();
+        const resp = await remoteAgentFetch('/api/remote-agent/install', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: installHeaders,
             body: JSON.stringify({
                 ...remoteAgentSshPayload(),
                 asset: detectData.matching_asset,
@@ -1579,9 +1637,9 @@ async function remoteAgentStart() {
         const installPath = detectData.install_path || '~/.config/llama-monitor/bin/llama-monitor';
         const startCommand = detectData.start_command || 'nohup ' + installPath + ' --agent --agent-host 0.0.0.0 --agent-port 7779 > ~/.config/llama-monitor/agent.log 2>&1 &';
 
-        const resp = await fetch('/api/remote-agent/start', {
+        const resp = await remoteAgentFetch('/api/remote-agent/start', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: remoteAgentHeaders(),
             body: JSON.stringify({
                 ...remoteAgentSshPayload(),
                 install_path: installPath,
@@ -1663,9 +1721,9 @@ async function remoteAgentUpdate() {
 
         showRemoteAgentProgress('Stopping, installing, and starting agent...', 20, 100);
 
-        const resp = await fetch('/api/remote-agent/update', {
+        const resp = await remoteAgentFetch('/api/remote-agent/update', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: remoteAgentHeaders(),
             body: JSON.stringify({
                 ...remoteAgentSshPayload(),
                 agent_url: inferredAgentUrl() || null,
@@ -1727,9 +1785,9 @@ async function remoteAgentStop() {
     showRemoteAgentProgress('Stopping agent...', 0, 100);
 
     try {
-        const resp = await fetch('/api/remote-agent/stop', {
+        const resp = await remoteAgentFetch('/api/remote-agent/stop', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: remoteAgentHeaders(),
             body: JSON.stringify(remoteAgentSshPayload()),
         });
 
@@ -1800,9 +1858,10 @@ async function remoteAgentRemove() {
     showRemoteAgentProgress('Removing managed agent...', 0, 100);
 
     try {
-        const resp = await fetch('/api/remote-agent/remove', {
+        const removeHeaders = await remoteAgentAdminHeaders();
+        const resp = await remoteAgentFetch('/api/remote-agent/remove', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: removeHeaders,
             body: JSON.stringify(remoteAgentSshPayload()),
         });
 

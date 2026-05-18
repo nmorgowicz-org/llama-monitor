@@ -224,6 +224,7 @@ pub enum TlsMode {
 pub struct AcmeConfig {
     pub enabled: bool,
     pub fqdn: String,
+    pub email: String,
     pub environment: String,
     pub dns_provider: String,
     pub dns_config: HashMap<String, String>,

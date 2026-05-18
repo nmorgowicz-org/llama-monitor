@@ -204,7 +204,12 @@ export async function doAttach() {
 }
 
 export async function doDetach() {
-    const resp = await fetch('/api/detach', { method: 'POST' });
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const resp = await fetch('/api/detach', { method: 'POST', headers });
+    if (resp.status === 401) {
+        showToast('Detach failed: authentication required', 'error');
+        return;
+    }
     const data = await resp.json();
 
     if (!data.ok) {
@@ -269,7 +274,12 @@ export function doStartFromSetup() {
 
 export async function initAttachDetachButtons() {
     try {
-        const resp = await fetch('/api/sessions/active');
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const resp = await fetch('/api/sessions/active', { headers });
+        if (resp.status === 401) {
+            console.error('initAttachDetachButtons: authentication required');
+            return;
+        }
         const data = await resp.json();
         const btnAttach = document.getElementById('btn-attach');
         const btnDetach = document.getElementById('btn-detach');

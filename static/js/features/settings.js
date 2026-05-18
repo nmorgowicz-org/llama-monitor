@@ -538,6 +538,7 @@ async function loadTlsConfig() {
         if (mode === 'acme' && data?.acme) {
             const acme = data.acme;
             const fqdnEl = document.getElementById('acme-fqdn');
+            const emailEl = document.getElementById('acme-email');
             const providerEl = document.getElementById('acme-dns-provider');
             const customWrapEl = document.getElementById('acme-provider-custom-wrap');
             const customEl = document.getElementById('acme-dns-provider-custom');
@@ -546,6 +547,7 @@ async function loadTlsConfig() {
             const delayEl = document.getElementById('acme-validation-delay');
 
             if (fqdnEl) fqdnEl.value = acme.fqdn || '';
+            if (emailEl) emailEl.value = acme.email || '';
 
             const prov = (acme.dns_provider || '').toLowerCase();
             if (providerEl) {
@@ -684,6 +686,7 @@ function _bindTlsEvents() {
             const statusEl = document.getElementById('acme-status-text');
 
             const fqdn = (document.getElementById('acme-fqdn')?.value || '').trim();
+            const email = (document.getElementById('acme-email')?.value || '').trim();
             const providerValue = providerSelect?.value || 'cloudflare';
             const customProvider = (document.getElementById('acme-dns-provider-custom')?.value || '').trim();
             const provider = providerValue === '__other__' ? customProvider : providerValue;
@@ -711,6 +714,7 @@ function _bindTlsEvents() {
                 acme: {
                     enabled: true,
                     fqdn,
+                    email,
                     environment: env,
                     dns_provider: provider,
                     dns_config: dnsConfig,

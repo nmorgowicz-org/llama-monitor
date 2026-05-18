@@ -5,7 +5,6 @@ use std::process::Command;
 use crate::config::{TLSConfig, TlsMode};
 
 const LEGO_BINARY: &str = "lego";
-const ACME_EMAIL: &str = "acme@llama-monitor.local";
 const STAGING_SERVER: &str = "https://acme-staging-v02.api.letsencrypt.org/directory";
 const PROD_SERVER: &str = "https://acme-v02.api.letsencrypt.org/directory";
 
@@ -137,11 +136,17 @@ fn build_lego_command(
     }
 
     let acme_path_str = acme_path.to_string_lossy().to_string();
+    let email = if cfg.acme.email.is_empty() {
+        format!("acme@{}", fqdn)
+    } else {
+        cfg.acme.email.clone()
+    };
+
     let mut args: Vec<String> = vec![
         mode.to_string(),
         "--accept-tos".to_string(),
         "--email".to_string(),
-        ACME_EMAIL.to_string(),
+        email,
         "--dns".to_string(),
         acme.dns_provider.clone(),
         "--server".to_string(),
@@ -292,10 +297,18 @@ pub fn acme_renew_cert(config_dir: &std::path::Path, cfg: &TLSConfig) -> Result<
         return Err(format!("lego renew failed:\n{}", scrubbed.trim()));
     }
 
-    // Update last_renewal.
+    // Verify cert files still exist at their expected paths after renewal.
+    let cert = acme_cert_path(config_dir, fqdn);
+    let key = acme_key_path(config_dir, fqdn);
+    if !cert.exists() || !key.exists() {
+        return Err("lego renew succeeded but cert/key not found at expected paths".to_string());
+    }
+
     let mut new_cfg = cfg.clone();
     use chrono::{SecondsFormat, Utc};
     new_cfg.acme.last_renewal = Some(Utc::now().to_rfc3339_opts(SecondsFormat::Secs, false));
+    new_cfg.acme.cert_path = Some(cert);
+    new_cfg.acme.key_path = Some(key);
 
     Ok(new_cfg)
 }
@@ -306,12 +319,19 @@ pub fn should_renew(cfg: &TLSConfig) -> bool {
         return false;
     }
 
-    // If never renewed, treat as needing initial request/renew.
+    // If no cert file exists yet, this is a fresh install awaiting the initial
+    // cert request (via API). Renewal is not applicable here.
+    let cert_exists = cfg.acme.cert_path.as_ref().is_some_and(|p| p.exists());
+    if !cert_exists {
+        return false;
+    }
+
+    // Cert exists but no renewal record — renew now (cert obtained outside app).
     if cfg.acme.last_renewal.is_none() {
         return true;
     }
 
-    // If last renewal > 60 days ago, renew.
+    // Renew if last recorded renewal was more than 60 days ago.
     if let Some(ts) = &cfg.acme.last_renewal
         && let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts)
     {
@@ -321,7 +341,7 @@ pub fn should_renew(cfg: &TLSConfig) -> bool {
         }
     }
 
-    // If cert file is older than 60 days, renew.
+    // Fallback: renew if the cert file itself is older than 60 days.
     if let Some(ref path) = cfg.acme.cert_path
         && let Ok(meta) = std::fs::metadata(path)
         && let Ok(modified) = meta.modified()
@@ -364,7 +384,8 @@ mod tests {
     }
 
     #[test]
-    fn should_renew_true_for_acme_no_last_renewal() {
+    fn should_renew_false_when_no_cert_exists() {
+        // No cert on disk → initial request, not renewal.
         let cfg = TLSConfig {
             mode: TlsMode::Acme,
             acme: AcmeConfig {
@@ -373,6 +394,29 @@ mod tests {
                 environment: "production".to_string(),
                 dns_provider: "namecheap".to_string(),
                 last_renewal: None,
+                cert_path: Some(std::path::PathBuf::from("/nonexistent/cert.pem")),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(!should_renew(&cfg));
+    }
+
+    #[test]
+    fn should_renew_true_when_cert_exists_no_renewal_record() {
+        // Cert file exists but no renewal record → treat as needing renewal.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cert = dir.path().join("cert.pem");
+        std::fs::write(&cert, b"fake").expect("write cert");
+        let cfg = TLSConfig {
+            mode: TlsMode::Acme,
+            acme: AcmeConfig {
+                enabled: true,
+                fqdn: "example.com".to_string(),
+                environment: "production".to_string(),
+                dns_provider: "namecheap".to_string(),
+                last_renewal: None,
+                cert_path: Some(cert),
                 ..Default::default()
             },
             ..Default::default()

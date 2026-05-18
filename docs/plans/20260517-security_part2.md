@@ -84,11 +84,16 @@ Focus: remaining gaps after initial hardening pass.
 
 ### 2. Unprotected Remote-Agent Endpoints
 
-- Status: OPEN
+- Status: FIXED
 - Files:
-  - src/web/api.rs (remote-agent endpoints: install, start, status, stop, remove, ssh-host-key, ssh-trust, detect)
+  - src/web/api.rs
+  - src/agent.rs
+  - static/js/features/remote-agent.js
+  - tests/ui/remote-agent/ssh.integration.spec.js
+  - docs/reference/remote-agent.md
+  - docs/reference/api.md
 - Issue:
-  - All remote-agent endpoints are unprotected (no api-token or db-admin-token required).
+  - All remote-agent endpoints were unprotected (no api-token or db-admin-token required).
   - Reachable from any client on the network.
   - An attacker could:
     - Install/start/stop/remove agents.
@@ -98,24 +103,43 @@ Focus: remaining gaps after initial hardening pass.
   - High: potential for disruption and unauthorized changes.
 - Likelihood:
   - Medium: if exposed on LAN or via reverse proxy.
-- Fix:
-  - Require api-token for all remote-agent endpoints.
-  - Require db-admin-token for:
-    - install
-    - remove
-- Next Steps:
-  - Add api-token auth to all remote-agent endpoints.
-  - Add db-admin-token auth to install/remove.
-  - Update frontend to send correct tokens.
-  - Update reference docs.
+- Mitigation Applied:
+  - Require api-token (Authorization: Bearer <api-token>) on:
+    - GET /api/remote-agent/releases/latest
+    - POST /api/remote-agent/detect
+    - POST /api/remote-agent/ssh/host-key
+    - POST /api/remote-agent/ssh/trust
+    - POST /api/remote-agent/status
+    - POST /api/remote-agent/start
+    - POST /api/remote-agent/update
+    - POST /api/remote-agent/stop
+    - GET /api/remote-agent/tls-status
+  - Require db-admin-token (Authorization: Bearer <db-admin-token>) on:
+    - POST /api/remote-agent/install
+    - POST /api/remote-agent/remove
+  - Added small helper functions (extract_bearer, unauthorized_api_token, unauthorized_db_admin_token) to keep checks consistent.
+  - Updated install_remote_agent to:
+    - Accept api_token and write it into remote-agent-config.json on the remote system.
+    - Ensure restrictive permissions (0600) on the config file.
+  - Updated frontend:
+    - All /api/remote-agent/* calls now send proper Authorization headers.
+    - install/remove use db-admin-token; others use api-token.
+  - Updated tests:
+    - SSH integration tests now fetch and use the api-token.
+  - Updated docs:
+    - remote-agent.md and api.md now document per-endpoint auth requirements.
 
 ### 3. Unprotected Session CRUD Endpoints
 
-- Status: OPEN
+- Status: FIXED
 - Files:
-  - src/web/api.rs (session CRUD: GET/POST /api/sessions, DELETE /api/sessions/:id, GET /api/sessions/active)
+  - src/web/api.rs
+  - static/js/features/sessions.js
+  - static/js/features/attach-detach.js
+  - tests/integration/chat-manual.sh
+  - docs/reference/api.md
 - Issue:
-  - All session endpoints are unprotected (no api-token or db-admin-token required).
+  - Most session endpoints were unprotected (no api-token or db-admin-token required).
   - Reachable from any client on the network.
   - An attacker could:
     - List/create/delete sessions.
@@ -124,12 +148,25 @@ Focus: remaining gaps after initial hardening pass.
   - Medium: disruption and data exposure.
 - Likelihood:
   - Medium: if exposed on LAN or via reverse proxy.
-- Fix:
-  - Require api-token for all session endpoints.
-- Next Steps:
-  - Add api-token auth to all session endpoints.
-  - Update frontend to send correct tokens.
-  - Update reference docs.
+- Mitigation Applied:
+  - Added api-token auth (Authorization: Bearer <api-token>) to:
+    - GET /api/sessions
+    - POST /api/sessions
+    - GET /api/sessions/active
+    - POST /api/sessions/active
+    - POST /api/detach
+  - Added db-admin-token auth (Authorization: Bearer <db-admin-token>) to:
+    - DELETE /api/sessions/:id
+    - POST /api/sessions/spawn
+  - POST /api/attach already required api-token (unchanged).
+  - Added small helper functions (check_api_token, check_db_admin_token) for consistency.
+  - Updated frontend:
+    - sessions.js and attach-detach.js now send correct tokens for all session endpoints.
+    - 401 responses show a concise “Authentication required” message.
+  - Updated tests:
+    - chat-manual.sh now fetches api-token and db-admin-token and includes them in session-related calls.
+  - Updated docs:
+    - api.md now documents per-endpoint auth requirements for session endpoints.
 
 ## MEDIUM
 
