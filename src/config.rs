@@ -37,26 +37,14 @@ use once_cell::sync::OnceCell;
 
 static ENCRYPTION_KEY_CELL: OnceCell<[u8; 32]> = OnceCell::new();
 
-/// Derive a 256-bit key from a secret using a simple KDF.
+/// Derive a 256-bit key from a secret using HKDF-SHA-256.
 fn derive_key(secret: &[u8]) -> [u8; 32] {
-    use sha1::Digest;
-
-    let mut input = Vec::with_capacity(secret.len() + 17);
-    input.extend_from_slice(secret);
-    input.extend_from_slice(b"llama-monitor-key");
-    let mut ctx = sha1::Sha1::new();
-    ctx.update(&input);
-    let hash = ctx.finalize();
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+    let hk = Hkdf::<Sha256>::new(None, secret);
     let mut key = [0u8; 32];
-    key[..20].copy_from_slice(&hash);
-
-    let mut ctx2 = sha1::Sha1::new();
-    let mut input2 = Vec::with_capacity(secret.len() + 18);
-    input2.extend_from_slice(secret);
-    input2.extend_from_slice(b"llama-monitor-key-2");
-    ctx2.update(&input2);
-    let hash2 = ctx2.finalize();
-    key[20..].copy_from_slice(&hash2[..12]);
+    hk.expand(b"llama-monitor-encryption-key", &mut key)
+        .expect("valid HKDF output length");
     key
 }
 
@@ -413,9 +401,11 @@ pub struct AppConfig {
     pub remote_agent_ssh_autostart: bool,
     pub remote_agent_ssh_target: Option<String>,
     pub remote_agent_ssh_command: Option<String>,
-    pub db_admin_token: Option<String>,
-    pub api_token: Option<String>,
     pub tls_config: TLSConfig,
+    // Live token stores — updated in-memory on rotation without requiring a restart.
+    // Arc<RwLock> so all Arc<AppConfig> clones share the same backing store.
+    live_api_token_store: std::sync::Arc<std::sync::RwLock<Option<String>>>,
+    live_db_admin_token_store: std::sync::Arc<std::sync::RwLock<Option<String>>>,
 }
 
 impl AppConfig {
@@ -460,9 +450,68 @@ impl AppConfig {
             remote_agent_ssh_autostart: args.remote_agent_ssh_autostart,
             remote_agent_ssh_target: args.remote_agent_ssh_target,
             remote_agent_ssh_command: args.remote_agent_ssh_command,
-            db_admin_token: ensure_db_admin_token(&config_dir),
-            api_token: ensure_api_token(&config_dir),
             tls_config: load_tls_config(&config_dir),
+            live_api_token_store: std::sync::Arc::new(std::sync::RwLock::new(
+                ensure_api_token(&config_dir),
+            )),
+            live_db_admin_token_store: std::sync::Arc::new(std::sync::RwLock::new(
+                ensure_db_admin_token(&config_dir),
+            )),
+        }
+    }
+
+    /// Read the current live API token (updated on rotation).
+    pub fn live_api_token(&self) -> Option<String> {
+        self.live_api_token_store.read().unwrap().clone()
+    }
+
+    /// Read the current live DB admin token (updated on rotation).
+    pub fn live_db_admin_token(&self) -> Option<String> {
+        self.live_db_admin_token_store.read().unwrap().clone()
+    }
+
+    /// Update the live API token after rotation.
+    pub fn update_live_api_token(&self, token: String) {
+        *self.live_api_token_store.write().unwrap() = Some(token);
+    }
+
+    /// Update the live DB admin token after rotation.
+    pub fn update_live_db_admin_token(&self, token: String) {
+        *self.live_db_admin_token_store.write().unwrap() = Some(token);
+    }
+
+    /// Construct an `AppConfig` for unit tests without reading from disk.
+    #[cfg(test)]
+    pub fn for_test(api_token: Option<String>, db_admin_token: Option<String>) -> Self {
+        Self {
+            config_dir: std::path::PathBuf::from("/tmp/llama-monitor-test"),
+            llama_server_path: std::path::PathBuf::from("llama-server"),
+            llama_server_cwd: std::path::PathBuf::from("."),
+            port: 8001,
+            gpu_backend: String::new(),
+            llama_poll_interval: 1,
+            models_dir: None,
+            presets_file: std::path::PathBuf::new(),
+            templates_file: std::path::PathBuf::new(),
+            gpu_env_file: std::path::PathBuf::new(),
+            gpu_arch_override: None,
+            gpu_devices_override: None,
+            ui_settings_file: std::path::PathBuf::new(),
+            auth_config_file: std::path::PathBuf::new(),
+            sessions_file: std::path::PathBuf::new(),
+            ssh_known_hosts_file: std::path::PathBuf::new(),
+            lhm_disabled_file: std::path::PathBuf::new(),
+            agent_host: "127.0.0.1".to_string(),
+            agent_port: 7777,
+            agent_token: None,
+            remote_agent_url: None,
+            remote_agent_token: None,
+            remote_agent_ssh_autostart: false,
+            remote_agent_ssh_target: None,
+            remote_agent_ssh_command: None,
+            tls_config: TLSConfig::default(),
+            live_api_token_store: std::sync::Arc::new(std::sync::RwLock::new(api_token)),
+            live_db_admin_token_store: std::sync::Arc::new(std::sync::RwLock::new(db_admin_token)),
         }
     }
 }
@@ -510,26 +559,8 @@ fn ensure_api_token(config_dir: &PathBuf) -> Option<String> {
 }
 
 pub(crate) fn generate_random_token() -> String {
-    // Read exactly 16 bytes from /dev/urandom (avoid reading all bytes)
     let mut buf = [0u8; 16];
-    let value = if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        if std::io::Read::read_exact(&mut f, &mut buf).is_ok() {
-            u128::from_be_bytes(buf)
-        } else {
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos();
-            let pid = std::process::id() as u128;
-            ts ^ pid
-        }
-    } else {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let pid = std::process::id() as u128;
-        ts ^ pid
-    };
+    OsRng.fill_bytes(&mut buf);
+    let value = u128::from_be_bytes(buf);
     format!("{value:x}")
 }

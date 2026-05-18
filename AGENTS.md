@@ -613,7 +613,9 @@ All user data persists to `~/.config/llama-monitor/`:
 | File | Purpose |
 |------|---------|
 | `chat.db` | SQLite chat storage for tabs, messages, full-text search index, and chat metadata |
-| `backups/` | Manual `chat_*.db`, automatic hourly `chat_auto_*.db`, and pre-restore `pre_restore_*.db` database backups |
+| `backups/auto/` | Automatic hourly rolling backups (`chat_auto_<ts>.db`); last 24 kept |
+| `backups/daily/` | Automatic daily backups (`chat_daily_<day>.db`); last 7 kept |
+| `backups/manual/` | Manual API-triggered backups (`chat_<ts>.db`) and pre-restore safety copies (`pre_restore_<ts>.db`); last 7 kept |
 | `sessions.json` | Persisted session list (`Session` objects with spawn/attach mode, status, preset ID, timestamps) |
 | `presets.json` | Model presets with llama.cpp launch parameters |
 | `templates.json` | User-created or user-modified chat persona templates and explicit policy overrides |
@@ -629,8 +631,8 @@ Data is persisted:
 - Templates: saved immediately by the template CRUD API
 - UI settings: saved immediately by `PUT /api/settings`
 - GPU environment: saved immediately by `PUT /api/gpu-env`
-- Chat database: updated live by chat tab/message APIs; WAL checkpointed hourly
-- Chat backups: automatic hourly backup plus manual `/api/db/backup`
+- Chat database: updated live by chat tab/message APIs; WAL checkpointed and ANALYZE run hourly
+- Chat backups: automatic hourly (last 24) to `backups/auto/`, automatic daily (last 7) to `backups/daily/`, manual on-demand to `backups/manual/` via `POST /api/db/backup`
 
 Frontend-only browser persistence also exists in `localStorage` and is not mirrored into `~/.config/llama-monitor/`. This includes UI state such as chat style, chat font, enter-to-send, telemetry pinning, nav/sidebar collapse state, visualization preferences, last attached endpoint, last session/setup positioning, date format, update dismissals, and some guided-generation UI toggles/categories.
 
@@ -669,6 +671,8 @@ Archive docs are useful context, but they are not the canonical definition of cu
 
 ### 2) Authentication and authorization
 
+- Any endpoint that **writes, deletes, or modifies** user data requires at minimum `api-token`.
+- Any endpoint that **reads user-owned data** (settings, presets, templates, chat content, configuration) also requires `api-token`. “Read-only” does not mean “unauthenticated.”
 - Any endpoint that:
   - Starts/stops/kills processes,
   - Restores/deletes DB backups,
@@ -676,14 +680,16 @@ Archive docs are useful context, but they are not the canonical definition of cu
   - Exposes secrets or tokens
   must:
   - Require an appropriate token:
-    - api-token for general operations.
-    - db-admin-token for high-impact/irreversible operations.
+    - `api-token` for general operations.
+    - `db-admin-token` for high-impact/irreversible operations.
   - Never rely on “same machine” or “same browser” as security.
 - New destructive or elevated endpoints:
-  - Must use db-admin-token or a dedicated elevated token.
-  - Must include a confirmation field (e.g., { "confirm": "action" }) to prevent accidental use.
+  - Must use `db-admin-token` or a dedicated elevated token.
+  - Must include a confirmation field (e.g., `{ “confirm”: “action” }`) to prevent accidental use.
+- **Token rotation**: rotating a token MUST update both the on-disk file AND the live in-memory `AppConfig` atomically. Writing to disk only is a silent security failure — the old token keeps working indefinitely. See `api_rotate_agent_token` as the canonical implementation pattern.
+- **Multi-level auth endpoints**: if an endpoint accepts either `api-token` or `db-admin-token` (e.g. to grant elevated access), the gate must accept either value — never require `api-token` first and then check `db-admin-token` separately, because a bearer cannot equal both simultaneously.
 - When in doubt:
-  - Prefer stricter auth (db-admin-token) over weaker (api-token).
+  - Prefer stricter auth (`db-admin-token`) over weaker (`api-token`).
 
 ### 3) Input validation
 
@@ -753,23 +759,51 @@ Archive docs are useful context, but they are not the canonical definition of cu
 - Must:
   - Use existing encryption helpers for sensitive config.
   - Mask secrets in APIs meant for general UI consumers.
-  - Provide an “full” or “admin” endpoint for real tokens when needed, protected by auth.
+  - Provide a “full” or “admin” endpoint for real tokens when needed, protected by auth.
 
-### 8) Security checklist (before marking PR ready)
+### 8) Security implementation patterns
 
-Before marking a PR ready-to-test, the agent MUST verify:
+These are concrete implementation rules. Violations in these areas have caused real bugs. Follow them exactly.
 
-- [ ] No new endpoint with elevated impact is unprotected (auth, confirm, cooldown).
-- [ ] All new file paths from user input are validated and confined to allowed roots.
-- [ ] No new innerHTML/insertAdjacentHTML with untrusted data; use textContent or DOMPurify.
-- [ ] Any new long-running or expensive operation has:
-  - A timeout,
-  - A size limit,
-  - A rate limit or cooldown where appropriate.
-- [ ] Any new agent or metrics fields use #[serde(default)] and won’t fully disconnect on missing fields.
-- [ ] Secrets are not logged or exposed in error messages.
-- [ ] Reference docs are updated to match new auth, tokens, and constraints.
+#### Randomness
+- **Always use `rand_core::OsRng`** for any security-sensitive random value: tokens, nonces, session IDs, CSP nonces, key material.
+- **Never derive security values from** timestamps, PIDs, thread IDs, or any other predictable system state — even as a “fallback.” A predictable nonce or token defeats its entire purpose.
+- The `OsRng` API works cross-platform including Windows. There is no valid reason for a non-`OsRng` path in security code.
 
-If any of these are unclear or not fully satisfied, the agent MUST:
-- Add the missing protections,
-- Or explicitly call out the gap and rationale in the PR description.
+#### Token comparison
+- **Always use `subtle::ConstantTimeEq`** (already a dependency via `subtle` crate) when comparing tokens, passwords, or any secret string.
+- Plain `==` on `&str` or `String` is not constant-time and leaks timing information that can be used to brute-force short secrets over a network.
+- The `check_api_token` helper uses this pattern — call it instead of doing inline `==` comparisons.
+
+#### Key derivation
+- Use **HKDF-SHA-256** (via the `hkdf` crate) for any new key derivation. SHA-1 with a static salt is not acceptable for new code.
+
+#### SQLite file operations
+- **Never use `std::fs::copy` or any direct file operation on `chat.db`** while a `ChatStorage` instance is alive. The live `Connection` holds the file open; overwriting it on disk corrupts the connection's page cache and diverges the database state.
+- **Always use the `ChatStorage::backup()` method** (SQLite online backup API) when copying the database. It is safe to run against an open connection.
+- **WAL sidecar files**: when restoring a database, the `-wal` and `-shm` files from the running instance must be deleted or the restored database will be silently corrupted when SQLite replays the stale WAL on next open. Any restore path must handle these files explicitly.
+- **`ChatStorage` is a single long-lived `Mutex<Connection>`**: operations like `VACUUM` and `ANALYZE` hold this mutex for their full duration, blocking all other DB calls. Do not call these from a hot path. Run them in background maintenance tasks only.
+
+#### CSRF origin checks
+- String-matching an Origin header against a bind address requires exact prefix/suffix logic. Off-by-one slicing (e.g. slicing `”0.0.0.0:”` as `”0.0.”`) creates bypass opportunities. Test CSRF guards with adversarial origin values before considering them correct.
+
+### 9) Security checklist (before marking PR ready)
+
+Before marking a PR ready-to-test, the agent MUST verify every item below. This checklist exists because these exact categories have produced shipped bugs.
+
+**Mandatory review pass**: Run `/security-review` on the branch before filing the PR. If the branch has broad changes across multiple subsystems, also run `/review`. These catch logic-level issues the checklist alone cannot.
+
+- [ ] **Auth on all user-data endpoints**: every new GET endpoint that returns user-owned data (settings, presets, templates, chat, config) requires `api-token`. "Read-only" does not mean unauthenticated.
+- [ ] **Auth on all mutating endpoints**: every new POST/PUT/PATCH/DELETE requires at minimum `api-token`; destructive or irreversible operations require `db-admin-token`.
+- [ ] **Token rotation updates in-memory state**: if rotating a token, the live `AppConfig` is updated atomically alongside the on-disk file.
+- [ ] **No `==` on secrets**: all token/credential comparisons use `subtle::ConstantTimeEq`, not `==`.
+- [ ] **No predictable randomness**: all new nonces, tokens, session IDs use `OsRng`. No timestamp/PID fallbacks.
+- [ ] **No direct file ops on live SQLite**: use `ChatStorage::backup()` API; handle WAL sidecars on restore.
+- [ ] **All new file paths from user input** are validated (reject `..`, leading `/`, `\`) and canonicalized within an allowed root.
+- [ ] **No new innerHTML/insertAdjacentHTML** with untrusted data; use `textContent` or `DOMPurify`.
+- [ ] **Long-running or expensive operations** have a timeout, size limit, and rate limit or cooldown.
+- [ ] **Agent/protocol fields** use `#[serde(default)]` and degraded-mode behavior on missing fields.
+- [ ] **Secrets are not logged** or returned in error messages.
+- [ ] **Reference docs** are updated to match new auth requirements, token types, and constraints.
+
+If any item is unclear or not satisfied, the agent MUST either add the missing protection or explicitly document the gap and rationale in the PR description.

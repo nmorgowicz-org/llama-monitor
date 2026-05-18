@@ -49,29 +49,37 @@ fn unauthorized_db_admin_token() -> Box<dyn warp::reply::Reply> {
 
 /// Check if the Authorization header matches the configured api-token.
 fn check_api_token(auth: &Option<String>, cfg: &AppConfig) -> bool {
-    if let Some(ref token) = cfg.api_token {
-        if token.is_empty() {
-            return false;
-        }
-        auth.as_ref()
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .is_some_and(|t| t == token.as_str())
-    } else {
-        false
-    }
+    let bearer = auth.as_ref().and_then(|v| v.strip_prefix("Bearer "));
+    bearer_matches_api_token(bearer, cfg)
 }
 
 /// Check if the Authorization header matches the configured db-admin-token.
 fn check_db_admin_token(auth: &Option<String>, cfg: &AppConfig) -> bool {
-    if let Some(ref token) = cfg.db_admin_token {
-        if token.is_empty() {
-            return false;
+    let bearer = auth.as_ref().and_then(|v| v.strip_prefix("Bearer "));
+    bearer_matches_db_admin_token(bearer, cfg)
+}
+
+/// Compare an already-extracted bearer token against the live api-token (constant-time).
+fn bearer_matches_api_token(bearer: Option<&str>, cfg: &AppConfig) -> bool {
+    use subtle::ConstantTimeEq;
+    let live = cfg.live_api_token();
+    match (bearer, live.as_deref()) {
+        (Some(got), Some(expected)) if !expected.is_empty() => {
+            got.as_bytes().ct_eq(expected.as_bytes()).into()
         }
-        auth.as_ref()
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .is_some_and(|t| t == token.as_str())
-    } else {
-        false
+        _ => false,
+    }
+}
+
+/// Compare an already-extracted bearer token against the live db-admin-token (constant-time).
+fn bearer_matches_db_admin_token(bearer: Option<&str>, cfg: &AppConfig) -> bool {
+    use subtle::ConstantTimeEq;
+    let live = cfg.live_db_admin_token();
+    match (bearer, live.as_deref()) {
+        (Some(got), Some(expected)) if !expected.is_empty() => {
+            got.as_bytes().ct_eq(expected.as_bytes()).into()
+        }
+        _ => false,
     }
 }
 
@@ -442,6 +450,28 @@ fn load_prompts_from_files() -> HashMap<String, String> {
 }
 
 use crate::chat_storage::ChatStorage;
+
+/// Attempt to claim a cooldown window atomically.
+///
+/// Returns `(allowed, remaining_secs)`. `allowed` is `true` only if the cooldown
+/// has elapsed AND this caller atomically claimed the slot (preventing concurrent
+/// double-execution). `remaining_secs` gives a hint for the retry-after header.
+fn try_cooldown(
+    last: &std::sync::atomic::AtomicU64,
+    now: u64,
+    cooldown_secs: u64,
+) -> (bool, u64) {
+    use std::sync::atomic::Ordering;
+    let prev = last.load(Ordering::Acquire);
+    let elapsed = now.saturating_sub(prev);
+    if elapsed < cooldown_secs {
+        return (false, cooldown_secs - elapsed);
+    }
+    let ok = last
+        .compare_exchange(prev, now, Ordering::AcqRel, Ordering::Relaxed)
+        .is_ok();
+    (ok, 0)
+}
 
 fn api_check_lhm() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "lhm" / "check")
@@ -1131,12 +1161,12 @@ pub fn api_routes(
     let start = api_start(state.clone(), app_config.clone());
     let stop = api_stop(state.clone(), app_config.clone());
     let kill_llama = api_kill_llama(state.clone(), app_config.clone());
-    let get_presets = api_get_presets(state.clone());
+    let get_presets = api_get_presets(state.clone(), app_config.clone());
     let create_preset = api_create_preset(state.clone(), app_config.clone());
     let update_preset = api_update_preset(state.clone(), app_config.clone());
     let delete_preset = api_delete_preset(state.clone(), app_config.clone());
-    let reset_presets = api_reset_presets(state.clone());
-    let get_templates = api_get_templates(state.clone());
+    let reset_presets = api_reset_presets(state.clone(), app_config.clone());
+    let get_templates = api_get_templates(state.clone(), app_config.clone());
     let create_template = api_create_template(state.clone(), app_config.clone());
     let update_template = api_update_template(state.clone(), app_config.clone());
     let delete_template = api_delete_template(state.clone(), app_config.clone());
@@ -1144,7 +1174,7 @@ pub fn api_routes(
     let refresh_models = api_refresh_models(state.clone(), app_config.clone());
     let get_gpu_env = api_get_gpu_env(state.clone());
     let put_gpu_env = api_put_gpu_env(state.clone(), app_config.clone());
-    let get_settings = api_get_settings(state.clone());
+    let get_settings = api_get_settings(state.clone(), app_config.clone());
     let get_settings_full = api_get_settings_full(state.clone(), app_config.clone());
     let put_settings = api_put_settings(state.clone(), app_config.clone());
     let browse = api_browse(state.clone(), app_config.clone());
@@ -1190,7 +1220,7 @@ pub fn api_routes(
     let delete_session = api_delete_session(state.clone(), app_config.clone());
     let get_active_session = api_get_active_session(state.clone(), app_config.clone());
     let set_active_session = api_set_active_session(state.clone(), app_config.clone());
-    let get_capabilities = api_get_capabilities(state.clone());
+    let get_capabilities = api_get_capabilities(state.clone(), app_config.clone());
     let spawn_session_with_preset =
         api_spawn_session_with_preset(state.clone(), app_config.clone());
     let attach = api_attach(state.clone(), app_config.clone());
@@ -1422,28 +1452,26 @@ fn api_get_auth_config(
         .and(warp::header::optional::<String>("authorization"))
         .map(move |auth: Option<String>| {
             let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-            match (&app_config.api_token, bearer.as_deref()) {
-                (Some(expected), Some(got)) if expected == got => {
-                    let view = auth_manager.config_view();
-                    Box::new(warp::reply::json(&serde_json::json!({
-                        "source": match view.source {
-                            AuthSource::None => "none",
-                            AuthSource::Config => "config",
-                            AuthSource::Cli => "cli",
-                        },
-                        "basicEnabled": view.basic_enabled,
-                        "formEnabled": view.form_enabled,
-                        "username": view.username,
-                        "managedByCli": matches!(view.source, AuthSource::Cli),
-                        "recoveryCommand": "llama-monitor --clear-auth-config",
-                        "recoveryFile": app_config.auth_config_file.display().to_string(),
-                    }))) as Box<dyn warp::reply::Reply>
-                }
-                _ => Box::new(warp::reply::with_status(
+            if !bearer_matches_api_token(bearer.as_deref(), &app_config) {
+                return Box::new(warp::reply::with_status(
                     warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
                     warp::http::StatusCode::UNAUTHORIZED,
-                )) as Box<dyn warp::reply::Reply>,
+                )) as Box<dyn warp::reply::Reply>;
             }
+            let view = auth_manager.config_view();
+            Box::new(warp::reply::json(&serde_json::json!({
+                "source": match view.source {
+                    AuthSource::None => "none",
+                    AuthSource::Config => "config",
+                    AuthSource::Cli => "cli",
+                },
+                "basicEnabled": view.basic_enabled,
+                "formEnabled": view.form_enabled,
+                "username": view.username,
+                "managedByCli": matches!(view.source, AuthSource::Cli),
+                "recoveryCommand": "llama-monitor --clear-auth-config",
+                "recoveryFile": app_config.auth_config_file.display().to_string(),
+            }))) as Box<dyn warp::reply::Reply>
         })
 }
 
@@ -1469,14 +1497,11 @@ fn api_put_auth_config(
         .and(warp::body::json())
         .map(move |auth: Option<String>, req: UpdateAuthConfigRequest| {
             let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-            match (&app_config.api_token, bearer.as_deref()) {
-                (Some(expected), Some(got)) if expected == got => {}
-                _ => {
-                    return Box::new(warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
-                        warp::http::StatusCode::UNAUTHORIZED,
-                    )) as Box<dyn warp::reply::Reply>;
-                }
+            if !bearer_matches_api_token(bearer.as_deref(), &app_config) {
+                return Box::new(warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
+                    warp::http::StatusCode::UNAUTHORIZED,
+                )) as Box<dyn warp::reply::Reply>;
             }
 
             if matches!(auth_manager.source(), AuthSource::Cli) {
@@ -1615,7 +1640,7 @@ fn api_remote_agent_latest_release(
         .and_then(
             move |auth: Option<String>, cfg: Arc<AppConfig>| async move {
                 let bearer = extract_bearer(auth);
-                if bearer.as_deref() != cfg.api_token.as_deref().filter(|t| !t.is_empty()) {
+                if bearer.as_deref() != cfg.live_api_token().as_deref().filter(|t| !t.is_empty()) {
                     return Ok(unauthorized_api_token());
                 }
 
@@ -1623,7 +1648,7 @@ fn api_remote_agent_latest_release(
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
-                let last = LAST_REMOTE_AGENT_LATEST_RELEASE.load(Ordering::Relaxed);
+                let last = LAST_REMOTE_AGENT_LATEST_RELEASE.load(Ordering::Acquire);
                 if now - last < 30 {
                     let remaining = 30 - (now - last);
                     return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
@@ -1636,7 +1661,7 @@ fn api_remote_agent_latest_release(
                     ))
                         as Box<dyn warp::reply::Reply>);
                 }
-                LAST_REMOTE_AGENT_LATEST_RELEASE.store(now, Ordering::Relaxed);
+                LAST_REMOTE_AGENT_LATEST_RELEASE.store(now, Ordering::Release);
 
                 match crate::agent::latest_release_info().await {
                     Ok(release) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
@@ -1670,7 +1695,7 @@ fn api_remote_agent_detect(
                 async move {
                     let bearer = extract_bearer(auth);
                     if bearer.as_deref()
-                        != app_config.api_token.as_deref().filter(|t| !t.is_empty())
+                        != app_config.live_api_token().as_deref().filter(|t| !t.is_empty())
                     {
                         return Ok(unauthorized_api_token());
                     }
@@ -1679,7 +1704,7 @@ fn api_remote_agent_detect(
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
-                    let last = LAST_REMOTE_AGENT_DETECT.load(Ordering::Relaxed);
+                    let last = LAST_REMOTE_AGENT_DETECT.load(Ordering::Acquire);
                     if now - last < 10 {
                         let remaining = 10 - (now - last);
                         return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
@@ -1692,7 +1717,7 @@ fn api_remote_agent_detect(
                         ))
                             as Box<dyn warp::reply::Reply>);
                     }
-                    LAST_REMOTE_AGENT_DETECT.store(now, Ordering::Relaxed);
+                    LAST_REMOTE_AGENT_DETECT.store(now, Ordering::Release);
 
                     match hydrate_ssh_connection(
                         request.ssh_connection.take(),
@@ -1734,7 +1759,7 @@ fn api_remote_agent_ssh_host_key(
                 async move {
                     let bearer = extract_bearer(auth);
                     if bearer.as_deref()
-                        != app_config.api_token.as_deref().filter(|t| !t.is_empty())
+                        != app_config.live_api_token().as_deref().filter(|t| !t.is_empty())
                     {
                         return Ok(unauthorized_api_token());
                     }
@@ -1743,7 +1768,7 @@ fn api_remote_agent_ssh_host_key(
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
-                    let last = LAST_REMOTE_AGENT_SSH_HOST_KEY.load(Ordering::Relaxed);
+                    let last = LAST_REMOTE_AGENT_SSH_HOST_KEY.load(Ordering::Acquire);
                     if now - last < 10 {
                         let remaining = 10 - (now - last);
                         return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
@@ -1756,7 +1781,7 @@ fn api_remote_agent_ssh_host_key(
                         ))
                             as Box<dyn warp::reply::Reply>);
                     }
-                    LAST_REMOTE_AGENT_SSH_HOST_KEY.store(now, Ordering::Relaxed);
+                    LAST_REMOTE_AGENT_SSH_HOST_KEY.store(now, Ordering::Release);
 
                     let target = request
                         .get("ssh_target")
@@ -1799,7 +1824,7 @@ fn api_remote_agent_ssh_trust(
             let app_config = app_config.clone();
             async move {
                 let bearer = extract_bearer(auth);
-                if bearer.as_deref() != app_config.api_token.as_deref().filter(|t| !t.is_empty()) {
+                if bearer.as_deref() != app_config.live_api_token().as_deref().filter(|t| !t.is_empty()) {
                     return Ok(unauthorized_api_token());
                 }
 
@@ -1807,7 +1832,7 @@ fn api_remote_agent_ssh_trust(
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
-                let last = LAST_REMOTE_AGENT_SSH_TRUST.load(Ordering::Relaxed);
+                let last = LAST_REMOTE_AGENT_SSH_TRUST.load(Ordering::Acquire);
                 if now - last < 10 {
                     let remaining = 10 - (now - last);
                     return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
@@ -1819,7 +1844,7 @@ fn api_remote_agent_ssh_trust(
                         warp::http::StatusCode::TOO_MANY_REQUESTS,
                     )) as Box<dyn warp::reply::Reply>);
                 }
-                LAST_REMOTE_AGENT_SSH_TRUST.store(now, Ordering::Relaxed);
+                LAST_REMOTE_AGENT_SSH_TRUST.store(now, Ordering::Release);
 
                 let target = request
                     .get("ssh_target")
@@ -1900,12 +1925,7 @@ fn api_remote_agent_install(
                 let app_config = app_config.clone();
                 async move {
                     let bearer = extract_bearer(auth);
-                    if bearer.as_deref()
-                        != app_config
-                            .db_admin_token
-                            .as_deref()
-                            .filter(|t| !t.is_empty())
-                    {
+                    if !bearer_matches_db_admin_token(bearer.as_deref(), &app_config) {
                         return Ok(unauthorized_db_admin_token());
                     }
 
@@ -1913,7 +1933,7 @@ fn api_remote_agent_install(
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
-                    let last = LAST_REMOTE_AGENT_INSTALL.load(Ordering::Relaxed);
+                    let last = LAST_REMOTE_AGENT_INSTALL.load(Ordering::Acquire);
                     if now - last < 30 {
                         let remaining = 30 - (now - last);
                         return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
@@ -1926,7 +1946,7 @@ fn api_remote_agent_install(
                         ))
                             as Box<dyn warp::reply::Reply>);
                     }
-                    LAST_REMOTE_AGENT_INSTALL.store(now, Ordering::Relaxed);
+                    LAST_REMOTE_AGENT_INSTALL.store(now, Ordering::Release);
 
                     crate::agent::suppress_remote_agent_autostart();
                     request.ssh_connection = match hydrate_ssh_connection(
@@ -1947,7 +1967,7 @@ fn api_remote_agent_install(
                     } else {
                         crate::agent::detect_remote_os_simple(&request.ssh_target).await
                     };
-                    let api_token = app_config.api_token.clone();
+                    let api_token = app_config.live_api_token();
                     match crate::agent::install_remote_agent(
                         request.ssh_target.trim(),
                         request.ssh_connection.clone(),
@@ -1990,7 +2010,7 @@ fn api_remote_agent_status(
                 async move {
                     let bearer = extract_bearer(auth);
                     if bearer.as_deref()
-                        != app_config.api_token.as_deref().filter(|t| !t.is_empty())
+                        != app_config.live_api_token().as_deref().filter(|t| !t.is_empty())
                     {
                         return Ok(unauthorized_api_token());
                     }
@@ -1999,7 +2019,7 @@ fn api_remote_agent_status(
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
-                    let last = LAST_REMOTE_AGENT_STATUS.load(Ordering::Relaxed);
+                    let last = LAST_REMOTE_AGENT_STATUS.load(Ordering::Acquire);
                     if now - last < 5 {
                         let remaining = 5 - (now - last);
                         return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
@@ -2012,7 +2032,7 @@ fn api_remote_agent_status(
                         ))
                             as Box<dyn warp::reply::Reply>);
                     }
-                    LAST_REMOTE_AGENT_STATUS.store(now, Ordering::Relaxed);
+                    LAST_REMOTE_AGENT_STATUS.store(now, Ordering::Release);
 
                     let ssh_target = match request.get("ssh_target") {
                         Some(v) => v.as_str().unwrap_or("").to_string(),
@@ -2071,7 +2091,7 @@ fn api_remote_agent_start(
                 async move {
                     let bearer = extract_bearer(auth);
                     if bearer.as_deref()
-                        != app_config.api_token.as_deref().filter(|t| !t.is_empty())
+                        != app_config.live_api_token().as_deref().filter(|t| !t.is_empty())
                     {
                         return Ok(unauthorized_api_token());
                     }
@@ -2080,7 +2100,7 @@ fn api_remote_agent_start(
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
-                    let last = LAST_REMOTE_AGENT_START.load(Ordering::Relaxed);
+                    let last = LAST_REMOTE_AGENT_START.load(Ordering::Acquire);
                     if now - last < 10 {
                         let remaining = 10 - (now - last);
                         return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
@@ -2093,7 +2113,7 @@ fn api_remote_agent_start(
                         ))
                             as Box<dyn warp::reply::Reply>);
                     }
-                    LAST_REMOTE_AGENT_START.store(now, Ordering::Relaxed);
+                    LAST_REMOTE_AGENT_START.store(now, Ordering::Release);
 
                     crate::agent::suppress_remote_agent_autostart();
                     let ssh_target = match request.get("ssh_target") {
@@ -2197,7 +2217,7 @@ fn api_remote_agent_update(
                 async move {
                     let bearer = extract_bearer(auth);
                     if bearer.as_deref()
-                        != app_config.api_token.as_deref().filter(|t| !t.is_empty())
+                        != app_config.live_api_token().as_deref().filter(|t| !t.is_empty())
                     {
                         return Ok(unauthorized_api_token());
                     }
@@ -2206,7 +2226,7 @@ fn api_remote_agent_update(
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
-                    let last = LAST_REMOTE_AGENT_UPDATE.load(Ordering::Relaxed);
+                    let last = LAST_REMOTE_AGENT_UPDATE.load(Ordering::Acquire);
                     if now - last < 30 {
                         let remaining = 30 - (now - last);
                         return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
@@ -2219,7 +2239,7 @@ fn api_remote_agent_update(
                         ))
                             as Box<dyn warp::reply::Reply>);
                     }
-                    LAST_REMOTE_AGENT_UPDATE.store(now, Ordering::Relaxed);
+                    LAST_REMOTE_AGENT_UPDATE.store(now, Ordering::Release);
 
                     crate::agent::suppress_remote_agent_autostart();
                     let ssh_target = match request.get("ssh_target") {
@@ -2279,7 +2299,7 @@ fn api_remote_agent_stop(
                 async move {
                     let bearer = extract_bearer(auth);
                     if bearer.as_deref()
-                        != app_config.api_token.as_deref().filter(|t| !t.is_empty())
+                        != app_config.live_api_token().as_deref().filter(|t| !t.is_empty())
                     {
                         return Ok(unauthorized_api_token());
                     }
@@ -2288,7 +2308,7 @@ fn api_remote_agent_stop(
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
-                    let last = LAST_REMOTE_AGENT_STOP.load(Ordering::Relaxed);
+                    let last = LAST_REMOTE_AGENT_STOP.load(Ordering::Acquire);
                     if now - last < 10 {
                         let remaining = 10 - (now - last);
                         return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
@@ -2301,7 +2321,7 @@ fn api_remote_agent_stop(
                         ))
                             as Box<dyn warp::reply::Reply>);
                     }
-                    LAST_REMOTE_AGENT_STOP.store(now, Ordering::Relaxed);
+                    LAST_REMOTE_AGENT_STOP.store(now, Ordering::Release);
 
                     crate::agent::suppress_remote_agent_autostart();
                     let ssh_target = match request.get("ssh_target") {
@@ -2360,12 +2380,7 @@ fn api_remote_agent_remove(
                 let app_config = app_config.clone();
                 async move {
                     let bearer = extract_bearer(auth);
-                    if bearer.as_deref()
-                        != app_config
-                            .db_admin_token
-                            .as_deref()
-                            .filter(|t| !t.is_empty())
-                    {
+                    if !bearer_matches_db_admin_token(bearer.as_deref(), &app_config) {
                         return Ok(unauthorized_db_admin_token());
                     }
 
@@ -2373,7 +2388,7 @@ fn api_remote_agent_remove(
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
-                    let last = LAST_REMOTE_AGENT_REMOVE.load(Ordering::Relaxed);
+                    let last = LAST_REMOTE_AGENT_REMOVE.load(Ordering::Acquire);
                     if now - last < 15 {
                         let remaining = 15 - (now - last);
                         return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
@@ -2386,7 +2401,7 @@ fn api_remote_agent_remove(
                         ))
                             as Box<dyn warp::reply::Reply>);
                     }
-                    LAST_REMOTE_AGENT_REMOVE.store(now, Ordering::Relaxed);
+                    LAST_REMOTE_AGENT_REMOVE.store(now, Ordering::Release);
 
                     crate::agent::suppress_remote_agent_autostart();
                     let ssh_target = match request.get("ssh_target") {
@@ -2436,7 +2451,7 @@ fn api_remote_agent_tls_status(
         .and(warp::header::optional::<String>("authorization"))
         .map(move |auth: Option<String>| {
             let bearer = extract_bearer(auth);
-            if bearer.as_deref() != app_config.api_token.as_deref().filter(|t| !t.is_empty()) {
+            if bearer.as_deref() != app_config.live_api_token().as_deref().filter(|t| !t.is_empty()) {
                 return unauthorized_api_token();
             }
             let certs_dir = crate::certs::certs_dir();
@@ -2515,12 +2530,20 @@ fn api_stop(
 
 fn api_get_presets(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "presets")
         .and(warp::get())
-        .map(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
             let presets = state.presets.lock().unwrap().clone();
-            warp::reply::json(&presets)
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
+            futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                Box::new(warp::reply::json(&presets)),
+            ))
         })
 }
 
@@ -2604,15 +2627,23 @@ fn api_delete_preset(
 
 fn api_reset_presets(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "presets" / "reset")
         .and(warp::post())
-        .map(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
             let defaults = presets::default_presets();
             let mut presets = state.presets.lock().unwrap();
             *presets = defaults;
             let _ = presets::save_presets(&state.presets_path, &presets);
-            warp::reply::json(&serde_json::json!({"ok": true}))
+            futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                Box::new(warp::reply::json(&serde_json::json!({"ok": true}))),
+            ))
         })
 }
 
@@ -2620,12 +2651,20 @@ fn api_reset_presets(
 
 fn api_get_templates(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "templates")
         .and(warp::get())
-        .map(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
             let templates = state.templates.lock().unwrap().clone();
-            warp::reply::json(&templates)
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
+            futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                Box::new(warp::reply::json(&templates)),
+            ))
         })
 }
 
@@ -2793,13 +2832,21 @@ fn api_put_gpu_env(
 
 fn api_get_settings(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "settings")
         .and(warp::get())
-        .map(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
             let settings = state.ui_settings.lock().unwrap().clone();
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
             let masked = mask_remote_agent_token(settings);
-            warp::reply::json(&masked)
+            futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                Box::new(warp::reply::json(&masked)),
+            ))
         })
 }
 
@@ -2816,7 +2863,7 @@ fn api_get_settings_full(
         .map(move |auth: Option<String>, cfg: Arc<AppConfig>| {
             let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
             let has_api_token =
-                bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+                bearer_matches_api_token(bearer.as_deref(), &cfg);
 
             if !has_api_token {
                 return Box::new(warp::reply::with_status(
@@ -2943,7 +2990,7 @@ fn api_rotate_agent_token(
                 // Require api-token
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
                 let has_api_token =
-                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+                    bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                 if !has_api_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -2990,7 +3037,7 @@ fn api_rotate_api_token(
                 // Require api-token
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
                 let has_api_token =
-                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+                    bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                 if !has_api_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -3012,11 +3059,12 @@ fn api_rotate_api_token(
                     eprintln!("[api] Failed to write rotated api-token to {token_file:?}: {e}");
                 }
                 crate::config::harden_file_permissions(&token_file);
+                cfg.update_live_api_token(new_token);
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
                         "ok": true,
-                        "message": "API token rotated. Restart llama-monitor to fully apply."
+                        "message": "API token rotated successfully."
                     }),
                 )))
             }
@@ -3037,7 +3085,7 @@ fn api_rotate_db_admin_token(
                 // Require api-token
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
                 let has_api_token =
-                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+                    bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                 if !has_api_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -3061,11 +3109,12 @@ fn api_rotate_db_admin_token(
                     );
                 }
                 crate::config::harden_file_permissions(&token_file);
+                cfg.update_live_db_admin_token(new_token);
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
                         "ok": true,
-                        "message": "DB admin token rotated. Restart llama-monitor to fully apply."
+                        "message": "DB admin token rotated successfully."
                     }),
                 )))
             }
@@ -3097,9 +3146,8 @@ fn api_browse(
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
-                let last = LAST_BROWSE.load(Ordering::Relaxed);
+                let last = LAST_BROWSE.load(Ordering::Acquire);
                 if now - last < 1 {
-                    LAST_BROWSE.store(now, Ordering::Relaxed);
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::with_status(
                             warp::reply::json(&serde_json::json!({
@@ -3110,7 +3158,7 @@ fn api_browse(
                         ),
                     ));
                 }
-                LAST_BROWSE.store(now, Ordering::Relaxed);
+                LAST_BROWSE.store(now, Ordering::Release);
 
                 // Build allowed roots:
                 // - Home directory (primary root).
@@ -4436,7 +4484,7 @@ fn api_chat_search(
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
-                let last = LAST_CHAT_SEARCH.load(Ordering::Relaxed);
+                let last = LAST_CHAT_SEARCH.load(Ordering::Acquire);
                 if now - last < 1 {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::with_status(
@@ -4449,7 +4497,7 @@ fn api_chat_search(
                         ),
                     ));
                 }
-                LAST_CHAT_SEARCH.store(now, Ordering::Relaxed);
+                LAST_CHAT_SEARCH.store(now, Ordering::Release);
 
                 let limit = p.limit.clamp(1, 100);
                 match store.search(&p.q, limit, p.offset) {
@@ -4491,7 +4539,7 @@ fn api_db_stats(
             move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
                 let has_api_token =
-                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+                    bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                 if !has_api_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -4533,7 +4581,7 @@ fn api_db_integrity(
             move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
                 let has_api_token =
-                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+                    bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                 if !has_api_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -4593,7 +4641,7 @@ fn api_db_maintenance(
                     // Require api-token
                     let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
                     let has_api_token =
-                        bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+                        bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                     if !has_api_token {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -4660,7 +4708,7 @@ fn api_db_backup(
                     let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
 
                     let has_api_token =
-                        bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+                        bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                     if !has_api_token {
                         return Ok::<_, warp::Rejection>(warp::reply::with_status(
@@ -4673,7 +4721,7 @@ fn api_db_backup(
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
-                    let last = LAST_DB_BACKUP.load(Ordering::Relaxed);
+                    let last = LAST_DB_BACKUP.load(Ordering::Acquire);
                     if now - last < 10 {
                         let remaining = 10 - (now - last);
                         return Ok::<_, warp::Rejection>(warp::reply::with_status(
@@ -4685,7 +4733,7 @@ fn api_db_backup(
                             warp::http::StatusCode::TOO_MANY_REQUESTS,
                         ));
                     }
-                    LAST_DB_BACKUP.store(now, Ordering::Relaxed);
+                    LAST_DB_BACKUP.store(now, Ordering::Release);
 
                     let config_dir = cfg.config_dir.clone();
                     // Manual backups live in their own subdirectory, separate from auto backups.
@@ -4766,7 +4814,7 @@ fn api_db_indexes(
             move |auth: Option<String>, store: Arc<ChatStorage>, cfg: Arc<AppConfig>| async move {
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
                 let has_api_token =
-                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+                    bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                 if !has_api_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -4821,7 +4869,8 @@ fn api_internal_token(
                     warp::http::StatusCode::FORBIDDEN,
                 )) as Box<dyn warp::reply::Reply>;
             }
-            let token = cfg.api_token.as_deref().unwrap_or("");
+            let live = cfg.live_api_token();
+            let token = live.as_deref().unwrap_or("");
             Box::new(warp::reply::json(&serde_json::json!({ "token": token })))
         })
 }
@@ -4842,7 +4891,8 @@ fn api_db_admin_token(
                     warp::http::StatusCode::FORBIDDEN,
                 )) as Box<dyn warp::reply::Reply>;
             }
-            let token = cfg.db_admin_token.as_deref().unwrap_or("");
+            let live = cfg.live_db_admin_token();
+            let token = live.as_deref().unwrap_or("");
             Box::new(warp::reply::json(&serde_json::json!({ "token": token })))
         })
 }
@@ -4876,11 +4926,11 @@ fn api_db_query(
 
                 let store_clone = store.clone();
                 async move {
-                    // Require api-token for DB query (defense-in-depth)
-                    let has_api_token =
-                        bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+                    // Accept either api-token or db-admin-token; admin mode iff db-admin-token used.
+                    let has_api_token = bearer_matches_api_token(bearer.as_deref(), &cfg);
+                    let is_admin = bearer_matches_db_admin_token(bearer.as_deref(), &cfg);
 
-                    if !has_api_token {
+                    if !has_api_token && !is_admin {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::with_status(
                                 warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
@@ -4888,10 +4938,6 @@ fn api_db_query(
                             ),
                         ));
                     }
-
-                    // Admin mode if db_admin_token is present and valid
-                    let is_admin = bearer.as_deref()
-                        == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
 
                     // SQL length cap: 16KB
                     if req.sql.len() > 16_000 {
@@ -4960,7 +5006,7 @@ fn api_db_backups(
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
 
                 let has_api_token =
-                    bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+                    bearer_matches_api_token(bearer.as_deref(), &cfg);
 
                 if !has_api_token {
                     return Ok::<_, warp::Rejection>(warp::reply::with_status(
@@ -5041,7 +5087,7 @@ fn api_db_restore(
                   req: RestoreRequest,
                   store: Arc<ChatStorage>,
                   cfg: Arc<AppConfig>| {
-                use std::sync::atomic::{AtomicU64, Ordering};
+                use std::sync::atomic::AtomicU64;
                 use std::time::{SystemTime, UNIX_EPOCH};
 
                 static LAST_DB_RESTORE: AtomicU64 = AtomicU64::new(0);
@@ -5053,7 +5099,7 @@ fn api_db_restore(
 
                     // Require db-admin-token for restore (high-impact operation)
                     let has_admin_token =
-                        bearer.as_deref() == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
+                        bearer_matches_db_admin_token(bearer.as_deref(), &cfg);
 
                     if !has_admin_token {
                         return Ok::<_, warp::Rejection>(warp::reply::with_status(
@@ -5066,9 +5112,8 @@ fn api_db_restore(
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
-                    let last = LAST_DB_RESTORE.load(Ordering::Relaxed);
-                    if now - last < 30 {
-                        let remaining = 30 - (now - last);
+                    let (ok, remaining) = try_cooldown(&LAST_DB_RESTORE, now, 30);
+                    if !ok {
                         return Ok::<_, warp::Rejection>(warp::reply::with_status(
                             warp::reply::json(&serde_json::json!({
                                 "ok": false,
@@ -5078,7 +5123,6 @@ fn api_db_restore(
                             warp::http::StatusCode::TOO_MANY_REQUESTS,
                         ));
                     }
-                    LAST_DB_RESTORE.store(now, Ordering::Relaxed);
 
                     // Validate backup_name (prevent directory traversal)
                     let backup_name = req.backup_name.trim();
@@ -5116,10 +5160,8 @@ fn api_db_restore(
                         ));
                     }
 
-                    // Get the current database path
-                    let db_path = store.get_db_path();
-
-                    // Safety backup goes into manual/ so it doesn't evict auto backups.
+                    // Safety backup (via SQLite backup API) so the live connection
+                    // is used safely — no raw fs::copy on an open database.
                     let manual_dir = cfg.config_dir.join("backups").join("manual");
                     let _ = std::fs::create_dir_all(&manual_dir);
                     let safety_backup = manual_dir.join(format!(
@@ -5129,14 +5171,11 @@ fn api_db_restore(
                             .map(|d| d.as_millis().to_string())
                             .unwrap_or_else(|_| "0".to_string())
                     ));
+                    let _ = store.backup(&safety_backup);
 
-                    if std::fs::metadata(&db_path).is_ok() {
-                        let _ = std::fs::copy(&db_path, &safety_backup);
-                    }
-
-                    // Restore: copy backup over current database
-                    match std::fs::copy(&backup_path, &db_path) {
-                        Ok(_) => {
+                    // Atomically close connection, swap in backup file, reopen.
+                    match store.restore_from_path(&backup_path) {
+                        Ok(()) => {
                             // Verify the restored database
                             match store.integrity_check() {
                                 Ok(_) => {
@@ -5199,8 +5238,8 @@ fn api_db_repair(
                 async move {
                     // Require db-admin-token
                     let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
-                    let has_db_admin_token = bearer.as_deref()
-                        == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
+                    let has_db_admin_token =
+                        bearer_matches_db_admin_token(bearer.as_deref(), &cfg);
 
                     if !has_db_admin_token {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -5271,7 +5310,7 @@ fn api_db_delete_backup(
 
                     // Require db-admin-token for delete (high-impact operation)
                     let has_admin_token = bearer.as_deref()
-                        == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
+                        == cfg.live_db_admin_token().as_deref().filter(|t| !t.is_empty());
 
                     if !has_admin_token {
                         return Ok::<_, warp::Rejection>(warp::reply::with_status(
@@ -5422,7 +5461,7 @@ fn api_delete_session(
                         .duration_since(UNIX_EPOCH)
                         .unwrap_or_default()
                         .as_secs();
-                    let last = LAST_DELETE_SESSION.load(Ordering::Relaxed);
+                    let last = LAST_DELETE_SESSION.load(Ordering::Acquire);
                     if now - last < 5 {
                         let remaining = 5 - (now - last);
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -5436,7 +5475,7 @@ fn api_delete_session(
                             ),
                         ));
                     }
-                    LAST_DELETE_SESSION.store(now, Ordering::Relaxed);
+                    LAST_DELETE_SESSION.store(now, Ordering::Release);
 
                     if state.remove_session(&session_id) {
                         Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -5503,13 +5542,21 @@ fn api_get_active_session(
 
 fn api_get_capabilities(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "capabilities")
         .and(warp::path::end())
         .and(warp::get())
-        .and_then(move || {
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
             let state = state.clone();
             async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        unauthorized_api_token(),
+                    );
+                }
                 let capabilities = state.calculate_capabilities();
                 let endpoint_kind = state.current_endpoint_kind();
                 let session_kind = state.current_session_kind();
@@ -5518,17 +5565,19 @@ fn api_get_capabilities(
                 let (system_reason, gpu_reason, cpu_temp_reason) =
                     state.calculate_availability_reasons();
 
-                Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
-                    "capabilities": capabilities,
-                    "endpoint_kind": endpoint_kind,
-                    "session_kind": session_kind,
-                    "tray_mode": tray_mode,
-                    "availability": {
-                        "system": system_reason,
-                        "gpu": gpu_reason,
-                        "cpu_temp": cpu_temp_reason
-                    }
-                })))
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                    warp::reply::json(&serde_json::json!({
+                        "capabilities": capabilities,
+                        "endpoint_kind": endpoint_kind,
+                        "session_kind": session_kind,
+                        "tray_mode": tray_mode,
+                        "availability": {
+                            "system": system_reason,
+                            "gpu": gpu_reason,
+                            "cpu_temp": cpu_temp_reason
+                        }
+                    })),
+                ))
             }
         })
 }
@@ -5601,7 +5650,7 @@ fn api_spawn_session_with_preset(
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
-                let last = LAST_SPAWN_SESSION.load(Ordering::Relaxed);
+                let last = LAST_SPAWN_SESSION.load(Ordering::Acquire);
                 if now - last < 15 {
                     let remaining = 15 - (now - last);
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -5615,7 +5664,7 @@ fn api_spawn_session_with_preset(
                         ),
                     ));
                 }
-                LAST_SPAWN_SESSION.store(now, Ordering::Relaxed);
+                LAST_SPAWN_SESSION.store(now, Ordering::Release);
 
                 let port: u16 = match payload.get("port") {
                     Some(v) => {
@@ -5757,12 +5806,12 @@ fn api_attach(
                       cfg: Arc<AppConfig>| {
             let state = state.clone();
             async move {
-                // Require api-token for attach
-                let has_token = headers
+                // Require api-token for attach (constant-time comparison via helper)
+                let bearer_str = headers
                     .get("authorization")
                     .and_then(|v| v.to_str().ok())
-                    .and_then(|v| v.strip_prefix("Bearer "))
-                    .is_some_and(|t| t == cfg.api_token.as_deref().unwrap_or(""));
+                    .and_then(|v| v.strip_prefix("Bearer "));
+                let has_token = bearer_matches_api_token(bearer_str, &cfg);
 
                 if !has_token {
                     return Ok::<_, warp::Rejection>(warp::reply::with_status(
@@ -5775,7 +5824,7 @@ fn api_attach(
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
-                let last = LAST_ATTACH.load(Ordering::Relaxed);
+                let last = LAST_ATTACH.load(Ordering::Acquire);
                 if now - last < 10 {
                     let remaining = 10 - (now - last);
                     return Ok::<_, warp::Rejection>(warp::reply::with_status(
@@ -5787,7 +5836,7 @@ fn api_attach(
                         warp::http::StatusCode::TOO_MANY_REQUESTS,
                     ));
                 }
-                LAST_ATTACH.store(now, Ordering::Relaxed);
+                LAST_ATTACH.store(now, Ordering::Release);
 
                 let endpoint: String = match payload.get("endpoint") {
                     Some(v) => {
@@ -5991,7 +6040,7 @@ fn api_kill_llama(
                 // Require db-admin-token (elevated operation).
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
                 let has_admin_token =
-                    bearer.as_deref() == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
+                    bearer_matches_db_admin_token(bearer.as_deref(), &cfg);
 
                 if !has_admin_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -6020,7 +6069,7 @@ fn api_kill_llama(
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
-                let last = LAST_KILL.load(Ordering::Relaxed);
+                let last = LAST_KILL.load(Ordering::Acquire);
                 if now - last < 30 {
                     let remaining = 30 - (now - last);
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -6034,7 +6083,7 @@ fn api_kill_llama(
                     ));
                 }
 
-                LAST_KILL.store(now, Ordering::Relaxed);
+                LAST_KILL.store(now, Ordering::Release);
 
                 // Inline kill logic (platform-specific).
                 #[cfg(target_os = "windows")]
@@ -6127,7 +6176,7 @@ fn api_get_tls_config(
         .map(move |auth: Option<String>, cfg: Arc<AppConfig>| {
             let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
             let has_api_token =
-                bearer.as_deref() == cfg.api_token.as_deref().filter(|t| !t.is_empty());
+                bearer_matches_api_token(bearer.as_deref(), &cfg);
 
             if !has_api_token {
                 return Box::new(warp::reply::with_status(
@@ -6187,39 +6236,9 @@ fn api_put_tls_config(
                 let state = state.clone();
                 let app_config = app_config.clone();
                 async move {
-                    // Require api-token in Authorization: Bearer <token>
-                    let expected = match &app_config.api_token {
-                        Some(t) => t,
-                        None => {
-                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
-                                warp::reply::json(&serde_json::json!({
-                                    "ok": false,
-                                    "error": "API token not configured"
-                                })),
-                                warp::http::StatusCode::UNAUTHORIZED,
-                            ));
-                        }
-                    };
-
-                    let token = match auth_header.as_ref().and_then(|h| h.strip_prefix("Bearer ")) {
-                        Some(t) => t.trim(),
-                        None => {
-                            return Ok::<_, warp::Rejection>(warp::reply::with_status(
-                                warp::reply::json(&serde_json::json!({
-                                    "ok": false,
-                                    "error": "Missing or invalid Authorization header"
-                                })),
-                                warp::http::StatusCode::UNAUTHORIZED,
-                            ));
-                        }
-                    };
-
-                    if token != expected {
+                    if !check_api_token(&auth_header, &app_config) {
                         return Ok::<_, warp::Rejection>(warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": "Invalid API token"
-                            })),
+                            warp::reply::json(&serde_json::json!({"ok": false, "error": "unauthorized; api-token required"})),
                             warp::http::StatusCode::UNAUTHORIZED,
                         ));
                     }
@@ -6404,7 +6423,7 @@ fn api_tls_acme_request(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::AtomicU64;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     static LAST_TLS_ACME_REQUEST: AtomicU64 = AtomicU64::new(0);
@@ -6416,39 +6435,9 @@ fn api_tls_acme_request(
             let state = state.clone();
             let app_config = app_config.clone();
             async move {
-                // Auth check
-                let expected = match &app_config.api_token {
-                    Some(t) => t,
-                    None => {
-                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": "API token not configured"
-                            })),
-                            warp::http::StatusCode::UNAUTHORIZED,
-                        ));
-                    }
-                };
-
-                let token = match auth_header.as_ref().and_then(|h| h.strip_prefix("Bearer ")) {
-                    Some(t) => t.trim(),
-                    None => {
-                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": "Missing or invalid Authorization header"
-                            })),
-                            warp::http::StatusCode::UNAUTHORIZED,
-                        ));
-                    }
-                };
-
-                if token != expected {
+                if !check_api_token(&auth_header, &app_config) {
                     return Ok::<_, warp::Rejection>(warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": "Invalid API token"
-                        })),
+                        warp::reply::json(&serde_json::json!({"ok": false, "error": "unauthorized; api-token required"})),
                         warp::http::StatusCode::UNAUTHORIZED,
                     ));
                 }
@@ -6457,9 +6446,8 @@ fn api_tls_acme_request(
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
-                let last = LAST_TLS_ACME_REQUEST.load(Ordering::Relaxed);
-                if now - last < 60 {
-                    let remaining = 60 - (now - last);
+                let (ok, remaining) = try_cooldown(&LAST_TLS_ACME_REQUEST, now, 60);
+                if !ok {
                     return Ok::<_, warp::Rejection>(warp::reply::with_status(
                         warp::reply::json(&serde_json::json!({
                             "ok": false,
@@ -6469,7 +6457,6 @@ fn api_tls_acme_request(
                         warp::http::StatusCode::TOO_MANY_REQUESTS,
                     ));
                 }
-                LAST_TLS_ACME_REQUEST.store(now, Ordering::Relaxed);
 
                 let cfg = state.get_tls_config();
                 let config_dir = app_config.config_dir.clone();
@@ -6512,7 +6499,7 @@ fn api_tls_acme_renew(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::AtomicU64;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     static LAST_TLS_ACME_RENEW: AtomicU64 = AtomicU64::new(0);
@@ -6524,39 +6511,9 @@ fn api_tls_acme_renew(
             let state = state.clone();
             let app_config = app_config.clone();
             async move {
-                // Auth check
-                let expected = match &app_config.api_token {
-                    Some(t) => t,
-                    None => {
-                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": "API token not configured"
-                            })),
-                            warp::http::StatusCode::UNAUTHORIZED,
-                        ));
-                    }
-                };
-
-                let token = match auth_header.as_ref().and_then(|h| h.strip_prefix("Bearer ")) {
-                    Some(t) => t.trim(),
-                    None => {
-                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": "Missing or invalid Authorization header"
-                            })),
-                            warp::http::StatusCode::UNAUTHORIZED,
-                        ));
-                    }
-                };
-
-                if token != expected {
+                if !check_api_token(&auth_header, &app_config) {
                     return Ok::<_, warp::Rejection>(warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": "Invalid API token"
-                        })),
+                        warp::reply::json(&serde_json::json!({"ok": false, "error": "unauthorized; api-token required"})),
                         warp::http::StatusCode::UNAUTHORIZED,
                     ));
                 }
@@ -6565,9 +6522,8 @@ fn api_tls_acme_renew(
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
-                let last = LAST_TLS_ACME_RENEW.load(Ordering::Relaxed);
-                if now - last < 60 {
-                    let remaining = 60 - (now - last);
+                let (ok, remaining) = try_cooldown(&LAST_TLS_ACME_RENEW, now, 60);
+                if !ok {
                     return Ok::<_, warp::Rejection>(warp::reply::with_status(
                         warp::reply::json(&serde_json::json!({
                             "ok": false,
@@ -6577,7 +6533,6 @@ fn api_tls_acme_renew(
                         warp::http::StatusCode::TOO_MANY_REQUESTS,
                     ));
                 }
-                LAST_TLS_ACME_RENEW.store(now, Ordering::Relaxed);
 
                 let cfg = state.get_tls_config();
                 let config_dir = app_config.config_dir.clone();
@@ -6618,7 +6573,7 @@ fn api_tls_acme_renew(
 fn api_self_update(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::AtomicU64;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     static LAST_UPDATE: AtomicU64 = AtomicU64::new(0);
@@ -6635,7 +6590,7 @@ fn api_self_update(
                 // Require db-admin-token (elevated operation).
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
                 let has_admin_token =
-                    bearer.as_deref() == cfg.db_admin_token.as_deref().filter(|t| !t.is_empty());
+                    bearer_matches_db_admin_token(bearer.as_deref(), &cfg);
 
                 if !has_admin_token {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -6664,9 +6619,8 @@ fn api_self_update(
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
-                let last = LAST_UPDATE.load(Ordering::Relaxed);
-                if now - last < 300 {
-                    let remaining = 300 - (now - last);
+                let (ok, remaining) = try_cooldown(&LAST_UPDATE, now, 300);
+                if !ok {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::with_status(
                             warp::reply::json(&serde_json::json!({
@@ -6677,8 +6631,6 @@ fn api_self_update(
                         ),
                     ));
                 }
-
-                LAST_UPDATE.store(now, Ordering::Relaxed);
 
                 match crate::agent::self_update_binary().await {
                     Ok(result) => {
@@ -6743,36 +6695,10 @@ mod tests {
             cs,
             tls_config,
         );
-        let app_config = Arc::new(config::AppConfig {
-            config_dir: PathBuf::from("/tmp/llama-monitor-test"),
-            llama_server_path: PathBuf::from("llama-server"),
-            llama_server_cwd: PathBuf::from("."),
-            port: 8001,
-            gpu_backend: String::new(),
-            llama_poll_interval: 1,
-            models_dir: None,
-            presets_file: PathBuf::new(),
-            templates_file: PathBuf::new(),
-            gpu_env_file: PathBuf::new(),
-            gpu_arch_override: None,
-            gpu_devices_override: None,
-            ui_settings_file: PathBuf::new(),
-            auth_config_file: PathBuf::new(),
-            sessions_file: PathBuf::new(),
-            ssh_known_hosts_file: PathBuf::new(),
-            lhm_disabled_file: PathBuf::new(),
-            agent_host: "127.0.0.1".to_string(),
-            agent_port: 7777,
-            agent_token: None,
-            remote_agent_url: None,
-            remote_agent_token: None,
-            remote_agent_ssh_autostart: false,
-            remote_agent_ssh_target: None,
-            remote_agent_ssh_command: None,
-            db_admin_token: None,
-            api_token: Some("test-token".to_string()),
-            tls_config: TLSConfig::default(),
-        });
+        let app_config = Arc::new(config::AppConfig::for_test(
+            Some("test-token".to_string()),
+            None,
+        ));
         (state, app_config)
     }
 

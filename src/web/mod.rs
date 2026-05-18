@@ -23,8 +23,7 @@ fn global_rate_limit() -> impl Filter<Extract = ((),), Error = warp::Rejection> 
     static WINDOW_START: AtomicU64 = AtomicU64::new(0);
     static REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
 
-    let max_per_second = 200u64;
-    let burst_allowance = 500u64;
+    let limit = 200u64 + 500u64; // max_per_second + burst_allowance
 
     warp::any().and_then(move || async move {
         let now = SystemTime::now()
@@ -32,17 +31,26 @@ fn global_rate_limit() -> impl Filter<Extract = ((),), Error = warp::Rejection> 
             .unwrap_or_default()
             .as_secs();
 
-        let window_start = WINDOW_START.load(Ordering::Relaxed);
-        let count = REQUEST_COUNT.load(Ordering::Relaxed);
+        let window_start = WINDOW_START.load(Ordering::Acquire);
 
         if now != window_start {
-            WINDOW_START.store(now, Ordering::Relaxed);
-            REQUEST_COUNT.store(1, Ordering::Relaxed);
-            Ok(())
-        } else if count >= max_per_second + burst_allowance {
+            // Atomically claim the window reset; only one thread wins the CAS.
+            if WINDOW_START
+                .compare_exchange(window_start, now, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+            {
+                REQUEST_COUNT.store(1, Ordering::Release);
+                return Ok(());
+            }
+            // Another thread already reset the window; fall through to count.
+        }
+
+        // Increment first, then check — avoids the load/check/add TOCTOU.
+        let prev = REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+        if prev >= limit {
+            REQUEST_COUNT.fetch_sub(1, Ordering::Relaxed);
             Err(warp::reject::custom(RateLimitReject))
         } else {
-            REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
             Ok(())
         }
     })
@@ -78,9 +86,12 @@ fn origin_guard(
                         .trim_end_matches('/');
 
                     if !origin_host.is_empty() {
-                        // If bound to 0.0.0.0, only check port matches
+                        // If bound to 0.0.0.0 accept any host on the correct port.
+                        // Use exact port comparison, not ends_with, to prevent suffix bypass.
                         if server_origin.starts_with("0.0.0.0:") {
-                            if !origin_host.ends_with(&server_origin[5..]) {
+                            let server_port = &server_origin["0.0.0.0:".len()..];
+                            let origin_port = origin_host.rsplit(':').next().unwrap_or("");
+                            if origin_port != server_port {
                                 return Err(warp::reject::custom(OriginReject));
                             }
                         } else if origin_host != server_origin {
@@ -293,13 +304,10 @@ fn index_route(
 
 // Simple u128 helper for CSP nonce generation (no extra dependency)
 fn rand_core_getrandom_u128() -> u128 {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let pid = std::process::id() as u128;
-    // Mix timestamp, pid, and a rotating counter-like value
-    ((ts.wrapping_mul(2654435761)) ^ pid).wrapping_add(0x9E3779B97F4A7C15u128)
+    use rand_core::{OsRng, RngCore};
+    let mut buf = [0u8; 16];
+    OsRng.fill_bytes(&mut buf);
+    u128::from_be_bytes(buf)
 }
 
 async fn handle_rejection(err: warp::Rejection) -> Result<Box<dyn warp::reply::Reply>, Infallible> {

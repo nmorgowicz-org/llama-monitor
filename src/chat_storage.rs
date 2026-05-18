@@ -159,7 +159,10 @@ pub struct SearchResultsPage {
 // ── Storage ───────────────────────────────────────────────────────────────────
 
 pub struct ChatStorage {
-    conn: std::sync::Mutex<Connection>,
+    // Option so restore_from_path can atomically close and reopen the connection
+    // while holding the mutex exclusively. It is None only during that brief window.
+    conn: std::sync::Mutex<Option<Connection>>,
+    db_path: PathBuf,
 }
 
 impl ChatStorage {
@@ -168,8 +171,15 @@ impl ChatStorage {
             .with_context(|| format!("opening chat.db at {}", db_path.display()))?;
         conn.execute_batch(SCHEMA_SQL)?;
         Ok(Self {
-            conn: std::sync::Mutex::new(conn),
+            conn: std::sync::Mutex::new(Some(conn)),
+            db_path: db_path.clone(),
         })
+    }
+
+    /// Return the path this storage was opened from.
+    #[allow(dead_code)]
+    pub fn get_db_path(&self) -> PathBuf {
+        self.db_path.clone()
     }
 
     // ── Migration ─────────────────────────────────────────────────────────────
@@ -182,7 +192,8 @@ impl ChatStorage {
         let tabs: Vec<serde_json::Value> =
             serde_json::from_str(&raw).context("parsing legacy chat-tabs.json")?;
 
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         let tx = conn.unchecked_transaction()?;
 
         let mut migrated_tabs = 0u64;
@@ -267,7 +278,8 @@ impl ChatStorage {
     // ── Tab CRUD ──────────────────────────────────────────────────────────────
 
     pub fn list_tabs(&self) -> Result<Vec<TabMeta>> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         let mut stmt = conn.prepare(
             "SELECT t.id, t.name, t.explicit_level, t.active_template_id,
                     t.pinned, t.tab_order, t.last_ctx_pct,
@@ -300,7 +312,8 @@ impl ChatStorage {
     }
 
     pub fn get_tab(&self, id: &str) -> Result<ChatTabRow> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         let mut stmt = conn.prepare(
             "SELECT id, name, system_prompt, ai_name, user_name,
                     explicit_level, active_template_id,
@@ -338,12 +351,13 @@ impl ChatStorage {
             })
         })?;
 
-        tab.messages = self._load_messages_locked(&conn, id)?;
+        tab.messages = self._load_messages_locked(conn, id)?;
         Ok(tab)
     }
 
     pub fn create_tab(&self, tab: &ChatTabRow) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         conn.execute(
             "INSERT INTO tabs (id, name, system_prompt, ai_name, user_name,
                  explicit_level, active_template_id,
@@ -381,7 +395,8 @@ impl ChatStorage {
     }
 
     pub fn update_tab_meta(&self, tab: &ChatTabRow) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         conn.execute(
             "UPDATE tabs SET
                 name=?2, system_prompt=?3, ai_name=?4, user_name=?5,
@@ -418,13 +433,15 @@ impl ChatStorage {
     }
 
     pub fn delete_tab(&self, id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         conn.execute("DELETE FROM tabs WHERE id = ?1", params![id])?;
         Ok(())
     }
 
     pub fn reorder_tabs(&self, ordered_ids: &[String]) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         let tx = conn.unchecked_transaction()?;
         for (i, id) in ordered_ids.iter().enumerate() {
             tx.execute(
@@ -470,7 +487,8 @@ impl ChatStorage {
     }
 
     pub fn append_message(&self, msg: &MessageRow) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         conn.execute(
             "INSERT INTO messages (tab_id, role, content, timestamp_ms,
                  input_tokens, output_tokens,
@@ -496,7 +514,8 @@ impl ChatStorage {
     }
 
     pub fn replace_messages(&self, tab_id: &str, messages: &[MessageRow]) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         let tx = conn.unchecked_transaction()?;
         tx.execute("DELETE FROM messages WHERE tab_id = ?1", params![tab_id])?;
         for (seq, msg) in messages.iter().enumerate() {
@@ -552,7 +571,8 @@ impl ChatStorage {
             });
         }
 
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         let total: i64 = conn.query_row(
             "SELECT COUNT(*)
              FROM messages_fts
@@ -605,7 +625,8 @@ impl ChatStorage {
 
     /// Run integrity check on the database
     pub fn integrity_check(&self) -> Result<String> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         let mut stmt = conn.prepare("PRAGMA integrity_check")?;
         let result: String = stmt.query_row([], |row| row.get(0))?;
         Ok(result)
@@ -613,7 +634,8 @@ impl ChatStorage {
 
     /// Check database size and table counts
     pub fn database_stats(&self) -> Result<serde_json::Value> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
 
         // Get table counts
         let tab_count: i64 = conn.query_row("SELECT COUNT(*) FROM tabs", [], |row| row.get(0))?;
@@ -631,7 +653,8 @@ impl ChatStorage {
 
     /// Rebuild FTS index
     pub fn rebuild_fts_index(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         // The 'rebuild' special command drops and repopulates the index from the
         // content table in one step; no separate DELETE is needed.
         conn.execute_batch("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")?;
@@ -640,14 +663,16 @@ impl ChatStorage {
 
     /// Run vacuum to optimize database
     pub fn vacuum(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         conn.execute_batch("VACUUM")?;
         Ok(())
     }
 
     /// Checkpoint WAL
     pub fn checkpoint(&self) -> Result<(i64, i64, i64)> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         let mut stmt = conn.prepare("PRAGMA wal_checkpoint(TRUNCATE)")?;
         let row = stmt.query_row([], |row| {
             Ok((
@@ -661,7 +686,8 @@ impl ChatStorage {
 
     /// Create backup to specified path using SQLite online backup API
     pub fn backup(&self, backup_path: &std::path::Path) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
 
         // Checkpoint before backup to ensure consistency
         conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE)")?;
@@ -669,7 +695,7 @@ impl ChatStorage {
         let mut dst = Connection::open(backup_path)
             .with_context(|| format!("opening backup at {}", backup_path.display()))?;
 
-        let backup = Backup::new(&conn, &mut dst).context("creating backup handle")?;
+        let backup = Backup::new(conn, &mut dst).context("creating backup handle")?;
         backup
             .run_to_completion(5, std::time::Duration::from_millis(250), None)
             .context("backup operation")?;
@@ -679,14 +705,16 @@ impl ChatStorage {
 
     /// Analyze database for query optimization
     pub fn analyze(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         conn.execute_batch("ANALYZE")?;
         Ok(())
     }
 
     /// Get list of indexes
     pub fn list_indexes(&self) -> Result<Vec<serde_json::Value>> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         let mut stmt = conn.prepare(
             "SELECT name, tbl_name, sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL",
         )?;
@@ -707,7 +735,8 @@ impl ChatStorage {
 
     /// Execute arbitrary SQL query (admin only, restricted to safe operations)
     pub fn execute_query(&self, sql: &str, is_admin: bool) -> Result<serde_json::Value> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
 
         // Normalize for checks
         let trimmed = sql.trim();
@@ -815,19 +844,50 @@ impl ChatStorage {
         }))
     }
 
-    /// Get the database file path via PRAGMA
-    pub fn get_db_path(&self) -> PathBuf {
-        let conn = self.conn.lock().unwrap();
-        // PRAGMA database_list columns: 0=seq, 1=name ("main"), 2=file
-        let path: String = conn
-            .query_row("PRAGMA database_list", [], |row| row.get::<_, String>(2))
-            .unwrap_or_else(|_| "chat.db".to_string());
-        PathBuf::from(path)
+    /// Restore the live database from a backup file safely.
+    ///
+    /// While holding the mutex exclusively: checkpoints WAL, closes the
+    /// connection, copies the backup file over chat.db, removes any stale WAL
+    /// sidecars, then reopens and applies the schema.
+    pub fn restore_from_path(&self, backup_path: &std::path::Path) -> Result<()> {
+        let mut guard = self.conn.lock().unwrap();
+
+        // Checkpoint so nothing is stranded in the WAL before we close.
+        if let Some(conn) = guard.as_ref() {
+            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
+        }
+
+        // Drop the connection (closes the file handle).
+        *guard = None;
+
+        // Overwrite chat.db with the chosen backup.
+        std::fs::copy(backup_path, &self.db_path).with_context(|| {
+            format!(
+                "copying backup {} → {}",
+                backup_path.display(),
+                self.db_path.display()
+            )
+        })?;
+
+        // Remove stale WAL sidecars so SQLite starts clean.
+        let wal = self.db_path.with_extension("db-wal");
+        let shm = self.db_path.with_extension("db-shm");
+        let _ = std::fs::remove_file(&wal);
+        let _ = std::fs::remove_file(&shm);
+
+        // Reopen and ensure schema is current.
+        let new_conn = Connection::open(&self.db_path)
+            .with_context(|| format!("reopening {} after restore", self.db_path.display()))?;
+        new_conn.execute_batch(SCHEMA_SQL)?;
+        *guard = Some(new_conn);
+
+        Ok(())
     }
 
     /// Repair corrupted FTS index by dropping and recreating it
     pub fn repair_indexes(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
 
         // Drop the FTS virtual table and its associated triggers, then recreate from scratch.
         conn.execute_batch(
@@ -868,7 +928,8 @@ impl ChatStorage {
     /// If the database is corrupted beyond what integrity_check can read, restore
     /// from one of the backups in the `backups/` directory beside the database file.
     pub fn emergency_recovery(&self) -> Result<String> {
-        let conn = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
         let mut stmt = conn.prepare("PRAGMA integrity_check")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         let lines: rusqlite::Result<Vec<String>> = rows.collect();
