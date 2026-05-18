@@ -220,10 +220,10 @@ fn auth_guard(
                     // Allow if a valid api-token is present (Bearer).
                     // This lets internal/API callers (chat, remote-agent, etc.) bypass
                     // the UI-level auth guard while still enforcing their own token auth.
-                    if let Some(token) = extract_bearer_token(auth_header.as_deref())
-                        && api::check_api_token(&Some(format!("Bearer {token}")), &cfg)
-                    {
-                        return Ok(());
+                    if let Some(token) = extract_bearer_token(auth_header.as_deref()) {
+                        if api::check_api_token(&Some(format!("Bearer {token}")), &cfg) {
+                            return Ok(());
+                        }
                     }
 
                     Err(warp::reject::custom(AuthReject {
@@ -238,7 +238,11 @@ fn extract_bearer_token(header: Option<&str>) -> Option<&str> {
     let header = header?;
     let without_prefix = header.strip_prefix("Bearer ")?;
     let token = without_prefix.trim();
-    if token.is_empty() { None } else { Some(token) }
+    if token.is_empty() {
+        None
+    } else {
+        Some(token)
+    }
 }
 
 #[derive(Debug)]
