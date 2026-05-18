@@ -21,7 +21,7 @@ webview-popover = ["dep:wry"]
     reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "json"] }
     serde = { version = "1", features = ["derive"] }
     serde_json = "1"
-    shlex = "1"
+    shlex = "2"
     ssh2 = { version = "0.9", features = ["vendored-openssl"] }
     sysinfo = "0.38"
     tempfile = "3"
@@ -30,7 +30,7 @@ webview-popover = ["dep:wry"]
     url = "2"
     warp = { version = "0.4", features = ["server", "websocket"] }
     warp-helmet = "1.0"
-    tray-icon = { version = "0.23", optional = true }
+    tray-icon = { version = "0.24", optional = true }
     winit = { version = "0.31.0-beta.2", default-features = false, features = ["x11", "wayland"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
