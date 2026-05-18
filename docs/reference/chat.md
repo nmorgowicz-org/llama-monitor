@@ -51,6 +51,13 @@ The sidebar's `Search Messages` button opens a larger flyout beside the conversa
 - **History pagination** — Long conversations render only the newest messages first (default 15) and expose older history through `Load More`
 - **RP dialogue highlighting** — Quoted dialogue is colorized even when Markdown formatting splits the text across inline tags
 
+### Upstream Busy Handling
+
+- **Monitor-side serialization** — llama-monitor now serializes its own chat-adjacent inference requests so it does not issue overlapping requests from the same app session.
+- **Single-slot upstream protection** — When the active llama.cpp server is already occupied, the chat transport waits briefly for the current request to finish before attempting a new one.
+- **Explicit transport errors** — If the upstream stays busy, the transport now surfaces a busy response instead of a generic `500`. Offline or dropped-upstream cases are also reported explicitly.
+- **Shared behavior across tools** — The same admission logic applies to normal chat sends, guided suggestions, quick-guide rewrites, keyword generation, and context-note analysis because they all share the same upstream chat-completions transport.
+
 ### Message Actions
 
 | Action | Description |
