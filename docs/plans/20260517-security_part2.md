@@ -214,11 +214,21 @@ Focus: remaining gaps after initial hardening pass.
 
 ### 5. Unprotected Chat and Chat-Search Endpoints
 
-- Status: OPEN
+- Status: FIXED
 - Files:
-  - src/web/api.rs (chat and chat-search endpoints)
+  - src/web/api.rs
+  - static/js/features/chat-state.js
+  - static/js/features/chat-transport.js
+  - static/js/features/chat-suggestions.js
+  - static/js/features/chat-quick-guide.js
+  - static/js/features/chat-notes.js
+  - static/js/features/file-browser.js
+  - static/js/features/chat-search.js
+  - tests/ui/chat/chat-shell.spec.js
+  - tests/ui/capture.mjs
+  - docs/reference/api.md
 - Issue:
-  - Chat and chat-search endpoints are unprotected (no api-token or db-admin-token required).
+  - Chat and chat-search endpoints were unprotected (no api-token or db-admin-token required).
   - Reachable from any client on the network.
   - An attacker could:
     - Send chat requests.
@@ -227,12 +237,30 @@ Focus: remaining gaps after initial hardening pass.
   - Medium: disruption and data exposure.
 - Likelihood:
   - Medium: if exposed on LAN or via reverse proxy.
-- Fix:
-  - Require api-token for chat and chat-search endpoints.
-- Next Steps:
-  - Add api-token auth to chat and chat-search endpoints.
-  - Update frontend to send correct tokens.
-  - Update reference docs.
+- Mitigation Applied:
+  - Added api-token auth (Authorization: Bearer <api-token>) to:
+    - POST /api/chat
+    - POST /api/chat/abort
+    - POST /api/chat/suggestions
+    - POST /api/keywords/generate
+    - POST /api/context-notes/analyze
+    - GET /api/chat/tabs
+    - POST /api/chat/tabs
+    - GET /api/chat/tabs/:id
+    - PUT /api/chat/tabs/:id
+    - DELETE /api/chat/tabs/:id
+    - PATCH /api/chat/tabs/:id/meta
+    - POST /api/chat/tabs/:id/messages
+    - PATCH /api/chat/tabs/order
+    - GET /api/chat/search
+    - GET /api/browse
+  - Updated frontend:
+    - All chat-related fetch calls now include Authorization header using existing api-token helpers.
+    - 401 responses show a concise “Authentication required” message.
+  - Updated tests:
+    - chat-shell.spec.js and capture.mjs now include Authorization header in chat-related fetch calls.
+  - Updated docs:
+    - api.md now documents that all /api/chat/*, /api/chat/search, /api/keywords/generate, /api/context-notes/analyze, and /api/browse require api-token.
 
 ## LOW
 

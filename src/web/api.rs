@@ -750,13 +750,19 @@ fn api_disable_lhm(
 
 fn api_generate_keywords(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "keywords" / "generate")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json::<KeywordRequest>())
-        .and_then(move |req: KeywordRequest| {
+        .and_then(move |auth: Option<String>, req: KeywordRequest| {
+            let cfg = app_config.clone();
             let state = state.clone();
             async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
                 let session = state.get_active_session()
                     .ok_or(warp::reject::not_found())?;
 
@@ -855,20 +861,28 @@ fn api_generate_keywords(
                     )));
                 }
 
-                Ok::<_, warp::Rejection>(warp::reply::json(&KeywordResponse { keywords }))
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                    warp::reply::json(&KeywordResponse { keywords }),
+                ))
             }
         })
 }
 
 fn api_analyze_context_notes(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "context-notes" / "analyze")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json::<ContextNotesAnalyzeRequest>())
-        .and_then(move |req: ContextNotesAnalyzeRequest| {
+        .and_then(move |auth: Option<String>, req: ContextNotesAnalyzeRequest| {
+            let cfg = app_config.clone();
             let state = state.clone();
             async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
                 let session = state.get_active_session()
                     .ok_or(warp::reject::not_found())?;
 
@@ -1037,7 +1051,9 @@ fn api_analyze_context_notes(
                     )));
                 }
 
-                Ok::<_, warp::Rejection>(warp::reply::json(&ContextNotesAnalyzeResponse { sections }))
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                    warp::reply::json(&ContextNotesAnalyzeResponse { sections }),
+                ))
             }
         })
 }
@@ -1067,21 +1083,21 @@ pub fn api_routes(
     let get_settings = api_get_settings(state.clone());
     let get_settings_full = api_get_settings_full(state.clone(), app_config.clone());
     let put_settings = api_put_settings(state.clone());
-    let browse = api_browse(state.clone());
-    let chat = api_chat(state.clone());
-    let chat_abort = api_chat_abort(state.clone());
-    let chat_suggestions = api_chat_suggestions(state.clone());
-    let generate_keywords = api_generate_keywords(state.clone());
+    let browse = api_browse(state.clone(), app_config.clone());
+    let chat = api_chat(state.clone(), app_config.clone());
+    let chat_abort = api_chat_abort(state.clone(), app_config.clone());
+    let chat_suggestions = api_chat_suggestions(state.clone(), app_config.clone());
+    let generate_keywords = api_generate_keywords(state.clone(), app_config.clone());
     let chat_storage = state.chat_storage.clone();
-    let chat_list_tabs = api_list_tabs(chat_storage.clone());
-    let chat_create_tab = api_create_tab(chat_storage.clone());
-    let chat_get_tab = api_get_tab(chat_storage.clone());
-    let chat_put_tab = api_put_tab(chat_storage.clone());
-    let chat_delete_tab = api_delete_tab(chat_storage.clone());
-    let chat_patch_tab_meta = api_patch_tab_meta(chat_storage.clone());
-    let chat_append_messages = api_append_messages(chat_storage.clone());
-    let chat_reorder_tabs = api_reorder_tabs(chat_storage.clone());
-    let chat_search = api_chat_search(chat_storage.clone());
+    let chat_list_tabs = api_list_tabs(chat_storage.clone(), app_config.clone());
+    let chat_create_tab = api_create_tab(chat_storage.clone(), app_config.clone());
+    let chat_get_tab = api_get_tab(chat_storage.clone(), app_config.clone());
+    let chat_put_tab = api_put_tab(chat_storage.clone(), app_config.clone());
+    let chat_delete_tab = api_delete_tab(chat_storage.clone(), app_config.clone());
+    let chat_patch_tab_meta = api_patch_tab_meta(chat_storage.clone(), app_config.clone());
+    let chat_append_messages = api_append_messages(chat_storage.clone(), app_config.clone());
+    let chat_reorder_tabs = api_reorder_tabs(chat_storage.clone(), app_config.clone());
+    let chat_search = api_chat_search(chat_storage.clone(), app_config.clone());
 
     // Agent token rotation routes
     let rotate_agent_token = api_rotate_agent_token(state.clone(), app_config.clone());
@@ -1155,7 +1171,7 @@ pub fn api_routes(
         .or(rotate_db_admin_token)
         .or(get_auth_config)
         .or(put_auth_config);
-    let analyze_context_notes = api_analyze_context_notes(state.clone());
+    let analyze_context_notes = api_analyze_context_notes(state.clone(), app_config.clone());
     let chat_routes = browse
         .or(chat)
         .or(chat_abort)
@@ -2902,6 +2918,7 @@ fn api_rotate_db_admin_token(
 
 fn api_browse(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -2910,204 +2927,228 @@ fn api_browse(
 
     warp::path!("api" / "browse")
         .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::query::<std::collections::HashMap<String, String>>())
-        .map(move |query: std::collections::HashMap<String, String>| {
-            // Cooldown: 1 second
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let last = LAST_BROWSE.load(Ordering::Relaxed);
-            if now - last < 1 {
+        .and_then(move |auth: Option<String>, query: std::collections::HashMap<String, String>| {
+            let cfg = app_config.clone();
+            let state = state.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                // Cooldown: 1 second
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let last = LAST_BROWSE.load(Ordering::Relaxed);
+                if now - last < 1 {
+                    LAST_BROWSE.store(now, Ordering::Relaxed);
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "error": "too soon; please wait",
+                                "seconds_remaining": 1
+                            })),
+                            warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        ),
+                    ));
+                }
                 LAST_BROWSE.store(now, Ordering::Relaxed);
-                return warp::reply::with_status(
-                    warp::reply::json(&serde_json::json!({
-                        "error": "too soon; please wait",
-                        "seconds_remaining": 1
-                    })),
-                    warp::http::StatusCode::TOO_MANY_REQUESTS,
-                );
-            }
-            LAST_BROWSE.store(now, Ordering::Relaxed);
 
-            // Build allowed roots:
-            // - Home directory (primary root).
-            // - Directories used for models, TLS certs, etc.
-            let mut allowed_roots: Vec<PathBuf> = Vec::new();
+                // Build allowed roots:
+                // - Home directory (primary root).
+                // - Directories used for models, TLS certs, etc.
+                let mut allowed_roots: Vec<PathBuf> = Vec::new();
 
-            // Always allow home directory
-            if let Some(home) = dirs::home_dir()
-                && let Ok(canon) = home.canonicalize()
-            {
-                allowed_roots.push(canon);
-            }
+                // Always allow home directory
+                if let Some(home) = dirs::home_dir()
+                    && let Ok(canon) = home.canonicalize()
+                {
+                    allowed_roots.push(canon);
+                }
 
-            // Allow models_dir (parent directory)
-            if let Some(ref models_dir) = state.models_dir
-                && let Some(parent) = models_dir.parent()
-                && let Ok(canon) = parent.canonicalize()
-            {
-                allowed_roots.push(canon);
-            }
-
-            // Allow TLS custom cert/key parent directories
-            if let Ok(tls) = state.tls_config.lock() {
-                if let Some(ref cert_path) = tls.custom_cert_path
-                    && let Some(parent) = cert_path.parent()
+                // Allow models_dir (parent directory)
+                if let Some(ref models_dir) = state.models_dir
+                    && let Some(parent) = models_dir.parent()
                     && let Ok(canon) = parent.canonicalize()
                 {
                     allowed_roots.push(canon);
                 }
-                if let Some(ref key_path) = tls.custom_key_path
-                    && let Some(parent) = key_path.parent()
-                    && let Ok(canon) = parent.canonicalize()
-                {
-                    allowed_roots.push(canon);
-                }
-            }
 
-            // Remove duplicates
-            allowed_roots.sort();
-            allowed_roots.dedup();
-
-            let requested = query.get("path").cloned().unwrap_or_default();
-            let filter = query.get("filter").cloned().unwrap_or_default();
-
-            let dir = if requested.is_empty() {
-                dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
-            } else {
-                PathBuf::from(&requested)
-            };
-
-            let dir = match dir.canonicalize() {
-                Ok(p) => p,
-                Err(_) => {
-                    return warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({
-                            "path": requested,
-                            "error": "Path not found"
-                        })),
-                        warp::http::StatusCode::OK,
-                    );
-                }
-            };
-
-            // Enforce allowlist: directory must be under one of the allowed roots
-            if !allowed_roots.iter().any(|root| dir.starts_with(root)) {
-                return warp::reply::with_status(
-                    warp::reply::json(&serde_json::json!({
-                        "path": dir.display().to_string(),
-                        "error": "Path not allowed"
-                    })),
-                    warp::http::StatusCode::OK,
-                );
-            }
-
-            if !dir.is_dir() {
-                return warp::reply::with_status(
-                    warp::reply::json(&serde_json::json!({
-                        "path": dir.display().to_string(),
-                        "error": "Not a directory"
-                    })),
-                    warp::http::StatusCode::OK,
-                );
-            }
-
-            let parent = dir
-                .parent()
-                .map(|p| p.display().to_string())
-                .unwrap_or_default();
-
-            let mut entries: Vec<serde_json::Value> = Vec::new();
-            if let Ok(read_dir) = std::fs::read_dir(&dir) {
-                for entry in read_dir.flatten() {
-                    let name = entry.file_name().to_string_lossy().to_string();
-                    if name.starts_with('.') {
-                        continue;
+                // Allow TLS custom cert/key parent directories
+                if let Ok(tls) = state.tls_config.lock() {
+                    if let Some(ref cert_path) = tls.custom_cert_path
+                        && let Some(parent) = cert_path.parent()
+                        && let Ok(canon) = parent.canonicalize()
+                    {
+                        allowed_roots.push(canon);
                     }
-                    let meta = entry.metadata().ok();
-                    let is_dir = meta.as_ref().is_some_and(|m| m.is_dir());
+                    if let Some(ref key_path) = tls.custom_key_path
+                        && let Some(parent) = key_path.parent()
+                        && let Ok(canon) = parent.canonicalize()
+                    {
+                        allowed_roots.push(canon);
+                    }
+                }
 
-                    if !is_dir && !filter.is_empty() {
-                        let pass = match filter.as_str() {
-                            "gguf" => name.ends_with(".gguf"),
-                            "executable" => {
-                                #[cfg(unix)]
-                                {
-                                    use std::os::unix::fs::PermissionsExt;
-                                    meta.as_ref()
-                                        .is_some_and(|m| m.permissions().mode() & 0o111 != 0)
-                                }
-                                #[cfg(not(unix))]
-                                {
-                                    true
-                                }
-                            }
-                            _ => true,
-                        };
-                        if !pass {
+                // Remove duplicates
+                allowed_roots.sort();
+                allowed_roots.dedup();
+
+                let requested = query.get("path").cloned().unwrap_or_default();
+                let filter = query.get("filter").cloned().unwrap_or_default();
+
+                let dir = if requested.is_empty() {
+                    dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+                } else {
+                    PathBuf::from(&requested)
+                };
+
+                let dir = match dir.canonicalize() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "path": requested,
+                                    "error": "Path not found"
+                                })),
+                                warp::http::StatusCode::OK,
+                            ),
+                        ));
+                    }
+                };
+
+                // Enforce allowlist: directory must be under one of the allowed roots
+                if !allowed_roots.iter().any(|root| dir.starts_with(root)) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "path": dir.display().to_string(),
+                                "error": "Path not allowed"
+                            })),
+                            warp::http::StatusCode::OK,
+                        ),
+                    ));
+                }
+
+                if !dir.is_dir() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "path": dir.display().to_string(),
+                                "error": "Not a directory"
+                            })),
+                            warp::http::StatusCode::OK,
+                        ),
+                    ));
+                }
+
+                let parent = dir
+                    .parent()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default();
+
+                let mut entries: Vec<serde_json::Value> = Vec::new();
+                if let Ok(read_dir) = std::fs::read_dir(&dir) {
+                    for entry in read_dir.flatten() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        if name.starts_with('.') {
                             continue;
                         }
+                        let meta = entry.metadata().ok();
+                        let is_dir = meta.as_ref().is_some_and(|m| m.is_dir());
+
+                        if !is_dir && !filter.is_empty() {
+                            let pass = match filter.as_str() {
+                                "gguf" => name.ends_with(".gguf"),
+                                "executable" => {
+                                    #[cfg(unix)]
+                                    {
+                                        use std::os::unix::fs::PermissionsExt;
+                                        meta.as_ref()
+                                            .is_some_and(|m| m.permissions().mode() & 0o111 != 0)
+                                    }
+                                    #[cfg(not(unix))]
+                                    {
+                                        true
+                                    }
+                                }
+                                _ => true,
+                            };
+                            if !pass {
+                                continue;
+                            }
+                        }
+
+                        let size = if is_dir {
+                            0
+                        } else {
+                            meta.as_ref().map(|m| m.len()).unwrap_or(0)
+                        };
+                        let size_display = if is_dir {
+                            String::new()
+                        } else if size >= 1_000_000_000 {
+                            format!("{:.1} GB", size as f64 / 1_000_000_000.0)
+                        } else if size >= 1_000_000 {
+                            format!("{:.0} MB", size as f64 / 1_000_000.0)
+                        } else {
+                            format!("{:.0} KB", size as f64 / 1_000.0)
+                        };
+
+                        entries.push(serde_json::json!({
+                            "name": name,
+                            "is_dir": is_dir,
+                            "size": size,
+                            "size_display": size_display,
+                            "path": entry.path().display().to_string(),
+                        }));
                     }
-
-                    let size = if is_dir {
-                        0
-                    } else {
-                        meta.as_ref().map(|m| m.len()).unwrap_or(0)
-                    };
-                    let size_display = if is_dir {
-                        String::new()
-                    } else if size >= 1_000_000_000 {
-                        format!("{:.1} GB", size as f64 / 1_000_000_000.0)
-                    } else if size >= 1_000_000 {
-                        format!("{:.0} MB", size as f64 / 1_000_000.0)
-                    } else {
-                        format!("{:.0} KB", size as f64 / 1_000.0)
-                    };
-
-                    entries.push(serde_json::json!({
-                        "name": name,
-                        "is_dir": is_dir,
-                        "size": size,
-                        "size_display": size_display,
-                        "path": entry.path().display().to_string(),
-                    }));
                 }
+
+                entries.sort_by(|a, b| {
+                    let a_dir = a["is_dir"].as_bool().unwrap_or(false);
+                    let b_dir = b["is_dir"].as_bool().unwrap_or(false);
+                    b_dir.cmp(&a_dir).then_with(|| {
+                        a["name"]
+                            .as_str()
+                            .unwrap_or("")
+                            .to_lowercase()
+                            .cmp(&b["name"].as_str().unwrap_or("").to_lowercase())
+                    })
+                });
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                    warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "path": dir.display().to_string(),
+                            "parent": parent,
+                            "entries": entries,
+                        })),
+                        warp::http::StatusCode::OK,
+                    ),
+                ))
             }
-
-            entries.sort_by(|a, b| {
-                let a_dir = a["is_dir"].as_bool().unwrap_or(false);
-                let b_dir = b["is_dir"].as_bool().unwrap_or(false);
-                b_dir.cmp(&a_dir).then_with(|| {
-                    a["name"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .cmp(&b["name"].as_str().unwrap_or("").to_lowercase())
-                })
-            });
-
-            warp::reply::with_status(
-                warp::reply::json(&serde_json::json!({
-                    "path": dir.display().to_string(),
-                    "parent": parent,
-                    "entries": entries,
-                })),
-                warp::http::StatusCode::OK,
-            )
         })
 }
 
 fn api_chat(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::content_length_limit(2 * 1024 * 1024))
         .and(warp::body::bytes())
-        .and_then(move |body: bytes::Bytes| {
+        .and_then(move |auth: Option<String>, body: bytes::Bytes| {
+            let cfg = app_config.clone();
             let state = state.clone();
             async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
                 // Derive endpoint from active session — no user-controlled input
                 let session = state
                     .get_active_session()
@@ -3191,30 +3232,48 @@ fn api_chat(
                     }
                 });
 
-                Ok::<_, warp::Rejection>(warp::sse::reply(stream))
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                    warp::sse::reply(stream),
+                ))
             }
         })
 }
 
 fn api_chat_abort(
     _state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat" / "abort")
         .and(warp::post())
-        .and_then(move || async move {
-            Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok": true})))
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                    warp::reply::json(&serde_json::json!({"ok": true})),
+                ))
+            }
         })
 }
 
 fn api_chat_suggestions(
     state: AppState,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat" / "suggestions")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json::<SuggestionRequest>())
-        .and_then(move |req: SuggestionRequest| {
+        .and_then(move |auth: Option<String>, req: SuggestionRequest| {
+            let cfg = app_config.clone();
             let state = state.clone();
             async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
                 let (all_messages, system_prompt, context_notes, quick_guide_active) =
                     if let Some(messages) = req.messages.clone() {
                         (
@@ -3462,12 +3521,14 @@ fn api_chat_suggestions(
                     suggestions.len() as u32
                 };
 
-                Ok::<_, warp::Rejection>(warp::reply::json(&SuggestionResponse {
-                    suggestions,
-                    cards,
-                    category: req.category,
-                    count,
-                }))
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                    warp::reply::json(&SuggestionResponse {
+                        suggestions,
+                        cards,
+                        category: req.category,
+                        count,
+                    }),
+                ))
             }
         })
 }
@@ -3873,18 +3934,30 @@ fn new_tab_id() -> String {
 // GET /api/chat/tabs — metadata only (no messages)
 fn api_list_tabs(
     storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat" / "tabs")
         .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
         .and(with_chat_storage(storage))
-        .and_then(|store: Arc<ChatStorage>| async move {
-            match store.list_tabs() {
-                Ok(tabs) => Ok::<_, warp::Rejection>(warp::reply::json(&tabs)),
-                Err(e) => {
-                    eprintln!("list_tabs error: {e}");
-                    Ok(warp::reply::json(
-                        &Vec::<crate::chat_storage::TabMeta>::new(),
-                    ))
+        .and_then(move |auth: Option<String>, store: Arc<ChatStorage>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                match store.list_tabs() {
+                    Ok(tabs) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&tabs),
+                    )),
+                    Err(e) => {
+                        eprintln!("list_tabs error: {e}");
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(
+                                &Vec::<crate::chat_storage::TabMeta>::new(),
+                            ),
+                        ))
+                    }
                 }
             }
         })
@@ -3893,23 +3966,37 @@ fn api_list_tabs(
 // POST /api/chat/tabs — create new tab
 fn api_create_tab(
     storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat" / "tabs")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json::<crate::chat_storage::ChatTabRow>())
         .and(with_chat_storage(storage))
         .and_then(
-            move |mut tab: crate::chat_storage::ChatTabRow, store: Arc<ChatStorage>| async move {
-                if tab.id.is_empty() {
-                    tab.id = new_tab_id();
-                }
-                tab.created_at = now_ts();
-                tab.updated_at = tab.created_at;
-                match store.create_tab(&tab) {
-                    Ok(_) => Ok::<_, warp::Rejection>(warp::reply::json(&tab)),
-                    Err(e) => Ok(warp::reply::json(
-                        &serde_json::json!({"ok":false,"error":e.to_string()}),
-                    )),
+            move |auth: Option<String>,
+                  mut tab: crate::chat_storage::ChatTabRow,
+                  store: Arc<ChatStorage>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    if tab.id.is_empty() {
+                        tab.id = new_tab_id();
+                    }
+                    tab.created_at = now_ts();
+                    tab.updated_at = tab.created_at;
+                    match store.create_tab(&tab) {
+                        Ok(_) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&tab),
+                        )),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(
+                                &serde_json::json!({"ok":false,"error":e.to_string()}),
+                            ),
+                        )),
+                    }
                 }
             },
         )
@@ -3918,16 +4005,28 @@ fn api_create_tab(
 // GET /api/chat/tabs/:id — full tab with messages
 fn api_get_tab(
     storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat" / "tabs" / String)
         .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
         .and(with_chat_storage(storage))
-        .and_then(|id: String, store: Arc<ChatStorage>| async move {
-            match store.get_tab(&id) {
-                Ok(tab) => Ok::<_, warp::Rejection>(warp::reply::json(&tab)),
-                Err(e) => Ok(warp::reply::json(
-                    &serde_json::json!({"ok":false,"error":e.to_string()}),
-                )),
+        .and_then(move |id: String, auth: Option<String>, store: Arc<ChatStorage>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                match store.get_tab(&id) {
+                    Ok(tab) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&tab),
+                    )),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({"ok":false,"error":e.to_string()}),
+                        ),
+                    )),
+                }
             }
         })
 }
@@ -3935,33 +4034,46 @@ fn api_get_tab(
 // PUT /api/chat/tabs/:id — full save (meta + replace messages)
 fn api_put_tab(
     storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat" / "tabs" / String)
         .and(warp::put())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json::<crate::chat_storage::ChatTabRow>())
         .and(with_chat_storage(storage))
         .and_then(
             move |id: String,
+                  auth: Option<String>,
                   mut tab: crate::chat_storage::ChatTabRow,
-                  store: Arc<ChatStorage>| async move {
-                tab.id = id;
-                tab.updated_at = now_ts();
-                let messages = std::mem::take(&mut tab.messages);
-                let msg_rows: Vec<crate::chat_storage::MessageRow> = messages
-                    .into_iter()
-                    .enumerate()
-                    .map(|(seq, m)| crate::chat_storage::MessageRow {
-                        seq: seq as i64,
-                        tab_id: tab.id.clone(),
-                        ..m
-                    })
-                    .collect();
-                let result = store
-                    .update_tab_meta(&tab)
-                    .and_then(|_| store.replace_messages(&tab.id, &msg_rows));
-                match result {
-                    Ok(_) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok":true}))),
-                    Err(e) => Ok(warp::reply::json(&serde_json::json!({"ok":false,"error":e.to_string()}))),
+                  store: Arc<ChatStorage>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    tab.id = id;
+                    tab.updated_at = now_ts();
+                    let messages = std::mem::take(&mut tab.messages);
+                    let msg_rows: Vec<crate::chat_storage::MessageRow> = messages
+                        .into_iter()
+                        .enumerate()
+                        .map(|(seq, m)| crate::chat_storage::MessageRow {
+                            seq: seq as i64,
+                            tab_id: tab.id.clone(),
+                            ..m
+                        })
+                        .collect();
+                    let result = store
+                        .update_tab_meta(&tab)
+                        .and_then(|_| store.replace_messages(&tab.id, &msg_rows));
+                    match result {
+                        Ok(_) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"ok":true})),
+                        )),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"ok":false,"error":e.to_string()})),
+                        )),
+                    }
                 }
             },
         )
@@ -3970,18 +4082,30 @@ fn api_put_tab(
 // DELETE /api/chat/tabs/:id
 fn api_delete_tab(
     storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat" / "tabs" / String)
         .and(warp::delete())
+        .and(warp::header::optional::<String>("authorization"))
         .and(with_chat_storage(storage))
-        .and_then(|id: String, store: Arc<ChatStorage>| async move {
-            match store.delete_tab(&id) {
-                Ok(_) => {
-                    Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok":true})))
+        .and_then(move |id: String, auth: Option<String>, store: Arc<ChatStorage>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
                 }
-                Err(e) => Ok(warp::reply::json(
-                    &serde_json::json!({"ok":false,"error":e.to_string()}),
-                )),
+                match store.delete_tab(&id) {
+                    Ok(_) => {
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"ok":true})),
+                        ))
+                    }
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({"ok":false,"error":e.to_string()}),
+                        ),
+                    )),
+                }
             }
         })
 }
@@ -3989,20 +4113,33 @@ fn api_delete_tab(
 // PATCH /api/chat/tabs/:id/meta — metadata only, no messages
 fn api_patch_tab_meta(
     storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat" / "tabs" / String / "meta")
         .and(warp::patch())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json::<crate::chat_storage::ChatTabRow>())
         .and(with_chat_storage(storage))
         .and_then(
             move |id: String,
+                  auth: Option<String>,
                   mut tab: crate::chat_storage::ChatTabRow,
-                  store: Arc<ChatStorage>| async move {
-                tab.id = id;
-                tab.updated_at = now_ts();
-                match store.update_tab_meta(&tab) {
-                    Ok(_) => Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok":true}))),
-                    Err(e) => Ok(warp::reply::json(&serde_json::json!({"ok":false,"error":e.to_string()}))),
+                  store: Arc<ChatStorage>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    tab.id = id;
+                    tab.updated_at = now_ts();
+                    match store.update_tab_meta(&tab) {
+                        Ok(_) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"ok":true})),
+                        )),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"ok":false,"error":e.to_string()})),
+                        )),
+                    }
                 }
             },
         )
@@ -4011,42 +4148,55 @@ fn api_patch_tab_meta(
 // POST /api/chat/tabs/:id/messages — append one or more messages
 fn api_append_messages(
     storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat" / "tabs" / String / "messages")
         .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json::<serde_json::Value>())
         .and(with_chat_storage(storage))
         .and_then(
-            move |id: String, body: serde_json::Value, store: Arc<ChatStorage>| async move {
-                let msgs = body["messages"].as_array().cloned().unwrap_or_default();
-                let mut last_id = 0i64;
-                for msg_val in msgs {
-                    let msg: crate::chat_storage::MessageRow = serde_json::from_value(msg_val)
-                        .unwrap_or_else(|_| crate::chat_storage::MessageRow {
-                            tab_id: id.clone(),
-                            role: "user".into(),
-                            content: "".into(),
-                            id: 0,
-                            timestamp_ms: 0,
-                            input_tokens: None,
-                            output_tokens: None,
-                            cumulative_input_tokens: None,
-                            cumulative_output_tokens: None,
-                            compaction_marker: false,
-                            variants: None,
-                            variant_index: None,
-                            seq: 0,
-                        });
-                    let mut m = msg;
-                    m.tab_id = id.clone();
-                    match store.append_message(&m) {
-                        Ok(row_id) => last_id = row_id,
-                        Err(e) => eprintln!("append_message error: {e}"),
+            move |id: String,
+                  auth: Option<String>,
+                  body: serde_json::Value,
+                  store: Arc<ChatStorage>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
                     }
+                    let msgs = body["messages"].as_array().cloned().unwrap_or_default();
+                    let mut last_id = 0i64;
+                    for msg_val in msgs {
+                        let msg: crate::chat_storage::MessageRow = serde_json::from_value(msg_val)
+                            .unwrap_or_else(|_| crate::chat_storage::MessageRow {
+                                tab_id: id.clone(),
+                                role: "user".into(),
+                                content: "".into(),
+                                id: 0,
+                                timestamp_ms: 0,
+                                input_tokens: None,
+                                output_tokens: None,
+                                cumulative_input_tokens: None,
+                                cumulative_output_tokens: None,
+                                compaction_marker: false,
+                                variants: None,
+                                variant_index: None,
+                                seq: 0,
+                            });
+                        let mut m = msg;
+                        m.tab_id = id.clone();
+                        match store.append_message(&m) {
+                            Ok(row_id) => last_id = row_id,
+                            Err(e) => eprintln!("append_message error: {e}"),
+                        }
+                    }
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({"ok":true,"last_id":last_id}),
+                        ),
+                    ))
                 }
-                Ok::<_, warp::Rejection>(warp::reply::json(
-                    &serde_json::json!({"ok":true,"last_id":last_id}),
-                ))
             },
         )
 }
@@ -4054,28 +4204,40 @@ fn api_append_messages(
 // PATCH /api/chat/tabs/order
 fn api_reorder_tabs(
     storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "chat" / "tabs" / "order")
         .and(warp::patch())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json::<serde_json::Value>())
         .and(with_chat_storage(storage))
-        .and_then(
-            |body: serde_json::Value, store: Arc<ChatStorage>| async move {
-                let ids: Vec<String> = body["tab_order"]
-                    .as_array()
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                match store.reorder_tabs(&ids) {
-                    Ok(_) => {
-                        Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({"ok":true})))
+        . and_then(
+            move |auth: Option<String>, body: serde_json::Value, store: Arc<ChatStorage>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
                     }
-                    Err(e) => Ok(warp::reply::json(
-                        &serde_json::json!({"ok":false,"error":e.to_string()}),
-                    )),
+                    let ids: Vec<String> = body["tab_order"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    match store.reorder_tabs(&ids) {
+                        Ok(_) => {
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({"ok":true})),
+                            ))
+                        }
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(
+                                &serde_json::json!({"ok":false,"error":e.to_string()}),
+                            ),
+                        )),
+                    }
                 }
             },
         )
@@ -4084,6 +4246,7 @@ fn api_reorder_tabs(
 // GET /api/chat/search?q=…&limit=20&offset=0
 fn api_chat_search(
     storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -4104,44 +4267,51 @@ fn api_chat_search(
 
     warp::path!("api" / "chat" / "search")
         .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
         .and(warp::query::<SearchParams>())
         .and(with_chat_storage(storage))
-        .and_then(|p: SearchParams, store: Arc<ChatStorage>| async move {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            let last = LAST_CHAT_SEARCH.load(Ordering::Relaxed);
-            if now - last < 1 {
-                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                    warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": "too many searches; please wait",
-                            "seconds_remaining": 1
-                        })),
-                        warp::http::StatusCode::TOO_MANY_REQUESTS,
-                    ),
-                ));
-            }
-            LAST_CHAT_SEARCH.store(now, Ordering::Relaxed);
+        .and_then(move |auth: Option<String>, p: SearchParams, store: Arc<ChatStorage>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let last = LAST_CHAT_SEARCH.load(Ordering::Relaxed);
+                if now - last < 1 {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "too many searches; please wait",
+                                "seconds_remaining": 1
+                            })),
+                            warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        ),
+                    ));
+                }
+                LAST_CHAT_SEARCH.store(now, Ordering::Relaxed);
 
-            let limit = p.limit.clamp(1, 100);
-            match store.search(&p.q, limit, p.offset) {
-                Ok(results) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                    warp::reply::json(&results),
-                )),
-                Err(e) => {
-                    eprintln!("search error: {e}");
-                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                        &crate::chat_storage::SearchResultsPage {
-                            results: Vec::new(),
-                            total: 0,
-                            limit,
-                            offset: p.offset,
-                            has_more: false,
-                        },
-                    )))
+                let limit = p.limit.clamp(1, 100);
+                match store.search(&p.q, limit, p.offset) {
+                    Ok(results) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&results),
+                    )),
+                    Err(e) => {
+                        eprintln!("search error: {e}");
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                            &crate::chat_storage::SearchResultsPage {
+                                results: Vec::new(),
+                                total: 0,
+                                limit,
+                                offset: p.offset,
+                                has_more: false,
+                            },
+                        )))
+                    }
                 }
             }
         })

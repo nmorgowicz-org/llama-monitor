@@ -201,6 +201,7 @@ async function fetchSearchPage(query, { offset, append }) {
     }
     const resp = await fetch(
         `/api/chat/search?q=${encodeURIComponent(query)}&limit=${SEARCH_PAGE_SIZE}&offset=${offset}`,
+        { headers: window.authHeaders ? window.authHeaders() : {} },
     );
     const page = await resp.json();
     renderResults(page, query, { append });

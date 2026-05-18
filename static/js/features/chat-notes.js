@@ -796,7 +796,9 @@ async function runSectionFullContextAnalysis(sectionName) {
 async function callAnalyzeApi({ messages, existingNotes, sections, tab }) {
     const resp = await fetch('/api/context-notes/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             messages,
             system_prompt: tab.system_prompt || '',

@@ -500,6 +500,7 @@ Response:
 ## File Browser
 
 ### `GET /api/browse`
+Auth: api-token.
 Browses a local directory.
 
 Query params:
@@ -539,6 +540,7 @@ On invalid input the API returns a JSON error payload such as:
 ## Chat Transport
 
 ### `POST /api/chat`
+Auth: api-token.
 Pass-through streaming proxy to the active session's `/v1/chat/completions`.
 
 The request body is forwarded as raw bytes. The server does not validate or reshape the OpenAI-compatible payload before forwarding it upstream.
@@ -546,6 +548,7 @@ The request body is forwarded as raw bytes. The server does not validate or resh
 The response is an SSE stream that forwards upstream `data: ...` events.
 
 ### `POST /api/chat/abort`
+Auth: api-token.
 Current no-op acknowledgement endpoint:
 
 ```json
@@ -553,6 +556,7 @@ Current no-op acknowledgement endpoint:
 ```
 
 ### `POST /api/chat/suggestions`
+Auth: api-token.
 Generates guided-generation suggestions using either supplied chat context or a fallback tab lookup.
 
 Request:
@@ -599,6 +603,7 @@ For `category: "director"`, `cards` can contain structured entries:
 ```
 
 ### `POST /api/keywords/generate`
+Auth: api-token.
 
 ```json
 { "category": "noir" }
@@ -611,6 +616,7 @@ Response:
 ```
 
 ### `POST /api/context-notes/analyze`
+Auth: api-token.
 
 ```json
 {
@@ -648,6 +654,7 @@ Response:
 The live chat persistence layer is SQLite-backed and centered on `chat.db`. Chat tabs are no longer stored as one big JSON array.
 
 ### `GET /api/chat/tabs`
+Auth: api-token.
 Returns tab metadata only, without message bodies.
 
 ```json
@@ -670,11 +677,13 @@ Returns tab metadata only, without message bodies.
 ```
 
 ### `POST /api/chat/tabs`
+Auth: api-token.
 Creates one tab. Request body is a full `ChatTabRow`. If `id` is empty, the server generates one. `created_at` and `updated_at` are overwritten server-side.
 
 Response is the created tab object.
 
 ### `GET /api/chat/tabs/{id}`
+Auth: api-token.
 Returns the full tab row plus messages.
 
 ```json
@@ -721,6 +730,7 @@ Returns the full tab row plus messages.
 ```
 
 ### `PUT /api/chat/tabs/{id}`
+Auth: api-token.
 Full save for one tab. The handler updates tab metadata and then replaces all messages for that tab.
 
 Response:
@@ -736,9 +746,11 @@ Important behavior:
 - during this replace path, only `role`, `content`, `timestamp_ms`, `input_tokens`, `output_tokens`, and `compaction_marker` are persisted for each message; cumulative token fields and variant fields are not preserved by this route
 
 ### `PATCH /api/chat/tabs/{id}/meta`
+Auth: api-token.
 Metadata-only update for one tab. Request body uses the same tab shape, but `messages` are ignored.
 
 ### `POST /api/chat/tabs/{id}/messages`
+Auth: api-token.
 Appends one or more messages.
 
 Request:
@@ -776,6 +788,7 @@ Important behavior:
 - this append route does persist `cumulative_input_tokens`, `cumulative_output_tokens`, `variants`, and `variant_index`
 
 ### `PATCH /api/chat/tabs/order`
+Auth: api-token.
 
 ```json
 {
@@ -790,6 +803,7 @@ Response:
 ```
 
 ### `DELETE /api/chat/tabs/{id}`
+Auth: api-token.
 
 ```json
 { "ok": true }
@@ -798,6 +812,7 @@ Response:
 ## Chat Search
 
 ### `GET /api/chat/search`
+Auth: api-token.
 Full-text search over non-compaction-marker messages in `chat.db`.
 
 Query params:

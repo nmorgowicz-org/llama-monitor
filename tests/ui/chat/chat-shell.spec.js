@@ -143,14 +143,17 @@ test.describe('chat tabs', () => {
           updated_at: Date.now(),
           messages: [],
         };
-        await fetch('/api/chat/tabs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(tabPayload),
-        });
-        await fetch(`/api/chat/tabs/${tab.id}/messages`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        const auth = window.__API_TOKEN
+              ? { 'Authorization': `Bearer ${window.__API_TOKEN}` }
+              : {};
+          await fetch('/api/chat/tabs', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...auth },
+              body: JSON.stringify(tabPayload),
+          });
+          await fetch(`/api/chat/tabs/${tab.id}/messages`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...auth },
           body: JSON.stringify({
             messages: tab.messages.map((message, idx) => ({
               tab_id: tab.id,

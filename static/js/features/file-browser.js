@@ -64,7 +64,9 @@ export async function fileBrowserGo(path) {
     if (fbFilter) params.set('filter', fbFilter);
 
     try {
-        const resp = await fetch('/api/browse?' + params);
+        const resp = await fetch('/api/browse?' + params, {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         const data = await resp.json();
         if (data.error) {
             // Handle "Path not allowed" with a clear message

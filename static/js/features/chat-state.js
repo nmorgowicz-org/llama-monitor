@@ -112,7 +112,9 @@ function normalizeChatTab(tab) {
 
 export async function initChatTabs() {
     try {
-        const resp = await fetch('/api/chat/tabs');
+        const resp = await fetch('/api/chat/tabs', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         const metas = await resp.json();
         if (metas.length) {
             chat.tabs = metas.map(meta => ({
@@ -179,7 +181,9 @@ async function _loadTabMessages(id) {
     const tab = chat.tabs.find(t => t.id === id);
     if (!tab || tab._loaded) return;
     try {
-        const resp = await fetch(`/api/chat/tabs/${id}`);
+        const resp = await fetch(`/api/chat/tabs/${id}`, {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         const full = await resp.json();
         Object.assign(tab, full);
         tab._loaded = true;
@@ -195,7 +199,9 @@ export async function addChatTab() {
     try {
         const resp = await fetch('/api/chat/tabs', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
             body: JSON.stringify(tab),
         });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -229,7 +235,10 @@ export async function closeChatTab(id) {
     chatViewBindings.renderChatMessages?.();
 
     // Fire-and-forget: delete from server
-    fetch(`/api/chat/tabs/${id}`, { method: 'DELETE' }).catch(() => {});
+    fetch(`/api/chat/tabs/${id}`, {
+            method: 'DELETE',
+            headers: window.authHeaders ? window.authHeaders() : {},
+        }).catch(() => {});
 
     showToastWithActions('Tab deleted', 'info', '', [
         {
@@ -356,7 +365,9 @@ export function scheduleChatPersist(tab) {
             const normalized = normalizeTabForSave(tabToSave);
             fetch(`/api/chat/tabs/${tabToSave.id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
                 body: JSON.stringify(normalized),
             }).catch(e => console.error('persist tab error:', e));
         }, CHAT_TABS_PERSIST_DEBOUNCE_MS);
@@ -396,7 +407,9 @@ export function persistTabOrder() {
     const ids = chat.tabs.map(t => t.id);
     fetch('/api/chat/tabs/order', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tab_order: ids }),
     }).catch(e => console.error('persistTabOrder error:', e));
 }

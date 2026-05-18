@@ -606,7 +606,9 @@ ${recentContext}`;
 async function fetchSuggestionRewrite(prompt) {
     const resp = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             messages: [
                 {
@@ -791,9 +793,9 @@ async function requestSuggestions({ tabId, category, contextDepth, suggestionCou
     try {
         const response = await fetch('/api/chat/suggestions', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 tab_id: tabId,
                 category,
@@ -1274,7 +1276,9 @@ function setupCategoryButtons() {
             try {
                 const response = await fetch('/api/keywords/generate', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: window.authHeaders
+                        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                        : { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         category: categoryName,
                     }),

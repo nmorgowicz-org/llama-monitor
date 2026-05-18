@@ -1695,24 +1695,27 @@ async function scenarioSidebar(ctx, options) {
                 updated_at: Date.now(),
                 messages: [],
             };
-            await fetch('/api/chat/tabs', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(tabPayload),
-            });
-            if (tab.messages && tab.messages.length > 0) {
-                const msgPayload = {
-                    messages: tab.messages.map((m, idx) => ({
-                        tab_id: tab.id,
-                        role: m.role || 'user',
-                        content: m.content || '',
-                        timestamp_ms: m.timestamp_ms || Date.now(),
-                        seq: idx,
-                    })),
-                };
-                await fetch(`/api/chat/tabs/${tab.id}/messages`, {
+            const _auth = window.__API_TOKEN
+                    ? { 'Authorization': `Bearer ${window.__API_TOKEN}` }
+                    : {};
+                await fetch('/api/chat/tabs', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', ..._auth },
+                    body: JSON.stringify(tabPayload),
+                });
+                if (tab.messages && tab.messages.length > 0) {
+                    const msgPayload = {
+                        messages: tab.messages.map((m, idx) => ({
+                            tab_id: tab.id,
+                            role: m.role || 'user',
+                            content: m.content || '',
+                            timestamp_ms: m.timestamp_ms || Date.now(),
+                            seq: idx,
+                        })),
+                    };
+                    await fetch(`/api/chat/tabs/${tab.id}/messages`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', ..._auth },
                     body: JSON.stringify(msgPayload),
                 });
             }

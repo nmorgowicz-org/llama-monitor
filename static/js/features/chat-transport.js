@@ -218,7 +218,9 @@ export async function fetchSummary(messages, options = {}) {
     try {
         const resp = await fetch('/api/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 messages: summaryMessages,
                 stream: true,
@@ -602,7 +604,9 @@ export async function _doSendChat(tab, options = {}) {
     try {
         const chatResp = await fetch('/api/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
             signal: chat.abortController.signal,
             body: JSON.stringify({
                 messages,
