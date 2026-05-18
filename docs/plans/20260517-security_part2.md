@@ -172,9 +172,9 @@ Focus: remaining gaps after initial hardening pass.
 
 ### 4. Missing Rate Limits on Expensive Endpoints
 
-- Status: OPEN
+- Status: FIXED
 - Files:
-  - src/web/api.rs (remote-agent install/start/stop/remove, session CRUD, file browser, chat-search)
+  - src/web/api.rs
 - Issue:
   - Remote-agent install/start/stop/remove: no per-endpoint cooldown; can be spammed with expensive SSH.
   - Session CRUD: no rate limit; could be spammed to exhaust sessions.
@@ -184,15 +184,33 @@ Focus: remaining gaps after initial hardening pass.
   - Denial of service.
 - Likelihood:
   - Medium: if exposed on LAN or via reverse proxy.
-- Fix:
-  - Add per-endpoint cooldowns:
-    - Remote-agent install/start/stop/remove: 10–30s cooldown.
-    - Session CRUD: lightweight rate limit or cooldown.
-    - File browser: lightweight rate limit or cooldown.
-    - Chat-search: lightweight rate limit or cooldown.
-- Next Steps:
-  - Implement per-endpoint cooldowns.
-  - Update reference docs.
+- Mitigation Applied:
+  - Added per-endpoint cooldowns (429 with seconds_remaining) using LAST_* AtomicU64 pattern:
+  - Remote-agent:
+    - install: 30s
+    - update: 30s
+    - remove: 15s
+    - start: 10s
+    - stop: 10s
+    - detect: 10s
+    - status: 5s
+    - ssh/host-key: 10s
+    - ssh/trust: 10s
+    - releases/latest: 30s
+    - tls-status: none needed (cheap)
+  - Session:
+    - spawn: 15s
+    - attach: 10s
+    - delete: 5s
+  - File browser:
+    - GET /api/browse: 1s
+  - Chat-search:
+    - GET /api/chat/search: 1s
+  - DB and TLS:
+    - POST /api/db/restore: 30s
+    - POST /api/db/backup: 10s
+    - POST /api/tls/acme/request: 60s
+    - POST /api/tls/acme/renew: 60s
 
 ### 5. Unprotected Chat and Chat-Search Endpoints
 

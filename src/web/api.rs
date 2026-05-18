@@ -1523,6 +1523,11 @@ fn api_put_auth_config(
 fn api_remote_agent_latest_release(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_REMOTE_AGENT_LATEST_RELEASE: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "remote-agent" / "releases" / "latest")
         .and(warp::get())
         .and(warp::header::optional::<String>("authorization"))
@@ -1533,6 +1538,26 @@ fn api_remote_agent_latest_release(
                 if bearer.as_deref() != cfg.api_token.as_deref().filter(|t| !t.is_empty()) {
                     return Ok(unauthorized_api_token());
                 }
+
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let last = LAST_REMOTE_AGENT_LATEST_RELEASE.load(Ordering::Relaxed);
+                if now - last < 30 {
+                    let remaining = 30 - (now - last);
+                    return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "too soon; please wait",
+                            "seconds_remaining": remaining
+                        })),
+                        warp::http::StatusCode::TOO_MANY_REQUESTS,
+                    ))
+                        as Box<dyn warp::reply::Reply>);
+                }
+                LAST_REMOTE_AGENT_LATEST_RELEASE.store(now, Ordering::Relaxed);
+
                 match crate::agent::latest_release_info().await {
                     Ok(release) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
                         &serde_json::json!({"ok": true, "release": release}),
@@ -1550,6 +1575,11 @@ fn api_remote_agent_latest_release(
 fn api_remote_agent_detect(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_REMOTE_AGENT_DETECT: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "remote-agent" / "detect")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
@@ -1564,6 +1594,26 @@ fn api_remote_agent_detect(
                     {
                         return Ok(unauthorized_api_token());
                     }
+
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let last = LAST_REMOTE_AGENT_DETECT.load(Ordering::Relaxed);
+                    if now - last < 10 {
+                        let remaining = 10 - (now - last);
+                        return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "too soon; please wait",
+                                "seconds_remaining": remaining
+                            })),
+                            warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        ))
+                            as Box<dyn warp::reply::Reply>);
+                    }
+                    LAST_REMOTE_AGENT_DETECT.store(now, Ordering::Relaxed);
+
                     match hydrate_ssh_connection(
                         request.ssh_connection.take(),
                         &request.ssh_target,
@@ -1589,6 +1639,11 @@ fn api_remote_agent_detect(
 fn api_remote_agent_ssh_host_key(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_REMOTE_AGENT_SSH_HOST_KEY: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "remote-agent" / "ssh" / "host-key")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
@@ -1603,6 +1658,26 @@ fn api_remote_agent_ssh_host_key(
                     {
                         return Ok(unauthorized_api_token());
                     }
+
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let last = LAST_REMOTE_AGENT_SSH_HOST_KEY.load(Ordering::Relaxed);
+                    if now - last < 10 {
+                        let remaining = 10 - (now - last);
+                        return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "too soon; please wait",
+                                "seconds_remaining": remaining
+                            })),
+                            warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        ))
+                            as Box<dyn warp::reply::Reply>);
+                    }
+                    LAST_REMOTE_AGENT_SSH_HOST_KEY.store(now, Ordering::Relaxed);
+
                     let target = request
                         .get("ssh_target")
                         .and_then(|value| value.as_str())
@@ -1631,6 +1706,11 @@ fn api_remote_agent_ssh_host_key(
 fn api_remote_agent_ssh_trust(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_REMOTE_AGENT_SSH_TRUST: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "remote-agent" / "ssh" / "trust")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
@@ -1642,6 +1722,25 @@ fn api_remote_agent_ssh_trust(
                 if bearer.as_deref() != app_config.api_token.as_deref().filter(|t| !t.is_empty()) {
                     return Ok(unauthorized_api_token());
                 }
+
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let last = LAST_REMOTE_AGENT_SSH_TRUST.load(Ordering::Relaxed);
+                if now - last < 10 {
+                    let remaining = 10 - (now - last);
+                    return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "too soon; please wait",
+                            "seconds_remaining": remaining
+                        })),
+                        warp::http::StatusCode::TOO_MANY_REQUESTS,
+                    )) as Box<dyn warp::reply::Reply>);
+                }
+                LAST_REMOTE_AGENT_SSH_TRUST.store(now, Ordering::Relaxed);
+
                 let target = request
                     .get("ssh_target")
                     .and_then(|value| value.as_str())
@@ -1707,6 +1806,11 @@ fn hydrate_ssh_connection(
 fn api_remote_agent_install(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_REMOTE_AGENT_INSTALL: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "remote-agent" / "install")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
@@ -1724,6 +1828,26 @@ fn api_remote_agent_install(
                     {
                         return Ok(unauthorized_db_admin_token());
                     }
+
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let last = LAST_REMOTE_AGENT_INSTALL.load(Ordering::Relaxed);
+                    if now - last < 30 {
+                        let remaining = 30 - (now - last);
+                        return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "too soon; please wait",
+                                "seconds_remaining": remaining
+                            })),
+                            warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        ))
+                            as Box<dyn warp::reply::Reply>);
+                    }
+                    LAST_REMOTE_AGENT_INSTALL.store(now, Ordering::Relaxed);
+
                     crate::agent::suppress_remote_agent_autostart();
                     request.ssh_connection = match hydrate_ssh_connection(
                         request.ssh_connection.take(),
@@ -1771,6 +1895,11 @@ fn api_remote_agent_install(
 fn api_remote_agent_status(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_REMOTE_AGENT_STATUS: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "remote-agent" / "status")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
@@ -1785,6 +1914,26 @@ fn api_remote_agent_status(
                     {
                         return Ok(unauthorized_api_token());
                     }
+
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let last = LAST_REMOTE_AGENT_STATUS.load(Ordering::Relaxed);
+                    if now - last < 5 {
+                        let remaining = 5 - (now - last);
+                        return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "too soon; please wait",
+                                "seconds_remaining": remaining
+                            })),
+                            warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        ))
+                            as Box<dyn warp::reply::Reply>);
+                    }
+                    LAST_REMOTE_AGENT_STATUS.store(now, Ordering::Relaxed);
+
                     let ssh_target = match request.get("ssh_target") {
                         Some(v) => v.as_str().unwrap_or("").to_string(),
                         None => {
@@ -1827,6 +1976,11 @@ fn api_remote_agent_status(
 fn api_remote_agent_start(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_REMOTE_AGENT_START: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "remote-agent" / "start")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
@@ -1841,6 +1995,26 @@ fn api_remote_agent_start(
                     {
                         return Ok(unauthorized_api_token());
                     }
+
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let last = LAST_REMOTE_AGENT_START.load(Ordering::Relaxed);
+                    if now - last < 10 {
+                        let remaining = 10 - (now - last);
+                        return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "too soon; please wait",
+                                "seconds_remaining": remaining
+                            })),
+                            warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        ))
+                            as Box<dyn warp::reply::Reply>);
+                    }
+                    LAST_REMOTE_AGENT_START.store(now, Ordering::Relaxed);
+
                     crate::agent::suppress_remote_agent_autostart();
                     let ssh_target = match request.get("ssh_target") {
                         Some(v) => v.as_str().unwrap_or("").to_string(),
@@ -1928,6 +2102,11 @@ fn api_remote_agent_start(
 fn api_remote_agent_update(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_REMOTE_AGENT_UPDATE: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "remote-agent" / "update")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
@@ -1942,6 +2121,26 @@ fn api_remote_agent_update(
                     {
                         return Ok(unauthorized_api_token());
                     }
+
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let last = LAST_REMOTE_AGENT_UPDATE.load(Ordering::Relaxed);
+                    if now - last < 30 {
+                        let remaining = 30 - (now - last);
+                        return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "too soon; please wait",
+                                "seconds_remaining": remaining
+                            })),
+                            warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        ))
+                            as Box<dyn warp::reply::Reply>);
+                    }
+                    LAST_REMOTE_AGENT_UPDATE.store(now, Ordering::Relaxed);
+
                     crate::agent::suppress_remote_agent_autostart();
                     let ssh_target = match request.get("ssh_target") {
                         Some(v) => v.as_str().unwrap_or("").to_string(),
@@ -1985,6 +2184,11 @@ fn api_remote_agent_update(
 fn api_remote_agent_stop(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_REMOTE_AGENT_STOP: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "remote-agent" / "stop")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
@@ -1999,6 +2203,26 @@ fn api_remote_agent_stop(
                     {
                         return Ok(unauthorized_api_token());
                     }
+
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let last = LAST_REMOTE_AGENT_STOP.load(Ordering::Relaxed);
+                    if now - last < 10 {
+                        let remaining = 10 - (now - last);
+                        return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "too soon; please wait",
+                                "seconds_remaining": remaining
+                            })),
+                            warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        ))
+                            as Box<dyn warp::reply::Reply>);
+                    }
+                    LAST_REMOTE_AGENT_STOP.store(now, Ordering::Relaxed);
+
                     crate::agent::suppress_remote_agent_autostart();
                     let ssh_target = match request.get("ssh_target") {
                         Some(v) => v.as_str().unwrap_or("").to_string(),
@@ -2042,6 +2266,11 @@ fn api_remote_agent_stop(
 fn api_remote_agent_remove(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_REMOTE_AGENT_REMOVE: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "remote-agent" / "remove")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
@@ -2059,6 +2288,26 @@ fn api_remote_agent_remove(
                     {
                         return Ok(unauthorized_db_admin_token());
                     }
+
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let last = LAST_REMOTE_AGENT_REMOVE.load(Ordering::Relaxed);
+                    if now - last < 15 {
+                        let remaining = 15 - (now - last);
+                        return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "too soon; please wait",
+                                "seconds_remaining": remaining
+                            })),
+                            warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        ))
+                            as Box<dyn warp::reply::Reply>);
+                    }
+                    LAST_REMOTE_AGENT_REMOVE.store(now, Ordering::Relaxed);
+
                     crate::agent::suppress_remote_agent_autostart();
                     let ssh_target = match request.get("ssh_target") {
                         Some(v) => v.as_str().unwrap_or("").to_string(),
@@ -2654,10 +2903,33 @@ fn api_rotate_db_admin_token(
 fn api_browse(
     state: AppState,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_BROWSE: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "browse")
         .and(warp::get())
         .and(warp::query::<std::collections::HashMap<String, String>>())
         .map(move |query: std::collections::HashMap<String, String>| {
+            // Cooldown: 1 second
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let last = LAST_BROWSE.load(Ordering::Relaxed);
+            if now - last < 1 {
+                LAST_BROWSE.store(now, Ordering::Relaxed);
+                return warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "error": "too soon; please wait",
+                        "seconds_remaining": 1
+                    })),
+                    warp::http::StatusCode::TOO_MANY_REQUESTS,
+                );
+            }
+            LAST_BROWSE.store(now, Ordering::Relaxed);
+
             // Build allowed roots:
             // - Home directory (primary root).
             // - Directories used for models, TLS certs, etc.
@@ -2710,26 +2982,35 @@ fn api_browse(
             let dir = match dir.canonicalize() {
                 Ok(p) => p,
                 Err(_) => {
-                    return warp::reply::json(&serde_json::json!({
-                        "path": requested,
-                        "error": "Path not found"
-                    }));
+                    return warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "path": requested,
+                            "error": "Path not found"
+                        })),
+                        warp::http::StatusCode::OK,
+                    );
                 }
             };
 
             // Enforce allowlist: directory must be under one of the allowed roots
             if !allowed_roots.iter().any(|root| dir.starts_with(root)) {
-                return warp::reply::json(&serde_json::json!({
-                    "path": dir.display().to_string(),
-                    "error": "Path not allowed"
-                }));
+                return warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "path": dir.display().to_string(),
+                        "error": "Path not allowed"
+                    })),
+                    warp::http::StatusCode::OK,
+                );
             }
 
             if !dir.is_dir() {
-                return warp::reply::json(&serde_json::json!({
-                    "path": dir.display().to_string(),
-                    "error": "Not a directory"
-                }));
+                return warp::reply::with_status(
+                    warp::reply::json(&serde_json::json!({
+                        "path": dir.display().to_string(),
+                        "error": "Not a directory"
+                    })),
+                    warp::http::StatusCode::OK,
+                );
             }
 
             let parent = dir
@@ -2806,11 +3087,14 @@ fn api_browse(
                 })
             });
 
-            warp::reply::json(&serde_json::json!({
-                "path": dir.display().to_string(),
-                "parent": parent,
-                "entries": entries,
-            }))
+            warp::reply::with_status(
+                warp::reply::json(&serde_json::json!({
+                    "path": dir.display().to_string(),
+                    "parent": parent,
+                    "entries": entries,
+                })),
+                warp::http::StatusCode::OK,
+            )
         })
 }
 
@@ -3801,6 +4085,11 @@ fn api_reorder_tabs(
 fn api_chat_search(
     storage: Arc<ChatStorage>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_CHAT_SEARCH: AtomicU64 = AtomicU64::new(0);
+
     #[derive(serde::Deserialize)]
     struct SearchParams {
         q: String,
@@ -3818,18 +4107,41 @@ fn api_chat_search(
         .and(warp::query::<SearchParams>())
         .and(with_chat_storage(storage))
         .and_then(|p: SearchParams, store: Arc<ChatStorage>| async move {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let last = LAST_CHAT_SEARCH.load(Ordering::Relaxed);
+            if now - last < 1 {
+                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                    warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "too many searches; please wait",
+                            "seconds_remaining": 1
+                        })),
+                        warp::http::StatusCode::TOO_MANY_REQUESTS,
+                    ),
+                ));
+            }
+            LAST_CHAT_SEARCH.store(now, Ordering::Relaxed);
+
             let limit = p.limit.clamp(1, 100);
             match store.search(&p.q, limit, p.offset) {
-                Ok(results) => Ok::<_, warp::Rejection>(warp::reply::json(&results)),
+                Ok(results) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                    warp::reply::json(&results),
+                )),
                 Err(e) => {
                     eprintln!("search error: {e}");
-                    Ok(warp::reply::json(&crate::chat_storage::SearchResultsPage {
-                        results: Vec::new(),
-                        total: 0,
-                        limit,
-                        offset: p.offset,
-                        has_more: false,
-                    }))
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &crate::chat_storage::SearchResultsPage {
+                            results: Vec::new(),
+                            total: 0,
+                            limit,
+                            offset: p.offset,
+                            has_more: false,
+                        },
+                    )))
                 }
             }
         })
@@ -4005,6 +4317,11 @@ fn api_db_backup(
     storage: Arc<ChatStorage>,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_DB_BACKUP: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "db" / "backup")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
@@ -4025,6 +4342,24 @@ fn api_db_backup(
                             warp::http::StatusCode::UNAUTHORIZED,
                         ));
                     }
+
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let last = LAST_DB_BACKUP.load(Ordering::Relaxed);
+                    if now - last < 10 {
+                        let remaining = 10 - (now - last);
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "too soon; please wait",
+                                "seconds_remaining": remaining
+                            })),
+                            warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        ));
+                    }
+                    LAST_DB_BACKUP.store(now, Ordering::Relaxed);
 
                     let config_dir = cfg.config_dir.clone();
                     // Manual backups live in their own subdirectory, separate from auto backups.
@@ -4380,6 +4715,11 @@ fn api_db_restore(
                   req: RestoreRequest,
                   store: Arc<ChatStorage>,
                   cfg: Arc<AppConfig>| {
+                use std::sync::atomic::{AtomicU64, Ordering};
+                use std::time::{SystemTime, UNIX_EPOCH};
+
+                static LAST_DB_RESTORE: AtomicU64 = AtomicU64::new(0);
+
                 let cfg = cfg.clone();
                 async move {
                     let bearer = auth
@@ -4395,6 +4735,24 @@ fn api_db_restore(
                             warp::http::StatusCode::UNAUTHORIZED,
                         ));
                     }
+
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let last = LAST_DB_RESTORE.load(Ordering::Relaxed);
+                    if now - last < 30 {
+                        let remaining = 30 - (now - last);
+                        return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "too soon; please wait",
+                                "seconds_remaining": remaining
+                            })),
+                            warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        ));
+                    }
+                    LAST_DB_RESTORE.store(now, Ordering::Relaxed);
 
                     // Validate backup_name (prevent directory traversal)
                     let backup_name = req.backup_name.trim();
@@ -4715,6 +5073,11 @@ fn api_delete_session(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_DELETE_SESSION: AtomicU64 = AtomicU64::new(0);
+
     let app_config = app_config.clone();
     warp::path!("api" / "sessions" / String)
         .and(warp::path::end())
@@ -4728,6 +5091,27 @@ fn api_delete_session(
                     if !check_db_admin_token(&auth, &cfg) {
                         return Ok(unauthorized_db_admin_token());
                     }
+
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let last = LAST_DELETE_SESSION.load(Ordering::Relaxed);
+                    if now - last < 5 {
+                        let remaining = 5 - (now - last);
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "too soon; please wait",
+                                    "seconds_remaining": remaining
+                                })),
+                                warp::http::StatusCode::TOO_MANY_REQUESTS,
+                            ),
+                        ));
+                    }
+                    LAST_DELETE_SESSION.store(now, Ordering::Relaxed);
+
                     if state.remove_session(&session_id) {
                         Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::json(&serde_json::json!({"ok": true})),
@@ -4867,6 +5251,11 @@ fn api_spawn_session_with_preset(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_SPAWN_SESSION: AtomicU64 = AtomicU64::new(0);
+
     let app_config_inner = app_config.clone();
     warp::path!("api" / "sessions" / "spawn")
         .and(warp::path::end())
@@ -4881,6 +5270,27 @@ fn api_spawn_session_with_preset(
                 if !check_db_admin_token(&auth, &cfg) {
                     return Ok(unauthorized_db_admin_token());
                 }
+
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let last = LAST_SPAWN_SESSION.load(Ordering::Relaxed);
+                if now - last < 15 {
+                    let remaining = 15 - (now - last);
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "too soon; please wait",
+                                "seconds_remaining": remaining
+                            })),
+                            warp::http::StatusCode::TOO_MANY_REQUESTS,
+                        ),
+                    ));
+                }
+                LAST_SPAWN_SESSION.store(now, Ordering::Relaxed);
+
                 let port: u16 = match payload.get("port") {
                     Some(v) => {
                         if let Some(p) = v.as_u64() {
@@ -5005,6 +5415,11 @@ fn api_attach(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_ATTACH: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "attach")
         .and(warp::path::end())
         .and(warp::post())
@@ -5029,6 +5444,24 @@ fn api_attach(
                         warp::http::StatusCode::UNAUTHORIZED,
                     ));
                 }
+
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let last = LAST_ATTACH.load(Ordering::Relaxed);
+                if now - last < 10 {
+                    let remaining = 10 - (now - last);
+                    return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "too soon; please wait",
+                            "seconds_remaining": remaining
+                        })),
+                        warp::http::StatusCode::TOO_MANY_REQUESTS,
+                    ));
+                }
+                LAST_ATTACH.store(now, Ordering::Relaxed);
 
                 let endpoint: String = match payload.get("endpoint") {
                     Some(v) => {
@@ -5645,6 +6078,11 @@ fn api_tls_acme_request(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_TLS_ACME_REQUEST: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "tls" / "acme" / "request")
         .and(warp::post())
         .and(warp::header::optional::<String>("Authorization"))
@@ -5689,6 +6127,24 @@ fn api_tls_acme_request(
                     ));
                 }
 
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let last = LAST_TLS_ACME_REQUEST.load(Ordering::Relaxed);
+                if now - last < 60 {
+                    let remaining = 60 - (now - last);
+                    return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "too soon; please wait",
+                            "seconds_remaining": remaining
+                        })),
+                        warp::http::StatusCode::TOO_MANY_REQUESTS,
+                    ));
+                }
+                LAST_TLS_ACME_REQUEST.store(now, Ordering::Relaxed);
+
                 let cfg = state.get_tls_config();
                 let config_dir = app_config.config_dir.clone();
 
@@ -5730,6 +6186,11 @@ fn api_tls_acme_renew(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static LAST_TLS_ACME_RENEW: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "tls" / "acme" / "renew")
         .and(warp::post())
         .and(warp::header::optional::<String>("Authorization"))
@@ -5773,6 +6234,24 @@ fn api_tls_acme_renew(
                         warp::http::StatusCode::UNAUTHORIZED,
                     ));
                 }
+
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let last = LAST_TLS_ACME_RENEW.load(Ordering::Relaxed);
+                if now - last < 60 {
+                    let remaining = 60 - (now - last);
+                    return Ok::<_, warp::Rejection>(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "too soon; please wait",
+                            "seconds_remaining": remaining
+                        })),
+                        warp::http::StatusCode::TOO_MANY_REQUESTS,
+                    ));
+                }
+                LAST_TLS_ACME_RENEW.store(now, Ordering::Relaxed);
 
                 let cfg = state.get_tls_config();
                 let config_dir = app_config.config_dir.clone();
