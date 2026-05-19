@@ -8047,6 +8047,16 @@ body.shell-width-tight .chat-header-btn {
   padding: 4px 7px;
 }
 
+/* Icon-only mode: hide all button labels at tight width */
+body.shell-width-tight .chat-header-label {
+  display: none;
+}
+
+/* Persona button redundant at tight width (accessible via Behavior panel) */
+body.shell-width-tight #chat-persona-btn {
+  display: none;
+}
+
 body.shell-width-tight .chat-name-pill {
   padding: 2px 5px;
 }
@@ -8076,11 +8086,7 @@ body.shell-width-very-tight .chat-header-btn {
   padding: 4px 5px;
 }
 
-/* Hide secondary labels — icon-only for file and persona */
-body.shell-width-very-tight #chat-file-btn .chat-header-label,
-body.shell-width-very-tight #chat-persona-btn .chat-header-label {
-  display: none;
-}
+/* Remaining label hides already covered by shell-width-tight rules above */
 
 /* Name pills — hide labels, shrink inputs */
 body.shell-width-very-tight .chat-name-label {

@@ -29,7 +29,7 @@ export function enterFocusMode(silent = false) {
 
     if (!silent && !toastShown) {
         toastShown = true;
-        showToast('Focus Mode', 'info', 'Hover top edge or press ⌘⇧F to exit', { duration: 4000 });
+        showToast('Focus Mode', 'info', 'Click again, hover top edge, or press ⌘⇧F to exit', { duration: 4000 });
     }
 }
 

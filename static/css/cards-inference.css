@@ -1017,7 +1017,10 @@
   font-size: 0.7rem;
   line-height: 1.2;
   text-align: center;
-  max-width: 100px;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 

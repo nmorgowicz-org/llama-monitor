@@ -246,6 +246,13 @@ function renderGaugeFooter(model) {
     gaugeFooter.textContent = parts.join(' · ');
 }
 
+function setGaugeSecondary(el, text, isTabName = false) {
+    el.textContent = text;
+    el.title = isTabName ? text : '';
+    const len = text.length;
+    el.style.fontSize = len > 20 ? '0.55rem' : len > 14 ? '0.60rem' : len > 10 ? '0.65rem' : '';
+}
+
 function renderGaugeView(model) {
     const { gaugeValue, gaugeSecondary, gaugeRing } = ensureElements();
     const heroPct = model.mode === 'live-runtime'
@@ -265,17 +272,18 @@ function renderGaugeView(model) {
 
     if (model.mode === 'live-runtime') {
         gaugeValue.textContent = `${Math.round(displayPct)}%`;
-        gaugeSecondary.textContent = `${formatMetricNumber(model.runtimeLiveTokens)} / ${formatMetricNumber(model.capacityTokens)} live`;
+        setGaugeSecondary(gaugeSecondary, `${formatMetricNumber(model.runtimeLiveTokens)} / ${formatMetricNumber(model.capacityTokens)} live`);
     } else if (model.mode === 'chat-derived') {
         gaugeValue.textContent = heroPct != null ? `${Math.round(displayPct)}%` : '—';
-        gaugeSecondary.textContent = model.busiestChat?.name
+        const chatName = model.busiestChat?.name
             ?? `${model.activeChatCount} chat${model.activeChatCount !== 1 ? 's' : ''}`;
+        setGaugeSecondary(gaugeSecondary, chatName, !!model.busiestChat?.name);
     } else if (model.mode === 'capacity-only') {
         gaugeValue.textContent = formatMetricNumber(model.capacityTokens);
-        gaugeSecondary.textContent = 'Capacity';
+        setGaugeSecondary(gaugeSecondary, 'Capacity');
     } else {
         gaugeValue.textContent = '—';
-        gaugeSecondary.textContent = 'Attach to a server or start a chat';
+        setGaugeSecondary(gaugeSecondary, 'Attach to a server or start a chat');
     }
 
     renderChatStrip(model);

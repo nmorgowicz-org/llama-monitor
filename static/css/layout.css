@@ -1333,6 +1333,10 @@ body.chat-focus-mode .content-area {
   width: 100% !important;
 }
 
+body.chat-focus-mode .chat-tab-bar {
+  display: none;
+}
+
 /* Exit beacon — invisible thin strip at top of viewport */
 #focus-mode-exit-beacon {
   display: none;
