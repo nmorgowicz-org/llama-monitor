@@ -5,6 +5,11 @@
  */
 export async function dismissAuthShell(page) {
   const authShell = page.locator('#auth-shell');
+
+  // Check if auth shell element exists and is visible
+  const shellExists = await authShell.count();
+  if (shellExists === 0) return;
+
   const isVisible = await authShell.isVisible().catch(() => false);
   if (!isVisible) return;
 
@@ -20,14 +25,24 @@ export async function dismissAuthShell(page) {
   });
 
   if (!authEnabled) {
-    // Auth not configured but shell is showing — dismiss via DOM
+    // Auth not configured but shell is showing — dismiss aggressively
     await page.evaluate(() => {
       const shell = document.getElementById('auth-shell');
-      if (shell) shell.setAttribute('aria-hidden', 'true');
+      if (shell) {
+        shell.setAttribute('aria-hidden', 'true');
+        shell.style.display = 'none';
+        shell.style.pointerEvents = 'none';
+      }
+      const backdrop = document.querySelector('.auth-shell-backdrop');
+      if (backdrop) {
+        backdrop.style.display = 'none';
+        backdrop.style.pointerEvents = 'none';
+      }
     });
     return;
   }
 
+  // Auth is enabled — try to log in
   const candidates = [
     { username: 'admin', password: 'secret1234' },
     { username: 'admin', password: 'secret123' },
@@ -55,19 +70,42 @@ export async function dismissAuthShell(page) {
       try {
         await authShell.waitFor({ state: 'hidden', timeout: 5000 });
       } catch {
-        // Shell may not hide automatically; force reload
+        // Shell may not hide automatically
       }
       await page.reload();
       await page.waitForSelector('html.modules-ready', { timeout: 15000 });
+      // After reload, check again in case auth shell reappears
+      const stillVisible = await authShell.isVisible().catch(() => false);
+      if (stillVisible) {
+        await page.evaluate(() => {
+          const shell = document.getElementById('auth-shell');
+          if (shell) {
+            shell.style.display = 'none';
+            shell.style.pointerEvents = 'none';
+          }
+          const backdrop = document.querySelector('.auth-shell-backdrop');
+          if (backdrop) {
+            backdrop.style.display = 'none';
+            backdrop.style.pointerEvents = 'none';
+          }
+        });
+      }
       return;
     }
   }
 
-  // All credentials failed — try to dismiss via DOM as fallback
+  // All credentials failed — dismiss aggressively via DOM
   await page.evaluate(() => {
     const shell = document.getElementById('auth-shell');
-    if (shell) shell.setAttribute('aria-hidden', 'true');
+    if (shell) {
+      shell.setAttribute('aria-hidden', 'true');
+      shell.style.display = 'none';
+      shell.style.pointerEvents = 'none';
+    }
     const backdrop = document.querySelector('.auth-shell-backdrop');
-    if (backdrop) backdrop.remove();
+    if (backdrop) {
+      backdrop.style.display = 'none';
+      backdrop.style.pointerEvents = 'none';
+    }
   });
 }

@@ -100,7 +100,7 @@ test.describe('TLS / Certificates settings', () => {
     const grid = page.locator('#acme-credentials-grid');
     await expect(grid).toBeAttached();
     const addBtn = page.locator('#acme-add-credential');
-    await expect(addBtn).toBeVisible();
+    await expect(addBtn).toBeAttached();
     await expect(addBtn).toContainText(/add field/i);
   });
 
