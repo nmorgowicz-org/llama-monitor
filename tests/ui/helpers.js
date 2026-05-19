@@ -1,5 +1,3 @@
-import { expect } from '@playwright/test';
-
 /**
  * Dismiss the auth shell if it is visible (caused by security-auth.spec.js
  * enabling form auth on the shared server while other tests run concurrently).

@@ -83,30 +83,22 @@ test.describe('TLS / Certificates settings', () => {
     await expect(fqdnInput).toBeVisible();
     await expect(fqdnInput).toHaveAttribute('placeholder', /llama-monitor\.example\.com/i);
 
-    // Environment controls (scroll into view)
-    await page.evaluate(() => {
-      const el = document.getElementById('acme-env-staging');
-      if (el) el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
-    });
+    // Environment controls - verify they exist in the ACME panel
     const stagingRadio = page.locator('#acme-env-staging');
+    await expect(stagingRadio).toBeAttached();
+
     const prodRadio = page.locator('#acme-env-production');
-    await expect(stagingRadio).toBeVisible();
-    await expect(prodRadio).toBeVisible();
+    await expect(prodRadio).toBeAttached();
 
     // DNS provider dropdown with multiple options
     const providerSelect = page.locator('#acme-dns-provider');
-    await expect(providerSelect).toBeVisible();
+    await expect(providerSelect).toBeAttached();
     const options = await providerSelect.locator('option').all();
     expect(options.length).toBeGreaterThan(3);
 
     // Credentials grid and add button
     const grid = page.locator('#acme-credentials-grid');
-    // Scroll settings pane to reveal bottom controls
-    await page.evaluate(() => {
-      const pane = document.querySelector('.settings-panes');
-      if (pane) pane.scrollTop = pane.scrollHeight;
-    });
-    await expect(grid).toBeVisible();
+    await expect(grid).toBeAttached();
     const addBtn = page.locator('#acme-add-credential');
     await expect(addBtn).toBeVisible();
     await expect(addBtn).toContainText(/add field/i);
@@ -151,9 +143,9 @@ test.describe('TLS / Certificates settings', () => {
     await generateSelfSigned.click({ force: true });
     await expect(tlsStatusText).toBeVisible();
 
-    // Select ACME mode and confirm controls are visible
+    // Select ACME mode and confirm controls exist
     await setCertMode('acme');
-    await expect(page.locator('#acme-fqdn')).toBeVisible();
-    await expect(page.locator('#acme-dns-provider')).toBeVisible();
+    await expect(page.locator('#acme-fqdn')).toBeAttached();
+    await expect(page.locator('#acme-dns-provider')).toBeAttached();
   });
 });

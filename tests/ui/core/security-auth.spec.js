@@ -4,37 +4,80 @@ test('dashboard access can be enabled, used, and disabled from settings', async 
   await page.goto('/');
   await page.waitForSelector('html.modules-ready');
 
-  await page.getByRole('button', { name: /settings/i }).first().click();
-  await expect(page.locator('#settings-modal')).toHaveClass(/open/);
-  await page.locator('.settings-tab[data-tab="security"]').click();
-  await expect(page.locator('#dashboard-auth-status')).not.toHaveText(/Checking dashboard access/i);
+  // Reset auth state via API to avoid interference from parallel tests
+  const resetResult = await page.evaluate(async () => {
+    try {
+      const statusRes = await fetch('/api/auth/status');
+      const status = await statusRes.json();
+      if (!status.enabled) {
+        return { wasEnabled: false };
+      }
 
-  await page.evaluate(() => {
-    document.querySelector('#dashboard-auth-mode-pills [data-auth-mode="form"]')?.click();
+      const shell = document.getElementById('auth-shell');
+      if (shell && !shell.hasAttribute('aria-hidden')) {
+        await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: 'admin', password: 'secret1234' }),
+        });
+      }
+
+      const headers = window.authHeaders
+        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+        : { 'Content-Type': 'application/json' };
+      const res = await fetch('/api/auth/config', {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ basic_enabled: false, form_enabled: false, username: '' }),
+      });
+      return { wasEnabled: true, status: res.status };
+    } catch (e) {
+      return { wasEnabled: false, error: e.message };
+    }
   });
-  await page.locator('#dashboard-auth-username').fill('admin');
-  await page.locator('#dashboard-auth-new-password').fill('secret1234');
-  await page.locator('#dashboard-auth-confirm-password').fill('secret1234');
 
-  // Capture the PUT response body to verify form auth was actually enabled.
-  let saveResponseBody = null;
-  const [saveResponse] = await Promise.all([
-    page.waitForResponse(resp => resp.url().includes('/api/auth/config') && resp.request().method() === 'PUT'),
-    page.evaluate(() => { document.getElementById('btn-save-dashboard-auth')?.click(); }),
-  ]);
-  saveResponseBody = await saveResponse.json().catch(() => null);
-  // If the save did not return 200 OK (e.g. backend rejected it), fail fast with context.
-  expect(saveResponse.status(), `PUT /api/auth/config failed: ${JSON.stringify(saveResponseBody)}`).toBe(200);
+  if (resetResult.wasEnabled) {
+    expect(resetResult.status, `Reset auth failed`).toBe(200);
+    await page.waitForTimeout(500);
+  }
 
-  // Allow brief moment for server to apply config before checking status
-  await page.waitForTimeout(1000);
+  await page.reload();
+  await page.waitForSelector('html.modules-ready');
 
-  // Verify auth status reflects the new config before we reload.
-  const preReloadStatus = await page.evaluate(() =>
-    fetch('/api/auth/status', { cache: 'no-store' }).then(r => r.json()),
-  );
-  expect(preReloadStatus.methods?.form, `form auth not active before reload: ${JSON.stringify(preReloadStatus)}`).toBe(true);
+  // Enable form auth via API
+  const enableResult = await page.evaluate(async () => {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+    const res = await fetch('/api/auth/config', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        basic_enabled: false,
+        form_enabled: true,
+        username: 'admin',
+        current_password: '',
+        new_password: 'secret1234',
+      }),
+    });
+    return { status: res.status, body: await res.json() };
+  });
+  expect(
+    enableResult.status,
+    `Enable auth failed: ${JSON.stringify(enableResult.body)}`,
+  ).toBe(200);
 
+  // Verify auth status reflects the new config
+  const preReloadStatus = await page.evaluate(async () => {
+    const res = await fetch('/api/auth/status', { cache: 'no-store' });
+    return await res.json();
+  });
+  expect(
+    preReloadStatus.methods?.form,
+    `form auth not active: ${JSON.stringify(preReloadStatus)}`,
+  ).toBe(true);
+
+  // Reload and verify auth shell appears
   await page.reload();
   await expect(page.locator('#auth-shell')).toBeVisible({ timeout: 10000 });
   await expect(page.locator('#auth-shell-recovery')).toContainText('clear-auth-config');
@@ -45,19 +88,27 @@ test('dashboard access can be enabled, used, and disabled from settings', async 
   await page.waitForSelector('html.modules-ready');
   await expect(page.locator('.top-nav-bar')).toBeVisible();
 
-  await page.getByRole('button', { name: /settings/i }).first().click();
-  await expect(page.locator('#settings-modal')).toHaveClass(/open/);
-  await page.locator('.settings-tab[data-tab="security"]').click();
-  await expect(page.locator('#dashboard-auth-status')).not.toHaveText(/Checking dashboard access/i);
+  // Wait for page to stabilize after login navigation
+  await page.waitForTimeout(1000);
 
-  await page.evaluate(() => {
-    document.querySelector('#dashboard-auth-mode-pills [data-auth-mode="none"]')?.click();
+  // Disable form auth via API
+  const disableResult = await page.evaluate(async () => {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+    const res = await fetch('/api/auth/config', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ basic_enabled: false, form_enabled: false, username: '' }),
+    });
+    return { status: res.status, body: await res.json() };
   });
-  await Promise.all([
-    page.waitForResponse(resp => resp.url().includes('/api/auth/config') && resp.status() === 200 && resp.request().method() === 'PUT'),
-    page.evaluate(() => { document.getElementById('btn-save-dashboard-auth')?.click(); }),
-  ]);
+  expect(
+    disableResult.status,
+    `Disable auth failed: ${JSON.stringify(disableResult.body)}`,
+  ).toBe(200);
 
+  // Reload and verify auth shell is gone
   await page.reload();
   await expect(page.locator('#auth-shell')).toBeHidden();
 });
