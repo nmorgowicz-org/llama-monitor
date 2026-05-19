@@ -49,7 +49,7 @@ The Server tab is the main monitoring dashboard. It combines llama.cpp inference
 | **Request Activity** | Activity rail (recent request timeline), request count, and average duration |
 | **Model & Decoding** | Active model name, quantization, sampler config inline, speculative decoding chip and config grid |
 
-![Server Tab](../screenshots/07-server-tab.png)
+![Server Tab](../screenshots/settings-server-tab.png)
 
 ### Fine-grained metrics
 
@@ -115,7 +115,7 @@ Clock visualization:
 
 - GPU clocks can be shown as dual-ring orbits (one for core, one for memory) with meters, or as chips, or as plain numeric values.
 
-![GPU & System Metrics](../screenshots/08-gpu-section.png)
+![GPU & System Metrics](../screenshots/dashboard-gpu-section.png)
 
 ### System metrics
 

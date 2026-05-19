@@ -29,6 +29,12 @@ Chat tabs, prompt controls, telemetry overlays, and logs live next to the monito
 
 ![Chat Interface](docs/screenshots/chat-chat.png)
 
+### Focus Mode
+
+One click hides the nav, sidebars, and chrome — leaving just the message thread. Hover the top edge, click the button again, or press ⌘⇧F to return.
+
+![Focus Mode](docs/screenshots/chat-focus-mode.png)
+
 ### Guided Generation
 
 A per-tab notes sidebar, AI-generated suggestions, quick guide flows, and director/surprise tools let you steer the next reply without rebuilding the whole prompt stack.
