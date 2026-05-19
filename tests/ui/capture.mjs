@@ -1826,11 +1826,13 @@ await captureShot(page, 'sidebar-sidebar-expanded.png', { fullPage: true });
             // Capture full-page with search mode and results
             await captureShot(page, 'sidebar-fts-search-active.png', { fullPage: true });
 
-            // Capture close-up of search results
-            const searchResults = await page.$('.csp-search-panel');
-            if (searchResults) {
-                await captureElementScreenshot(page, '.csp-search-panel', 'sidebar-fts-search-results.png', { padding: 12 });
-                await captureCloseUp(page, '.csp-search-panel', 'sidebar-fts-search-results.png', options);
+            // Capture close-up of search results (close-up only)
+            if (options.closeUp) {
+                const searchResults = await page.$('.csp-search-panel');
+                if (searchResults) {
+                    await captureElementScreenshot(page, '.csp-search-panel', 'sidebar-fts-search-results.png', { padding: 12 });
+                    await captureCloseUp(page, '.csp-search-panel', 'sidebar-fts-search-results.png', options);
+                }
             }
 
             // Close search
