@@ -1,9 +1,21 @@
 import { test, expect } from '@playwright/test';
+import { dismissAuthShell } from '../helpers.js';
 
 async function switchToMonitor(page) {
+  await dismissAuthShell(page);
   await page.evaluate(async () => {
     const { switchView } = await import('/js/features/setup-view.js');
     switchView('monitor');
+  });
+}
+
+async function ensureChatVisible(page) {
+  await page.getByRole('button', { name: /chat/i }).click();
+  await expect(page.locator('#page-chat')).toBeVisible();
+  // Force comfortable density so persona button and labels are visible
+  await page.evaluate(async () => {
+    const { pinComfortableDensity } = await import('/js/features/chat-width-observer.js');
+    pinComfortableDensity();
   });
 }
 
@@ -11,8 +23,9 @@ test.describe('system prompt and persona panel', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
+    await dismissAuthShell(page);
     await switchToMonitor(page);
-    await page.getByRole('button', { name: /chat/i }).click();
+    await ensureChatVisible(page);
   });
 
   test('opens and closes via .open class (not display:none)', async ({ page }) => {
@@ -280,8 +293,9 @@ test.describe('template manager', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
+    await dismissAuthShell(page);
     await switchToMonitor(page);
-    await page.getByRole('button', { name: /chat/i }).click();
+    await ensureChatVisible(page);
   });
 
   test('opens modal on manage button click', async ({ page }) => {
@@ -326,8 +340,9 @@ test.describe('per-persona explicit policies', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
+    await dismissAuthShell(page);
     await switchToMonitor(page);
-    await page.getByRole('button', { name: /chat/i }).click();
+    await ensureChatVisible(page);
   });
 
   test('explicit policy section present in template manager', async ({ page }) => {
@@ -359,8 +374,9 @@ test.describe('persona reset button', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
+    await dismissAuthShell(page);
     await switchToMonitor(page);
-    await page.getByRole('button', { name: /chat/i }).click();
+    await ensureChatVisible(page);
   });
 
   test('reset button visible only for built-in persona copies', async ({ page }) => {
@@ -389,8 +405,9 @@ test.describe('template list sections and active badge', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
+    await dismissAuthShell(page);
     await switchToMonitor(page);
-    await page.getByRole('button', { name: /chat/i }).click();
+    await ensureChatVisible(page);
   });
 
   test('active badge appears on current persona', async ({ page }) => {
@@ -430,8 +447,9 @@ test.describe('gender token substitution', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
+    await dismissAuthShell(page);
     await switchToMonitor(page);
-    await page.getByRole('button', { name: /chat/i }).click();
+    await ensureChatVisible(page);
   });
 
   test('selecting gender sets ai_gender on tab', async ({ page }) => {
@@ -470,8 +488,9 @@ test.describe('custom role boundary', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
+    await dismissAuthShell(page);
     await switchToMonitor(page);
-    await page.getByRole('button', { name: /chat/i }).click();
+    await ensureChatVisible(page);
   });
 
   test('role boundary section exists and is editable', async ({ page }) => {

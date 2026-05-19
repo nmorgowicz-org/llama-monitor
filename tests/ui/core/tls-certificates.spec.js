@@ -1,9 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { dismissAuthShell } from '../helpers.js';
 
 test.describe('TLS / Certificates settings', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
+    await dismissAuthShell(page);
   });
 
   test('Certificates tab exists and is selectable', async ({ page }) => {
@@ -59,6 +61,9 @@ test.describe('TLS / Certificates settings', () => {
     const certsTab = page.locator('.settings-tab').getByText('Security');
     await certsTab.click();
     await expect(page.locator('#settings-security')).toBeVisible();
+
+    // Wait for ACME element to be in DOM before manipulating
+    await page.waitForSelector('#cert-mode-acme', { state: 'attached', timeout: 10000 });
 
     // Select ACME mode (DOM helper)
     await page.evaluate((m) => {

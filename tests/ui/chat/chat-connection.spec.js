@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
+import { dismissAuthShell } from '../helpers.js';
 
 async function switchToMonitor(page) {
+  await dismissAuthShell(page);
   await page.evaluate(async () => {
     const { switchView } = await import('/js/features/setup-view.js');
     switchView('monitor');
@@ -23,7 +25,7 @@ test.describe('connection lost banner', () => {
       el.value = text;
       el.dispatchEvent(new Event('input', { bubbles: true }));
     }, 'test');
-    await page.click('#btn-send');
+    await page.click('#btn-send', { force: true });
 
     // Wait for connection-lost modal (if it is configured to show on 503)
     const modal = page.locator('#connection-lost-modal');

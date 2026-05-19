@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
+import { dismissAuthShell } from '../helpers.js';
 
 async function enterMonitorView(page) {
+  await dismissAuthShell(page);
   await page.evaluate(async () => {
     const { switchView } = await import('/js/features/setup-view.js');
     switchView('monitor');
@@ -14,6 +16,7 @@ test.describe('app shell', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
+    await dismissAuthShell(page);
   });
 
   test('renders setup shell before monitor activation', async ({ page }) => {
@@ -56,6 +59,7 @@ test.describe('modals and menus', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
+    await dismissAuthShell(page);
   });
 
   test('settings opens and secondary tabs switch', async ({ page }) => {
@@ -269,6 +273,7 @@ test.describe('inference metric rendering', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
+    await dismissAuthShell(page);
     await enterMonitorView(page);
   });
 

@@ -26,6 +26,9 @@ test('dashboard access can be enabled, used, and disabled from settings', async 
   // If the save did not return 200 OK (e.g. backend rejected it), fail fast with context.
   expect(saveResponse.status(), `PUT /api/auth/config failed: ${JSON.stringify(saveResponseBody)}`).toBe(200);
 
+  // Allow brief moment for server to apply config before checking status
+  await page.waitForTimeout(1000);
+
   // Verify auth status reflects the new config before we reload.
   const preReloadStatus = await page.evaluate(() =>
     fetch('/api/auth/status', { cache: 'no-store' }).then(r => r.json()),

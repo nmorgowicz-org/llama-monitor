@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
+import { dismissAuthShell } from '../helpers.js';
 
 async function switchToMonitor(page) {
+  await dismissAuthShell(page);
   await page.evaluate(async () => {
     const { switchView } = await import('/js/features/setup-view.js');
     switchView('monitor');
@@ -11,6 +13,7 @@ test.describe('debug prompt inspector', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
+    await dismissAuthShell(page);
     await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
   });
