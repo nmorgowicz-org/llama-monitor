@@ -15,12 +15,25 @@ test('dashboard access can be enabled, used, and disabled from settings', async 
   await page.locator('#dashboard-auth-username').fill('admin');
   await page.locator('#dashboard-auth-new-password').fill('secret1234');
   await page.locator('#dashboard-auth-confirm-password').fill('secret1234');
-  await page.evaluate(() => {
-    document.getElementById('btn-save-dashboard-auth')?.click();
-  });
+
+  // Capture the PUT response body to verify form auth was actually enabled.
+  let saveResponseBody = null;
+  const [saveResponse] = await Promise.all([
+    page.waitForResponse(resp => resp.url().includes('/api/auth/config') && resp.request().method() === 'PUT'),
+    page.evaluate(() => { document.getElementById('btn-save-dashboard-auth')?.click(); }),
+  ]);
+  saveResponseBody = await saveResponse.json().catch(() => null);
+  // If the save did not return 200 OK (e.g. backend rejected it), fail fast with context.
+  expect(saveResponse.status(), `PUT /api/auth/config failed: ${JSON.stringify(saveResponseBody)}`).toBe(200);
+
+  // Verify auth status reflects the new config before we reload.
+  const preReloadStatus = await page.evaluate(() =>
+    fetch('/api/auth/status', { cache: 'no-store' }).then(r => r.json()),
+  );
+  expect(preReloadStatus.methods?.form, `form auth not active before reload: ${JSON.stringify(preReloadStatus)}`).toBe(true);
 
   await page.reload();
-  await expect(page.locator('#auth-shell')).toBeVisible();
+  await expect(page.locator('#auth-shell')).toBeVisible({ timeout: 10000 });
   await expect(page.locator('#auth-shell-recovery')).toContainText('clear-auth-config');
   await page.locator('#auth-username').fill('admin');
   await page.locator('#auth-password').fill('secret1234');
@@ -37,9 +50,10 @@ test('dashboard access can be enabled, used, and disabled from settings', async 
   await page.evaluate(() => {
     document.querySelector('#dashboard-auth-mode-pills [data-auth-mode="none"]')?.click();
   });
-  await page.evaluate(() => {
-    document.getElementById('btn-save-dashboard-auth')?.click();
-  });
+  await Promise.all([
+    page.waitForResponse(resp => resp.url().includes('/api/auth/config') && resp.status() === 200 && resp.request().method() === 'PUT'),
+    page.evaluate(() => { document.getElementById('btn-save-dashboard-auth')?.click(); }),
+  ]);
 
   await page.reload();
   await expect(page.locator('#auth-shell')).toBeHidden();

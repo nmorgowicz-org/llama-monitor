@@ -80,6 +80,7 @@ fn main() -> Result<()> {
     if args.agent {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
+            .thread_stack_size(8 * 1024 * 1024)
             .build()?;
         return runtime.block_on(agent::run_agent_server(app_config));
     }
@@ -303,6 +304,7 @@ fn main() -> Result<()> {
     // for the system tray, which macOS requires to be on the main thread.
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
+        .thread_stack_size(8 * 1024 * 1024)
         .build()?;
 
     // Llama metrics poller. It remains idle until the user starts a preset or

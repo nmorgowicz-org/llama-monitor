@@ -20,6 +20,8 @@ import { initChatParams } from './features/chat-params.js';
 import { initSetupView } from './features/setup-view.js';
 import { initShortcuts } from './features/shortcuts.js';
 import { initNav } from './features/nav.js';
+import { initChatWidthObserver } from './features/chat-width-observer.js';
+import { initChatFocusMode, toggleFocusMode } from './features/chat-focus-mode.js';
 import { initAnimate } from './features/animate.js';
 import { initSettings } from './features/settings.js';
 import { initUserMenu } from './features/user-menu.js';
@@ -119,6 +121,8 @@ async function initializeApp() {
 
     // Phase 8: Nav, animate, settings, user menu, config, models, sensor bridge, toast
     initNav();
+    initChatWidthObserver();
+    initChatFocusMode();
     initAnimate();
     initSettings();
     initUserMenu();
@@ -180,6 +184,12 @@ function getTopmostDismissibleOverlay() {
 }
 
 document.addEventListener('keydown', (e) => {
+    if (!e.defaultPrevented && !e.repeat && !e.isComposing && (e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'F') {
+        e.preventDefault();
+        toggleFocusMode();
+        return;
+    }
+
     if (e.key !== 'Escape' || e.defaultPrevented || e.repeat || e.isComposing) return;
 
     const overlay = getTopmostDismissibleOverlay();

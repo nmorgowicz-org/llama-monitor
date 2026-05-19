@@ -1,6 +1,16 @@
 // ── Performance Baseline ──────────────────────────────────────────────────────
 
 import { test, expect } from '@playwright/test';
+import { readFileSync, writeFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { join, dirname } from 'path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const BASELINE_FILE = join(__dirname, 'js-module-baseline.json');
+
+function readBaseline() {
+  return JSON.parse(readFileSync(BASELINE_FILE, 'utf8'));
+}
 
 test.describe('performance baseline', () => {
   test('cold load network and timing', async ({ page }) => {
@@ -28,8 +38,12 @@ test.describe('performance baseline', () => {
     console.log('JS files loaded:');
     jsRequests.forEach(r => console.log(`  ${r.url}`));
 
-    // Assertions to track regression (baseline updated: 38 JS, added Certificates TLS support)
-    expect(jsRequests.length).toBeLessThanOrEqual(38);
+    const baseline = readBaseline();
+    expect(
+      jsRequests.length,
+      `JS module count regressed: ${jsRequests.length} > ${baseline.count}. ` +
+      `Run \`cd tests/ui && npm run update-baseline\` after verifying the new modules are intentional.`,
+    ).toBeLessThanOrEqual(baseline.count);
     expect(modulesReadyTime).toBeLessThan(5000); // should be under 5s locally
   });
 

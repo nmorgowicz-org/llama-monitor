@@ -1,0 +1,1843 @@
+/* ==========================================================================
+   modal-premium.css — Shared Premium Modal Styles
+   Glass morphism, ambient glow, breathing borders, widget-card sections.
+   Extracted from chat.css 2026-05-18.
+   Covers: #export-modal, #config-modal, #file-browser-modal,
+            .template-manager-modal, #preset-modal (added Task 1)
+   ========================================================================== */
+
+/* ==========================================================================
+   Template Manager Modal — Main Styles
+   ========================================================================== */
+
+.template-manager-modal {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: min(88vh, 960px);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(99, 102, 241, 0.14), transparent 28%),
+    radial-gradient(circle at 82% 82%, rgba(34, 211, 238, 0.09), transparent 26%),
+    linear-gradient(160deg, rgba(40, 48, 58, 0.94), rgba(28, 34, 42, 0.97));
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: var(--radius-card);
+  box-shadow:
+    0 12px 48px rgba(0, 0, 0, 0.5),
+    0 2px 12px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+    inset 0 36px 90px -36px rgba(99, 102, 241, 0.08);
+  backdrop-filter: blur(24px) saturate(1.2);
+  animation: template-modal-entrance 350ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  position: relative;
+}
+.template-manager-modal::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 5%, rgba(255, 255, 255, 0.25) 50%, transparent 95%);
+  z-index: 2;
+  pointer-events: none;
+}
+.template-manager-modal::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), transparent 40%, transparent 60%, rgba(99, 102, 241, 0.15));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.6;
+  animation: template-border-breathe 3s ease-in-out infinite;
+}
+@keyframes template-modal-entrance {
+  0% {
+    opacity: 0;
+    transform: scale(0.95) translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+@keyframes template-modal-exit {
+  0% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.95) translateY(12px);
+  }
+}
+#template-manager-modal.closing .template-manager-modal {
+  animation: template-modal-exit 250ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  #template-manager-modal.closing .template-manager-modal {
+    animation: none;
+  }
+}
+@keyframes template-border-breathe {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+#template-manager-modal {
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.78) 100%);
+  backdrop-filter: blur(16px);
+}
+.template-manager-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+}
+.template-manager-body {
+  display: flex;
+  gap: 0;
+  flex: 0 0 auto;
+  min-height: clamp(240px, 34vh, 360px);
+  height: clamp(260px, 38vh, 400px);
+  overflow: hidden;
+}
+.template-manager-sidebar {
+  width: 250px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 12px;
+  gap: 8px;
+  background:
+    radial-gradient(circle at top left, rgba(99, 102, 241, 0.12), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015)),
+    rgba(0, 0, 0, 0.1);
+}
+.template-manager-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.template-list-section-header {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 8px 10px 3px;
+  opacity: 0.55;
+}
+.template-list-section-header:first-child {
+  padding-top: 2px;
+}
+.template-list-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  border-left-width: 3px;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: transparent;
+}
+.template-list-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.template-list-item.selected {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+.template-list-item.editing {
+  background: rgba(251, 146, 60, 0.12);
+  border-color: rgba(251, 146, 60, 0.3);
+}
+.template-list-item.active-persona {
+  background: rgba(34, 197, 94, 0.09);
+  border-color: transparent;
+  border-left-color: rgba(34, 197, 94, 0.6);
+}
+.template-list-item.active-persona:hover {
+  background: rgba(34, 197, 94, 0.14);
+}
+.template-list-item.active-persona.selected {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.4);
+  border-left-color: rgba(34, 197, 94, 0.7);
+}
+.template-list-item.custom {
+  border-left-color: rgba(251, 191, 36, 0.45);
+}
+.template-list-item.custom.selected {
+  border-left-color: rgba(251, 191, 36, 0.7);
+}
+.template-list-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  margin-right: 6px;
+}
+.template-list-name-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.template-list-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.template-active-badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(34, 197, 94, 0.9);
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  border-radius: 3px;
+  padding: 1px 4px;
+  line-height: 1.4;
+}
+.template-list-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+  opacity: 0.75;
+}
+.template-list-actions {
+  display: flex;
+  gap: 2px;
+  overflow: hidden;
+  width: 0;
+  opacity: 0;
+  flex-shrink: 0;
+  margin-top: 1px;
+  transition: width 0.15s ease, opacity 0.15s ease;
+}
+.template-list-item:hover .template-list-actions {
+  width: 66px;
+  opacity: 1;
+}
+.template-list-btn {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.template-list-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+.template-list-btn.delete:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+.template-manager-preview {
+  flex: 1;
+  min-height: 0;
+  padding: 16px;
+  overflow-y: auto;
+  background:
+    radial-gradient(circle at top right, rgba(99, 102, 241, 0.09), transparent 28%),
+    radial-gradient(circle at 16% 84%, rgba(34, 211, 238, 0.05), transparent 26%),
+    rgba(255, 255, 255, 0.02);
+}
+.template-preview-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+  opacity: 0.6;
+}
+.template-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.template-preview-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+.template-preview-actions {
+  display: flex;
+  gap: 6px;
+}
+.template-preview-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.template-preview-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+.template-preview-btn.apply {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.2);
+  color: var(--primary-light);
+}
+.template-preview-btn.apply:hover {
+  background: rgba(99, 102, 241, 0.15);
+}
+.template-preview-content {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.template-editor-field {
+  margin-bottom: 10px;
+}
+.template-editor-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.template-editor-hint {
+  font-weight: 400;
+  font-style: italic;
+  opacity: 0.7;
+}
+.template-editor-input,
+.template-editor-textarea {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.03), transparent 22%),
+    linear-gradient(145deg, rgba(28, 34, 42, 0.9), rgba(20, 24, 32, 0.95));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-base);
+  outline: none;
+  transition: all 200ms ease;
+  font-family: inherit;
+  box-sizing: border-box;
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.template-editor-input:hover,
+.template-editor-textarea:hover {
+  border-color: rgba(99, 102, 241, 0.35);
+  box-shadow:
+    0 6px 16px rgba(0, 0, 0, 0.35),
+    0 0 20px rgba(99, 102, 241, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.template-editor-input:focus,
+.template-editor-textarea:focus {
+  border-color: rgba(99, 102, 241, 0.6);
+  box-shadow:
+    0 0 0 3px rgba(99, 102, 241, 0.15),
+    0 4px 12px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.template-editor-textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+.template-editor-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+.template-save-btn {
+  padding: 8px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  color: white;
+  background: var(--gradient-primary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-base);
+  cursor: pointer;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
+}
+.template-save-btn:hover {
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.45);
+  transform: translateY(-1px);
+}
+.template-save-btn:active {
+  transform: translateY(0) scale(0.97);
+  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.2);
+}
+.template-cancel-btn {
+  padding: 8px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-base);
+  cursor: pointer;
+  transition: all 200ms ease;
+}
+.template-cancel-btn:hover {
+  border-color: var(--border-emphasis);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  transform: translateX(-2px);
+}
+.template-cancel-btn:active {
+  transform: translateX(-2px) scale(0.97);
+}
+.template-new-btn {
+  padding: 8px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary-light);
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  width: 100%;
+}
+.template-new-btn:hover {
+  background: rgba(99, 102, 241, 0.15);
+}
+#template-manager-modal .modal-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 12px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  position: relative;
+  z-index: 2;
+  background:
+    radial-gradient(circle at top left, rgba(99, 102, 241, 0.1), transparent 44%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)),
+    rgba(0, 0, 0, 0.1);
+}
+.template-manager-gender-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.template-manager-gender-row .chat-gender-label {
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+.template-manager-gender-row .chat-gender-pills {
+  margin-bottom: 0;
+}
+.template-manager-gender-row .modal-help {
+  margin-left: auto;
+  font-size: 0.68rem;
+}
+
+#template-manager-modal .modal-footer .modal-section {
+  margin-bottom: 0;
+  width: 100%;
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.05), transparent 32%),
+    linear-gradient(145deg, rgba(31, 37, 48, 0.9), rgba(18, 24, 34, 0.95));
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 12px 28px rgba(2, 6, 23, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+#template-manager-modal .modal-footer details[open] {
+  padding-bottom: 4px;
+}
+
+/* ==========================================================================
+   File Browser Modal — Premium Glass Overhaul
+   ========================================================================== */
+
+/* ==========================================================================
+   File Browser Modal — Premium Glass Overhaul
+   ========================================================================== */
+
+#file-browser-modal {
+    background:
+        radial-gradient(ellipse at center, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.78) 100%);
+    backdrop-filter: blur(16px);
+}
+
+#file-browser-modal .modal {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    background:
+        radial-gradient(circle at 18% 18%, rgba(56, 189, 248, 0.08), transparent 26%),
+        radial-gradient(circle at 82% 14%, rgba(56, 189, 248, 0.05), transparent 24%),
+        linear-gradient(160deg, rgba(40, 48, 58, 0.94), rgba(28, 34, 42, 0.97));
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: var(--radius-card);
+    box-shadow:
+        0 12px 48px rgba(0, 0, 0, 0.5),
+        0 2px 12px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.07),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+        inset 0 36px 80px -38px rgba(56, 189, 248, 0.04);
+    backdrop-filter: blur(24px) saturate(1.2);
+    overflow: hidden;
+    animation: filebrowser-modal-entrance 350ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+#file-browser-modal .modal::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 5%, rgba(255, 255, 255, 0.25) 50%, transparent 95%);
+    z-index: 2;
+    pointer-events: none;
+}
+
+#file-browser-modal .modal::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-card);
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.3), transparent 40%, transparent 60%, rgba(56, 189, 248, 0.15));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0.6;
+    transition: opacity 400ms ease;
+}
+
+#file-browser-modal.open .modal::after,
+#file-browser-modal.active .modal::after,
+#file-browser-modal[style*="display: block"] .modal::after,
+#file-browser-modal[style*="display:block"] .modal::after {
+    opacity: 1;
+    animation: filebrowser-border-breathe 3s ease-in-out infinite;
+}
+
+@keyframes filebrowser-modal-entrance {
+    0% {
+        opacity: 0;
+        transform: scale(0.95) translateY(12px);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+@keyframes filebrowser-border-breathe {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
+}
+
+#file-browser-modal .modal-header {
+    position: relative;
+    z-index: 2;
+}
+
+#file-browser-modal .file-browser-bar {
+    position: relative;
+    z-index: 2;
+    padding: 12px 20px;
+    gap: var(--gap-sm);
+    border-bottom: 1px solid var(--border-subtle);
+    background: rgba(0, 0, 0, 0.08);
+}
+
+#file-browser-modal .fb-path-input {
+    min-height: 40px;
+    padding: 9px 14px;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    background:
+        radial-gradient(circle at top right, rgba(255, 255, 255, 0.03), transparent 22%),
+        linear-gradient(145deg, rgba(28, 34, 42, 0.9), rgba(20, 24, 32, 0.95));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-base);
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    transition: all 200ms ease;
+}
+
+#file-browser-modal .fb-path-input:hover {
+    border-color: rgba(56, 189, 248, 0.35);
+    box-shadow:
+        0 6px 16px rgba(0, 0, 0, 0.35),
+        0 0 20px rgba(56, 189, 248, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+#file-browser-modal .fb-path-input:focus {
+    border-color: rgba(56, 189, 248, 0.6);
+    box-shadow:
+        0 0 0 3px rgba(56, 189, 248, 0.15),
+        0 4px 12px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+#file-browser-modal .modal-body {
+    position: relative;
+    z-index: 2;
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+#file-browser-modal .modal-buttons {
+    position: relative;
+    z-index: 2;
+}
+
+#file-browser-modal .fb-entries {
+    padding: 12px;
+}
+
+#file-browser-modal .file-browser-hint {
+    padding: 6px 12px 2px 12px;
+    font-size: var(--text-2xs);
+    color: var(--color-text-muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--color-border-subtle);
+}
+
+
+
+
+/* ==========================================================================
+   Export Modal — Premium Glass Overhaul
+   ========================================================================== */
+
+/* ==========================================================================
+   Export Modal — Premium Glass Overhaul
+   ========================================================================== */
+
+#export-modal {
+    background:
+        radial-gradient(ellipse at center, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.78) 100%);
+    backdrop-filter: blur(16px);
+}
+
+#export-modal .modal {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    background:
+        radial-gradient(circle at 18% 18%, rgba(99, 102, 241, 0.08), transparent 26%),
+        radial-gradient(circle at 82% 14%, rgba(99, 102, 241, 0.05), transparent 24%),
+        linear-gradient(160deg, rgba(40, 48, 58, 0.94), rgba(28, 34, 42, 0.97));
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: var(--radius-card);
+    box-shadow:
+        0 12px 48px rgba(0, 0, 0, 0.5),
+        0 2px 12px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.07),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+        inset 0 36px 80px -38px rgba(99, 102, 241, 0.04);
+    backdrop-filter: blur(24px) saturate(1.2);
+    overflow: hidden;
+    animation: export-modal-entrance 350ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+#export-modal .modal::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 5%, rgba(255, 255, 255, 0.25) 50%, transparent 95%);
+    z-index: 2;
+    pointer-events: none;
+}
+
+#export-modal .modal::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-card);
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), transparent 40%, transparent 60%, rgba(99, 102, 241, 0.15));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0.6;
+    transition: opacity 400ms ease;
+}
+
+#export-modal.open .modal::after,
+#export-modal.active .modal::after,
+#export-modal[style*="display: block"] .modal::after,
+#export-modal[style*="display:block"] .modal::after {
+    opacity: 1;
+    animation: export-border-breathe 3s ease-in-out infinite;
+}
+
+@keyframes export-modal-entrance {
+    0% {
+        opacity: 0;
+        transform: scale(0.95) translateY(12px);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+@keyframes export-border-breathe {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
+}
+
+#export-modal .modal-header {
+    position: relative;
+    z-index: 2;
+}
+
+#export-modal .modal-body {
+    position: relative;
+    z-index: 2;
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+#export-modal .modal-buttons {
+    position: relative;
+    z-index: 2;
+}
+
+#export-modal .export-panel {
+    position: relative;
+    padding: 20px 22px;
+    background:
+        radial-gradient(circle at 84% 16%, rgba(99, 102, 241, 0.06), transparent 22%),
+        radial-gradient(circle at 12% 88%, rgba(99, 102, 241, 0.04), transparent 28%),
+        linear-gradient(145deg, rgba(40, 48, 58, 0.92), rgba(27, 33, 41, 0.98));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-card);
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.3),
+        0 4px 16px rgba(0, 0, 0, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+        inset 0 36px 80px -38px rgba(99, 102, 241, 0.03);
+    transition: border-color 250ms ease, box-shadow 250ms ease, transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#export-modal .export-panel::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.4), transparent);
+}
+
+#export-modal .export-panel::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-card);
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), transparent 40%, transparent 60%, rgba(99, 102, 241, 0.15));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: 0;
+    transition: opacity 250ms ease;
+    pointer-events: none;
+}
+
+#export-modal .export-panel:hover::after {
+    opacity: 1;
+}
+
+#export-modal .export-panel:hover {
+    border-color: rgba(99, 102, 241, 0.45);
+    box-shadow:
+        0 10px 32px rgba(0, 0, 0, 0.38),
+        0 4px 16px rgba(0, 0, 0, 0.28),
+        0 0 40px rgba(99, 102, 241, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+    transform: translateY(-2px);
+}
+
+#export-modal .export-section-title {
+    margin: 0 0 12px 0;
+    font-size: var(--text-sm);
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+    color: var(--color-text-primary);
+}
+
+#export-modal .export-option {
+    background:
+        radial-gradient(circle at top right, rgba(255, 255, 255, 0.02), transparent 22%),
+        linear-gradient(145deg, rgba(28, 34, 42, 0.85), rgba(20, 24, 32, 0.95));
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    transition: all 200ms ease;
+}
+
+#export-modal .export-option:hover {
+    border-color: rgba(99, 102, 241, 0.3);
+    box-shadow:
+        0 6px 16px rgba(0, 0, 0, 0.28),
+        0 0 20px rgba(99, 102, 241, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    transform: translateY(-1px);
+}
+
+#export-modal .export-option input[type="radio"] {
+    accent-color: rgba(99, 102, 241, 0.8);
+}
+
+#export-modal .export-option-title {
+    color: var(--color-text-primary);
+    font-weight: 600;
+    font-size: var(--text-sm);
+}
+
+#export-modal .export-option-description {
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+}
+
+
+/* ==========================================================================
+   File Browser Modal — Light Theme Overrides
+   ========================================================================== */
+
+[data-theme="light"] #file-browser-modal {
+    background:
+        radial-gradient(ellipse at center, rgba(0, 0, 0, 0.25) 0%, rgba(0, 0, 0, 0.45) 100%);
+}
+
+[data-theme="light"] #file-browser-modal .modal {
+    background:
+        radial-gradient(circle at 18% 18%, rgba(56, 189, 248, 0.06), transparent 26%),
+        radial-gradient(circle at 82% 14%, rgba(56, 189, 248, 0.03), transparent 24%),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(240, 244, 248, 0.96));
+    border-color: rgba(17, 24, 39, 0.1);
+    box-shadow:
+        0 12px 48px rgba(15, 23, 42, 0.15),
+        0 2px 12px rgba(15, 23, 42, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="light"] #file-browser-modal .modal::before {
+    background: linear-gradient(90deg, transparent 5%, rgba(0, 0, 0, 0.08) 50%, transparent 95%);
+}
+
+[data-theme="light"] #file-browser-modal .modal::after {
+    opacity: 0.35;
+}
+
+[data-theme="light"] #file-browser-modal .file-browser-bar {
+    background: rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="light"] #file-browser-modal .fb-path-input {
+    background: rgba(255, 255, 255, 0.7);
+    border-color: rgba(17, 24, 39, 0.1);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] #file-browser-modal .fb-path-input:hover {
+    border-color: rgba(56, 189, 248, 0.3);
+}
+
+[data-theme="light"] #file-browser-modal .fb-path-input:focus {
+    border-color: rgba(56, 189, 248, 0.5);
+    box-shadow:
+        0 0 0 3px rgba(56, 189, 248, 0.1),
+        inset 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+/* ==========================================================================
+   Export Modal — Light Theme Overrides
+   ========================================================================== */
+
+[data-theme="light"] #export-modal {
+    background:
+        radial-gradient(ellipse at center, rgba(0, 0, 0, 0.25) 0%, rgba(0, 0, 0, 0.45) 100%);
+}
+
+[data-theme="light"] #export-modal .modal {
+    background:
+        radial-gradient(circle at 18% 18%, rgba(99, 102, 241, 0.06), transparent 26%),
+        radial-gradient(circle at 82% 14%, rgba(99, 102, 241, 0.03), transparent 24%),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(240, 244, 248, 0.96));
+    border-color: rgba(17, 24, 39, 0.1);
+    box-shadow:
+        0 12px 48px rgba(15, 23, 42, 0.15),
+        0 2px 12px rgba(15, 23, 42, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="light"] #export-modal .modal::before {
+    background: linear-gradient(90deg, transparent 5%, rgba(0, 0, 0, 0.08) 50%, transparent 95%);
+}
+
+[data-theme="light"] #export-modal .modal::after {
+    opacity: 0.35;
+}
+
+[data-theme="light"] #export-modal .export-panel {
+    background:
+        radial-gradient(circle at 84% 16%, rgba(99, 102, 241, 0.04), transparent 22%),
+        linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(240, 244, 248, 0.9));
+    border-color: rgba(17, 24, 39, 0.08);
+    box-shadow:
+        0 8px 24px rgba(15, 23, 42, 0.08),
+        0 2px 8px rgba(15, 23, 42, 0.06),
+        inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+[data-theme="light"] #export-modal .export-panel:hover {
+    border-color: rgba(99, 102, 241, 0.3);
+    box-shadow:
+        0 12px 32px rgba(15, 23, 42, 0.12),
+        0 0 24px rgba(99, 102, 241, 0.06),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+[data-theme="light"] #export-modal .export-option {
+    background: rgba(255, 255, 255, 0.7);
+    border-color: rgba(17, 24, 39, 0.08);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="light"] #export-modal .export-option:hover {
+    border-color: rgba(99, 102, 241, 0.25);
+    box-shadow:
+        0 6px 16px rgba(15, 23, 42, 0.08),
+        0 0 20px rgba(99, 102, 241, 0.05),
+        inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+
+/* ==========================================================================
+   Template Manager Modal — Light Theme Overrides
+   ========================================================================== */
+
+/* ==========================================================================
+   Template Manager — Light Theme Overrides
+   ========================================================================== */
+
+[data-theme="light"] .template-manager-modal {
+  background:
+    radial-gradient(circle at 18% 18%, rgba(99, 102, 241, 0.06), transparent 26%),
+    radial-gradient(circle at 82% 82%, rgba(99, 102, 241, 0.04), transparent 24%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
+  border-color: rgba(17, 24, 39, 0.1);
+  box-shadow:
+    0 12px 48px rgba(15, 23, 42, 0.12),
+    0 2px 12px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="light"] .template-manager-modal::after {
+  opacity: 0.4;
+}
+
+[data-theme="light"] .template-manager-sidebar {
+  border-right-color: rgba(17, 24, 39, 0.08);
+  background:
+    radial-gradient(circle at top left, rgba(99, 102, 241, 0.08), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(248, 250, 252, 0.92));
+}
+
+[data-theme="light"] .template-list-item:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="light"] .template-list-item.selected {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+[data-theme="light"] .template-list-item.active-persona {
+  background: rgba(34, 197, 94, 0.07);
+  border-left-color: rgba(34, 197, 94, 0.5);
+}
+
+[data-theme="light"] .template-list-item.active-persona:hover {
+  background: rgba(34, 197, 94, 0.11);
+}
+
+[data-theme="light"] .template-list-item.active-persona.selected {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.35);
+  border-left-color: rgba(34, 197, 94, 0.6);
+}
+
+[data-theme="light"] .template-list-item.custom {
+  border-left-color: rgba(217, 119, 6, 0.4);
+}
+
+[data-theme="light"] .template-list-item.custom.selected {
+  border-left-color: rgba(217, 119, 6, 0.65);
+}
+
+[data-theme="light"] .template-active-badge {
+  color: rgba(22, 163, 74, 0.95);
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.25);
+}
+
+[data-theme="light"] .template-preview-content {
+  background: rgba(0, 0, 0, 0.015);
+  border-color: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .template-manager-preview {
+  background:
+    radial-gradient(circle at top right, rgba(99, 102, 241, 0.08), transparent 28%),
+    radial-gradient(circle at 16% 84%, rgba(34, 211, 238, 0.05), transparent 24%),
+    rgba(255, 255, 255, 0.5);
+}
+
+[data-theme="light"] .template-preview-header {
+  border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .template-editor-input,
+[data-theme="light"] .template-editor-textarea {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(17, 24, 39, 0.1);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .template-editor-input:focus,
+[data-theme="light"] .template-editor-textarea:focus {
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow:
+    0 0 0 3px rgba(99, 102, 241, 0.1),
+    inset 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .template-save-btn {
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.2);
+}
+
+[data-theme="light"] .template-save-btn:hover {
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.35);
+}
+
+[data-theme="light"] .template-cancel-btn {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="light"] .template-new-btn {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.25);
+}
+
+[data-theme="light"] .template-new-btn:hover {
+  background: rgba(99, 102, 241, 0.14);
+}
+
+[data-theme="light"] #template-manager-modal .modal-footer {
+  border-top-color: rgba(0, 0, 0, 0.06);
+  background:
+    radial-gradient(circle at top left, rgba(99, 102, 241, 0.08), transparent 44%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 250, 252, 0.94));
+}
+
+[data-theme="light"] #template-manager-modal .modal-footer .modal-section {
+  background:
+    radial-gradient(circle at top right, rgba(99, 102, 241, 0.08), transparent 30%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(241, 245, 249, 0.96));
+  border-color: rgba(17, 24, 39, 0.08);
+  box-shadow:
+    0 12px 28px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+
+/* ==========================================================================
+   Config Modal — Premium Glass Overhaul
+   ========================================================================== */
+
+#config-modal .modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 540px;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(45, 212, 191, 0.08), transparent 26%),
+    radial-gradient(circle at 82% 82%, rgba(45, 212, 191, 0.05), transparent 24%),
+    linear-gradient(160deg, rgba(40, 48, 58, 0.94), rgba(28, 34, 42, 0.97));
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: var(--radius-card);
+  box-shadow:
+    0 12px 48px rgba(0, 0, 0, 0.5),
+    0 2px 12px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+    inset 0 36px 80px -38px rgba(45, 212, 191, 0.04);
+  backdrop-filter: blur(24px) saturate(1.2);
+  overflow: hidden;
+  animation: config-modal-entrance 350ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+#config-modal .modal::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 5%, rgba(255, 255, 255, 0.25) 50%, transparent 95%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+#config-modal .modal::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.3), transparent 40%, transparent 60%, rgba(45, 212, 191, 0.15));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.6;
+  animation: config-border-breathe 3s ease-in-out infinite;
+}
+
+@keyframes config-modal-entrance {
+  0% {
+    opacity: 0;
+    transform: scale(0.95) translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes config-border-breathe {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+#config-modal {
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.78) 100%);
+  backdrop-filter: blur(16px);
+}
+
+#config-modal .modal-header {
+  position: relative;
+  z-index: 2;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+#config-modal .modal-body {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Config modal-section — widget-card treatment */
+
+#config-modal .modal-section {
+  position: relative;
+  padding: 18px 20px;
+  margin-bottom: var(--gap-md);
+  background:
+    radial-gradient(circle at 84% 16%, rgba(45, 212, 191, 0.06), transparent 22%),
+    radial-gradient(circle at 12% 88%, rgba(45, 212, 191, 0.04), transparent 28%),
+    linear-gradient(145deg, rgba(40, 48, 58, 0.92), rgba(27, 33, 41, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-card);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.3),
+    0 4px 16px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+    inset 0 36px 80px -38px rgba(45, 212, 191, 0.03);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+  transition: border-color 250ms ease, box-shadow 250ms ease, transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#config-modal .modal-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(45, 212, 191, 0.4), transparent);
+}
+
+#config-modal .modal-section::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-card);
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.25), transparent 40%, transparent 60%, rgba(45, 212, 191, 0.12));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 250ms ease;
+  pointer-events: none;
+}
+
+#config-modal .modal-section:hover::after {
+  opacity: 1;
+}
+
+#config-modal .modal-section:hover {
+  border-color: rgba(45, 212, 191, 0.4);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.4),
+    0 4px 16px rgba(0, 0, 0, 0.28),
+    0 0 32px rgba(45, 212, 191, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+  transform: translateY(-1px);
+}
+
+/* Config modal field controls — premium treatment */
+
+#config-modal .modal-field {
+  transition: all 200ms ease;
+}
+
+#config-modal .modal-field input:not([type="checkbox"]),
+#config-modal .modal-field select,
+#config-modal .modal-field textarea {
+  min-height: 42px;
+  padding: 10px 14px;
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.03), transparent 22%),
+    linear-gradient(145deg, rgba(28, 34, 42, 0.9), rgba(20, 24, 32, 0.95));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-base);
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: all 200ms ease;
+}
+
+#config-modal .modal-field input:not([type="checkbox"]):hover,
+#config-modal .modal-field select:hover {
+  border-color: rgba(45, 212, 191, 0.35);
+  box-shadow:
+    0 6px 16px rgba(0, 0, 0, 0.35),
+    0 0 20px rgba(45, 212, 191, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+#config-modal .modal-field input:not([type="checkbox"]):focus,
+#config-modal .modal-field select:focus,
+#config-modal .modal-field textarea:focus {
+  border-color: rgba(45, 212, 191, 0.6);
+  box-shadow:
+    0 0 0 3px rgba(45, 212, 191, 0.15),
+    0 4px 12px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Config modal select chevron */
+
+#config-modal .modal-field select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 40px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+}
+
+
+/* ==========================================================================
+   Config Modal — Light Theme Overrides
+   ========================================================================== */
+
+[data-theme="light"] #config-modal .modal {
+  background:
+    radial-gradient(circle at 18% 18%, rgba(45, 212, 191, 0.06), transparent 26%),
+    radial-gradient(circle at 82% 82%, rgba(45, 212, 191, 0.04), transparent 24%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
+  border-color: rgba(17, 24, 39, 0.1);
+  box-shadow:
+    0 12px 48px rgba(15, 23, 42, 0.12),
+    0 2px 12px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="light"] #config-modal .modal::after {
+  opacity: 0.4;
+}
+
+[data-theme="light"] #config-modal .modal-header {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="light"] #config-modal .modal-section {
+  background:
+    radial-gradient(circle at 84% 16%, rgba(45, 212, 191, 0.04), transparent 22%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(240, 244, 248, 0.9));
+  border-color: rgba(17, 24, 39, 0.08);
+  box-shadow:
+    0 8px 24px rgba(15, 23, 42, 0.08),
+    0 2px 8px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+[data-theme="light"] #config-modal .modal-section:hover {
+  border-color: rgba(45, 212, 191, 0.3);
+  box-shadow:
+    0 12px 32px rgba(15, 23, 42, 0.12),
+    0 0 24px rgba(45, 212, 191, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+[data-theme="light"] #config-modal .modal-field input:not([type="checkbox"]),
+[data-theme="light"] #config-modal .modal-field select,
+[data-theme="light"] #config-modal .modal-field textarea {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(17, 24, 39, 0.1);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] #config-modal .modal-field input:not([type="checkbox"]):focus,
+[data-theme="light"] #config-modal .modal-field select:focus,
+[data-theme="light"] #config-modal .modal-field textarea:focus {
+  border-color: rgba(45, 212, 191, 0.5);
+  box-shadow:
+    0 0 0 3px rgba(45, 212, 191, 0.1),
+    inset 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+
+/* ==========================================================================
+   Reduced Motion — Extracted Modals
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+    #file-browser-modal .modal,
+    #file-browser-modal .modal::after,
+    #export-modal .modal,
+    #export-modal .modal::after,
+    .template-manager-modal,
+    .template-manager-modal::after,
+    #config-modal .modal,
+    #config-modal .modal::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+
+    #file-browser-modal .fb-path-input,
+    #export-modal .export-panel,
+    #export-modal .export-panel::after,
+    #export-modal .export-option {
+        transition-duration: 0.01ms !important;
+    }
+
+    #export-modal .export-panel:hover,
+    #export-modal .export-option:hover {
+        transform: none !important;
+    }
+}
+
+/* ==========================================================================
+   Preset Modal — Premium Glass Overhaul
+   9 sections: Model & Memory, Context & KV Cache, Batching & Slots,
+   Generation, GPU Distribution, Threading, Rope Scaling,
+   Speculative Decoding, Advanced
+   ========================================================================== */
+
+#preset-modal {
+  background:
+    radial-gradient(ellipse at center, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.78) 100%);
+  backdrop-filter: blur(16px);
+}
+
+/* Ambient glow orb */
+#preset-modal::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 600px;
+  height: 600px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.16) 0%, rgba(139, 92, 246, 0.08) 40%, transparent 70%);
+  filter: blur(60px);
+  pointer-events: none;
+  animation: modal-ambient-drift 9s ease-in-out infinite;
+  z-index: 0;
+}
+
+#preset-modal .modal {
+  position: relative;
+  width: min(820px, 95vw);
+  max-height: min(92vh, 940px);
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at 15% 15%, rgba(99, 102, 241, 0.09), transparent 28%),
+    radial-gradient(circle at 85% 85%, rgba(139, 92, 246, 0.06), transparent 26%),
+    linear-gradient(160deg, rgba(40, 48, 58, 0.94), rgba(28, 34, 42, 0.97));
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: var(--radius-card);
+  box-shadow:
+    0 12px 48px rgba(0, 0, 0, 0.5),
+    0 2px 12px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25),
+    inset 0 36px 80px -38px rgba(99, 102, 241, 0.04);
+  backdrop-filter: blur(24px) saturate(1.2);
+  overflow: hidden;
+  animation: preset-modal-entrance 350ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+#preset-modal .modal::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 5%, rgba(255, 255, 255, 0.25) 50%, transparent 95%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+#preset-modal .modal::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), transparent 40%, transparent 60%, rgba(139, 92, 246, 0.15));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.6;
+  animation: preset-border-breathe 3s ease-in-out infinite;
+}
+
+#preset-modal.open .modal::after,
+#preset-modal.active .modal::after,
+#preset-modal[style*="display: block"] .modal::after,
+#preset-modal[style*="display:block"] .modal::after {
+  opacity: 1;
+}
+
+@keyframes modal-ambient-drift {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.7; }
+  33%       { transform: translate(-45%, -55%) scale(1.1); opacity: 1; }
+  66%       { transform: translate(-55%, -45%) scale(0.95); opacity: 0.8; }
+}
+
+@keyframes preset-modal-entrance {
+  0%   { opacity: 0; transform: scale(0.95) translateY(12px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes preset-border-breathe {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 1; }
+}
+
+#preset-modal .modal-header {
+  position: relative;
+  z-index: 2;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+#preset-modal .modal-header h2 {
+  background: linear-gradient(135deg, #c7d2fe, #a5b4fc, #818cf8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+#preset-modal .modal-body {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Widget-card treatment for all 9 details.modal-section panels */
+
+#preset-modal details.modal-section {
+  position: relative;
+  padding: 16px 20px;
+  margin-bottom: var(--gap-md);
+  background:
+    radial-gradient(circle at 84% 16%, rgba(99, 102, 241, 0.06), transparent 22%),
+    radial-gradient(circle at 12% 88%, rgba(99, 102, 241, 0.04), transparent 28%),
+    linear-gradient(145deg, rgba(40, 48, 58, 0.92), rgba(27, 33, 41, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-card);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.3),
+    0 4px 16px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+  transition: border-color 250ms ease, box-shadow 250ms ease, transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: preset-section-enter 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+#preset-modal details.modal-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  /* default accent — overridden per-section below */
+  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.5), transparent);
+}
+
+#preset-modal details.modal-section::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-card);
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), transparent 40%, transparent 60%, rgba(99, 102, 241, 0.12));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 250ms ease;
+  pointer-events: none;
+}
+
+#preset-modal details.modal-section:hover::after {
+  opacity: 1;
+}
+
+#preset-modal details.modal-section:hover {
+  border-color: rgba(99, 102, 241, 0.4);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.4),
+    0 4px 16px rgba(0, 0, 0, 0.28),
+    0 0 32px rgba(99, 102, 241, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+  transform: translateY(-1px);
+}
+
+@keyframes preset-section-enter {
+  0%   { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* Staggered entrance delays for 9 sections */
+#preset-modal details.modal-section:nth-of-type(1)  { animation-delay: 0.04s; }
+#preset-modal details.modal-section:nth-of-type(2)  { animation-delay: 0.08s; }
+#preset-modal details.modal-section:nth-of-type(3)  { animation-delay: 0.12s; }
+#preset-modal details.modal-section:nth-of-type(4)  { animation-delay: 0.16s; }
+#preset-modal details.modal-section:nth-of-type(5)  { animation-delay: 0.20s; }
+#preset-modal details.modal-section:nth-of-type(6)  { animation-delay: 0.24s; }
+#preset-modal details.modal-section:nth-of-type(7)  { animation-delay: 0.28s; }
+#preset-modal details.modal-section:nth-of-type(8)  { animation-delay: 0.32s; }
+#preset-modal details.modal-section:nth-of-type(9)  { animation-delay: 0.36s; }
+
+/* Per-section accent colors — top-line gradient + hover border */
+
+/* 1: Model & Memory — indigo */
+#preset-modal details.modal-section:nth-of-type(1)::before {
+  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.55), transparent);
+}
+#preset-modal details.modal-section:nth-of-type(1):hover {
+  border-color: rgba(99, 102, 241, 0.45);
+}
+
+/* 2: Context & KV Cache — cyan */
+#preset-modal details.modal-section:nth-of-type(2)::before {
+  background: linear-gradient(90deg, transparent, rgba(6, 182, 212, 0.55), transparent);
+}
+#preset-modal details.modal-section:nth-of-type(2):hover {
+  border-color: rgba(6, 182, 212, 0.45);
+}
+
+/* 3: Batching & Slots — emerald */
+#preset-modal details.modal-section:nth-of-type(3)::before {
+  background: linear-gradient(90deg, transparent, rgba(16, 185, 129, 0.55), transparent);
+}
+#preset-modal details.modal-section:nth-of-type(3):hover {
+  border-color: rgba(16, 185, 129, 0.45);
+}
+
+/* 4: Generation — violet */
+#preset-modal details.modal-section:nth-of-type(4)::before {
+  background: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.55), transparent);
+}
+#preset-modal details.modal-section:nth-of-type(4):hover {
+  border-color: rgba(139, 92, 246, 0.45);
+}
+
+/* 5: GPU Distribution — amber */
+#preset-modal details.modal-section:nth-of-type(5)::before {
+  background: linear-gradient(90deg, transparent, rgba(245, 158, 11, 0.55), transparent);
+}
+#preset-modal details.modal-section:nth-of-type(5):hover {
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+/* 6: Threading — rose */
+#preset-modal details.modal-section:nth-of-type(6)::before {
+  background: linear-gradient(90deg, transparent, rgba(244, 63, 94, 0.55), transparent);
+}
+#preset-modal details.modal-section:nth-of-type(6):hover {
+  border-color: rgba(244, 63, 94, 0.45);
+}
+
+/* 7: Rope Scaling — sky */
+#preset-modal details.modal-section:nth-of-type(7)::before {
+  background: linear-gradient(90deg, transparent, rgba(14, 165, 233, 0.55), transparent);
+}
+#preset-modal details.modal-section:nth-of-type(7):hover {
+  border-color: rgba(14, 165, 233, 0.45);
+}
+
+/* 8: Speculative Decoding — fuchsia */
+#preset-modal details.modal-section:nth-of-type(8)::before {
+  background: linear-gradient(90deg, transparent, rgba(217, 70, 239, 0.55), transparent);
+}
+#preset-modal details.modal-section:nth-of-type(8):hover {
+  border-color: rgba(217, 70, 239, 0.45);
+}
+
+/* 9: Advanced — orange */
+#preset-modal details.modal-section:nth-of-type(9)::before {
+  background: linear-gradient(90deg, transparent, rgba(249, 115, 22, 0.55), transparent);
+}
+#preset-modal details.modal-section:nth-of-type(9):hover {
+  border-color: rgba(249, 115, 22, 0.45);
+}
+
+/* Elevated form controls */
+
+#preset-modal .modal-field input:not([type="checkbox"]),
+#preset-modal .modal-field select,
+#preset-modal .modal-field textarea {
+  padding: 9px 13px;
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.03), transparent 22%),
+    linear-gradient(145deg, rgba(28, 34, 42, 0.9), rgba(20, 24, 32, 0.95));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-base);
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: all 200ms ease;
+}
+
+#preset-modal .modal-field input:not([type="checkbox"]):hover,
+#preset-modal .modal-field select:hover {
+  border-color: rgba(99, 102, 241, 0.35);
+  box-shadow:
+    0 6px 16px rgba(0, 0, 0, 0.35),
+    0 0 20px rgba(99, 102, 241, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+#preset-modal .modal-field input:not([type="checkbox"]):focus,
+#preset-modal .modal-field select:focus,
+#preset-modal .modal-field textarea:focus {
+  border-color: rgba(99, 102, 241, 0.6);
+  box-shadow:
+    0 0 0 3px rgba(99, 102, 241, 0.15),
+    0 4px 12px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  outline: none;
+}
+
+#preset-modal .modal-field select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 40px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+}
+
+/* ==========================================================================
+   Preset Modal — Light Theme Overrides
+   ========================================================================== */
+
+[data-theme="light"] #preset-modal {
+  background:
+    radial-gradient(ellipse at center, rgba(0, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.38) 100%);
+}
+
+[data-theme="light"] #preset-modal .modal {
+  background:
+    radial-gradient(circle at 15% 15%, rgba(99, 102, 241, 0.06), transparent 28%),
+    radial-gradient(circle at 85% 85%, rgba(139, 92, 246, 0.04), transparent 26%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.98));
+  border-color: rgba(17, 24, 39, 0.1);
+  box-shadow:
+    0 12px 48px rgba(15, 23, 42, 0.12),
+    0 2px 12px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="light"] #preset-modal .modal::after {
+  opacity: 0.4;
+}
+
+[data-theme="light"] #preset-modal .modal-header {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="light"] #preset-modal .modal-header h2 {
+  background: linear-gradient(135deg, #4338ca, #6366f1, #7c3aed);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+[data-theme="light"] #preset-modal details.modal-section {
+  background:
+    radial-gradient(circle at 84% 16%, rgba(99, 102, 241, 0.04), transparent 22%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.85), rgba(240, 244, 248, 0.9));
+  border-color: rgba(17, 24, 39, 0.08);
+  box-shadow:
+    0 8px 24px rgba(15, 23, 42, 0.08),
+    0 2px 8px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+[data-theme="light"] #preset-modal details.modal-section:hover {
+  border-color: rgba(99, 102, 241, 0.3);
+  box-shadow:
+    0 12px 32px rgba(15, 23, 42, 0.12),
+    0 0 24px rgba(99, 102, 241, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+[data-theme="light"] #preset-modal .modal-field input:not([type="checkbox"]),
+[data-theme="light"] #preset-modal .modal-field select,
+[data-theme="light"] #preset-modal .modal-field textarea {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(17, 24, 39, 0.1);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] #preset-modal .modal-field input:not([type="checkbox"]):focus,
+[data-theme="light"] #preset-modal .modal-field select:focus,
+[data-theme="light"] #preset-modal .modal-field textarea:focus {
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow:
+    0 0 0 3px rgba(99, 102, 241, 0.1),
+    inset 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+/* ==========================================================================
+   Preset Modal — Reduced Motion
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  #preset-modal .modal,
+  #preset-modal .modal::after,
+  #preset-modal details.modal-section {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

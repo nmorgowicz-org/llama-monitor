@@ -203,9 +203,13 @@ async function fetchSearchPage(query, { offset, append }) {
         `/api/chat/search?q=${encodeURIComponent(query)}&limit=${SEARCH_PAGE_SIZE}&offset=${offset}`,
         { headers: window.authHeaders ? window.authHeaders() : {} },
     );
+    _searchLoading = false;
+    if (!resp.ok) {
+        renderErrorState();
+        return;
+    }
     const page = await resp.json();
     renderResults(page, query, { append });
-    _searchLoading = false;
 }
 
 function renderResults(page, query, { append = false } = {}) {

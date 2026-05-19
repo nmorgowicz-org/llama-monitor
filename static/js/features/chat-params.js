@@ -1265,28 +1265,30 @@ export function initChatParams() {
     document.getElementById('chat-font-decrease')?.addEventListener('click', () => adjustChatFont(-1));
     document.getElementById('chat-font-increase')?.addEventListener('click', () => adjustChatFont(1));
 
-    // Bind export button with dropdown menu
-    const exportBtn = document.getElementById('chat-export-btn');
-    const exportMenu = document.getElementById('chat-export-menu');
-    if (exportBtn && exportMenu) {
-        exportBtn.addEventListener('click', e => {
+    // Bind file button — unified export/import dropdown
+    const fileBtn = document.getElementById('chat-file-btn');
+    const fileMenu = document.getElementById('chat-file-menu');
+    if (fileBtn && fileMenu) {
+        fileBtn.addEventListener('click', e => {
             e.stopPropagation();
-            exportMenu.classList.toggle('hidden');
+            fileMenu.classList.toggle('hidden');
         });
-        exportMenu.addEventListener('click', e => {
-            const fmt = e.target.dataset.exportFormat;
-            if (fmt) {
-                exportChatTab(fmt);
-                exportMenu.classList.add('hidden');
-            }
+        fileMenu.querySelectorAll('[data-export-format]').forEach(item => {
+            item.addEventListener('click', () => {
+                exportChatTab(item.dataset.exportFormat);
+                fileMenu.classList.add('hidden');
+            });
+        });
+        document.getElementById('chat-file-import-item')?.addEventListener('click', () => {
+            importChatTab();
+            fileMenu.classList.add('hidden');
         });
     }
     document.addEventListener('click', e => {
-        if (!e.target.closest('#chat-export-btn') && !e.target.closest('#chat-export-menu')) {
-            document.getElementById('chat-export-menu')?.classList.add('hidden');
+        if (!e.target.closest('#chat-file-btn') && !e.target.closest('#chat-file-menu')) {
+            document.getElementById('chat-file-menu')?.classList.add('hidden');
         }
     });
-    document.getElementById('chat-import-btn')?.addEventListener('click', importChatTab);
 
     // Bind chat style cards (event delegation)
     const styleGrid = document.getElementById('chat-style-grid');

@@ -455,6 +455,18 @@ Avoid:
 
 If a change is minor (e.g., small UX tweak, internal refactor, non-user-facing fix) and existing tests already cover the broader area, you can skip adding a new test.
 
+### Performance Baseline
+
+`tests/ui/core/performance.spec.js` tracks the number of JS files loaded on cold page load. The ceiling is stored in `tests/ui/core/js-module-baseline.json`.
+
+When you add a new module that gets imported (directly or transitively) from `static/js/bootstrap.js`, the test will fail with a message telling you to run:
+
+```
+cd tests/ui && npm run update-baseline
+```
+
+The script does a headless cold load against the running test server, counts the actual JS files, and writes the new ceiling to `js-module-baseline.json`. You must commit both the new module AND the updated baseline file together.
+
 ### Relationship to Screenshot Harness
 
 - Playwright tests:

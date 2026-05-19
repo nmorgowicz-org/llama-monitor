@@ -4,8 +4,11 @@
 import { chat, lastLlamaMetrics, metricSeries, wsData } from '../core/app-state.js';
 import { chatScroll } from './chat-render.js';
 import { showSessionPanel, hideSessionPanel } from './chat-sessions-sidebar.js';
+import { isFocusModeActive, exitFocusMode } from './chat-focus-mode.js';
 
 export function switchTab(name) {
+    if (name !== 'chat' && isFocusModeActive()) exitFocusMode();
+
     const page = document.getElementById('page-' + name);
 
     // Handle modal tabs (no corresponding page div)
@@ -202,6 +205,54 @@ export function refreshTopCockpit() {
     }
 }
 
+// ── Sidebar drag-resize ───────────────────────────────────────────────────────
+
+const SIDEBAR_RESIZE_KEY = 'appNavWidth';
+const SIDEBAR_MIN = 140;
+const SIDEBAR_MAX = 320;
+
+function setSidebarWidth(px) {
+    const clamped = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, px));
+    document.documentElement.style.setProperty('--sidebar-width-expanded', clamped + 'px');
+    localStorage.setItem(SIDEBAR_RESIZE_KEY, clamped);
+}
+
+function initSidebarResize() {
+    const handle = document.getElementById('sidebar-resize-handle');
+    const sidebar = document.getElementById('sidebar-nav');
+    if (!handle || !sidebar) return;
+
+    const saved = Number(localStorage.getItem(SIDEBAR_RESIZE_KEY));
+    if (saved >= SIDEBAR_MIN && saved <= SIDEBAR_MAX) {
+        setSidebarWidth(saved);
+    }
+
+    let startX = 0;
+    let startWidth = 0;
+
+    handle.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        startX = e.clientX;
+        startWidth = sidebar.getBoundingClientRect().width;
+        sidebar.classList.add('is-resizing');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', e => {
+        if (!sidebar.classList.contains('is-resizing')) return;
+        setSidebarWidth(startWidth + (e.clientX - startX));
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (!sidebar.classList.contains('is-resizing')) return;
+        sidebar.classList.remove('is-resizing');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    });
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initNav() {
@@ -228,6 +279,7 @@ export function initNav() {
     }
 
     restoreSidebarState();
+    initSidebarResize();
     initEndpointStatus();
     refreshTopCockpit();
 }

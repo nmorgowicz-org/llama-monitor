@@ -891,6 +891,34 @@ async function scenarioChat(ctx, options) {
             await captureShot(page, 'chat-chat-telemetry-pinned.png', { fullPage: true });
         }
     }
+    // File menu
+    const fileBtn = await page.$('#chat-file-btn');
+    if (fileBtn) {
+        try {
+            await fileBtn.click();
+            await page.waitForSelector('#chat-file-menu:not(.hidden)', { timeout: 2000 });
+            await captureCloseUp(page, '#chat-file-menu', 'chat-file-menu.png', options);
+            await page.keyboard.press('Escape');
+            await sleep(300);
+        } catch {
+            console.log('[CAPTURE] File menu open failed, skipping...');
+        }
+    }
+
+    // Focus mode
+    try {
+        await page.locator('#chat-focus-mode-btn').click();
+        await page.waitForFunction(() => document.body.classList.contains('chat-focus-mode'), { timeout: 2000 });
+        await sleep(400);
+        await captureShot(page, 'chat-focus-mode.png', { fullPage: true });
+        await captureCloseUp(page, '#focus-mode-exit-pill', 'chat-focus-mode-pill.png', options);
+        await page.locator('#focus-mode-exit-beacon').click();
+        await page.waitForFunction(() => !document.body.classList.contains('chat-focus-mode'), { timeout: 2000 });
+        await sleep(300);
+    } catch {
+        console.log('[CAPTURE] Focus mode capture failed, skipping...');
+    }
+
     await cleanupScreenshotTabs(page);
 
     await switchTab(page, 'logs');
@@ -1874,6 +1902,21 @@ await captureShot(page, 'sidebar-sidebar-expanded.png', { fullPage: true });
     // Close menu
     await page.keyboard.press('Escape');
     await sleep(300);
+
+    // Sidebar resize handle — capture with hover state
+    try {
+        const resizeHandle = await page.$('#sidebar-resize-handle');
+        if (resizeHandle) {
+            const box = await resizeHandle.boundingBox();
+            if (box) {
+                await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+                await sleep(300);
+                await captureElementScreenshot(page, '.sidebar-nav', 'sidebar-resize-handle.png', { padding: 0 });
+            }
+        }
+    } catch {
+        console.log('[CAPTURE] Sidebar resize handle capture failed, skipping...');
+    }
 
     // Test search filter (title filter, not FTS)
     await page.type('#csp-search', 'Noir');

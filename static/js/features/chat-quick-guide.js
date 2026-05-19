@@ -225,6 +225,13 @@ function setupQuickInputHandler() {
 function submitQuickGuide() {
     const tab = activeChatTab();
     const instruction = (tab?.quick_guide_draft || '').trim();
+
+    // Always collapse the UI — even if there is no active tab.
+    const inputEl = document.getElementById('quick-guide-input');
+    if (inputEl) inputEl.value = '';
+    quickGuideState.expanded = false;
+    updateQuickGuideUI();
+
     if (!tab) return;
 
     quickGuideState.lastUsedInstruction = instruction || null;
@@ -233,11 +240,6 @@ function submitQuickGuide() {
     }));
 
     tab.quick_guide_draft = '';
-    const inputEl = document.getElementById('quick-guide-input');
-    if (inputEl) inputEl.value = '';
-    quickGuideState.expanded = false;
-    updateQuickGuideUI();
-
     showToast(instruction ? 'Reply guide applied' : 'Reply guide cleared', 'success');
 }
 

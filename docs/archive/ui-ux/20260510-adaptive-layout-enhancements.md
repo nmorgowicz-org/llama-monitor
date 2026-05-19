@@ -1,16 +1,29 @@
 # Chat Evolution — Adaptive Layout & UI Completion
 
 **Date:** 2026-05-10
-**Last updated:** 2026-05-18
-**Status:** In Progress — Tasks 0–9 remaining; all targeted for `feature/chat-system-evolution`
+**Completed:** 2026-05-18
 **Branch:** `feature/chat-system-evolution`
-**Scope:** CSS refactor, preset modal, file action consolidation, shell width architecture, toolbar density, name/font demotion, chat focus mode, draggable sidebar, popover hardening
+**Status:** COMPLETE — All Tasks 0–8 shipped
+
+> **Archive note:** This document was the living implementation plan for the `feature/chat-system-evolution` branch. All tasks are done and merged. It is preserved here as a reference for the decisions made, the app architecture at that point in time, and the rationale behind each change. Do not treat the task sections as work to be done — they describe what was built.
 
 ---
 
-## Purpose of This Document
+## What Was Built
 
-This is the single living plan for all remaining UI work on the `feature/chat-system-evolution` branch. It supersedes both the original `20260510-adaptive-layout-enhancements.md` planning doc and the archived `20260505-modal_ui_improvements.md`. An AI agent reading this document with no prior context should be able to pick up and continue development from any task without needing to read anything else.
+Nine tasks delivered on this branch:
+
+| Task | Description |
+|------|-------------|
+| 0 | CSS refactor — extracted premium modal styles into `modal-premium.css` (reduced `chat.css` from ~9,400 to ~8,000 lines) |
+| 1 | Preset modal — full glass-morphism premium treatment |
+| 2 | File action consolidation — replaced `#chat-export-btn` + `#chat-import-btn` with unified `#chat-file-btn` dropdown |
+| 3 | Shell width architecture — CSS variables for sidebar widths, `ResizeObserver`-based density system |
+| 4 | Toolbar density tiers — tight/very-tight compaction classes applied by `chat-width-observer.js` |
+| 5 | Name/font demotion — labels hidden at very-tight density |
+| 6 | Chat focus mode — `body.chat-focus-mode`, `⌘⇧F` shortcut, exit beacon/pill, tab-switch auto-exit |
+| 7 | Draggable main sidebar — `#sidebar-resize-handle`, `initSidebarResize()` in `nav.js`, persisted to `appNavWidth` |
+| 8 | Popover hardening — viewport-safe `min-width`/`max-width` on telemetry popover, persona menu, file menu |
 
 ---
 
@@ -89,9 +102,9 @@ The following work is **complete** and must not be re-implemented:
 
 **Right cluster (`.chat-header-right`):**
 - `.chat-font-controls` → `#chat-font-decrease`, `#chat-font-value` (span), `#chat-font-increase`
-- `#chat-export-btn` + `#chat-export-menu` dropdown (Save as Markdown / Save as JSON)
-- `#chat-import-btn`
+- `#chat-file-btn` + `#chat-file-menu` dropdown (Save as Markdown / Save as JSON / Import) — *replaced separate export+import buttons in Task 2*
 - `#chat-persona-btn` + `#chat-persona-menu` dropdown
+- `#chat-focus-mode-btn` — *added in Task 6*
 
 ### CSS files and current state
 
@@ -266,80 +279,11 @@ Apply the exact same pattern used for `#config-modal`. The config modal is the b
 
 ---
 
-## Task 2: File Action Consolidation
+## Task 2: File Action Consolidation ✅ COMPLETE
 
-**Goal:** Replace the separate `#chat-export-btn` and `#chat-import-btn` buttons with a single `#chat-file-btn` button and a unified dropdown. Saves one toolbar pill, reduces visual clutter, groups file management as a utility action.
+**Goal:** Replace the separate `#chat-export-btn` and `#chat-import-btn` buttons with a single `#chat-file-btn` button and a unified dropdown.
 
-### HTML changes (`static/index.html`)
-
-Find the current export + import block in `#chat-header .chat-header-right` (search `chat-export-btn`). Replace:
-
-```html
-<!-- REMOVE THIS BLOCK: -->
-<div class="chat-header-dropdown">
-  <button class="chat-header-btn" id="chat-export-btn" ...>...</button>
-  <div id="chat-export-menu" class="chat-export-menu hidden">
-    <button data-export-format="md">Save as Markdown</button>
-    <button data-export-format="json">Save as JSON</button>
-  </div>
-</div>
-<button class="chat-header-btn" id="chat-import-btn" ...>...</button>
-
-<!-- REPLACE WITH: -->
-<div class="chat-header-dropdown">
-  <button class="chat-header-btn" id="chat-file-btn" title="File actions — save or import conversation">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-      <polyline points="14 2 14 8 20 8"/>
-      <line x1="12" y1="18" x2="12" y2="12"/>
-      <line x1="9" y1="15" x2="15" y2="15"/>
-    </svg>
-    <span class="chat-header-label">File</span>
-  </button>
-  <div id="chat-file-menu" class="chat-export-menu hidden">
-    <button data-export-format="md">Save as Markdown</button>
-    <button data-export-format="json">Save as JSON</button>
-    <button id="chat-file-import-item">Import conversation</button>
-  </div>
-</div>
-```
-
-### JS changes (`static/js/features/chat-params.js`)
-
-Find the export button wiring block (search `chat-export-btn`) and the import button wiring (search `chat-import-btn`). Replace with:
-
-```javascript
-// File button — unified export/import dropdown
-const fileBtn = document.getElementById('chat-file-btn');
-const fileMenu = document.getElementById('chat-file-menu');
-if (fileBtn && fileMenu) {
-  fileBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    fileMenu.classList.toggle('hidden');
-  });
-  fileMenu.querySelectorAll('[data-export-format]').forEach(item => {
-    item.addEventListener('click', () => {
-      exportChatTab(item.dataset.exportFormat);
-      fileMenu.classList.add('hidden');
-    });
-  });
-  document.getElementById('chat-file-import-item')?.addEventListener('click', () => {
-    importChatTab();
-    fileMenu.classList.add('hidden');
-  });
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('#chat-file-btn') && !e.target.closest('#chat-file-menu')) {
-      fileMenu.classList.add('hidden');
-    }
-  });
-}
-```
-
-Note: `exportChatTab` and `importChatTab` are imported from `chat-render.js` at the top of `chat-params.js` — they are already imported, just change the wiring.
-
-### CSS changes (`static/css/chat.css`)
-
-Search for `.chat-export-menu` — the existing dropdown menu CSS already works. The `#chat-file-menu` uses the same class so no new CSS is needed. If there are any rules targeting `#chat-export-btn` or `#chat-import-btn` by ID, rename them to `#chat-file-btn`.
+**Implemented:** `#chat-file-btn` + `#chat-file-menu` in `index.html`; wiring in `chat-params.js` using `exportChatTab`/`importChatTab` from `chat-render.js`. CSS reuses `.chat-export-menu` class unchanged.
 
 ---
 

@@ -383,8 +383,8 @@ test.describe('chat message export', () => {
     await page.getByRole('button', { name: /chat/i }).click();
   });
 
-  test('export button is present in chat controls', async ({ page }) => {
-    await expect(page.locator('#chat-export-btn')).toBeVisible();
+  test('file button is present in chat controls', async ({ page }) => {
+    await expect(page.locator('#chat-file-btn')).toBeVisible();
   });
 
   test('export generates valid JSON with correct format', async ({ page }) => {
@@ -400,12 +400,12 @@ test.describe('chat message export', () => {
       renderChatMessages();
     });
 
-    // Click export button to open dropdown
-    await page.locator('#chat-export-btn').click();
+    // Click file button to open dropdown
+    await page.locator('#chat-file-btn').click();
 
     // Click the JSON export option
     const downloadPromise = page.waitForEvent('download', { timeout: 5000 });
-    await page.locator('#chat-export-menu [data-export-format="json"]').click();
+    await page.locator('#chat-file-menu [data-export-format="json"]').click();
     const download = await downloadPromise;
     expect(download).toBeTruthy();
   });

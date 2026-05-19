@@ -17,7 +17,7 @@ const config = {
   webServer: process.env.LLAMA_MONITOR_UI_URL ? undefined : {
     // Wrapper script creates a fresh temp config dir so tests run with a clean slate,
     // independent of the developer's local ~/.config/llama-monitor/ data.
-    command: './run-server.sh',
+    command: 'node run-server.mjs',
     cwd: '.',
     url: 'http://127.0.0.1:7778',
     reuseExistingServer: false,
