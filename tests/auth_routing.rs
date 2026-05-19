@@ -575,3 +575,71 @@ fn endpoint_remote_agent_status_requires_db_admin_token() {
     };
     assert!(matches, "db-admin-token must allow remote-agent status");
 }
+
+// ===================== SAFE JSON BODY (400 NOT 404) =====================
+
+// These tests ensure that malformed JSON on mutating chat endpoints returns
+// 400 (Bad Request) instead of 404 — the exact bug that caused silent tab loss.
+
+#[tokio::test]
+async fn safe_json_body_valid_returns_200() {
+    use llama_monitor::web::{handle_rejection, safe_json_body};
+    use serde::Deserialize;
+    use warp::Filter;
+
+    #[derive(Deserialize)]
+    struct TestReq {
+        #[allow(dead_code)]
+        id: String,
+    }
+
+    let route = warp::post()
+        .and(safe_json_body::<TestReq>())
+        .map(|_req: TestReq| warp::reply::json(&serde_json::json!({ "ok": true })))
+        .recover(handle_rejection);
+
+    let resp = warp::test::request()
+        .method("POST")
+        .json(&serde_json::json!({ "id": "test" }))
+        .reply(&route)
+        .await;
+
+    assert_eq!(
+        resp.status(),
+        warp::http::StatusCode::OK,
+        "valid JSON must return 200"
+    );
+}
+
+#[tokio::test]
+async fn safe_json_body_invalid_returns_400_not_404() {
+    use llama_monitor::web::{handle_rejection, safe_json_body};
+    use serde::Deserialize;
+    use warp::Filter;
+
+    #[derive(Deserialize)]
+    struct TestReq {
+        #[allow(dead_code)]
+        id: String,
+    }
+
+    let route = warp::post()
+        .and(safe_json_body::<TestReq>())
+        .map(|_req: TestReq| warp::reply::json(&serde_json::json!({ "ok": true })))
+        .recover(handle_rejection);
+
+    // Send obviously invalid JSON
+    let resp = warp::test::request()
+        .method("POST")
+        .header("content-type", "application/json")
+        .body("{ bad json }")
+        .reply(&route)
+        .await;
+
+    let status = resp.status();
+    assert_eq!(
+        status,
+        warp::http::StatusCode::BAD_REQUEST,
+        "invalid JSON must return 400 (not 404)"
+    );
+}

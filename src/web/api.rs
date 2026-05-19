@@ -4412,7 +4412,7 @@ fn api_create_tab(
     warp::path!("api" / "chat" / "tabs")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<crate::chat_storage::ChatTabRow>())
+        .and(super::safe_json_body::<crate::chat_storage::ChatTabRow>())
         .and(with_chat_storage(storage))
         .and_then(
             move |auth: Option<String>,
@@ -4563,7 +4563,7 @@ fn api_patch_tab_meta(
     warp::path!("api" / "chat" / "tabs" / String / "meta")
         .and(warp::patch())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<crate::chat_storage::ChatTabRow>())
+        .and(super::safe_json_body::<crate::chat_storage::ChatTabRow>())
         .and(with_chat_storage(storage))
         .and_then(
             move |id: String,
@@ -4691,11 +4691,6 @@ fn api_chat_search(
     storage: Arc<ChatStorage>,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    static LAST_CHAT_SEARCH: AtomicU64 = AtomicU64::new(0);
-
     #[derive(serde::Deserialize)]
     struct SearchParams {
         q: String,
@@ -4720,24 +4715,6 @@ fn api_chat_search(
                     if !check_api_token(&auth, &cfg) {
                         return Ok(unauthorized_api_token());
                     }
-                    let now = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs();
-                    let last = LAST_CHAT_SEARCH.load(Ordering::Acquire);
-                    if now - last < 1 {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::with_status(
-                                warp::reply::json(&serde_json::json!({
-                                    "ok": false,
-                                    "error": "too many searches; please wait",
-                                    "seconds_remaining": 1
-                                })),
-                                warp::http::StatusCode::TOO_MANY_REQUESTS,
-                            ),
-                        ));
-                    }
-                    LAST_CHAT_SEARCH.store(now, Ordering::Release);
 
                     let limit = p.limit.clamp(1, 100);
                     match store.search(&p.q, limit, p.offset) {

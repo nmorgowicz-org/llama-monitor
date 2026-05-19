@@ -153,7 +153,16 @@ pub fn build_routes(
     // Apply Origin guard to api routes (mutating methods with Origin must match)
     let api_protected = api.and(origin_guard(server_origin)).map(|reply, ()| reply);
 
-    let protected = ws.or(api_protected).or(compact);
+    // compact is auth-guarded but excluded from helmet so its own per-request CSP
+    // (which needs 'unsafe-inline' for the inline <style> block and a nonce for the
+    // inline <script> that injects __COMPACT_PORT__) is the only CSP header sent.
+    // Two CSP headers would cause browsers to apply both and pick the most restrictive,
+    // silently blocking the inline styles and the port-injection script.
+    let compact_protected = compact
+        .and(auth_guard(auth_manager.clone(), app_config.clone()))
+        .map(|reply, _: ()| reply);
+
+    let protected = ws.or(api_protected);
     let protected = protected
         .and(auth_guard(auth_manager.clone(), app_config.clone()))
         .map(|reply, _: ()| reply);
@@ -182,9 +191,13 @@ pub fn build_routes(
 
     // Apply global rate limit to all routes (200 req/s, 500 burst).
     let rate_limited = global_rate_limit();
-    let non_index = non_index.and(rate_limited).map(|reply, ()| reply);
+    let non_index = non_index.and(rate_limited.clone()).map(|reply, ()| reply);
+    let compact_protected = compact_protected.and(rate_limited).map(|reply, ()| reply);
 
-    index.or(non_index).recover(handle_rejection)
+    index
+        .or(non_index)
+        .or(compact_protected)
+        .recover(handle_rejection)
 }
 
 /// Auth guard for protected routes.
@@ -375,7 +388,9 @@ fn rand_core_getrandom_u128() -> u128 {
     u128::from_be_bytes(buf)
 }
 
-async fn handle_rejection(err: warp::Rejection) -> Result<Box<dyn warp::reply::Reply>, Infallible> {
+pub async fn handle_rejection(
+    err: warp::Rejection,
+) -> Result<Box<dyn warp::reply::Reply>, Infallible> {
     if let Some(auth) = err.find::<AuthReject>() {
         let reply = warp::reply::with_status(
             warp::reply::json(&serde_json::json!({ "error": "unauthorized" })),
