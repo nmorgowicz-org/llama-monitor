@@ -1317,6 +1317,7 @@ body.sidebar-collapsed .content-area {
 body.chat-focus-mode .endpoint-health-strip,
 body.chat-focus-mode .top-nav-bar {
   max-height: 0;
+  min-height: 0;
   opacity: 0;
   pointer-events: none;
 }

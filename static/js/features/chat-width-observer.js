@@ -5,7 +5,7 @@
 
 const THRESHOLDS = {
     veryTight: 520,
-    tight: 700,
+    tight: 1000,
 };
 
 const DENSITY_CLASSES = ['shell-width-tight', 'shell-width-very-tight'];
