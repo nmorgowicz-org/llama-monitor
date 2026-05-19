@@ -3,6 +3,7 @@
 // renders a larger flyout beside the sidebar for full-text search results.
 
 import { switchChatTab } from './chat-state.js';
+import { chat } from '../core/app-state.js';
 
 const SEARCH_PAGE_SIZE = 20;
 
@@ -20,6 +21,7 @@ let _collapsedBeforeSearch = false;
 let _searchQuery = '';
 let _searchOffset = 0;
 let _searchLoading = false;
+let _searchVisibility = ['active'];
 
 export function initChatSearch() {
     const panel = document.getElementById('chat-sessions-panel');
@@ -73,6 +75,10 @@ export function initChatSearch() {
             <span class="csp-search-count">Type 2+ letters</span>
             <span class="csp-search-summary">Use the title filter for chat names, and message search for history.</span>
         </div>
+        <div class="csp-search-filters">
+            <button class="csp-search-filter-chip active" data-visibility="active" type="button">Active</button>
+            <button class="csp-search-filter-chip" data-visibility="archived" type="button">Archived</button>
+        </div>
         <div class="csp-search-results"></div>
         <div class="csp-search-footer">
             <button class="csp-search-load-more" type="button">Show More Results</button>
@@ -88,6 +94,9 @@ export function initChatSearch() {
     _searchInput?.addEventListener('input', onSearchInput);
     _searchPanel.querySelector('.csp-search-close')?.addEventListener('click', closeSearch);
     _searchLoadMoreBtn?.addEventListener('click', loadMoreResults);
+    _searchPanel.querySelectorAll('.csp-search-filter-chip').forEach((chip) => {
+        chip.addEventListener('click', () => onVisibilityChipClick(chip));
+    });
 
     document.addEventListener('keydown', (e) => {
         if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
@@ -144,6 +153,8 @@ export function closeSearch() {
     if (_searchInput) _searchInput.value = '';
     _searchQuery = '';
     _searchOffset = 0;
+    _searchVisibility = ['active'];
+    chat.visibilityUi.activeSearchVisibility = ['active'];
     _searchLoading = false;
     if (_searchList) _searchList.innerHTML = '';
     if (_searchLoadMoreBtn) _searchLoadMoreBtn.style.display = 'none';
@@ -193,6 +204,25 @@ async function loadMoreResults() {
     }
 }
 
+function onVisibilityChipClick(chip) {
+    const vis = chip.dataset.visibility;
+    const idx = _searchVisibility.indexOf(vis);
+    if (idx >= 0) {
+        if (_searchVisibility.length > 1) {
+            _searchVisibility.splice(idx, 1);
+            chip.classList.remove('active');
+        }
+    } else {
+        _searchVisibility.push(vis);
+        chip.classList.add('active');
+    }
+    chat.visibilityUi.activeSearchVisibility = [..._searchVisibility];
+    _searchOffset = 0;
+    if (_searchQuery && _searchQuery.length >= 2) {
+        fetchSearchPage(_searchQuery, { offset: 0, append: false });
+    }
+}
+
 async function fetchSearchPage(query, { offset, append }) {
     _searchLoading = true;
     if (_searchLoadMoreBtn) {
@@ -200,7 +230,7 @@ async function fetchSearchPage(query, { offset, append }) {
         _searchLoadMoreBtn.textContent = append ? 'Loading…' : 'Show More Results';
     }
     const resp = await fetch(
-        `/api/chat/search?q=${encodeURIComponent(query)}&limit=${SEARCH_PAGE_SIZE}&offset=${offset}`,
+        `/api/chat/search?q=${encodeURIComponent(query)}&limit=${SEARCH_PAGE_SIZE}&offset=${offset}&visibility=${encodeURIComponent(_searchVisibility.join(','))}`,
         { headers: window.authHeaders ? window.authHeaders() : {} },
     );
     _searchLoading = false;

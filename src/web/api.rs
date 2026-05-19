@@ -676,7 +676,7 @@ fn load_prompts_from_files() -> HashMap<String, String> {
     prompts
 }
 
-use crate::chat_storage::ChatStorage;
+use crate::chat_storage::{ChatStorage, TabVisibility};
 
 /// Attempt to claim a cooldown window atomically.
 ///
@@ -694,6 +694,27 @@ fn try_cooldown(last: &std::sync::atomic::AtomicU64, now: u64, cooldown_secs: u6
         .compare_exchange(prev, now, Ordering::AcqRel, Ordering::Relaxed)
         .is_ok();
     (ok, 0)
+}
+
+fn parse_visibility_param(param: &str) -> Vec<TabVisibility> {
+    if param.is_empty() || param == "active" {
+        vec![TabVisibility::Active]
+    } else if param == "all" {
+        vec![
+            TabVisibility::Active,
+            TabVisibility::Archived,
+            TabVisibility::Hidden,
+        ]
+    } else if param == "archived" {
+        vec![TabVisibility::Archived]
+    } else if param == "hidden" {
+        vec![TabVisibility::Hidden]
+    } else {
+        param
+            .split(',')
+            .map(|s| s.trim().parse().unwrap_or(TabVisibility::Active))
+            .collect()
+    }
 }
 
 fn api_check_lhm(
@@ -1412,6 +1433,9 @@ pub fn api_routes(
     let chat_append_messages = api_append_messages(chat_storage.clone(), app_config.clone());
     let chat_reorder_tabs = api_reorder_tabs(chat_storage.clone(), app_config.clone());
     let chat_search = api_chat_search(chat_storage.clone(), app_config.clone());
+    let chat_archive_tab = api_archive_tab(chat_storage.clone(), app_config.clone());
+    let chat_hide_tab = api_hide_tab(chat_storage.clone(), app_config.clone());
+    let chat_restore_tab = api_restore_tab(chat_storage.clone(), app_config.clone());
 
     // Agent token rotation routes
     let rotate_agent_token = api_rotate_agent_token(state.clone(), app_config.clone());
@@ -1497,7 +1521,10 @@ pub fn api_routes(
         .or(chat_patch_tab_meta)
         .or(chat_append_messages)
         .or(chat_reorder_tabs)
-        .or(chat_search);
+        .or(chat_search)
+        .or(chat_archive_tab)
+        .or(chat_hide_tab)
+        .or(chat_restore_tab);
     let db_routes = db_stats
         .or(db_integrity)
         .or(db_maintenance)
@@ -4382,26 +4409,32 @@ fn api_list_tabs(
     warp::path!("api" / "chat" / "tabs")
         .and(warp::get())
         .and(warp::header::optional::<String>("authorization"))
+        .and(warp::query::<HashMap<String, String>>())
         .and(with_chat_storage(storage))
-        .and_then(move |auth: Option<String>, store: Arc<ChatStorage>| {
-            let cfg = app_config.clone();
-            async move {
-                if !check_api_token(&auth, &cfg) {
-                    return Ok(unauthorized_api_token());
-                }
-                match store.list_tabs() {
-                    Ok(tabs) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&tabs),
-                    )),
-                    Err(e) => {
-                        eprintln!("list_tabs error: {e}");
-                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&Vec::<crate::chat_storage::TabMeta>::new()),
-                        ))
+        .and_then(
+            move |auth: Option<String>, query: HashMap<String, String>, store: Arc<ChatStorage>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let visibilities = parse_visibility_param(
+                        &query.get("visibility").cloned().unwrap_or_default(),
+                    );
+                    match store.list_tabs(&visibilities) {
+                        Ok(tabs) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&tabs),
+                        )),
+                        Err(e) => {
+                            eprintln!("list_tabs error: {e}");
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&Vec::<crate::chat_storage::TabMeta>::new()),
+                            ))
+                        }
                     }
                 }
-            }
-        })
+            },
+        )
 }
 
 // POST /api/chat/tabs — create new tab
@@ -4698,6 +4731,8 @@ fn api_chat_search(
         limit: usize,
         #[serde(default)]
         offset: usize,
+        #[serde(default)]
+        visibility: String,
     }
     fn default_limit() -> usize {
         20
@@ -4717,7 +4752,8 @@ fn api_chat_search(
                     }
 
                     let limit = p.limit.clamp(1, 100);
-                    match store.search(&p.q, limit, p.offset) {
+                    let visibilities = parse_visibility_param(&p.visibility);
+                    match store.search(&p.q, limit, p.offset, &visibilities) {
                         Ok(results) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                             Box::new(warp::reply::json(&results)),
                         ),
@@ -4733,6 +4769,102 @@ fn api_chat_search(
                                 }),
                             ))
                         }
+                    }
+                }
+            },
+        )
+}
+
+fn api_archive_tab(
+    storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs" / String)
+        .and(warp::post())
+        .and(warp::path!("archive"))
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_chat_storage(storage))
+        .and_then(
+            move |id: String, auth: Option<String>, store: Arc<ChatStorage>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    match store.set_visibility(&id, &TabVisibility::Archived) {
+                        Ok(tab) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&tab),
+                        )),
+                        Err(_) => Ok(Box::new(warp::reply::with_status(
+                            warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": "not_found"}),
+                            ),
+                            warp::http::StatusCode::NOT_FOUND,
+                        ))),
+                    }
+                }
+            },
+        )
+}
+
+fn api_hide_tab(
+    storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs" / String)
+        .and(warp::post())
+        .and(warp::path!("hide"))
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_chat_storage(storage))
+        .and_then(
+            move |id: String, auth: Option<String>, store: Arc<ChatStorage>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    match store.set_visibility(&id, &TabVisibility::Hidden) {
+                        Ok(tab) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&tab),
+                        )),
+                        Err(_) => Ok(Box::new(warp::reply::with_status(
+                            warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": "not_found"}),
+                            ),
+                            warp::http::StatusCode::NOT_FOUND,
+                        ))),
+                    }
+                }
+            },
+        )
+}
+
+fn api_restore_tab(
+    storage: Arc<ChatStorage>,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat" / "tabs" / String)
+        .and(warp::post())
+        .and(warp::path!("restore"))
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_chat_storage(storage))
+        .and_then(
+            move |id: String, auth: Option<String>, store: Arc<ChatStorage>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    match store.set_visibility(&id, &TabVisibility::Active) {
+                        Ok(tab) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&tab),
+                        )),
+                        Err(_) => Ok(Box::new(warp::reply::with_status(
+                            warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": "not_found"}),
+                            ),
+                            warp::http::StatusCode::NOT_FOUND,
+                        ))),
                     }
                 }
             },

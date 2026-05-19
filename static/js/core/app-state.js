@@ -146,6 +146,13 @@ export const chat = {
     trashPurgeTimer: null,
     /** Whether auto-scroll is disabled (user scrolled up during generation) */
     disableAutoScroll: false,
+    /** Visibility UI state */
+    visibilityUi: {
+        archiveOpen: false,
+        hiddenOpen: false,
+        hiddenRevealed: false,
+        activeSearchVisibility: ['active'],
+    },
 };
 
 // ── LHM (Windows Hardware Monitor) ───────────────────────────────────────────

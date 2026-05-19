@@ -665,6 +665,7 @@
                     <input class="csp-search" id="csp-search" type="search"
                            placeholder="Filter chat titles…" autocomplete="off">
                 </div>
+                <div class="csp-management-row" id="csp-management-row"></div>
                 <div class="csp-list" id="csp-list"></div>
                 <div class="csp-trash-strip hidden" id="csp-trash-strip"></div>
             </aside>
@@ -754,6 +755,13 @@
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
                         </button>
                     </div>
+                    <button class="chat-header-hide-btn" id="chat-header-hide-btn" type="button" aria-label="Hide this chat from normal view" title="Hide this chat">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                            <line x1="1" y1="1" x2="23" y2="23"/>
+                        </svg>
+                    </button>
                     <div class="chat-header-dropdown">
                         <button class="chat-header-btn" id="chat-file-btn" title="File actions — save or import conversation">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

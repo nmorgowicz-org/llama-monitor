@@ -77,6 +77,7 @@ export function newChatTab(name = 'New Chat') {
         created_at: Date.now(),
         updated_at: Date.now(),
         pinned: false,
+        visibility: 'active',
     };
 }
 
@@ -105,6 +106,7 @@ function normalizeChatTab(tab) {
         quick_guide_pending: '',
         armed_story_beats: tab.armed_story_beats ?? [],
         pinned: tab.pinned ?? false,
+        visibility: tab.visibility || 'active',
     };
 }
 
@@ -112,7 +114,7 @@ function normalizeChatTab(tab) {
 
 export async function initChatTabs() {
     try {
-        const resp = await fetch('/api/chat/tabs', {
+        const resp = await fetch('/api/chat/tabs?visibility=all', {
             headers: window.authHeaders ? window.authHeaders() : {},
         });
         if (!resp.ok) {
@@ -308,6 +310,11 @@ export function restoreTabFromTrash(id) {
 
 export async function switchChatTab(id) {
     if (chat.busy) return;
+    const targetTab = chat.tabs.find(t => t.id === id);
+    if (targetTab && targetTab.visibility !== 'active') {
+        showToast('Chat not visible', 'info', '', []);
+        return;
+    }
     chat.activeTabId = id;
     await _loadTabMessages(id);
     chatViewBindings.renderChatTabs?.();
@@ -347,6 +354,125 @@ export function togglePinTab(id) {
     chatViewBindings.renderChatSessionsSidebar?.();
     scheduleChatPersist(tab);
     persistTabOrder();
+}
+
+// ── Visibility Actions ────────────────────────────────────────────────────────
+
+function _selectFallbackTab(leavingId) {
+    const activeTabs = chat.tabs.filter(t => t.visibility === 'active');
+    if (activeTabs.length) {
+        const idx = activeTabs.findIndex(t => t.id === leavingId);
+        const fallbackIdx = idx >= 0 ? 0 : activeTabs.length - 1;
+        switchChatTab(activeTabs[fallbackIdx].id);
+    } else {
+        chat.activeTabId = null;
+    }
+}
+
+export function archiveChatTab(id) {
+    const tab = chat.tabs.find(t => t.id === id);
+    if (!tab) return;
+    const prevVisibility = tab.visibility;
+    tab.visibility = 'archived';
+    if (chat.activeTabId === id) {
+        _selectFallbackTab(id);
+    }
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
+    const headers = window.authHeaders
+        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+        : { 'Content-Type': 'application/json' };
+    fetch(`/api/chat/tabs/${id}/archive`, {
+        method: 'POST',
+        headers,
+    }).catch(e => {
+        tab.visibility = prevVisibility;
+        chatViewBindings.renderChatTabs?.();
+        chatViewBindings.renderChatSessionsSidebar?.();
+        console.error('archiveChatTab failed:', e);
+    });
+    showToastWithActions('Chat archived', 'info', '', [{
+        id: 'undo',
+        label: 'Undo',
+        primary: true,
+        handler: () => restoreChatTab(id),
+    }]);
+}
+
+export function hideChatTab(id) {
+    const tab = chat.tabs.find(t => t.id === id);
+    if (!tab) return;
+    const prevVisibility = tab.visibility;
+    tab.visibility = 'hidden';
+    if (chat.activeTabId === id) {
+        _selectFallbackTab(id);
+    }
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
+    const headers = window.authHeaders
+        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+        : { 'Content-Type': 'application/json' };
+    fetch(`/api/chat/tabs/${id}/hide`, {
+        method: 'POST',
+        headers,
+    }).catch(e => {
+        tab.visibility = prevVisibility;
+        chatViewBindings.renderChatTabs?.();
+        chatViewBindings.renderChatSessionsSidebar?.();
+        console.error('hideChatTab failed:', e);
+    });
+    showToastWithActions('Chat hidden', 'info', '', [{
+        id: 'undo',
+        label: 'Undo',
+        primary: true,
+        handler: () => restoreChatTab(id),
+    }]);
+}
+
+export function restoreChatTab(id) {
+    const tab = chat.tabs.find(t => t.id === id);
+    if (!tab) return;
+    tab.visibility = 'active';
+    switchChatTab(id);
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
+    const headers = window.authHeaders
+        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+        : { 'Content-Type': 'application/json' };
+    fetch(`/api/chat/tabs/${id}/restore`, {
+        method: 'POST',
+        headers,
+    }).catch(e => console.error('restoreChatTab failed:', e));
+    showToast('Chat restored', 'success', '', []);
+}
+
+export async function setChatTabVisibility(id, visibility) {
+    const tab = chat.tabs.find(t => t.id === id);
+    if (!tab) return;
+    const prevVisibility = tab.visibility;
+    tab.visibility = visibility;
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
+    const headers = window.authHeaders
+        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+        : { 'Content-Type': 'application/json' };
+    try {
+        const resp = await fetch(`/api/chat/tabs/${id}/meta`, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({ visibility }),
+        });
+        if (!resp.ok) {
+            tab.visibility = prevVisibility;
+            chatViewBindings.renderChatTabs?.();
+            chatViewBindings.renderChatSessionsSidebar?.();
+        }
+    } catch (e) {
+        tab.visibility = prevVisibility;
+        chatViewBindings.renderChatTabs?.();
+        chatViewBindings.renderChatSessionsSidebar?.();
+        console.error('setChatTabVisibility failed:', e);
+    }
 }
 
 // ── Tab Field Updates ─────────────────────────────────────────────────────────

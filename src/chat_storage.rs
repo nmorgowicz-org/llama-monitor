@@ -1,8 +1,10 @@
 use anyhow::{Context, Result};
 use rusqlite::backup::Backup;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, params, params_from_iter};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 const SCHEMA_SQL: &str = r#"
 PRAGMA journal_mode=WAL;
@@ -74,6 +76,36 @@ END;
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TabVisibility {
+    #[default]
+    Active,
+    Archived,
+    Hidden,
+}
+
+impl fmt::Display for TabVisibility {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TabVisibility::Active => write!(f, "active"),
+            TabVisibility::Archived => write!(f, "archived"),
+            TabVisibility::Hidden => write!(f, "hidden"),
+        }
+    }
+}
+
+impl FromStr for TabVisibility {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self> {
+        match s {
+            "archived" => Ok(TabVisibility::Archived),
+            "hidden" => Ok(TabVisibility::Hidden),
+            _ => Ok(TabVisibility::Active),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TabMeta {
     pub id: String,
@@ -88,6 +120,8 @@ pub struct TabMeta {
     pub message_count: i64,
     pub created_at: i64,
     pub updated_at: i64,
+    #[serde(default)]
+    pub visibility: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -113,8 +147,14 @@ pub struct ChatTabRow {
     pub total_output_tokens: i64,
     pub created_at: i64,
     pub updated_at: i64,
+    #[serde(default = "default_visibility")]
+    pub visibility: String,
     #[serde(default)]
     pub messages: Vec<MessageRow>,
+}
+
+fn default_visibility() -> String {
+    "active".to_string()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -147,6 +187,8 @@ pub struct SearchResult {
     pub role: String,
     pub snippet: String,
     pub timestamp_ms: Option<i64>,
+    #[serde(default)]
+    pub visibility: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -172,6 +214,7 @@ impl ChatStorage {
         let conn = Connection::open(db_path)
             .with_context(|| format!("opening chat.db at {}", db_path.display()))?;
         conn.execute_batch(SCHEMA_SQL)?;
+        run_schema_migrations(&conn)?;
         Ok(Self {
             conn: std::sync::Mutex::new(Some(conn)),
             db_path: db_path.clone(),
@@ -279,21 +322,40 @@ impl ChatStorage {
 
     // ── Tab CRUD ──────────────────────────────────────────────────────────────
 
-    pub fn list_tabs(&self) -> Result<Vec<TabMeta>> {
+    pub fn list_tabs(&self, visibilities: &[TabVisibility]) -> Result<Vec<TabMeta>> {
         let guard = self.conn.lock().unwrap();
         let conn = guard.as_ref().expect("db open");
-        let mut stmt = conn.prepare(
+
+        let (where_clause, params_vec): (String, Vec<Box<dyn rusqlite::ToSql>>) =
+            if visibilities.is_empty() {
+                (String::new(), Vec::new())
+            } else {
+                let placeholders: Vec<_> = visibilities.iter().map(|_| "?").collect();
+                (
+                    format!("WHERE t.visibility IN ({})", placeholders.join(", ")),
+                    visibilities
+                        .iter()
+                        .map(|v| Box::new(v.to_string()) as Box<dyn rusqlite::ToSql>)
+                        .collect(),
+                )
+            };
+
+        let sql = format!(
             "SELECT t.id, t.name, t.explicit_level, t.active_template_id,
                     t.pinned, t.tab_order, t.last_ctx_pct,
                     t.total_input_tokens, t.total_output_tokens,
                     COUNT(m.id) as message_count,
-                    t.created_at, t.updated_at
+                    t.created_at, t.updated_at, t.visibility
              FROM tabs t
              LEFT JOIN messages m ON m.tab_id = t.id AND m.compaction_marker = 0
+             {}
              GROUP BY t.id
              ORDER BY t.tab_order ASC",
-        )?;
-        let rows = stmt.query_map([], |row| {
+            where_clause
+        );
+
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(params_vec), |row| {
             Ok(TabMeta {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -307,6 +369,7 @@ impl ChatStorage {
                 message_count: row.get(9)?,
                 created_at: row.get(10)?,
                 updated_at: row.get(11)?,
+                visibility: row.get(12)?,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -323,7 +386,7 @@ impl ChatStorage {
                     model_params, context_notes, sidebar_width,
                     tab_order, pinned, last_ctx_pct,
                     total_input_tokens, total_output_tokens,
-                    created_at, updated_at
+                    created_at, updated_at, visibility
              FROM tabs WHERE id = ?1",
         )?;
         let mut tab = stmt.query_row(params![id], |row| {
@@ -349,6 +412,7 @@ impl ChatStorage {
                 total_output_tokens: row.get(18)?,
                 created_at: row.get(19)?,
                 updated_at: row.get(20)?,
+                visibility: row.get(21)?,
                 messages: vec![],
             })
         })?;
@@ -367,8 +431,8 @@ impl ChatStorage {
                  model_params, context_notes, sidebar_width,
                  tab_order, pinned, last_ctx_pct,
                  total_input_tokens, total_output_tokens,
-                 created_at, updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
+                 created_at, updated_at, visibility)
+              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
             params![
                 tab.id,
                 tab.name,
@@ -391,6 +455,7 @@ impl ChatStorage {
                 tab.total_output_tokens,
                 tab.created_at,
                 tab.updated_at,
+                tab.visibility,
             ],
         )?;
         Ok(())
@@ -407,7 +472,7 @@ impl ChatStorage {
                 model_params=?12, context_notes=?13, sidebar_width=?14,
                 pinned=?15, last_ctx_pct=?16,
                 total_input_tokens=?17, total_output_tokens=?18,
-                updated_at=?19
+                updated_at=?19, visibility=?20
              WHERE id=?1",
             params![
                 tab.id,
@@ -429,6 +494,7 @@ impl ChatStorage {
                 tab.total_input_tokens,
                 tab.total_output_tokens,
                 tab.updated_at,
+                tab.visibility,
             ],
         )?;
         Ok(())
@@ -453,6 +519,87 @@ impl ChatStorage {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    pub fn set_visibility(&self, id: &str, visibility: &TabVisibility) -> Result<TabMeta> {
+        let guard = self.conn.lock().unwrap();
+        let conn = guard.as_ref().expect("db open");
+        let vis_str = visibility.to_string();
+
+        conn.execute(
+            "UPDATE tabs SET visibility = ?1, updated_at = ?2 WHERE id = ?3",
+            params![
+                vis_str,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as i64,
+                id
+            ],
+        )?;
+
+        let tab: ChatTabRow = conn.query_row(
+            "SELECT id, name, system_prompt, ai_name, user_name,
+                    explicit_level, active_template_id,
+                    auto_compact, auto_compact_summarize, compact_mode, compact_threshold,
+                    model_params, context_notes, sidebar_width,
+                    tab_order, pinned, last_ctx_pct,
+                    total_input_tokens, total_output_tokens,
+                    created_at, updated_at, visibility
+             FROM tabs WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(ChatTabRow {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    system_prompt: row.get(2)?,
+                    ai_name: row.get(3)?,
+                    user_name: row.get(4)?,
+                    explicit_level: row.get::<_, i64>(5)? as u8,
+                    active_template_id: row.get(6)?,
+                    auto_compact: row.get::<_, i64>(7)? != 0,
+                    auto_compact_summarize: row.get::<_, i64>(8)? != 0,
+                    compact_mode: row.get(9)?,
+                    compact_threshold: row.get(10)?,
+                    model_params: serde_json::from_str(&row.get::<_, String>(11)?)
+                        .unwrap_or_default(),
+                    context_notes: serde_json::from_str(&row.get::<_, String>(12)?)
+                        .unwrap_or_default(),
+                    sidebar_width: row.get::<_, i64>(13)? as u32,
+                    tab_order: row.get(14)?,
+                    pinned: row.get::<_, i64>(15)? != 0,
+                    last_ctx_pct: row.get(16)?,
+                    total_input_tokens: row.get(17)?,
+                    total_output_tokens: row.get(18)?,
+                    created_at: row.get(19)?,
+                    updated_at: row.get(20)?,
+                    visibility: row.get(21)?,
+                    messages: vec![],
+                })
+            },
+        )?;
+
+        let message_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM messages WHERE tab_id = ?1 AND compaction_marker = 0",
+            params![id],
+            |row| row.get(0),
+        )?;
+
+        Ok(TabMeta {
+            id: tab.id,
+            name: tab.name,
+            explicit_level: tab.explicit_level,
+            active_template_id: tab.active_template_id,
+            pinned: tab.pinned,
+            tab_order: tab.tab_order,
+            last_ctx_pct: tab.last_ctx_pct,
+            total_input_tokens: tab.total_input_tokens,
+            total_output_tokens: tab.total_output_tokens,
+            message_count,
+            created_at: tab.created_at,
+            updated_at: tab.updated_at,
+            visibility: tab.visibility,
+        })
     }
 
     // ── Message CRUD ──────────────────────────────────────────────────────────
@@ -561,7 +708,13 @@ impl ChatStorage {
             .replace("&lt;/mark&gt;", "</mark>")
     }
 
-    pub fn search(&self, query: &str, limit: usize, offset: usize) -> Result<SearchResultsPage> {
+    pub fn search(
+        &self,
+        query: &str,
+        limit: usize,
+        offset: usize,
+        visibilities: &[TabVisibility],
+    ) -> Result<SearchResultsPage> {
         let normalized_query = normalize_fts_query(query);
         if normalized_query.is_empty() {
             return Ok(SearchResultsPage {
@@ -575,42 +728,75 @@ impl ChatStorage {
 
         let guard = self.conn.lock().unwrap();
         let conn = guard.as_ref().expect("db open");
-        let total: i64 = conn.query_row(
+
+        let vis_filter = if visibilities.is_empty() {
+            String::new()
+        } else {
+            let placeholders: Vec<_> = visibilities.iter().map(|_| "?").collect();
+            format!("AND t.visibility IN ({})", placeholders.join(", "))
+        };
+
+        let total_sql = format!(
             "SELECT COUNT(*)
-             FROM messages_fts
-             JOIN messages m ON m.id = messages_fts.rowid
-             WHERE messages_fts MATCH ?1
-               AND m.compaction_marker = 0",
-            params![normalized_query.as_str()],
-            |row| row.get(0),
-        )?;
-        let mut stmt = conn.prepare(
-            "SELECT t.id, t.name, m.id, m.role,
-                    snippet(messages_fts, 0, '<mark>', '</mark>', '…', 24),
-                    m.timestamp_ms
              FROM messages_fts
              JOIN messages m ON m.id = messages_fts.rowid
              JOIN tabs t ON t.id = m.tab_id
              WHERE messages_fts MATCH ?1
                AND m.compaction_marker = 0
+               {}",
+            vis_filter
+        );
+        let total: i64 = conn.query_row(
+            &total_sql,
+            params_from_iter(
+                std::iter::once(Box::new(normalized_query.as_str()) as Box<dyn rusqlite::ToSql>)
+                    .chain(
+                        visibilities
+                            .iter()
+                            .map(|v| Box::new(v.to_string()) as Box<dyn rusqlite::ToSql>),
+                    ),
+            ),
+            |row| row.get(0),
+        )?;
+
+        let results_sql = format!(
+            "SELECT t.id, t.name, m.id, m.role,
+                    snippet(messages_fts, 0, '<mark>', '</mark>', '…', 24),
+                    m.timestamp_ms, t.visibility
+             FROM messages_fts
+             JOIN messages m ON m.id = messages_fts.rowid
+             JOIN tabs t ON t.id = m.tab_id
+             WHERE messages_fts MATCH ?1
+               AND m.compaction_marker = 0
+               {}
              ORDER BY rank
-             LIMIT ?2 OFFSET ?3",
-        )?;
-        let rows = stmt.query_map(
-            params![normalized_query, limit as i64, offset as i64],
-            |row| {
-                let raw_snippet: String = row.get(4)?;
-                let snippet = Self::escape_html_except_mark(&raw_snippet);
-                Ok(SearchResult {
-                    tab_id: row.get(0)?,
-                    tab_name: row.get(1)?,
-                    message_id: row.get(2)?,
-                    role: row.get(3)?,
-                    snippet,
-                    timestamp_ms: row.get(5)?,
-                })
-            },
-        )?;
+             LIMIT ?{} OFFSET ?{}",
+            vis_filter,
+            visibilities.len() + 2,
+            visibilities.len() + 3,
+        );
+        let mut stmt = conn.prepare(&results_sql)?;
+        let mut result_params: Vec<Box<dyn rusqlite::ToSql>> =
+            vec![Box::new(normalized_query.as_str())];
+        for v in visibilities {
+            result_params.push(Box::new(v.to_string()));
+        }
+        result_params.push(Box::new(limit as i64));
+        result_params.push(Box::new(offset as i64));
+
+        let rows = stmt.query_map(params_from_iter(result_params), |row| {
+            let raw_snippet: String = row.get(4)?;
+            let snippet = Self::escape_html_except_mark(&raw_snippet);
+            Ok(SearchResult {
+                tab_id: row.get(0)?,
+                tab_name: row.get(1)?,
+                message_id: row.get(2)?,
+                role: row.get(3)?,
+                snippet,
+                timestamp_ms: row.get(5)?,
+                visibility: row.get(6)?,
+            })
+        })?;
         let results = rows.collect::<rusqlite::Result<Vec<_>>>()?;
         let total = total.max(0) as usize;
         let has_more = offset.saturating_add(results.len()) < total;
@@ -881,6 +1067,7 @@ impl ChatStorage {
         let new_conn = Connection::open(&self.db_path)
             .with_context(|| format!("reopening {} after restore", self.db_path.display()))?;
         new_conn.execute_batch(SCHEMA_SQL)?;
+        run_schema_migrations(&new_conn)?;
         *guard = Some(new_conn);
 
         Ok(())
@@ -942,6 +1129,21 @@ impl ChatStorage {
             Err(anyhow::anyhow!("Integrity issues found:\n{}", report))
         }
     }
+}
+
+fn run_schema_migrations(conn: &Connection) -> Result<()> {
+    let has_visibility: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('tabs') WHERE name = 'visibility'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_visibility {
+        conn.execute(
+            "ALTER TABLE tabs ADD COLUMN visibility TEXT NOT NULL DEFAULT 'active' CHECK (visibility IN ('active','archived','hidden'))",
+            [],
+        )?;
+    }
+    Ok(())
 }
 
 /// Returns true if this SELECT is likely to expose sensitive chat content or config
@@ -1014,6 +1216,7 @@ mod tests {
             total_output_tokens: 0,
             created_at: 1,
             updated_at: 1,
+            visibility: "active".to_string(),
             messages: Vec::new(),
         }
     }
@@ -1063,7 +1266,7 @@ mod tests {
             ))
             .expect("append message");
 
-        let results = store.search("rai", 10, 0).expect("prefix search");
+        let results = store.search("rai", 10, 0, &[]).expect("prefix search");
         assert_eq!(results.total, 1);
         assert_eq!(results.results.len(), 1);
         assert_eq!(results.results[0].tab_name, "Noir Scene");
@@ -1086,12 +1289,14 @@ mod tests {
             ))
             .expect("append message");
 
-        let hyphenated = store.search("gpu-43c", 10, 0).expect("hyphenated search");
+        let hyphenated = store
+            .search("gpu-43c", 10, 0, &[])
+            .expect("hyphenated search");
         assert_eq!(hyphenated.total, 1);
         assert_eq!(hyphenated.results.len(), 1);
 
         let punctuated = store
-            .search("slow HTTP endpoint.", 10, 0)
+            .search("slow HTTP endpoint.", 10, 0, &[])
             .expect("punctuated search");
         assert_eq!(punctuated.total, 1);
         assert_eq!(punctuated.results.len(), 1);

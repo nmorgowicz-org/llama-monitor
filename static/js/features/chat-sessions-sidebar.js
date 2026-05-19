@@ -4,7 +4,7 @@
 
 import { chat } from '../core/app-state.js';
 import { switchChatTab, closeChatTab, addChatTab, renameChatTab,
-         togglePinTab, activeChatTab } from './chat-state.js';
+          togglePinTab, activeChatTab, archiveChatTab, hideChatTab, restoreChatTab, setChatTabVisibility } from './chat-state.js';
 
 const CSP_COLLAPSED_KEY = 'csp-collapsed';
 
@@ -90,7 +90,59 @@ function updateCollapsedLabel() {
     const label = document.getElementById('csp-collapsed-label');
     if (!label) return;
     const tab = (chat.tabs || []).find(t => t.id === chat.activeTabId);
-    label.textContent = tab?.name || 'Conversations';
+    if (!tab || tab.visibility !== 'active') {
+        label.textContent = 'Conversations';
+    } else {
+        label.textContent = tab.name || 'Conversations';
+    }
+}
+
+function _renderManagementPills() {
+    const container = document.getElementById('csp-management-row');
+    if (!container) return;
+
+    const archivedCount = chat.tabs.filter(t => t.visibility === 'archived').length;
+    const hiddenCount = chat.tabs.filter(t => t.visibility === 'hidden').length;
+
+    container.innerHTML = '';
+
+    const archivePill = document.createElement('button');
+    archivePill.className = 'csp-management-pill';
+    archivePill.type = 'button';
+    archivePill.setAttribute('aria-label', 'Show archived chats');
+    const archiveLabel = document.createElement('span');
+    archiveLabel.textContent = 'Archived';
+    archivePill.appendChild(archiveLabel);
+    if (archivedCount > 0) {
+        const archiveCount = document.createElement('span');
+        archiveCount.className = 'csp-pill-count';
+        archiveCount.textContent = archivedCount;
+        archivePill.appendChild(archiveCount);
+    }
+    archivePill.addEventListener('click', () => {
+        chat.visibilityUi.archiveOpen = !chat.visibilityUi.archiveOpen;
+        _renderManagementPills();
+    });
+    container.appendChild(archivePill);
+
+    const hiddenPill = document.createElement('button');
+    hiddenPill.className = 'csp-management-pill';
+    hiddenPill.type = 'button';
+    hiddenPill.setAttribute('aria-label', 'Show hidden chats');
+    const hiddenLabel = document.createElement('span');
+    hiddenLabel.textContent = 'Hidden';
+    hiddenPill.appendChild(hiddenLabel);
+    if (hiddenCount > 0) {
+        const hiddenCountEl = document.createElement('span');
+        hiddenCountEl.className = 'csp-pill-count';
+        hiddenCountEl.textContent = hiddenCount;
+        hiddenPill.appendChild(hiddenCountEl);
+    }
+    hiddenPill.addEventListener('click', () => {
+        chat.visibilityUi.hiddenOpen = !chat.visibilityUi.hiddenOpen;
+        _renderManagementPills();
+    });
+    container.appendChild(hiddenPill);
 }
 
 // Render
@@ -99,7 +151,8 @@ export function renderChatSessionsSidebar() {
     const list = document.getElementById('csp-list');
     if (!list) return;
 
-    const groups = _groupTabsByRecency(chat.tabs || []);
+    const activeTabs = chat.tabs.filter(t => t.visibility === 'active');
+    const groups = _groupTabsByRecency(activeTabs);
     const activeId = chat.activeTabId;
 
     const sections = [
@@ -129,8 +182,17 @@ export function renderChatSessionsSidebar() {
     list.innerHTML = '';
     list.appendChild(frag);
 
+    if (chat.visibilityUi.archiveOpen) {
+        _renderArchivedSection(list);
+    }
+
+    if (chat.visibilityUi.hiddenOpen) {
+        _renderHiddenSection(list);
+    }
+
     _applySearchFilter(document.getElementById('csp-search')?.value.trim().toLowerCase() || '');
     updateCollapsedLabel();
+    _renderManagementPills();
 }
 
 export function updateSessionItem(tabId) {
@@ -269,6 +331,208 @@ function _buildSessionItem(tab, isActive) {
 
 // Context menu
 
+function _renderArchivedSection(list) {
+    const archived = chat.tabs.filter(t => t.visibility === 'archived');
+    if (archived.length === 0) return;
+
+    const header = document.createElement('div');
+    header.className = 'csp-section-header';
+    header.textContent = 'ARCHIVED';
+    list.appendChild(header);
+
+    archived.forEach(tab => {
+        const item = _buildArchivedItem(tab);
+        list.appendChild(item);
+    });
+}
+
+function _buildArchivedItem(tab) {
+    const item = document.createElement('div');
+    item.className = 'csp-item csp-item-archived';
+    item.dataset.tabId = tab.id;
+
+    const body = document.createElement('div');
+    body.className = 'csp-item-body';
+
+    const name = document.createElement('div');
+    name.className = 'csp-item-name';
+    name.textContent = tab.name || 'Untitled';
+    body.appendChild(name);
+
+    const meta = document.createElement('div');
+    meta.className = 'csp-item-meta';
+
+    const count = document.createElement('span');
+    count.className = 'csp-item-count';
+    count.textContent = (tab.messages || []).length || '';
+    meta.appendChild(count);
+    body.appendChild(meta);
+
+    item.appendChild(body);
+
+    const actions = document.createElement('div');
+    actions.className = 'csp-item-actions';
+
+    const restoreBtn = document.createElement('button');
+    restoreBtn.className = 'csp-item-action-btn';
+    restoreBtn.dataset.action = 'restore';
+    restoreBtn.setAttribute('aria-label', 'Restore chat');
+    restoreBtn.textContent = '\u2197';
+    restoreBtn.style.cssText = 'font-size:14px;';
+    actions.appendChild(restoreBtn);
+
+    const moreBtn = document.createElement('button');
+    moreBtn.className = 'csp-item-action-btn';
+    moreBtn.dataset.action = 'more';
+    moreBtn.setAttribute('aria-label', 'More actions');
+    moreBtn.textContent = '\u22EF';
+    actions.appendChild(moreBtn);
+
+    item.appendChild(actions);
+
+    item.addEventListener('click', (e) => {
+        const action = e.target.dataset.action;
+        if (action) {
+            e.stopPropagation();
+            _handleArchivedAction(tab, action);
+        }
+    });
+
+    item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        _showContextMenu(tab, e.target);
+    });
+
+    return item;
+}
+
+function _handleArchivedAction(tab, action) {
+    switch (action) {
+        case 'restore':
+            restoreChatTab(tab.id);
+            renderChatSessionsSidebar();
+            break;
+        case 'hide':
+            hideChatTab(tab.id);
+            renderChatSessionsSidebar();
+            break;
+        case 'delete':
+            closeChatTab(tab.id);
+            renderChatSessionsSidebar();
+            break;
+    }
+}
+
+function _renderHiddenSection(list) {
+    const hidden = chat.tabs.filter(t => t.visibility === 'hidden');
+    if (hidden.length === 0) return;
+
+    const header = document.createElement('div');
+    header.className = 'csp-section-header';
+    header.textContent = 'HIDDEN';
+    list.appendChild(header);
+
+    if (!chat.visibilityUi.hiddenRevealed) {
+        const reveal = document.createElement('button');
+        reveal.className = 'csp-reveal-btn';
+        reveal.type = 'button';
+        reveal.setAttribute('aria-label', 'Reveal hidden chats');
+        const revealText = document.createElement('span');
+        revealText.textContent = 'Reveal hidden chats';
+        reveal.appendChild(revealText);
+        reveal.addEventListener('click', () => {
+            chat.visibilityUi.hiddenRevealed = true;
+            renderChatSessionsSidebar();
+        });
+        list.appendChild(reveal);
+        return;
+    }
+
+    hidden.forEach(tab => {
+        const item = _buildHiddenItem(tab);
+        list.appendChild(item);
+    });
+}
+
+function _buildHiddenItem(tab) {
+    const item = document.createElement('div');
+    item.className = 'csp-item csp-item-hidden';
+    item.dataset.tabId = tab.id;
+
+    const body = document.createElement('div');
+    body.className = 'csp-item-body';
+
+    const name = document.createElement('div');
+    name.className = 'csp-item-name';
+    name.textContent = tab.name || 'Untitled';
+    body.appendChild(name);
+
+    const meta = document.createElement('div');
+    meta.className = 'csp-item-meta';
+
+    const count = document.createElement('span');
+    count.className = 'csp-item-count';
+    count.textContent = (tab.messages || []).length || '';
+    meta.appendChild(count);
+    body.appendChild(meta);
+
+    item.appendChild(body);
+
+    const actions = document.createElement('div');
+    actions.className = 'csp-item-actions';
+
+    const restoreBtn = document.createElement('button');
+    restoreBtn.className = 'csp-item-action-btn';
+    restoreBtn.dataset.action = 'restore';
+    restoreBtn.setAttribute('aria-label', 'Restore chat');
+    restoreBtn.textContent = '\u2197';
+    restoreBtn.style.cssText = 'font-size:14px;';
+    actions.appendChild(restoreBtn);
+
+    const moreBtn = document.createElement('button');
+    moreBtn.className = 'csp-item-action-btn';
+    moreBtn.dataset.action = 'more';
+    moreBtn.setAttribute('aria-label', 'More actions');
+    moreBtn.textContent = '\u22EF';
+    actions.appendChild(moreBtn);
+
+    item.appendChild(actions);
+
+    item.addEventListener('click', (e) => {
+        const action = e.target.dataset.action;
+        if (action) {
+            e.stopPropagation();
+            _handleHiddenAction(tab, action);
+        }
+    });
+
+    item.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        _showContextMenu(tab, e.target);
+    });
+
+    return item;
+}
+
+function _handleHiddenAction(tab, action) {
+    switch (action) {
+        case 'restore':
+            restoreChatTab(tab.id);
+            renderChatSessionsSidebar();
+            break;
+        case 'archive':
+            setChatTabVisibility(tab.id, 'archived');
+            renderChatSessionsSidebar();
+            break;
+        case 'delete':
+            closeChatTab(tab.id);
+            renderChatSessionsSidebar();
+            break;
+    }
+}
+
 let _activeMenu = null;
 
 function _showContextMenu(tab, anchorEl) {
@@ -279,9 +543,31 @@ function _showContextMenu(tab, anchorEl) {
     menu.setAttribute('role', 'menu');
     menu.setAttribute('tabindex', '-1');
 
-    const items = [
+    const isHidden = tab.visibility === 'hidden';
+    const items = tab.visibility === 'archived' ? [
+        { label: 'Restore',         action: 'restore' },
+        { label: 'Hide',            action: 'hide' },
+        { separator: true },
+        { label: 'Export JSON',     action: 'export-json' },
+        { label: 'Export Markdown', action: 'export-md' },
+        { label: 'Duplicate',       action: 'duplicate' },
+        { separator: true },
+        { label: 'Delete',          action: 'delete', danger: true },
+    ] : isHidden ? [
+        { label: 'Restore',         action: 'restore' },
+        { label: 'Archive',         action: 'archive' },
+        { separator: true },
+        { label: 'Export JSON',     action: 'export-json' },
+        { label: 'Export Markdown', action: 'export-md' },
+        { label: 'Duplicate',       action: 'duplicate' },
+        { separator: true },
+        { label: 'Delete',          action: 'delete', danger: true },
+    ] : [
         { label: 'Rename',          action: 'rename' },
         { label: tab.pinned ? 'Unpin' : 'Pin', action: 'pin' },
+        { label: 'Archive',         action: 'archive' },
+        { label: 'Hide',            action: 'hide' },
+        { separator: true },
         { label: 'Export JSON',     action: 'export-json' },
         { label: 'Export Markdown', action: 'export-md' },
         { label: 'Duplicate',       action: 'duplicate' },
@@ -326,6 +612,22 @@ function _dismissContextMenu() {
 
 function _handleContextAction(tab, action) {
     switch (action) {
+        case 'restore':
+            restoreChatTab(tab.id);
+            renderChatSessionsSidebar();
+            break;
+        case 'archive':
+            if (tab.visibility === 'hidden') {
+                setChatTabVisibility(tab.id, 'archived');
+            } else {
+                archiveChatTab(tab.id);
+            }
+            renderChatSessionsSidebar();
+            break;
+        case 'hide':
+            hideChatTab(tab.id);
+            renderChatSessionsSidebar();
+            break;
         case 'rename': {
             const newName = prompt('Rename conversation:', tab.name);
             if (newName && newName.trim()) {

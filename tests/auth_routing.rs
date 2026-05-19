@@ -576,6 +576,99 @@ fn endpoint_remote_agent_status_requires_db_admin_token() {
     assert!(matches, "db-admin-token must allow remote-agent status");
 }
 
+// ── Visibility endpoint auth ─────────────────────────────────────────────────
+
+#[test]
+fn endpoint_archive_tab_requires_api_token() {
+    let cfg_protected = cfg_api_only();
+    let cfg_open = cfg_no_tokens();
+
+    assert!(
+        !check_api_token(&None, &cfg_protected),
+        "must require api-token"
+    );
+    assert!(
+        check_api_token(&bearer(TEST_API_TOKEN), &cfg_protected),
+        "correct token must allow"
+    );
+    assert!(check_api_token(&None, &cfg_open), "local-first must allow");
+}
+
+#[test]
+fn endpoint_hide_tab_requires_api_token() {
+    let cfg_protected = cfg_api_only();
+    let cfg_open = cfg_no_tokens();
+
+    assert!(
+        !check_api_token(&None, &cfg_protected),
+        "must require api-token"
+    );
+    assert!(
+        check_api_token(&bearer(TEST_API_TOKEN), &cfg_protected),
+        "correct token must allow"
+    );
+    assert!(check_api_token(&None, &cfg_open), "local-first must allow");
+}
+
+#[test]
+fn endpoint_restore_tab_requires_api_token() {
+    let cfg_protected = cfg_api_only();
+    let cfg_open = cfg_no_tokens();
+
+    assert!(
+        !check_api_token(&None, &cfg_protected),
+        "must require api-token"
+    );
+    assert!(
+        check_api_token(&bearer(TEST_API_TOKEN), &cfg_protected),
+        "correct token must allow"
+    );
+    assert!(check_api_token(&None, &cfg_open), "local-first must allow");
+}
+
+#[test]
+fn endpoint_list_tabs_visibility_requires_api_token() {
+    let cfg_protected = cfg_api_only();
+    let cfg_open = cfg_no_tokens();
+
+    assert!(
+        !check_api_token(&None, &cfg_protected),
+        "must require api-token"
+    );
+    assert!(
+        check_api_token(&bearer(TEST_API_TOKEN), &cfg_protected),
+        "correct token must allow"
+    );
+    assert!(check_api_token(&None, &cfg_open), "local-first must allow");
+}
+
+#[test]
+fn endpoint_search_visibility_requires_api_token() {
+    let cfg_protected = cfg_api_only();
+    let cfg_open = cfg_no_tokens();
+
+    assert!(
+        !check_api_token(&None, &cfg_protected),
+        "must require api-token"
+    );
+    assert!(
+        check_api_token(&bearer(TEST_API_TOKEN), &cfg_protected),
+        "correct token must allow"
+    );
+    assert!(check_api_token(&None, &cfg_open), "local-first must allow");
+}
+
+#[test]
+fn endpoint_archive_works_with_form_auth_enabled() {
+    let auth = auth_form();
+    let cfg = cfg_api_only();
+
+    assert!(
+        simulate_auth_guard(&auth, &cfg, Some(&bearer(TEST_API_TOKEN).unwrap()), None),
+        "must be reachable via api-token through auth_guard"
+    );
+}
+
 // ===================== SAFE JSON BODY (400 NOT 404) =====================
 
 // These tests ensure that malformed JSON on mutating chat endpoints returns

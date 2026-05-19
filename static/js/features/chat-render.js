@@ -8,6 +8,7 @@ import {
     activeChatTab,
     addChatTab,
     getChatViewBindings,
+    hideChatTab,
     registerChatViewBindings,
     scheduleChatPersist,
     switchChatTab,
@@ -1507,6 +1508,13 @@ export function initChatRender() {
         const isExpanded = marker.dataset.expanded === 'true';
         body.style.display = isExpanded ? 'none' : 'block';
         marker.dataset.expanded = isExpanded ? 'false' : 'true';
+    });
+
+    document.getElementById('chat-header-hide-btn')?.addEventListener('click', () => {
+        const tab = activeChatTab();
+        if (tab) {
+            hideChatTab(tab.id);
+        }
     });
 
     registerChatViewBindings({
