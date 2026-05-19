@@ -8030,6 +8030,17 @@
    Tertiary: name pills, labels hidden at very-tight.
    ========================================================================== */
 
+/* ── Tier: snug ───────────────────────────────────────────────────────────── */
+
+/* Rightmost two: hide Focus label, remove Persona button (accessible via Behavior) */
+body.shell-width-snug #chat-focus-mode-btn .chat-header-label {
+  display: none;
+}
+
+body.shell-width-snug #chat-persona-btn {
+  display: none;
+}
+
 /* ── Tier: tight ──────────────────────────────────────────────────────────── */
 
 body.shell-width-tight #chat-header {

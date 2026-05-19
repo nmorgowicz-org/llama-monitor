@@ -246,6 +246,13 @@ function renderGaugeFooter(model) {
     gaugeFooter.textContent = parts.join(' · ');
 }
 
+function abbreviateTokens(n) {
+    if (!Number.isFinite(n)) return '0';
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+    return String(Math.round(n));
+}
+
 function setGaugeSecondary(el, text, isTabName = false) {
     el.textContent = text;
     el.title = isTabName ? text : '';
@@ -272,14 +279,14 @@ function renderGaugeView(model) {
 
     if (model.mode === 'live-runtime') {
         gaugeValue.textContent = `${Math.round(displayPct)}%`;
-        setGaugeSecondary(gaugeSecondary, `${formatMetricNumber(model.runtimeLiveTokens)} / ${formatMetricNumber(model.capacityTokens)} live`);
+        setGaugeSecondary(gaugeSecondary, `${abbreviateTokens(model.runtimeLiveTokens)} / ${abbreviateTokens(model.capacityTokens)} live`);
     } else if (model.mode === 'chat-derived') {
         gaugeValue.textContent = heroPct != null ? `${Math.round(displayPct)}%` : '—';
         const chatName = model.busiestChat?.name
             ?? `${model.activeChatCount} chat${model.activeChatCount !== 1 ? 's' : ''}`;
         setGaugeSecondary(gaugeSecondary, chatName, !!model.busiestChat?.name);
     } else if (model.mode === 'capacity-only') {
-        gaugeValue.textContent = formatMetricNumber(model.capacityTokens);
+        gaugeValue.textContent = abbreviateTokens(model.capacityTokens);
         setGaugeSecondary(gaugeSecondary, 'Capacity');
     } else {
         gaugeValue.textContent = '—';
