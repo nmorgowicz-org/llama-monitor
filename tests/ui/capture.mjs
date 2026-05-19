@@ -1274,7 +1274,9 @@ await waitForChatComplete(page);
     await page.evaluate(() => document.getElementById('suggestions-manage-btn')?.click());
     await sleep(800);
     await captureShot(page, 'guided-gen-manage-categories.png', { fullPage: false });
-    await captureElementScreenshot(page, '#categories-builtin-list', 'guided-gen-categories-builtin-list.png', { padding: 12 });
+    if (options.closeUp) {
+        await captureElementScreenshot(page, '#categories-builtin-list', 'guided-gen-categories-builtin-list.png', { padding: 12 });
+    }
     await page.keyboard.press('Escape');
     await sleep(300);
 
@@ -1761,9 +1763,11 @@ async function scenarioSidebar(ctx, options) {
     // Capture expanded sidebar with multiple chats
 await captureShot(page, 'sidebar-sidebar-expanded.png', { fullPage: true });
 
-    // Capture sidebar element detail
+   // Capture sidebar element detail (close-up only)
 
-    await captureElementScreenshot(page, '#chat-sessions-panel', 'sidebar-sidebar-panel-detail.png', { padding: 16 });
+    if (options.closeUp) {
+        await captureElementScreenshot(page, '#chat-sessions-panel', 'sidebar-sidebar-panel-detail.png', { padding: 16 });
+    }
 
     // Collapse the sidebar (directly set class for reliability)
     await page.evaluate(() => {
@@ -1776,8 +1780,10 @@ await captureShot(page, 'sidebar-sidebar-expanded.png', { fullPage: true });
     // Capture collapsed strip
     await captureShot(page, 'sidebar-sidebar-collapsed.png', { fullPage: true });
 
-    // Capture collapsed strip detail
-    await captureElementScreenshot(page, '#csp-collapsed-strip', 'sidebar-sidebar-collapsed-detail.png', { padding: 12 });
+    // Capture collapsed strip detail (close-up only)
+    if (options.closeUp) {
+        await captureElementScreenshot(page, '#csp-collapsed-strip', 'sidebar-sidebar-collapsed-detail.png', { padding: 12 });
+    }
 
     // Expand again
     await page.evaluate(() => {
@@ -1894,28 +1900,32 @@ await captureShot(page, 'sidebar-sidebar-expanded.png', { fullPage: true });
     });
     await sleep(500);
     await captureShot(page, 'chat-context-menu.png', { fullPage: true });
-    // Capture context menu detail
-    const menu = await page.$('.csp-context-menu');
-    if (menu) {
-        await captureElementScreenshot(page, '.csp-context-menu', 'chat-context-menu-detail.png', { padding: 12 });
+    // Capture context menu detail (close-up only)
+    if (options.closeUp) {
+        const menu = await page.$('.csp-context-menu');
+        if (menu) {
+            await captureElementScreenshot(page, '.csp-context-menu', 'chat-context-menu-detail.png', { padding: 12 });
+        }
     }
     // Close menu
     await page.keyboard.press('Escape');
     await sleep(300);
 
-    // Sidebar resize handle — capture with hover state
-    try {
-        const resizeHandle = await page.$('#sidebar-resize-handle');
-        if (resizeHandle) {
-            const box = await resizeHandle.boundingBox();
-            if (box) {
-                await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-                await sleep(300);
-                await captureElementScreenshot(page, '.sidebar-nav', 'sidebar-resize-handle.png', { padding: 0 });
+    // Sidebar resize handle — capture with hover state (close-up only)
+    if (options.closeUp) {
+        try {
+            const resizeHandle = await page.$('#sidebar-resize-handle');
+            if (resizeHandle) {
+                const box = await resizeHandle.boundingBox();
+                if (box) {
+                    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+                    await sleep(300);
+                    await captureElementScreenshot(page, '.sidebar-nav', 'sidebar-resize-handle.png', { padding: 0 });
+                }
             }
+        } catch {
+            console.log('[CAPTURE] Sidebar resize handle capture failed, skipping...');
         }
-    } catch {
-        console.log('[CAPTURE] Sidebar resize handle capture failed, skipping...');
     }
 
     // Test search filter (title filter, not FTS)
