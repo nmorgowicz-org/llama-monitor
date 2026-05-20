@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.19.0...v0.19.1) (2026-05-20)
+
+
+### Bug Fixes
+
+* **chat:** extend busy-wait timeout to 5 minutes for long inference tasks ([bb11a2e](https://github.com/nmorgowicz-org/llama-monitor/commit/bb11a2e6c4c0778b4f6b2f43ab033b8733c678e4))
+* **chat:** restore hidden chat access via sidebar pill click ([bb11a2e](https://github.com/nmorgowicz-org/llama-monitor/commit/bb11a2e6c4c0778b4f6b2f43ab033b8733c678e4))
+* **ui:** add active state visual feedback to management pills ([bb11a2e](https://github.com/nmorgowicz-org/llama-monitor/commit/bb11a2e6c4c0778b4f6b2f43ab033b8733c678e4))
+* **ui:** correct config bar button collapse thresholds and enhance snug tier ([bb11a2e](https://github.com/nmorgowicz-org/llama-monitor/commit/bb11a2e6c4c0778b4f6b2f43ab033b8733c678e4))
+
 ## [0.19.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.18.0...v0.19.0) (2026-05-20)
 
 
