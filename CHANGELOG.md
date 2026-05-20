@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.18.0...v0.19.0) (2026-05-20)
+
+
+### Features
+
+* add graceful shutdown with WAL checkpoint and final session save ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* add hourly WAL checkpoint and auto backups for database maintenance ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **api:** add DB admin token auth and restricted query allowlist for /api/db/query ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **api:** secure DB backup/restore endpoints with token auth and path validation ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **auth:** add --form-auth and --clear-auth-config CLI flags for dashboard auth ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **auth:** add auth-config.json persistence and migration from startup flags ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **auth:** add Basic Auth / form login / both modes and per-route auth guard ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **auth:** add dashboard form login with HttpOnly session cookie and auth shell ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **auth:** add Security tab controls to enable/disable dashboard auth and change password ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **chat:** add chat archive and hidden visibility states with sidebar management pills ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **chat:** add Chat Sessions sidebar with recency grouping, pinning, avatars, and context menus ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **chat:** add full-text search (FTS) across all chat messages with sidebar UI and live results ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **chat:** add hidden surface with deliberate reveal flow for privacy ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **chat:** add Hide Now button in chat header for quick conversation hiding ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **chat:** add inline archive surface with restore/hide/delete actions and undo toasts ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **chat:** add lazy loading of tab messages and per-tab incremental persistence ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **chat:** scope message search to active tabs by default with Active/Archived filter chips ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **cli:** add TLS-related CLI flags (--tls, --tls-cert, --tls-key, --tls-self-signed) ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **gpu:** WMI-based GPU discovery for Intel and unknown GPUs on Windows ([497db06](https://github.com/nmorgowicz-org/llama-monitor/commit/497db06f71216acc399fed96e1e715b9497889c8))
+* **security:** add ACME DNS-01 integration with auto-renewal and Certificates management in Settings ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** add API token auth for sensitive endpoints (DB backup/restore, query) ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** add api-token auth to previously unprotected endpoints (settings, presets, templates, LHM, sensor-bridge) ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** add CSP nonce for inline scripts and DOMPurify sanitization to prevent XSS in chat ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** add global Origin validation to mitigate CSRF on cookie-authenticated endpoints ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** add in-place token rotation for agent, API, and DB admin tokens ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** add mTLS for remote-agent with role-based trust ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** add per-endpoint cooldowns for expensive operations (remote-agent, sessions, file browser, chat-search, DB, ACME) ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** add remote-agent command validation to block dangerous commands ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** add TLS support with self-signed, custom cert, and ACME (Let's Encrypt) modes ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** add visibility-aware list and search endpoints with query param filtering ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** enforce api-token auth on all chat and chat-search endpoints ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** enforce api-token auth on all remote-agent endpoints ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** enforce api-token auth on archive, hide, and restore endpoints ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** enforce api-token auth on session CRUD and attach/detach endpoints ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** enforce db-admin-token auth on remote-agent install and remove ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** enforce db-admin-token auth on session delete and spawn ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** mask hidden chat names from collapsed sidebar label ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **security:** mask sensitive tokens and SSH credentials in settings with show/hide toggle ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **tray:** Windows WebView popover — replaces static context menu with live metrics ([497db06](https://github.com/nmorgowicz-org/llama-monitor/commit/497db06f71216acc399fed96e1e715b9497889c8))
+* **ui:** add Database Administration modal with maintenance, backups, indexes, repair, and SQL query ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **ui:** add guided-generation prompt templates and category management in Settings ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **ui:** add keyboard shortcuts panel and improved chat input buttons ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **ui:** polish Settings modal layout, sections, and controls for chat, appearance, and guided generation ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **ui:** redesign file browser modal with premium UX, parent folder button, and config browse button ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+
+
+### Bug Fixes
+
+* **chat:** serialize monitor inference requests and return explicit busy/offline errors when the active llama-server is occupied ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **chat:** stabilize AI response waiting to prevent "[stopped]" captures in guided-generation flows ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* resolve generic-array version conflict after dependabot updates ([50a1147](https://github.com/nmorgowicz-org/llama-monitor/commit/50a114786c22f04f7afd27744673e8f4d4eff639))
+* **security:** restrict /api/browse to allowed root paths to prevent path traversal ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **ui:** resolve file browser hint clipping and stabilize related e2e tests ([db9000e](https://github.com/nmorgowicz-org/llama-monitor/commit/db9000eaa99673d009adb1a1e7d0cfb973007a08))
+* **windows:** Windows ACL hardening for secret files via icacls ([497db06](https://github.com/nmorgowicz-org/llama-monitor/commit/497db06f71216acc399fed96e1e715b9497889c8))
+
 ## [0.18.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.17.1...v0.18.0) (2026-05-14)
 
 
