@@ -119,9 +119,13 @@ function _renderManagementPills() {
         archiveCount.textContent = archivedCount;
         archivePill.appendChild(archiveCount);
     }
+    if (chat.visibilityUi.archiveOpen) {
+        archivePill.classList.add('active');
+        archivePill.setAttribute('aria-pressed', 'true');
+    }
     archivePill.addEventListener('click', () => {
         chat.visibilityUi.archiveOpen = !chat.visibilityUi.archiveOpen;
-        _renderManagementPills();
+        renderChatSessionsSidebar();
     });
     container.appendChild(archivePill);
 
@@ -138,9 +142,13 @@ function _renderManagementPills() {
         hiddenCountEl.textContent = hiddenCount;
         hiddenPill.appendChild(hiddenCountEl);
     }
+    if (chat.visibilityUi.hiddenOpen) {
+        hiddenPill.classList.add('active');
+        hiddenPill.setAttribute('aria-pressed', 'true');
+    }
     hiddenPill.addEventListener('click', () => {
         chat.visibilityUi.hiddenOpen = !chat.visibilityUi.hiddenOpen;
-        _renderManagementPills();
+        renderChatSessionsSidebar();
     });
     container.appendChild(hiddenPill);
 }

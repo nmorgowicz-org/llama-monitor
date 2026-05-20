@@ -1351,6 +1351,12 @@
     color: var(--color-text, rgba(255,255,255,0.85));
 }
 
+.csp-management-pill.active {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: rgba(99, 102, 241, 0.4);
+    color: #a5b4fc;
+}
+
 .csp-management-pill .csp-pill-count {
     display: inline-flex;
     align-items: center;
@@ -1403,6 +1409,12 @@
     background: rgba(0,0,0,0.06);
     border-color: rgba(0,0,0,0.15);
     color: rgba(0,0,0,0.75);
+}
+
+[data-theme="light"] .csp-management-pill.active {
+    background: rgba(99, 102, 241, 0.1);
+    border-color: rgba(99, 102, 241, 0.3);
+    color: #6366f1;
 }
 
 [data-theme="light"] .csp-management-pill .csp-pill-count {
@@ -8241,12 +8253,21 @@
 
 /* ── Tier: snug ───────────────────────────────────────────────────────────── */
 
-/* Rightmost two: hide Focus label, remove Persona button (accessible via Behavior) */
+/* Rightmost: hide Focus label, remove Persona button (accessible via Behavior) */
 body.shell-width-snug #chat-focus-mode-btn .chat-header-label {
   display: none;
 }
 
 body.shell-width-snug #chat-persona-btn {
+  display: none;
+}
+
+/* Also hide Compact button and font percentage in snug to prevent overflow */
+body.shell-width-snug #btn-compact {
+  display: none;
+}
+
+body.shell-width-snug .chat-font-value {
   display: none;
 }
 

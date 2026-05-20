@@ -93,9 +93,9 @@ impl std::error::Error for ApiError {}
 
 impl Reject for ApiError {}
 
-const MONITOR_INFERENCE_QUEUE_TIMEOUT: Duration = Duration::from_secs(30);
-const UPSTREAM_BUSY_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
-const UPSTREAM_BUSY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const MONITOR_INFERENCE_QUEUE_TIMEOUT: Duration = Duration::from_secs(330);
+const UPSTREAM_BUSY_WAIT_TIMEOUT: Duration = Duration::from_secs(300);
+const UPSTREAM_BUSY_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const UPSTREAM_SEND_RETRIES: usize = 3;
 const UPSTREAM_SEND_RETRY_BACKOFF_MS: u64 = 250;
 
@@ -148,7 +148,7 @@ async fn wait_for_upstream_capacity(state: &AppState) -> Result<(), warp::Reject
 
         if tokio::time::Instant::now() >= deadline {
             return Err(warp::reject::custom(ApiError::busy(
-                "The active llama-server is busy with another request. Wait for the current request to finish and retry.",
+                "The active llama-server has been busy for too long. The server may be running a very large inference. Wait for it to finish and retry.",
             )));
         }
 
