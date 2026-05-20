@@ -1,7 +1,7 @@
 # Windows Tray WebView Implementation Plan
 
 **Date:** 2026-05-05
-**Status:** Planned
+**Status:** Implemented (2026-05-19 on branch feature/windows-tray-webview-and-compat)
 **Priority:** Medium
 
 ## Goal

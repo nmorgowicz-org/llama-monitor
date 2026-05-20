@@ -233,22 +233,23 @@ The sensor bridge doc exists and is comprehensive. Gaps:
 
 Given the scope, work is prioritized as follows:
 
-### Phase A: Tray WebView (primary goal, this session)
+### Phase A: Tray WebView (primary goal, this session) ✅ COMPLETE
 
 Follow `docs/plans/20260505-windows_tray_webview.md` phases 1–9 in order:
-1. Cargo.toml: move `wry` to universal dep (W-01)
-2. tray.rs: remove `not(target_os = "windows")` guards (W-02)
-3. tray.rs: delete `WindowsTrayMenu` and related code
-4. tray.rs: extend popover functions to Windows
-5. Verify cross-compile: `cargo check --target x86_64-pc-windows-msvc`
+1. ✅ Cargo.toml: move `wry` to universal dep (W-01)
+2. ✅ tray.rs: remove `not(target_os = "windows")` guards (W-02)
+3. ✅ tray.rs: delete `WindowsTrayMenu` and related code (~110 lines removed)
+4. ✅ tray.rs: extend popover functions to Windows via `not(target_os = "linux")` guards
+5. ✅ Verify cross-compile: `cargo check --target x86_64-pc-windows-gnu` — passed
 
-### Phase B: Windows permission warning (W-04, low effort)
+### Phase B: Windows permission warning (W-04, low effort) ✅ COMPLETE
 
-Add a startup `eprintln!` on Windows noting that file permissions cannot be automatically hardened. This is a 5-line change.
+✅ Added startup `eprintln!` on Windows in main.rs warning about file permission hardening gap.
 
-### Phase C: Winit features verification (W-03)
+### Phase C: Winit features verification (W-03) ✅ COMPLETE
 
-Confirm `cargo check --target x86_64-pc-windows-msvc` succeeds. If not, investigate winit feature requirements.
+✅ Confirmed: winit-win32 backend auto-selected when targeting Windows, even with
+`default-features = false`. Cross-compile check passed with winit-win32 v0.31.0-beta.2.
 
 ### Phase D: Documentation updates
 
