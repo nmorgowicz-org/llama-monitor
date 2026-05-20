@@ -6,7 +6,9 @@ import { chat, lastLlamaMetrics } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import {
     activeChatTab,
+    addChatTab,
     getChatViewBindings,
+    hideChatTab,
     registerChatViewBindings,
     scheduleChatPersist,
     switchChatTab,
@@ -18,6 +20,7 @@ import {
 } from './chat-state.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { openTemplateManager } from './chat-templates.js';
+import { renderChatSessionsSidebar } from './chat-sessions-sidebar.js';
 
 // Getter for transport functions — avoids circular import (chat-render ↔ chat-transport)
 let _getTransport = null;
@@ -74,14 +77,20 @@ function ensureChatElements() {
 
 export function renderMd(src) {
     if (typeof marked !== 'undefined') {
-        try { return marked.parse(src); } catch(_) {}
+        try {
+            const raw = marked.parse(src);
+            return (typeof window.DOMPurify !== 'undefined' ? window.DOMPurify.sanitize(raw) : raw);
+        } catch(_) {}
     }
     return src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>');
 }
 
 export function renderMdStreaming(src) {
     if (typeof marked !== 'undefined') {
-        try { return marked.parse(src, { gfm: true, breaks: true, renderer: new marked.Renderer() }); } catch(_) {}
+        try {
+            const raw = marked.parse(src, { gfm: true, breaks: true, renderer: new marked.Renderer() });
+            return (typeof window.DOMPurify !== 'undefined' ? window.DOMPurify.sanitize(raw) : raw);
+        } catch(_) {}
     }
     return src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>');
 }
@@ -388,12 +397,15 @@ async function getTemplateNameById(id) {
 export function renderChatTabs() {
     ensureChatElements();
     const bar = chatTabBarEl;
+    if (!bar) return;
     const addBtn = bar?.querySelector('.chat-tab-add');
     bar?.querySelectorAll('.chat-tab').forEach(el => el.remove());
 
     for (const tab of chat.tabs) {
         const el = document.createElement('div');
-        const msgCount = tab.messages.filter(m => m.role !== 'system').length;
+        const msgCount = Array.isArray(tab.messages)
+            ? tab.messages.filter(m => m.role !== 'system').length
+            : (tab.message_count || 0);
         let extraClasses = '';
         if (msgCount > 50) extraClasses = ' tab-hot';
         else if (msgCount > 20) extraClasses = ' tab-warm';
@@ -497,13 +509,6 @@ export function renderChatTabs() {
             bar.insertBefore(sep, firstUnpinned);
         }
     }
-    updateTabBarOverflowMask();
-}
-
-export function updateTabBarOverflowMask() {
-    const bar = document.getElementById('chat-tab-bar');
-    if (!bar) return;
-    bar.classList.toggle('no-overflow', bar.scrollWidth <= bar.clientWidth);
 }
 
 function getTimeAgo(ts) {
@@ -576,7 +581,26 @@ export function renderChatMessages() {
     const container = chatMessagesEl;
     const tab = activeChatTab();
 
-    if (!tab || tab.messages.filter(m => m.role !== 'system').length === 0) {
+    if (!tab) {
+        container.innerHTML = `
+          <div class="chat-empty">
+            <div class="chat-empty-icon">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="1.2" opacity="0.25">
+                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+              </svg>
+            </div>
+            <p class="chat-empty-title">No chats open</p>
+            <p class="chat-empty-hint">Create a new chat or restore one from trash.</p>
+            <button class="btn btn-primary" id="chat-empty-create-btn">New Chat</button>
+          </div>`;
+        document.getElementById('chat-empty-create-btn')?.addEventListener('click', () => {
+            addChatTab().catch(err => console.error('chat empty create failed:', err));
+        });
+        return;
+    }
+
+    if (tab.messages.filter(m => m.role !== 'system').length === 0) {
         const prompts = [
             { icon: '💡', text: 'Explain a complex topic simply', label: 'Learn something' },
             { icon: '✍️', text: 'Help me write an email about...', label: 'Write something' },
@@ -639,6 +663,7 @@ export function renderChatMessages() {
         const el = buildMessageElement(msg, idx, tab.messages);
         const realIdx = tab.messages.indexOf(msg);
         if (realIdx >= 0) el.dataset.msgIdx = realIdx;
+        el.dataset.msgId = msg.db_id ?? '';
         container.appendChild(el);
         idx++;
     }
@@ -1485,9 +1510,17 @@ export function initChatRender() {
         marker.dataset.expanded = isExpanded ? 'false' : 'true';
     });
 
+    document.getElementById('chat-header-hide-btn')?.addEventListener('click', () => {
+        const tab = activeChatTab();
+        if (tab) {
+            hideChatTab(tab.id);
+        }
+    });
+
     registerChatViewBindings({
         renderChatTabs,
         renderChatMessages,
+        renderChatSessionsSidebar,
         updateChatTabBadge,
     });
 }

@@ -606,7 +606,9 @@ ${recentContext}`;
 async function fetchSuggestionRewrite(prompt) {
     const resp = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             messages: [
                 {
@@ -622,7 +624,7 @@ async function fetchSuggestionRewrite(prompt) {
             temperature: 0.75,
             thinking_budget_tokens: 0,
             chat_template_kwargs: { enable_thinking: false },
-            max_tokens: 420,
+            max_tokens: 1024,
         }),
     });
 
@@ -791,9 +793,9 @@ async function requestSuggestions({ tabId, category, contextDepth, suggestionCou
     try {
         const response = await fetch('/api/chat/suggestions', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 tab_id: tabId,
                 category,
@@ -805,7 +807,8 @@ async function requestSuggestions({ tabId, category, contextDepth, suggestionCou
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            const errText = await response.text().catch(() => '');
+            throw new Error(`HTTP ${response.status}: ${errText || response.statusText}`);
         }
 
         const data = await response.json();
@@ -1274,7 +1277,9 @@ function setupCategoryButtons() {
             try {
                 const response = await fetch('/api/keywords/generate', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: window.authHeaders
+                        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                        : { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         category: categoryName,
                     }),

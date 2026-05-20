@@ -839,8 +839,14 @@ export function resolveActiveTemplate(templateId) {
 export async function loadTemplates() {
     if (!_userTemplates) {
         try {
-            const res = await fetch('/api/templates');
-            _userTemplates = await res.json();
+            const auth = window.authHeaders ? window.authHeaders() : {};
+            const res = await fetch('/api/templates', { headers: auth });
+            if (res.status === 401) {
+                showToast('Unauthorized: API token missing or invalid', 'error');
+                _userTemplates = [];
+            } else {
+                _userTemplates = await res.json();
+            }
         } catch (e) {
             console.error('Failed to load templates from API:', e);
             _userTemplates = [];
@@ -855,14 +861,25 @@ export async function loadTemplates() {
 
 async function saveUserTemplates(templates) {
     try {
-        const existing = await fetch('/api/templates').then(r => r.json());
+        const auth = window.authHeaders ? window.authHeaders() : {};
+        const existingRes = await fetch('/api/templates', { headers: auth });
+        if (existingRes.status === 401) {
+            showToast('Unauthorized: API token missing or invalid', 'error');
+            return;
+        }
+        const existing = await existingRes.json();
         for (const t of existing) {
-            await fetch(`/api/templates/${t.id}`, { method: 'DELETE' });
+            await fetch(`/api/templates/${t.id}`, {
+                method: 'DELETE',
+                headers: window.authHeaders ? window.authHeaders() : {},
+            });
         }
         for (const t of templates) {
             await fetch('/api/templates', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id: t.id, name: t.name, prompt: t.prompt, explicit_policies: t.explicit_policies })
             });
         }
@@ -1076,7 +1093,9 @@ async function saveTemplate() {
         try {
             const res = await fetch('/api/templates', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id: crypto.randomUUID(), name, prompt, explicit_policies: { level1: '', level2: '' } })
             });
             const data = await res.json();
@@ -1100,7 +1119,9 @@ async function saveTemplate() {
             try {
                 const res = await fetch('/api/templates', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: window.authHeaders
+                        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                        : { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: crypto.randomUUID(), name, prompt, explicit_policies: t.explicit_policies })
                 });
                 if (!(await res.json()).ok) {
@@ -1116,7 +1137,9 @@ async function saveTemplate() {
             try {
                 const res = await fetch(`/api/templates/${editingTemplateId}`, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: window.authHeaders
+                        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                        : { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id: editingTemplateId, name, prompt, explicit_policies: t.explicit_policies })
                 });
                 if (!(await res.json()).ok) {
@@ -1145,7 +1168,10 @@ async function deleteTemplate(id) {
         return;
     }
     try {
-        const res = await fetch(`/api/templates/${id}`, { method: 'DELETE' });
+        const res = await fetch(`/api/templates/${id}`, {
+            method: 'DELETE',
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         if ((await res.json()).ok) {
             _userTemplates = null;
             selectedTemplateId = null;
@@ -1180,7 +1206,9 @@ async function resetTemplateToDefault(id) {
     try {
         const res = await fetch(`/api/templates/${id}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 id,
                 name: builtin.name,
@@ -1393,7 +1421,9 @@ function savePersonaExplicitPolicies() {
     // Save to backend
     fetch(`/api/templates/${t.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: t.id, name: t.name, prompt: t.prompt, explicit_policies: t.explicit_policies })
     }).then(res => res.json()).then(data => {
         if (data.ok) {

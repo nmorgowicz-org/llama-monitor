@@ -24,13 +24,27 @@ function clearFieldErrors() {
 // ── Load ───────────────────────────────────────────────────────────────────────
 
 export async function loadPresets(selectId) {
+    const auth = window.authHeaders ? window.authHeaders() : {};
+
     const [presetsResp, settingsResp] = await Promise.all([
-        fetch('/api/presets'),
-        selectId === undefined ? fetch('/api/settings') : Promise.resolve(null),
+        fetch('/api/presets', { headers: auth }),
+        selectId === undefined ? fetch('/api/settings', { headers: auth }) : Promise.resolve(null),
     ]);
 
+    if (presetsResp.status === 401) {
+        showToast('Unauthorized: API token missing or invalid', 'error');
+        return;
+    }
+
     sessionState.presets = await presetsResp.json();
-    const saved = settingsResp ? await settingsResp.json() : null;
+    let saved = null;
+    if (settingsResp) {
+        if (settingsResp.status === 401) {
+            console.warn('[presets] /api/settings returned 401');
+        } else {
+            saved = await settingsResp.json();
+        }
+    }
 
     const sel = document.getElementById('preset-select');
     sel.innerHTML = '';
@@ -209,7 +223,9 @@ export async function savePreset(event) {
         if (id) {
             resp = await fetch('/api/presets/' + encodeURIComponent(id), {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
                 body: JSON.stringify(preset),
             });
             if (!resp.ok) {
@@ -221,7 +237,9 @@ export async function savePreset(event) {
         } else {
             resp = await fetch('/api/presets', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
                 body: JSON.stringify(preset),
             });
             if (!resp.ok) {
@@ -255,7 +273,9 @@ export async function copyPreset() {
     try {
         const resp = await fetch('/api/presets', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
             body: JSON.stringify(copy),
         });
         if (!resp.ok) {
@@ -278,7 +298,10 @@ export async function deletePreset() {
     if (!confirm('Delete preset "' + p.name + '"?')) return;
 
     try {
-        const resp = await fetch('/api/presets/' + encodeURIComponent(id), { method: 'DELETE' });
+        const resp = await fetch('/api/presets/' + encodeURIComponent(id), {
+            method: 'DELETE',
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         if (!resp.ok) {
             const err = await resp.text().catch(() => 'Unknown error');
             showToast('Delete failed: ' + err, 'error');
@@ -294,7 +317,10 @@ export async function deletePreset() {
 export async function resetPresets() {
     if (!confirm('Reset all presets to built-in defaults? Custom presets will be removed.')) return;
     try {
-        const resp = await fetch('/api/presets/reset', { method: 'POST' });
+        const resp = await fetch('/api/presets/reset', {
+            method: 'POST',
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         if (!resp.ok) {
             const err = await resp.text().catch(() => 'Unknown error');
             showToast('Reset failed: ' + err, 'error');

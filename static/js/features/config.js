@@ -21,7 +21,9 @@ export function closeConfigModal() {
 
 async function loadGpuEnv() {
     try {
-        const resp = await fetch('/api/gpu-env');
+        const resp = await fetch('/api/gpu-env', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         const data = await resp.json();
         const env = data.env;
         const archs = data.architectures;
@@ -63,7 +65,9 @@ function saveConfig() {
     clearTimeout(settingsState.saveTimer);
     fetch('/api/settings', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify(collectSettings()),
     }).catch(() => {});
 
@@ -75,7 +79,9 @@ function saveConfig() {
     };
     fetch('/api/gpu-env', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify(env),
     }).catch(() => {});
 

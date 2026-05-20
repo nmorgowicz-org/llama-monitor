@@ -11,7 +11,10 @@ function _bindSensorBridgeSetup() {
         btn.textContent = 'Installing...';
         const callout = document.getElementById('sensor-bridge-setup-callout');
         try {
-            const res = await fetch('/api/sensor-bridge/install', { method: 'POST' });
+            const res = await fetch('/api/sensor-bridge/install', {
+                    method: 'POST',
+                    headers: window.authHeaders ? window.authHeaders() : {},
+                });
             const data = await res.json();
             if (!data.started) {
                 btn.textContent = 'Setup';
@@ -28,7 +31,9 @@ function _bindSensorBridgeSetup() {
             const poll = setInterval(async () => {
                 elapsed += 2000;
                 try {
-                    const s = await fetch('/api/sensor-bridge/status');
+                    const s = await fetch('/api/sensor-bridge/status', {
+                            headers: window.authHeaders ? window.authHeaders() : {},
+                        });
                     const sd = await s.json();
                     if (sd.running) {
                         clearInterval(poll);

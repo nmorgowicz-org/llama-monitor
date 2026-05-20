@@ -12,6 +12,7 @@ const TRASH_PURGE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // check every hour
 const chatViewBindings = {
     renderChatTabs: null,
     renderChatMessages: null,
+    renderChatSessionsSidebar: null,
     loadChatNames: null,
     updateExplicitToggleUI: null,
     updateParamsDirtyIndicator: null,
@@ -65,6 +66,9 @@ export function newChatTab(name = 'New Chat') {
         },
         context_notes: [],
         context_custom_sections: [],
+        compact_mode: 'percent',
+        compact_threshold: 0.8,
+        tab_order: 0,
         sidebar_width: 280,
         quick_guide_draft: '',
         quick_guide_active: '',
@@ -73,6 +77,7 @@ export function newChatTab(name = 'New Chat') {
         created_at: Date.now(),
         updated_at: Date.now(),
         pinned: false,
+        visibility: 'active',
     };
 }
 
@@ -101,6 +106,7 @@ function normalizeChatTab(tab) {
         quick_guide_pending: '',
         armed_story_beats: tab.armed_story_beats ?? [],
         pinned: tab.pinned ?? false,
+        visibility: tab.visibility || 'active',
     };
 }
 
@@ -108,19 +114,65 @@ function normalizeChatTab(tab) {
 
 export async function initChatTabs() {
     try {
-        const resp = await fetch('/api/chat/tabs');
-        const data = await resp.json();
-        chat.tabs = data.length ? data.map(normalizeChatTab) : [newChatTab('Chat 1')];
-    } catch {
-        chat.tabs = [newChatTab('Chat 1')];
+        const resp = await fetch('/api/chat/tabs?visibility=all', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        if (!resp.ok) {
+            let detail = `Chat tabs request failed (${resp.status})`;
+            if (resp.status === 401 || resp.status === 403) {
+                detail = 'This browser could not authenticate to load saved chats.';
+            }
+            throw new Error(detail);
+        }
+        const metas = await resp.json();
+        if (!Array.isArray(metas)) {
+            throw new Error('Chat tabs response was invalid.');
+        }
+        if (metas.length) {
+            chat.tabs = metas.map(meta => ({
+                ...meta,
+                messages: null,
+                _loaded: false,
+            }));
+        } else {
+            await addChatTab();
+            chatViewBindings.renderChatSessionsSidebar?.();
+            chatViewBindings.renderChatMessages?.();
+            chatViewBindings.loadChatNames?.();
+            chatViewBindings.updateExplicitToggleUI?.();
+            chatViewBindings.updateParamsDirtyIndicator?.();
+            chatViewBindings.syncMessageLimitInput?.();
+            chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
+            chatViewBindings.refreshChatTelemetry?.();
+            chatViewBindings.updatePersonaMenuName?.();
+            refreshTopCockpit();
+            return;
+        }
+    } catch (e) {
+        console.error('initChatTabs failed:', e);
+        chat.tabs = [];
+        chat.activeTabId = null;
+        chatViewBindings.renderChatTabs?.();
+        chatViewBindings.renderChatSessionsSidebar?.();
+        chatViewBindings.renderChatMessages?.();
+        chatViewBindings.loadChatNames?.();
+        chatViewBindings.updateExplicitToggleUI?.();
+        chatViewBindings.updateParamsDirtyIndicator?.();
+        chatViewBindings.syncMessageLimitInput?.();
+        chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
+        chatViewBindings.refreshChatTelemetry?.();
+        chatViewBindings.updatePersonaMenuName?.();
+        refreshTopCockpit();
+        showToast('Could not load chats', 'error', e?.message || 'Saved chats could not be loaded.');
+        return;
     }
     chat.activeTabId = chat.tabs[0].id;
 
-    // Render (legacy — Phase 6b)
-    chatViewBindings.renderChatTabs?.();
-    chatViewBindings.renderChatMessages?.();
+    await _loadTabMessages(chat.activeTabId);
 
-    // Load UI state from tab
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
+    chatViewBindings.renderChatMessages?.();
     chatViewBindings.loadChatNames?.();
     chatViewBindings.updateExplicitToggleUI?.();
     chatViewBindings.updateParamsDirtyIndicator?.();
@@ -130,57 +182,100 @@ export async function initChatTabs() {
     chatViewBindings.updatePersonaMenuName?.();
     refreshTopCockpit();
 
-   // Trigger context card update - mark that chat tabs loaded so dashboard can poll
-      if (typeof window.onChatTabsLoaded === 'function') {
-          window.onChatTabsLoaded();
-      }
+    if (typeof window.onChatTabsLoaded === 'function') {
+        window.onChatTabsLoaded();
+    }
 
-      // Notify subscribers that tabs are loaded and a tab is active.
-      // Defer to next macrotask so any in-flight user interactions (e.g. sidebar
-      // toggle) have already painted their CSS transitions before this fires.
-      setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('activeTabChanged', { detail: { tabId: chat.activeTabId } }));
-      }, 0);
+    setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('activeTabChanged', { detail: { tabId: chat.activeTabId } }));
+    }, 0);
+}
 
-     // Show chat tip only when user is on monitor view with an active chat session
-     const { setupViewState } = await import('../core/app-state.js');
-     if (setupViewState.view === 'monitor') {
-         const activeTab = activeChatTab();
-         if (activeTab && activeTab.messages.length > 0) {
-             if (!localStorage.getItem('llama-monitor-chat-tips-seen')) {
-                 localStorage.setItem('llama-monitor-chat-tips-seen', 'true');
-                 setTimeout(() => {
-                     showToast('Tip: try a suggested prompt below to get started', 'info');
-                 }, 800);
-             }
-         }
-     }
+// ── Lazy Tab Loading ───────────────────────────────────────────────────────────
+
+async function _loadTabMessages(id) {
+    const tab = chat.tabs.find(t => t.id === id);
+    if (!tab || tab._loaded) return;
+    try {
+        const resp = await fetch(`/api/chat/tabs/${id}`, {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        const full = await resp.json();
+        Object.assign(tab, full);
+        tab._loaded = true;
+    } catch (e) {
+        console.error(`_loadTabMessages failed for ${id}:`, e);
+    }
 }
 
 // ── Tab CRUD ───────────────────────────────────────────────────────────────────
 
-export function addChatTab() {
+export async function addChatTab() {
     const tab = newChatTab(`Chat ${chat.tabs.length + 1}`);
+    try {
+        const resp = await fetch('/api/chat/tabs', {
+            method: 'POST',
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
+            body: JSON.stringify(tab),
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const created = await resp.json();
+        Object.assign(tab, created);
+        tab._loaded = true;
+    } catch (e) {
+        console.error('addChatTab failed:', e);
+        // If creation failed, do not add the tab to avoid orphaned tabs.
+        return;
+    }
     chat.tabs.push(tab);
-    switchChatTab(tab.id);
-    scheduleChatPersist();
+    await switchChatTab(tab.id);
+    chatViewBindings.renderChatSessionsSidebar?.();
 }
 
-export function closeChatTab(id) {
+export async function closeChatTab(id) {
     const tabIdx = chat.tabs.findIndex(t => t.id === id);
     if (tabIdx === -1) return;
-    if (chat.tabs.length === 1) return;
 
     const [tab] = chat.tabs.splice(tabIdx, 1);
     chat.tabTrash.push({ tab, trashedAt: Date.now() });
 
     if (chat.activeTabId === id) {
-        chat.activeTabId = chat.tabs[chat.tabs.length - 1].id;
+        if (chat.tabs.length) {
+            chat.activeTabId = chat.tabs[chat.tabs.length - 1].id;
+            await _loadTabMessages(chat.activeTabId);
+        } else {
+            chat.activeTabId = null;
+        }
     }
 
     chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
     chatViewBindings.renderChatMessages?.();
-    scheduleChatPersist();
+    chatViewBindings.loadChatNames?.();
+    chatViewBindings.updateExplicitToggleUI?.();
+    chatViewBindings.updateParamsDirtyIndicator?.();
+    chatViewBindings.syncMessageLimitInput?.();
+    chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
+    chatViewBindings.refreshChatTelemetry?.();
+    chatViewBindings.updatePersonaMenuName?.();
+    refreshTopCockpit();
+
+    try {
+        const resp = await fetch(`/api/chat/tabs/${id}`, {
+            method: 'DELETE',
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        const body = await resp.json().catch(() => null);
+        if (!resp.ok || body?.ok === false) {
+            throw new Error(body?.error || `Delete failed (${resp.status})`);
+        }
+    } catch (e) {
+        restoreTabFromTrash(id);
+        showToast('Could not delete tab', 'error', e?.message || 'The tab was restored because deletion failed.');
+        return;
+    }
 
     showToastWithActions('Tab deleted', 'info', '', [
         {
@@ -201,6 +296,7 @@ export function restoreTabFromTrash(id) {
     chat.activeTabId = trashEntry.tab.id;
 
     chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
     chatViewBindings.renderChatMessages?.();
     chatViewBindings.loadChatNames?.();
     chatViewBindings.updateExplicitToggleUI?.();
@@ -209,13 +305,20 @@ export function restoreTabFromTrash(id) {
     chatViewBindings.refreshChatTelemetry?.();
     chatViewBindings.updatePersonaMenuName?.();
     refreshTopCockpit();
-    scheduleChatPersist();
+    scheduleChatPersist(normalizeChatTab(trashEntry.tab));
 }
 
-export function switchChatTab(id) {
+export async function switchChatTab(id) {
     if (chat.busy) return;
+    const targetTab = chat.tabs.find(t => t.id === id);
+    if (targetTab && targetTab.visibility !== 'active') {
+        showToast('Chat not visible', 'info', '', []);
+        return;
+    }
     chat.activeTabId = id;
+    await _loadTabMessages(id);
     chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
     chatViewBindings.renderChatMessages?.();
     chatViewBindings.loadChatNames?.();
     chatViewBindings.updateExplicitToggleUI?.();
@@ -235,7 +338,8 @@ export function renameChatTab(id, newName) {
     if (tab) {
         tab.name = newName.trim() || tab.name;
         chatViewBindings.renderChatTabs?.();
-        scheduleChatPersist();
+        chatViewBindings.renderChatSessionsSidebar?.();
+        scheduleChatPersist(tab);
     }
 }
 
@@ -247,7 +351,128 @@ export function togglePinTab(id) {
     const unpinned = chat.tabs.filter(t => !t.pinned);
     chat.tabs = [...pinned, ...unpinned];
     chatViewBindings.renderChatTabs?.();
-    scheduleChatPersist();
+    chatViewBindings.renderChatSessionsSidebar?.();
+    scheduleChatPersist(tab);
+    persistTabOrder();
+}
+
+// ── Visibility Actions ────────────────────────────────────────────────────────
+
+function _selectFallbackTab(leavingId) {
+    const activeTabs = chat.tabs.filter(t => t.visibility === 'active');
+    if (activeTabs.length) {
+        const idx = activeTabs.findIndex(t => t.id === leavingId);
+        const fallbackIdx = idx >= 0 ? 0 : activeTabs.length - 1;
+        switchChatTab(activeTabs[fallbackIdx].id);
+    } else {
+        chat.activeTabId = null;
+    }
+}
+
+export function archiveChatTab(id) {
+    const tab = chat.tabs.find(t => t.id === id);
+    if (!tab) return;
+    const prevVisibility = tab.visibility;
+    tab.visibility = 'archived';
+    if (chat.activeTabId === id) {
+        _selectFallbackTab(id);
+    }
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
+    const headers = window.authHeaders
+        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+        : { 'Content-Type': 'application/json' };
+    fetch(`/api/chat/tabs/${id}/archive`, {
+        method: 'POST',
+        headers,
+    }).catch(e => {
+        tab.visibility = prevVisibility;
+        chatViewBindings.renderChatTabs?.();
+        chatViewBindings.renderChatSessionsSidebar?.();
+        console.error('archiveChatTab failed:', e);
+    });
+    showToastWithActions('Chat archived', 'info', '', [{
+        id: 'undo',
+        label: 'Undo',
+        primary: true,
+        handler: () => restoreChatTab(id),
+    }]);
+}
+
+export function hideChatTab(id) {
+    const tab = chat.tabs.find(t => t.id === id);
+    if (!tab) return;
+    const prevVisibility = tab.visibility;
+    tab.visibility = 'hidden';
+    if (chat.activeTabId === id) {
+        _selectFallbackTab(id);
+    }
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
+    const headers = window.authHeaders
+        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+        : { 'Content-Type': 'application/json' };
+    fetch(`/api/chat/tabs/${id}/hide`, {
+        method: 'POST',
+        headers,
+    }).catch(e => {
+        tab.visibility = prevVisibility;
+        chatViewBindings.renderChatTabs?.();
+        chatViewBindings.renderChatSessionsSidebar?.();
+        console.error('hideChatTab failed:', e);
+    });
+    showToastWithActions('Chat hidden', 'info', '', [{
+        id: 'undo',
+        label: 'Undo',
+        primary: true,
+        handler: () => restoreChatTab(id),
+    }]);
+}
+
+export function restoreChatTab(id) {
+    const tab = chat.tabs.find(t => t.id === id);
+    if (!tab) return;
+    tab.visibility = 'active';
+    switchChatTab(id);
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
+    const headers = window.authHeaders
+        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+        : { 'Content-Type': 'application/json' };
+    fetch(`/api/chat/tabs/${id}/restore`, {
+        method: 'POST',
+        headers,
+    }).catch(e => console.error('restoreChatTab failed:', e));
+    showToast('Chat restored', 'success', '', []);
+}
+
+export async function setChatTabVisibility(id, visibility) {
+    const tab = chat.tabs.find(t => t.id === id);
+    if (!tab) return;
+    const prevVisibility = tab.visibility;
+    tab.visibility = visibility;
+    chatViewBindings.renderChatTabs?.();
+    chatViewBindings.renderChatSessionsSidebar?.();
+    const headers = window.authHeaders
+        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+        : { 'Content-Type': 'application/json' };
+    try {
+        const resp = await fetch(`/api/chat/tabs/${id}/meta`, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({ visibility }),
+        });
+        if (!resp.ok) {
+            tab.visibility = prevVisibility;
+            chatViewBindings.renderChatTabs?.();
+            chatViewBindings.renderChatSessionsSidebar?.();
+        }
+    } catch (e) {
+        tab.visibility = prevVisibility;
+        chatViewBindings.renderChatTabs?.();
+        chatViewBindings.renderChatSessionsSidebar?.();
+        console.error('setChatTabVisibility failed:', e);
+    }
 }
 
 // ── Tab Field Updates ─────────────────────────────────────────────────────────
@@ -271,7 +496,7 @@ export function updateChatName(field, value) {
     const tab = activeChatTab();
     if (tab) {
         tab[field] = value.trim();
-        scheduleChatPersist();
+        scheduleChatPersist(tab);
         chatViewBindings.renderChatMessages?.();
     }
 }
@@ -293,10 +518,42 @@ export function normalizeTabForSave(tab) {
     return t;
 }
 
-export function scheduleChatPersist() {
-    chat.tabsDirty = true;
-    clearTimeout(chat.persistTimer);
-    chat.persistTimer = setTimeout(persistChatTabs, CHAT_TABS_PERSIST_DEBOUNCE_MS);
+export function scheduleChatPersist(tab) {
+    const t = tab || activeChatTab();
+    if (!t) return;
+    if (!chat._persistTab) {
+        chat._persistTab = debounce(async (tabToSave) => {
+            const normalized = normalizeTabForSave(tabToSave);
+            try {
+                const resp = await fetch(`/api/chat/tabs/${tabToSave.id}`, {
+                    method: 'PUT',
+                    headers: window.authHeaders
+                        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                        : { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(normalized),
+                });
+                if (!resp.ok) {
+                    if (resp.status === 404) {
+                        // Tab does not exist in DB; remove from local state.
+                        chat.tabs = chat.tabs.filter(tb => tb.id !== tabToSave.id);
+                    } else {
+                        console.error('persist tab error:', resp.status);
+                    }
+                }
+            } catch (e) {
+                console.error('persist tab error:', e);
+            }
+        }, CHAT_TABS_PERSIST_DEBOUNCE_MS);
+    }
+    chat._persistTab(t);
+}
+
+function debounce(fn, ms) {
+    let timer = null;
+    return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), ms);
+    };
 }
 
 export function purgeOldTrash() {
@@ -315,37 +572,33 @@ export function markChatTabsDirty() {
 }
 
 export async function persistChatTabs() {
-    if (!chat.tabsDirty) return;
-    try {
-        const tabsToSave = chat.tabs.map(normalizeTabForSave);
-        const totalMessages = tabsToSave.reduce((sum, t) => sum + (t.messages?.length || 0), 0);
-        if (totalMessages === 0 && tabsToSave.length > 0) {
-            return;
-        }
-        const response = await fetch('/api/chat/tabs', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(tabsToSave),
-        });
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-        chat.tabsDirty = false;
-    } catch (e) {
-        console.error('persistChatTabs error:', e);
-        throw e;
-    }
+    // No longer used — individual tab persistence via scheduleChatPersist(tab)
+    // Kept for backward compatibility but does nothing.
+}
+
+export function persistTabOrder() {
+    const ids = chat.tabs.map(t => t.id);
+    fetch('/api/chat/tabs/order', {
+        method: 'PATCH',
+        headers: window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tab_order: ids }),
+    }).catch(e => console.error('persistTabOrder error:', e));
 }
 
 export function flushChatPersist() {
     clearTimeout(chat.persistTimer);
     clearInterval(chat.periodicSaveTimer);
     if (chat.tabs && chat.tabs.length) {
-        fetch('/api/chat/tabs', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(chat.tabs.map(normalizeTabForSave)),
-            keepalive: true,
+        chat.tabs.forEach(tab => {
+            const normalized = normalizeTabForSave(tab);
+            fetch(`/api/chat/tabs/${tab.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(normalized),
+                keepalive: true,
+            }).catch(() => {});
         });
     }
 }
@@ -398,10 +651,4 @@ export function initChatState() {
     window.addEventListener('beforeunload', flushChatPersist);
     chat.trashPurgeTimer = setInterval(purgeOldTrash, TRASH_PURGE_CHECK_INTERVAL_MS);
     purgeOldTrash();
-    // Periodic save to prevent data loss on force-kill
-    chat.periodicSaveTimer = setInterval(() => {
-        if (chat.tabsDirty) {
-            persistChatTabs();
-        }
-    }, CHAT_TABS_PERIODIC_SAVE_MS);
 }

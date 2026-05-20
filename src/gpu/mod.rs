@@ -10,13 +10,21 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GpuMetrics {
+    #[serde(default)]
     pub temp: f32,
+    #[serde(default)]
     pub load: u32,
+    #[serde(default)]
     pub power_consumption: f32,
+    #[serde(default)]
     pub power_limit: u32,
+    #[serde(default)]
     pub vram_used: u64,
+    #[serde(default)]
     pub vram_total: u64,
+    #[serde(default)]
     pub sclk_mhz: u32,
+    #[serde(default)]
     pub mclk_mhz: u32,
 }
 

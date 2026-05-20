@@ -1,4 +1,5 @@
 use futures_util::{SinkExt, StreamExt};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use warp::Filter;
 use warp::ws::{Message, Ws};
@@ -8,6 +9,9 @@ use crate::state::AppState;
 const WS_PUSH_INTERVAL_DEFAULT_MS: u64 = 500;
 const WS_PUSH_INTERVAL_MIN_MS: u64 = 200;
 const WS_PUSH_INTERVAL_MAX_MS: u64 = 10000;
+const MAX_WS_CONNECTIONS: usize = 50;
+
+static WS_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 
 fn clamped_push_interval_ms(settings: &crate::state::UiSettings) -> u64 {
     let val = settings.ws_push_interval_ms;
@@ -19,8 +23,19 @@ pub fn ws_route(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     let ws_state = state;
     warp::path("ws").and(warp::ws()).map(move |ws: Ws| {
+        // Limit concurrent WebSocket connections.
+        let current = WS_CONNECTIONS.fetch_add(1, Ordering::Relaxed);
+        if current >= MAX_WS_CONNECTIONS {
+            WS_CONNECTIONS.fetch_sub(1, Ordering::Relaxed);
+            let reply: Box<dyn warp::reply::Reply> = Box::new(warp::reply::with_status(
+                warp::reply::json(&serde_json::json!({ "error": "too many connections" })),
+                warp::http::StatusCode::TOO_MANY_REQUESTS,
+            ));
+            return reply;
+        }
+
         let state = ws_state.clone();
-        ws.on_upgrade(move |socket| {
+        let upgrade = ws.on_upgrade(move |socket| {
             let state = state.clone();
             async move {
                 let (mut ws_tx, mut ws_rx) = socket.split();
@@ -131,7 +146,10 @@ pub fn ws_route(
 
                 while let Some(_msg) = ws_rx.next().await {}
                 update_task.abort();
+                WS_CONNECTIONS.fetch_sub(1, Ordering::Relaxed);
             }
-        })
+        });
+
+        Box::new(upgrade)
     })
 }

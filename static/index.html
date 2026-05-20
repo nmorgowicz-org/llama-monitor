@@ -18,20 +18,50 @@
     <link rel="stylesheet" href="/css/agent-modal.css">
     <link rel="stylesheet" href="/css/cards-hardware.css">
     <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/modal-premium.css">
     <link rel="stylesheet" href="/css/chat.css">
     <link rel="stylesheet" href="/css/chat-guided-generation.css">
+    <link rel="stylesheet" href="/css/auth.css">
     <link rel="stylesheet" href="/css/setup-view.css">
     <link rel="stylesheet" href="/css/settings-modal.css">
     <link rel="stylesheet" href="/css/logs.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
-<script>window.DOMPurify = window.DOMPurify || {};</script>
+<script src="/js/config/dompurify-init.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/atom-one-dark.min.css">
     <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
-    <script>const APP_VERSION = '{{ VERSION }}'; const APP_PLATFORM = '{{ PLATFORM }}';</script>
+    <script nonce="{{ NONCE }}">const APP_VERSION = '{{ VERSION }}'; const APP_PLATFORM = '{{ PLATFORM }}';</script>
 </head>
 <body>
+      <div class="auth-shell hidden" id="auth-shell" aria-hidden="true">
+        <div class="auth-shell-backdrop"></div>
+        <div class="auth-shell-card">
+            <div class="auth-shell-brand">
+                <span class="auth-shell-eyebrow">Secure Access</span>
+                <h1 class="auth-shell-title">Sign in to Llama Monitor</h1>
+                <p class="auth-shell-subtitle" id="auth-shell-subtitle">Enter your credentials to unlock protected routes.</p>
+            </div>
+            <div class="auth-shell-badges" id="auth-shell-badges"></div>
+            <form class="auth-shell-form" id="auth-shell-form">
+                <label class="auth-shell-field">
+                    <span>Username</span>
+                    <input type="text" id="auth-username" autocomplete="username" required>
+                </label>
+                <label class="auth-shell-field">
+                    <span>Password</span>
+                    <input type="password" id="auth-password" autocomplete="current-password" required>
+                </label>
+                <button class="auth-shell-submit" id="auth-submit" type="submit">Sign In</button>
+                <p class="auth-shell-error" id="auth-shell-error" role="alert"></p>
+            </form>
+            <div class="auth-shell-footer">
+                <div class="auth-shell-note" id="auth-shell-note"></div>
+                <div class="auth-shell-recovery" id="auth-shell-recovery"></div>
+                <div class="auth-shell-meta">Local-first dashboard access with optional extra protection.</div>
+            </div>
+        </div>
+      </div>
       <!-- Shared SVG filters for sparkline visualizations -->
       <svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
         <defs>
@@ -150,14 +180,6 @@
             <span class="sidebar-label">Logs</span>
             <span class="sidebar-badge" id="sidebar-badge-logs"></span>
         </button>
-        <button class="sidebar-btn" data-tab="sessions" id="sidebar-btn-sessions" title="Sessions">
-            <span class="sidebar-icon">📂</span>
-            <span class="sidebar-label">Sessions</span>
-        </button>
-        <button class="sidebar-btn" data-tab="models" id="sidebar-btn-models" title="Models">
-            <span class="sidebar-icon">🤖</span>
-            <span class="sidebar-label">Models</span>
-        </button>
         <button class="sidebar-btn" data-tab="settings" id="sidebar-btn-settings" title="Settings">
             <span class="sidebar-icon">⚙️</span>
             <span class="sidebar-label">Settings</span>
@@ -166,6 +188,7 @@
             <span class="sidebar-collapse-icon">◀</span>
         </button>
         <span class="nav-version" id="app-version"></span>
+        <div class="sidebar-resize-handle" id="sidebar-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize sidebar"></div>
     </div>
 
     <main class="content-area">
@@ -615,25 +638,39 @@
         <!-- Page: Chat -->
         <div class="page chat-page" id="page-chat">
 
-            <!-- Tab bar -->
-            <div class="chat-tab-bar" id="chat-tab-bar">
-                <button class="chat-tab-add" id="chat-tab-add-btn" title="New chat tab">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                        <path d="M12 5v14M5 12h14"/>
-                    </svg>
-                </button>
-                <div class="chat-tab-trash-wrapper" id="chat-tab-trash-wrapper">
-                    <button class="chat-tab-trash-btn" id="chat-tab-trash-btn" title="Recently deleted tabs">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
-                            <path d="M15 12l-3 3-3-3"/>
-                            <path d="M12 15v-4"/>
+            <aside class="chat-sessions-panel" id="chat-sessions-panel" aria-label="Conversations">
+                <div class="csp-collapsed-strip" id="csp-collapsed-strip" title="Conversations">
+                    <div class="csp-collapsed-expand" id="csp-collapsed-expand" title="Show conversations">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <path d="M9 18l6-6-6-6"/>
+                        </svg>
+                    </div>
+                    <span class="csp-collapsed-label" id="csp-collapsed-label"></span>
+                </div>
+                <div class="csp-header">
+                    <span class="csp-title">Conversations</span>
+                    <button class="csp-collapse-btn" id="csp-collapse-btn" title="Collapse">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                            <path d="M15 18l-6-6 6-6"/>
                         </svg>
                     </button>
                 </div>
-            </div>
-            <div class="chat-tab-trash-dropdown" id="chat-tab-trash-dropdown">
-            </div>
+                <div class="csp-actions">
+                    <button class="csp-new-btn" id="csp-new-btn">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+                        New Chat
+                    </button>
+                </div>
+                <div class="csp-search-wrap">
+                    <input class="csp-search" id="csp-search" type="search"
+                           placeholder="Filter chat titles…" autocomplete="off">
+                </div>
+                <div class="csp-management-row" id="csp-management-row"></div>
+                <div class="csp-list" id="csp-list"></div>
+                <div class="csp-trash-strip hidden" id="csp-trash-strip"></div>
+            </aside>
+
+            <div class="chat-main-area" id="chat-main-area">
 
             <!-- Chat header -->
             <div class="chat-header" id="chat-header">
@@ -718,29 +755,45 @@
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M12 5v14M5 12h14"/></svg>
                         </button>
                     </div>
+                    <button class="chat-header-hide-btn" id="chat-header-hide-btn" type="button" aria-label="Hide this chat from normal view" title="Hide this chat">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                            <line x1="1" y1="1" x2="23" y2="23"/>
+                        </svg>
+                    </button>
                     <div class="chat-header-dropdown">
-                    <button class="chat-header-btn" id="chat-export-btn" title="Save conversation as file">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
-                        </svg>
-                        <span class="chat-header-label">Export</span>
-                    </button>
-                    <div id="chat-export-menu" class="chat-export-menu hidden">
-                        <button data-export-format="md">Save as Markdown</button>
-                        <button data-export-format="json">Save as JSON</button>
+                        <button class="chat-header-btn" id="chat-file-btn" title="File actions — save or import conversation">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                                <line x1="12" y1="18" x2="12" y2="12"/>
+                                <line x1="9" y1="15" x2="15" y2="15"/>
+                            </svg>
+                            <span class="chat-header-label">File</span>
+                        </button>
+                        <div id="chat-file-menu" class="chat-export-menu hidden">
+                            <button data-export-format="md">Save as Markdown</button>
+                            <button data-export-format="json">Save as JSON</button>
+                            <button id="chat-file-import-item">Import conversation</button>
+                        </div>
                     </div>
-                </div>
-                      <button class="chat-header-btn" id="chat-import-btn" title="Import conversation from file">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-                        </svg>
-                        <span class="chat-header-label">Import</span>
-                    </button>
                     <button class="chat-header-btn" id="chat-persona-btn" title="Personas & Templates">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <circle cx="12" cy="8" r="7"/><path d="M2 21h20M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/>
                         </svg>
                         <span class="chat-header-label">Persona</span>
+                    </button>
+                    <button id="chat-focus-mode-btn"
+                            class="chat-header-btn"
+                            title="Focus Mode (⌘⇧F)"
+                            aria-pressed="false"
+                            aria-label="Toggle Focus Mode">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor"
+                             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 5V1h4M9 1h4v4M13 9v4H9M5 13H1V9"/>
+                        </svg>
+                        <span class="chat-header-label">Focus</span>
                     </button>
                     <div id="chat-persona-menu" class="chat-persona-menu hidden">
                         <div class="chat-persona-menu-header">
@@ -1138,12 +1191,28 @@
             <!-- Input area -->
              <div class="chat-input-row" id="chat-input-row">
                <div class="chat-controls">
-                       <button class="btn-chat-control" id="btn-debug-prompt" title="Prompt debug info">
-                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                               <path d="M16 18l6-6-6-6M8 6l-6 6 6 6"/>
-                           </svg>
-                       </button>
-                   </div>
+                       <div class="chat-controls-dropdown">
+                           <button class="btn-chat-control" id="btn-debug-dropdown" title="Tools">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M9 4H6a2 2 0 00-2 2v12a2 2 0 002 2h3"/>
+                                    <path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3"/>
+                                    <line x1="10" y1="10" x2="14" y2="10"/>
+                                    <line x1="10" y1="14" x2="14" y2="14"/>
+                                </svg>
+                                <svg class="dropdown-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                            </button>
+                           <div class="chat-controls-menu" id="debug-dropdown-menu">
+                               <button class="chat-controls-menu-item" id="btn-debug-prompt" data-action="prompt-debug">
+                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                   Prompt Debug
+                               </button>
+                               <button class="chat-controls-menu-item" id="btn-db-admin" data-action="db-admin">
+                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                                   Database Admin
+                               </button>
+                           </div>
+                       </div>
+                  </div>
                      <div class="chat-textarea-wrap">
                       <textarea id="chat-input" rows="1" placeholder="Send a message…"></textarea>
                       <span class="chat-char-count" id="chat-char-count" title="Approximate token count (chars ÷ 4)"></span>
@@ -1316,6 +1385,7 @@
                      </svg>
                  </button>
              </div>
+            </div>
         </div>
 
         <!-- Page: Logs -->
@@ -1639,10 +1709,13 @@
                               Agent URL
                               <input type="text" id="set-remote-agent-url" placeholder="http://127.0.0.1:7779">
                           </label>
-                          <label class="modal-field" style="flex:1;" title="Optional bearer token used when polling the remote agent.">
-                              Agent Token
-                              <input type="text" id="set-remote-agent-token" placeholder="optional">
-                          </label>
+                         <label class="modal-field" style="flex:1;" title="Optional bearer token used when polling the remote agent.">
+                               Agent Token
+                               <div class="secret-input-wrap">
+                                   <input type="password" id="set-remote-agent-token" placeholder="optional">
+                                   <button type="button" class="secret-toggle" aria-label="Show/hide token">👁</button>
+                               </div>
+                           </label>
                       </div>
                       <div class="modal-row" style="gap:12px;">
                            <label class="modal-field checkbox-field" style="flex:1;">
@@ -1839,21 +1912,24 @@
 
 <!-- File Browser Modal (z-index above all modals) -->
 <div class="modal-overlay" id="file-browser-modal" style="z-index:1200;">
-    <div class="modal" style="width:560px;">
+    <div class="modal file-browser-modal" style="width:560px;">
         <div class="modal-header">
-            <h2>Browse</h2>
+            <h2 id="fb-title">Browse Files</h2>
             <button type="button" class="modal-close" id="filebrowser-close" aria-label="Close">&times;</button>
         </div>
         <div class="file-browser-bar">
-            <button class="btn-sm btn-preset" id="filebrowser-up" title="Parent directory">&uarr; Up</button>
+            <button class="btn-sm btn-preset" id="filebrowser-up" title="Parent folder">&uarr; Up</button>
             <input type="text" id="fb-path-input" class="fb-path-input" placeholder="Enter path and press Enter">
         </div>
         <div class="modal-body" style="padding:0;">
+            <div class="file-browser-hint">
+                Only allowed directories are accessible.
+            </div>
             <div id="fb-entries" class="fb-entries"></div>
         </div>
         <div class="modal-buttons">
             <button type="button" class="btn btn-modal-cancel" id="filebrowser-cancel">Cancel</button>
-            <button type="button" class="btn btn-modal-save" id="filebrowser-select">Select This Folder</button>
+            <button type="button" class="btn btn-modal-save" id="filebrowser-select">Select</button>
         </div>
     </div>
 </div>
@@ -2190,6 +2266,10 @@
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                     Performance
                 </button>
+                <button class="settings-tab" data-tab="security">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    Security
+                </button>
                 <button class="settings-tab" data-tab="advanced">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4"/><path d="M12 19v4"/><path d="M4.22 4.22l2.83 2.83"/><path d="M16.95 16.95l2.83 2.83"/><path d="M1 12h4"/><path d="M19 12h4"/><path d="M4.22 19.78l2.83-2.83"/><path d="M16.95 7.05l2.83-2.83"/></svg>
                     Advanced
@@ -2198,251 +2278,623 @@
             <div class="settings-content">
                 <div class="settings-pane active" id="settings-session">
                     <h3>Session Settings</h3>
-                    <label class="modal-field">
-                        Default Spawn Mode
-                        <select id="settings-default-spawn-mode">
-                            <option value="spawn">Spawn New Server</option>
-                            <option value="attach">Attach to Existing</option>
-                        </select>
-                    </label>
-                    <label class="modal-field">
-                        Default Server Endpoint
-                        <input type="text" id="settings-default-server-endpoint" value="http://127.0.0.1:8001">
-                    </label>
-                    <label class="modal-field">
-                        Auto-start on Launch
-                        <div style="display:flex;align-items:center;gap:12px;">
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="settings-auto-start" checked>
-                                <span class="toggle-slider"></span>
-                            </label>
-                            <span class="toggle-label">Automatically start server when launching</span>
-                        </div>
-                    </label>
+                    <div class="settings-card">
+                        <label class="modal-field">
+                            Default Spawn Mode
+                            <select id="settings-default-spawn-mode">
+                                <option value="spawn">Spawn New Server</option>
+                                <option value="attach">Attach to Existing</option>
+                            </select>
+                        </label>
+                        <label class="modal-field">
+                            Default Server Endpoint
+                            <input type="text" id="settings-default-server-endpoint" value="http://127.0.0.1:8001">
+                        </label>
+                        <label class="modal-field">
+                            Auto-start on Launch
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="settings-auto-start" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <span class="toggle-label">Automatically start server when launching</span>
+                            </div>
+                        </label>
+                    </div>
                 </div>
                 <div class="settings-pane" id="settings-gpu">
                     <h3>GPU Configuration</h3>
-                    <label class="modal-field">
-                        Default GPU Layers
-                        <input type="number" id="settings-default-gpu-layers" value="99">
-                    </label>
-                    <label class="modal-field">
-                        GPU Memory Target
-                        <input type="number" id="settings-gpu-memory-target" placeholder="GB">
-                    </label>
+                    <div class="settings-card">
+                        <label class="modal-field">
+                            Default GPU Layers
+                            <input type="number" id="settings-default-gpu-layers" value="99">
+                        </label>
+                        <label class="modal-field">
+                            GPU Memory Target
+                            <input type="number" id="settings-gpu-memory-target" placeholder="GB">
+                        </label>
+                    </div>
                 </div>
                 <div class="settings-pane" id="settings-models">
                     <h3>Model Settings</h3>
-                    <label class="modal-field">
-                        Default Model Path
-                        <input type="text" id="settings-default-model-path" placeholder="/path/to/model.gguf">
-                    </label>
-                    <label class="modal-field">
-                        Default Context Size
-                        <input type="number" id="settings-default-context-size" value="128000">
-                    </label>
-                    <label class="modal-field">
-                        Enable Quantization
-                        <div style="display:flex;align-items:center;gap:12px;">
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="settings-enable-quantization" checked>
-                                <span class="toggle-slider"></span>
-                            </label>
-                            <span class="toggle-label">Use quantized models by default</span>
-                        </div>
-                    </label>
-                </div>
-                <div class="settings-pane" id="settings-appearance">
-                     <h3>Appearance</h3>
-                     <label class="modal-field">
-                         Theme
-                         <select id="settings-theme">
-                             <option value="auto">Auto (System)</option>
-                             <option value="light">Light</option>
-                             <option value="dark">Dark</option>
-                         </select>
-                     </label>
-                     <label class="modal-field">
-                         Font Size
-                         <select id="settings-font-size">
-                             <option value="small">Small (14px)</option>
-                             <option value="medium" selected>Medium (16px)</option>
-                             <option value="large">Large (18px)</option>
-                         </select>
-                     </label>
-                     <label class="modal-field">
-                         Dashboard Widgets
-                         <div class="modal-row">
-                             <label class="chk"><input type="checkbox" id="settings-widget-cpu" checked> CPU Usage</label>
-                             <label class="chk"><input type="checkbox" id="settings-widget-gpu" checked> GPU Usage</label>
-                             <label class="chk"><input type="checkbox" id="settings-widget-memory" checked> Memory</label>
-                         </div>
-                     </label>
-                 </div>
-                 <div class="settings-pane" id="settings-chat">
-                     <h3>Guided Generation</h3>
-                     <p class="settings-help">
-                        Tools to help with creative writing, roleplay, and structured conversations.
-                     </p>
-                     <label class="modal-field">
-                         Context Notes Sidebar
-                         <div style="display:flex;align-items:center;gap:12px;">
-                             <label class="toggle-switch">
-                                 <input type="checkbox" id="settings-enabled-context-notes" checked>
-                                 <span class="toggle-slider"></span>
-                             </label>
-                             <span class="toggle-label">Enable persistent context notes (character, setting, plot details)</span>
-                         </div>
-                     </label>
-                     <label class="modal-field">
-                         AI Suggestions
-                         <div style="display:flex;align-items:center;gap:12px;">
-                             <label class="toggle-switch">
-                                 <input type="checkbox" id="settings-enabled-suggestions" checked>
-                                 <span class="toggle-slider"></span>
-                             </label>
-                             <span class="toggle-label">Enable AI-powered suggestion dropdown</span>
-                         </div>
-                     </label>
-                     <label class="modal-field">
-                         Quick Guide
-                         <div style="display:flex;align-items:center;gap:12px;">
-                             <label class="toggle-switch">
-                                 <input type="checkbox" id="settings-enabled-quick-guide" checked>
-                                 <span class="toggle-slider"></span>
-                             </label>
-                             <span class="toggle-label">Enable one-time instruction input</span>
-                         </div>
-                     </label>
-                     <label class="modal-field">
-                          Default Sidebar Width
-                          <input type="range" id="settings-sidebar-width" min="200" max="500" value="280" style="width:200px;">
-                          <span id="settings-sidebar-width-value" style="color:var(--text-muted);font-size:12px;">280px</span>
-                      </label>
-                      <hr style="border:none;border-top:1px solid var(--border-color);margin:16px 0;">
-                      <h4 style="margin:0 0 12px 0;">Suggestion Settings</h4>
-                      <label class="modal-field">
-                          Suggestion Count
-                          <div style="display:flex;align-items:center;gap:12px;">
-                              <input type="range" id="settings-suggestion-count" min="3" max="8" value="5" style="width:150px;">
-                              <span id="settings-suggestion-count-value" style="color:var(--text-muted);font-size:12px;min-width:20px;text-align:center;">5</span>
-                          </div>
-                      </label>
-                      <label class="modal-field">
-                          Context Depth
-                          <div style="display:flex;align-items:center;gap:12px;">
-                              <input type="range" id="settings-context-depth" min="5" max="20" value="10" style="width:150px;">
-                              <span id="settings-context-depth-value" style="color:var(--text-muted);font-size:12px;min-width:24px;text-align:center;">10</span>
-                          </div>
-                      </label>
-                      <label class="modal-field">
-                          General Prompt
-                          <textarea id="settings-prompt-general" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                      </label>
-                      <label class="modal-field">
-                          Plot Twist Prompt
-                          <textarea id="settings-prompt-plot-twist" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                      </label>
-                      <label class="modal-field">
-                           New Character Prompt
-                           <textarea id="settings-prompt-new-character" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                       </label>
-                       <label class="modal-field">
-                           Context Prompt
-                           <textarea id="settings-prompt-context" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                       </label>
-                       <label class="modal-field">
-                           Director Prompt
-                           <textarea id="settings-prompt-director" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                       </label>
-                       <label class="modal-field">
-                           Explicit Prompt
-                           <textarea id="settings-prompt-explicit" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                       </label>
-                       <label class="modal-field">
-                           Action Prompt
-                           <textarea id="settings-prompt-action" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                       </label>
-                       <label class="modal-field">
-                           Comedy Prompt
-                           <textarea id="settings-prompt-comedy" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                       </label>
-                       <label class="modal-field">
-                           Fantasy Prompt
-                           <textarea id="settings-prompt-fantasy" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                       </label>
-                       <label class="modal-field">
-                           Horror Prompt
-                           <textarea id="settings-prompt-horror" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                       </label>
-                       <label class="modal-field">
-                           Mystery Prompt
-                           <textarea id="settings-prompt-mystery" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                       </label>
-                       <label class="modal-field">
-                           Noir Prompt
-                           <textarea id="settings-prompt-noir" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                       </label>
-                       <label class="modal-field">
-                           Romance Prompt
-                           <textarea id="settings-prompt-romance" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                       </label>
-                       <label class="modal-field">
-                           Sci-Fi Prompt
-                           <textarea id="settings-prompt-sci-fi" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                       </label>
-                       <label class="modal-field">
-                           Thriller Prompt
-                           <textarea id="settings-prompt-thriller" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                       </label>
-                       <button type="button" id="settings-reset-prompts" class="btn btn-secondary" style="margin-top:8px;font-size:12px;padding:6px 12px;">Reset Prompts to Defaults</button>
-                  </div>
-                 <div class="settings-pane" id="settings-performance">
-                    <h3>Performance &amp; Connection</h3>
-                    <p class="settings-help">
-                        Control how frequently the dashboard refreshes metrics. Lower intervals give smoother real-time updates but use more bandwidth and battery. On slow or metered connections, a higher interval reduces network usage.
-                    </p>
-                    <label class="modal-field">
-                        Dashboard Refresh Rate
-                        <select id="settings-ws-push-interval">
-                            <option value="auto">Auto — Adjusts to your connection speed</option>
-                            <option value="500">Normal (500ms) — Smooth real-time updates</option>
-                            <option value="1000">Balanced (1s) — Good for most connections</option>
-                            <option value="2000">Battery Saver (2s) — 75% less bandwidth</option>
-                            <option value="5000">Slow Connection (5s) — Minimum updates</option>
-                        </select>
-                    </label>
-                    <div id="network-status-indicator" class="network-status-indicator" style="display:none;">
-                        <span class="network-status-icon" id="network-status-icon"></span>
-                        <span class="network-status-text" id="network-status-text"></span>
+                    <div class="settings-card">
+                        <label class="modal-field">
+                            Default Model Path
+                            <input type="text" id="settings-default-model-path" placeholder="/path/to/model.gguf">
+                        </label>
+                        <label class="modal-field">
+                            Default Context Size
+                            <input type="number" id="settings-default-context-size" value="128000">
+                        </label>
+                        <label class="modal-field">
+                            Enable Quantization
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="settings-enable-quantization" checked>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <span class="toggle-label">Use quantized models by default</span>
+                            </div>
+                        </label>
                     </div>
                 </div>
-                <div class="settings-pane" id="settings-advanced">
+              <div class="settings-pane" id="settings-appearance">
+                      <h3>Appearance</h3>
+                      <div class="settings-card">
+                          <label class="modal-field">
+                              Theme
+                              <select id="settings-theme">
+                                  <option value="auto">Auto (System)</option>
+                                  <option value="light">Light</option>
+                                  <option value="dark">Dark</option>
+                              </select>
+                          </label>
+                          <label class="modal-field">
+                              Font Size
+                              <select id="settings-font-size">
+                                  <option value="small">Small (14px)</option>
+                                  <option value="medium" selected>Medium (16px)</option>
+                                  <option value="large">Large (18px)</option>
+                              </select>
+                          </label>
+                          <label class="modal-field">
+                              Dashboard Widgets
+                              <div class="modal-row">
+                                  <label class="chk"><input type="checkbox" id="settings-widget-cpu" checked> CPU Usage</label>
+                                  <label class="chk"><input type="checkbox" id="settings-widget-gpu" checked> GPU Usage</label>
+                                  <label class="chk"><input type="checkbox" id="settings-widget-memory" checked> Memory</label>
+                              </div>
+                          </label>
+                      </div>
+                  </div>
+                  <div class="settings-pane" id="settings-chat">
+                      <h3>Guided Generation</h3>
+                      <p class="settings-help">
+                         Tools to help with creative writing, roleplay, and structured conversations.
+                      </p>
+                      <div class="settings-card">
+                          <label class="modal-field">
+                              Context Notes Sidebar
+                              <div style="display:flex;align-items:center;gap:12px;">
+                                  <label class="toggle-switch">
+                                      <input type="checkbox" id="settings-enabled-context-notes" checked>
+                                      <span class="toggle-slider"></span>
+                                  </label>
+                                  <span class="toggle-label">Enable persistent context notes (character, setting, plot details)</span>
+                              </div>
+                          </label>
+                          <label class="modal-field">
+                              AI Suggestions
+                              <div style="display:flex;align-items:center;gap:12px;">
+                                  <label class="toggle-switch">
+                                      <input type="checkbox" id="settings-enabled-suggestions" checked>
+                                      <span class="toggle-slider"></span>
+                                  </label>
+                                  <span class="toggle-label">Enable AI-powered suggestion dropdown</span>
+                              </div>
+                          </label>
+                          <label class="modal-field">
+                              Quick Guide
+                              <div style="display:flex;align-items:center;gap:12px;">
+                                  <label class="toggle-switch">
+                                      <input type="checkbox" id="settings-enabled-quick-guide" checked>
+                                      <span class="toggle-slider"></span>
+                                  </label>
+                                  <span class="toggle-label">Enable one-time instruction input</span>
+                              </div>
+                          </label>
+                          <label class="modal-field">
+                               Default Sidebar Width
+                               <input type="range" id="settings-sidebar-width" min="200" max="500" value="280" style="width:200px;">
+                               <span id="settings-sidebar-width-value" style="color:var(--text-muted);font-size:12px;">280px</span>
+                           </label>
+                      </div>
+                      <div class="settings-card" style="margin-top:14px;">
+                          <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                              Suggestion Settings
+                          </div>
+                          <label class="modal-field">
+                              Suggestion Count
+                              <div style="display:flex;align-items:center;gap:12px;">
+                                  <input type="range" id="settings-suggestion-count" min="3" max="8" value="5" style="width:150px;">
+                                  <span id="settings-suggestion-count-value" style="color:var(--text-muted);font-size:12px;min-width:20px;text-align:center;">5</span>
+                              </div>
+                          </label>
+                          <label class="modal-field">
+                              Context Depth
+                              <div style="display:flex;align-items:center;gap:12px;">
+                                  <input type="range" id="settings-context-depth" min="5" max="20" value="10" style="width:150px;">
+                                  <span id="settings-context-depth-value" style="color:var(--text-muted);font-size:12px;min-width:24px;text-align:center;">10</span>
+                              </div>
+                          </label>
+                      </div>
+                      <div class="settings-card" style="margin-top:14px;">
+                          <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                              Prompt Templates
+                          </div>
+                          <label class="modal-field">
+                              General Prompt
+                              <textarea id="settings-prompt-general" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                          </label>
+                          <label class="modal-field">
+                              Plot Twist Prompt
+                              <textarea id="settings-prompt-plot-twist" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                          </label>
+                          <label class="modal-field">
+                               New Character Prompt
+                               <textarea id="settings-prompt-new-character" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                           </label>
+                           <label class="modal-field">
+                               Context Prompt
+                               <textarea id="settings-prompt-context" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                           </label>
+                           <label class="modal-field">
+                               Director Prompt
+                               <textarea id="settings-prompt-director" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                           </label>
+                           <label class="modal-field">
+                               Explicit Prompt
+                               <textarea id="settings-prompt-explicit" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                           </label>
+                           <label class="modal-field">
+                               Action Prompt
+                               <textarea id="settings-prompt-action" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                           </label>
+                           <label class="modal-field">
+                               Comedy Prompt
+                               <textarea id="settings-prompt-comedy" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                           </label>
+                           <label class="modal-field">
+                               Fantasy Prompt
+                               <textarea id="settings-prompt-fantasy" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                           </label>
+                           <label class="modal-field">
+                               Horror Prompt
+                               <textarea id="settings-prompt-horror" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                           </label>
+                           <label class="modal-field">
+                               Mystery Prompt
+                               <textarea id="settings-prompt-mystery" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                           </label>
+                           <label class="modal-field">
+                               Noir Prompt
+                               <textarea id="settings-prompt-noir" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                           </label>
+                           <label class="modal-field">
+                               Romance Prompt
+                               <textarea id="settings-prompt-romance" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                           </label>
+                           <label class="modal-field">
+                               Sci-Fi Prompt
+                               <textarea id="settings-prompt-sci-fi" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                           </label>
+                           <label class="modal-field">
+                               Thriller Prompt
+                               <textarea id="settings-prompt-thriller" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
+                           </label>
+                           <button type="button" id="settings-reset-prompts" class="btn btn-secondary" style="margin-top:8px;font-size:12px;padding:6px 12px;">Reset Prompts to Defaults</button>
+                      </div>
+                   </div>
+                 <div class="settings-pane" id="settings-performance">
+                    <h3>Performance &amp; Connection</h3>
+                    <div class="settings-card">
+                        <p class="settings-help">
+                            Control how frequently the dashboard refreshes metrics. Lower intervals give smoother real-time updates but use more bandwidth and battery. On slow or metered connections, a higher interval reduces network usage.
+                        </p>
+                        <label class="modal-field">
+                            Dashboard Refresh Rate
+                            <select id="settings-ws-push-interval">
+                                <option value="auto">Auto — Adjusts to your connection speed</option>
+                                <option value="500">Normal (500ms) — Smooth real-time updates</option>
+                                <option value="1000">Balanced (1s) — Good for most connections</option>
+                                <option value="2000">Battery Saver (2s) — 75% less bandwidth</option>
+                                <option value="5000">Slow Connection (5s) — Minimum updates</option>
+                            </select>
+                        </label>
+                        <div id="network-status-indicator" class="network-status-indicator" style="display:none;">
+                            <span class="network-status-icon" id="network-status-icon"></span>
+                            <span class="network-status-text" id="network-status-text"></span>
+                        </div>
+                    </div>
+                </div>
+                  <div class="settings-pane" id="settings-advanced">
                     <h3>Advanced Settings</h3>
-                    <div class="modal-section">
-                        <h3>Runtime Configuration</h3>
+                    <div class="widget-card" style="padding:14px;margin-bottom:16px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            Runtime Configuration
+                        </div>
                         <p class="settings-help">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                            Configure server executable paths, working directories, GPU environment settings, and remote agent connections. Use the <strong>Agent</strong> button in the header for guided remote agent setup via SSH.
+                            Configure server executable paths, working directories, and GPU environment settings.
                         </p>
                         <button type="button" class="btn btn-secondary" id="settings-open-config-btn">Open Runtime Configuration</button>
                     </div>
-                    <label class="modal-field">
-                        Server Binary Path
-                        <input type="text" id="settings-server-binary-path" value="/usr/local/bin/llama-server">
-                    </label>
-                    <label class="modal-field">
-                        Log Level
-                        <select id="settings-log-level">
-                            <option value="info">Info</option>
-                            <option value="warning">Warning</option>
-                            <option value="error">Error</option>
-                        </select>
-                    </label>
-                    <label class="modal-field">
-                        Data Directory
-                        <input type="text" id="settings-data-directory" value="~/.config/llama-monitor">
-                    </label>
+                    <div class="settings-card">
+                        <label class="modal-field">
+                            Server Binary Path
+                            <input type="text" id="settings-server-binary-path" value="/usr/local/bin/llama-server">
+                        </label>
+                        <label class="modal-field">
+                            Log Level
+                            <select id="settings-log-level">
+                                <option value="info">Info</option>
+                                <option value="warning">Warning</option>
+                                <option value="error">Error</option>
+                            </select>
+                        </label>
+                        <label class="modal-field">
+                            Data Directory
+                            <input type="text" id="settings-data-directory" value="~/.config/llama-monitor">
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Security & Certificates -->
+                <div class="settings-pane" id="settings-security">
+                    <h3>Security &amp; Certificates</h3>
+                    <p class="settings-help">
+                        Manage TLS encryption for the web UI. Changes require a restart to take effect.
+                    </p>
+
+                    <!-- TLS Status -->
+                    <div id="tab-certificates" class="tls-status-card" style="margin-bottom:14px;padding:10px 11px;border-radius:12px;border:1px solid rgba(255,255,255,0.07);background:linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01));box-shadow:0 8px 24px rgba(0,0,0,0.22),inset 0 1px 0 rgba(255,255,255,0.04);">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                            <strong>TLS Status</strong>
+                        </div>
+                        <div id="tls-status-text" style="color:var(--text-muted);font-size:13px;margin-bottom:2px;">
+                            Checking...
+                        </div>
+                        <div id="tls-details" style="font-size:12px;color:var(--text-muted);margin-bottom:6px;"></div>
+                    </div>
+
+                    <!-- LAN Warning -->
+                    <div id="tls-lan-warning" class="settings-warning" style="display:none;margin-bottom:14px;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,165,0,0.45);background:radial-gradient(circle at top,rgba(255,165,0,0.14),rgba(255,165,0,0.04));box-shadow:0 10px 28px rgba(255,165,0,0.14),inset 0 1px 0 rgba(255,255,255,0.08);font-size:12px;color:var(--accent-orange);">
+                        <strong>Warning:</strong> Listening on all interfaces (0.0.0.0) without TLS.
+                        Anyone on your network can access the UI in cleartext.
+                    </div>
+
+                    <!-- Certificates card -->
+                    <div class="widget-card" style="padding:14px;margin-bottom:16px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            Certificates
+                        </div>
+
+                        <!-- Mode selector pills -->
+                        <div id="cert-mode-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+                            <button type="button" class="cert-mode-pill" data-mode="none" style="border-radius:999px;padding:5px 10px;font-size:11px;border:1px solid rgba(255,255,255,0.08);background:linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01));color:var(--color-text-secondary);cursor:pointer;transition:all 160ms ease;">
+                                No HTTPS
+                            </button>
+                            <button type="button" class="cert-mode-pill" data-mode="self-signed" style="border-radius:999px;padding:5px 10px;font-size:11px;border:1px solid rgba(255,255,255,0.08);background:linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01));color:var(--color-text-secondary);cursor:pointer;transition:all 160ms ease;">
+                                Self-Signed
+                            </button>
+                            <button type="button" class="cert-mode-pill" data-mode="custom" style="border-radius:999px;padding:5px 10px;font-size:11px;border:1px solid rgba(255,255,255,0.08);background:linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01));color:var(--color-text-secondary);cursor:pointer;transition:all 160ms ease;">
+                                Bring Your Own Key
+                            </button>
+                            <button type="button" class="cert-mode-pill" data-mode="acme" style="border-radius:999px;padding:5px 10px;font-size:11px;border:1px solid rgba(255,255,255,0.08);background:linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01));color:var(--color-text-secondary);cursor:pointer;transition:all 160ms ease;">
+                                Let's Encrypt (ACME)
+                            </button>
+                        </div>
+
+                        <!-- No HTTPS -->
+                        <div id="cert-mode-none" class="cert-mode-content" style="display:none;">
+                            <p class="settings-help">
+                                Running without TLS. Recommended only for local use (127.0.0.1).
+                            </p>
+                            <button type="button" class="btn btn-secondary" id="btn-disable-tls">Disable TLS</button>
+                        </div>
+
+                        <!-- Self-Signed -->
+                        <div id="cert-mode-self-signed" class="cert-mode-content" style="display:none;">
+                            <p class="settings-help">
+                                Use a self-signed certificate for local/internal use. Browser will show a warning unless you trust the certificate.
+                            </p>
+                            <button type="button" class="btn btn-secondary" id="btn-generate-self-signed">Generate self-signed certificate</button>
+                        </div>
+
+                        <!-- Bring Your Own Key -->
+                        <div id="cert-mode-custom" class="cert-mode-content" style="display:none;">
+                            <p class="settings-help">
+                                Use a certificate managed externally (e.g., Traefik, internal CA, or another ACME client).
+                            </p>
+                            <label class="modal-field">
+                                Certificate file path
+                                <input type="text" id="tls-custom-cert-path" placeholder="/path/to/cert.pem">
+                            </label>
+                            <label class="modal-field">
+                                Key file path
+                                <input type="text" id="tls-custom-key-path" placeholder="/path/to/key.pem">
+                            </label>
+                            <button type="button" class="btn btn-secondary" id="btn-apply-custom-cert">Apply</button>
+                        </div>
+
+                        <!-- Let's Encrypt (ACME) -->
+                        <div id="cert-mode-acme" class="cert-mode-content" style="display:none;">
+                            <p class="settings-help">
+                                Use Staging first to test your DNS/API setup without hitting rate limits.
+                            </p>
+
+                            <label class="modal-field">
+                                Domain (FQDN)
+                                <input type="text" id="acme-fqdn" placeholder="llama-monitor.example.com">
+                            </label>
+
+                            <label class="modal-field">
+                                Contact email
+                                <input type="email" id="acme-email" placeholder="you@example.com">
+                            </label>
+                            <p class="settings-help">Used by Let&rsquo;s Encrypt for expiry warnings. Optional but recommended.</p>
+
+                            <label class="modal-field">
+                                DNS provider
+                                <select id="acme-dns-provider">
+                                    <option value="cloudflare">Cloudflare</option>
+                                    <option value="route53">Amazon Route 53</option>
+                                    <option value="gcloud">Google Cloud DNS</option>
+                                    <option value="digitalocean">DigitalOcean</option>
+                                    <option value="namecheap">Namecheap</option>
+                                    <option value="porkbun">Porkbun</option>
+                                    <option value="godaddy">GoDaddy</option>
+                                    <option value="azure-dns">Azure DNS</option>
+                                    <option value="hetzner">Hetzner</option>
+                                    <option value="ovh">OVH</option>
+                                    <option value="dnsmadeeasy">DNS Made Easy</option>
+                                    <option value="powerdns">PowerDNS</option>
+                                    <option value="duckdns">Duck DNS</option>
+                                    <option value="inwx">INWX</option>
+                                    <option value="__other__">Other (type provider name)</option>
+                                </select>
+                            </label>
+
+                            <label class="modal-field" id="acme-provider-custom-wrap" style="display:none;">
+                                Provider name
+                                <input type="text" id="acme-dns-provider-custom" placeholder="e.g. proxmox, linode, etc.">
+                            </label>
+
+                            <div style="margin-bottom:8px;">
+                                <span style="font-size:12px;color:var(--text-muted);">Environment</span>
+                                <div style="display:flex;gap:16px;margin-top:4px;">
+                                    <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;">
+                                        <input type="radio" name="acme-env" id="acme-env-staging" value="staging" checked>
+                                        Staging (test)
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;">
+                                        <input type="radio" name="acme-env" id="acme-env-production" value="production">
+                                        Production (real)
+                                    </label>
+                                </div>
+                            </div>
+
+                            <label class="modal-field">
+                                Validation delay (seconds)
+                                <input type="number" id="acme-validation-delay" value="300" min="60" max="1800" step="10">
+                            </label>
+                            <p class="settings-help">Time to wait for DNS propagation before validation.</p>
+
+                            <!-- Provider credentials (key/value) -->
+                            <div id="acme-credentials-section" style="margin-top:6px;padding-top:8px;border-top:1px solid var(--border-subtle);">
+                                <p style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">
+                                    DNS provider credentials
+                                </p>
+                                <p class="settings-help" style="margin-bottom:2px;">
+                                    Enter your DNS provider's API credentials as key/value pairs.
+                                    Example for Cloudflare: CLOUDFLARE_API_TOKEN / your-token.
+                                </p>
+                                <p class="settings-help" style="margin-bottom:6px;">
+                                    For environment variable names, see the
+                                    <a href="https://go-acme.github.io/lego/dns/" target="_blank" rel="noopener noreferrer" style="color:var(--color-primary-light);text-decoration:underline;">lego DNS provider docs</a>.
+                                </p>
+
+                                <div id="acme-credentials-grid" style="display:grid;grid-template-columns:1fr 1fr auto;gap:4px;font-size:12px;">
+                                    <div style="color:var(--text-muted);">Key</div>
+                                    <div style="color:var(--text-muted);">Value</div>
+                                    <div></div>
+                                </div>
+
+                                <button type="button" id="acme-add-credential" class="btn-sm" style="margin-top:6px;font-size:11px;">+ Add field</button>
+                            </div>
+
+                            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+                                <button type="button" class="btn btn-primary" id="acme-request-cert">Request certificate</button>
+                                <button type="button" class="btn btn-secondary" id="acme-renew-cert">Renew now</button>
+                            </div>
+
+                            <div id="acme-status-text" style="font-size:12px;color:var(--text-muted);margin-top:6px;"></div>
+                        </div>
+                    </div>
+
+                    <div class="widget-card" style="padding:14px;margin-bottom:16px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            Dashboard Access
+                        </div>
+                        <p class="settings-help" style="margin-bottom:8px;">
+                            Control whether the dashboard uses no auth, HTTP Basic Auth, the in-app sign-in form, or both. Stored passwords are hashed locally and the auth config file is owner-only.
+                        </p>
+                        <div id="dashboard-auth-status" style="font-size:12px;color:var(--color-text-muted);margin-bottom:10px;">Checking dashboard access…</div>
+
+                        <div id="dashboard-auth-managed-warning" class="settings-warning" style="display:none;margin-bottom:12px;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,165,0,0.35);background:radial-gradient(circle at top,rgba(255,165,0,0.12),rgba(255,165,0,0.04));font-size:12px;color:var(--accent-orange);">
+                            This instance is using startup auth flags. Remove <code>--basic-auth</code> or <code>--form-auth</code> to manage dashboard access here.
+                        </div>
+
+                        <div id="dashboard-auth-controls">
+                            <div id="dashboard-auth-mode-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+                                <button type="button" class="cert-mode-pill" data-auth-mode="none">No Auth</button>
+                                <button type="button" class="cert-mode-pill" data-auth-mode="form">Form Login</button>
+                                <button type="button" class="cert-mode-pill" data-auth-mode="basic">Basic Auth</button>
+                                <button type="button" class="cert-mode-pill" data-auth-mode="both">Both</button>
+                            </div>
+
+                            <label class="modal-field">
+                                Username
+                                <input type="text" id="dashboard-auth-username" autocomplete="username" placeholder="admin">
+                            </label>
+
+                            <label class="modal-field">
+                                Current password
+                                <input type="password" id="dashboard-auth-current-password" autocomplete="current-password" placeholder="Needed only when replacing an existing password">
+                            </label>
+
+                            <label class="modal-field">
+                                New password
+                                <input type="password" id="dashboard-auth-new-password" autocomplete="new-password" placeholder="At least 8 characters">
+                            </label>
+
+                            <label class="modal-field">
+                                Confirm new password
+                                <input type="password" id="dashboard-auth-confirm-password" autocomplete="new-password" placeholder="Re-enter the new password">
+                            </label>
+
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                <button type="button" class="btn btn-secondary" id="btn-save-dashboard-auth">
+                                    Save Dashboard Access
+                                </button>
+                                <span id="dashboard-auth-save-status" style="font-size:11px;color:var(--color-text-muted);"></span>
+                            </div>
+                        </div>
+
+                        <div style="margin-top:10px;font-size:12px;color:var(--color-text-muted);line-height:1.5;">
+                            Forgot the password? Run <code>llama-monitor --clear-auth-config</code> on this machine, restart, and then set a new password here.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Agent Token Rotation -->
+                <div class="settings-section">
+                    <div class="widget-card" style="padding:14px;margin-bottom:16px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            Agent Token
+                        </div>
+                        <p class="settings-help" style="margin-bottom:8px;">
+                            Rotate the remote agent token used for authenticated communication. This invalidates the previous token immediately.
+                        </p>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <button type="button" class="btn btn-secondary" id="btn-rotate-agent-token">
+                                Rotate Agent Token
+                            </button>
+                            <span id="rotate-agent-token-status" style="font-size:11px;color:var(--color-text-muted);"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- API Token Rotation -->
+                <div class="settings-section">
+                    <div class="widget-card" style="padding:14px;margin-bottom:16px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            API Token
+                        </div>
+                        <p class="settings-help" style="margin-bottom:8px;">
+                            Rotate the API token used by the web UI and protected endpoints. This may briefly disrupt active browser sessions.
+                        </p>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <button type="button" class="btn btn-secondary" id="btn-rotate-api-token">
+                                Rotate API Token
+                            </button>
+                            <span id="rotate-api-token-status" style="font-size:11px;color:var(--color-text-muted);"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DB Admin Token Rotation -->
+                <div class="settings-section">
+                    <div class="widget-card" style="padding:14px;margin-bottom:16px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            DB Admin Token
+                        </div>
+                        <p class="settings-help" style="margin-bottom:8px;">
+                            Rotate the DB admin token used for advanced database operations. This invalidates the previous token immediately.
+                        </p>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <button type="button" class="btn btn-secondary" id="btn-rotate-db-admin-token">
+                                Rotate DB Admin Token
+                            </button>
+                            <span id="rotate-db-admin-token-status" style="font-size:11px;color:var(--color-text-muted);"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Database Administration -->
+                <div class="settings-section">
+                    <div class="widget-card db-admin-card" style="padding:14px;margin-bottom:16px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            Database Administration
+                        </div>
+
+                        <div class="db-admin-panel" id="db-admin-panel">
+                            <div class="db-admin-header">
+                                <div class="db-admin-title">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                                    <span>Chat Database</span>
+                                </div>
+                                <div class="db-admin-status" id="db-admin-status">
+                                    <span class="status-dot"></span>
+                                    <span class="status-text">Checking...</span>
+                                </div>
+                            </div>
+
+                            <div class="db-admin-stats" id="db-admin-stats">
+                                <div class="db-stat">
+                                    <span class="db-stat-label">Conversations</span>
+                                    <span class="db-stat-value" id="db-stat-tabs">-</span>
+                                </div>
+                                <div class="db-stat">
+                                    <span class="db-stat-label">Messages</span>
+                                    <span class="db-stat-value" id="db-stat-messages">-</span>
+                                </div>
+                                <div class="db-stat">
+                                    <span class="db-stat-label">Database Size</span>
+                                    <span class="db-stat-value" id="db-stat-size">-</span>
+                                </div>
+                                <div class="db-stat">
+                                    <span class="db-stat-label">FTS Index</span>
+                                    <span class="db-stat-value" id="db-stat-fts">-</span>
+                                </div>
+                            </div>
+
+                            <div class="db-admin-actions">
+                                <button type="button" class="btn btn-secondary db-admin-btn" id="db-btn-backup" title="Create database backup">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                    Backup Now
+                                </button>
+                                <button type="button" class="btn btn-secondary db-admin-btn" id="db-btn-check" title="Run integrity check">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                    Verify
+                                </button>
+                                <button type="button" class="btn btn-secondary db-admin-btn" id="db-btn-maintenance" title="Run maintenance">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                                    Maintain
+                                </button>
+                                <button type="button" class="btn btn-secondary db-admin-btn" id="db-btn-query" title="Run SQL query">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                                    Query
+                                </button>
+                            </div>
+
+                            <div class="db-admin-log" id="db-admin-log">
+                                <div class="db-log-header">Activity Log</div>
+                                <div class="db-log-content" id="db-log-content"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -3007,6 +3459,217 @@
     </div>
 </div>
 
+    <!-- Database Administration Modal -->
+<div class="modal-overlay debug-modal-overlay" id="db-admin-modal" style="z-index:1400;">
+    <div class="modal debug-modal db-admin-modal">
+        <div class="modal-header debug-modal-header">
+            <h3>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px; opacity: 0.8;"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                Database Administration
+            </h3>
+            <button class="modal-close-btn" id="db-admin-modal-close" title="Close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <div class="modal-body debug-modal-body db-admin-body">
+            <!-- Status Header -->
+            <div class="db-admin-status-bar" id="db-admin-status-bar">
+                <div class="db-status-indicator">
+                    <span class="db-status-dot" id="db-status-dot"></span>
+                    <span class="db-status-text" id="db-status-text">Checking...</span>
+                </div>
+                <div class="db-status-actions">
+                    <button type="button" class="db-status-btn" id="db-btn-refresh" title="Refresh status">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="db-stats-grid" id="db-stats-grid">
+                <div class="db-stat-card">
+                    <div class="db-stat-card-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                    </div>
+                    <div class="db-stat-card-content">
+                        <div class="db-stat-card-value" id="db-stat-tabs">-</div>
+                        <div class="db-stat-card-label">Conversations</div>
+                    </div>
+                </div>
+                <div class="db-stat-card">
+                    <div class="db-stat-card-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    </div>
+                    <div class="db-stat-card-content">
+                        <div class="db-stat-card-value" id="db-stat-messages">-</div>
+                        <div class="db-stat-card-label">Messages</div>
+                    </div>
+                </div>
+                <div class="db-stat-card">
+                    <div class="db-stat-card-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+                    </div>
+                    <div class="db-stat-card-content">
+                        <div class="db-stat-card-value" id="db-stat-size">-</div>
+                        <div class="db-stat-card-label">Database Size</div>
+                    </div>
+                </div>
+                <div class="db-stat-card">
+                    <div class="db-stat-card-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                    </div>
+                    <div class="db-stat-card-content">
+                        <div class="db-stat-card-value" id="db-stat-fts">-</div>
+                        <div class="db-stat-card-label">FTS Index</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="db-admin-tabs" role="tablist">
+                <button type="button" class="db-tab active" data-tab="maintenance" role="tab">Maintenance</button>
+                <button type="button" class="db-tab" data-tab="backups" role="tab">Backups</button>
+                <button type="button" class="db-tab" data-tab="indexes" role="tab">Indexes</button>
+                <button type="button" class="db-tab" data-tab="repair" role="tab">Repair</button>
+                <button type="button" class="db-tab" data-tab="query" role="tab">Query</button>
+            </div>
+
+            <!-- Tab Content -->
+            <div class="db-admin-tab-content">
+                <!-- Maintenance Tab -->
+                <div class="db-tab-panel active" data-panel="maintenance">
+                    <div class="db-action-group">
+                        <h4>Quick Actions</h4>
+                        <div class="db-action-row">
+                            <button type="button" class="db-action-btn primary" id="db-btn-backup">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                                Backup Now
+                            </button>
+                            <button type="button" class="db-action-btn" id="db-btn-check">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                Verify Integrity
+                            </button>
+                            <button type="button" class="db-action-btn" id="db-btn-checkpoint">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                Checkpoint WAL
+                            </button>
+                        </div>
+                    </div>
+                    <div class="db-action-group">
+                        <h4>Optimization</h4>
+                        <div class="db-action-row">
+                            <button type="button" class="db-action-btn" id="db-btn-vacuum">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+                                Vacuum
+                            </button>
+                            <button type="button" class="db-action-btn" id="db-btn-rebuild-fts">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+                                Rebuild FTS
+                            </button>
+                            <button type="button" class="db-action-btn" id="db-btn-analyze">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.21 15.89A10 10 0 118 2.83"/><path d="M22 12A10 10 0 0012 2v10z"/></svg>
+                                Analyze
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Backups Tab -->
+                <div class="db-tab-panel" data-panel="backups">
+                    <div class="db-backups-header">
+                        <h4>Backup Files</h4>
+                        <div class="db-backups-info" id="db-backups-info">
+                            <span id="db-backup-count">-</span> backups &middot; <span id="db-backup-total-size">-</span> total
+                        </div>
+                    </div>
+                    <div class="db-backups-list" id="db-backups-list">
+                        <div class="db-empty-state" id="db-backups-empty">
+                            <p>Loading backups...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Indexes Tab -->
+                <div class="db-tab-panel" data-panel="indexes">
+                    <div class="db-indexes-header">
+                        <h4>Database Indexes</h4>
+                        <button type="button" class="db-action-btn small" id="db-btn-rebuild-all-indexes">
+                            Rebuild All
+                        </button>
+                    </div>
+                    <div class="db-indexes-list" id="db-indexes-list">
+                        <div class="db-empty-state">
+                            <p>Loading indexes...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Repair Tab -->
+                <div class="db-tab-panel" data-panel="repair">
+                    <div class="db-repair-intro">
+                        <h4>Database Repair</h4>
+                        <p>Common fixes for SQLite issues. Most repairs create an automatic backup first.</p>
+                    </div>
+                    <div class="db-repair-list">
+                        <div class="db-repair-item">
+                            <div class="db-repair-info">
+                                <div class="db-repair-name">Recover Corrupted Indexes</div>
+                                <div class="db-repair-desc">Drop and recreate all indexes. Fixes "database disk image is malformed" errors.</div>
+                            </div>
+                            <button type="button" class="db-action-btn warning" id="db-btn-repair-indexes">Repair</button>
+                        </div>
+                        <div class="db-repair-item">
+                            <div class="db-repair-info">
+                                <div class="db-repair-name">Compact Database</div>
+                                <div class="db-repair-desc">Vacuum and rebuild to reclaim space from deleted data.</div>
+                            </div>
+                            <button type="button" class="db-action-btn" id="db-btn-repair-compact">Compact</button>
+                        </div>
+                        <div class="db-repair-item">
+                            <div class="db-repair-info">
+                                <div class="db-repair-name">Emergency Recovery</div>
+                                <div class="db-repair-desc">Use SQLite's recovery mode to extract data from a corrupted database.</div>
+                            </div>
+                            <button type="button" class="db-action-btn danger" id="db-btn-repair-emergency">Recover</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Query Tab -->
+                <div class="db-tab-panel" data-panel="query">
+                    <div class="db-query-intro">
+                        <h4>SQL Query Console</h4>
+                        <p>Execute read-only queries (SELECT, PRAGMA). Write operations are blocked for safety.</p>
+                    </div>
+                    <div class="db-query-form">
+                        <textarea id="db-query-input" rows="3" placeholder="SELECT COUNT(*) FROM messages"></textarea>
+                        <div class="db-query-actions">
+                            <button type="button" class="db-action-btn primary" id="db-btn-run-query">Run Query</button>
+                            <button type="button" class="db-action-btn" id="db-btn-clear-query">Clear</button>
+                        </div>
+                    </div>
+                    <div class="db-query-result" id="db-query-result" hidden>
+                        <div class="db-query-result-header">
+                            <span>Result</span>
+                            <button type="button" class="db-action-btn small" id="db-btn-copy-result">Copy</button>
+                        </div>
+                        <pre id="db-query-output"></pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Activity Log -->
+            <div class="db-admin-log" id="db-admin-log">
+                <div class="db-log-header">
+                    <span>Activity Log</span>
+                    <button type="button" class="db-action-btn small" id="db-btn-clear-log">Clear</button>
+                </div>
+                <div class="db-log-content" id="db-log-content"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
     <script type="module" src="/js/bootstrap.js?v={{ VERSION }}"></script>
 <!-- Release Notes Panel -->
 <div id="release-notes-overlay" class="modal-overlay" style="z-index:1399;"></div>
@@ -3025,6 +3688,10 @@
             <button type="button" class="btn-sm btn-preset" id="release-notes-dismiss">Later</button>
         </div>
     </div>
+</div>
+
+<div id="focus-mode-exit-beacon" role="button" tabindex="-1" aria-label="Exit Focus Mode">
+    <div id="focus-mode-exit-pill">Focus Mode — click to exit &nbsp;×</div>
 </div>
 
 </body>

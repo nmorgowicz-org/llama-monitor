@@ -1,4 +1,13 @@
 /* llama-monitor — layout
+ * CSS variables for sidebar widths — updated by JS on drag-resize.
+ * Do not hard-code sidebar pixel values elsewhere; use these vars instead.
+ */
+:root {
+  --sidebar-width-expanded: 208px;
+  --sidebar-width-collapsed: 68px;
+}
+
+/* llama-monitor — layout
  * CONTAINS: .endpoint-health-strip, .strip-left/.strip-right,
  *           .endpoint-mode, .endpoint-status, .endpoint-url, .endpoint-url-container,
  *           .agent-status, .status-dot, .status-text,
@@ -691,12 +700,13 @@
   display: flex;
   flex-direction: column;
   gap: var(--gap-xs);
-  width: 208px;
+  width: var(--sidebar-width-expanded);
   padding: 20px 14px;
   overflow-y: auto;
+  background-color: rgb(14, 18, 24);
   background:
-    linear-gradient(180deg, rgba(20, 23, 29, 0.96), rgba(14, 18, 24, 0.98)),
-    rgba(22, 25, 30, 0.9);
+    linear-gradient(180deg, rgb(20, 23, 29), rgb(14, 18, 24)),
+    rgb(22, 25, 30);
   border-right: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.03);
   transition: width 250ms cubic-bezier(0.16, 1, 0.3, 1), padding 250ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -708,7 +718,7 @@
 }
 
 .sidebar-nav.collapsed {
-  width: 68px;
+  width: var(--sidebar-width-collapsed);
   padding: 20px 6px;
 }
 
@@ -877,14 +887,14 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  margin-left: 208px;
-  width: calc(100% - 208px);
+  margin-left: var(--sidebar-width-expanded);
+  width: calc(100% - var(--sidebar-width-expanded));
   transition: margin-left 250ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 body.sidebar-collapsed .content-area {
-  margin-left: 68px;
-  width: calc(100% - 68px);
+  margin-left: var(--sidebar-width-collapsed);
+  width: calc(100% - var(--sidebar-width-collapsed));
 }
 
 .page {
@@ -897,6 +907,52 @@ body.sidebar-collapsed .content-area {
 
 .page.active {
   display: flex;
+}
+
+#page-chat {
+  flex-direction: row;
+  position: relative;
+}
+
+.chat-main-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-sessions-panel {
+  position: relative;
+  z-index: 90;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  background: var(--surface-card-base);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  transition: width 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.chat-sessions-panel.visible {
+  width: 240px;
+  min-width: 240px;
+}
+
+.chat-sessions-panel.visible.collapsed {
+  width: 24px;
+  min-width: 24px;
+}
+
+[data-theme="light"] .chat-sessions-panel {
+  background: var(--surface-card-elevated);
+  border-right-color: rgba(0, 0, 0, 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-sessions-panel { transition: none; }
 }
 
 /* ── Version Display ──────────────────────────────────────────────────────── */
@@ -1205,4 +1261,146 @@ body.sidebar-collapsed .content-area {
 
 [data-theme="light"] .slide-panel::after {
   opacity: 0.35;
+}
+
+/* ==========================================================================
+   Sidebar Drag-Resize Handle
+   #sidebar-resize-handle — thin hit target on right edge of .sidebar-nav.
+   Dragged by initSidebarResize() in nav.js; writes --sidebar-width-expanded.
+   ========================================================================== */
+
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 90;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-nav.is-resizing .sidebar-resize-handle {
+  background: rgba(167, 139, 250, 0.35);
+}
+
+.sidebar-nav.collapsed .sidebar-resize-handle {
+  display: none;
+}
+
+/* ==========================================================================
+   Width Density Classes
+   Applied to body by chat-width-observer.js based on .chat-main-area width.
+   Density rules for toolbar compaction live in chat.css.
+   ========================================================================== */
+
+/* body.shell-width-comfortable  — default, no class needed */
+/* body.shell-width-tight        — moderate compaction */
+/* body.shell-width-very-tight   — heavy compaction */
+
+/* ==========================================================================
+   Chat Focus Mode
+   Toggled by chat-focus-mode.js via body.chat-focus-mode.
+   ========================================================================== */
+
+.endpoint-health-strip,
+.top-nav-bar {
+  max-height: 200px;
+  overflow: hidden;
+  opacity: 1;
+  transition: max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.22s ease;
+}
+
+body.chat-focus-mode .endpoint-health-strip,
+body.chat-focus-mode .top-nav-bar {
+  max-height: 0;
+  min-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-top-width: 0;
+  border-bottom-width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+body.chat-focus-mode .sidebar-nav {
+  width: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+body.chat-focus-mode .content-area {
+  margin-left: 0 !important;
+  width: 100% !important;
+}
+
+body.chat-focus-mode .chat-tab-bar {
+  display: none;
+}
+
+/* Exit beacon — invisible thin strip at top of viewport */
+#focus-mode-exit-beacon {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  z-index: 9999;
+  cursor: pointer;
+  background: transparent;
+  pointer-events: none;
+}
+
+body.chat-focus-mode #focus-mode-exit-beacon {
+  display: block;
+  pointer-events: all;
+}
+
+/* Exit pill — slides down from top on beacon hover */
+#focus-mode-exit-pill {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%) translateY(-100%);
+  background: var(--surface-card, rgba(30, 30, 40, 0.92));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-subtle, rgba(255,255,255,0.1));
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  padding: 6px 16px 8px;
+  font-size: 12px;
+  color: var(--text-secondary, rgba(255,255,255,0.6));
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  z-index: 10000;
+  opacity: 0;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+              opacity 0.18s ease;
+  pointer-events: none;
+  user-select: none;
+}
+
+#focus-mode-exit-beacon:hover #focus-mode-exit-pill,
+#focus-mode-exit-pill:hover {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  pointer-events: all;
+}
+
+/* Focus mode button active state lives in chat.css */
+
+@media (prefers-reduced-motion: reduce) {
+  .endpoint-health-strip,
+  .top-nav-bar,
+  body.chat-focus-mode .sidebar-nav,
+  body.chat-focus-mode .content-area,
+  #focus-mode-exit-pill {
+    transition: none !important;
+  }
 }

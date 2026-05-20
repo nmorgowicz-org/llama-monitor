@@ -10,11 +10,9 @@
     "test:debug": "playwright test --debug",
     "test:report": "playwright show-report",
     "capture:list": "node capture.mjs --list-scenarios",
-    "capture:artifacts": "node capture.mjs --scenario artifacts",
-    "capture:new-features": "node capture.mjs --scenario new-features",
-    "capture:docs": "node capture.mjs --scenario docs",
     "capture:sparkline": "node capture.mjs --scenario sparkline",
-    "capture:gifs": "node capture.mjs --scenario gifs"
+    "capture:gifs": "node capture.mjs --scenario gifs",
+    "update-baseline": "node -e \"import('./update-baseline.mjs').then(m => m.default())\""
   },
   "devDependencies": {
     "@playwright/test": "^1.40.0"

@@ -1,0 +1,73 @@
+#!/usr/bin/env node
+// run-server.mjs — cross-platform replacement for run-server.sh.
+// Creates a fresh temp config dir, starts the llama-monitor binary, and
+// cleans up on exit. Works on Linux, macOS, and Windows.
+
+import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(__dirname, '..', '..');
+
+const testConfigDir = mkdtempSync(join(tmpdir(), 'llama-monitor-test-'));
+const configPathFile = join(tmpdir(), 'llama-monitor-test-config-path');
+
+console.log(`[run-server] Fresh config dir: ${testConfigDir}`);
+
+try {
+    writeFileSync(configPathFile, testConfigDir, 'utf8');
+} catch {
+    // Non-critical — used only by manual debugging scripts
+}
+
+function cleanup() {
+    try { rmSync(testConfigDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    try { rmSync(configPathFile, { force: true }); } catch { /* ignore */ }
+}
+
+const extraArgs = (process.env.LLAMA_MONITOR_TEST_ARGS || '').split(/\s+/).filter(Boolean);
+
+const cargoArgs = [
+    'run',
+    '--',
+    '--headless',
+    '--port', '7778',
+    '--config-dir', testConfigDir,
+    ...extraArgs,
+];
+
+const child = spawn('cargo', cargoArgs, {
+    cwd: repoRoot,
+    stdio: 'inherit',
+    // On Windows, spawn needs shell:false but cargo must be on PATH — which it is
+    // after a standard rustup install. No shell:true needed.
+});
+
+child.on('error', err => {
+    console.error(`[run-server] Failed to start cargo: ${err.message}`);
+    cleanup();
+    process.exit(1);
+});
+
+child.on('exit', (code, signal) => {
+    cleanup();
+    if (signal) {
+        process.kill(process.pid, signal);
+    } else {
+        process.exit(code ?? 0);
+    }
+});
+
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.on(sig, () => {
+        child.kill(sig);
+    });
+}
+
+// Windows: handle CTRL_C_EVENT
+if (process.platform === 'win32') {
+    process.on('SIGBREAK', () => child.kill('SIGTERM'));
+}

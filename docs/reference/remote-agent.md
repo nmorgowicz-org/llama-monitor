@@ -1,140 +1,289 @@
 # Remote Agent
 
-The remote agent extends Llama Monitor's telemetry to headless machines and remote servers. A lightweight agent process runs on the remote host and reports GPU, system, and inference metrics back to the dashboard.
+The remote agent adds host-level telemetry to remote llama.cpp endpoints. Without it, Llama Monitor can still attach to a remote server and read inference metrics, but GPU, CPU, RAM, and host-health data remain unavailable.
 
-## What the Agent Does
+## What it adds
 
-When you attach to a remote llama.cpp server without an agent, the dashboard only receives inference metrics from the `/metrics` and `/slots` endpoints. The agent adds:
+When a remote agent is installed and reachable, the dashboard can show:
 
-- **GPU metrics** — Temperature, utilization, VRAM, power, clock speeds
-- **System metrics** — CPU load, temperature, RAM, motherboard model
-- **Health reporting** — Agent connectivity status, firewall detection, version info
+- GPU temperature, utilization, VRAM, power, and clocks
+- CPU load, temperature, RAM, and host/platform details
+- Agent reachability, installed version, and update availability
 
-With the agent running, a remote session shows **Full telemetry** (green status pill), identical to a local session.
+This is what upgrades a remote attach session from **Inference only** to **Full telemetry**.
 
-## Architecture
+## Agent states and indicators
 
-```
-Dashboard (your machine)                          Remote Agent (headless server)
-                        ║
-                        ║  HTTP polling (configurable interval)
-                        ║
-        ┌───────────────┘
-        │
-        ▼
-   /metrics     Agent exposes combined metrics endpoint
-   /slots       GPU + system + inference data in Prometheus format
-   /health      Agent health and version info
-```
+When attached to a remote endpoint, the header Agent button and Remote Agent panel reflect several states:
 
-The dashboard polls the agent's HTTP endpoint on a configurable interval. The agent collects data from local tools (`nvidia-smi`, `rocm-smi`, `mactop`, sysinfo) and forwards it.
+- **Connected**:
+  - Agent process is reachable and HTTP health checks succeed.
+  - Shows “Remote Agent” with a connected indicator.
 
-## SSH-Based Management
+- **Firewall blocked**:
+  - Agent process is considered connected (e.g., started via SSH), but the dashboard cannot reach its HTTP endpoint.
+  - Triggered when `remote_agent_connected` is true but `remote_agent_health_reachable` is false.
+  - Header shows “Firewall blocked” with a **Fix** button.
+  - Remote Agent panel shows “Agent Started, HTTP Blocked” with firewall guidance.
 
-The dashboard can manage the agent lifecycle on remote machines over SSH:
+- **Update Available**:
+  - The dashboard compares the agent’s version (from `/info`) against the latest release.
+  - If the running version is older, it sets `remote_agent_update_available`.
+  - Header shows “Update Available” with an **Upgrade** button.
+  - Remote Agent panel shows an “Update available” indicator and an **Upgrade** / **Update Agent** button.
 
-| Action | Description |
-|--------|-------------|
-| **Detect** | Tests SSH connectivity and checks if agent is installed |
-| **Install** | Downloads the correct binary for the remote OS/arch and places it |
-| **Start** | Launches the agent process in the background |
-| **Stop** | Gracefully stops the agent |
-| **Update** | Downloads and replaces the agent binary with the latest version |
-| **Remove** | Uninstalls the agent and cleans up scheduled tasks |
+- **Agent tooltip**:
+  - Hovering the Agent button shows a tooltip with:
+    - Status line (Connected / Not connected / Firewall blocked / Update available).
+    - Running version (e.g., “Running v1.2.3”) if known.
+    - Agent URL if configured.
 
-### SSH Setup Flow
+## Entry points in the UI
 
-1. Open Settings > Advanced > Remote Agent
-2. Enter SSH target (`user@host`) and optionally a custom command
-3. Scan host key to verify server identity (see SSH Host Key Verification below)
-4. Guided setup walks through install, start, and verification with a progress bar
+There are two current ways into remote-agent setup:
 
-### Guided Setup Wizard
+### Header Agent button
 
-The remote agent setup wizard automates the full installation process:
+The **Agent** control in the top header is the fast path for remote telemetry. It is also where the dashboard surfaces status and a **Fix** action when a remote endpoint needs agent attention.
 
-1. **Enter SSH host** — Target `user@host` and port
-2. **Scan host key** — Establishes TCP connection, performs SSH handshake, extracts host key fingerprint
-3. **Trust key** — Persists fingerprint to local trusted host store
-4. **Detect OS/arch** — Identifies remote platform for correct binary download
-5. **Download release** — Fetches matching binary from GitHub releases
-6. **SCP install** — Transfers binary to remote host
-7. **Start agent** — Launches agent process in background
-8. **Verify health** — Confirms agent HTTP endpoint is reachable
+Use it when you want a guided setup flow focused on one remote host.
 
-The wizard shows a scrollable progress log and auto-trusts the host key during install. Agent tokens from detect/start responses are auto-saved.
+### Configuration modal
 
-### Auto-Start
+For manual control, open:
 
-When a remote agent becomes unreachable, the dashboard attempts SSH autostart once. If it fails, a Fix button appears in the header to open the agent menu for manual intervention.
+`Settings → Advanced → Open Runtime Configuration → Remote Agent`
 
-## Windows Support
+This panel exposes the full runtime controls:
 
-On Windows, both the agent and `sensor_bridge.exe` are installed as SYSTEM scheduled tasks:
+- Guided SSH setup
+- Host check
+- Release check
+- Install and start
+- Start, stop, restart, update, and remove
+- Saved agent URL, token, SSH target, optional autostart, and optional custom SSH start command
 
-- Start at boot with no console window
-- Full hardware access for GPU and CPU temperature sensors
-- No user login required
+## mTLS and trust
 
-The SSH user performing the install must be a local administrator.
+- Remote agents communicate with the dashboard over mTLS.
+- The agent loads trust anchors from:
+  - A legacy single CA (ca.pem), if present, and
+  - All .pem files in the cas/ directory (multi-CA support).
+- This allows multiple independent CAs to be trusted across different agents.
+- If no CA is found, the agent refuses to start.
+- Each dashboard instance can place its own CA into cas/ so that agents trust multiple dashboards (e.g., during migration or in multi-instance setups).
 
-## Version Detection
+## Agent tokens
 
-The agent reports its installed version to the dashboard. The dashboard compares against the latest release and shows an "Update available" indicator when a newer version exists. Click the indicator to upgrade in-place.
+- The primary agent token is configured via --agent-token or the UI.
+- The agent also supports multiple allowed tokens via agent-tokens.json:
+  - File: ~/.config/llama-monitor/agent-tokens.json
+  - Format: { "tokens": ["<token1>", "<token2>"] }
+  - Any token in this list is accepted for authenticated agent endpoints.
+- On startup, the primary token is automatically ensured in this file, enabling multi-client setups (for example, multiple dashboards polling the same agent).
 
-## Configuration
+## Protocol and versioning
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--agent` | | Run as a remote metrics agent |
-| `--agent-host` | `127.0.0.1` | Bind address |
-| `--agent-port` | `7779` | HTTP port |
-| `--agent-token` | _(none)_ | Bearer token for authentication |
+- Agent endpoints:
+  - GET /info: returns agent version and protocol_version.
+  - GET /agent/info: same, plus agent_token for verification.
+- The current protocol version is 1.0.0.
+- The dashboard enforces a minimum protocol version when polling the agent.
 
-On the dashboard side:
+## Version mismatch and degraded mode
 
-| Flag | Description |
-|------|-------------|
-| `--remote-agent-url` | Override agent URL for polling |
-| `--remote-agent-token` | Bearer token for agent authentication |
-| `--remote-agent-ssh-autostart` | Enable SSH autostart when unreachable |
-| `--remote-agent-ssh-target` | SSH target for autostart (`user@host`) |
-| `--remote-agent-ssh-command` | Custom remote command to start the agent |
+- On each agent poll, the dashboard:
+  - Reads the agent’s `protocol_version` from `/info`.
+  - Compares it to its enforced minimum (currently 1.0.0).
+- If `protocol_version` is:
+  - Below 1.0.0, or
+  - Missing (older agents that don’t report it),
+  then:
+  - The dashboard keeps the agent marked as connected.
+  - It sets a “protocol too old” flag and logs a warning.
+  - It runs in degraded compatibility mode: partial metrics may be available, advanced features may be limited.
+- If metrics parsing fails after a successful HTTP response:
+  - The dashboard treats this as degraded instead of disconnected,
+    preserving partial telemetry when possible.
 
-## SSH Host Key Verification
+## Current setup flow
 
-Llama Monitor verifies remote server identity before establishing SSH connections, protecting against man-in-the-middle attacks:
+The real setup flow is now explicit and opt-in. Typing an endpoint or SSH target does not trigger SSH activity by itself.
 
-1. **Scan** — Click the scan button to open a TCP connection, perform an SSH handshake, and extract the host key
-2. **Fingerprint** — The key is displayed as colon-separated hex (e.g., `aa:bb:cc:...`)
-3. **Trust** — Click Trust to persist the fingerprint in the local trusted host store (`host:port` keyed)
-4. **Verification** — On subsequent connections, the actual key is compared against the trusted key using constant-time comparison
-5. **Mismatch** — If a trusted key exists but doesn't match, the connection is rejected with "SSH host key changed"
-6. **Untrusted** — If no trusted key exists, the connection is rejected with a prompt to use the guided setup
+### Guided SSH setup
 
-## Firewall Detection
+In the Runtime Configuration panel, click **Guided SSH Setup**.
 
-The dashboard detects when the remote agent is running but its HTTP port is unreachable:
+1. Enter the remote host, username, port, and auth method.
+2. Click **Preview Plan** to review the inferred agent URL, SSH target, auth mode, and expected install path.
+3. Click **Scan Host Key** to fetch the host fingerprint.
+4. Click **Trust Host Key** if the fingerprint is correct.
+5. Click **Use These Settings** to populate the saved SSH target and agent URL.
+6. From the main Remote Agent controls, explicitly choose **Check Host**, **Install & Start**, or **Start Agent**.
 
-- **Detection** — Agent process is connected (SSH tunnel works) but health endpoint on port 7779 is unreachable
-- **UI** — Warning alert: "Firewall Blocking Agent — Agent running but HTTP port 7779 unreachable — check Windows Firewall inbound rules"
-- **Priority** — Firewall warning takes priority over "not connected" status but lower priority than "update available"
+The guide only prepares and validates settings. It does not contact the remote machine until you click one of the action buttons.
+
+### Header setup modal
+
+When the dashboard knows a remote endpoint needs an agent, the header flow opens a dedicated **Set Up Remote Agent** modal. That flow is step-based:
+
+1. Enter the SSH host and port.
+2. Choose authentication.
+3. Scan and trust the host key.
+4. Review the generated agent details.
+5. Install/start the agent and save the resulting URL/token back into settings.
+
+Use this flow when the app prompts you directly from a remote attach session.
+
+## Saved runtime settings
+
+Remote-agent connection details are persisted as runtime configuration, not ordinary UI preferences.
+
+| Setting | Purpose |
+|---------|---------|
+| **Agent URL** | Explicit polling URL for the remote agent; if left blank, the app infers `http://<remote-host>:7779` from the attached endpoint host |
+| **Agent Token** | Optional bearer token required by the agent |
+| **SSH target** | Saved `user@host` target for manual agent actions or optional autostart |
+| **After attach, try SSH start if the agent is unreachable** | Enables one autostart attempt after attaching to a remote endpoint |
+| **Custom SSH start command** | Overrides the built-in OS-specific start command |
+
+## SSH behavior and trust
+
+Host-key verification is required before managed SSH operations.
+
+1. The app scans the host key over SSH.
+2. It shows the host, key type, and fingerprint.
+3. Trusting the key stores it locally for future verification.
+4. If the key changes later, the dashboard rejects the managed SSH operation until you re-scan and trust the new key.
+
+The dedicated SSH backend supports:
+
+- SSH agent / keychain
+- Password for the current operation
+- Private key path, with optional passphrase
+
+## Autostart behavior
+
+If **After attach, try SSH start if the agent is unreachable** is enabled, the dashboard will make one saved SSH start attempt after you attach to a remote endpoint and discover that the agent is unavailable.
+
+This is not global background probing. It only applies after an attach, and only when you have explicitly enabled the setting.
+
+## Platform behavior
+
+### Windows
+
+On Windows, the managed install uses scheduled tasks for both the agent and `sensor_bridge.exe`, allowing startup without an interactive session.
+
+### Linux and macOS
+
+The app chooses an OS-appropriate install/start path and command for the managed agent. The guided plan preview shows the expected install location before you run it.
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| Status pill yellow (Inference only) | Agent not running or unreachable | Start agent on remote host |
-| Status pill orange (Limited) | Agent connected but sensors unavailable | Check GPU tools are installed |
-| Temperature unavailable on Windows | `sensor_bridge.exe` not running | Dashboard shows Fix button to start it |
-| "Firewall blocked" | Agent started but HTTP port blocked | Open agent port in firewall |
-| SSH host key changed | Remote server key differs from trusted key | Re-scan and re-trust the host key |
-| Update available | Installed version behind latest | Click indicator to upgrade |
+| Symptom | Likely cause | Action |
+|---------|--------------|--------|
+| **Inference only** status on a remote session | No agent is running or the agent URL is not reachable | Open the Agent flow or Runtime Configuration and start/install the agent |
+| **Agent Started, HTTP Blocked** warning | The process started, but port `7779` is blocked or bound incorrectly | Open the remote firewall and confirm the agent is listening on `0.0.0.0` when remote access is required |
+| Host-key mismatch | The remote server fingerprint changed | Re-scan the key and verify the host before trusting it again |
+| Start/install buttons complain about missing SSH target | Guided settings were not applied or no target was saved | Run **Guided SSH Setup** and click **Use These Settings** |
+| Agent is reachable but some host metrics are missing | The remote system cannot provide those sensors | Check the underlying platform tools such as `nvidia-smi`, `rocm-smi`, or OS temperature access |
 
-## Benefits
+## Stored secrets and security
 
-- **Full remote visibility** — Same metrics as local, no SSH tunneling needed
-- **Lightweight** — Single binary, no Docker, minimal resource usage
-- **Self-updating** — Version detection and one-click upgrade from the dashboard
-- **Cross-platform** — Linux, macOS, Windows with automatic OS/arch detection
-- **Boot persistence** — Scheduled tasks on Windows, systemd on Linux, launchd on macOS
+Credentials used by the remote agent and internal APIs are encrypted at rest using AES-256-GCM and stored in `~/.config/llama-monitor/`.
+
+Encryption:
+- Llama-monitor:
+  - Uses an encryption key:
+    - From `LLAMA_MONITOR_ENCRYPTION_KEY` if set and ≥16 characters, or
+    - Auto-generated and stored in `encryption-key` in the config directory.
+  - Automatically encrypts:
+    - `remote_agent_token`
+    - `api-token`
+    - `db-admin-token`
+    - ACME `dns_config` values
+- No manual key management is required.
+
+Encrypted values:
+
+- **Agent Token** (`remote_agent_token`):
+  - Used as a bearer token when polling the remote agent.
+  - Encrypted at rest.
+  - Masked in `GET /api/settings`; real value available via `GET /api/settings/full` with `api-token` auth.
+- **SSH password** (`remote_agent_ssh_password`):
+  - Used for the current SSH operation when password auth is selected.
+  - Not persisted long-term; used in-memory for the session.
+- **Private key path** (`remote_agent_ssh_key_path`):
+  - Path reference only; the key file itself is not copied into llama-monitor’s config.
+
+Notes:
+- These values are never logged in full (only “token generated”-style messages).
+- They are not included in generic debug or health responses.
+- For security-conscious setups:
+  - Treat `~/.config/llama-monitor/` as sensitive.
+  - Use file permissions and/or disk encryption where available.
+
+## Endpoint authentication
+
+All `/api/remote-agent/*` endpoints require a bearer token.
+
+- **api-token** (standard operations):
+  - `GET /api/remote-agent/releases/latest`
+  - `POST /api/remote-agent/detect`
+  - `POST /api/remote-agent/ssh/host-key`
+  - `POST /api/remote-agent/ssh/trust`
+  - `POST /api/remote-agent/status`
+  - `POST /api/remote-agent/start`
+  - `POST /api/remote-agent/update`
+  - `POST /api/remote-agent/stop`
+  - `GET /api/remote-agent/tls-status`
+
+- **db-admin-token** (elevated operations):
+  - `POST /api/remote-agent/install`
+  - `POST /api/remote-agent/remove`
+
+Requests must include:
+- Header: `Authorization: Bearer <token>`
+- If missing or invalid, the endpoint returns 401 with an error message.
+
+The frontend automatically includes the appropriate token via `window.authHeaders()` (api-token) or by fetching the db-admin-token for install/remove.
+
+## Remote agent config file
+
+During install, the dashboard writes a `remote-agent-config.json` file next to the agent binary with:
+
+- `api_token`: the dashboard's api-token, used by the agent (or SSH-managed operations) to authenticate to `/api/remote-agent/*` endpoints.
+
+This file is written with restrictive permissions (0600 on Unix/macOS) so only the agent process can read it.
+
+## Tokens and rotation
+
+Three tokens are used by llama-monitor:
+
+- **API Token**:
+  - File: `api-token`
+  - Used to protect sensitive endpoints (attach, DB queries, TLS/ACME, remote-agent endpoints, etc.).
+  - Encrypted at rest.
+- **DB Admin Token**:
+  - File: `db-admin-token`
+  - Used for advanced database operations and restricted queries, plus elevated remote-agent endpoints (install/remove).
+  - Encrypted at rest.
+- **Agent Token**:
+  - Stored in `ui-settings.json` as `remote_agent_token`.
+  - Used to authenticate with the remote agent.
+  - Encrypted at rest.
+
+All three can be rotated from the UI:
+
+- Open `Settings → Security & Certificates`.
+- Use one of:
+  - `Rotate Agent Token`
+  - `Rotate API Token`
+  - `Rotate DB Admin Token`
+- Confirm the prompt. A new token is generated and the previous one is immediately invalid.
+
+After rotating the API Token or DB Admin Token, restart llama-monitor to fully apply the change.
+
+## CLI equivalents
+
+The dashboard-side CLI flags for remote-agent integration are documented in [CLI Flags](cli-flags.md). The agent itself can be launched directly with `--agent`, `--agent-host`, `--agent-port`, and `--agent-token`.

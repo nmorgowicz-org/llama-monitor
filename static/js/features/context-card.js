@@ -246,6 +246,20 @@ function renderGaugeFooter(model) {
     gaugeFooter.textContent = parts.join(' · ');
 }
 
+function abbreviateTokens(n) {
+    if (!Number.isFinite(n)) return '0';
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+    return String(Math.round(n));
+}
+
+function setGaugeSecondary(el, text, isTabName = false) {
+    el.textContent = text;
+    el.title = isTabName ? text : '';
+    const len = text.length;
+    el.style.fontSize = len > 20 ? '0.55rem' : len > 14 ? '0.60rem' : len > 10 ? '0.65rem' : '';
+}
+
 function renderGaugeView(model) {
     const { gaugeValue, gaugeSecondary, gaugeRing } = ensureElements();
     const heroPct = model.mode === 'live-runtime'
@@ -265,17 +279,18 @@ function renderGaugeView(model) {
 
     if (model.mode === 'live-runtime') {
         gaugeValue.textContent = `${Math.round(displayPct)}%`;
-        gaugeSecondary.textContent = `${formatMetricNumber(model.runtimeLiveTokens)} / ${formatMetricNumber(model.capacityTokens)} live`;
+        setGaugeSecondary(gaugeSecondary, `${abbreviateTokens(model.runtimeLiveTokens)} / ${abbreviateTokens(model.capacityTokens)} live`);
     } else if (model.mode === 'chat-derived') {
         gaugeValue.textContent = heroPct != null ? `${Math.round(displayPct)}%` : '—';
-        gaugeSecondary.textContent = model.busiestChat?.name
+        const chatName = model.busiestChat?.name
             ?? `${model.activeChatCount} chat${model.activeChatCount !== 1 ? 's' : ''}`;
+        setGaugeSecondary(gaugeSecondary, chatName, !!model.busiestChat?.name);
     } else if (model.mode === 'capacity-only') {
-        gaugeValue.textContent = formatMetricNumber(model.capacityTokens);
-        gaugeSecondary.textContent = 'Capacity';
+        gaugeValue.textContent = abbreviateTokens(model.capacityTokens);
+        setGaugeSecondary(gaugeSecondary, 'Capacity');
     } else {
         gaugeValue.textContent = '—';
-        gaugeSecondary.textContent = 'Attach to a server or start a chat';
+        setGaugeSecondary(gaugeSecondary, 'Attach to a server or start a chat');
     }
 
     renderChatStrip(model);
@@ -373,7 +388,9 @@ function saveViewPreference() {
             if (!settings) return;
             return fetch('/api/settings', {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ...settings, context_card_view: currentView }),
             });
         })

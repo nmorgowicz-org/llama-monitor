@@ -168,7 +168,9 @@ function onNetworkChange() {
             // Silently update the backend without triggering a full save
             fetch('/api/settings', {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ws_push_interval_ms: newInterval }),
             }).catch(() => {});
         }

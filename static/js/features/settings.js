@@ -5,8 +5,42 @@ import { settingsState } from '../core/app-state.js';
 import { setContextCardViewPreference } from './context-card.js';
 import { renderChatMessages } from './chat-render.js';
 import { getAutoPollingInterval } from './network-detection.js';
+import { showToast } from './toast.js';
 
 const DATE_FORMAT_KEY = 'llama-monitor-date-format';
+
+// ── Secret masking helpers ────────────────────────────────────────────────────
+
+function maskSecret(value) {
+    if (!value || value.length <= 8) {
+        return '•'.repeat(value?.length || 0);
+    }
+    const start = value.slice(0, 4);
+    const end = value.slice(-4);
+    const mid = '•'.repeat(8);
+    return start + mid + end;
+}
+
+function applySecretValue(input, value, showRaw) {
+    if (!input || value == null) return;
+    const v = String(value);
+    input.dataset.fullValue = v;
+    if (showRaw) {
+        input.value = v;
+    } else {
+        input.value = maskSecret(v);
+    }
+}
+
+function getSecretValue(id) {
+    const input = document.getElementById(id);
+    if (!input) return '';
+    const full = input.dataset.fullValue;
+    if (full !== undefined && full !== '') {
+        return full;
+    }
+    return (input.value || '').trim();
+}
 
 // ── Dirty tracking ────────────────────────────────────────────────────────────
 
@@ -50,7 +84,7 @@ export function collectSettings() {
         models_dir: '',
         server_endpoint: endpoint,
         remote_agent_url: document.getElementById('set-remote-agent-url')?.value.trim() || '',
-        remote_agent_token: document.getElementById('set-remote-agent-token')?.value.trim() || '',
+        remote_agent_token: getSecretValue('set-remote-agent-token') || '',
         remote_agent_ssh_autostart: !!document.getElementById('set-remote-agent-ssh-autostart')?.checked,
         remote_agent_ssh_target: document.getElementById('set-remote-agent-ssh-target')?.value.trim() || '',
         remote_agent_ssh_command: document.getElementById('set-remote-agent-ssh-command')?.value.trim() || '',
@@ -111,9 +145,11 @@ export function saveSettings() {
     clearSettingsDirty();
 
     settingsState.saveTimer = setTimeout(() => {
-        fetch('/api/settings', {
+        (window.authFetch || fetch)('/api/settings', {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
             body: JSON.stringify(collectSettings()),
         }).catch(() => {});
     }, 400);
@@ -151,7 +187,7 @@ export function applySettings(s) {
 
     if (s.remote_agent_token !== undefined) {
         const el = document.getElementById('set-remote-agent-token');
-        if (el) el.value = s.remote_agent_token;
+        if (el) applySecretValue(el, s.remote_agent_token, false);
     }
 
     if (s.remote_agent_ssh_autostart !== undefined) {
@@ -248,7 +284,9 @@ function applyWsIntervalLive() {
     // Send just the interval change to the backend
     fetch('/api/settings', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ws_push_interval_ms: interval }),
     }).catch(() => {});
 }
@@ -327,6 +365,29 @@ function _bindSettingsEvents() {
             document.querySelectorAll('.settings-pane').forEach(p => p.classList.remove('active'));
             tab.classList.add('active');
             document.getElementById('settings-' + target)?.classList.add('active');
+
+            // Load TLS config when Security tab is opened
+            if (target === 'security') {
+                loadTlsConfig();
+                loadDashboardAuthConfig();
+            }
+        });
+    });
+
+    // Certificate mode pills
+    document.querySelectorAll('.cert-mode-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+            const mode = pill.dataset.mode;
+            if (!mode) return;
+            setActiveCertMode(mode);
+        });
+    });
+
+    document.querySelectorAll('#dashboard-auth-mode-pills .cert-mode-pill').forEach(pill => {
+        pill.addEventListener('click', () => {
+            const mode = pill.dataset.authMode;
+            if (!mode) return;
+            setActiveDashboardAuthMode(mode);
         });
     });
 
@@ -355,6 +416,26 @@ function _bindSettingsEvents() {
         if (valueEl) valueEl.textContent = String(e.target.value);
     });
 
+    // Secret show/hide toggles
+    document.querySelectorAll('.secret-toggle').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const wrap = btn.parentElement;
+            const input = wrap.querySelector('input');
+            if (!input) return;
+            const full = input.dataset.fullValue;
+            if (!full) return;
+
+            const isShowing = btn.dataset.showing === 'true';
+            if (isShowing) {
+                input.value = maskSecret(full);
+                btn.dataset.showing = 'false';
+            } else {
+                input.value = full;
+                btn.dataset.showing = 'true';
+            }
+        });
+    });
+
     // Reset prompts to defaults
     document.getElementById('settings-reset-prompts')?.addEventListener('click', () => {
         const defaults = {
@@ -372,16 +453,761 @@ function _bindSettingsEvents() {
     });
 }
 
+// ── TLS / Certificates ────────────────────────────────────────────────────────
+
+function setActiveCertMode(mode) {
+    const pills = document.querySelectorAll('.cert-mode-pill');
+    const panes = document.querySelectorAll('.cert-mode-content');
+
+    pills.forEach(p => {
+        const m = p.dataset.mode;
+        if (m === mode) {
+            p.classList.add('active');
+        } else {
+            p.classList.remove('active');
+        }
+    });
+
+    panes.forEach(p => {
+        const id = p.id;
+        const show = id === 'cert-mode-' + mode;
+        p.style.display = show ? 'block' : 'none';
+    });
+}
+
+async function loadTlsConfig() {
+    const statusEl = document.getElementById('tls-status-text');
+    const detailsEl = document.getElementById('tls-details');
+    const warningEl = document.getElementById('tls-lan-warning');
+
+    if (!statusEl) return;
+
+    try {
+        const res = await fetch('/api/tls/config', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+
+        if (!res.ok) {
+            statusEl.textContent = 'TLS: Unable to check status';
+            if (detailsEl) detailsEl.textContent = `Server responded ${res.status}`;
+            return;
+        }
+
+        const data = await res.json();
+        const mode = data?.mode || 'none';
+        const host = data?.host || '';
+
+        // Set active pill and show corresponding pane
+        setActiveCertMode(mode);
+
+        // Update status text
+        if (mode === 'none') {
+            statusEl.textContent = 'TLS: Disabled (HTTP only)';
+        } else if (mode === 'self-signed') {
+            statusEl.textContent = 'TLS: Enabled (Self-signed)';
+        } else if (mode === 'custom') {
+            statusEl.textContent = 'TLS: Enabled (Custom certificate)';
+        } else if (mode === 'acme') {
+            const env = (data?.acme?.environment || '').toLowerCase();
+            if (env === 'staging') {
+                statusEl.textContent = 'TLS: Enabled (Let\'s Encrypt – Staging)';
+            } else {
+                statusEl.textContent = 'TLS: Enabled (Let\'s Encrypt – Production)';
+            }
+        } else {
+            statusEl.textContent = 'TLS: Enabled';
+        }
+
+        // Future: show cert details when backend provides them
+        if (detailsEl && (data?.issuer || data?.expiry || data?.domains)) {
+            const parts = [];
+            if (data.issuer) parts.push('Issuer: ' + data.issuer);
+            if (data.expiry) parts.push('Expires: ' + data.expiry);
+            if (data.domains && data.domains.length) parts.push('Domains: ' + data.domains.join(', '));
+            detailsEl.textContent = parts.join(' · ');
+        } else if (detailsEl) {
+            detailsEl.textContent = '';
+        }
+
+        // Show LAN warning if 0.0.0.0 and no TLS
+        if (warningEl) {
+            if (mode === 'none' && host === '0.0.0.0') {
+                warningEl.style.display = 'block';
+            } else {
+                warningEl.style.display = 'none';
+            }
+        }
+
+        // Pre-fill ACME fields when mode is "acme"
+        if (mode === 'acme' && data?.acme) {
+            const acme = data.acme;
+            const fqdnEl = document.getElementById('acme-fqdn');
+            const emailEl = document.getElementById('acme-email');
+            const providerEl = document.getElementById('acme-dns-provider');
+            const customWrapEl = document.getElementById('acme-provider-custom-wrap');
+            const customEl = document.getElementById('acme-dns-provider-custom');
+            const stagingRadio = document.getElementById('acme-env-staging');
+            const prodRadio = document.getElementById('acme-env-production');
+            const delayEl = document.getElementById('acme-validation-delay');
+
+            if (fqdnEl) fqdnEl.value = acme.fqdn || '';
+            if (emailEl) emailEl.value = acme.email || '';
+
+            const prov = (acme.dns_provider || '').toLowerCase();
+            if (providerEl) {
+                // If provider is in known list, select it; otherwise select __other__
+                const knownProviders = [
+                    'cloudflare', 'route53', 'gcloud', 'digitalocean',
+                    'namecheap', 'porkbun', 'godaddy', 'azure-dns',
+                    'hetzner', 'ovh', 'dnsmadeeasy', 'powerdns',
+                    'duckdns', 'inwx'
+                ];
+                if (knownProviders.includes(prov)) {
+                    providerEl.value = prov;
+                    if (customWrapEl) customWrapEl.style.display = 'none';
+                } else {
+                    providerEl.value = '__other__';
+                    if (customWrapEl) customWrapEl.style.display = 'block';
+                    if (customEl) customEl.value = acme.dns_provider || '';
+                }
+            }
+
+            const env = (acme.environment || 'staging').toLowerCase();
+            if (stagingRadio) stagingRadio.checked = env === 'staging';
+            if (prodRadio) prodRadio.checked = env === 'production';
+
+            if (delayEl) delayEl.value = acme.validation_delay ?? 300;
+
+            // Populate key/value credentials from dnsConfig
+            clearAcmeCredentials();
+            const dnsCfg = acme.dns_config || {};
+            for (const [k, v] of Object.entries(dnsCfg)) {
+                addAcmeCredentialRow(k, v);
+            }
+
+            // Show last renewal in tls-details if present
+            if (acme.last_renewal && detailsEl) {
+                detailsEl.textContent =
+                    (detailsEl.textContent ? detailsEl.textContent + ' · ' : '') +
+                    'Last renewal: ' + acme.last_renewal;
+            }
+        }
+    } catch (err) {
+        statusEl.textContent = 'TLS: Unable to check status';
+        if (detailsEl) detailsEl.textContent = 'Network or server error';
+        console.warn('[settings] TLS config load failed:', err);
+    }
+}
+
+async function tlsPut(payload) {
+    try {
+        const res = await fetch('/api/tls/config', {
+            method: 'PUT',
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            showToast('TLS update failed', 'error', text || `Server responded ${res.status}`);
+            return;
+        }
+
+        return await res.json().catch(() => ({}));
+    } catch (err) {
+        showToast('TLS update failed', 'error', err.message || 'Network error');
+    }
+}
+
+function _bindTlsEvents() {
+    // Disable TLS
+    const disableBtn = document.getElementById('btn-disable-tls');
+    if (disableBtn) {
+        disableBtn.addEventListener('click', async () => {
+            await tlsPut({ mode: 'none' });
+            showToast('TLS disabled', 'success', 'Restart llama-monitor to apply.');
+            await loadTlsConfig();
+        });
+    }
+
+    // Generate self-signed
+    const selfSignedBtn = document.getElementById('btn-generate-self-signed');
+    if (selfSignedBtn) {
+        selfSignedBtn.addEventListener('click', async () => {
+            await tlsPut({ mode: 'self-signed' });
+            showToast('Self-signed TLS enabled', 'success', 'Restart llama-monitor to apply.');
+            await loadTlsConfig();
+        });
+    }
+
+    // Apply custom certificate
+    const applyCustomBtn = document.getElementById('btn-apply-custom-cert');
+    if (applyCustomBtn) {
+        applyCustomBtn.addEventListener('click', async () => {
+            const certPath = (document.getElementById('tls-custom-cert-path')?.value || '').trim();
+            const keyPath = (document.getElementById('tls-custom-key-path')?.value || '').trim();
+
+            if (!certPath || !keyPath) {
+                showToast('Missing paths', 'error', 'Both certificate and key paths are required.');
+                return;
+            }
+
+            await tlsPut({
+                mode: 'custom',
+                custom_cert_path: certPath,
+                custom_key_path: keyPath,
+            });
+            showToast('Custom certificate configured', 'success', 'Restart llama-monitor to apply.');
+            await loadTlsConfig();
+        });
+    }
+
+    // ACME: show/hide custom provider input
+    const providerSelect = document.getElementById('acme-dns-provider');
+    if (providerSelect) {
+        providerSelect.addEventListener('change', () => {
+            const customWrap = document.getElementById('acme-provider-custom-wrap');
+            if (customWrap) {
+                customWrap.style.display = providerSelect.value === '__other__' ? 'block' : 'none';
+            }
+        });
+    }
+
+    // ACME: add credential row
+    const addCredBtn = document.getElementById('acme-add-credential');
+    if (addCredBtn) {
+        addCredBtn.addEventListener('click', () => {
+            addAcmeCredentialRow('', '');
+        });
+    }
+
+    // ACME: Request certificate
+    const acmeRequestBtn = document.getElementById('acme-request-cert');
+    if (acmeRequestBtn) {
+        acmeRequestBtn.addEventListener('click', async () => {
+            const statusEl = document.getElementById('acme-status-text');
+
+            const fqdn = (document.getElementById('acme-fqdn')?.value || '').trim();
+            const email = (document.getElementById('acme-email')?.value || '').trim();
+            const providerValue = providerSelect?.value || 'cloudflare';
+            const customProvider = (document.getElementById('acme-dns-provider-custom')?.value || '').trim();
+            const provider = providerValue === '__other__' ? customProvider : providerValue;
+            const env = (document.querySelector('input[name="acme-env"]:checked')?.value || 'staging');
+            const delay = parseInt(document.getElementById('acme-validation-delay')?.value || '300', 10);
+
+            const dnsConfig = readAcmeCredentials();
+
+            // Basic validation
+            if (!fqdn) {
+                showToast('Missing domain', 'error', 'Enter a domain (FQDN) for your certificate.');
+                return;
+            }
+            if (!provider || provider === '__other__') {
+                showToast('Missing provider', 'error', 'Select or type a DNS provider.');
+                return;
+            }
+            if (Object.keys(dnsConfig).length === 0) {
+                showToast('Missing credentials', 'error', 'Add at least one credential key/value for your DNS provider.');
+                return;
+            }
+
+            const payload = {
+                mode: 'acme',
+                acme: {
+                    enabled: true,
+                    fqdn,
+                    email,
+                    environment: env,
+                    dns_provider: provider,
+                    dns_config: dnsConfig,
+                    validation_delay: delay,
+                },
+            };
+
+            if (statusEl) statusEl.textContent = 'Saving ACME configuration...';
+
+            // Save config
+            const putResult = await tlsPut(payload);
+            if (!putResult) {
+                if (statusEl) statusEl.textContent = 'Failed to save ACME configuration.';
+                return;
+            }
+
+            if (statusEl) statusEl.textContent = 'Requesting certificate...';
+
+            // Trigger ACME request
+            try {
+                const res = await fetch('/api/tls/acme/request', {
+                    method: 'POST',
+                    headers: window.authHeaders
+                        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                        : { 'Content-Type': 'application/json' },
+                });
+
+                if (!res.ok) {
+                    const text = await res.text().catch(() => '');
+                    if (statusEl) statusEl.textContent = 'Request failed: ' + (text || `Server responded ${res.status}`);
+                    return;
+                }
+
+                if (statusEl) {
+                    statusEl.textContent = 'Certificate requested. Restart llama-monitor to apply.';
+                }
+                showToast('ACME certificate requested', 'success', 'Restart llama-monitor to apply.');
+                await loadTlsConfig();
+            } catch (err) {
+                if (statusEl) statusEl.textContent = 'Request failed: ' + (err.message || 'Network error');
+            }
+        });
+    }
+
+    // ACME: Renew certificate
+    const acmeRenewBtn = document.getElementById('acme-renew-cert');
+    if (acmeRenewBtn) {
+        acmeRenewBtn.addEventListener('click', async () => {
+            const statusEl = document.getElementById('acme-status-text');
+            if (statusEl) statusEl.textContent = 'Renewing certificate...';
+
+            try {
+                const res = await fetch('/api/tls/acme/renew', {
+                    method: 'POST',
+                    headers: window.authHeaders
+                        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                        : { 'Content-Type': 'application/json' },
+                });
+
+                if (!res.ok) {
+                    const text = await res.text().catch(() => '');
+                    if (statusEl) statusEl.textContent = 'Renewal failed: ' + (text || `Server responded ${res.status}`);
+                    showToast('ACME renewal failed', 'error', text || `Server responded ${res.status}`);
+                    return;
+                }
+
+                if (statusEl) {
+                    statusEl.textContent = 'Certificate renewed. Restart llama-monitor to apply.';
+                }
+                showToast('ACME certificate renewed', 'success', 'Restart llama-monitor to apply.');
+                await loadTlsConfig();
+            } catch (err) {
+                if (statusEl) statusEl.textContent = 'Renewal failed: ' + (err.message || 'Network error');
+                showToast('ACME renewal failed', 'error', err.message || 'Network error');
+            }
+        });
+    }
+}
+
+ // ── ACME credential helpers ──────────────────────────────────────────────────
+
+function acmeCredentialsGrid() {
+    return document.getElementById('acme-credentials-grid');
+}
+
+function addAcmeCredentialRow(key, value) {
+    const grid = acmeCredentialsGrid();
+    if (!grid) return;
+
+    const keyInput = document.createElement('input');
+    keyInput.type = 'text';
+    keyInput.placeholder = 'Key (e.g. CLOUDFLARE_API_TOKEN)';
+    keyInput.style.fontSize = '11px';
+    keyInput.value = key || '';
+
+    const valInput = document.createElement('input');
+    valInput.type = 'password';
+    valInput.placeholder = 'Value';
+    valInput.style.fontSize = '11px';
+    valInput.value = value || '';
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.textContent = '✕';
+    removeBtn.style.fontSize = '10px';
+    removeBtn.style.padding = '1px 5px';
+    removeBtn.style.cursor = 'pointer';
+    removeBtn.addEventListener('click', () => {
+        keyInput.remove();
+        valInput.remove();
+        removeBtn.remove();
+    });
+
+    grid.appendChild(keyInput);
+    grid.appendChild(valInput);
+    grid.appendChild(removeBtn);
+}
+
+function clearAcmeCredentials() {
+    const grid = acmeCredentialsGrid();
+    if (!grid) return;
+    // Keep header cells (first 3 children), remove the rest
+    while (grid.children.length > 3) {
+        grid.removeChild(grid.lastChild);
+    }
+}
+
+function readAcmeCredentials() {
+    const grid = acmeCredentialsGrid();
+    if (!grid) return {};
+
+    const inputs = Array.from(grid.querySelectorAll('input'));
+    const map = {};
+    for (let i = 0; i + 1 < inputs.length; i += 2) {
+        const k = (inputs[i]?.value || '').trim();
+        const v = (inputs[i + 1]?.value || '').trim();
+        if (k && v) {
+            map[k] = v;
+        }
+    }
+    return map;
+}
+
+// ── Dashboard auth / password reset ─────────────────────────────────────────
+
+function selectedDashboardAuthMode() {
+    return document.querySelector('#dashboard-auth-mode-pills .cert-mode-pill.active')?.dataset.authMode || 'none';
+}
+
+function setActiveDashboardAuthMode(mode) {
+    document.querySelectorAll('#dashboard-auth-mode-pills .cert-mode-pill').forEach(pill => {
+        pill.classList.toggle('active', pill.dataset.authMode === mode);
+    });
+}
+
+async function loadDashboardAuthConfig() {
+    const statusEl = document.getElementById('dashboard-auth-status');
+    const warningEl = document.getElementById('dashboard-auth-managed-warning');
+    const controlsEl = document.getElementById('dashboard-auth-controls');
+    const userEl = document.getElementById('dashboard-auth-username');
+
+    if (statusEl) statusEl.textContent = 'Loading dashboard access…';
+
+    try {
+        const res = await fetch('/api/auth/config', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            if (statusEl) statusEl.textContent = data.message || data.error || `Failed to load dashboard access (${res.status})`;
+            return;
+        }
+
+        if (warningEl) warningEl.style.display = data.managedByCli ? '' : 'none';
+        if (controlsEl) {
+            controlsEl.style.opacity = data.managedByCli ? '0.6' : '1';
+            controlsEl.style.pointerEvents = data.managedByCli ? 'none' : 'auto';
+        }
+
+        if (userEl) userEl.value = data.username || '';
+
+        if (data.basicEnabled && data.formEnabled) {
+            setActiveDashboardAuthMode('both');
+        } else if (data.basicEnabled) {
+            setActiveDashboardAuthMode('basic');
+        } else if (data.formEnabled) {
+            setActiveDashboardAuthMode('form');
+        } else {
+            setActiveDashboardAuthMode('none');
+        }
+
+        if (statusEl) {
+            const sourceLabel = data.managedByCli ? 'startup flags' : 'auth-config.json';
+            const modeLabel = data.basicEnabled && data.formEnabled
+                ? 'Basic Auth + form login'
+                : data.basicEnabled
+                    ? 'Basic Auth'
+                    : data.formEnabled
+                        ? 'Form login'
+                        : 'No dashboard auth';
+            statusEl.textContent = `${modeLabel} • managed via ${sourceLabel}`;
+        }
+    } catch (err) {
+        if (statusEl) statusEl.textContent = err.message || 'Failed to load dashboard access';
+    }
+}
+
+async function saveDashboardAuthConfig() {
+    const statusEl = document.getElementById('dashboard-auth-save-status');
+    const username = document.getElementById('dashboard-auth-username')?.value.trim() || '';
+    const currentPassword = document.getElementById('dashboard-auth-current-password')?.value || '';
+    const newPassword = document.getElementById('dashboard-auth-new-password')?.value || '';
+    const confirmPassword = document.getElementById('dashboard-auth-confirm-password')?.value || '';
+    const mode = selectedDashboardAuthMode();
+
+    const basicEnabled = mode === 'basic' || mode === 'both';
+    const formEnabled = mode === 'form' || mode === 'both';
+
+    if (newPassword || confirmPassword) {
+        if (newPassword !== confirmPassword) {
+            if (statusEl) statusEl.textContent = 'Passwords do not match';
+            showToast('Dashboard access not saved', 'error', 'New password and confirmation must match.');
+            return;
+        }
+    }
+
+    if ((basicEnabled || formEnabled) && !username) {
+        if (statusEl) statusEl.textContent = 'Username required';
+        showToast('Dashboard access not saved', 'error', 'Enter a username when auth is enabled.');
+        return;
+    }
+
+    if (statusEl) statusEl.textContent = 'Saving…';
+
+    try {
+        const res = await fetch('/api/auth/config', {
+            method: 'PUT',
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                basic_enabled: basicEnabled,
+                form_enabled: formEnabled,
+                username,
+                current_password: currentPassword,
+                new_password: newPassword,
+            }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            if (statusEl) statusEl.textContent = data.message || data.error || `Failed (${res.status})`;
+            showToast('Dashboard access not saved', 'error', data.message || data.error || `Server responded ${res.status}`);
+            return;
+        }
+
+        if (statusEl) statusEl.textContent = data.message || 'Saved';
+        showToast('Dashboard access saved', 'success', data.message || 'Dashboard access updated.');
+
+        ['dashboard-auth-current-password', 'dashboard-auth-new-password', 'dashboard-auth-confirm-password'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = '';
+        });
+
+        await loadDashboardAuthConfig();
+    } catch (err) {
+        if (statusEl) statusEl.textContent = err.message || 'Network error';
+        showToast('Dashboard access not saved', 'error', err.message || 'Network error');
+    }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initSettings() {
     // Bind settings button (sidebar button also bound by nav.js with data-tab="settings")
     document.getElementById('settings-btn')?.addEventListener('click', openSettingsModal);
+    document.getElementById('btn-save-dashboard-auth')?.addEventListener('click', saveDashboardAuthConfig);
 
     // Bind settings modal buttons
     document.getElementById('settings-modal-close')?.addEventListener('click', closeSettingsModal);
     document.getElementById('settings-modal-cancel')?.addEventListener('click', closeSettingsModal);
     document.getElementById('settings-modal-save')?.addEventListener('click', saveSettings);
 
+    // Rotate Agent Token
+    document.getElementById('btn-rotate-agent-token')?.addEventListener('click', async () => {
+        const statusEl = document.getElementById('rotate-agent-token-status');
+
+        if (!await confirmTokenRotation(
+            'Rotate Agent Token?',
+            'This will invalidate the current remote agent token immediately.'
+        )) {
+            return;
+        }
+
+        if (statusEl) statusEl.textContent = 'Rotating...';
+
+        try {
+            const res = await fetch('/api/rotate-agent-token', {
+                method: 'POST',
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
+            });
+
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                if (statusEl) statusEl.textContent = 'Failed: ' + (text || `Server responded ${res.status}`);
+                showToast('Rotate agent token failed', 'error', text || `Server responded ${res.status}`);
+                return;
+            }
+
+            if (statusEl) statusEl.textContent = 'Token rotated';
+            showToast('Agent token rotated', 'success', 'Previous token is now invalid.');
+
+            // Refresh settings so masked token updates
+            const settingsRes = await fetch('/api/settings', {
+                headers: window.authHeaders ? window.authHeaders() : {},
+            });
+            if (settingsRes.ok) {
+                const s = await settingsRes.json();
+                applySettings(s);
+            }
+        } catch (err) {
+            if (statusEl) statusEl.textContent = 'Failed: ' + (err.message || 'Network error');
+            showToast('Rotate agent token failed', 'error', err.message || 'Network error');
+        }
+    });
+
+    // Rotate API Token
+    document.getElementById('btn-rotate-api-token')?.addEventListener('click', async () => {
+        const statusEl = document.getElementById('rotate-api-token-status');
+
+        if (!await confirmTokenRotation(
+            'Rotate API Token?',
+            'This will invalidate the current API token immediately. Open browser tabs may lose access until refreshed.'
+        )) {
+            return;
+        }
+
+        if (statusEl) statusEl.textContent = 'Rotating...';
+
+        try {
+            const res = await fetch('/api/rotate-api-token', {
+                method: 'POST',
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
+            });
+
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                if (statusEl) statusEl.textContent = 'Failed: ' + (text || `Server responded ${res.status}`);
+                showToast('Rotate API token failed', 'error', text || `Server responded ${res.status}`);
+                return;
+            }
+
+            if (statusEl) statusEl.textContent = 'Token rotated';
+            showToast('API token rotated', 'success', 'Previous token is now invalid. Restart llama-monitor to fully apply.');
+        } catch (err) {
+            if (statusEl) statusEl.textContent = 'Failed: ' + (err.message || 'Network error');
+            showToast('Rotate API token failed', 'error', err.message || 'Network error');
+        }
+    });
+
+    // Rotate DB Admin Token
+    document.getElementById('btn-rotate-db-admin-token')?.addEventListener('click', async () => {
+        const statusEl = document.getElementById('rotate-db-admin-token-status');
+
+        if (!await confirmTokenRotation(
+            'Rotate DB Admin Token?',
+            'This will invalidate the current DB admin token immediately.'
+        )) {
+            return;
+        }
+
+        if (statusEl) statusEl.textContent = 'Rotating...';
+
+        try {
+            const res = await fetch('/api/rotate-db-admin-token', {
+                method: 'POST',
+                headers: window.authHeaders
+                    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                    : { 'Content-Type': 'application/json' },
+            });
+
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                if (statusEl) statusEl.textContent = 'Failed: ' + (text || `Server responded ${res.status}`);
+                showToast('Rotate DB admin token failed', 'error', text || `Server responded ${res.status}`);
+                return;
+            }
+
+            if (statusEl) statusEl.textContent = 'Token rotated';
+            showToast('DB admin token rotated', 'success', 'Previous token is now invalid. Restart llama-monitor to fully apply.');
+        } catch (err) {
+            if (statusEl) statusEl.textContent = 'Failed: ' + (err.message || 'Network error');
+            showToast('Rotate DB admin token failed', 'error', err.message || 'Network error');
+        }
+    });
+
     _bindSettingsEvents();
+    _bindTlsEvents();
+    if (document.getElementById('settings-security')?.classList.contains('active')) {
+        loadDashboardAuthConfig();
+    }
+}
+
+// ── Token rotation confirmation helper ────────────────────────────────────────
+
+async function confirmTokenRotation(title, message) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '2000';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'modal';
+    dialog.style.width = '420px';
+    dialog.style.padding = '14px 16px 14px 16px';
+
+    const header = document.createElement('div');
+    header.style.display = 'flex';
+    header.style.alignItems = 'center';
+    header.style.justifyContent = 'space-between';
+    header.style.marginBottom = '8px';
+
+    const titleEl = document.createElement('div');
+    titleEl.style.fontSize = '15px';
+    titleEl.style.fontWeight = '600';
+    titleEl.textContent = title;
+
+    const msg = document.createElement('div');
+    msg.style.fontSize = '13px';
+    msg.style.color = 'var(--color-text-muted)';
+    msg.style.marginBottom = '12px';
+    msg.textContent = message;
+
+    const actions = document.createElement('div');
+    actions.style.display = 'flex';
+    actions.style.justifyContent = 'flex-end';
+    actions.style.gap = '8px';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn btn-modal-cancel';
+    cancelBtn.textContent = 'Cancel';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'btn btn-modal-save';
+    confirmBtn.textContent = 'Rotate';
+
+    const result = new Promise(resolve => {
+        let decided = false;
+
+        function cleanup() {
+            if (overlay.parentElement) overlay.remove();
+        }
+
+        cancelBtn.addEventListener('click', () => {
+            if (decided) return;
+            decided = true;
+            cleanup();
+            resolve(false);
+        });
+
+        confirmBtn.addEventListener('click', () => {
+            if (decided) return;
+            decided = true;
+            cleanup();
+            resolve(true);
+        });
+
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay && !decided) {
+                decided = true;
+                cleanup();
+                resolve(false);
+            }
+        });
+    });
+
+    header.appendChild(titleEl);
+    dialog.appendChild(header);
+    dialog.appendChild(msg);
+    dialog.appendChild(actions);
+    actions.appendChild(cancelBtn);
+    actions.appendChild(confirmBtn);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    confirmBtn.focus();
+
+    return result;
 }

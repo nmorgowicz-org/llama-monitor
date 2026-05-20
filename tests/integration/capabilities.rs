@@ -1,7 +1,15 @@
+use std::sync::Arc;
+
 use llama_monitor::{
+    chat_storage::ChatStorage,
+    config::TLSConfig,
     gpu::env::GpuEnv,
     state::{AppPaths, AppState, Session, UiSettings},
 };
+
+fn test_chat_storage() -> Arc<ChatStorage> {
+    Arc::new(ChatStorage::open(&std::path::PathBuf::from(":memory:")).unwrap())
+}
 
 #[test]
 fn local_spawn_has_all_metrics() {
@@ -19,7 +27,14 @@ fn local_spawn_has_all_metrics() {
         rocm_path: "/opt/rocm".into(),
         extra_env: vec![],
     };
-    let state = AppState::new(vec![], paths, gpu_env, UiSettings::default());
+    let state = AppState::new(
+        vec![],
+        paths,
+        gpu_env,
+        UiSettings::default(),
+        test_chat_storage(),
+        TLSConfig::default(),
+    );
 
     let session = Session::new_spawn(
         "spawn_test".to_string(),
@@ -69,7 +84,14 @@ fn local_attach_has_full_metrics() {
         rocm_path: "/opt/rocm".into(),
         extra_env: vec![],
     };
-    let state = AppState::new(vec![], paths, gpu_env, UiSettings::default());
+    let state = AppState::new(
+        vec![],
+        paths,
+        gpu_env,
+        UiSettings::default(),
+        test_chat_storage(),
+        TLSConfig::default(),
+    );
 
     let session = Session::new_attach(
         "attach_local_test".to_string(),
@@ -118,7 +140,14 @@ fn remote_attach_has_inference_only() {
         rocm_path: "/opt/rocm".into(),
         extra_env: vec![],
     };
-    let state = AppState::new(vec![], paths, gpu_env, UiSettings::default());
+    let state = AppState::new(
+        vec![],
+        paths,
+        gpu_env,
+        UiSettings::default(),
+        test_chat_storage(),
+        TLSConfig::default(),
+    );
 
     let session = Session::new_attach(
         "attach_remote_test".to_string(),
@@ -193,6 +222,8 @@ fn headless_mode_disables_tray() {
         agent_host: "127.0.0.1".to_string(),
         host: "127.0.0.1".to_string(),
         basic_auth: None,
+        form_auth: None,
+        clear_auth_config: false,
         agent_port: 7779,
         agent_token: None,
         remote_agent_url: None,
@@ -200,6 +231,10 @@ fn headless_mode_disables_tray() {
         remote_agent_ssh_autostart: false,
         remote_agent_ssh_target: None,
         remote_agent_ssh_command: None,
+        tls: false,
+        tls_cert: None,
+        tls_key: None,
+        tls_self_signed: false,
     };
 
     assert!(
@@ -225,6 +260,8 @@ fn headless_mode_disables_tray() {
         agent_host: "127.0.0.1".to_string(),
         host: "127.0.0.1".to_string(),
         basic_auth: None,
+        form_auth: None,
+        clear_auth_config: false,
         agent_port: 7779,
         agent_token: None,
         remote_agent_url: None,
@@ -232,6 +269,10 @@ fn headless_mode_disables_tray() {
         remote_agent_ssh_autostart: false,
         remote_agent_ssh_target: None,
         remote_agent_ssh_command: None,
+        tls: false,
+        tls_cert: None,
+        tls_key: None,
+        tls_self_signed: false,
     };
 
     assert!(
@@ -257,6 +298,8 @@ fn headless_mode_disables_tray() {
         agent_host: "127.0.0.1".to_string(),
         host: "127.0.0.1".to_string(),
         basic_auth: None,
+        form_auth: None,
+        clear_auth_config: false,
         agent_port: 7779,
         agent_token: None,
         remote_agent_url: None,
@@ -264,6 +307,10 @@ fn headless_mode_disables_tray() {
         remote_agent_ssh_autostart: false,
         remote_agent_ssh_target: None,
         remote_agent_ssh_command: None,
+        tls: false,
+        tls_cert: None,
+        tls_key: None,
+        tls_self_signed: false,
     };
 
     assert!(

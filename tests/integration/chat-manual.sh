@@ -23,6 +23,20 @@ PASS=0
 FAIL=0
 TOTAL=0
 
+# Fetch the api-token for protected endpoints (used by session endpoints).
+API_TOKEN=""
+if curl -s "${BASE_URL}/api/internal/api-token" -o /tmp/lm-token.json --connect-timeout 5 2>/dev/null; then
+    API_TOKEN=$(cat /tmp/lm-token.json | grep -o '"token":"[^"]*"' | cut -d'"' -f4 || true)
+    rm -f /tmp/lm-token.json
+fi
+
+# Fetch the db-admin-token for elevated session operations.
+DB_ADMIN_TOKEN=""
+if curl -s "${BASE_URL}/api/db/admin-token" -o /tmp/lm-db-token.json --connect-timeout 5 2>/dev/null; then
+    DB_ADMIN_TOKEN=$(cat /tmp/lm-db-token.json | grep -o '"token":"[^"]*"' | cut -d'"' -f4 || true)
+    rm -f /tmp/lm-db-token.json
+fi
+
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 assert_http() {
@@ -31,9 +45,14 @@ assert_http() {
     local path="$3"
     local expected_code="${4:-200}"
     local body="${5:-}"
+    local auth_token="${6:-}"
 
     TOTAL=$((TOTAL + 1))
     local args=(-s -o /dev/null -w "%{http_code}" -X "$method" "${BASE_URL}${path}" -H "Content-Type: application/json" --connect-timeout 5)
+
+    if [[ -n "$auth_token" ]]; then
+        args+=(-H "Authorization: Bearer $auth_token")
+    fi
 
     if [[ -n "$body" ]]; then
         args+=(-d "$body")
@@ -56,12 +75,20 @@ assert_json_contains() {
     local method="$2"
     local path="$3"
     local expected="$4"
+    local auth_token="${5:-}"
 
     TOTAL=$((TOTAL + 1))
     local output
-    output=$(curl -s -X "$method" "${BASE_URL}${path}" \
-        -H "Content-Type: application/json" \
-        --connect-timeout 5 2>/dev/null || true)
+    if [[ -n "$auth_token" ]]; then
+        output=$(curl -s -X "$method" "${BASE_URL}${path}" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $auth_token" \
+            --connect-timeout 5 2>/dev/null || true)
+    else
+        output=$(curl -s -X "$method" "${BASE_URL}${path}" \
+            -H "Content-Type: application/json" \
+            --connect-timeout 5 2>/dev/null || true)
+    fi
 
     if echo "$output" | grep -q "$expected"; then
         PASS=$((PASS + 1))
@@ -98,7 +125,10 @@ echo ""
 echo "── Setup: Checking Active Session ──"
 
 TOTAL=$((TOTAL + 1))
-ACTIVE=$(curl -s "${BASE_URL}/api/sessions/active" 2>/dev/null)
+ACTIVE=$(curl -s "${BASE_URL}/api/sessions/active" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $API_TOKEN" \
+    --connect-timeout 5 2>/dev/null || true)
 
 # Check if there's an active session (response should have "ok":true or session data)
 if echo "$ACTIVE" | grep -q '"ok"'; then
@@ -107,11 +137,15 @@ if echo "$ACTIVE" | grep -q '"ok"'; then
     echo "  ✅ Active session found: $SID"
 else
     # Try to find and activate an attach session
-    ALL_SESSIONS=$(curl -s "${BASE_URL}/api/sessions" 2>/dev/null)
+    ALL_SESSIONS=$(curl -s "${BASE_URL}/api/sessions" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $API_TOKEN" \
+        --connect-timeout 5 2>/dev/null || true)
     ATTACH_ID=$(echo "$ALL_SESSIONS" | grep -o '"id":"session_[^"]*"' | head -1 | cut -d'"' -f4)
     if [[ -n "$ATTACH_ID" ]]; then
         curl -s -X POST "${BASE_URL}/api/sessions/active" \
             -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $API_TOKEN" \
             -d "{\"id\": \"$ATTACH_ID\"}" > /dev/null
         PASS=$((PASS + 1))
         echo "  ✅ Activated session: $ATTACH_ID"

@@ -3,6 +3,8 @@ use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::chat_storage::ChatStorage;
+use crate::config::{TLSConfig, decrypt_value, encrypt_value};
 use crate::gpu::GpuMetrics;
 use crate::gpu::env::GpuEnv;
 use crate::llama::metrics::LlamaMetrics;
@@ -284,8 +286,9 @@ impl Default for UiSettings {
 pub fn load_ui_settings(path: &Path) -> UiSettings {
     if path.exists()
         && let Ok(contents) = std::fs::read_to_string(path)
-        && let Ok(s) = serde_json::from_str::<UiSettings>(&contents)
+        && let Ok(mut s) = serde_json::from_str::<UiSettings>(&contents)
     {
+        s.remote_agent_token = decrypt_value(&s.remote_agent_token);
         return s;
     }
     UiSettings::default()
@@ -295,8 +298,13 @@ pub fn save_ui_settings(path: &Path, settings: &UiSettings) -> anyhow::Result<()
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+
+    // Encrypt remote_agent_token before writing
+    let mut to_save = settings.clone();
+    to_save.remote_agent_token = encrypt_value(&to_save.remote_agent_token);
+
     let tmp = path.with_extension("json.tmp");
-    let json = serde_json::to_string_pretty(settings)?;
+    let json = serde_json::to_string_pretty(&to_save)?;
     std::fs::write(&tmp, json)?;
     std::fs::rename(&tmp, path)?;
     Ok(())
@@ -387,6 +395,11 @@ pub struct AppState {
     pub remote_agent_url: Arc<Mutex<Option<String>>>,
     pub remote_agent_version: Arc<Mutex<Option<String>>>,
     pub remote_agent_update_available: Arc<Mutex<bool>>,
+    pub remote_agent_protocol_version: Arc<Mutex<Option<String>>>,
+    pub remote_agent_protocol_too_old: Arc<Mutex<bool>>,
+    pub chat_storage: Arc<ChatStorage>,
+    pub tls_config: Arc<Mutex<TLSConfig>>,
+    pub monitor_inference_gate: Arc<tokio::sync::Semaphore>,
 }
 
 impl AppState {
@@ -395,6 +408,8 @@ impl AppState {
         paths: AppPaths,
         gpu_env: GpuEnv,
         ui_settings: UiSettings,
+        chat_storage: Arc<ChatStorage>,
+        tls_config: TLSConfig,
     ) -> Self {
         let presets_path = paths.presets_path;
         let templates_path = paths.templates_path;
@@ -465,6 +480,11 @@ impl AppState {
             remote_agent_url: Arc::new(Mutex::new(None)),
             remote_agent_version: Arc::new(Mutex::new(None)),
             remote_agent_update_available: Arc::new(Mutex::new(false)),
+            remote_agent_protocol_version: Arc::new(Mutex::new(None)),
+            remote_agent_protocol_too_old: Arc::new(Mutex::new(false)),
+            chat_storage,
+            tls_config: Arc::new(Mutex::new(tls_config)),
+            monitor_inference_gate: Arc::new(tokio::sync::Semaphore::new(1)),
         };
 
         // Prune old inactive sessions on startup (older than 7 days)
@@ -790,6 +810,14 @@ impl AppState {
 
         (system_reason, gpu_reason, cpu_temp_reason)
     }
+
+    pub fn get_tls_config(&self) -> TLSConfig {
+        self.tls_config.lock().unwrap().clone()
+    }
+
+    pub fn set_tls_config(&self, config: TLSConfig) {
+        *self.tls_config.lock().unwrap() = config;
+    }
 }
 
 #[allow(dead_code)]
@@ -887,6 +915,10 @@ mod tests {
         }
     }
 
+    fn test_tls_config() -> TLSConfig {
+        TLSConfig::default()
+    }
+
     #[test]
     fn endpoint_detection_with_various_hosts() {
         let local_hosts = [
@@ -968,7 +1000,15 @@ mod tests {
         ) in test_cases
         {
             let paths = test_paths(PathBuf::new());
-            let state = AppState::new(vec![], paths, GpuEnv::default(), UiSettings::default());
+            let cs = Arc::new(ChatStorage::open(&PathBuf::from(":memory:")).unwrap());
+            let state = AppState::new(
+                vec![],
+                paths,
+                GpuEnv::default(),
+                UiSettings::default(),
+                cs,
+                test_tls_config(),
+            );
             let session = if mode == "spawn" {
                 Session::new_spawn("test".to_string(), "Test".to_string(), 8001, String::new())
             } else {
@@ -1014,11 +1054,14 @@ mod tests {
         )];
         std::fs::write(&sessions_path, serde_json::to_string(&sessions).unwrap()).unwrap();
 
+        let cs = Arc::new(ChatStorage::open(&PathBuf::from(":memory:")).unwrap());
         let state = AppState::new(
             vec![],
             test_paths(sessions_path.clone()),
             GpuEnv::default(),
             UiSettings::default(),
+            cs,
+            test_tls_config(),
         );
 
         assert!(state.active_session_id.lock().unwrap().is_empty());
@@ -1031,11 +1074,14 @@ mod tests {
 
     #[test]
     fn set_active_session_rejects_missing_session_without_mutating() {
+        let cs = Arc::new(ChatStorage::open(&PathBuf::from(":memory:")).unwrap());
         let state = AppState::new(
             vec![],
             test_paths(PathBuf::new()),
             GpuEnv::default(),
             UiSettings::default(),
+            cs,
+            test_tls_config(),
         );
         state.add_session(Session::new_spawn(
             "existing".to_string(),
@@ -1051,11 +1097,14 @@ mod tests {
 
     #[test]
     fn removing_active_session_clears_active_state() {
+        let cs = Arc::new(ChatStorage::open(&PathBuf::from(":memory:")).unwrap());
         let state = AppState::new(
             vec![],
             test_paths(PathBuf::new()),
             GpuEnv::default(),
             UiSettings::default(),
+            cs,
+            test_tls_config(),
         );
         state.add_session(Session::new_spawn(
             "existing".to_string(),

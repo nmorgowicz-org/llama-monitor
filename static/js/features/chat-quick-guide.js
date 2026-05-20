@@ -225,6 +225,13 @@ function setupQuickInputHandler() {
 function submitQuickGuide() {
     const tab = activeChatTab();
     const instruction = (tab?.quick_guide_draft || '').trim();
+
+    // Always collapse the UI — even if there is no active tab.
+    const inputEl = document.getElementById('quick-guide-input');
+    if (inputEl) inputEl.value = '';
+    quickGuideState.expanded = false;
+    updateQuickGuideUI();
+
     if (!tab) return;
 
     quickGuideState.lastUsedInstruction = instruction || null;
@@ -233,11 +240,6 @@ function submitQuickGuide() {
     }));
 
     tab.quick_guide_draft = '';
-    const inputEl = document.getElementById('quick-guide-input');
-    if (inputEl) inputEl.value = '';
-    quickGuideState.expanded = false;
-    updateQuickGuideUI();
-
     showToast(instruction ? 'Reply guide applied' : 'Reply guide cleared', 'success');
 }
 
@@ -372,11 +374,14 @@ async function fetchDirectorIdeas() {
 
         const response = await fetch('/api/chat/suggestions', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         });
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            const errText = await response.text().catch(() => '');
+            throw new Error(`HTTP ${response.status}: ${errText || response.statusText}`);
         }
 
         const data = await response.json();

@@ -69,7 +69,9 @@ export async function doStart() {
 
     const resp = await fetch('/api/start', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
     });
     const data = await resp.json();
@@ -90,7 +92,10 @@ export async function doStop() {
     const btnStop = document.getElementById('btn-stop');
     if (btnStop) btnStop.disabled = true;
 
-    await fetch('/api/stop', { method: 'POST' });
+    await fetch('/api/stop', {
+            method: 'POST',
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
     await doKillLlamaInternal();
 }
 
@@ -103,11 +108,34 @@ export async function doKillLlama() {
     if (btnKill) btnKill.disabled = true;
 
     try {
-        const resp = await fetch('/api/kill-llama', { method: 'POST' });
+        const tokenResp = await fetch('/api/db/admin-token');
+        const tokenData = await tokenResp.json();
+        const token = tokenData.token;
+        if (!token) {
+            showToast('Kill failed: admin token not available', 'error');
+            return;
+        }
+
+        const resp = await fetch('/api/kill-llama', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({ confirm: 'kill' }),
+        });
+
         const data = await resp.json();
 
-        if (!data.ok) showToast('Kill failed: ' + (data.error || 'unknown'), 'error');
-        else showToast('llama-server killed', 'success');
+        if (!data.ok) {
+            if (resp.status === 429) {
+                showToast('Kill failed: too soon; please wait', 'error');
+            } else {
+                showToast('Kill failed: ' + (data.error || 'unknown'), 'error');
+            }
+        } else {
+            showToast('llama-server killed', 'success');
+        }
     } catch (e) {
         showToast('Kill failed: ' + e.message, 'error');
     } finally {
@@ -117,7 +145,19 @@ export async function doKillLlama() {
 
 export async function doKillLlamaInternal() {
     try {
-        await fetch('/api/kill-llama', { method: 'POST' });
+        const tokenResp = await fetch('/api/db/admin-token');
+        const tokenData = await tokenResp.json();
+        const token = tokenData.token;
+        if (!token) return;
+
+        await fetch('/api/kill-llama', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+            },
+            body: JSON.stringify({ confirm: 'kill' }),
+        });
     } catch(e) {
         // Ignore errors from kill, just try to continue
     }
@@ -136,7 +176,9 @@ export async function doAttach() {
 
     const resp = await fetch('/api/attach', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: (typeof window.authHeaders === 'function')
+            ? window.authHeaders({ 'Content-Type': 'application/json' })
+            : { 'Content-Type': 'application/json' },
         body: JSON.stringify({ endpoint }),
     });
     const data = await resp.json();
@@ -167,7 +209,12 @@ export async function doAttach() {
 }
 
 export async function doDetach() {
-    const resp = await fetch('/api/detach', { method: 'POST' });
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const resp = await fetch('/api/detach', { method: 'POST', headers });
+    if (resp.status === 401) {
+        showToast('Detach failed: authentication required', 'error');
+        return;
+    }
     const data = await resp.json();
 
     if (!data.ok) {
@@ -232,7 +279,12 @@ export function doStartFromSetup() {
 
 export async function initAttachDetachButtons() {
     try {
-        const resp = await fetch('/api/sessions/active');
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const resp = await fetch('/api/sessions/active', { headers });
+        if (resp.status === 401) {
+            console.error('initAttachDetachButtons: authentication required');
+            return;
+        }
         const data = await resp.json();
         const btnAttach = document.getElementById('btn-attach');
         const btnDetach = document.getElementById('btn-detach');
