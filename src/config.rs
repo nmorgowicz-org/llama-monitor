@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::{
     Aes256Gcm,
     aead::{Aead, KeyInit},
 };
-use generic_array::GenericArray;
 use rand_core::{OsRng, RngCore};
 
 use crate::cli::AppArgs;
