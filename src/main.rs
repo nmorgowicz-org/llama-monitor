@@ -67,7 +67,6 @@ fn main() -> Result<()> {
     // Initialize at-rest encryption (auto-generates key if needed)
     config::init_encryption_key(&app_config.config_dir);
 
-
     // Harden permissions on secret files (Unix: 0600)
     harden_file_permissions(&app_config.ui_settings_file);
     harden_file_permissions(&app_config.sessions_file);

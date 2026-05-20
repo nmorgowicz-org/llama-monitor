@@ -8,8 +8,8 @@ pub struct WmiGpuBackend;
 
 impl GpuBackend for WmiGpuBackend {
     fn read_metrics(&self) -> Result<BTreeMap<String, GpuMetrics>> {
-        let wmi = WMIConnection::new()
-            .map_err(|e| anyhow::anyhow!("WMI connection failed: {e}"))?;
+        let wmi =
+            WMIConnection::new().map_err(|e| anyhow::anyhow!("WMI connection failed: {e}"))?;
 
         let rows: Vec<HashMap<String, Variant>> = wmi
             .raw_query::<HashMap<String, Variant>>(

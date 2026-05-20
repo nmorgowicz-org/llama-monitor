@@ -32,7 +32,8 @@ pub(crate) fn harden_file_permissions(path: &std::path::Path) {
         // accounts; fall back to USERNAME alone for local accounts.
         let user = match (std::env::var("USERDOMAIN"), std::env::var("USERNAME")) {
             (Ok(domain), Ok(name))
-                if !domain.is_empty() && domain != std::env::var("COMPUTERNAME").unwrap_or_default() =>
+                if !domain.is_empty()
+                    && domain != std::env::var("COMPUTERNAME").unwrap_or_default() =>
             {
                 format!("{domain}\\{name}")
             }
