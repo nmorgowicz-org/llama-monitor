@@ -830,7 +830,7 @@ function updateAnalysisPanelUI() {
         panel.innerHTML = `
             <div class="sidebar-analysis-loading">
                 <div class="sidebar-analysis-spinner"></div>
-                <span>Analysing conversation…</span>
+                <span>Analyzing conversation…</span>
             </div>
         `;
         return;
