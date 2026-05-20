@@ -67,6 +67,18 @@ fn main() -> Result<()> {
     // Initialize at-rest encryption (auto-generates key if needed)
     config::init_encryption_key(&app_config.config_dir);
 
+    // On Windows, file permission hardening is not available (no Unix ACL API in std).
+    // Secret files in the config directory are not automatically restricted to owner-only.
+    // See docs/plans/20260519-windows_compatibility_fixes.md issue W-04.
+    #[cfg(windows)]
+    {
+        eprintln!(
+            "[warn] Windows: file permission hardening is not available. \
+            Manually restrict access to {} to your user account only.",
+            app_config.config_dir.display()
+        );
+    }
+
     // Harden permissions on secret files (Unix: 0600)
     harden_file_permissions(&app_config.ui_settings_file);
     harden_file_permissions(&app_config.sessions_file);
