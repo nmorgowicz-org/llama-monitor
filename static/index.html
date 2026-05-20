@@ -136,6 +136,7 @@
             <button class="nav-cockpit" id="nav-cockpit" type="button" title="Global telemetry — click to open Server">
                 <span class="metric-live-chip idle nav-cockpit-state" id="nav-cockpit-state">idle</span>
                 <span class="nav-cockpit-chip nav-cockpit-throughput" id="nav-cockpit-throughput" title="Prompt and generation throughput">P &mdash; · G &mdash;</span>
+                <span class="nav-cockpit-chip nav-cockpit-spec hidden" id="nav-cockpit-spec" title="Speculative decoding efficiency — tokens accepted per decode pass"></span>
                 <span class="nav-cockpit-chip nav-cockpit-context" id="nav-cockpit-context" title="Highest chat context pressure">Ctx &mdash;</span>
                 <span class="nav-cockpit-chip nav-cockpit-gpu" id="nav-cockpit-gpu" title="Hottest GPU temperature">GPU &mdash;</span>
                 <svg class="metric-sparkline nav-cockpit-spark" id="nav-cockpit-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
@@ -439,6 +440,10 @@
                             <div class="slot-batch-efficiency" id="m-slot-batch-efficiency" style="display:none;">
                                 <span class="stat-label">Avg slots/decode</span>
                                 <span class="stat-value" id="m-busy-slots-per-decode">&mdash;</span>
+                            </div>
+                            <div class="slot-batch-efficiency" id="m-spec-efficiency" style="display:none;">
+                                <span class="stat-label">Tok/decode (spec)</span>
+                                <span class="stat-value" id="m-tokens-per-decode">&mdash;</span>
                             </div>
                         </div>
                         <div class="widget-card inference-mini-panel">
@@ -833,6 +838,10 @@
                                 <div class="chat-telemetry-mini-bar">
                                     <div class="chat-telemetry-mini-fill gen-bar" id="chat-telemetry-gen-bar"></div>
                                 </div>
+                            </div>
+                            <div class="chat-telemetry-metric chat-telemetry-spec-metric hidden" id="chat-telemetry-spec-metric" title="Speculative decoding: tokens accepted per decode pass">
+                                <span class="chat-telemetry-metric-label">S</span>
+                                <span class="chat-telemetry-metric-value" id="chat-telemetry-spec-value">&mdash;</span>
                             </div>
                         </div>
                         <div class="chat-telemetry-live-chip" id="chat-telemetry-live-chip" title="Live generation rate">

@@ -600,6 +600,12 @@
   }
 }
 
+@media (max-width: 1080px) {
+  .nav-cockpit-spec {
+    display: none;
+  }
+}
+
 @media (max-width: 820px) {
   .nav-center {
     max-width: 440px;

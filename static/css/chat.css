@@ -2072,6 +2072,10 @@
   background: linear-gradient(90deg, rgba(94, 234, 212, 0.38), #5eead4);
   box-shadow: 0 0 12px rgba(94, 234, 212, 0.22);
 }
+.chat-telemetry-spec-metric {
+  grid-column: 1 / -1;
+  grid-template-columns: auto auto;
+}
 .chat-telemetry-context {
   display: inline-flex;
   align-items: center;

@@ -862,6 +862,8 @@ export function refreshChatTelemetry() {
     const contextValue = document.getElementById('chat-telemetry-context-value');
     const contextRing = document.getElementById('chat-telemetry-context-ring');
     const liveRate = document.getElementById('chat-telemetry-live-rate');
+    const specMetric = document.getElementById('chat-telemetry-spec-metric');
+    const specValue = document.getElementById('chat-telemetry-spec-value');
     const telemetryBtn = document.getElementById('chat-telemetry-btn');
 
     const promptRate = hasActiveEndpoint ? (l?.prompt_tokens_per_sec || 0) : 0;
@@ -916,6 +918,17 @@ export function refreshChatTelemetry() {
 
     if (promptValue) promptValue.textContent = promptDisplayRate > 0 ? promptDisplayRate.toFixed(1) : '\u2014';
     if (genValue) genValue.textContent = genDisplayRate > 0 ? genDisplayRate.toFixed(1) : '\u2014';
+
+    const tpd = l?.tokens_per_decode ?? 0;
+    if (specMetric && specValue) {
+        if (tpd > 1.05) {
+            specValue.textContent = tpd.toFixed(2) + '\u00d7';
+            specMetric.classList.remove('hidden');
+        } else {
+            specMetric.classList.add('hidden');
+        }
+    }
+
     if (liveRate) {
         liveRate.textContent = genDisplayRate > 0 ? genDisplayRate.toFixed(1) + ' t/s' : (generationActive ? 'warming' : '\u2014');
     }
@@ -1952,6 +1965,10 @@ function populateTiming(data) {
     if (data.totalTokens && data.promptMs && data.genMs) {
         const throughput = data.totalTokens / ((data.promptMs + data.genMs) / 1000);
         cells.push({ label: 'Observed Throughput', value: throughput.toFixed(1), unit: 'tok/s' });
+    }
+    if (data.draftN != null && data.draftNAccepted != null && data.draftN > 0) {
+        const pct = Math.round((data.draftNAccepted / data.draftN) * 100);
+        cells.push({ label: 'Draft Accepted', value: data.draftNAccepted + '/' + data.draftN, unit: '(' + pct + '%)' });
     }
     if (data.modelParams?.max_tokens) {
         cells.push({ label: 'Max Tokens', value: data.modelParams.max_tokens, unit: '' });

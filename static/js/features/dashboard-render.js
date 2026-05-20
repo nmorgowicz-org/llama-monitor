@@ -433,19 +433,30 @@ function renderSlotUtilization(l) {
 function renderBatchEfficiency(l) {
     const container = document.getElementById('m-slot-batch-efficiency');
     const valueEl = document.getElementById('m-busy-slots-per-decode');
-    if (!container || !valueEl) return;
+    const specContainer = document.getElementById('m-spec-efficiency');
+    const specValueEl = document.getElementById('m-tokens-per-decode');
 
-    const total = (l?.slots_processing || 0) + (l?.slots_idle || 0);
-    const value = l?.n_busy_slots_per_decode;
-
-    // Only meaningful with multi-slot servers (>1 slot configured)
-    if (!value || value <= 0 || total <= 1) {
-        container.style.display = 'none';
-        return;
+    if (container && valueEl) {
+        const total = (l?.slots_processing || 0) + (l?.slots_idle || 0);
+        const value = l?.n_busy_slots_per_decode;
+        // Only meaningful with multi-slot servers (>1 slot configured)
+        if (!value || value <= 0 || total <= 1) {
+            container.style.display = 'none';
+        } else {
+            container.style.display = '';
+            valueEl.textContent = value.toFixed(2);
+        }
     }
 
-    container.style.display = '';
-    valueEl.textContent = value.toFixed(2);
+    if (specContainer && specValueEl) {
+        const tpd = l?.tokens_per_decode ?? 0;
+        if (tpd > 1.05) {
+            specContainer.style.display = '';
+            specValueEl.textContent = tpd.toFixed(2) + '×';
+        } else {
+            specContainer.style.display = 'none';
+        }
+    }
 }
 
 function renderRequestStats() {
