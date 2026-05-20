@@ -11,8 +11,9 @@ use rand_core::{OsRng, RngCore};
 
 use crate::cli::AppArgs;
 
-/// On Unix, restrict file permissions to owner-only (0600).
-/// On other platforms, no-op.
+/// Restrict file permissions to owner-only.
+/// Unix: sets mode 0600. Windows: uses icacls to remove inherited ACEs and
+/// grant only the current user Full Control.
 pub(crate) fn harden_file_permissions(path: &std::path::Path) {
     if !path.exists() {
         return;
@@ -25,9 +26,49 @@ pub(crate) fn harden_file_permissions(path: &std::path::Path) {
             let _ = std::fs::set_permissions(path, perms);
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        let _ = path;
+        // Build the user identity string. Prefer USERDOMAIN\USERNAME for domain
+        // accounts; fall back to USERNAME alone for local accounts.
+        let user = match (std::env::var("USERDOMAIN"), std::env::var("USERNAME")) {
+            (Ok(domain), Ok(name))
+                if !domain.is_empty()
+                    && domain != std::env::var("COMPUTERNAME").unwrap_or_default() =>
+            {
+                format!("{domain}\\{name}")
+            }
+            (_, Ok(name)) if !name.is_empty() => name,
+            _ => {
+                eprintln!(
+                    "[warn] harden_file_permissions: USERNAME not set; cannot harden {}",
+                    path.display()
+                );
+                return;
+            }
+        };
+
+        let path_str = path.to_string_lossy();
+        // /inheritance:r  — remove inherited ACEs
+        // /grant:r        — replace (not add) explicit grants
+        // (F)             — Full Control
+        let result = std::process::Command::new("icacls")
+            .args([
+                path_str.as_ref(),
+                "/inheritance:r",
+                "/grant:r",
+                &format!("{user}:(F)"),
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        if !result.is_ok_and(|s| s.success()) {
+            eprintln!(
+                "[warn] harden_file_permissions: icacls failed for {}; \
+                permissions may be too permissive",
+                path.display()
+            );
+        }
     }
 }
 

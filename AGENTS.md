@@ -117,6 +117,54 @@ END_COMMIT_OVERRIDE
 13. **Do not rely on intermediate commit messages for release notes** - Because PRs are typically squash-merged, release-please usually sees the merged PR title/body, not every branch commit. If multiple entries are needed in the changelog, use the PR body override block above.
 14. **PR body overrides should be updated before merge, not after** - If the scope of the PR changes during review, the agent should revise the override block so the final merged PR body matches what actually shipped.
 
+## Multi-Platform Compatibility (MANDATORY)
+
+This project targets **macOS, Linux, and Windows**. Development frequently happens on macOS, which means Windows-specific code paths are the most likely to silently break. Agents MUST treat all three platforms as first-class targets on every change.
+
+### Platform Compatibility Rules
+
+1. **Never add platform-specific code without a Windows equivalent** — If a feature works on macOS/Linux, it must either work on Windows or have an explicit `#[cfg(target_os = "windows")]` stub with a documented reason for the gap.
+
+2. **Run a cross-compile check before every PR** — After any change to `src/tray.rs`, `Cargo.toml`, or any file with `#[cfg]` guards, run:
+   ```bash
+   rustup target add x86_64-pc-windows-gnu
+   cargo check --target x86_64-pc-windows-gnu
+   ```
+   CI uses the `x86_64-pc-windows-gnu` (MinGW) target. If the check fails, fix it before pushing.
+
+3. **Removing a `not(target_os = "windows")` guard is a common task** — The tray popover, GPU monitoring, and other subsystems use these guards to exclude Windows from macOS/Linux-only paths. When extending a feature, audit every `not(target_os = "windows")` in the affected files and determine if Windows should now be included.
+
+4. **New `#[cfg]` guards must be justified** — When adding platform-specific code, add an inline comment explaining why it's platform-specific and what Windows gets instead (or why it can't be supported yet).
+
+5. **Test tooltip and fallback paths on all platforms** — If code falls back gracefully when a platform feature is unavailable, the fallback must not silently swallow errors on Windows. Log a warning.
+
+6. **`winit` features** — The `winit` dependency uses `default-features = false` with `x11` and `wayland` features. The Win32 backend is selected automatically when the build target is Windows and requires no explicit feature flag in winit 0.31. Do not add platform-specific winit feature flags unless a future winit version requires it.
+
+7. **`wry` is universal** — After the Windows tray WebView implementation (branch `feature/windows-tray-webview-and-compat`), `wry` is a universal dependency and must not be re-scoped to `not(target_os = "windows")`.
+
+8. **File permission hardening** — `harden_file_permissions()` is a no-op on Windows. This is a known gap (documented in `docs/plans/20260519-windows_compatibility_fixes.md` issue W-04). Do not remove the function; do not pretend it works on Windows. If adding new secret files, add a call to `harden_file_permissions()` for Unix coverage, and note the Windows gap in a comment.
+
+9. **GPU metrics on Windows** — GPU monitoring works via `nvidia-smi` (NVIDIA) and `rocm-smi` (AMD) on Windows when those tools are in PATH. Intel GPU monitoring is not yet implemented on Windows. Document Windows requirements in any GPU-related user-visible feature work.
+
+### Windows-Specific Architecture
+
+| Feature | Windows Implementation | Status |
+|---------|----------------------|--------|
+| Tray popover | WebView2 via `wry` | In progress (this branch) |
+| CPU temperature | `sensor_bridge.exe` HTTP sidecar | Working — requires elevated privileges |
+| GPU metrics | `nvidia-smi` / `rocm-smi` in PATH | Working for NVIDIA/AMD |
+| File permissions | No-op (security gap documented) | Known gap — see W-04 |
+| Signal handling | `tokio::signal::ctrl_c()` | Sufficient for tray app |
+| Dashboard open | `cmd.exe /C start <url>` | Working (used by old menu; may be reused) |
+
+### Related Documents
+
+- `docs/plans/20260505-windows_tray_webview.md` — Primary Windows tray implementation plan
+- `docs/plans/20260519-windows_compatibility_fixes.md` — Full catalog of Windows compatibility gaps
+- `docs/reference/windows-sensor-bridge-implementation.md` — Sensor bridge architecture
+
+---
+
 ## Development Workflow
 
 1. Create feature branch: `git checkout -b feature/my-feature`

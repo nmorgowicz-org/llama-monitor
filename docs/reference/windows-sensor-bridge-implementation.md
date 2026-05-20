@@ -2,460 +2,167 @@
 
 ## Overview
 
-This document describes the Windows sensor bridge architecture used by llama-monitor to collect hardware sensor data on Windows systems.
+On Windows, CPU temperature cannot be read by Rust code without a kernel driver. The solution is a small C# sidecar service (`sensor_bridge.exe`) that uses the `LibreHardwareMonitorLib` NuGet package to read kernel-level sensor data and serve it as JSON over a local HTTP server. The Rust app polls `http://127.0.0.1:7780/` on a short interval to fetch the latest readings.
 
 **Data sources collected:**
 
-- Motherboard name and model
-- CPU temperature (via C# sidecar binary)
-- CPU load (usage %)
-- Current CPU clock speed (MHz)
-- RAM usage (% used and free GB)
-- CPU model name
-
-**Architecture:** Most metrics come from native Rust crates. CPU temperature cannot be read natively on Windows without a kernel driver. The solution is a small C# sidecar executable (`sensor_bridge.exe`) that uses the `LibreHardwareMonitorLib` NuGet package to read the kernel-level sensor data and output it as JSON to stdout. The Rust app spawns this sidecar as a child process and parses its output.
-
-> **Note:** This document is implementation documentation describing the existing sensor bridge design. It is NOT build instructions for new development.
-
----
-
-## Part 1: Prerequisites
-
-### 1.1 Required Tooling
-
-Ensure the following are installed before proceeding:
-
-| Tool | Purpose | Install Command / URL |
-|---|---|---|
-| Rust + Cargo | Main app | https://rustup.rs |
-| .NET SDK 8.0 or newer | Build the C# sidecar | https://dotnet.microsoft.com/download |
-| Visual Studio Code or any editor | Optional but helpful | -- |
-
-Verify installs:
-```bash
-rustc --version
-cargo --version
-dotnet --version
-```
-
-### 1.2 Required Privileges
-
-The C# sidecar (`sensor_bridge.exe`) **must run as Administrator** to access hardware sensor data via the LibreHardwareMonitor kernel driver. Your Rust app must either:
-
-- Be launched as Administrator, OR
-- Use a manifest file to request elevation (see Part 4)
+| Metric | Source |
+|--------|--------|
+| CPU temperature | `sensor_bridge.exe` via LibreHardwareMonitorLib → `http://127.0.0.1:7780/` |
+| CPU load % | `sysinfo` crate |
+| CPU clock speed (MHz) | WMI `Win32_PerfFormattedData_Counters_ProcessorInformation` |
+| CPU model name | WMI `Win32_Processor` |
+| Motherboard name/model | WMI `Win32_BaseBoard` |
+| RAM usage | `sysinfo` crate |
+| GPU name + VRAM | WMI `Win32_VideoController` (fallback when nvidia-smi/rocm-smi unavailable) |
+| GPU temp/utilization | `nvidia-smi` (NVIDIA) or `rocm-smi` (AMD); not available for Intel via WMI |
 
 ---
 
-## Part 2: Build the C# Sidecar (`sensor_bridge`)
+## Architecture
 
-This is a standalone .NET console app. It reads all hardware sensor data and prints it as a JSON array to stdout, then exits.
-
-### 2.1 Create the Project
-
-```bash
-mkdir sensor_bridge
-cd sensor_bridge
-dotnet new console
+```
+llama-monitor.exe
+  │  polls every 500 ms
+  ↓
+http://127.0.0.1:7780/    ← sensor_bridge.exe (persistent HTTP server)
+  │  responds with cached JSON
+  │  updates cache every 5 seconds via LHM
+  ↓
+LibreHardwareMonitor kernel driver
+  (reads CPU Package temp, motherboard sensors)
 ```
 
-### 2.2 Add LibreHardwareMonitorLib
+The sensor bridge runs as a **persistent background process** — it does not exit after one request. It maintains a 5-second refresh timer for sensor data and serves cached readings to any client that connects. This avoids the overhead of spawning a new process per poll.
 
-```bash
-dotnet add package LibreHardwareMonitorLib
-```
+---
 
-This NuGet package handles all kernel driver interaction internally. No separate driver install is needed.
+## sensor_bridge.exe
 
-### 2.3 Replace Program.cs
+### Source
 
-Replace the contents of `Program.cs` with the following:
+`sensor_bridge/Program.cs` in the repository root.
 
-```csharp
-using LibreHardwareMonitor.Hardware;
-using System.Text.Json;
+### What it does
 
-class UpdateVisitor : IVisitor
-{
-    public void VisitComputer(IComputer computer)
-    {
-        computer.Traverse(this);
-    }
-    public void VisitHardware(IHardware hardware)
-    {
-        hardware.Update();
-        foreach (var sub in hardware.SubHardware) sub.Accept(this);
-    }
-    public void VisitSensor(ISensor sensor) { }
-    public void VisitParameter(IParameter parameter) { }
-}
+1. Opens `LibreHardwareMonitor.Hardware.Computer` with CPU and Motherboard sensors enabled
+2. Starts a 5-second refresh timer via `System.Threading.Timer`
+3. Binds `HttpListener` to `http://127.0.0.1:7780/`
+4. On each GET request, returns the latest sensor JSON (does not re-read hardware on each request)
+5. Handles port conflicts by deleting stale netsh URL reservations and killing duplicate sensor_bridge processes
 
-var computer = new Computer
-{
-    IsCpuEnabled = true,
-    IsMotherboardEnabled = true,
-    IsMemoryEnabled = true,
-    IsGpuEnabled = false,   // set true if you want GPU temps later
-    IsStorageEnabled = false
-};
-
-computer.Open();
-computer.Accept(new UpdateVisitor());
-
-var sensors = new List<object>();
-
-foreach (var hardware in computer.Hardware)
-{
-    foreach (var subHardware in hardware.SubHardware)
-    {
-        foreach (var sensor in subHardware.Sensors)
-        {
-            sensors.Add(new
-            {
-                hardware = hardware.Name,
-                subhardware = subHardware.Name,
-                name = sensor.Name,
-                type = sensor.SensorType.ToString(),
-                value = sensor.Value
-            });
-        }
-    }
-
-    foreach (var sensor in hardware.Sensors)
-    {
-        sensors.Add(new
-        {
-            hardware = hardware.Name,
-            subhardware = (string?)null,
-            name = sensor.Name,
-            type = sensor.SensorType.ToString(),
-            value = sensor.Value
-        });
-    }
-}
-
-computer.Close();
-
-Console.WriteLine(JsonSerializer.Serialize(sensors));
-```
-
-### 2.4 Build the Sidecar
-
-```bash
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ./publish
-```
-
-This produces a single `sensor_bridge.exe` in `./publish`. Copy this file into your Rust project's output directory or a `bin/` subfolder.
-
-**Important:** `--self-contained true` means the .NET runtime is bundled. The user does not need .NET installed separately.
-
-### 2.5 Verify the Sidecar Works
-
-Run it manually as Administrator from a terminal:
-
-```powershell
-.\publish\sensor_bridge.exe
-```
-
-You should see JSON output like:
+### JSON response format
 
 ```json
 [
-  {"hardware":"Intel Core i9-14900K","subhardware":null,"name":"CPU Package","type":"Temperature","value":52.0},
-  {"hardware":"Intel Core i9-14900K","subhardware":null,"name":"CPU Core #1","type":"Temperature","value":48.0},
-  ...
+  {
+    "hardware": "Intel Core i9-14900K",
+    "subhardware": null,
+    "name": "CPU Package",
+    "type": "Temperature",
+    "value": 52.0
+  },
+  {
+    "hardware": "Intel Core i9-14900K",
+    "subhardware": "Core #0",
+    "name": "Temperature",
+    "type": "Temperature",
+    "value": 48.0
+  }
 ]
 ```
 
-If you see an empty array `[]`, the app is running without Administrator privileges. Re-run as Admin.
+Fields:
+- `hardware` — top-level hardware name (CPU model, motherboard model)
+- `subhardware` — sub-component name, or `null` if a top-level sensor
+- `name` — sensor name (e.g., "CPU Package", "Core #1")
+- `type` — sensor type string (e.g., "Temperature", "Load", "Clock")
+- `value` — current reading as a float, or `null` if unavailable
 
----
+### Building sensor_bridge.exe
 
-## Part 3: Build the Rust Application
-
-### 3.1 Create the Project
+Requires .NET SDK 8.0+ and the `LibreHardwareMonitorLib` NuGet package. Build from the `sensor_bridge/` directory:
 
 ```bash
-cargo new system_metrics
-cd system_metrics
+dotnet publish -c Release -r win-x64 --self-contained true \
+  -p:PublishSingleFile=true -o ./publish
 ```
 
-### 3.2 Cargo.toml Dependencies
+This produces a single self-contained `sensor_bridge.exe` (~30 MB) in `./publish`. No .NET runtime installation required on the target machine.
 
-Replace the `[dependencies]` section in `Cargo.toml`:
+### Distribution
 
-```toml
-[dependencies]
-sysinfo = "0.30"
-wmi = "0.13"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+`sensor_bridge.exe` must be placed **next to** `llama-monitor.exe` in the installation directory. The release workflow (`release.yml`) already handles this:
+
+```yaml
+cp sensor_bridge/publish/sensor_bridge.exe windows-bundle/sensor_bridge.exe
 ```
 
-### 3.3 Project Structure
-
-Place `sensor_bridge.exe` in a `bin/` folder inside your project:
-
-```
-system_metrics/
-├── Cargo.toml
-├── src/
-│   └── main.rs
-└── bin/
-    └── sensor_bridge.exe
-```
-
-### 3.4 main.rs
+The Rust code in `src/lhm.rs` locates the binary relative to the current executable:
 
 ```rust
-use serde::Deserialize;
-use sysinfo::{CpuExt, System, SystemExt};
-use wmi::{COMLibrary, WMIConnection};
-
-// WMI structs for motherboard and CPU model
-#[derive(Deserialize, Debug)]
-#[allow(non_snake_case)]
-struct BaseBoard {
-    Manufacturer: String,
-    Product: String,
-}
-
-#[derive(Deserialize, Debug)]
-#[allow(non_snake_case)]
-struct Processor {
-    Name: String,
-}
-
-// Matches the JSON output from sensor_bridge.exe
-#[derive(Deserialize, Debug)]
-struct SensorReading {
-    hardware: String,
-    name: String,
-    #[serde(rename = "type")]
-    sensor_type: String,
-    value: Option<f64>,
-}
-
-fn get_cpu_temperature() -> Option<f64> {
-    // Locate sensor_bridge.exe relative to the current executable
-    let exe_dir = std::env::current_exe()
-        .ok()?
-        .parent()?
-        .to_path_buf();
-
-    let bridge_path = exe_dir.join("bin").join("sensor_bridge.exe");
-
-    if !bridge_path.exists() {
-        eprintln!("sensor_bridge.exe not found at {:?}", bridge_path);
-        return None;
-    }
-
-    let output = std::process::Command::new(&bridge_path)
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        eprintln!("sensor_bridge.exe failed: {:?}", output.status);
-        return None;
-    }
-
-    let json_str = String::from_utf8(output.stdout).ok()?;
-    let readings: Vec<SensorReading> = serde_json::from_str(&json_str).ok()?;
-
-    // Find the first CPU Package temperature reading
-    readings
-        .iter()
-        .find(|r| r.sensor_type == "Temperature" && r.name.contains("Package"))
-        .and_then(|r| r.value)
-}
-
-fn main() {
-    // --- sysinfo: CPU load, clock, RAM ---
-    let mut sys = System::new_all();
-    sys.refresh_all();
-
-    println!("=== CPU ===");
-    for (i, cpu) in sys.cpus().iter().enumerate() {
-        println!(
-            "  Core {}: {:.1}% load @ {} MHz",
-            i,
-            cpu.cpu_usage(),
-            cpu.frequency()
-        );
-    }
-
-    // --- WMI: motherboard and CPU model ---
-    println!("\n=== System Info ===");
-    match COMLibrary::new() {
-        Ok(com) => {
-            match WMIConnection::new(com.into()) {
-                Ok(wmi) => {
-                    // CPU model
-                    let cpus: Result<Vec<Processor>, _> = wmi.query();
-                    match cpus {
-                        Ok(list) => {
-                            for cpu in &list {
-                                println!("  CPU Model: {}", cpu.Name.trim());
-                            }
-                        }
-                        Err(e) => eprintln!("  CPU WMI error: {}", e),
-                    }
-
-                    // Motherboard
-                    let boards: Result<Vec<BaseBoard>, _> = wmi.query();
-                    match boards {
-                        Ok(list) => {
-                            for board in &list {
-                                println!(
-                                    "  Motherboard: {} {}",
-                                    board.Manufacturer.trim(),
-                                    board.Product.trim()
-                                );
-                            }
-                        }
-                        Err(e) => eprintln!("  Motherboard WMI error: {}", e),
-                    }
-                }
-                Err(e) => eprintln!("  WMI connection error: {}", e),
-            }
-        }
-        Err(e) => eprintln!("  COM init error: {}", e),
-    }
-
-    // --- RAM ---
-    println!("\n=== Memory ===");
-    let total_gb = sys.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
-    let used_gb = sys.used_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
-    let free_gb = total_gb - used_gb;
-    let used_pct = (used_gb / total_gb) * 100.0;
-    println!("  Total: {:.2} GB", total_gb);
-    println!("  Used:  {:.2} GB ({:.1}%)", used_gb, used_pct);
-    println!("  Free:  {:.2} GB", free_gb);
-
-    // --- CPU Temperature via sidecar ---
-    println!("\n=== Temperature ===");
-    match get_cpu_temperature() {
-        Some(temp) => println!("  CPU Package: {:.1} °C", temp),
-        None => println!("  CPU temp unavailable (run as Administrator or check sensor_bridge.exe)"),
-    }
-}
-```
-
-### 3.5 Build and Run
-
-```bash
-cargo build --release
-```
-
-Copy `bin/sensor_bridge.exe` into the same `bin/` folder next to the compiled `system_metrics.exe`:
-
-```
-target/release/
-├── system_metrics.exe
-└── bin/
-    └── sensor_bridge.exe
-```
-
-Run as Administrator:
-
-```bash
-.\target\release\system_metrics.exe
+let bridge_path = std::env::current_exe()
+    .ok()
+    .and_then(|p| p.parent().map(|d| d.join("sensor_bridge.exe")));
 ```
 
 ---
 
-## Part 4: Elevation (Running as Administrator)
+## Rust Integration
 
-The app needs admin rights for temperature data. Two options:
+**Files:** `src/lhm.rs`, `src/lhm_persistence.rs`, `static/js/windows-lhm.js`
 
-### Option A: Manifest File (Recommended for Distribution)
+### Lifecycle managed by `src/lhm.rs`
 
-Create `system_metrics.exe.manifest`:
+| Function | Purpose |
+|----------|---------|
+| `is_sensor_bridge_available()` | Checks if `sensor_bridge.exe` exists next to the binary |
+| `is_lhm_available()` | Alias for `is_sensor_bridge_available()` |
+| `is_local_sensor_bridge_running()` | Probes `http://127.0.0.1:7780/` for a live response |
+| `poll_local_sensor_bridge_temp()` | GET `http://127.0.0.1:7780/`, parse JSON, return CPU Package temp |
+| `install_local_sensor_bridge()` | Runs UAC-elevated PowerShell to register a Windows Scheduled Task that starts `sensor_bridge.exe` at system startup as SYSTEM |
+| `uninstall_local_sensor_bridge()` | Removes the scheduled task |
 
-```xml
-<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
-    <security>
-      <requestedPrivileges>
-        <requestedExecutionLevel level="requireAdministrator" uiAccess="false"/>
-      </requestedPrivileges>
-    </security>
-  </trustInfo>
-</assembly>
-```
-
-Embed it using `mt.exe` (from Windows SDK) or add a `build.rs` in Rust using the `winres` crate:
-
-```toml
-# Cargo.toml
-[build-dependencies]
-winres = "0.1"
-```
+### Temperature polling (`src/system.rs`)
 
 ```rust
-// build.rs
-fn main() {
-    if cfg!(target_os = "windows") {
-        let mut res = winres::WindowsResource::new();
-        res.set_manifest_file("system_metrics.exe.manifest");
-        res.compile().unwrap();
-    }
+#[cfg(target_os = "windows")]
+{
+    let (temp, available) = crate::lhm::get_lhm_cpu_temp();
+    metrics.cpu_temp = temp;
+    metrics.cpu_temp_available = available;
 }
 ```
 
-### Option B: Graceful Fallback (No Elevation Required)
+Called on every system metrics poll (every 5 seconds by default). If `sensor_bridge` is not running or returns no data, `available` is `false` and temperature is not shown in the UI.
 
-If you don't want to force elevation, handle the `None` case from `get_cpu_temperature()` gracefully and display all other metrics normally. Temperature will simply show as unavailable when not elevated.
+### Frontend (`static/js/windows-lhm.js`)
 
----
-
-## Part 5: Troubleshooting
-
-| Symptom | Likely Cause | Fix |
-|---|---|---|
-| `sensor_bridge.exe` outputs `[]` | Not running as Admin | Re-run terminal as Administrator |
-| `sensor_bridge.exe not found` | Wrong path | Ensure `bin/sensor_bridge.exe` is next to your `.exe` |
-| WMI motherboard returns empty | Rare on some boards | Try querying `Win32_ComputerSystem` instead for manufacturer |
-| CPU temp shows `None` | Sidecar failed silently | Run `sensor_bridge.exe` manually and check output |
-| `Generic failure` on WMI | LHM WMI bridge issue (irrelevant here) | Not applicable, sidecar approach bypasses WMI entirely |
-| sysinfo shows 0 MHz clock | Needs a second `refresh_all()` call | Call `sys.refresh_all()` twice with a short sleep between |
+The frontend provides a UI for managing the sensor bridge installation in the Settings modal. It calls `/api/sensor-bridge/*` endpoints to:
+- Check if sensor_bridge.exe is present
+- Check if the service is running
+- Install / uninstall the scheduled task
 
 ---
 
-## Part 6: File Checklist
+## Elevation and Permissions
 
-Before shipping or testing, confirm these files exist:
+The LibreHardwareMonitor kernel driver requires **Administrator privileges** to load. The sensor bridge handles this by running as SYSTEM via a Windows Scheduled Task (installed by `install_local_sensor_bridge()` using UAC-elevated PowerShell).
 
-- [ ] `sensor_bridge/publish/sensor_bridge.exe` (built in Part 2)
-- [ ] `system_metrics/src/main.rs` (written in Part 3)
-- [ ] `system_metrics/Cargo.toml` (with correct dependencies)
-- [ ] `sensor_bridge.exe` copied into `target/release/bin/`
-- [ ] App launched as Administrator
+When running `sensor_bridge.exe` directly (e.g., for testing), launch the terminal as Administrator. Without elevation, the sensor reading array will be empty (`[]`).
 
 ---
 
-## Summary of Data Sources
+## Troubleshooting
 
-| Metric | Source |
-|---|---|
-| CPU load % | `sysinfo` crate |
-| CPU clock speed (MHz) | `sysinfo` crate |
-| CPU model name | WMI `Win32_Processor` via `wmi` crate |
-| Motherboard name/model | WMI `Win32_BaseBoard` via `wmi` crate |
-| RAM total, used, free | `sysinfo` crate |
-| CPU temperature | `sensor_bridge.exe` via `LibreHardwareMonitorLib` |
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| CPU temp shows unavailable | sensor_bridge not running | Install via Settings → Sensor Bridge tab |
+| `sensor_bridge.exe` returns `[]` | Not running as Administrator | Run terminal as Admin; or install as scheduled task |
+| Port 7780 conflict | Another process or stale URL reservation | sensor_bridge auto-resolves via netsh cleanup and process kill on startup |
+| "sensor_bridge.exe not found" | Binary missing from install dir | Re-run the installer or copy `sensor_bridge.exe` next to `llama-monitor.exe` |
+| Sensor bridge crashes immediately | Missing .NET runtime | Use the self-contained build (`--self-contained true`); no .NET required |
 
 ---
 
-## Usage in llama-monitor
-
-In the current llama-monitor implementation, this sensor bridge architecture is encapsulated in:
-
-- `src/lhm.rs` - LibreHardwareMonitor integration, sensor bridge lifecycle management
-- `src/lhm_persistence.rs` - Persistence of LHM disabled/enabled state
-- `static/js/windows-lhm.js` - Frontend UI for sensor bridge installation/management
-
-The sensor bridge is installed and managed through the `/api/sensor-bridge/*` API endpoints.
-
-**Last updated:** 2026-05-04
+**Last updated:** 2026-05-19

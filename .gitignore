@@ -54,3 +54,4 @@ scripts/*.sh
 !scripts/build-single-target.sh
 !scripts/release-preflight.sh
 !scripts/validate-js.sh
+.claude/

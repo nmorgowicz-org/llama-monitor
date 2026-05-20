@@ -48,12 +48,10 @@ rustls-pemfile = "2"
     warp-helmet = "1.0"
     tray-icon = { version = "0.24", optional = true }
     winit = { version = "0.31.0-beta.2", default-features = false, features = ["x11", "wayland"], optional = true }
+    wry = { version = "0.55", default-features = false, features = ["os-webview"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
     mac-notification-sys = "0.6"
-
-[target.'cfg(not(target_os = "windows"))'.dependencies]
-    wry = { version = "0.55", default-features = false, features = ["os-webview"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
     wmi = { version = "0.18.4", features = ["default"] }
