@@ -576,7 +576,7 @@ export function renderTrashDropdown() {
 
 // ── Message rendering ─────────────────────────────────────────────────────────
 
-export function renderChatMessages() {
+export function renderChatMessages(skipAutoScroll = false) {
     ensureChatElements();
     const container = chatMessagesEl;
     const tab = activeChatTab();
@@ -667,7 +667,7 @@ export function renderChatMessages() {
         container.appendChild(el);
         idx++;
     }
- setTimeout(() => chatScroll(true), 50);
+    if (!skipAutoScroll) setTimeout(() => chatScroll(true), 50);
     getChatViewBindings().syncCompactSettingsUI?.(activeChatTab());
 }
 
@@ -675,14 +675,18 @@ function loadMoreMessages(tab, currentLimit) {
     const allMessages = tab.messages.filter(m => m.role !== 'system' || m.compaction_marker);
     tab.visible_message_limit = Math.min(currentLimit * 2, allMessages.length);
 
-    // Preserve scroll position before re-rendering
     const scrollEl = chatMessagesEl;
-    const scrollTop = scrollEl ? scrollEl.scrollTop : 0;
+    const prevScrollHeight = scrollEl ? scrollEl.scrollHeight : 0;
+    const prevScrollTop = scrollEl ? scrollEl.scrollTop : 0;
 
-    renderChatMessages();
+    renderChatMessages(true);
 
-    // Restore scroll position (don't scroll to top)
-    if (scrollEl) scrollEl.scrollTop = scrollTop;
+    // Compensate for content added above: shift scrollTop by the height delta
+    // so the viewport stays anchored to the same message the user was reading.
+    if (scrollEl) {
+        const delta = scrollEl.scrollHeight - prevScrollHeight;
+        scrollEl.scrollTop = prevScrollTop + delta;
+    }
 }
 
 function buildMessageElement(msg, idx, allMessages) {
