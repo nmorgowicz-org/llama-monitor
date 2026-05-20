@@ -3,6 +3,8 @@ pub mod dummy;
 pub mod env;
 pub mod nvidia;
 pub mod rocm;
+#[cfg(target_os = "windows")]
+pub mod wmi_gpu;
 
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -44,6 +46,8 @@ pub fn detect_backend(force: &str) -> Arc<dyn GpuBackend> {
         "rocm" => Arc::new(rocm::RocmBackend),
         "nvidia" => Arc::new(nvidia::NvidiaBackend),
         "none" => Arc::new(dummy::DummyBackend),
+        #[cfg(target_os = "windows")]
+        "wmi" => Arc::new(wmi_gpu::WmiGpuBackend),
         _ => {
             // Auto-detect: check which GPU tool is available
             if is_apple_silicon() {
@@ -53,10 +57,24 @@ pub fn detect_backend(force: &str) -> Arc<dyn GpuBackend> {
             } else if command_exists("nvidia-smi") {
                 Arc::new(nvidia::NvidiaBackend)
             } else {
-                eprintln!(
-                    "[warn] No GPU monitoring tool found (apple/mactop, rocm-smi, nvidia-smi)"
-                );
-                Arc::new(dummy::DummyBackend)
+                // On Windows, fall back to WMI-based GPU discovery which surfaces
+                // Intel, AMD, and other GPUs visible via Win32_VideoController.
+                // Reports name and VRAM only (no temp/utilization without DXGI perf counters).
+                #[cfg(target_os = "windows")]
+                {
+                    eprintln!(
+                        "[info] No GPU CLI tool found (rocm-smi, nvidia-smi); \
+                        using WMI GPU discovery (name/VRAM only)"
+                    );
+                    return Arc::new(wmi_gpu::WmiGpuBackend);
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    eprintln!(
+                        "[warn] No GPU monitoring tool found (apple/mactop, rocm-smi, nvidia-smi)"
+                    );
+                    Arc::new(dummy::DummyBackend)
+                }
             }
         }
     }

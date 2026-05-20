@@ -251,16 +251,23 @@ Follow `docs/plans/20260505-windows_tray_webview.md` phases 1–9 in order:
 ✅ Confirmed: winit-win32 backend auto-selected when targeting Windows, even with
 `default-features = false`. Cross-compile check passed with winit-win32 v0.31.0-beta.2.
 
-### Phase D: Documentation updates
+### Phase D: Documentation updates ✅ COMPLETE
 
-- Update `docs/reference/windows-sensor-bridge-implementation.md` to match actual HTTP server implementation (W-09)
-- Add Windows GPU setup notes (W-07)
+- ✅ Rewrote `docs/reference/windows-sensor-bridge-implementation.md` to match the
+  actual HTTP server implementation (sensor_bridge is a persistent server on :7780,
+  not a stdout-based one-shot process as the old doc described)
+- ✅ Added Windows GPU source table (nvidia-smi, rocm-smi, WMI fallback) to the doc
 
-### Phase E: Future PRs (out of scope for this branch)
+### Phase E: Remaining implementation ✅ COMPLETE
 
-- Windows ACL hardening for secret files (W-04 Option A/C)
-- Intel GPU / DXGI monitoring (W-07)
-- Windows Service packaging with proper signal handling (W-05)
+- ✅ W-04: Windows ACL hardening — implemented in `config.rs` via `icacls /inheritance:r
+  /grant:r <user>:(F)`; handles domain vs local accounts; logs warning on failure
+- ✅ W-07: Intel/unknown GPU via WMI — new `src/gpu/wmi_gpu.rs` using
+  `Win32_VideoController`; surfaces GPU name and VRAM; auto-selected on Windows
+  when nvidia-smi/rocm-smi not found; reports name="wmi"
+- W-05: Windows Service packaging — **dedicated plan written** at
+  `docs/plans/20260519-windows_service_packaging.md`; deferred as a separate feature
+  (different deployment model, not a compatibility gap in the tray app)
 
 ---
 
