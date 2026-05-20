@@ -11,6 +11,7 @@ pub struct LlamaMetrics {
     pub last_generation_throughput_unix_ms: u64,
     pub prompt_tokens_total: u64,
     pub generation_tokens_total: u64,
+    pub tokens_per_decode: f64,
     #[serde(skip_serializing)]
     pub predicted_tokens_total: u64,
     #[serde(skip_serializing)]
@@ -94,6 +95,8 @@ pub struct PrometheusValues {
     pub requests_processing: u32,
     pub n_decode_total: f64,
     pub n_busy_slots_per_decode: f64,
+    // Derived: predicted_tokens_total / n_decode_total — spec efficiency (>1 means drafts accepted)
+    pub tokens_per_decode: f64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -143,6 +146,9 @@ pub fn parse_prometheus_metrics(body: &str) -> PrometheusValues {
             "llamacpp:n_busy_slots_per_decode" => vals.n_busy_slots_per_decode = value,
             _ => {}
         }
+    }
+    if vals.n_decode_total > 0.0 {
+        vals.tokens_per_decode = vals.predicted_tokens_total / vals.n_decode_total;
     }
     vals
 }
@@ -251,7 +257,7 @@ fn slot_snapshot(slot: &serde_json::Value, input: SlotSnapshotInput) -> SlotSnap
         context_live_tokens: input.slot_context.map(|(tokens, _)| tokens),
         context_live_tokens_source: input.slot_context.map(|(_, source)| source.to_string()),
         speculative_enabled,
-        speculative_type: metric_param_string(params, "speculative.type"),
+        speculative_type: speculative_type(params),
         speculative_config: speculative_config(params),
         sampler_stack: sampler_stack(params),
         sampler_config: sampler_config(params),
@@ -358,8 +364,26 @@ fn sampler_config(params: Option<&serde_json::Value>) -> Vec<MetricConfigItem> {
     .collect()
 }
 
+fn speculative_type(params: Option<&serde_json::Value>) -> Option<String> {
+    // Try singular first (legacy llama.cpp), then plural (current llama.cpp with MTP)
+    if let Some(v) = metric_param_string(params, "speculative.type") {
+        return Some(v);
+    }
+    // "speculative.types" is a comma-separated list like "none,draft-mtp,ngram-mod"
+    // Filter out "none" entries to show only active types
+    metric_param_string(params, "speculative.types").map(|s| {
+        let active: Vec<&str> = s.split(',').filter(|t| *t != "none").collect();
+        if active.is_empty() {
+            s
+        } else {
+            active.join(",")
+        }
+    })
+}
+
 fn speculative_config(params: Option<&serde_json::Value>) -> Vec<MetricConfigItem> {
     [
+        ("speculative.types", "types"),
         ("speculative.type", "type"),
         ("speculative.n_max", "n_max"),
         ("speculative.n_min", "n_min"),
@@ -489,5 +513,66 @@ mod tests {
                 .iter()
                 .any(|item| item.label == "n_max" && item.value == "48")
         );
+    }
+
+    #[test]
+    fn test_parse_prometheus_metrics_tokens_per_decode() {
+        let body = "llamacpp:tokens_predicted_total 118903\nllamacpp:n_decode_total 36178\n";
+        let vals = parse_prometheus_metrics(body);
+        assert!((vals.tokens_per_decode - 3.286).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parse_prometheus_metrics_tokens_per_decode_zero_decodes() {
+        let body = "llamacpp:tokens_predicted_total 1000\n";
+        let vals = parse_prometheus_metrics(body);
+        assert_eq!(vals.tokens_per_decode, 0.0);
+    }
+
+    #[test]
+    fn test_speculative_types_plural_field() {
+        // Current llama.cpp with draft-mtp uses "speculative.types" (plural)
+        let body = r#"[{
+            "id":0,
+            "n_ctx":4096,
+            "is_processing":true,
+            "speculative":true,
+            "params":{
+                "speculative.types":"none,draft-mtp,ngram-mod"
+            },
+            "next_token":[{"has_next_token":false,"n_remain":0,"n_decoded":10}]
+        }]"#;
+        let vals = parse_slot_metrics(body).unwrap();
+        let slot = vals.slots.first().unwrap();
+        assert!(slot.speculative_enabled);
+        // "none" should be filtered out, leaving "draft-mtp,ngram-mod"
+        assert_eq!(
+            slot.speculative_type.as_deref(),
+            Some("draft-mtp,ngram-mod")
+        );
+        assert!(
+            slot.speculative_config
+                .iter()
+                .any(|item| item.label == "types" && item.value == "none,draft-mtp,ngram-mod")
+        );
+    }
+
+    #[test]
+    fn test_speculative_type_singular_takes_priority() {
+        // Singular "speculative.type" should win over plural if both present
+        let body = r#"[{
+            "id":0,
+            "n_ctx":4096,
+            "is_processing":false,
+            "speculative":true,
+            "params":{
+                "speculative.type":"ngram",
+                "speculative.types":"none,ngram"
+            },
+            "next_token":[{"has_next_token":false,"n_remain":0,"n_decoded":5}]
+        }]"#;
+        let vals = parse_slot_metrics(body).unwrap();
+        let slot = vals.slots.first().unwrap();
+        assert_eq!(slot.speculative_type.as_deref(), Some("ngram"));
     }
 }

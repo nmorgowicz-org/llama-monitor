@@ -508,10 +508,15 @@ function renderDecodingConfig(l, hasActiveEndpoint, isGenerating) {
     }
 
     if (specChip) {
-        const specType = slot.speculative_type || 'configuration';
+        const specType = slot.speculative_type || '';
         const nMax = (slot.speculative_config || []).find(item => item.label === 'n_max');
+        const tpd = l?.tokens_per_decode ?? 0;
         if (slot.speculative_enabled || (slot.speculative_config || []).length > 0) {
-            specChip.textContent = 'Speculative · ' + specType + (nMax ? ' · n_max ' + nMax.value : '');
+            const parts = ['Speculative'];
+            if (specType) parts.push(specType);
+            if (nMax) parts.push('n_max ' + nMax.value);
+            if (tpd > 1.05) parts.push(tpd.toFixed(2) + '× tok/decode');
+            specChip.textContent = parts.join(' · ');
             specChip.classList.add('enabled');
         } else {
             specChip.textContent = 'Speculative decoding not enabled';

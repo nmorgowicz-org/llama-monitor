@@ -206,6 +206,7 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             m.context_high_water_tokens = prom.n_tokens_max;
             m.requests_processing = prom.requests_processing;
             m.n_busy_slots_per_decode = prom.n_busy_slots_per_decode;
+            m.tokens_per_decode = prom.tokens_per_decode;
         }
 
         // Poll /slots — get per-slot processing state + total context
