@@ -32,7 +32,8 @@ let cachedDbAdminToken = null;
 async function getDbAdminToken() {
     if (cachedDbAdminToken) return cachedDbAdminToken;
     try {
-        const res = await fetch('/api/db/admin-token');
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const res = await fetch('/api/db/admin-token', { headers });
         if (res.ok) {
             const data = await res.json();
             if (data.token) {
@@ -69,7 +70,13 @@ async function remoteAgentFetch(url, options) {
         const resp = await fetch(url, options);
         if (resp.status === 401) {
             showToast('Authentication required for this operation');
-            return { ok: false, status: 401, error: 'unauthorized' };
+            return new Response(
+                JSON.stringify({ ok: false, error: 'unauthorized' }),
+                {
+                    status: 401,
+                    headers: { 'Content-Type': 'application/json' }
+                }
+            );
         }
         return resp;
     } catch (err) {
@@ -84,7 +91,7 @@ function inferredAgentUrl() {
     if (!endpoint) return '';
     try {
         const url = new URL(endpoint);
-        return url.protocol + '//' + url.hostname + ':7779';
+        return 'https://' + url.hostname + ':7779';
     } catch (_) {
         return '';
     }
@@ -140,7 +147,7 @@ export function openRemoteAgentSetup() {
         sshHostInput.value = inferredHost;
     }
     if (agentUrlInput && !agentUrlInput.value && inferredHost) {
-        agentUrlInput.value = 'http://' + inferredHost + ':7779';
+        agentUrlInput.value = 'https://' + inferredHost + ':7779';
     }
 
     // Reset state
@@ -266,9 +273,9 @@ function prepareAgentSetupFromEndpoint() {
     const configAgentUrl = document.getElementById('set-remote-agent-url');
 
     if (sshHostInput && !sshHostInput.value.trim() && host) sshHostInput.value = host;
-    if (agentUrlInput && !agentUrlInput.value.trim() && host) agentUrlInput.value = 'http://' + host + ':7779';
+    if (agentUrlInput && !agentUrlInput.value.trim() && host) agentUrlInput.value = 'https://' + host + ':7779';
     if (configSshTarget && !configSshTarget.value.trim() && host) configSshTarget.value = host;
-    if (configAgentUrl && !configAgentUrl.value.trim() && host) configAgentUrl.value = 'http://' + host + ':7779';
+    if (configAgentUrl && !configAgentUrl.value.trim() && host) configAgentUrl.value = 'https://' + host + ':7779';
 }
 
 function updateSshSetupAuthFields() {
@@ -986,17 +993,21 @@ async function finishRemoteAgentSetup() {
 
     // Fetch current settings (full) to merge — avoids wiping unrelated settings
     // and preserves the real remote_agent_token (GET /api/settings masks it).
-    let currentSettings = {};
+    let currentSettings = null;
     try {
         const headers = {};
         if (window.authHeaders) {
             Object.assign(headers, window.authHeaders());
         }
         const resp = await fetch('/api/settings/full', { headers });
-        if (resp.ok) {
-            currentSettings = await resp.json();
+        if (!resp.ok) {
+            throw new Error('HTTP ' + resp.status);
         }
-    } catch (_) {}
+        currentSettings = await resp.json();
+    } catch (err) {
+        showAgentSetupStatus('Failed to load current settings before saving: ' + escapeHtml(err.message), 'error');
+        return;
+    }
 
     const settings = {
         ...currentSettings,
@@ -1011,6 +1022,8 @@ async function finishRemoteAgentSetup() {
     const explicitToken = agentTokenInput?.value.trim();
     if (explicitToken) {
         settings.remote_agent_token = explicitToken;
+    } else if (agentTokenInput?.dataset.fullValue) {
+        settings.remote_agent_token = agentTokenInput.dataset.fullValue;
     }
 
     const { auth, connection } = collectRemoteAgentSetupConnection();
@@ -1112,7 +1125,7 @@ function previewSshSetupGuide() {
     }
 
     const target = sshTargetFromConnection(connection);
-    const agentUrl = 'http://' + connection.host + ':7779';
+    const agentUrl = 'https://' + connection.host + ':7779';
     const authLabel = auth === 'password' ? 'password for this operation' : auth === 'key' ? 'private key file' : 'SSH agent or keychain';
 
     // eslint-disable-next-line no-unsanitized/property -- all server/computed strings wrapped in escapeHtml(); remaining items are hardcoded
@@ -1221,7 +1234,7 @@ function applySshSetupGuide() {
 
     if (targetInput) targetInput.value = target;
     if (agentUrlInput && !agentUrlInput.value.trim()) {
-        agentUrlInput.value = 'http://' + connection.host + ':7779';
+        agentUrlInput.value = 'https://' + connection.host + ':7779';
     }
 
     remoteAgent.sshConnection = connection;

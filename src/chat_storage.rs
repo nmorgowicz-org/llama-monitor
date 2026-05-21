@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS tabs (
     total_input_tokens     INTEGER NOT NULL DEFAULT 0,
     total_output_tokens    INTEGER NOT NULL DEFAULT 0,
     created_at             INTEGER NOT NULL,
-    updated_at             INTEGER NOT NULL
+    updated_at             INTEGER NOT NULL,
+    composer_draft         TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -122,6 +123,8 @@ pub struct TabMeta {
     pub updated_at: i64,
     #[serde(default)]
     pub visibility: String,
+    #[serde(default)]
+    pub composer_draft: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -149,6 +152,8 @@ pub struct ChatTabRow {
     pub updated_at: i64,
     #[serde(default = "default_visibility")]
     pub visibility: String,
+    #[serde(default)]
+    pub composer_draft: String,
     #[serde(default)]
     pub messages: Vec<MessageRow>,
 }
@@ -345,7 +350,7 @@ impl ChatStorage {
                     t.pinned, t.tab_order, t.last_ctx_pct,
                     t.total_input_tokens, t.total_output_tokens,
                     COUNT(m.id) as message_count,
-                    t.created_at, t.updated_at, t.visibility
+                    t.created_at, t.updated_at, t.visibility, t.composer_draft
              FROM tabs t
              LEFT JOIN messages m ON m.tab_id = t.id AND m.compaction_marker = 0
              {}
@@ -370,6 +375,7 @@ impl ChatStorage {
                 created_at: row.get(10)?,
                 updated_at: row.get(11)?,
                 visibility: row.get(12)?,
+                composer_draft: row.get(13)?,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -386,7 +392,7 @@ impl ChatStorage {
                     model_params, context_notes, sidebar_width,
                     tab_order, pinned, last_ctx_pct,
                     total_input_tokens, total_output_tokens,
-                    created_at, updated_at, visibility
+                    created_at, updated_at, visibility, composer_draft
              FROM tabs WHERE id = ?1",
         )?;
         let mut tab = stmt.query_row(params![id], |row| {
@@ -413,6 +419,7 @@ impl ChatStorage {
                 created_at: row.get(19)?,
                 updated_at: row.get(20)?,
                 visibility: row.get(21)?,
+                composer_draft: row.get(22)?,
                 messages: vec![],
             })
         })?;
@@ -431,8 +438,8 @@ impl ChatStorage {
                  model_params, context_notes, sidebar_width,
                  tab_order, pinned, last_ctx_pct,
                  total_input_tokens, total_output_tokens,
-                 created_at, updated_at, visibility)
-              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
+                 created_at, updated_at, visibility, composer_draft)
+              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
             params![
                 tab.id,
                 tab.name,
@@ -456,6 +463,7 @@ impl ChatStorage {
                 tab.created_at,
                 tab.updated_at,
                 tab.visibility,
+                tab.composer_draft,
             ],
         )?;
         Ok(())
@@ -472,7 +480,7 @@ impl ChatStorage {
                 model_params=?12, context_notes=?13, sidebar_width=?14,
                 pinned=?15, last_ctx_pct=?16,
                 total_input_tokens=?17, total_output_tokens=?18,
-                updated_at=?19, visibility=?20
+                updated_at=?19, visibility=?20, composer_draft=?21
              WHERE id=?1",
             params![
                 tab.id,
@@ -495,6 +503,7 @@ impl ChatStorage {
                 tab.total_output_tokens,
                 tab.updated_at,
                 tab.visibility,
+                tab.composer_draft,
             ],
         )?;
         Ok(())
@@ -545,7 +554,7 @@ impl ChatStorage {
                     model_params, context_notes, sidebar_width,
                     tab_order, pinned, last_ctx_pct,
                     total_input_tokens, total_output_tokens,
-                    created_at, updated_at, visibility
+                    created_at, updated_at, visibility, composer_draft
              FROM tabs WHERE id = ?1",
             params![id],
             |row| {
@@ -574,6 +583,7 @@ impl ChatStorage {
                     created_at: row.get(19)?,
                     updated_at: row.get(20)?,
                     visibility: row.get(21)?,
+                    composer_draft: row.get(22)?,
                     messages: vec![],
                 })
             },
@@ -599,6 +609,7 @@ impl ChatStorage {
             created_at: tab.created_at,
             updated_at: tab.updated_at,
             visibility: tab.visibility,
+            composer_draft: tab.composer_draft,
         })
     }
 

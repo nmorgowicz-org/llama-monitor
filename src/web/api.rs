@@ -1457,6 +1457,7 @@ pub fn api_routes(
     let db_query = api_db_query(chat_storage.clone(), app_config.clone());
 
     let get_sessions = api_get_sessions(state.clone(), app_config.clone());
+    let get_recent_sessions = api_get_recent_sessions(state.clone(), app_config.clone());
     let create_session = api_create_session(state.clone(), app_config.clone());
     let delete_session = api_delete_session(state.clone(), app_config.clone());
     let get_active_session = api_get_active_session(state.clone(), app_config.clone());
@@ -1536,6 +1537,7 @@ pub fn api_routes(
         .or(db_indexes)
         .or(db_query);
     let session_routes = get_sessions
+        .or(get_recent_sessions)
         .or(create_session)
         .or(delete_session)
         .or(get_active_session)
@@ -2417,12 +2419,10 @@ fn api_remote_agent_start(
                     };
                     let command = if let Some(ref conn) = ssh_connection {
                         let remote_os = crate::agent::detect_remote_os_with(conn).await;
-                        let resolved_install_path =
-                            crate::agent::default_install_path_for_os(remote_os);
                         crate::agent::default_start_command_for_os_with(
                             conn,
                             remote_os,
-                            &resolved_install_path,
+                            &install_path,
                         )
                         .await
                     } else {
@@ -5226,19 +5226,31 @@ fn api_internal_token(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "internal" / "api-token")
         .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::header::optional::<String>("cookie"))
         .and(warp::header::optional::<String>("host"))
         .and(with_app_config(app_config))
-        .map(move |host_header: Option<String>, cfg: Arc<AppConfig>| {
-            if !token_bootstrap_allowed(&auth_manager, &bind_host, host_header.as_deref()) {
-                return Box::new(warp::reply::with_status(
-                    warp::reply::json(&serde_json::json!({ "error": "forbidden" })),
-                    warp::http::StatusCode::FORBIDDEN,
-                )) as Box<dyn warp::reply::Reply>;
-            }
-            let live = cfg.live_api_token();
-            let token = live.as_deref().unwrap_or("");
-            Box::new(warp::reply::json(&serde_json::json!({ "token": token })))
-        })
+        .map(
+            move |auth: Option<String>,
+                  cookie: Option<String>,
+                  host_header: Option<String>,
+                  cfg: Arc<AppConfig>| {
+                let already_authenticated = auth_manager
+                    .authenticate_request(auth.as_deref(), cookie.as_deref())
+                    || check_api_token(&auth, &cfg);
+                if !already_authenticated
+                    && !token_bootstrap_allowed(&auth_manager, &bind_host, host_header.as_deref())
+                {
+                    return Box::new(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({ "error": "forbidden" })),
+                        warp::http::StatusCode::FORBIDDEN,
+                    )) as Box<dyn warp::reply::Reply>;
+                }
+                let live = cfg.live_api_token();
+                let token = live.as_deref().unwrap_or("");
+                Box::new(warp::reply::json(&serde_json::json!({ "token": token })))
+            },
+        )
 }
 
 // GET /api/db/admin-token - Return DB admin token for authenticated UI use
@@ -5249,19 +5261,31 @@ fn api_db_admin_token(
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "db" / "admin-token")
         .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::header::optional::<String>("cookie"))
         .and(warp::header::optional::<String>("host"))
         .and(with_app_config(app_config))
-        .map(move |host_header: Option<String>, cfg: Arc<AppConfig>| {
-            if !token_bootstrap_allowed(&auth_manager, &bind_host, host_header.as_deref()) {
-                return Box::new(warp::reply::with_status(
-                    warp::reply::json(&serde_json::json!({ "error": "forbidden" })),
-                    warp::http::StatusCode::FORBIDDEN,
-                )) as Box<dyn warp::reply::Reply>;
-            }
-            let live = cfg.live_db_admin_token();
-            let token = live.as_deref().unwrap_or("");
-            Box::new(warp::reply::json(&serde_json::json!({ "token": token })))
-        })
+        .map(
+            move |auth: Option<String>,
+                  cookie: Option<String>,
+                  host_header: Option<String>,
+                  cfg: Arc<AppConfig>| {
+                let already_authenticated = auth_manager
+                    .authenticate_request(auth.as_deref(), cookie.as_deref())
+                    || check_api_token(&auth, &cfg);
+                if !already_authenticated
+                    && !token_bootstrap_allowed(&auth_manager, &bind_host, host_header.as_deref())
+                {
+                    return Box::new(warp::reply::with_status(
+                        warp::reply::json(&serde_json::json!({ "error": "forbidden" })),
+                        warp::http::StatusCode::FORBIDDEN,
+                    )) as Box<dyn warp::reply::Reply>;
+                }
+                let live = cfg.live_db_admin_token();
+                let token = live.as_deref().unwrap_or("");
+                Box::new(warp::reply::json(&serde_json::json!({ "token": token })))
+            },
+        )
 }
 
 // POST /api/db/query - Execute admin query (SELECT only)
@@ -5761,6 +5785,40 @@ fn api_get_sessions(
                 let sessions = state.get_sessions();
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &sessions,
+                )))
+            }
+        })
+}
+
+fn api_get_recent_sessions(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config = app_config.clone();
+    warp::path!("api" / "sessions" / "recent")
+        .and(warp::path::end())
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            let state = state.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let mut sessions = state.get_sessions();
+                // Filter to Attach-mode only
+                sessions.retain(|s| matches!(s.mode, crate::state::SessionMode::Attach { .. }));
+                // Sort by last_connected_at descending
+                sessions.sort_by(|a, b| b.last_connected_at.cmp(&a.last_connected_at));
+                // Limit to 10
+                sessions.truncate(10);
+                let active_id = state.active_session_id.lock().unwrap().clone();
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "sessions": sessions,
+                        "active_session_id": active_id
+                    }),
                 )))
             }
         })
@@ -6322,6 +6380,16 @@ fn api_attach(
                     session_id
                 };
 
+                // Update session metadata for connection tracking
+                {
+                    let mut sessions = state.sessions.lock().unwrap();
+                    if let Some(s) = sessions.iter_mut().find(|s| s.id == session_id) {
+                        s.last_connected_at = now;
+                        s.connect_count += 1;
+                        s.last_error = None;
+                    }
+                }
+
                 state.set_active_session(&session_id);
                 state.llama_poll_notify.notify_waiters();
                 Ok::<_, warp::Rejection>(warp::reply::with_status(
@@ -6372,6 +6440,17 @@ fn api_detach(
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                         &serde_json::json!({"ok": false, "error": "Active session is not an attach session"}),
                     )));
+                }
+
+                // Update last_active on detach
+                {
+                    let mut sessions = state.sessions.lock().unwrap();
+                    if let Some(s) = sessions.iter_mut().find(|s| s.id == active_id) {
+                        s.last_active = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                    }
                 }
 
                 drop(sessions);

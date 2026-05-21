@@ -105,6 +105,7 @@
             <div class="strip-right">
                 <div class="agent-status" id="agent-status" style="display:none;" title="Click to manage remote agent" role="button" tabindex="0">
                     <span class="agent-indicator">●</span>
+                    <span class="telemetry-grade-chip" id="telemetry-grade-chip"></span>
                     <span class="agent-text">Remote Agent</span>
                     <span class="agent-latency" id="agent-latency"></span>
                     <button type="button" class="btn-agent-fix" style="display:none;" id="agent-fix-btn" title="Set up remote agent">⚡ Fix</button>
@@ -217,14 +218,25 @@
                         </div>
                         <h2 class="setup-card-title">Attach to Endpoint</h2>
                         <p class="setup-card-desc">Connect to a running llama.cpp server on any machine</p>
-                        <div class="setup-card-form">
-                            <input type="text" class="setup-input" id="setup-endpoint-url" placeholder="http://127.0.0.1:8080">
-                            <button class="setup-btn setup-btn-primary" id="setup-attach-btn">
-                                <span class="btn-icon">⚡</span> Attach
-                            </button>
+                        <div class="setup-recent-endpoints" id="setup-recent-endpoints">
+                            <div class="setup-section-header">
+                                <h3>Recent Endpoints</h3>
+                                <a id="setup-browse-sessions-link">Manage all sessions →</a>
+                            </div>
+                            <div class="setup-endpoint-list" id="setup-endpoint-list">
+                                <!-- Dynamically populated -->
+                            </div>
                         </div>
-                        <div class="setup-card-footer">
-                            <a class="setup-link" id="setup-browse-sessions-link">Browse saved sessions →</a>
+                        <div class="setup-endpoint-manual" id="setup-endpoint-manual">
+                            <div class="setup-section-header">
+                                <h3>Manual Attach</h3>
+                            </div>
+                            <div class="setup-card-form">
+                                <input type="text" class="setup-input" id="setup-endpoint-url" placeholder="http://127.0.0.1:8080">
+                                <button class="setup-btn setup-btn-primary" id="setup-attach-btn">
+                                    <span class="btn-icon">⚡</span> Attach
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="setup-card setup-card-spawn">
@@ -1198,6 +1210,9 @@
                 <span>Not connected to server</span>
                 <button class="disconnected-banner-btn" id="disconnected-banner-setup-btn">Go to Setup</button>
             </div>
+
+            <!-- Reply Plan Summary -->
+            <div class="reply-plan-summary" id="reply-plan-summary"></div>
 
             <!-- Input area -->
              <div class="chat-input-row" id="chat-input-row">

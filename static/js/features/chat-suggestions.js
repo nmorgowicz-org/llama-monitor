@@ -2,7 +2,7 @@
 // Dropdown menu with AI-generated suggestions (General, Plot Twist, New Character).
 
 import { activeChatTab, autoResizeChatInput, persistChatTabs } from './chat-state.js';
-import { chat } from '../core/app-state.js';
+import { chat, settingsState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { toggleExplicitMode } from './chat-templates.js';
@@ -50,8 +50,7 @@ let suggestionsState = {
 // ── Dropdown Toggle ──────────────────────────────────────────────────────────
 
 export function toggleSuggestionsDropdown() {
-    const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
-    if (settings.enabled_suggestions === false) return;
+    if (settingsState.enabled_suggestions === false) return;
 
     suggestionsState.expanded = !suggestionsState.expanded;
     if (suggestionsState.expanded) {
@@ -67,8 +66,7 @@ export function closeSuggestionsDropdown() {
 }
 
 export function isSuggestionsEnabled() {
-    const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
-    return settings.enabled_suggestions !== false;
+    return settingsState.enabled_suggestions !== false;
 }
 
 export function getSuggestionsState() {
@@ -701,11 +699,11 @@ async function rewriteSuggestionDraft() {
 // ── Fetch Suggestions from API ───────────────────────────────────────────────
 
 function getSettingsValue() {
-    try {
-        return JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
-    } catch {
-        return {};
-    }
+    return {
+        context_depth: settingsState.context_depth,
+        suggestion_count: settingsState.suggestion_count,
+        suggestion_prompts: settingsState.suggestion_prompts,
+    };
 }
 
 function buildSuggestionContext(tab) {
@@ -907,23 +905,18 @@ const CATEGORY_DEFAULT_PROMPTS = {
 };
 
 function getBuiltinPromptOverride(key) {
-    try {
-        const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
-        return (settings.suggestion_prompts || {})[key] || '';
-    } catch { return ''; }
+    return (settingsState.suggestion_prompts || {})[key] || '';
 }
 
 function saveBuiltinPromptOverride(key, value) {
-    try {
-        const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
-        if (!settings.suggestion_prompts) settings.suggestion_prompts = {};
-        if (value.trim()) {
-            settings.suggestion_prompts[key] = value.trim();
-        } else {
-            delete settings.suggestion_prompts[key];
-        }
-        localStorage.setItem('llama_monitor_settings', JSON.stringify(settings));
-    } catch (e) { console.error('Failed to save prompt override:', e); }
+    if (!settingsState.suggestion_prompts) settingsState.suggestion_prompts = {};
+    if (value.trim()) {
+        settingsState.suggestion_prompts[key] = value.trim();
+    } else {
+        delete settingsState.suggestion_prompts[key];
+    }
+    // Persist to backend via the settings API
+    import('./settings.js').then(({ saveSettings }) => saveSettings());
 }
 
 function manageCategories() {

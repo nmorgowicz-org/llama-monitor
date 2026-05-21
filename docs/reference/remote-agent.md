@@ -141,7 +141,7 @@ Remote-agent connection details are persisted as runtime configuration, not ordi
 
 | Setting | Purpose |
 |---------|---------|
-| **Agent URL** | Explicit polling URL for the remote agent; if left blank, the app infers `http://<remote-host>:7779` from the attached endpoint host |
+| **Agent URL** | Explicit polling URL for the remote agent; if left blank, the app infers `https://<remote-host>:7779` from the attached endpoint host |
 | **Agent Token** | Optional bearer token required by the agent |
 | **SSH target** | Saved `user@host` target for manual agent actions or optional autostart |
 | **After attach, try SSH start if the agent is unreachable** | Enables one autostart attempt after attaching to a remote endpoint |

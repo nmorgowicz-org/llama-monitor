@@ -335,6 +335,8 @@ export async function sendChat() {
     };
     tab.messages.push(userMsg);
     tab.updated_at = Date.now();
+    tab.composer_draft = '';
+    scheduleChatPersist();
 
     if (typeof renderChatMessages === 'function') renderChatMessages();
 

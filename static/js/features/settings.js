@@ -269,6 +269,14 @@ export function applySettings(s) {
         if (plotTwistEl && prompts['plot-twist']) plotTwistEl.value = prompts['plot-twist'];
         if (newCharEl && prompts['new-character']) newCharEl.value = prompts['new-character'];
     }
+
+    // Update central settingsState so feature modules read from a single source
+    settingsState.enabled_context_notes = s.enabled_context_notes !== false;
+    settingsState.enabled_suggestions = s.enabled_suggestions !== false;
+    settingsState.enabled_quick_guide = s.enabled_quick_guide !== false;
+    settingsState.suggestion_prompts = s.suggestion_prompts || {};
+    settingsState.context_depth = s.context_depth || 10;
+    settingsState.suggestion_count = s.suggestion_count || 5;
 }
 
 // ── Live WS interval update ──────────────────────────────────────────────────

@@ -2,6 +2,7 @@
 // Multi-mode assistant steering surface: Quick, Director, Surprise.
 
 import { activeChatTab, getChatViewBindings, scheduleChatPersist } from './chat-state.js';
+import { settingsState } from '../core/app-state.js';
 import { showToast } from './toast.js';
 
 const DIRECTOR_IDEA_COUNT = 4;
@@ -37,8 +38,7 @@ let quickGuideState = {
 };
 
 export function toggleQuickGuide() {
-    const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
-    if (settings.enabled_quick_guide === false) return;
+    if (settingsState.enabled_quick_guide === false) return;
 
     quickGuideState.expanded = !quickGuideState.expanded;
     if (quickGuideState.expanded) {
@@ -54,8 +54,7 @@ export function closeQuickGuide() {
 }
 
 export function isQuickGuideEnabled() {
-    const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
-    return settings.enabled_quick_guide !== false;
+    return settingsState.enabled_quick_guide !== false;
 }
 
 export function getQuickGuideState() {

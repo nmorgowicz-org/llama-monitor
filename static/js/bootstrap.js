@@ -35,6 +35,8 @@ import { initSuggestionsDropdown, closeSuggestionsDropdown } from './features/ch
 import { initQuickGuide, closeQuickGuide } from './features/chat-quick-guide.js';
 import { initDbAdmin } from './features/db-admin.js';
 import { initAuthGate, logoutCurrentUser } from './features/auth.js';
+import { deriveTelemetryGrade, gradeLabel, gradeStatusClass, gradeActionCopy } from './features/telemetry-grade.js';
+import { initReplyPlanUpdates } from './features/chat-reply-plan.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
@@ -136,6 +138,7 @@ async function initializeApp() {
     initContextSidebar();
     initSuggestionsDropdown();
     initQuickGuide();
+    initReplyPlanUpdates();
 
     // Phase 10: Database administration
     initDbAdmin();

@@ -65,6 +65,7 @@ pub fn ws_route(
                             let local_metrics_available = state.active_session_uses_local_metrics();
                             let host_metrics_available = state.host_metrics_available();
                             let remote_agent_connected = state.remote_agent_connected();
+                            let remote_agent_health_reachable = state.remote_agent_health_reachable();
                             let remote_agent_url = state.remote_agent_url.lock().unwrap().clone();
                             let remote_agent_version =
                                 state.remote_agent_version.lock().unwrap().clone();
@@ -124,10 +125,12 @@ pub fn ws_route(
                                 "local_metrics_available": local_metrics_available,
                                 "host_metrics_available": host_metrics_available,
                                 "remote_agent_connected": remote_agent_connected,
-                                "remote_agent_health_reachable": remote_agent_connected,
+                                "remote_agent_health_reachable": remote_agent_health_reachable,
                                 "remote_agent_url": remote_agent_url,
                                 "remote_agent_version": remote_agent_version,
+                                "remote_agent_protocol_version": *state.remote_agent_protocol_version.lock().unwrap(),
                                 "remote_agent_update_available": remote_agent_update_available,
+                                "remote_agent_protocol_too_old": *state.remote_agent_protocol_too_old.lock().unwrap(),
                                 "capabilities": capabilities,
                                 "endpoint_kind": endpoint_kind,
                                 "session_kind": session_kind,

@@ -959,8 +959,8 @@ function selectVizStyle(card, metric, style) {
     if (cardEl) {
         cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) { el.classList.add('viz-fade-out'); });
         setTimeout(function() {
-            if (card === 'gpu') renderGpuCard(lastGpuData || {}, !!lastGpuData && Object.keys(lastGpuData).length > 0);
-            else renderSystemCard(lastSystemMetrics, !!lastSystemMetrics);
+            if (card === 'gpu') renderGpuCard(lastGpuData || {}, !!lastGpuData && Object.keys(lastGpuData).length > 0, window.__telemetryGrade);
+            else renderSystemCard(lastSystemMetrics, !!lastSystemMetrics, window.__telemetryGrade);
             cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) {
                 el.classList.remove('viz-fade-out');
                 el.classList.add('viz-fade-in');
@@ -990,8 +990,8 @@ function resetVizPrefs(card) {
     if (cardEl) {
         cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) { el.classList.add('viz-fade-out'); });
         setTimeout(function() {
-            if (card === 'gpu') renderGpuCard(lastGpuData || {}, !!lastGpuData && Object.keys(lastGpuData).length > 0);
-            else renderSystemCard(lastSystemMetrics, !!lastSystemMetrics);
+            if (card === 'gpu') renderGpuCard(lastGpuData || {}, !!lastGpuData && Object.keys(lastGpuData).length > 0, window.__telemetryGrade);
+            else renderSystemCard(lastSystemMetrics, !!lastSystemMetrics, window.__telemetryGrade);
             cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) {
                 el.classList.remove('viz-fade-out');
                 el.classList.add('viz-fade-in');
@@ -1001,7 +1001,7 @@ function resetVizPrefs(card) {
     }
 }
 
-function renderGpuCard(gpuMap, visible) {
+function renderGpuCard(gpuMap, visible, grade) {
     var card = document.getElementById('gpu-card');
     var emptyEl = document.getElementById('gpu-empty');
     var deviceName = document.getElementById('gpu-device-name');
@@ -1114,7 +1114,7 @@ function renderGpuCard(gpuMap, visible) {
     }
 }
 
-function renderSystemCard(sys, visible) {
+function renderSystemCard(sys, visible, grade) {
     var card = document.getElementById('system-card');
     var emptyEl = document.getElementById('sys-empty');
     var deviceName = document.getElementById('sys-device-name');

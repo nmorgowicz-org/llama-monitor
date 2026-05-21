@@ -903,66 +903,8 @@ fn remote_release_asset_error(
 }
 
 pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
-    // Build HTTP client with mTLS:
-    // - Trust the shared CA as root for agent server certs.
-    // - Present an agent-client cert so the agent can verify our role.
-    let mut builder = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .pool_max_idle_per_host(0);
-
-    // Load CA as root store
-    let ca_loaded = if let Some(ca) = crate::certs::Cert::load(
-        &crate::certs::certs_dir().join("ca.pem"),
-        &crate::certs::certs_dir().join("ca.key"),
-    ) {
-        match reqwest::Certificate::from_pem(ca.pem.as_bytes()) {
-            Ok(cert) => {
-                builder = builder.add_root_certificate(cert);
-                true
-            }
-            Err(e) => {
-                eprintln!(
-                    "[agent] Failed to load CA cert: {e}; falling back to danger_accept_invalid_certs"
-                );
-                builder = builder.danger_accept_invalid_certs(true);
-                false
-            }
-        }
-    } else {
-        eprintln!("[agent] No CA found; using danger_accept_invalid_certs for agent communication");
-        builder = builder.danger_accept_invalid_certs(true);
-        false
-    };
-
-    // Add client cert for mTLS (agent-client role)
-    if let Some(client_cert) = crate::certs::Cert::load(
-        &crate::certs::certs_dir().join("agent-client.pem"),
-        &crate::certs::certs_dir().join("agent-client.key"),
-    ) {
-        let combined_pem = format!("{}{}", client_cert.pem, client_cert.key);
-        match reqwest::Identity::from_pem(combined_pem.as_bytes()) {
-            Ok(id) => {
-                builder = builder.identity(id);
-            }
-            Err(e) => {
-                eprintln!(
-                    "[agent] Failed to load agent-client identity: {e}; continuing without mTLS client cert"
-                );
-            }
-        }
-    } else if ca_loaded {
-        eprintln!(
-            "[agent] No agent-client cert found; agent mTLS may reject dashboard connections"
-        );
-    }
-
-    let client = match builder.build() {
-        Ok(client) => client,
-        Err(e) => {
-            eprintln!("[agent] Failed to build HTTP client: {e}");
-            return;
-        }
-    };
+    let https_client = build_agent_https_client(Duration::from_secs(2));
+    let http_client = build_plain_http_client(Duration::from_secs(2));
     let mut autostart_attempted = false;
     let mut enabled = false;
 
@@ -984,24 +926,49 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
         ]);
 
         if let Some(url) = url {
-            let mut request = client.get(format!("{}/metrics", url.trim_end_matches('/')));
-            if let Some(token) = &token {
-                request = request.bearer_auth(token);
+            let mut metrics_result = None;
+            let mut saw_unauthorized = false;
+
+            for candidate in agent_url_candidates(&url) {
+                let client = agent_client_for_url(&candidate, https_client.as_ref(), &http_client);
+                let mut request = client.get(format!("{}/metrics", candidate));
+                if let Some(token) = &token {
+                    request = request.bearer_auth(token);
+                }
+
+                match request.send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        metrics_result = Some((candidate, resp));
+                        break;
+                    }
+                    Ok(resp) => {
+                        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+                            saw_unauthorized = true;
+                        }
+                    }
+                    Err(_) => {}
+                }
             }
 
-            match request.send().await {
-                Ok(resp) if resp.status().is_success() => match resp.json::<AgentMetrics>().await {
+            match metrics_result {
+                Some((resolved_url, resp)) => match resp.json::<AgentMetrics>().await {
                     Ok(metrics) => {
                         *state.system_metrics.lock().unwrap() = metrics.system;
                         *state.gpu_metrics.lock().unwrap() = metrics.gpu;
                         *state.remote_agent_connected.lock().unwrap() = true;
-                        *state.remote_agent_url.lock().unwrap() = Some(url.clone());
+                        *state.remote_agent_health_reachable.lock().unwrap() = true;
+                        *state.remote_agent_url.lock().unwrap() = Some(resolved_url.clone());
                         state.refresh_capability_state();
                         autostart_attempted = false;
 
                         // Fetch agent version and protocol_version from /info endpoint
-                        let info_url = format!("{}/info", url.trim_end_matches('/'));
-                        let mut info_request = client.get(&info_url);
+                        let info_client = agent_client_for_url(
+                            &resolved_url,
+                            https_client.as_ref(),
+                            &http_client,
+                        );
+                        let info_url = format!("{}/info", resolved_url.trim_end_matches('/'));
+                        let mut info_request = info_client.get(&info_url);
                         if let Some(t) = &token {
                             info_request = info_request.bearer_auth(t);
                         }
@@ -1111,27 +1078,11 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                         // Keep connected=true but allow degraded mode flags to inform the frontend.
                     }
                 },
-                Ok(resp) => {
+                None => {
                     mark_disconnected(&state);
-                    if resp.status() == reqwest::StatusCode::UNAUTHORIZED && token.is_none() {
+                    if saw_unauthorized && token.is_none() {
                         eprintln!("[agent] Remote agent not yet authenticated (no token set)");
-                    } else {
-                        eprintln!(
-                            "[agent] Remote metrics request failed: HTTP {}",
-                            resp.status()
-                        );
                     }
-                    maybe_autostart_remote_agent(
-                        &state,
-                        &app_config,
-                        &settings,
-                        &url,
-                        &mut autostart_attempted,
-                    )
-                    .await;
-                }
-                Err(_) => {
-                    mark_disconnected(&state);
                     maybe_autostart_remote_agent(
                         &state,
                         &app_config,
@@ -1293,6 +1244,7 @@ fn mark_disconnected(state: &AppState) {
         *connected = false;
         was_connected
     };
+    *state.remote_agent_health_reachable.lock().unwrap() = false;
     *state.remote_agent_version.lock().unwrap() = None;
     *state.remote_agent_update_available.lock().unwrap() = false;
     if was_connected {
@@ -1326,12 +1278,7 @@ fn remote_agent_url_for_active_session(
         .or_else(|_| reqwest::Url::parse(&format!("http://{endpoint}")))
         .ok()?;
     let host = url.host_str()?;
-    Some(format!(
-        "{}://{}:{}",
-        url.scheme(),
-        host,
-        REMOTE_AGENT_DEFAULT_PORT
-    ))
+    Some(format!("https://{host}:{REMOTE_AGENT_DEFAULT_PORT}"))
 }
 
 fn first_non_empty(values: [Option<&str>; 2]) -> Option<String> {
@@ -1595,6 +1542,116 @@ fn normalize_version_label(version: &str) -> String {
         .to_string()
 }
 
+fn build_plain_http_client(timeout: Duration) -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .pool_max_idle_per_host(0)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+fn build_agent_https_client(timeout: Duration) -> Option<reqwest::Client> {
+    // The managed agent certificate is signed by our internal CA, but it is not
+    // yet minted per remote hostname/IP. Keep CA + client-cert validation, but
+    // relax hostname matching so IP-based remote agent URLs continue to work.
+    let mut builder = reqwest::Client::builder()
+        .timeout(timeout)
+        .pool_max_idle_per_host(0)
+        .danger_accept_invalid_hostnames(true);
+
+    let ca_loaded = if let Some(ca) = crate::certs::Cert::load(
+        &crate::certs::certs_dir().join("ca.pem"),
+        &crate::certs::certs_dir().join("ca.key"),
+    ) {
+        match reqwest::Certificate::from_pem(ca.pem.as_bytes()) {
+            Ok(cert) => {
+                builder = builder.add_root_certificate(cert);
+                true
+            }
+            Err(e) => {
+                eprintln!(
+                    "[agent] Failed to load CA cert: {e}; falling back to danger_accept_invalid_certs"
+                );
+                builder = builder.danger_accept_invalid_certs(true);
+                false
+            }
+        }
+    } else {
+        eprintln!("[agent] No CA found; using danger_accept_invalid_certs for agent communication");
+        builder = builder.danger_accept_invalid_certs(true);
+        false
+    };
+
+    if let Some(client_cert) = crate::certs::Cert::load(
+        &crate::certs::certs_dir().join("agent-client.pem"),
+        &crate::certs::certs_dir().join("agent-client.key"),
+    ) {
+        let combined_pem = format!("{}{}", client_cert.pem, client_cert.key);
+        match reqwest::Identity::from_pem(combined_pem.as_bytes()) {
+            Ok(id) => {
+                builder = builder.identity(id);
+            }
+            Err(e) => {
+                eprintln!(
+                    "[agent] Failed to load agent-client identity: {e}; continuing without mTLS client cert"
+                );
+            }
+        }
+    } else if ca_loaded {
+        eprintln!(
+            "[agent] No agent-client cert found; agent mTLS may reject dashboard connections"
+        );
+    }
+
+    match builder.build() {
+        Ok(client) => Some(client),
+        Err(e) => {
+            eprintln!("[agent] Failed to build HTTPS agent client: {e}");
+            None
+        }
+    }
+}
+
+fn agent_url_candidates(agent_url: &str) -> Vec<String> {
+    let trimmed = agent_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+
+    let mut candidates = Vec::new();
+    if let Ok(parsed) = reqwest::Url::parse(trimmed) {
+        match parsed.scheme() {
+            "http" => {
+                let mut https = parsed.clone();
+                let _ = https.set_scheme("https");
+                candidates.push(https.to_string().trim_end_matches('/').to_string());
+                candidates.push(trimmed.to_string());
+            }
+            "https" => {
+                candidates.push(trimmed.to_string());
+            }
+            _ => candidates.push(trimmed.to_string()),
+        }
+    } else {
+        candidates.push(trimmed.to_string());
+    }
+
+    candidates.dedup();
+    candidates
+}
+
+fn agent_client_for_url<'a>(
+    agent_url: &str,
+    https_client: Option<&'a reqwest::Client>,
+    http_client: &'a reqwest::Client,
+) -> &'a reqwest::Client {
+    if agent_url.starts_with("https://") {
+        https_client.unwrap_or(http_client)
+    } else {
+        http_client
+    }
+}
+
 fn install_path_for_os(os: RemoteOs) -> Option<&'static str> {
     match os {
         RemoteOs::Windows => Some("%APPDATA%\\llama-monitor\\bin\\llama-monitor.exe"),
@@ -1650,16 +1707,23 @@ async fn agent_health_reachable(agent_url: &str) -> bool {
 }
 
 async fn agent_health_reachable_with_token(agent_url: &str, token: Option<&str>) -> bool {
-    let mut req = reqwest::Client::new()
-        .get(format!("{}/health", agent_url.trim_end_matches('/')))
-        .timeout(Duration::from_secs(2));
-    if let Some(t) = token {
-        req = req.bearer_auth(t);
+    let https_client = build_agent_https_client(Duration::from_secs(2));
+    let http_client = build_plain_http_client(Duration::from_secs(2));
+
+    for candidate in agent_url_candidates(agent_url) {
+        let client = agent_client_for_url(&candidate, https_client.as_ref(), &http_client);
+        let mut req = client.get(format!("{}/health", candidate));
+        if let Some(t) = token {
+            req = req.bearer_auth(t);
+        }
+        if let Ok(resp) = req.send().await
+            && resp.status().is_success()
+        {
+            return true;
+        }
     }
-    let Ok(resp) = req.send().await else {
-        return false;
-    };
-    resp.status().is_success()
+
+    false
 }
 
 /// Write the agent token to a temp file in each user's home directory, so the
@@ -3219,5 +3283,17 @@ mod tests {
             let result = validate_install_path(path, RemoteOs::Windows);
             assert!(result.is_ok(), "Expected '{}' to be accepted", path);
         }
+    }
+
+    #[test]
+    fn agent_url_candidates_prefer_https_for_legacy_http_urls() {
+        let candidates = agent_url_candidates("http://192.168.2.16:7779");
+        assert_eq!(
+            candidates,
+            vec![
+                "https://192.168.2.16:7779".to_string(),
+                "http://192.168.2.16:7779".to_string()
+            ]
+        );
     }
 }

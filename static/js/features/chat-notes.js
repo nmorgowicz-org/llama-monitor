@@ -2,6 +2,7 @@
 // Stretchable bar on right side of chat messages for persistent context notes.
 
 import { activeChatTab, persistChatTabs } from './chat-state.js';
+import { settingsState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast } from './toast.js';
 
@@ -60,8 +61,7 @@ function setSvgIcon(button, paths) {
 // ── Sidebar Toggle ────────────────────────────────────────────────────────────
 
 export function toggleContextSidebar() {
-    const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
-    if (settings.enabled_context_notes === false) return;
+    if (settingsState.enabled_context_notes === false) return;
 
     sidebarState.expanded = !sidebarState.expanded;
     localStorage.setItem(SIDEBAR_EXPANDED_KEY, String(sidebarState.expanded));
@@ -71,8 +71,7 @@ export function toggleContextSidebar() {
 }
 
 export function isContextSidebarEnabled() {
-    const settings = JSON.parse(localStorage.getItem('llama_monitor_settings') || '{}');
-    return settings.enabled_context_notes !== false;
+    return settingsState.enabled_context_notes !== false;
 }
 
 export function getContextSidebarState() {

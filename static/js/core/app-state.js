@@ -112,6 +112,18 @@ export const settingsState = {
     isDirty: false,
     /** Timer ID for debounced settings save */
     saveTimer: null,
+    /** Guided-generation: context notes enabled */
+    enabled_context_notes: true,
+    /** Guided-generation: suggestions enabled */
+    enabled_suggestions: true,
+    /** Guided-generation: quick guide enabled */
+    enabled_quick_guide: true,
+    /** Custom suggestion prompts per category */
+    suggestion_prompts: {},
+    /** Context depth for suggestion generation */
+    context_depth: 10,
+    /** Number of suggestions to generate */
+    suggestion_count: 5,
 };
 
 // ── Chat ──────────────────────────────────────────────────────────────────────

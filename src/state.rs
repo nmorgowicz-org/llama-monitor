@@ -179,14 +179,26 @@ impl Default for SessionMode {
 /// A server session (active or inactive)
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Session {
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub mode: SessionMode,
+    #[serde(default)]
     pub status: SessionStatus,
     #[serde(default)]
     pub preset_id: String,
+    #[serde(default)]
     pub created_at: u64,
+    #[serde(default)]
     pub last_active: u64,
+    #[serde(default)]
+    pub last_connected_at: u64,
+    #[serde(default)]
+    pub connect_count: u64,
+    #[serde(default)]
+    pub last_error: Option<String>,
 }
 
 impl Session {
@@ -207,6 +219,9 @@ impl Session {
             preset_id,
             created_at: now,
             last_active: now,
+            last_connected_at: 0,
+            connect_count: 0,
+            last_error: None,
         }
     }
 
@@ -220,6 +235,9 @@ impl Session {
             preset_id: String::new(),
             created_at: now,
             last_active: now,
+            last_connected_at: 0,
+            connect_count: 0,
+            last_error: None,
         }
     }
 
@@ -392,6 +410,7 @@ pub struct AppState {
     pub session_kind: Arc<Mutex<SessionKind>>,
     pub tray_mode: Arc<Mutex<TrayMode>>,
     pub remote_agent_connected: Arc<Mutex<bool>>,
+    pub remote_agent_health_reachable: Arc<Mutex<bool>>,
     pub remote_agent_url: Arc<Mutex<Option<String>>>,
     pub remote_agent_version: Arc<Mutex<Option<String>>>,
     pub remote_agent_update_available: Arc<Mutex<bool>>,
@@ -477,6 +496,7 @@ impl AppState {
             session_kind: Arc::new(Mutex::new(session_kind)),
             tray_mode: Arc::new(Mutex::new(TrayMode::Headless)),
             remote_agent_connected: Arc::new(Mutex::new(false)),
+            remote_agent_health_reachable: Arc::new(Mutex::new(false)),
             remote_agent_url: Arc::new(Mutex::new(None)),
             remote_agent_version: Arc::new(Mutex::new(None)),
             remote_agent_update_available: Arc::new(Mutex::new(false)),
@@ -722,6 +742,10 @@ impl AppState {
 
     pub fn remote_agent_connected(&self) -> bool {
         *self.remote_agent_connected.lock().unwrap()
+    }
+
+    pub fn remote_agent_health_reachable(&self) -> bool {
+        *self.remote_agent_health_reachable.lock().unwrap()
     }
 
     pub fn host_metrics_available(&self) -> bool {

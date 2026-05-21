@@ -184,6 +184,40 @@
     50% { box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 24px rgba(235, 203, 131, 0.4); }
 }
 
+/* Telemetry grade chip */
+.telemetry-grade-chip {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 4px;
+    background: var(--bg-card);
+    color: var(--fg-muted);
+    border: 1px solid var(--border-subtle);
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.telemetry-grade-chip.grade-ok {
+    color: var(--color-ok, #4ade80);
+    border-color: var(--color-ok, #4ade80);
+    background: color-mix(in srgb, var(--color-ok, #4ade80) 10%, transparent);
+}
+
+.telemetry-grade-chip.grade-warning {
+    color: var(--color-warning, #fbbf24);
+    border-color: var(--color-warning, #fbbf24);
+    background: color-mix(in srgb, var(--color-warning, #fbbf24) 10%, transparent);
+}
+
+.telemetry-grade-chip.grade-error {
+    color: var(--color-error, #f87171);
+    border-color: var(--color-error, #f87171);
+    background: color-mix(in srgb, var(--color-error, #f87171) 10%, transparent);
+}
+
 .btn-agent-fix {
     transition: background 0.18s ease, box-shadow 0.18s ease;
 }

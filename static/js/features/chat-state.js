@@ -78,6 +78,7 @@ export function newChatTab(name = 'New Chat') {
         updated_at: Date.now(),
         pinned: false,
         visibility: 'active',
+        composer_draft: '',
     };
 }
 
@@ -107,6 +108,7 @@ function normalizeChatTab(tab) {
         armed_story_beats: tab.armed_story_beats ?? [],
         pinned: tab.pinned ?? false,
         visibility: tab.visibility || 'active',
+        composer_draft: tab.composer_draft ?? '',
     };
 }
 
@@ -328,6 +330,15 @@ export async function switchChatTab(id) {
     chatViewBindings.refreshChatTelemetry?.();
     chatViewBindings.updatePersonaMenuName?.();
     refreshTopCockpit();
+
+    const input = document.getElementById('chat-input');
+    if (input && targetTab?.composer_draft) {
+        input.value = targetTab.composer_draft;
+        autoResizeChatInput();
+    } else if (input) {
+        input.value = '';
+    }
+
     window.dispatchEvent(new CustomEvent('activeTabChanged', {
         detail: { tabId: id },
     }));
@@ -647,8 +658,19 @@ export function autoResizeChatInput() {
 
 // ── Init ───────────────────────────────────────────────────────────────────────
 
-export function initChatState() {
+  export function initChatState() {
     window.addEventListener('beforeunload', flushChatPersist);
     chat.trashPurgeTimer = setInterval(purgeOldTrash, TRASH_PURGE_CHECK_INTERVAL_MS);
     purgeOldTrash();
+
+    const input = document.getElementById('chat-input');
+    if (input) {
+        input.addEventListener('input', () => {
+            const tab = activeChatTab();
+            if (tab) {
+                tab.composer_draft = input.value;
+                scheduleChatPersist();
+            }
+        });
+    }
 }

@@ -3,6 +3,7 @@
 // Imports state from app-state.js and render functions from dashboard-render.js.
 
 import { formatMetricAge, formatMetricNumber } from '../core/format.js';
+import { deriveTelemetryGrade, gradeLabel, gradeStatusClass, gradeActionCopy } from '../features/telemetry-grade.js';
 import {
     sessionState,
     prevValues,
@@ -162,6 +163,10 @@ function updateDashboard(d) {
     // Store for use by status alert and other components
     setWsData(d);
 
+    // Derive and store telemetry grade for consumption by all dashboard components
+    const grade = deriveTelemetryGrade(d);
+    window.__telemetryGrade = grade;
+
     // Endpoint health strip
     updateEndpointStrip(d);
 
@@ -214,16 +219,9 @@ function updateEndpointStrip(d) {
             modeText = 'Remote';
         }
 
-        if (!d.capabilities.inference) {
-            statusClass = 'error';
-            statusText = 'Error';
-        } else if (!d.capabilities.host_metrics) {
-            statusClass = 'warning';
-            statusText = 'Inference only';
-        } else if (!d.capabilities.system || !d.capabilities.gpu) {
-            statusClass = 'warning';
-            statusText = 'Limited';
-        }
+        const grade = window.__telemetryGrade || 'local_full';
+        statusClass = gradeStatusClass(grade);
+        statusText = gradeLabel(grade);
 
         if (endpointModeEl) {
             endpointModeEl.textContent = modeText;
@@ -251,78 +249,87 @@ function updateAgentStatus(d) {
     const showAgent = d.session_mode === 'attach' && d.endpoint_kind === 'Remote';
     agentStatusEl.style.display = showAgent ? '' : 'none';
 
-    const agentStatus = d.remote_agent_connected ? 'connected' : 'disconnected';
-    const remoteAgentHealthReachable = d.remote_agent_health_reachable !== false;
-    const firewallBlocked = d.remote_agent_connected && !remoteAgentHealthReachable;
-    const updateAvailable = d.remote_agent_update_available === true;
+    const grade = window.__telemetryGrade || 'local_full';
 
-    if (updateAvailable) {
-        agentStatusEl.className = 'agent-status update-available';
-    } else {
-        agentStatusEl.className = 'agent-status ' + (firewallBlocked ? 'firewall-blocked' : agentStatus);
-    }
+    // Badge class
+    let badgeClass = 'agent-status';
+    if (grade === 'remote_agent_connected') badgeClass += ' connected';
+    else if (grade === 'remote_agent_update_available') badgeClass += ' update-available';
+    else if (grade === 'remote_agent_firewall_blocked') badgeClass += ' firewall-blocked';
+    else if (grade === 'remote_error') badgeClass += ' disconnected';
+    else badgeClass += ' disconnected';
+
+    // Text
+    let agentText = 'Remote Agent';
+    if (grade === 'remote_agent_update_available') agentText = 'Update Available';
+    else if (grade === 'remote_agent_firewall_blocked') agentText = 'Firewall blocked';
+    else if (grade === 'remote_agent_degraded') agentText = 'Degraded';
+    else if (grade === 'remote_partial_sensors') agentText = 'Partial sensors';
+    else if (grade === 'remote_error') agentText = 'Agent error';
+    else if (grade === 'remote_inference_only') agentText = 'No Remote Agent';
+
+    // Tooltip
+    let tooltipText = 'Connected';
+    let tooltipClass = 'connected';
+    if (grade === 'remote_agent_update_available') { tooltipText = 'Update available'; tooltipClass = 'warning'; }
+    else if (grade === 'remote_agent_firewall_blocked') { tooltipText = 'Firewall blocked'; tooltipClass = 'warning'; }
+    else if (grade === 'remote_agent_degraded') { tooltipText = 'Degraded compatibility'; tooltipClass = 'warning'; }
+    else if (grade === 'remote_partial_sensors') { tooltipText = 'Partial sensor coverage'; tooltipClass = 'warning'; }
+    else if (grade === 'remote_inference_only') { tooltipText = 'Inference only'; tooltipClass = 'disconnected'; }
+    else if (grade === 'remote_error') { tooltipText = 'Connection failed'; tooltipClass = 'disconnected'; }
+
+    // Fix button — show for any non-fully-connected state
+    const needsFix = !['remote_agent_connected', 'local_full'].includes(grade);
+    // Fix button copy
+    let fixCopy = '\u26a1 Fix';
+    let fixTitle = 'Set up remote agent';
+    if (grade === 'remote_agent_update_available') { fixCopy = '\u26a1 Upgrade'; fixTitle = 'Upgrade remote agent to latest version'; }
+    else if (grade === 'remote_agent_firewall_blocked') { fixTitle = 'Repair remote agent connectivity'; }
+    else if (grade === 'remote_agent_degraded') { fixCopy = '\u26a1 Upgrade'; fixTitle = 'Upgrade agent for full compatibility'; }
+
+    // Tooltip details — include action copy
+    let details = '';
+    if (d.remote_agent_version) details = 'Running v' + d.remote_agent_version;
+    if (d.remote_agent_url) details += (details ? ' | ' : '') + d.remote_agent_url;
+    const actionCopy = gradeActionCopy(grade);
+    if (actionCopy) details += (details ? '\n' : '') + actionCopy;
+
+    agentStatusEl.className = badgeClass;
 
     const textEl = agentStatusEl.querySelector('.agent-text');
     const fixBtn = agentStatusEl.querySelector('.btn-agent-fix');
     if (textEl) {
-        if (updateAvailable) {
-            textEl.textContent = 'Update Available';
-        } else if (firewallBlocked) {
-            textEl.textContent = 'Firewall blocked';
-        } else if (d.remote_agent_connected) {
-            textEl.textContent = 'Remote Agent';
-        } else {
-            textEl.textContent = 'No Remote Agent';
-        }
+        textEl.textContent = agentText;
     }
     if (fixBtn) {
-        const hasRemoteEndpoint = d.session_mode === 'attach' && d.endpoint_kind === 'Remote';
-        const needsFix = hasRemoteEndpoint && (!d.remote_agent_connected || firewallBlocked || updateAvailable);
         fixBtn.style.display = needsFix ? '' : 'none';
-        if (updateAvailable) {
-            fixBtn.textContent = '\u26a1 Upgrade';
-            fixBtn.title = 'Upgrade remote agent to latest version';
-        } else if (firewallBlocked) {
-            fixBtn.textContent = '\u26a1 Fix';
-            fixBtn.title = 'Repair remote agent connectivity';
-        } else {
-            fixBtn.textContent = '\u26a1 Fix';
-            fixBtn.title = 'Set up remote agent';
-        }
+        fixBtn.textContent = fixCopy;
+        fixBtn.title = fixTitle;
     }
 
     // Update tooltip
     const tooltipStatus = document.getElementById('agent-tooltip-status');
     const tooltipDetails = document.getElementById('agent-tooltip-details');
     if (tooltipStatus) {
-        if (updateAvailable) {
-            tooltipStatus.textContent = 'Update available';
-            tooltipStatus.className = 'agent-tooltip-status warning';
-        } else if (firewallBlocked) {
-            tooltipStatus.textContent = 'Firewall blocked';
-            tooltipStatus.className = 'agent-tooltip-status warning';
-        } else if (d.remote_agent_connected) {
-            tooltipStatus.textContent = 'Connected';
-            tooltipStatus.className = 'agent-tooltip-status connected';
-        } else {
-            tooltipStatus.textContent = 'Not connected';
-            tooltipStatus.className = 'agent-tooltip-status disconnected';
-        }
+        tooltipStatus.textContent = tooltipText;
+        tooltipStatus.className = 'agent-tooltip-status ' + tooltipClass;
     }
     if (tooltipDetails) {
-        let details = '';
-        if (d.remote_agent_version) {
-            details = 'Running v' + d.remote_agent_version;
-        }
-        if (d.remote_agent_url) {
-            details += (details ? ' | ' : '') + d.remote_agent_url;
-        }
         tooltipDetails.textContent = details;
     }
 
-    if (d.remote_agent_connected && !remoteAgentHealthReachable) {
-            setRemoteAgentStatus('Agent connected but HTTP is not reachable (firewall blocked)', 'warning');
-        }
+    // Telemetry grade chip
+    const gradeChip = document.getElementById('telemetry-grade-chip');
+    if (gradeChip) {
+        const chipGrade = window.__telemetryGrade || 'local_full';
+        gradeChip.textContent = gradeLabel(chipGrade);
+        gradeChip.className = 'telemetry-grade-chip grade-' + gradeStatusClass(chipGrade);
+        gradeChip.style.display = (d.endpoint_kind === 'Remote') ? '' : 'none';
+    }
+
+    if (grade === 'remote_agent_firewall_blocked') {
+        setRemoteAgentStatus('Agent connected but HTTP is not reachable (firewall blocked)', 'warning');
+    }
 
     if (agentLatencyEl) {
         agentLatencyEl.textContent = '';
@@ -583,7 +590,7 @@ function updateGpuCard(d) {
     const gpuVisible = d.host_metrics_available === true && !!d.capabilities?.gpu;
     setLastGpuData(d.gpu || {});
 
-    renderGpuCard(d.gpu || {}, gpuVisible);
+    renderGpuCard(d.gpu || {}, gpuVisible, window.__telemetryGrade);
 }
 
 // ── System card ──────────────────────────────────────────────────────────────
@@ -591,7 +598,7 @@ function updateGpuCard(d) {
 function updateSystemCard(d) {
     const systemVisible = d.host_metrics_available === true && !!d.capabilities?.system;
 
-    renderSystemCard(lastSystemMetrics, systemVisible);
+    renderSystemCard(lastSystemMetrics, systemVisible, window.__telemetryGrade);
 }
 
 // ── Logs ─────────────────────────────────────────────────────────────────────
