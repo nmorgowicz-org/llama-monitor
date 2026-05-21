@@ -18,6 +18,7 @@
     <link rel="stylesheet" href="/css/agent-modal.css">
     <link rel="stylesheet" href="/css/cards-hardware.css">
     <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/command-palette.css">
     <link rel="stylesheet" href="/css/modal-premium.css">
     <link rel="stylesheet" href="/css/chat.css">
     <link rel="stylesheet" href="/css/chat-guided-generation.css">
@@ -3718,6 +3719,23 @@
 
 <div id="focus-mode-exit-beacon" role="button" tabindex="-1" aria-label="Exit Focus Mode">
     <div id="focus-mode-exit-pill">Focus Mode — click to exit &nbsp;×</div>
+</div>
+
+<!-- Command Palette -->
+<div class="command-palette-overlay" id="command-palette-overlay" style="display:none;">
+    <div class="command-palette" role="dialog" aria-label="Command palette">
+        <div class="command-palette-search">
+            <svg class="command-palette-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+            </svg>
+            <input type="text" id="command-palette-input" placeholder="Search conversations, messages, or type a command…" autocomplete="off">
+            <kbd>ESC</kbd>
+        </div>
+        <div class="command-palette-results" id="command-palette-results"></div>
+        <div class="command-palette-footer">
+            <span class="command-palette-hint">↑↓ navigate · enter select · esc close</span>
+        </div>
+    </div>
 </div>
 
 </body>

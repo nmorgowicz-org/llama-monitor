@@ -37,6 +37,7 @@ import { initDbAdmin } from './features/db-admin.js';
 import { initAuthGate, logoutCurrentUser } from './features/auth.js';
 import { deriveTelemetryGrade, gradeLabel, gradeStatusClass, gradeActionCopy } from './features/telemetry-grade.js';
 import { initReplyPlanUpdates } from './features/chat-reply-plan.js';
+import { initCommandPalette } from './features/workspace-command-palette.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
@@ -143,6 +144,9 @@ async function initializeApp() {
     // Phase 10: Database administration
     initDbAdmin();
 
+    // Phase 11: Command palette
+    initCommandPalette();
+
     // Initialize chat tabs only after token bootstrap and feature init complete.
     await initChatTabs();
 }
@@ -171,7 +175,8 @@ document.getElementById('quick-guide-toggle')?.addEventListener('click', (e) => 
 
 function getTopmostDismissibleOverlay() {
     const candidates = [
-        ...document.querySelectorAll('.modal-overlay.open, .modal-overlay.active, .keyboard-shortcut-overlay.open, #release-notes-panel.open')
+        ...document.querySelectorAll('.modal-overlay.open, .modal-overlay.active, .keyboard-shortcut-overlay.open, #release-notes-panel.open'),
+        document.getElementById('command-palette-overlay'),
     ].filter(el => {
         const style = getComputedStyle(el);
         return style.display !== 'none' && style.visibility !== 'hidden';
