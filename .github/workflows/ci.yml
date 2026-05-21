@@ -135,9 +135,10 @@ jobs:
         run: npm run lint
 
   ui:
-    needs: paths-filter
+    needs: [paths-filter, check]
     if: >-
       always() &&
+      needs.check.result != 'failure' &&
       !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
       (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
       needs.paths-filter.outputs.ui == 'true' &&
@@ -218,9 +219,10 @@ jobs:
           retention-days: 1
 
   release-smoke:
-    needs: paths-filter
+    needs: [paths-filter, check]
     if: >-
       always() &&
+      needs.check.result != 'failure' &&
       !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
       (github.event.action != 'labeled' || github.event.label.name == 'ready-to-test') &&
       needs.paths-filter.outputs.release == 'true' &&
@@ -230,7 +232,7 @@ jobs:
     name: release-smoke (${{ matrix.target }})
     runs-on: arc-llama-monitor
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         target:
           - x86_64-unknown-linux-gnu
