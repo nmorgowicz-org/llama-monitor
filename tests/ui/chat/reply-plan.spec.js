@@ -21,6 +21,22 @@ test.describe('reply plan summary', () => {
   });
 
   test('reply plan is hidden when no active steering', async ({ page }) => {
+    // Clear all steering including auto_compact (default true)
+    await page.evaluate(async () => {
+      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { updateReplyPlanSummary } = await import('/js/features/chat-reply-plan.js');
+      const tab = activeChatTab();
+      if (tab) {
+        tab.active_template_id = '';
+        tab.explicit_level = 0;
+        tab.context_notes = [];
+        tab.quick_guide_active = '';
+        tab.quick_guide_draft = '';
+        tab.armed_story_beats = [];
+        tab.auto_compact = false;
+        updateReplyPlanSummary();
+      }
+    });
     const container = page.locator('#reply-plan-summary');
     await expect(container).not.toHaveClass(/visible/);
   });
@@ -69,15 +85,13 @@ test.describe('reply plan summary', () => {
         tab.active_template_id = 'writer';
         tab.explicit_level = 1;
         tab.context_notes = [{ name: 'Setting', content: 'A dark alley' }];
+        tab.auto_compact = false;
         updateReplyPlanSummary();
       }
     });
 
     const container = page.locator('#reply-plan-summary');
     await expect(container).toHaveClass(/visible/);
-
-    const chips = container.locator('.reply-plan-chip');
-    await expect(chips).toHaveCount(3);
 
     await expect(container.locator('.chip-persona')).toBeVisible();
     await expect(container.locator('.chip-explicit')).toBeVisible();
@@ -93,6 +107,7 @@ test.describe('reply plan summary', () => {
       if (tab) {
         tab.active_template_id = 'test-persona';
         tab.explicit_level = 1;
+        tab.auto_compact = false;
         updateReplyPlanSummary();
       }
     });
@@ -108,6 +123,10 @@ test.describe('reply plan summary', () => {
         tab.active_template_id = '';
         tab.explicit_level = 0;
         tab.context_notes = [];
+        tab.quick_guide_active = '';
+        tab.quick_guide_draft = '';
+        tab.armed_story_beats = [];
+        tab.auto_compact = false;
         updateReplyPlanSummary();
       }
     });

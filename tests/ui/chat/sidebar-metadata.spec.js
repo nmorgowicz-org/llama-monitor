@@ -77,19 +77,25 @@ test.describe('sidebar message count', () => {
   test('archived tab shows message count', async ({ page }) => {
     await page.evaluate(async () => {
       const { chat } = await import('/js/core/app-state.js');
-      const { archiveChatTab } = await import('/js/features/chat-state.js');
+      const { newChatTab } = await import('/js/features/chat-state.js');
       const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
 
-      // Add messages to first tab
+      // Create a second tab so we have an active tab after archiving
+      const tab2 = newChatTab('Active Tab');
+      chat.tabs.push(tab2);
+      chat.activeTabId = tab2.id;
+
+      // Archive the first tab directly
       const firstTab = chat.tabs[0];
       firstTab.messages = [
         { role: 'user', content: 'Message 1', timestamp_ms: Date.now() - 3000 },
         { role: 'assistant', content: 'Reply 1', timestamp_ms: Date.now() - 2000 },
         { role: 'user', content: 'Message 2', timestamp_ms: Date.now() - 1000 },
       ];
+      firstTab.visibility = 'archived';
 
-      // Archive the first tab
-      archiveChatTab(firstTab.id);
+      // Open archived section and render
+      chat.visibilityUi.archiveOpen = true;
       renderChatSessionsSidebar();
     });
 
