@@ -73,6 +73,7 @@ This panel exposes the full runtime controls:
 - This allows multiple independent CAs to be trusted across different agents.
 - If no CA is found, the agent refuses to start.
 - Each dashboard instance can place its own CA into cas/ so that agents trust multiple dashboards (e.g., during migration or in multi-instance setups).
+- Managed installs also provision an `agent-server.pem` / `agent-server.key` pair next to the remote binary so the dashboard can verify the agent over HTTPS using the same CA chain.
 
 ## Agent tokens
 

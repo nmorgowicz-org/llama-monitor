@@ -485,6 +485,15 @@ function renderGenerationDetailItems(el, parts) {
         .join('');
 }
 
+function primarySpeculativeType(specType) {
+    if (!specType) return '';
+    const parts = String(specType)
+        .split(',')
+        .map(part => part.trim())
+        .filter(part => part && part !== 'none');
+    return parts[0] || '';
+}
+
 function renderDecodingConfig(l, hasActiveEndpoint, isGenerating) {
     const slot = getPrimarySlot(l);
     const specChip = document.getElementById('m-speculative-chip');
@@ -498,14 +507,19 @@ function renderDecodingConfig(l, hasActiveEndpoint, isGenerating) {
     if (modelInfoRow) {
         const modelName = l?.model_name || '';
         const modelParams = l?.model_params || null;
+        const tpd = l?.tokens_per_decode ?? 0;
         if (modelName) {
             const parts = [escapeHtml(modelName)];
             if (modelParams) {
                 parts.push(escapeHtml(formatParamCount(modelParams)));
             }
             const stateClass = isGenerating ? 'generating' : 'idle';
-            // eslint-disable-next-line no-unsanitized/property -- stateClass is hardcoded enum; parts array members are all wrapped in escapeHtml()
-            modelInfoRow.innerHTML = '<span class="model-info-text ' + stateClass + '">' + parts.join(' · ') + '</span>';
+            const decodePill = tpd > 1.05
+                ? '<span class="model-info-pill">' + escapeHtml(tpd.toFixed(2) + '× tok/decode') + '</span>'
+                : '';
+            // eslint-disable-next-line no-unsanitized/property -- stateClass is hardcoded enum; dynamic text is wrapped in escapeHtml()
+            modelInfoRow.innerHTML =
+                '<span class="model-info-text ' + stateClass + '">' + parts.join(' · ') + '</span>' + decodePill;
         } else {
             modelInfoRow.innerHTML = '';
         }
@@ -519,14 +533,12 @@ function renderDecodingConfig(l, hasActiveEndpoint, isGenerating) {
     }
 
     if (specChip) {
-        const specType = slot.speculative_type || '';
+        const specType = primarySpeculativeType(slot.speculative_type || '');
         const nMax = (slot.speculative_config || []).find(item => item.label === 'n_max');
-        const tpd = l?.tokens_per_decode ?? 0;
         if (slot.speculative_enabled || (slot.speculative_config || []).length > 0) {
             const parts = ['Speculative'];
             if (specType) parts.push(specType);
             if (nMax) parts.push('n_max ' + nMax.value);
-            if (tpd > 1.05) parts.push(tpd.toFixed(2) + '× tok/decode');
             specChip.textContent = parts.join(' · ');
             specChip.classList.add('enabled');
         } else {

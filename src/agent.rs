@@ -614,10 +614,12 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
         ca_pems.len()
     );
 
-    let agent_server_cert = crate::certs::ensure_agent_server_cert(vec![
-        "localhost".to_string(),
-        "127.0.0.1".to_string(),
-    ]);
+    let agent_server_cert = load_install_dir_agent_server_cert().unwrap_or_else(|| {
+        crate::certs::ensure_agent_server_cert(vec![
+            "localhost".to_string(),
+            "127.0.0.1".to_string(),
+        ])
+    });
 
     let tls_config = match crate::certs::build_agent_tls_config(ca_pems, agent_server_cert) {
         Ok(cfg) => cfg,
@@ -1551,9 +1553,10 @@ fn build_plain_http_client(timeout: Duration) -> reqwest::Client {
 }
 
 fn build_agent_https_client(timeout: Duration) -> Option<reqwest::Client> {
-    // The managed agent certificate is signed by our internal CA, but it is not
-    // yet minted per remote hostname/IP. Keep CA + client-cert validation, but
-    // relax hostname matching so IP-based remote agent URLs continue to work.
+    // Managed agent certificates are signed by the dashboard CA, but installs may
+    // still be reached by IP/hostnames that do not exactly match the certificate
+    // SAN set. Keep CA validation and client-auth in place, but relax hostname
+    // matching so IP-based remote agent URLs continue to work.
     let mut builder = reqwest::Client::builder()
         .timeout(timeout)
         .pool_max_idle_per_host(0)
@@ -1570,37 +1573,32 @@ fn build_agent_https_client(timeout: Duration) -> Option<reqwest::Client> {
             }
             Err(e) => {
                 eprintln!(
-                    "[agent] Failed to load CA cert: {e}; falling back to danger_accept_invalid_certs"
+                    "[agent] Failed to load CA cert: {e}; cannot trust managed agent HTTPS endpoints"
                 );
-                builder = builder.danger_accept_invalid_certs(true);
                 false
             }
         }
     } else {
-        eprintln!("[agent] No CA found; using danger_accept_invalid_certs for agent communication");
-        builder = builder.danger_accept_invalid_certs(true);
+        eprintln!("[agent] No CA found; managed agent HTTPS connections will fail");
         false
     };
 
-    if let Some(client_cert) = crate::certs::Cert::load(
-        &crate::certs::certs_dir().join("agent-client.pem"),
-        &crate::certs::certs_dir().join("agent-client.key"),
-    ) {
-        let combined_pem = format!("{}{}", client_cert.pem, client_cert.key);
-        match reqwest::Identity::from_pem(combined_pem.as_bytes()) {
-            Ok(id) => {
-                builder = builder.identity(id);
-            }
-            Err(e) => {
+    let client_cert = crate::certs::ensure_agent_client_cert();
+    let combined_pem = format!("{}{}", client_cert.pem, client_cert.key);
+    match reqwest::Identity::from_pem(combined_pem.as_bytes()) {
+        Ok(id) => {
+            builder = builder.identity(id);
+        }
+        Err(e) => {
+            eprintln!(
+                "[agent] Failed to load agent-client identity: {e}; continuing without mTLS client cert"
+            );
+            if ca_loaded {
                 eprintln!(
-                    "[agent] Failed to load agent-client identity: {e}; continuing without mTLS client cert"
+                    "[agent] Agent mTLS may reject dashboard connections until agent-client identity is repaired"
                 );
             }
         }
-    } else if ca_loaded {
-        eprintln!(
-            "[agent] No agent-client cert found; agent mTLS may reject dashboard connections"
-        );
     }
 
     match builder.build() {
@@ -1610,6 +1608,14 @@ fn build_agent_https_client(timeout: Duration) -> Option<reqwest::Client> {
             None
         }
     }
+}
+
+fn load_install_dir_agent_server_cert() -> Option<crate::certs::Cert> {
+    let current_exe = std::env::current_exe().ok()?;
+    let install_dir = current_exe.parent()?;
+    let cert_path = install_dir.join("agent-server.pem");
+    let key_path = install_dir.join("agent-server.key");
+    crate::certs::Cert::load(&cert_path, &key_path)
 }
 
 fn agent_url_candidates(agent_url: &str) -> Vec<String> {
@@ -2014,6 +2020,63 @@ pub mod install {
         let _ = std::fs::remove_file(&local_tmp);
     }
 
+    fn managed_agent_server_sans(connection: &SshConnection) -> Vec<String> {
+        let mut sans = vec!["localhost".to_string(), "127.0.0.1".to_string()];
+        let host = connection.host.trim();
+        if !host.is_empty()
+            && !sans
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(host))
+        {
+            sans.push(host.to_string());
+        }
+        sans
+    }
+
+    async fn drop_agent_server_certificate(
+        connection: &SshConnection,
+        install_path: &str,
+        os: RemoteOs,
+    ) {
+        let sep = if os == RemoteOs::Windows { '\\' } else { '/' };
+        let Some(dir_end) = install_path.rfind(sep) else {
+            return;
+        };
+        let install_dir = &install_path[..dir_end];
+        let remote_cert_path = format!("{}{}agent-server.pem", install_dir, sep);
+        let remote_key_path = format!("{}{}agent-server.key", install_dir, sep);
+
+        let cert = crate::certs::generate_agent_server_cert(managed_agent_server_sans(connection));
+        let local_cert_tmp = tempfile::NamedTempFile::new_in(std::env::temp_dir())
+            .map(|f| f.path().to_path_buf())
+            .unwrap_or_else(|_| std::env::temp_dir().join("agent-server.pem"));
+        let local_key_tmp = tempfile::NamedTempFile::new_in(std::env::temp_dir())
+            .map(|f| f.path().to_path_buf())
+            .unwrap_or_else(|_| std::env::temp_dir().join("agent-server.key"));
+
+        if std::fs::write(&local_cert_tmp, &cert.pem).is_ok() {
+            let _ = remote_ssh::copy_to_remote(
+                connection.clone(),
+                local_cert_tmp.to_string_lossy().to_string(),
+                remote_cert_path,
+                0o644,
+            )
+            .await;
+        }
+        if std::fs::write(&local_key_tmp, &cert.key).is_ok() {
+            let _ = remote_ssh::copy_to_remote(
+                connection.clone(),
+                local_key_tmp.to_string_lossy().to_string(),
+                remote_key_path,
+                0o600,
+            )
+            .await;
+        }
+
+        let _ = std::fs::remove_file(&local_cert_tmp);
+        let _ = std::fs::remove_file(&local_key_tmp);
+    }
+
     /// Writes remote-agent-config.json next to the agent binary with the api-token
     /// so the agent (or dashboard SSH operations) can authenticate to
     /// /api/remote-agent/* endpoints.
@@ -2109,8 +2172,12 @@ pub mod install {
         // Drop an uninstall script next to the binary (non-fatal if it fails).
         drop_uninstall_script(&connection, &install_path, os).await;
 
-        // Ship the CA certificate so the agent can generate a server cert
+        // Ship the CA certificate so the agent trusts this dashboard's client certs.
         drop_ca_certificate(&connection, &install_path, os).await;
+
+        // Provision a server certificate signed by this dashboard CA so the
+        // dashboard can authenticate the managed agent over HTTPS.
+        drop_agent_server_certificate(&connection, &install_path, os).await;
 
         // Write remote-agent-config.json with api-token so the agent can authenticate
         // to the dashboard's /api/remote-agent/* endpoints.
