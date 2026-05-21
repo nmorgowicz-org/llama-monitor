@@ -23,6 +23,7 @@ When attached to a remote endpoint, the header Agent button and Remote Agent pan
 - **Firewall blocked**:
   - Agent process is considered connected (e.g., started via SSH), but the dashboard cannot reach its HTTP endpoint.
   - Triggered when `remote_agent_connected` is true but `remote_agent_health_reachable` is false.
+  - `remote_agent_health_reachable` is independent from `remote_agent_connected`: it is set to true when the `/metrics` HTTP call succeeds, and reset to false on disconnect.
   - Header shows “Firewall blocked” with a **Fix** button.
   - Remote Agent panel shows “Agent Started, HTTP Blocked” with firewall guidance.
 
@@ -89,6 +90,8 @@ This panel exposes the full runtime controls:
   - GET /agent/info: same, plus agent_token for verification.
 - The current protocol version is 1.0.0.
 - The dashboard enforces a minimum protocol version when polling the agent.
+- The dashboard reads `protocol_version` from the agent `/info` endpoint on each poll.
+- Below minimum version: the dashboard enters degraded compatibility mode and sets the `protocol_too_old` flag. The telemetry grade reflects the degraded state in the UI.
 
 ## Version mismatch and degraded mode
 

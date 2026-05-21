@@ -11,6 +11,16 @@ The chat tab provides multi-conversation streaming chat against the connected ll
 - **Rename** — Double-click the top tab label or use the sidebar context menu
 - **Delete with undo** — Closing a tab moves it into an in-memory trash bin with an Undo toast; the trash list is not persisted across reloads. This includes the last remaining tab, which leaves the chat view in an empty-state screen until you create or restore a conversation. Trash entries auto-purge after 24 hours and can be cleared with `Clear all`.
 
+## Command Palette
+
+`Ctrl+K` / `Cmd+K` opens a unified workspace search overlay.
+
+- **Conversation title search** — Searches conversation titles locally as you type
+- **Full-text message search** — Queries message content via the FTS API (`GET /api/chat/search`)
+- **Quick actions** — When input is empty, shows actions: New Chat, Search Messages
+- **Keyboard navigation** — Arrow keys to navigate results, Enter to activate, Escape to close
+- **Actions on results** — Switch conversation, pin/unpin, archive/unarchive, hide/unhide, delete
+
 ## Conversation Sidebar
 
 The left conversation sidebar is the main organizer for chat sessions.
@@ -20,6 +30,7 @@ The left conversation sidebar is the main organizer for chat sessions.
 
 - **Recency groups** — Conversations are grouped into `Pinned`, `Today`, `Yesterday`, `This Week`, and `Older`
 - **Per-conversation status** — Each row shows the conversation name, persona label, explicit-mode badge, message count, and a context-pressure bar derived from the last known context percentage
+- **Accurate message counts** — Inactive and lazy-loaded tabs display the backend `message_count` from the database rather than `0`. Archived and hidden tabs also use the backend count.
 - **Collapse/expand** — The collapsed state persists in `localStorage` and is restored when the page is reopened
 - **Title filter** — The inline filter narrows the sidebar list by conversation names and visible persona labels only
 - **Message search entry point** — A dedicated `Search Messages` button sits under the title filter so full-text search is visible without hunting for a header icon
@@ -51,6 +62,23 @@ The sidebar's `Search Messages` button opens a larger flyout beside the conversa
 - **Unread badge** — New assistant replies increment a scroll-to-bottom unread badge when you are reading older content
 - **History pagination** — Long conversations render only the newest messages first (default 15) and expose older history through `Load More`
 - **RP dialogue highlighting** — Quoted dialogue is colorized even when Markdown formatting splits the text across inline tags
+
+### Composer Draft Persistence
+
+Per-tab draft text in the composer is saved on input and persisted to the backend via the `composer_draft` field on the tab. On tab switch or page reload, the draft is restored. The draft is cleared on successful message send.
+
+### Reply Plan Summary
+
+A compact chip bar above the composer shows which steering inputs are active for the next reply:
+
+| Chip | Shown When |
+|------|-----------|
+| Persona | A template is active on the tab |
+| Explicit mode | Explicit level is greater than 0 |
+| Context notes | Notes exist on the tab |
+| Quick guide | A guide is active or a draft exists |
+| Armed beats / surprise | Beats are armed with remaining turns |
+| Auto-compact | Auto-compact is enabled; displays the threshold value |
 
 ### Message Actions
 
@@ -419,6 +447,10 @@ Thinking blocks are currently a live-session UI feature, not a durable storage f
 - Assistant `thinking_content` can appear in the browser while a reply streams
 - JSON export can include `thinking_content` if it is still present in the in-memory tab object
 - The current SQLite tab/message schema does not store `thinking_content`, so those blocks are not restored after a reload from `chat.db`
+
+## Guided-Generation Settings Ownership
+
+Guided-generation settings (`enabled_context_notes`, `enabled_suggestions`, `enabled_quick_guide`, `suggestion_prompts`, `context_depth`, `suggestion_count`) are sourced from the backend via `GET /api/settings` through the central `settingsState` object. This eliminates the previous divergence where these values could differ between `localStorage` and the server config.
 
 ## Data Flow
 

@@ -149,6 +149,24 @@ The UI exposes telemetry availability directly:
 
 This matters most for remote endpoints: attaching to a remote llama.cpp server alone does not grant GPU or system metrics.
 
+## Telemetry Grade
+
+Remote endpoints use a unified 9-state telemetry grade to derive the agent connection quality:
+
+| Grade | Meaning |
+|-------|---------|
+| `local_full` | Local session with full telemetry |
+| `remote_inference_only` | Remote attach with no agent |
+| `remote_agent_connecting` | Agent connection in progress |
+| `remote_agent_connected` | Agent connected and healthy |
+| `remote_agent_degraded` | Agent connected but protocol version below minimum |
+| `remote_agent_firewall_blocked` | Agent connected via SSH but HTTP health unreachable |
+| `remote_agent_update_available` | Agent connected but a newer version exists |
+| `remote_partial_sensors` | Agent connected but some host sensors unavailable |
+| `remote_error` | Agent connection failed or unreachable |
+
+The grade chip is displayed on the agent badge for remote endpoints. The endpoint status strip uses grade-based labels. GPU and system cards show grade-aware empty-state copy when telemetry is partial or unavailable.
+
 ## Network detection
 
 If the browser supports the Network Information API, the dashboard:
@@ -168,6 +186,16 @@ For remote endpoints, the agent status area can show:
 - **Firewall blocked**: Agent connected via SSH but HTTP port unreachable; shows a "Fix" button to open the setup modal.
 - **Update available**: A newer agent version exists; shows an "Upgrade" button.
 - **Tooltip**: Hovering the agent status shows version and agent URL.
+- **Grade chip**: A compact chip on the agent badge reflects the current telemetry grade (see [Telemetry Grade](#telemetry-grade)).
+
+## Setup Screen — Recent Endpoints
+
+The setup screen's attach card is replaced with a recent-endpoints dashboard:
+
+- Shows up to 10 recent attach-mode sessions, fetched via `GET /api/sessions/recent`
+- Each entry displays the endpoint name, relative last-connected time, connection count, and a status indicator
+- One-click reconnect to any listed endpoint
+- A manual attach section remains available below the recent list for new endpoints
 
 ## Refresh rate
 
