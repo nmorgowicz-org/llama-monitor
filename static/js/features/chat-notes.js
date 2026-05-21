@@ -119,7 +119,11 @@ function updateSidebarUI() {
 
     if (!sidebar || !contextBar || !toggleBtn) return;
 
-    const notesCount = tab ? (tab.context_notes || []).filter(note => note.content?.trim()).length : 0;
+    const notesCount = tab
+        ? (tab.context_notes && tab.context_notes.length > 0)
+            ? tab.context_notes.filter(note => note.content?.trim()).length
+            : (tab.notes_count || 0)
+        : 0;
     const introHidden = isSidebarIntroHiddenPref();
 
     if (countBadge) {

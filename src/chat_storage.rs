@@ -119,6 +119,7 @@ pub struct TabMeta {
     pub total_input_tokens: i64,
     pub total_output_tokens: i64,
     pub message_count: i64,
+    pub notes_count: i64,
     pub created_at: i64,
     pub updated_at: i64,
     #[serde(default)]
@@ -350,6 +351,7 @@ impl ChatStorage {
                     t.pinned, t.tab_order, t.last_ctx_pct,
                     t.total_input_tokens, t.total_output_tokens,
                     COUNT(m.id) as message_count,
+                    COALESCE(json_array_length(t.context_notes), 0) as notes_count,
                     t.created_at, t.updated_at, t.visibility, t.composer_draft
              FROM tabs t
              LEFT JOIN messages m ON m.tab_id = t.id AND m.compaction_marker = 0
@@ -372,10 +374,11 @@ impl ChatStorage {
                 total_input_tokens: row.get(7)?,
                 total_output_tokens: row.get(8)?,
                 message_count: row.get(9)?,
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
-                visibility: row.get(12)?,
-                composer_draft: row.get(13)?,
+                notes_count: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
+                visibility: row.get(13)?,
+                composer_draft: row.get(14)?,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -595,6 +598,11 @@ impl ChatStorage {
             |row| row.get(0),
         )?;
 
+        let notes_count = match &tab.context_notes {
+            serde_json::Value::Array(arr) => arr.len() as i64,
+            _ => 0,
+        };
+
         Ok(TabMeta {
             id: tab.id,
             name: tab.name,
@@ -606,6 +614,7 @@ impl ChatStorage {
             total_input_tokens: tab.total_input_tokens,
             total_output_tokens: tab.total_output_tokens,
             message_count,
+            notes_count,
             created_at: tab.created_at,
             updated_at: tab.updated_at,
             visibility: tab.visibility,
