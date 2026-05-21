@@ -576,10 +576,13 @@ export function renderTrashDropdown() {
 
 // ── Message rendering ─────────────────────────────────────────────────────────
 
-export function renderChatMessages() {
+export function renderChatMessages(options = {}) {
     ensureChatElements();
     const container = chatMessagesEl;
     const tab = activeChatTab();
+    const {
+        forceScrollToBottom = true,
+    } = options;
 
     if (!tab) {
         container.innerHTML = `
@@ -667,7 +670,9 @@ export function renderChatMessages() {
         container.appendChild(el);
         idx++;
     }
- setTimeout(() => chatScroll(true), 50);
+    if (forceScrollToBottom) {
+        setTimeout(() => chatScroll(true), 50);
+    }
     getChatViewBindings().syncCompactSettingsUI?.(activeChatTab());
 }
 
@@ -675,14 +680,17 @@ function loadMoreMessages(tab, currentLimit) {
     const allMessages = tab.messages.filter(m => m.role !== 'system' || m.compaction_marker);
     tab.visible_message_limit = Math.min(currentLimit * 2, allMessages.length);
 
-    // Preserve scroll position before re-rendering
+    // Preserve the visible viewport by compensating for the new content inserted above.
     const scrollEl = chatMessagesEl;
     const scrollTop = scrollEl ? scrollEl.scrollTop : 0;
+    const scrollHeight = scrollEl ? scrollEl.scrollHeight : 0;
 
-    renderChatMessages();
+    renderChatMessages({ forceScrollToBottom: false });
 
-    // Restore scroll position (don't scroll to top)
-    if (scrollEl) scrollEl.scrollTop = scrollTop;
+    if (scrollEl) {
+        const addedHeight = scrollEl.scrollHeight - scrollHeight;
+        scrollEl.scrollTop = scrollTop + Math.max(addedHeight, 0);
+    }
 }
 
 function buildMessageElement(msg, idx, allMessages) {
