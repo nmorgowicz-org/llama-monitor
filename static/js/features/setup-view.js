@@ -163,14 +163,22 @@ export function renderRecentEndpoints(sessions, activeId) {
         nameEl.className = 'setup-endpoint-name';
         nameEl.textContent = session.name || endpoint || 'Unnamed';
 
+        const endpointEl = document.createElement('div');
+        endpointEl.className = 'setup-endpoint-url';
+        endpointEl.textContent = endpoint;
+        endpointEl.title = endpoint;
+
         const metaEl = document.createElement('div');
         metaEl.className = 'setup-endpoint-meta';
-        let meta = endpoint;
-        if (lastConnected !== 'Never') meta += ' · ' + lastConnected;
-        if (connectCount > 0) meta += ' · ' + connectCount + 'x';
+        const metaParts = [];
+        if (lastConnected !== 'Never') metaParts.push(lastConnected);
+        if (connectCount > 0) metaParts.push(connectCount + 'x');
+        let meta = metaParts.join(' · ');
+        if (!meta) meta = 'Saved endpoint';
         metaEl.textContent = meta;
 
         infoWrap.appendChild(nameEl);
+        infoWrap.appendChild(endpointEl);
         infoWrap.appendChild(metaEl);
 
         const connectBtn = document.createElement('button');

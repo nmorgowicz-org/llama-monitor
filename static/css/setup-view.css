@@ -1550,15 +1550,22 @@ body.setup-active .sidebar-nav {
     font-size: 14px;
     font-weight: 500;
     color: var(--fg-primary, var(--color-text-primary));
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.25;
+    margin-bottom: 2px;
+}
+
+.setup-endpoint-url {
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--fg-secondary, var(--color-text-secondary, var(--color-text-primary)));
+    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 .setup-endpoint-meta {
     font-size: 11px;
     color: var(--fg-muted, var(--color-text-muted));
-    margin-top: 2px;
+    margin-top: 4px;
 }
 
 .setup-endpoint-connect {

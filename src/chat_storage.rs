@@ -1154,6 +1154,17 @@ fn run_schema_migrations(conn: &Connection) -> Result<()> {
             [],
         )?;
     }
+    let has_composer_draft: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('tabs') WHERE name = 'composer_draft'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_composer_draft {
+        conn.execute(
+            "ALTER TABLE tabs ADD COLUMN composer_draft TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -1228,8 +1239,75 @@ mod tests {
             created_at: 1,
             updated_at: 1,
             visibility: "active".to_string(),
+            composer_draft: String::new(),
             messages: Vec::new(),
         }
+    }
+
+    #[test]
+    fn schema_migration_adds_composer_draft_for_existing_databases() {
+        let dir = tempdir().expect("temp dir");
+        let db_path = dir.path().join("chat.db");
+
+        let conn = Connection::open(&db_path).expect("open raw db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE tabs (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                system_prompt TEXT NOT NULL DEFAULT '',
+                ai_name TEXT,
+                user_name TEXT,
+                explicit_level INTEGER NOT NULL DEFAULT 0,
+                active_template_id TEXT,
+                auto_compact INTEGER NOT NULL DEFAULT 1,
+                auto_compact_summarize INTEGER NOT NULL DEFAULT 0,
+                compact_mode TEXT NOT NULL DEFAULT 'percent',
+                compact_threshold REAL NOT NULL DEFAULT 0.8,
+                model_params TEXT NOT NULL DEFAULT '{}',
+                context_notes TEXT NOT NULL DEFAULT '[]',
+                sidebar_width INTEGER NOT NULL DEFAULT 280,
+                tab_order INTEGER NOT NULL DEFAULT 0,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                last_ctx_pct REAL,
+                total_input_tokens INTEGER NOT NULL DEFAULT 0,
+                total_output_tokens INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                visibility TEXT NOT NULL DEFAULT 'active'
+            );
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tab_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp_ms INTEGER NOT NULL DEFAULT 0,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                cumulative_input_tokens INTEGER,
+                cumulative_output_tokens INTEGER,
+                compaction_marker INTEGER NOT NULL DEFAULT 0,
+                variants TEXT,
+                variant_index INTEGER,
+                seq INTEGER NOT NULL
+            );
+            "#,
+        )
+        .expect("create legacy schema");
+        drop(conn);
+
+        let store = ChatStorage::open(&db_path).expect("open migrated storage");
+        let columns: i64 = {
+            let guard = store.conn.lock().expect("lock db");
+            let conn = guard.as_ref().expect("db open");
+            conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tabs') WHERE name = 'composer_draft'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query columns")
+        };
+        assert_eq!(columns, 1);
     }
 
     fn make_message(tab_id: &str, role: &str, content: &str) -> MessageRow {

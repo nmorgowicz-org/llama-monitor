@@ -318,3 +318,79 @@ fn headless_mode_disables_tray() {
         "tray should be disabled with both flags"
     );
 }
+
+#[test]
+fn session_serialization_includes_new_fields() {
+    let session = Session::new_attach(
+        "test_new_fields".to_string(),
+        "New Fields Test".to_string(),
+        "http://remote.example.com:8080".to_string(),
+    );
+
+    // Verify new fields have correct defaults
+    assert_eq!(session.last_connected_at, 0);
+    assert_eq!(session.connect_count, 0);
+    assert!(session.last_error.is_none());
+
+    // Verify serialization includes all fields
+    let json = serde_json::to_value(&session).unwrap();
+    assert!(json.get("last_connected_at").is_some());
+    assert!(json.get("connect_count").is_some());
+    assert!(json.get("last_error").is_some());
+    assert!(json.get("id").is_some());
+    assert!(json.get("name").is_some());
+    assert!(json.get("mode").is_some());
+    assert!(json.get("status").is_some());
+}
+
+#[test]
+fn session_deserialization_omits_new_fields() {
+    // Simulate old session JSON without new fields
+    let old_json = r#"{
+        "id": "old_session",
+        "name": "Old Session",
+        "mode": {"Attach": {"endpoint": "http://127.0.0.1:8080"}},
+        "status": "Stopped"
+    }"#;
+
+    let session: Session = serde_json::from_str(old_json).unwrap();
+    assert_eq!(session.id, "old_session");
+    assert_eq!(session.last_connected_at, 0);
+    assert_eq!(session.connect_count, 0);
+    assert!(session.last_error.is_none());
+}
+
+#[test]
+fn agent_health_reachable_defaults_false() {
+    let paths = AppPaths {
+        presets_path: std::path::PathBuf::new(),
+        templates_path: std::path::PathBuf::new(),
+        models_dir: None,
+        gpu_env_path: std::path::PathBuf::new(),
+        ui_settings_path: std::path::PathBuf::new(),
+        sessions_path: std::path::PathBuf::new(),
+    };
+    let gpu_env = GpuEnv {
+        arch: "auto".into(),
+        devices: String::new(),
+        rocm_path: "/opt/rocm".into(),
+        extra_env: vec![],
+    };
+    let state = AppState::new(
+        vec![],
+        paths,
+        gpu_env,
+        UiSettings::default(),
+        test_chat_storage(),
+        TLSConfig::default(),
+    );
+
+    assert!(
+        !state.remote_agent_health_reachable(),
+        "health_reachable must default to false"
+    );
+    assert!(
+        !state.remote_agent_connected(),
+        "agent_connected must default to false"
+    );
+}
