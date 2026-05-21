@@ -60,6 +60,14 @@ test.describe('modals and menus', () => {
     await page.goto('/');
     await page.waitForSelector('html.modules-ready');
     await dismissAuthShell(page);
+    // Dismiss any modals that may have opened during initialization
+    await page.evaluate(() => {
+      document.querySelectorAll('.modal-overlay.open, .keyboard-shortcut-overlay.open').forEach(el => {
+        el.classList.remove('open');
+        el.setAttribute('aria-hidden', 'true');
+        el.inert = true;
+      });
+    });
   });
 
   test('settings opens and secondary tabs switch', async ({ page }) => {
@@ -99,24 +107,24 @@ test.describe('modals and menus', () => {
   });
 
   test('profile menu remains open after click', async ({ page }) => {
-    await page.getByRole('button', { name: /user/i }).click();
+    await page.locator('#nav-user-btn').click();
     await expect(page.locator('.nav-user-menu')).toHaveClass(/open/);
     await expect(page.getByRole('link', { name: 'Preferences' })).toBeVisible();
   });
 
   test('profile dropdown actions are wired', async ({ page }) => {
-    await page.getByRole('button', { name: /user/i }).click();
+    await page.locator('#nav-user-btn').click();
     await page.getByRole('link', { name: 'Preferences' }).click();
     await expect(page.locator('#user-preferences-modal')).toHaveClass(/open/);
     await page.locator('#user-preferences-modal .modal-close').click();
 
-    await page.getByRole('button', { name: /user/i }).click();
+    await page.locator('#nav-user-btn').click();
     await page.waitForSelector('#nav-user-menu-items', { state: 'visible' });
     await page.locator('#user-menu-help').click();
     await expect(page.locator('#keyboard-shortcuts-modal')).toHaveClass(/open/);
     await page.locator('#keyboard-shortcuts-modal .shortcuts-close').click();
 
-    await page.getByRole('button', { name: /user/i }).click();
+    await page.locator('#nav-user-btn').click();
     await page.getByRole('link', { name: 'Toggle Theme' }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', /light|dark/);
   });

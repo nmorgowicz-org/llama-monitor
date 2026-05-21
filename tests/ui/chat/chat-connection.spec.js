@@ -21,6 +21,9 @@ test.describe('connection lost banner', () => {
     // Simulate connection-lost modal being shown by triggering a send error.
     await page.route('**/api/chat', route => route.fulfill({ status: 503 }));
 
+    // Wait for chat input to be visible before interacting
+    await expect(page.locator('#chat-input')).toBeVisible({ timeout: 10000 });
+
     await page.$eval('#chat-input', (el, text) => {
       el.value = text;
       el.dispatchEvent(new Event('input', { bubbles: true }));

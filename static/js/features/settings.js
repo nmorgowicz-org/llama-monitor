@@ -481,7 +481,7 @@ function _bindSettingsEvents() {
 
 // ── TLS / Certificates ────────────────────────────────────────────────────────
 
-function setActiveCertMode(mode) {
+export function setActiveCertMode(mode) {
     const pills = document.querySelectorAll('.cert-mode-pill');
     const panes = document.querySelectorAll('.cert-mode-content');
 

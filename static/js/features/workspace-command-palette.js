@@ -74,9 +74,7 @@ export function openCommandPalette() {
     _input.value = '';
     _results.innerHTML = '';
 
-    requestAnimationFrame(() => {
-        _input.focus();
-    });
+    _input.focus();
 
     renderDefaultActions();
 }
@@ -111,14 +109,17 @@ function onInput() {
 function onInputKeydown(e) {
     if (e.key === 'ArrowDown') {
         e.preventDefault();
+        e.stopPropagation();
         _selectedIndex = Math.min(_selectedIndex + 1, _items.length - 1);
         highlightItem();
     } else if (e.key === 'ArrowUp') {
         e.preventDefault();
+        e.stopPropagation();
         _selectedIndex = Math.max(_selectedIndex - 1, 0);
         highlightItem();
     } else if (e.key === 'Enter' && _selectedIndex >= 0 && _selectedIndex < _items.length) {
         e.preventDefault();
+        e.stopPropagation();
         activateItem(_items[_selectedIndex]);
     }
 }

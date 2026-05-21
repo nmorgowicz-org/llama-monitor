@@ -7,6 +7,8 @@ async function switchToMonitor(page) {
     const { switchView } = await import('/js/features/setup-view.js');
     switchView('monitor');
   });
+  await expect(page.locator('body')).not.toHaveClass(/setup-active/);
+  await expect(page.locator('#view-monitor')).toBeVisible();
 }
 
 async function ensureChatVisible(page) {

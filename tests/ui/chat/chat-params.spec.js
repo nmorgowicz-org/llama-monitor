@@ -5,6 +5,8 @@ async function switchToMonitor(page) {
     const { switchView } = await import('/js/features/setup-view.js');
     switchView('monitor');
   });
+  await expect(page.locator('body')).not.toHaveClass(/setup-active/);
+  await expect(page.locator('#view-monitor')).toBeVisible();
 }
 
 test.describe('model params panel', () => {
@@ -13,6 +15,8 @@ test.describe('model params panel', () => {
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
+    // Ensure chat view is visible
+    await expect(page.locator('#page-chat')).toBeVisible({ timeout: 5000 });
   });
 
   test('opens and closes via .open class', async ({ page }) => {
