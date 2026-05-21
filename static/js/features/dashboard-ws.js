@@ -254,6 +254,7 @@ function updateAgentStatus(d) {
     // Badge class
     let badgeClass = 'agent-status';
     if (grade === 'remote_agent_connected') badgeClass += ' connected';
+    else if (grade === 'remote_agent_connecting') badgeClass += ' update-available';
     else if (grade === 'remote_agent_update_available') badgeClass += ' update-available';
     else if (grade === 'remote_agent_firewall_blocked') badgeClass += ' firewall-blocked';
     else if (grade === 'remote_error') badgeClass += ' disconnected';
@@ -261,7 +262,8 @@ function updateAgentStatus(d) {
 
     // Text
     let agentText = 'Remote Agent';
-    if (grade === 'remote_agent_update_available') agentText = 'Update Available';
+    if (grade === 'remote_agent_connecting') agentText = 'Connecting...';
+    else if (grade === 'remote_agent_update_available') agentText = 'Update Available';
     else if (grade === 'remote_agent_firewall_blocked') agentText = 'Firewall blocked';
     else if (grade === 'remote_agent_degraded') agentText = 'Degraded';
     else if (grade === 'remote_partial_sensors') agentText = 'Partial sensors';
@@ -271,7 +273,8 @@ function updateAgentStatus(d) {
     // Tooltip
     let tooltipText = 'Connected';
     let tooltipClass = 'connected';
-    if (grade === 'remote_agent_update_available') { tooltipText = 'Update available'; tooltipClass = 'warning'; }
+    if (grade === 'remote_agent_connecting') { tooltipText = 'Connecting'; tooltipClass = 'warning'; }
+    else if (grade === 'remote_agent_update_available') { tooltipText = 'Update available'; tooltipClass = 'warning'; }
     else if (grade === 'remote_agent_firewall_blocked') { tooltipText = 'Firewall blocked'; tooltipClass = 'warning'; }
     else if (grade === 'remote_agent_degraded') { tooltipText = 'Degraded compatibility'; tooltipClass = 'warning'; }
     else if (grade === 'remote_partial_sensors') { tooltipText = 'Partial sensor coverage'; tooltipClass = 'warning'; }
@@ -283,7 +286,8 @@ function updateAgentStatus(d) {
     // Fix button copy
     let fixCopy = '\u26a1 Fix';
     let fixTitle = 'Set up remote agent';
-    if (grade === 'remote_agent_update_available') { fixCopy = '\u26a1 Upgrade'; fixTitle = 'Upgrade remote agent to latest version'; }
+    if (grade === 'remote_agent_connecting') { fixCopy = '\u23F3 Wait'; fixTitle = 'Remote agent activity is already in progress'; }
+    else if (grade === 'remote_agent_update_available') { fixCopy = '\u26a1 Upgrade'; fixTitle = 'Upgrade remote agent to latest version'; }
     else if (grade === 'remote_agent_firewall_blocked') { fixTitle = 'Repair remote agent connectivity'; }
     else if (grade === 'remote_agent_degraded') { fixCopy = '\u26a1 Upgrade'; fixTitle = 'Upgrade agent for full compatibility'; }
 

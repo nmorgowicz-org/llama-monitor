@@ -466,7 +466,12 @@ Example:
   "default_sidebar_width": 280,
   "suggestion_prompts": {},
   "suggestion_count": 5,
-  "context_depth": 10
+  "context_depth": 10,
+  "chat_date_format": "MM/DD/YY",
+  "enter_to_send": true,
+  "context_notes_sidebar_expanded": false,
+  "context_notes_intro_hidden": false,
+  "custom_suggestion_categories": {}
 }
 ```
 
@@ -504,7 +509,12 @@ Example:
   "default_sidebar_width": 280,
   "suggestion_prompts": {},
   "suggestion_count": 5,
-  "context_depth": 10
+  "context_depth": 10,
+  "chat_date_format": "MM/DD/YY",
+  "enter_to_send": true,
+  "context_notes_sidebar_expanded": false,
+  "context_notes_intro_hidden": false,
+  "custom_suggestion_categories": {}
 }
 ```
 
@@ -521,6 +531,7 @@ Response:
 Notes:
 - The live handler expects the current full `UiSettings` shape.
 - The frontend also uses a narrow partial-update path for `ws_push_interval_ms`; external clients should prefer sending the full object.
+- `custom_suggestion_categories` is a map of category key to `{ "prompt": string, "explicit": bool }`.
 
 ## GPU Environment
 

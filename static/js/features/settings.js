@@ -7,8 +7,6 @@ import { renderChatMessages } from './chat-render.js';
 import { getAutoPollingInterval } from './network-detection.js';
 import { showToast } from './toast.js';
 
-const DATE_FORMAT_KEY = 'llama-monitor-date-format';
-
 // ── Secret masking helpers ────────────────────────────────────────────────────
 
 function maskSecret(value) {
@@ -61,6 +59,10 @@ function resolveWsPushInterval() {
     return parseInt(raw) || 500;
 }
 
+function notifySettingsApplied() {
+    window.dispatchEvent(new CustomEvent('settings-applied', { detail: { ...settingsState } }));
+}
+
 // ── Collect / Save / Apply ────────────────────────────────────────────────────
 
 export function collectSettings() {
@@ -98,6 +100,11 @@ export function collectSettings() {
         default_sidebar_width: parseInt(document.getElementById('settings-sidebar-width')?.value || '280', 10),
         suggestion_count: parseInt(document.getElementById('settings-suggestion-count')?.value || '5', 10),
         context_depth: parseInt(document.getElementById('settings-context-depth')?.value || '10', 10),
+        chat_date_format: settingsState.chat_date_format || 'MM/DD/YY',
+        enter_to_send: settingsState.enter_to_send !== false,
+        context_notes_sidebar_expanded: !!settingsState.context_notes_sidebar_expanded,
+        context_notes_intro_hidden: !!settingsState.context_notes_intro_hidden,
+        custom_suggestion_categories: settingsState.custom_suggestion_categories || {},
         suggestion_prompts: {
             general: document.getElementById('settings-prompt-general')?.value || '',
             'plot-twist': document.getElementById('settings-prompt-plot-twist')?.value || '',
@@ -277,6 +284,16 @@ export function applySettings(s) {
     settingsState.suggestion_prompts = s.suggestion_prompts || {};
     settingsState.context_depth = s.context_depth || 10;
     settingsState.suggestion_count = s.suggestion_count || 5;
+    settingsState.chat_date_format = s.chat_date_format || 'MM/DD/YY';
+    settingsState.enter_to_send = s.enter_to_send !== false;
+    settingsState.context_notes_sidebar_expanded = !!s.context_notes_sidebar_expanded;
+    settingsState.context_notes_intro_hidden = !!s.context_notes_intro_hidden;
+    settingsState.custom_suggestion_categories = s.custom_suggestion_categories || {};
+
+    const dateFmtEl = document.getElementById('chat-date-format');
+    if (dateFmtEl) dateFmtEl.value = settingsState.chat_date_format;
+
+    notifySettingsApplied();
 }
 
 // ── Live WS interval update ──────────────────────────────────────────────────
@@ -311,7 +328,7 @@ export function openSettingsModal() {
     clearSettingsDirty();
 
     const dateFmtEl = document.getElementById('chat-date-format');
-    if (dateFmtEl) dateFmtEl.value = localStorage.getItem(DATE_FORMAT_KEY) || 'MM/DD/YY';
+    if (dateFmtEl) dateFmtEl.value = settingsState.chat_date_format || 'MM/DD/YY';
 }
 
 export function closeSettingsModal() {
@@ -352,10 +369,11 @@ function _bindSettingsEvents() {
         }
     });
 
-    // Date format — save immediately to localStorage and re-render messages
+    // Date format — shared workspace preference
     document.getElementById('chat-date-format')?.addEventListener('change', (e) => {
-        localStorage.setItem(DATE_FORMAT_KEY, e.target.value);
+        settingsState.chat_date_format = e.target.value;
         renderChatMessages();
+        saveSettings();
     });
 
     // Auto-save on controls change

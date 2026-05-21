@@ -193,8 +193,8 @@ For remote endpoints, the agent status area can show:
 The setup screen's attach card is replaced with a recent-endpoints dashboard:
 
 - Shows up to 10 recent attach-mode sessions, fetched via `GET /api/sessions/recent`
-- Each entry displays the endpoint name, relative last-connected time, connection count, and a status indicator
-- One-click reconnect to any listed endpoint
+- Each entry displays the endpoint name, relative last-connected time, connection count, status summary, and a status indicator
+- The active recent session is labeled `Resume`; previously connected sessions use `Reconnect`
 - A manual attach section remains available below the recent list for new endpoints
 
 ## Refresh rate
@@ -225,9 +225,23 @@ This modal owns:
 
 - Guided-generation toggles and prompt defaults under **Chat**
 - Dashboard refresh rate under **Performance**
+- Shared workflow preferences such as timestamp format, enter-to-send, and context-notes panel continuity
 - The handoff to runtime controls under **Advanced → Open Runtime Configuration**
 
+This modal no longer shows placeholder runtime controls for model paths, GPU defaults, or server launch configuration.
+
 Do not rely on the Settings tab labels as the place to configure process launch paths or remote-agent connectivity. Those runtime controls live in the separate Configuration modal.
+
+Ownership summary for the visible Settings surfaces:
+
+| Surface | Owner | Persistence |
+|---------|-------|-------------|
+| **Settings → Chat** guided-generation toggles, sidebar width, prompt templates | Shared workspace settings | `GET/PUT /api/settings` |
+| **Settings → Performance** refresh interval | Shared workspace settings | `GET/PUT /api/settings` |
+| **Settings → Session / GPU / Models / Appearance** explanatory cards | Runtime/configuration handoff only | No direct save path in Settings |
+| **Settings → Advanced → Open Runtime Configuration** | Runtime configuration modal | `GET/PUT /api/settings` for config-backed fields |
+| **User → Preferences** theme, spacing, chat style, font scale | Device-local preference | browser `localStorage` |
+| **User → Preferences** enter-to-send | Shared workflow preference | `GET/PUT /api/settings` |
 
 ### Configuration modal
 
@@ -238,6 +252,8 @@ This modal owns the runtime-specific controls:
 - **Local llama-server executable**: executable path and optional process working directory
 - **GPU Environment**: local ROCm architecture, local GPU device list, local ROCm path
 - **Remote Agent**: agent URL/token, SSH target, optional SSH autostart, guided SSH setup, install/start/update/remove actions
+
+Device-local appearance choices such as theme, spacing, chat style, and font scale remain in **User → Preferences** rather than shared workspace settings.
 
 The endpoint you attach to is still chosen from the main session/setup flow. Configuration does not replace the attach/spawn session controls.
 

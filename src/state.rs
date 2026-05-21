@@ -137,6 +137,29 @@ pub struct UiSettings {
     /// Guided generation: context depth (number of messages to include)
     #[serde(default = "default_context_depth")]
     pub context_depth: u32,
+    /// Shared chat date format preference.
+    #[serde(default = "default_chat_date_format")]
+    pub chat_date_format: String,
+    /// Shared enter-to-send preference.
+    #[serde(default = "default_true")]
+    pub enter_to_send: bool,
+    /// Shared context notes sidebar expanded state.
+    #[serde(default)]
+    pub context_notes_sidebar_expanded: bool,
+    /// Shared context notes intro visibility.
+    #[serde(default)]
+    pub context_notes_intro_hidden: bool,
+    /// Shared custom suggestion categories used by the suggestions workspace.
+    #[serde(default)]
+    pub custom_suggestion_categories: HashMap<String, CustomSuggestionCategory>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct CustomSuggestionCategory {
+    #[serde(default)]
+    pub prompt: String,
+    #[serde(default)]
+    pub explicit: bool,
 }
 
 fn default_true() -> bool {
@@ -157,6 +180,10 @@ fn default_suggestion_count() -> u32 {
 
 fn default_context_depth() -> u32 {
     10
+}
+
+fn default_chat_date_format() -> String {
+    "MM/DD/YY".to_string()
 }
 
 fn default_ws_push_interval_ms() -> u64 {
@@ -297,6 +324,11 @@ impl Default for UiSettings {
             suggestion_prompts: default_suggestion_prompts(),
             suggestion_count: default_suggestion_count(),
             context_depth: default_context_depth(),
+            chat_date_format: default_chat_date_format(),
+            enter_to_send: default_true(),
+            context_notes_sidebar_expanded: false,
+            context_notes_intro_hidden: false,
+            custom_suggestion_categories: HashMap::new(),
         }
     }
 }

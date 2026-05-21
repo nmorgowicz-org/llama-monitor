@@ -126,19 +126,26 @@ export async function loadRecentSessions() {
 export function renderRecentEndpoints(sessions, activeId) {
     const list = document.getElementById('setup-endpoint-list');
     const container = document.getElementById('setup-recent-endpoints');
+    const attachBtn = document.getElementById('setup-attach-btn');
+    const lastSession = setupViewState.lastSessionData || loadLastSessionData();
     if (!list || !container) return;
 
     if (!sessions || sessions.length === 0) {
         container.style.display = 'none';
+        if (attachBtn) attachBtn.innerHTML = '<span class="btn-icon">⚡</span> Attach';
         return;
     }
 
     container.style.display = '';
+    if (attachBtn) attachBtn.innerHTML = '<span class="btn-icon">⚡</span> Reconnect Manually';
     list.innerHTML = '';
 
     sessions.forEach(session => {
         const card = document.createElement('div');
         card.className = 'setup-endpoint-card';
+        if (activeId && session.id === activeId) {
+            card.classList.add('is-active-session');
+        }
 
         let endpoint = '';
         if (session.mode && session.mode.Attach) {
@@ -171,6 +178,13 @@ export function renderRecentEndpoints(sessions, activeId) {
         const metaEl = document.createElement('div');
         metaEl.className = 'setup-endpoint-meta';
         const metaParts = [];
+        if (activeId && session.id === activeId) metaParts.push('Active workspace');
+        else if (session.status === 'Running') metaParts.push('Last seen running');
+        else if (session.status === 'Disconnected') metaParts.push('Ready to reconnect');
+        else if (session.status === 'Error') metaParts.push(session.last_error || 'Needs attention');
+        if (lastSession?.endpoint && endpoint && lastSession.endpoint === endpoint && lastSession.telemetryLabel) {
+            metaParts.push(lastSession.telemetryLabel);
+        }
         if (lastConnected !== 'Never') metaParts.push(lastConnected);
         if (connectCount > 0) metaParts.push(connectCount + 'x');
         let meta = metaParts.join(' · ');
@@ -183,7 +197,9 @@ export function renderRecentEndpoints(sessions, activeId) {
 
         const connectBtn = document.createElement('button');
         connectBtn.className = 'setup-endpoint-connect';
-        connectBtn.textContent = 'Connect';
+        connectBtn.textContent = activeId && session.id === activeId
+            ? 'Resume'
+            : (session.last_connected_at ? 'Reconnect' : 'Connect');
 
         card.appendChild(statusDot);
         card.appendChild(infoWrap);

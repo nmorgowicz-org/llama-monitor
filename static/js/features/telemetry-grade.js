@@ -1,3 +1,5 @@
+import { remoteAgent } from '../core/app-state.js';
+
 /**
  * Derive a single telemetry grade from WebSocket snapshot data.
  * @param {object} d - WebSocket data snapshot
@@ -28,6 +30,9 @@ export function deriveTelemetryGrade(d) {
 
         // No host metrics at all — inference only
         if (!caps.host_metrics) {
+            if (remoteAgent.inProgress) {
+                return 'remote_agent_connecting';
+            }
             return 'remote_inference_only';
         }
 
@@ -94,6 +99,7 @@ export function gradeStatusClass(grade) {
 export function gradeActionCopy(grade) {
     const copies = {
         remote_inference_only: 'Install the remote agent on the host to enable system and GPU metrics.',
+        remote_agent_connecting: 'Starting or upgrading the remote agent now. Wait a moment for telemetry to come online.',
         remote_agent_firewall_blocked: 'Open port 7779 on the remote host or adjust firewall rules.',
         remote_agent_degraded: 'Upgrade the remote agent — running in degraded compatibility mode.',
         remote_partial_sensors: 'Some sensors unavailable. Check agent logs on the remote host.',

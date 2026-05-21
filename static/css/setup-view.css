@@ -1522,6 +1522,16 @@ body.setup-active .sidebar-nav {
     background: var(--bg-card-hover, rgba(255, 255, 255, 0.06));
 }
 
+.setup-endpoint-card.is-active-session {
+    border-color: rgba(94, 234, 212, 0.28);
+    background: rgba(20, 184, 166, 0.08);
+}
+
+[data-theme="light"] .setup-endpoint-card.is-active-session {
+    border-color: rgba(13, 148, 136, 0.24);
+    background: rgba(20, 184, 166, 0.12);
+}
+
 .setup-endpoint-status {
     width: 8px;
     height: 8px;

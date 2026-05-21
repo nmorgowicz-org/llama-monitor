@@ -4,6 +4,7 @@
 import { showToast } from './toast.js';
 import { applyChatStyle, getEnterToSend, setEnterToSend } from './chat-params.js';
 import { openKeyboardShortcutsModal } from './shortcuts.js';
+import { saveSettings } from './settings.js';
 
 // ── User Menu ─────────────────────────────────────────────────────────────────
 
@@ -69,10 +70,13 @@ function saveUserPreferences() {
     document.documentElement.style.fontSize = (Number(fontScale) * 16) + 'px';
     document.documentElement.style.setProperty('--gap-md', (Number(spacingScale) * 16) + 'px');
 
+    // Chat style/font/spacing/theme remain device-local on purpose; only
+    // continuity-sensitive workflow prefs get promoted into shared settings.
     applyChatStyle(chatStyle);
     localStorage.setItem('llama-monitor-chat-style', chatStyle);
 
     setEnterToSend(enterToSendChecked);
+    saveSettings();
 
     localStorage.setItem('llama-monitor-preferences', JSON.stringify({
         theme,

@@ -38,6 +38,11 @@ export function updateReplyPlanSummary() {
         chips.push({ class: 'chip-guide', text: tab.quick_guide_active ? 'Guide active' : 'Guide draft' });
     }
 
+    const composerInput = document.getElementById('chat-input');
+    if (composerInput?.dataset.suggestionDraft === 'true') {
+        chips.push({ class: 'chip-guide', text: 'Draft override armed' });
+    }
+
     // Armed story beats / surprise
     const beats = tab.armed_story_beats || [];
     if (beats.length > 0) {
@@ -47,6 +52,11 @@ export function updateReplyPlanSummary() {
     // Compaction
     if (tab.auto_compact) {
         chips.push({ class: 'chip-compact', text: 'Auto-compact ' + (tab.compact_threshold || 75) + '%' });
+    }
+
+    const compactedMemory = (tab.messages || []).filter(msg => msg.compaction_marker && msg.content?.trim());
+    if (compactedMemory.length > 0) {
+        chips.push({ class: 'chip-compact', text: compactedMemory.length + ' memory' + (compactedMemory.length !== 1 ? ' blocks' : ' block') });
     }
 
     if (chips.length === 0) {
@@ -80,7 +90,6 @@ function resolvePersonaName(templateId) {
 export function initReplyPlanUpdates() {
     updateReplyPlanSummary();
 
-    // Listen for tab changes
     const observer = new MutationObserver(() => {
         updateReplyPlanSummary();
     });
@@ -93,6 +102,34 @@ export function initReplyPlanUpdates() {
     // Also update on visibility change (in case user switches tabs while minimized)
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
+            updateReplyPlanSummary();
+        }
+    });
+
+    window.addEventListener('activeTabChanged', updateReplyPlanSummary);
+    window.addEventListener('explicitModeChanged', updateReplyPlanSummary);
+    window.addEventListener('chatReplyComplete', updateReplyPlanSummary);
+    window.addEventListener('replyPlanChanged', updateReplyPlanSummary);
+    document.addEventListener('input', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        if ([
+            'chat-input',
+            'quick-guide-input',
+            'quick-guide-director-input',
+            'quick-guide-surprise-input',
+        ].includes(target.id)) {
+            updateReplyPlanSummary();
+        }
+    });
+    document.addEventListener('change', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        if ([
+            'chat-auto-compact',
+            'chat-auto-compact-summarize',
+            'chat-compact-threshold',
+        ].includes(target.id)) {
             updateReplyPlanSummary();
         }
     });

@@ -19,7 +19,7 @@ The chat tab provides multi-conversation streaming chat against the connected ll
 - **Full-text message search** — Queries message content via the FTS API (`GET /api/chat/search`)
 - **Quick actions** — When input is empty, shows actions: New Chat, Search Messages
 - **Keyboard navigation** — Arrow keys to navigate results, Enter to activate, Escape to close
-- **Actions on results** — Switch conversation, pin/unpin, archive/unarchive, hide/unhide, delete
+- **Actions on results** — Switch conversation, pin/unpin, archive/unarchive, hide/unhide, duplicate, rename, and delete
 
 ## Conversation Sidebar
 
@@ -77,8 +77,10 @@ A compact chip bar above the composer shows which steering inputs are active for
 | Explicit mode | Explicit level is greater than 0 |
 | Context notes | Notes exist on the tab |
 | Quick guide | A guide is active or a draft exists |
+| Draft override | A suggestion-generated draft is armed in the main composer |
 | Armed beats / surprise | Beats are armed with remaining turns |
 | Auto-compact | Auto-compact is enabled; displays the threshold value |
+| Rolling memory | One or more compacted memory blocks exist on the tab |
 
 ### Message Actions
 
@@ -256,7 +258,7 @@ Message font size can be adjusted from 70% to 150% via the style panel.
 
 ### Date Format
 
-Message timestamps follow the per-user appearance setting:
+Message timestamps follow the shared workspace date-format setting:
 
 | Format | Example |
 |--------|---------|
@@ -267,7 +269,7 @@ Message timestamps follow the per-user appearance setting:
 
 ### Enter Behavior
 
-Enter-to-send is stored as a browser preference. When disabled, `Enter` inserts a newline and `Ctrl+Enter` sends.
+Enter-to-send is stored in shared settings. When disabled, `Enter` inserts a newline and `Ctrl+Enter` sends.
 
 ## Guided Generation
 
@@ -294,7 +296,7 @@ The right-side context notes panel stores structured notes on the active tab and
 - **Multiple notes per section** — A section can contain several entries; they are concatenated when injected
 - **Custom sections** — You can create additional section names, which are also persisted with the tab
 - **Resizable width** — Width is stored on the tab and also mirrored in `localStorage` for UI restore
-- **Expanded/collapsed state** — The open state and intro visibility are browser-local `localStorage` preferences
+- **Expanded/collapsed state** — The open state and intro visibility are shared workspace preferences loaded from `GET /api/settings`
 
 #### AI Review
 
@@ -312,6 +314,8 @@ Suggestions generate user-side next-step ideas from the current conversation con
 ![Suggestions Dropdown](../screenshots/guided-gen-suggestions-dropdown.png)
 
 The browser sends recent messages, the current system prompt, non-empty context notes, and the active quick-guide instruction (if one is currently active) as suggestion context.
+
+Custom suggestion categories are stored in shared settings so they follow the workspace across browsers.
 
 ![Tag Cloud](../screenshots/guided-gen-suggestions-tag-cloud.png)
 ![Search Filter](../screenshots/guided-gen-suggestions-search-filter.png)
@@ -450,7 +454,9 @@ Thinking blocks are currently a live-session UI feature, not a durable storage f
 
 ## Guided-Generation Settings Ownership
 
-Guided-generation settings (`enabled_context_notes`, `enabled_suggestions`, `enabled_quick_guide`, `suggestion_prompts`, `context_depth`, `suggestion_count`) are sourced from the backend via `GET /api/settings` through the central `settingsState` object. This eliminates the previous divergence where these values could differ between `localStorage` and the server config.
+Guided-generation settings (`enabled_context_notes`, `enabled_suggestions`, `enabled_quick_guide`, `suggestion_prompts`, `context_depth`, `suggestion_count`) are sourced from the backend via `GET /api/settings` through the central `settingsState` object. Additional workflow-continuity preferences (`chat_date_format`, `enter_to_send`, context-notes open state, intro visibility, and custom suggestion categories) are also shared there.
+
+Purely device-specific presentation choices such as chat style and font scale remain browser-local.
 
 ## Data Flow
 

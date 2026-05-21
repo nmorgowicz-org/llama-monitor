@@ -298,6 +298,7 @@ window.addEventListener('suggestionSelected', async (e) => {
         input.focus();
         input.setSelectionRange(input.value.length, input.value.length);
         autoResizeChatInput();
+        window.dispatchEvent(new CustomEvent('replyPlanChanged'));
     }
 });
 

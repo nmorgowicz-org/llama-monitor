@@ -2304,94 +2304,38 @@
             </div>
             <div class="settings-content">
                 <div class="settings-pane active" id="settings-session">
-                    <h3>Session Settings</h3>
+                    <h3>Session Workspace</h3>
                     <div class="settings-card">
-                        <label class="modal-field">
-                            Default Spawn Mode
-                            <select id="settings-default-spawn-mode">
-                                <option value="spawn">Spawn New Server</option>
-                                <option value="attach">Attach to Existing</option>
-                            </select>
-                        </label>
-                        <label class="modal-field">
-                            Default Server Endpoint
-                            <input type="text" id="settings-default-server-endpoint" value="http://127.0.0.1:8001">
-                        </label>
-                        <label class="modal-field">
-                            Auto-start on Launch
-                            <div style="display:flex;align-items:center;gap:12px;">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="settings-auto-start" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                                <span class="toggle-label">Automatically start server when launching</span>
-                            </div>
-                        </label>
+                        <p class="settings-help">
+                            Session resume is handled from the setup screen and recent-endpoints workspace. Runtime attach targets, remote-agent details, and local launch paths are not edited here.
+                        </p>
+                        <p class="settings-help">
+                            Use the separate Configuration modal for executable paths and remote host details.
+                        </p>
                     </div>
                 </div>
                 <div class="settings-pane" id="settings-gpu">
                     <h3>GPU Configuration</h3>
                     <div class="settings-card">
-                        <label class="modal-field">
-                            Default GPU Layers
-                            <input type="number" id="settings-default-gpu-layers" value="99">
-                        </label>
-                        <label class="modal-field">
-                            GPU Memory Target
-                            <input type="number" id="settings-gpu-memory-target" placeholder="GB">
-                        </label>
+                        <p class="settings-help">
+                            GPU defaults are owned by model presets and runtime configuration. This settings modal no longer exposes placeholder GPU controls that do not persist.
+                        </p>
                     </div>
                 </div>
                 <div class="settings-pane" id="settings-models">
                     <h3>Model Settings</h3>
                     <div class="settings-card">
-                        <label class="modal-field">
-                            Default Model Path
-                            <input type="text" id="settings-default-model-path" placeholder="/path/to/model.gguf">
-                        </label>
-                        <label class="modal-field">
-                            Default Context Size
-                            <input type="number" id="settings-default-context-size" value="128000">
-                        </label>
-                        <label class="modal-field">
-                            Enable Quantization
-                            <div style="display:flex;align-items:center;gap:12px;">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="settings-enable-quantization" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                                <span class="toggle-label">Use quantized models by default</span>
-                            </div>
-                        </label>
+                        <p class="settings-help">
+                            Model paths, context sizes, speculative decoding, and GPU layering are preset-level concerns. Edit them in Presets or Runtime Configuration rather than through global placeholder fields.
+                        </p>
                     </div>
                 </div>
               <div class="settings-pane" id="settings-appearance">
                       <h3>Appearance</h3>
                       <div class="settings-card">
-                          <label class="modal-field">
-                              Theme
-                              <select id="settings-theme">
-                                  <option value="auto">Auto (System)</option>
-                                  <option value="light">Light</option>
-                                  <option value="dark">Dark</option>
-                              </select>
-                          </label>
-                          <label class="modal-field">
-                              Font Size
-                              <select id="settings-font-size">
-                                  <option value="small">Small (14px)</option>
-                                  <option value="medium" selected>Medium (16px)</option>
-                                  <option value="large">Large (18px)</option>
-                              </select>
-                          </label>
-                          <label class="modal-field">
-                              Dashboard Widgets
-                              <div class="modal-row">
-                                  <label class="chk"><input type="checkbox" id="settings-widget-cpu" checked> CPU Usage</label>
-                                  <label class="chk"><input type="checkbox" id="settings-widget-gpu" checked> GPU Usage</label>
-                                  <label class="chk"><input type="checkbox" id="settings-widget-memory" checked> Memory</label>
-                              </div>
-                          </label>
+                          <p class="settings-help">
+                              Device-specific appearance preferences live in <strong>User → Preferences</strong>. Theme, font scale, spacing, and chat style remain local on purpose so different machines can keep different presentation defaults.
+                          </p>
                       </div>
                   </div>
                   <div class="settings-pane" id="settings-chat">
@@ -2557,22 +2501,9 @@
                         <button type="button" class="btn btn-secondary" id="settings-open-config-btn">Open Runtime Configuration</button>
                     </div>
                     <div class="settings-card">
-                        <label class="modal-field">
-                            Server Binary Path
-                            <input type="text" id="settings-server-binary-path" value="/usr/local/bin/llama-server">
-                        </label>
-                        <label class="modal-field">
-                            Log Level
-                            <select id="settings-log-level">
-                                <option value="info">Info</option>
-                                <option value="warning">Warning</option>
-                                <option value="error">Error</option>
-                            </select>
-                        </label>
-                        <label class="modal-field">
-                            Data Directory
-                            <input type="text" id="settings-data-directory" value="~/.config/llama-monitor">
-                        </label>
+                        <p class="settings-help">
+                            This modal only retains shared workspace settings. Process launch paths, remote-agent SSH details, and environment-specific overrides live in Runtime Configuration instead of duplicating dead controls here.
+                        </p>
                     </div>
                 </div>
 

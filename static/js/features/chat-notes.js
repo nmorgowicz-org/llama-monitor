@@ -5,6 +5,7 @@ import { activeChatTab, persistChatTabs } from './chat-state.js';
 import { settingsState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast } from './toast.js';
+import { saveSettings } from './settings.js';
 
 // ── Analysis state ────────────────────────────────────────────────────────────
 let analysisState = {
@@ -14,11 +15,10 @@ let analysisState = {
 };
 
 const SIDEBAR_STORAGE_KEY = 'llama_monitor_sidebar_width';
-const SIDEBAR_EXPANDED_KEY = 'llama_monitor_sidebar_expanded';
-const SIDEBAR_INTRO_HIDDEN_KEY = 'llama_monitor_context_notes_intro_hidden';
 const DEFAULT_WIDTH = 280;
 const MIN_WIDTH = 240;
 const MAX_WIDTH = 600;
+let sharedSidebarPrefsHydrated = false;
 
 const PREDEFINED_SECTIONS = [
     { id: 'character', name: 'Character', icon: '👤', placeholder: 'e.g. "Kira, 28, cynical detective with a dry wit. Secretly writes poetry."' },
@@ -29,7 +29,8 @@ const PREDEFINED_SECTIONS = [
 
 let sidebarResizing = false;
 let sidebarState = {
-    expanded: localStorage.getItem(SIDEBAR_EXPANDED_KEY) === 'true',
+    expanded: settingsState.context_notes_sidebar_expanded === true
+        || localStorage.getItem('llama_monitor_sidebar_expanded') === 'true',
     activeSection: null,
     editingNoteIndex: null,
     composerSection: null,
@@ -58,15 +59,32 @@ function setSvgIcon(button, paths) {
     button.replaceChildren(svg);
 }
 
+function isSidebarExpandedPref() {
+    if (sharedSidebarPrefsHydrated) {
+        return settingsState.context_notes_sidebar_expanded === true;
+    }
+    return settingsState.context_notes_sidebar_expanded === true
+        || localStorage.getItem('llama_monitor_sidebar_expanded') === 'true';
+}
+
+function isSidebarIntroHiddenPref() {
+    if (sharedSidebarPrefsHydrated) {
+        return settingsState.context_notes_intro_hidden === true;
+    }
+    return settingsState.context_notes_intro_hidden === true
+        || localStorage.getItem('llama_monitor_context_notes_intro_hidden') === 'true';
+}
+
 // ── Sidebar Toggle ────────────────────────────────────────────────────────────
 
 export function toggleContextSidebar() {
     if (settingsState.enabled_context_notes === false) return;
 
     sidebarState.expanded = !sidebarState.expanded;
-    localStorage.setItem(SIDEBAR_EXPANDED_KEY, String(sidebarState.expanded));
+    settingsState.context_notes_sidebar_expanded = sidebarState.expanded;
     sidebarState._transitioning = true;
     updateSidebarUI();
+    saveSettings();
     setTimeout(() => { sidebarState._transitioning = false; }, 350);
 }
 
@@ -102,7 +120,7 @@ function updateSidebarUI() {
     if (!sidebar || !contextBar || !toggleBtn) return;
 
     const notesCount = tab ? (tab.context_notes || []).filter(note => note.content?.trim()).length : 0;
-    const introHidden = localStorage.getItem(SIDEBAR_INTRO_HIDDEN_KEY) === 'true';
+    const introHidden = isSidebarIntroHiddenPref();
 
     if (countBadge) {
         if (notesCount > 0) {
@@ -690,8 +708,10 @@ function setupSidebarCloseHandler() {
         collapseBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             sidebarState.expanded = false;
-            localStorage.setItem(SIDEBAR_EXPANDED_KEY, 'false');
+            settingsState.context_notes_sidebar_expanded = false;
+            sidebarState.expanded = false;
             updateSidebarUI();
+            saveSettings();
         });
     }
 }
@@ -702,9 +722,9 @@ function setupSidebarIntroToggle() {
 
     introToggle.addEventListener('click', (e) => {
         e.stopPropagation();
-        const introHidden = localStorage.getItem(SIDEBAR_INTRO_HIDDEN_KEY) === 'true';
-        localStorage.setItem(SIDEBAR_INTRO_HIDDEN_KEY, introHidden ? 'false' : 'true');
+        settingsState.context_notes_intro_hidden = !settingsState.context_notes_intro_hidden;
         updateSidebarUI();
+        saveSettings();
     });
 }
 
@@ -1007,6 +1027,12 @@ export function initContextSidebar() {
     // Listen for tab switches — defer to avoid racing with in-flight toggle transitions
     window.addEventListener('activeTabChanged', () => {
         if (sidebarState._transitioning) return;
+        updateSidebarUI();
+    });
+
+    window.addEventListener('settings-applied', () => {
+        sharedSidebarPrefsHydrated = true;
+        sidebarState.expanded = isSidebarExpandedPref();
         updateSidebarUI();
     });
 }

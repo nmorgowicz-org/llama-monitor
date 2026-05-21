@@ -2,7 +2,7 @@
 // Rendering functions for chat tabs, messages, compaction markers, and actions.
 // Calls rendering functions via window.* to avoid circular imports.
 
-import { chat, lastLlamaMetrics } from '../core/app-state.js';
+import { chat, lastLlamaMetrics, settingsState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import {
     activeChatTab,
@@ -34,12 +34,10 @@ function getTransport() {
 
 // ── Date formatting ───────────────────────────────────────────────────────────
 
-const DATE_FORMAT_KEY = 'llama-monitor-date-format';
-
 export function formatMessageDateTime(ts) {
     if (!ts) return '';
     const d = new Date(ts);
-    const fmt = localStorage.getItem(DATE_FORMAT_KEY) || 'MM/DD/YY';
+    const fmt = settingsState.chat_date_format || localStorage.getItem('llama-monitor-date-format') || 'MM/DD/YY';
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
     const yy = String(d.getFullYear()).slice(-2);

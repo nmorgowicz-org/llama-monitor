@@ -106,7 +106,11 @@ export function setLastGpuData(v) { lastGpuData = v; }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
-/** Settings state container — mutable properties, imported as a live reference */
+/**
+ * Settings state container — mutable properties, imported as a live reference.
+ * Shared workflow preferences live here because they round-trip through
+ * `/api/settings`; device-local presentation choices stay in User Preferences.
+ */
 export const settingsState = {
     /** Whether settings modal has unsaved changes */
     isDirty: false,
@@ -124,6 +128,16 @@ export const settingsState = {
     context_depth: 10,
     /** Number of suggestions to generate */
     suggestion_count: 5,
+    /** Shared chat date format */
+    chat_date_format: 'MM/DD/YY',
+    /** Shared enter-to-send preference */
+    enter_to_send: true,
+    /** Shared context notes sidebar expanded state */
+    context_notes_sidebar_expanded: false,
+    /** Shared context notes intro visibility */
+    context_notes_intro_hidden: false,
+    /** Shared custom suggestion categories */
+    custom_suggestion_categories: {},
 };
 
 // ── Chat ──────────────────────────────────────────────────────────────────────

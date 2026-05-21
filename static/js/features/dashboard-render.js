@@ -1,4 +1,5 @@
 import { escapeHtml, formatMetricNumber, formatDuration, formatClockReadout } from '../core/format.js';
+import { gradeActionCopy } from './telemetry-grade.js';
 import {
     chat,
     metricSeries,
@@ -617,6 +618,29 @@ function setEmptyState(el, show) {
     el.classList.toggle('visible', !!show);
 }
 
+function hardwareEmptyStateCopy(kind, grade) {
+    const action = gradeActionCopy(grade);
+    if (grade === 'remote_agent_connecting') {
+        return `${kind} telemetry is coming online. ${action}`;
+    }
+    if (grade === 'remote_inference_only') {
+        return `${kind} telemetry requires the remote agent. ${action}`;
+    }
+    if (grade === 'remote_agent_firewall_blocked') {
+        return `${kind} telemetry is blocked even though the agent started. ${action}`;
+    }
+    if (grade === 'remote_partial_sensors') {
+        return `${kind} telemetry is only partially available. ${action}`;
+    }
+    if (grade === 'remote_agent_degraded' || grade === 'remote_agent_update_available') {
+        return `${kind} telemetry is limited by agent compatibility. ${action}`;
+    }
+    if (grade === 'remote_error') {
+        return `${kind} telemetry is unavailable because the remote agent failed. ${action}`;
+    }
+    return `${kind} metrics appear after attach`;
+}
+
 function getMetricTone(kind) {
     switch (kind) {
     case 'load':
@@ -1029,6 +1053,8 @@ function renderGpuCard(gpuMap, visible, grade) {
     var entries = Object.entries(gpuMap);
     if (entries.length === 0) {
         setCardState(card, 'unavailable');
+        if (emptyEl) emptyEl.textContent = hardwareEmptyStateCopy('GPU', grade);
+        setChipState(stateChip, grade === 'remote_agent_connecting' ? 'connecting' : 'unavailable', 'warning');
         setEmptyState(emptyEl, true);
         return;
     }
@@ -1141,6 +1167,8 @@ function renderSystemCard(sys, visible, grade) {
 
     if (!sys) {
         setCardState(card, 'unavailable');
+        if (emptyEl) emptyEl.textContent = hardwareEmptyStateCopy('System', grade);
+        setChipState(stateChip, grade === 'remote_agent_connecting' ? 'connecting' : 'unavailable', 'warning');
         setEmptyState(emptyEl, true);
         return;
     }

@@ -4,7 +4,8 @@
 
 import { chat } from '../core/app-state.js';
 import { switchChatTab, closeChatTab, addChatTab, renameChatTab,
-          togglePinTab, activeChatTab, archiveChatTab, hideChatTab, restoreChatTab, setChatTabVisibility } from './chat-state.js';
+          togglePinTab, activeChatTab, archiveChatTab, hideChatTab, restoreChatTab, setChatTabVisibility,
+          duplicateChatTab } from './chat-state.js';
 
 const CSP_COLLAPSED_KEY = 'csp-collapsed';
 
@@ -660,29 +661,8 @@ function _handleContextAction(tab, action) {
             window.exportChatTab?.('md');
             break;
         case 'duplicate': {
-            const copy = {
-                ...tab,
-                id: crypto.randomUUID(),
-                name: tab.name + ' (copy)',
-                messages: [...(tab.messages || [])],
-                created_at: Date.now(),
-                updated_at: Date.now(),
-            };
-            chat.tabs.push(copy);
-            switchChatTab(copy.id);
+            duplicateChatTab(tab.id);
             renderChatSessionsSidebar();
-            // Trigger persistence via chat-state
-            const t = activeChatTab();
-            if (t) {
-                t._dirty = true;
-                clearTimeout(t._persistTimer);
-                t._persistTimer = setTimeout(() => {
-                    if (!t._dirty) return;
-                    t._dirty = false;
-                    // For now use existing scheduleChatPersist via import
-                    import('./chat-state.js').then(m => m.scheduleChatPersist?.(t));
-                }, 500);
-            }
             break;
         }
         case 'delete':

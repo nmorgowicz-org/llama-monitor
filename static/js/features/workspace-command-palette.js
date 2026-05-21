@@ -11,6 +11,7 @@ import {
     hideChatTab,
     restoreChatTab,
     closeChatTab,
+    duplicateChatTab,
 } from './chat-state.js';
 
 const DEBOUNCE_MS = 150;
@@ -150,7 +151,7 @@ function filterTabsByTitle(query) {
             title: tab.name,
             visibility: tab.visibility,
             pinned: tab.pinned,
-            messageCount: tab.messages?.length || 0,
+            messageCount: getTabMessageCount(tab),
             persona: tab.active_template_id || tab.ai_name || '',
         }));
 }
@@ -191,18 +192,28 @@ function buildResults(query, titleResults, ftsResults) {
     const seenTabs = new Set(titleResults.map(r => r.tabId));
     for (const r of ftsResults) {
         if (!seenTabs.has(r.tabId)) {
+            const tab = getTabById(r.tabId);
             results.push({
                 type: 'conversation',
                 tabId: r.tabId,
                 title: r.tabName,
-                visibility: 'active',
-                pinned: false,
-                messageCount: 0,
-                persona: '',
+                visibility: tab?.visibility || 'active',
+                pinned: !!tab?.pinned,
+                messageCount: getTabMessageCount(tab),
+                persona: tab?.active_template_id || tab?.ai_name || '',
                 _fromFTS: true,
             });
+            seenTabs.add(r.tabId);
         }
         results.push(r);
+    }
+
+    const actionTabs = Array.from(seenTabs)
+        .map(getTabById)
+        .filter(Boolean)
+        .slice(0, 5);
+    for (const tab of actionTabs) {
+        results.push(...buildTabActionResults(tab));
     }
 
     return results;
@@ -230,6 +241,8 @@ function renderResults(results) {
 
     for (const r of results) {
         if (r.type === 'action') {
+            _results.appendChild(createActionItem(r));
+        } else if (r.type === 'tab-action') {
             _results.appendChild(createActionItem(r));
         } else if (r.type === 'conversation') {
             _results.appendChild(createConversationItem(r));
@@ -261,7 +274,7 @@ function createActionItem(action) {
 
     const typeBadge = document.createElement('span');
     typeBadge.className = 'command-palette-item-type';
-    typeBadge.textContent = 'action';
+    typeBadge.textContent = action.type === 'tab-action' ? 'command' : 'action';
 
     const icon = document.createElement('span');
     icon.className = 'command-palette-item-icon';
@@ -275,9 +288,14 @@ function createActionItem(action) {
     el.appendChild(icon);
     el.appendChild(title);
 
-    el.addEventListener('click', () => {
-        activateItem(action);
-    });
+    if (action.meta) {
+        const meta = document.createElement('span');
+        meta.className = 'command-palette-item-meta';
+        meta.textContent = action.meta;
+        el.appendChild(meta);
+    }
+
+    el.addEventListener('click', () => activateItem(action));
 
     return el;
 }
@@ -373,10 +391,42 @@ function activateItem(item) {
 
     if (item.type === 'action') {
         handleAction(item.action);
+    } else if (item.type === 'tab-action') {
+        handleTabAction(item);
     } else if (item.type === 'conversation') {
         switchToConversation(item);
     } else if (item.type === 'message') {
         openMessage(item);
+    }
+}
+
+function handleTabAction(item) {
+    const tab = getTabById(item.tabId);
+    if (!tab) return;
+    switch (item.action) {
+        case 'pin':
+            togglePinTab(tab.id);
+            break;
+        case 'archive':
+            archiveChatTab(tab.id);
+            break;
+        case 'restore':
+            restoreChatTab(tab.id);
+            break;
+        case 'hide':
+            hideChatTab(tab.id);
+            break;
+        case 'duplicate':
+            duplicateChatTab(tab.id);
+            break;
+        case 'rename': {
+            const newName = prompt('Rename conversation:', tab.name);
+            if (newName && newName.trim()) renameChatTab(tab.id, newName.trim());
+            break;
+        }
+        case 'delete':
+            closeChatTab(tab.id);
+            break;
     }
 }
 
@@ -437,4 +487,34 @@ function escapeHtml(s) {
     const div = document.createElement('div');
     div.textContent = s;
     return div.innerHTML;
+}
+
+function getTabById(tabId) {
+    return chat.tabs.find(tab => tab.id === tabId) || null;
+}
+
+function getTabMessageCount(tab) {
+    if (!tab) return 0;
+    if (tab._loaded) return (tab.messages || []).length;
+    return tab.message_count || (tab.messages || []).length || 0;
+}
+
+function buildTabActionResults(tab) {
+    const visibilityLabel = tab.visibility === 'active' ? tab.name : `${tab.name} · ${tab.visibility}`;
+    const actions = [
+        { action: 'pin', label: tab.pinned ? 'Unpin conversation' : 'Pin conversation', icon: tab.pinned ? '📌' : '⊙' },
+        { action: tab.visibility === 'active' ? 'archive' : 'restore', label: tab.visibility === 'archived' ? 'Unarchive conversation' : 'Archive conversation', icon: '🗂' },
+        { action: tab.visibility === 'hidden' ? 'restore' : 'hide', label: tab.visibility === 'hidden' ? 'Unhide conversation' : 'Hide conversation', icon: '🙈' },
+        { action: 'duplicate', label: 'Duplicate conversation', icon: '⧉' },
+        { action: 'rename', label: 'Rename conversation', icon: '✎' },
+        { action: 'delete', label: 'Delete conversation', icon: '✕' },
+    ];
+    return actions.map(item => ({
+        type: 'tab-action',
+        tabId: tab.id,
+        action: item.action,
+        label: item.label,
+        icon: item.icon,
+        meta: visibilityLabel,
+    }));
 }

@@ -367,6 +367,24 @@ export function togglePinTab(id) {
     persistTabOrder();
 }
 
+export async function duplicateChatTab(id) {
+    const tab = chat.tabs.find(t => t.id === id);
+    if (!tab) return null;
+    const copy = normalizeChatTab({
+        ...tab,
+        id: crypto.randomUUID(),
+        name: `${tab.name} (copy)`,
+        messages: [...(tab.messages || [])],
+        created_at: Date.now(),
+        updated_at: Date.now(),
+    });
+    chat.tabs.push(copy);
+    await switchChatTab(copy.id);
+    chatViewBindings.renderChatSessionsSidebar?.();
+    scheduleChatPersist(copy);
+    return copy;
+}
+
 // ── Visibility Actions ────────────────────────────────────────────────────────
 
 function _selectFallbackTab(leavingId) {
@@ -532,6 +550,7 @@ export function normalizeTabForSave(tab) {
 export function scheduleChatPersist(tab) {
     const t = tab || activeChatTab();
     if (!t) return;
+    window.dispatchEvent(new CustomEvent('replyPlanChanged'));
     if (!chat._persistTab) {
         chat._persistTab = debounce(async (tabToSave) => {
             const normalized = normalizeTabForSave(tabToSave);

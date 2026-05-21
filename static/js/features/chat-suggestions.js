@@ -7,6 +7,7 @@ import { escapeHtml } from '../core/format.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { toggleExplicitMode } from './chat-templates.js';
 import { sendChatWithContent } from './chat-transport.js';
+import { saveSettings } from './settings.js';
 
 const CATEGORY_META = {
     general: { label: 'General', description: 'Versatile next-step prompts that fit almost any conversation.' },
@@ -543,6 +544,7 @@ function renderSuggestionDraftPreview(container) {
         input.focus();
         input.setSelectionRange(input.value.length, input.value.length);
         autoResizeChatInput();
+        window.dispatchEvent(new CustomEvent('replyPlanChanged'));
         suggestionsState.expanded = false;
         resetSuggestionWorkspace();
     });
@@ -1143,7 +1145,8 @@ function toggleCategoryExplicit(key) {
 function saveCustomCategories() {
     try {
         const data = Object.fromEntries(suggestionsState.customCategories);
-        localStorage.setItem('suggestions_custom_categories', JSON.stringify(data));
+        settingsState.custom_suggestion_categories = data;
+        saveSettings();
     } catch (e) {
         console.error('Failed to save custom categories:', e);
     }
@@ -1151,7 +1154,10 @@ function saveCustomCategories() {
 
 function loadCustomCategories() {
     try {
-        const data = JSON.parse(localStorage.getItem('suggestions_custom_categories') || '{}');
+        const shared = settingsState.custom_suggestion_categories || {};
+        const data = Object.keys(shared).length > 0
+            ? shared
+            : JSON.parse(localStorage.getItem('suggestions_custom_categories') || '{}');
         suggestionsState.customCategories = new Map(Object.entries(data));
     } catch (e) {
         console.error('Failed to load custom categories:', e);
@@ -1436,4 +1442,10 @@ export function initSuggestionsDropdown() {
     updateDropdownUI();
     // Render custom category buttons (only on init and when categories change)
     renderCustomCategoryButtons();
+    window.addEventListener('settings-applied', () => {
+        loadCustomCategories();
+        renderCustomCategories();
+        renderCustomCategoryButtons();
+        updateDropdownUI();
+    });
 }
