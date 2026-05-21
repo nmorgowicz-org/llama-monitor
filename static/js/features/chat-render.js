@@ -576,13 +576,17 @@ export function renderTrashDropdown() {
 
 // ── Message rendering ─────────────────────────────────────────────────────────
 
-export function renderChatMessages(options = {}) {
+export function renderChatMessages(optionsOrSkip = false) {
     ensureChatElements();
     const container = chatMessagesEl;
     const tab = activeChatTab();
-    const {
-        forceScrollToBottom = true,
-    } = options;
+    const options = typeof optionsOrSkip === 'object' && optionsOrSkip !== null
+        ? optionsOrSkip
+        : { skipAutoScroll: !!optionsOrSkip };
+    const skipAutoScroll = !!options.skipAutoScroll;
+    const forceScrollToBottom = options.forceScrollToBottom !== undefined
+        ? !!options.forceScrollToBottom
+        : !skipAutoScroll;
 
     if (!tab) {
         container.innerHTML = `
@@ -670,9 +674,7 @@ export function renderChatMessages(options = {}) {
         container.appendChild(el);
         idx++;
     }
-    if (forceScrollToBottom) {
-        setTimeout(() => chatScroll(true), 50);
-    }
+    if (!skipAutoScroll) setTimeout(() => chatScroll(true), 50);
     getChatViewBindings().syncCompactSettingsUI?.(activeChatTab());
 }
 
@@ -680,16 +682,17 @@ function loadMoreMessages(tab, currentLimit) {
     const allMessages = tab.messages.filter(m => m.role !== 'system' || m.compaction_marker);
     tab.visible_message_limit = Math.min(currentLimit * 2, allMessages.length);
 
-    // Preserve the visible viewport by compensating for the new content inserted above.
     const scrollEl = chatMessagesEl;
-    const scrollTop = scrollEl ? scrollEl.scrollTop : 0;
-    const scrollHeight = scrollEl ? scrollEl.scrollHeight : 0;
+    const prevScrollHeight = scrollEl ? scrollEl.scrollHeight : 0;
+    const prevScrollTop = scrollEl ? scrollEl.scrollTop : 0;
 
-    renderChatMessages({ forceScrollToBottom: false });
+    renderChatMessages(true);
 
+    // Compensate for content added above: shift scrollTop by the height delta
+    // so the viewport stays anchored to the same message the user was reading.
     if (scrollEl) {
-        const addedHeight = scrollEl.scrollHeight - scrollHeight;
-        scrollEl.scrollTop = scrollTop + Math.max(addedHeight, 0);
+        const delta = scrollEl.scrollHeight - prevScrollHeight;
+        scrollEl.scrollTop = prevScrollTop + delta;
     }
 }
 

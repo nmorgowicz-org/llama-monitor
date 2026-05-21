@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.19.1...v0.20.0) (2026-05-20)
+
+
+### Features
+
+* **metrics:** add tokens_per_decode and per-request draft acceptance to dashboard and telemetry ([6303ea3](https://github.com/nmorgowicz-org/llama-monitor/commit/6303ea3a47ef4c1c1dc4c14044cdd2c0dccb2279))
+
+
+### Bug Fixes
+
+* **chat:** preserve scroll position when loading older messages ([6303ea3](https://github.com/nmorgowicz-org/llama-monitor/commit/6303ea3a47ef4c1c1dc4c14044cdd2c0dccb2279))
+* **metrics:** fix speculative.types field name in metrics parsing ([6303ea3](https://github.com/nmorgowicz-org/llama-monitor/commit/6303ea3a47ef4c1c1dc4c14044cdd2c0dccb2279))
+* **notes:** fix AI review panel scroll and spelling ([6303ea3](https://github.com/nmorgowicz-org/llama-monitor/commit/6303ea3a47ef4c1c1dc4c14044cdd2c0dccb2279))
+
 ## [0.19.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.19.0...v0.19.1) (2026-05-20)
 
 

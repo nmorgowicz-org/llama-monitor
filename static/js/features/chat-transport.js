@@ -677,6 +677,8 @@ export async function _doSendChat(tab, options = {}) {
                         if (tab._lastDebugData) {
                             tab._lastDebugData.promptMs = obj.timings.prompt_ms ?? null;
                             tab._lastDebugData.genMs = obj.timings.predicted_ms ?? null;
+                            tab._lastDebugData.draftN = obj.timings.draft_n ?? null;
+                            tab._lastDebugData.draftNAccepted = obj.timings.draft_n_accepted ?? null;
                         }
                         continue;
                     }

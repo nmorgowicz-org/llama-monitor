@@ -131,6 +131,7 @@ export function refreshTopCockpit() {
 
     const stateEl = document.getElementById('nav-cockpit-state');
     const throughputEl = document.getElementById('nav-cockpit-throughput');
+    const specEl = document.getElementById('nav-cockpit-spec');
     const contextEl = document.getElementById('nav-cockpit-context');
     const gpuEl = document.getElementById('nav-cockpit-gpu');
     const sparkEl = document.getElementById('nav-cockpit-spark');
@@ -164,6 +165,16 @@ export function refreshTopCockpit() {
 
     if (throughputEl) {
         throughputEl.textContent = 'P ' + (promptDisplayRate > 0 ? promptDisplayRate.toFixed(0) : '—') + ' · G ' + (genDisplayRate > 0 ? genDisplayRate.toFixed(0) : '—');
+    }
+
+    if (specEl) {
+        const tpd = l?.tokens_per_decode ?? 0;
+        if (tpd > 1.05) {
+            specEl.textContent = tpd.toFixed(2) + '× S';
+            specEl.classList.remove('hidden');
+        } else {
+            specEl.classList.add('hidden');
+        }
     }
 
     const capacity = hasActiveEndpoint ? (l?.context_capacity_tokens || l?.kv_cache_max || 0) : 0;
