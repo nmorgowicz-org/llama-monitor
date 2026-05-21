@@ -507,13 +507,15 @@ If a change is minor (e.g., small UX tweak, internal refactor, non-user-facing f
 
 `tests/ui/core/performance.spec.js` tracks the number of JS files loaded on cold page load. The ceiling is stored in `tests/ui/core/js-module-baseline.json`.
 
-When you add a new module that gets imported (directly or transitively) from `static/js/bootstrap.js`, the test will fail with a message telling you to run:
+**Mandatory:** Whenever you add a new `.js` file under `static/js/` that gets imported (directly or transitively) from `static/js/bootstrap.js`, you MUST update the baseline. The test will fail with a message telling you to run:
 
 ```
 cd tests/ui && npm run update-baseline
 ```
 
 The script does a headless cold load against the running test server, counts the actual JS files, and writes the new ceiling to `js-module-baseline.json`. You must commit both the new module AND the updated baseline file together.
+
+**Do not skip this step.** The baseline count must match the actual number of JS modules loaded. If CI fails on the performance test, update the baseline and amend the commit.
 
 ### Relationship to Screenshot Harness
 
@@ -635,12 +637,13 @@ Required checks (every time):
 Hard rules:
 
 - Never rely on CI to catch issues you can avoid.
-- Never push “to see if CI passes.”
-- Never ignore, comment out, or “trust” a failing check.
+- Never push "to see if CI passes."
+- Never ignore, comment out, or "trust" a failing check.
 - Include auto-generated files (e.g., src/gen/*) in every check and commit.
 - If you change code, configs, or static assets, re-run the full checklist before pushing.
 - If you are unsure whether something might affect CI, assume it does and run the checks.
 - If a check fails and you cannot immediately fix it, STOP and ask for clarification instead of pushing.
+- **JS module baseline:** If you added a new `.js` file under `static/js/` imported from `bootstrap.js`, you MUST update `tests/ui/core/js-module-baseline.json` (run `cd tests/ui && npm run update-baseline`). Commit the updated baseline with the new module.
 
 ## CI/CD Workflow
 
