@@ -2398,20 +2398,18 @@ fn api_remote_agent_start(
                                 as Box<dyn warp::reply::Reply>);
                         }
                     };
+                    // Detect OS once using the hydrated connection and reuse for
+                    // both install_path resolution and command generation.
+                    let remote_os = if let Some(ref conn) = ssh_connection {
+                        crate::agent::detect_remote_os_with(conn).await
+                    } else {
+                        crate::agent::detect_remote_os_simple(&ssh_target).await
+                    };
                     let install_path = match request.get("install_path").and_then(|v| v.as_str()) {
                         Some(p) if !p.is_empty() => p.to_string(),
-                        _ => match &ssh_connection {
-                            Some(conn) => {
-                                let os = crate::agent::detect_remote_os_with(conn).await;
-                                crate::agent::default_install_path_for_os(os)
-                            }
-                            None => {
-                                crate::agent::default_install_path_for_target(&ssh_target).await
-                            }
-                        },
+                        _ => crate::agent::default_install_path_for_os(remote_os),
                     };
                     let command = if let Some(ref conn) = ssh_connection {
-                        let remote_os = crate::agent::detect_remote_os_with(conn).await;
                         crate::agent::default_start_command_for_os_with(
                             conn,
                             remote_os,

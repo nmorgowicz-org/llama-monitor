@@ -3063,10 +3063,6 @@ Start-Sleep -Seconds 2\""
         }
     }
 
-    pub async fn default_install_path_for_target(ssh_target: &str) -> String {
-        default_install_path_for_os(detect_remote_os(ssh_target).await)
-    }
-
     pub async fn default_start_command_for_target(ssh_target: &str, install_path: &str) -> String {
         default_start_command_for_os(detect_remote_os(ssh_target).await, install_path)
     }
@@ -3235,9 +3231,9 @@ Start-Sleep -Seconds 2\""
 }
 
 pub use install::{
-    RemoteAgentInstallRequest, default_install_path_for_target, default_start_command_for_target,
-    detect_remote_os_simple, install_remote_agent, remove_remote_agent, self_update_binary,
-    start_remote_agent, status_remote_agent, stop_remote_agent, update_remote_agent,
+    RemoteAgentInstallRequest, default_start_command_for_target, detect_remote_os_simple,
+    install_remote_agent, remove_remote_agent, self_update_binary, start_remote_agent,
+    status_remote_agent, stop_remote_agent, update_remote_agent,
 };
 
 #[cfg(test)]
