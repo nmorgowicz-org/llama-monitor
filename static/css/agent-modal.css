@@ -678,6 +678,7 @@
   font-weight: 700;
   letter-spacing: 0.02em;
   position: relative;
+  overflow: hidden;
   transition: color 300ms ease;
 }
 
