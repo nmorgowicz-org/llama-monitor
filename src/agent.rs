@@ -591,15 +591,28 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
         ca_pems.push(ca.pem);
     }
 
-    // Multi-CA directory
-    let cas_dir = crate::certs::agent_cas_dir();
-    if let Ok(entries) = std::fs::read_dir(&cas_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("pem")
-                && let Ok(pem) = std::fs::read_to_string(&path)
-            {
-                ca_pems.push(pem);
+    // Collect all cas/ directories to search: the config-based certs dir and,
+    // for managed installs, the directory next to the running binary (where the
+    // dashboard drops the CA during remote install).
+    let mut cas_dirs_to_search = vec![crate::certs::agent_cas_dir()];
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(exe_dir) = exe.parent()
+    {
+        let install_cas = exe_dir.join("cas");
+        if install_cas != crate::certs::agent_cas_dir() {
+            cas_dirs_to_search.push(install_cas);
+        }
+    }
+
+    for cas_dir in &cas_dirs_to_search {
+        if let Ok(entries) = std::fs::read_dir(cas_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("pem")
+                    && let Ok(pem) = std::fs::read_to_string(&path)
+                {
+                    ca_pems.push(pem);
+                }
             }
         }
     }
@@ -2692,24 +2705,43 @@ Start-Sleep -Seconds 2\""
         eprintln!("[agent] Checking agent health at {}", agent_url);
         // /health requires no auth; token is read after startup to avoid a race
         // where a freshly-started agent hasn't written its token file yet.
-        let health_reachable = tokio::time::timeout(Duration::from_secs(20), async {
+        //
+        // Build HTTPS/HTTP clients once and reuse them across all 20 attempts.
+        // Use a 1-second per-request timeout so 20 attempts fit within the
+        // 30-second outer timeout even on slow or firewalled networks.
+        let health_https = build_agent_https_client(Duration::from_secs(1));
+        let health_http = build_plain_http_client(Duration::from_secs(1));
+        let health_reachable = tokio::time::timeout(Duration::from_secs(30), async {
             for i in 1..=20 {
                 eprintln!("[agent] Health check attempt {}/20...", i);
-                if agent_health_reachable_with_token(&agent_url, None).await {
+                let reached = 'check: {
+                    for candidate in agent_url_candidates(&agent_url) {
+                        let client =
+                            agent_client_for_url(&candidate, health_https.as_ref(), &health_http);
+                        if let Ok(resp) = client.get(format!("{}/health", candidate)).send().await
+                            && resp.status().is_success()
+                        {
+                            break 'check true;
+                        }
+                    }
+                    false
+                };
+                if reached {
                     eprintln!("[agent] Agent health check passed");
-                    break;
+                    return true;
                 }
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
+            false
         })
         .await;
 
-        let running = health_reachable.is_ok();
+        let running = matches!(health_reachable, Ok(true));
 
         let error = if !running {
             let health_error = match health_reachable {
-                Err(tokio::time::error::Elapsed { .. }) => Some("Agent did not start within 20 seconds. Check if the agent is listening on 0.0.0.0:7779 and if the remote firewall allows inbound connections on port 7779.".to_string()),
-                Ok(()) => None,
+                Err(tokio::time::error::Elapsed { .. }) => Some("Agent did not start within 30 seconds. Check if the agent is listening on 0.0.0.0:7779 and if the remote firewall allows inbound connections on port 7779.".to_string()),
+                Ok(_) => None,
             };
             if health_error.is_some() {
                 health_error
