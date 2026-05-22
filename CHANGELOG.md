@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.21.0...v0.21.1) (2026-05-22)
+
+
+### Bug Fixes
+
+* **agent:** fix HTTPS client builder error preventing remote agent connections after reqwest 0.13 upgrade ([7203abf](https://github.com/nmorgowicz-org/llama-monitor/commit/7203abf6b0f8960e1729d99fa6dfb64a5d56d3cc))
+
 ## [0.21.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.20.0...v0.21.0) (2026-05-22)
 
 
