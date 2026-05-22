@@ -1,31 +1,3 @@
 {
-  "extends": ["config:recommended"],
-  "schedule": ["at any time"],
-  "labels": ["dependencies"],
-  "stabilityDays": 3,
-  "dependencyDashboard": false,
-  "separateMajorMinor": true,
-  "automerge": false,
-  "prConcurrentLimit": 5,
-  "prHourlyLimit": 2,
-  "ignoreDeps": ["renovate/renovate"],
-  "packageRules": [
-    {
-      "description": "Automerge GH Actions minor/patch",
-      "matchManagers": ["github-actions"],
-      "automerge": true,
-      "matchUpdateTypes": ["minor", "patch"]
-    },
-    {
-      "description": "Automerge npm patches only",
-      "matchManagers": ["npm"],
-      "automerge": true,
-      "matchUpdateTypes": ["patch"]
-    },
-    {
-      "description": "No automerge for Rust/Cargo",
-      "matchManagers": ["cargo"],
-      "automerge": false
-    }
-  ]
+  "extends": ["github>nmorgowicz-org/docker-compose-config//renovate"]
 }
