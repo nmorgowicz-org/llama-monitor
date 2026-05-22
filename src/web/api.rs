@@ -2380,10 +2380,9 @@ fn api_remote_agent_start(
                                 as Box<dyn warp::reply::Reply>);
                         }
                     };
-                    let install_path = match request.get("install_path") {
-                        Some(v) => v.as_str().unwrap_or("").to_string(),
-                        None => crate::agent::default_install_path_for_target(&ssh_target).await,
-                    };
+                    // Hydrate the SSH connection before resolving install_path so that
+                    // the OS detection fallback uses an authenticated connection rather
+                    // than a bare target string (which fails auth → Unknown OS → wrong path).
                     let ssh_connection = match hydrate_ssh_connection(
                         request
                             .get("ssh_connection")
@@ -2398,6 +2397,18 @@ fn api_remote_agent_start(
                             ))
                                 as Box<dyn warp::reply::Reply>);
                         }
+                    };
+                    let install_path = match request.get("install_path").and_then(|v| v.as_str()) {
+                        Some(p) if !p.is_empty() => p.to_string(),
+                        _ => match &ssh_connection {
+                            Some(conn) => {
+                                let os = crate::agent::detect_remote_os_with(conn).await;
+                                crate::agent::default_install_path_for_os(os)
+                            }
+                            None => {
+                                crate::agent::default_install_path_for_target(&ssh_target).await
+                            }
+                        },
                     };
                     let command = if let Some(ref conn) = ssh_connection {
                         let remote_os = crate::agent::detect_remote_os_with(conn).await;
