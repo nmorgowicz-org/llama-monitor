@@ -34,7 +34,9 @@ CREATE TABLE IF NOT EXISTS tabs (
     total_output_tokens    INTEGER NOT NULL DEFAULT 0,
     created_at             INTEGER NOT NULL,
     updated_at             INTEGER NOT NULL,
-    composer_draft         TEXT    NOT NULL DEFAULT ''
+    composer_draft         TEXT    NOT NULL DEFAULT '',
+    ai_gender              TEXT,
+    template_version_or_hash TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -155,6 +157,10 @@ pub struct ChatTabRow {
     pub visibility: String,
     #[serde(default)]
     pub composer_draft: String,
+    #[serde(default)]
+    pub ai_gender: Option<String>,
+    #[serde(default)]
+    pub template_version_or_hash: Option<String>,
     #[serde(default)]
     pub messages: Vec<MessageRow>,
 }
@@ -395,7 +401,7 @@ impl ChatStorage {
                     model_params, context_notes, sidebar_width,
                     tab_order, pinned, last_ctx_pct,
                     total_input_tokens, total_output_tokens,
-                    created_at, updated_at, visibility, composer_draft
+                    created_at, updated_at, visibility, composer_draft, ai_gender, template_version_or_hash
              FROM tabs WHERE id = ?1",
         )?;
         let mut tab = stmt.query_row(params![id], |row| {
@@ -423,6 +429,8 @@ impl ChatStorage {
                 updated_at: row.get(20)?,
                 visibility: row.get(21)?,
                 composer_draft: row.get(22)?,
+                ai_gender: row.get(23)?,
+                template_version_or_hash: row.get(24)?,
                 messages: vec![],
             })
         })?;
@@ -441,8 +449,8 @@ impl ChatStorage {
                  model_params, context_notes, sidebar_width,
                  tab_order, pinned, last_ctx_pct,
                  total_input_tokens, total_output_tokens,
-                 created_at, updated_at, visibility, composer_draft)
-              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)",
+                 created_at, updated_at, visibility, composer_draft, ai_gender, template_version_or_hash)
+              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25)",
             params![
                 tab.id,
                 tab.name,
@@ -467,6 +475,8 @@ impl ChatStorage {
                 tab.updated_at,
                 tab.visibility,
                 tab.composer_draft,
+                tab.ai_gender.as_deref(),
+                tab.template_version_or_hash.as_deref(),
             ],
         )?;
         Ok(())
@@ -483,7 +493,7 @@ impl ChatStorage {
                 model_params=?12, context_notes=?13, sidebar_width=?14,
                 pinned=?15, last_ctx_pct=?16,
                 total_input_tokens=?17, total_output_tokens=?18,
-                updated_at=?19, visibility=?20, composer_draft=?21
+                updated_at=?19, visibility=?20, composer_draft=?21, ai_gender=?22, template_version_or_hash=?23
              WHERE id=?1",
             params![
                 tab.id,
@@ -507,6 +517,8 @@ impl ChatStorage {
                 tab.updated_at,
                 tab.visibility,
                 tab.composer_draft,
+                tab.ai_gender.as_deref(),
+                tab.template_version_or_hash.as_deref(),
             ],
         )?;
         Ok(())
@@ -557,7 +569,7 @@ impl ChatStorage {
                     model_params, context_notes, sidebar_width,
                     tab_order, pinned, last_ctx_pct,
                     total_input_tokens, total_output_tokens,
-                    created_at, updated_at, visibility, composer_draft
+                    created_at, updated_at, visibility, composer_draft, ai_gender, template_version_or_hash
              FROM tabs WHERE id = ?1",
             params![id],
             |row| {
@@ -587,6 +599,8 @@ impl ChatStorage {
                     updated_at: row.get(20)?,
                     visibility: row.get(21)?,
                     composer_draft: row.get(22)?,
+                    ai_gender: row.get(23)?,
+                    template_version_or_hash: row.get(24)?,
                     messages: vec![],
                 })
             },
@@ -1174,6 +1188,25 @@ fn run_schema_migrations(conn: &Connection) -> Result<()> {
             [],
         )?;
     }
+    let has_ai_gender: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('tabs') WHERE name = 'ai_gender'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_ai_gender {
+        conn.execute("ALTER TABLE tabs ADD COLUMN ai_gender TEXT", [])?;
+    }
+    let has_template_hash: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('tabs') WHERE name = 'template_version_or_hash'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_template_hash {
+        conn.execute(
+            "ALTER TABLE tabs ADD COLUMN template_version_or_hash TEXT",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -1249,6 +1282,8 @@ mod tests {
             updated_at: 1,
             visibility: "active".to_string(),
             composer_draft: String::new(),
+            ai_gender: None,
+            template_version_or_hash: None,
             messages: Vec::new(),
         }
     }

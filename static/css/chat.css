@@ -2019,7 +2019,7 @@
 }
 .chat-telemetry-throughput {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr auto;
   gap: 6px;
   min-width: 0;
   flex: 0 1 320px;
@@ -2073,7 +2073,6 @@
   box-shadow: 0 0 12px rgba(94, 234, 212, 0.22);
 }
 .chat-telemetry-spec-metric {
-  grid-column: 1 / -1;
   grid-template-columns: auto auto;
 }
 .chat-telemetry-context {

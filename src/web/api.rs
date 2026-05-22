@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use sha2::{Digest, Sha256};
 use warp::Filter;
 use warp::http::StatusCode;
 use warp::reject::Reject;
@@ -4437,6 +4438,19 @@ fn api_list_tabs(
         )
 }
 
+/// Compute a short, stable hash of the template/system prompt content
+/// for tracking which version of a persona was used for a tab.
+fn compute_template_hash(prompt: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(prompt.as_bytes());
+    let result = hasher.finalize();
+    result
+        .iter()
+        .take(6)
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>()
+}
+
 // POST /api/chat/tabs — create new tab
 fn api_create_tab(
     storage: Arc<ChatStorage>,
@@ -4461,6 +4475,12 @@ fn api_create_tab(
                     }
                     tab.created_at = now_ts();
                     tab.updated_at = tab.created_at;
+                    // If created from a template, store a short hash of the prompt
+                    // to track which persona version was used.
+                    if tab.active_template_id.is_some() && tab.template_version_or_hash.is_none() {
+                        tab.template_version_or_hash =
+                            Some(compute_template_hash(&tab.system_prompt));
+                    }
                     match store.create_tab(&tab) {
                         Ok(_) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::json(&tab),
@@ -4529,6 +4549,11 @@ fn api_put_tab(
                     }
                     tab.id = id;
                     tab.updated_at = now_ts();
+                    // If tab uses a template but has no hash yet, set it.
+                    if tab.active_template_id.is_some() && tab.template_version_or_hash.is_none() {
+                        tab.template_version_or_hash =
+                            Some(compute_template_hash(&tab.system_prompt));
+                    }
                     let messages = std::mem::take(&mut tab.messages);
                     let msg_rows: Vec<crate::chat_storage::MessageRow> = messages
                         .into_iter()
