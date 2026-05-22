@@ -328,6 +328,11 @@ struct GithubAsset {
 }
 
 pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
+    // Install the ring CryptoProvider before any rustls usage. The dashboard
+    // mode gets this for free via reqwest/hyper-rustls, but the agent runs
+    // without those and would otherwise panic at ServerConfig::builder().
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let bind_addr = format!("{}:{}", app_config.agent_host, app_config.agent_port)
         .parse::<SocketAddr>()
         .context("invalid agent bind address")?;
@@ -584,10 +589,15 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     let mut ca_pems: Vec<String> = Vec::new();
 
     // Legacy single CA (for backward compatibility)
-    if let Some(ca) = crate::certs::Cert::load(
-        &crate::certs::certs_dir().join("ca.pem"),
-        &crate::certs::certs_dir().join("ca.key"),
-    ) {
+    let legacy_ca_path = crate::certs::certs_dir().join("ca.pem");
+    eprintln!(
+        "[agent] Searching for CA: legacy path {}",
+        legacy_ca_path.display()
+    );
+    if let Some(ca) =
+        crate::certs::Cert::load(&legacy_ca_path, &crate::certs::certs_dir().join("ca.key"))
+    {
+        eprintln!("[agent] Loaded legacy CA from {}", legacy_ca_path.display());
         ca_pems.push(ca.pem);
     }
 
@@ -605,15 +615,22 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     }
 
     for cas_dir in &cas_dirs_to_search {
+        eprintln!("[agent] Searching for CAs in {}", cas_dir.display());
         if let Ok(entries) = std::fs::read_dir(cas_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("pem")
                     && let Ok(pem) = std::fs::read_to_string(&path)
                 {
+                    eprintln!("[agent] Loaded CA from {}", path.display());
                     ca_pems.push(pem);
                 }
             }
+        } else {
+            eprintln!(
+                "[agent] CA directory not found or unreadable: {}",
+                cas_dir.display()
+            );
         }
     }
 
@@ -627,15 +644,23 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
         ca_pems.len()
     );
 
-    let agent_server_cert = load_install_dir_agent_server_cert().unwrap_or_else(|| {
+    let agent_server_cert = if let Some(cert) = load_install_dir_agent_server_cert() {
+        eprintln!("[agent] Using pre-provisioned server cert from install dir");
+        cert
+    } else {
+        eprintln!("[agent] No pre-provisioned server cert found; generating self-signed cert");
         crate::certs::ensure_agent_server_cert(vec![
             "localhost".to_string(),
             "127.0.0.1".to_string(),
         ])
-    });
+    };
 
+    eprintln!("[agent] Building mTLS server config...");
     let tls_config = match crate::certs::build_agent_tls_config(ca_pems, agent_server_cert) {
-        Ok(cfg) => cfg,
+        Ok(cfg) => {
+            eprintln!("[agent] mTLS server config built successfully");
+            cfg
+        }
         Err(e) => {
             eprintln!("[agent] Failed to build mTLS config: {e}; agent cannot start without mTLS");
             return Err(anyhow::anyhow!("agent mTLS config build failed: {e}"));
@@ -1995,8 +2020,12 @@ pub mod install {
         // SCP does not expand Windows environment variables.
         let resolved_install_dir = if os == RemoteOs::Windows {
             if let Some(appdata) = resolve_windows_appdata(connection).await {
+                eprintln!("[agent] Resolved %APPDATA% → {appdata} for CA SCP path");
                 install_dir.replace("%APPDATA%", &appdata)
             } else {
+                eprintln!(
+                    "[agent] Could not resolve %APPDATA%; SCP may fail if path contains env vars"
+                );
                 install_dir.to_string()
             }
         } else {
