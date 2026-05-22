@@ -5835,7 +5835,7 @@ fn api_get_recent_sessions(
                 // Filter to Attach-mode only
                 sessions.retain(|s| matches!(s.mode, crate::state::SessionMode::Attach { .. }));
                 // Sort by last_connected_at descending
-                sessions.sort_by(|a, b| b.last_connected_at.cmp(&a.last_connected_at));
+                sessions.sort_by_key(|s| std::cmp::Reverse(s.last_connected_at));
                 // Limit to 10
                 sessions.truncate(10);
                 let active_id = state.active_session_id.lock().unwrap().clone();
