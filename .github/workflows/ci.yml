@@ -62,7 +62,7 @@ jobs:
           needs.paths-filter.outputs.code == 'true'
         )
       )
-    runs-on: ${{ startsWith(github.event.pull_request.head.ref, 'release-please--') && 'arc-general' || 'arc-llama-monitor' }}
+    runs-on: ${{ startsWith(github.event.pull_request.head.ref, 'release-please--') && 'arc-general' || 'arc-llama-monitor-fast' }}
     steps:
       - name: Release PR shortcut
         if: startsWith(github.event.pull_request.head.ref, 'release-please--')
