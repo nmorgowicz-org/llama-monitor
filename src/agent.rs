@@ -1990,9 +1990,23 @@ pub mod install {
             return;
         };
         let install_dir = &install_path[..dir_end];
-        let cas_dir = format!("{}{}cas", install_dir, sep);
 
-        // Ensure cas/ directory exists on the remote
+        // Resolve %APPDATA% to a real path before using it as an SCP destination —
+        // SCP does not expand Windows environment variables.
+        let resolved_install_dir = if os == RemoteOs::Windows {
+            if let Some(appdata) = resolve_windows_appdata(connection).await {
+                install_dir.replace("%APPDATA%", &appdata)
+            } else {
+                install_dir.to_string()
+            }
+        } else {
+            install_dir.to_string()
+        };
+
+        let cas_dir = format!("{}{}cas", install_dir, sep);
+        let resolved_cas_dir = format!("{}{}cas", resolved_install_dir, sep);
+
+        // Ensure cas/ directory exists on the remote (cmd.exe expands %APPDATA% itself).
         let mkdir_cmd = if os == RemoteOs::Windows {
             format!(
                 "cmd.exe /C if not exist \"{}\" mkdir \"{}\"",
@@ -2018,7 +2032,7 @@ pub mod install {
         };
 
         let ca = crate::certs::ensure_ca();
-        let remote_ca_path = format!("{}{}{}.pem", cas_dir, sep, instance_id);
+        let remote_ca_path = format!("{}{}{}.pem", resolved_cas_dir, sep, instance_id);
 
         // Write CA cert to temp file and copy to remote
         let local_tmp = tempfile::NamedTempFile::new_in(std::env::temp_dir())
@@ -2026,14 +2040,18 @@ pub mod install {
             .unwrap_or_else(|_| std::env::temp_dir().join("ca.pem"));
 
         if std::fs::write(&local_tmp, &ca.pem).is_ok() {
-            let _ = remote_ssh::copy_to_remote(
+            let result = remote_ssh::copy_to_remote(
                 connection.clone(),
                 local_tmp.to_string_lossy().to_string(),
                 remote_ca_path.clone(),
                 0o644,
             )
             .await;
-            eprintln!("[info] Installed CA as {} on remote agent", remote_ca_path);
+            if result.is_ok() {
+                eprintln!("[info] Installed CA as {} on remote agent", remote_ca_path);
+            } else {
+                eprintln!("[warn] Failed to install CA on remote agent: {:?}", result);
+            }
         }
         let _ = std::fs::remove_file(&local_tmp);
     }
@@ -2061,8 +2079,20 @@ pub mod install {
             return;
         };
         let install_dir = &install_path[..dir_end];
-        let remote_cert_path = format!("{}{}agent-server.pem", install_dir, sep);
-        let remote_key_path = format!("{}{}agent-server.key", install_dir, sep);
+
+        // Resolve %APPDATA% before using as SCP destination.
+        let resolved_install_dir = if os == RemoteOs::Windows {
+            if let Some(appdata) = resolve_windows_appdata(connection).await {
+                install_dir.replace("%APPDATA%", &appdata)
+            } else {
+                install_dir.to_string()
+            }
+        } else {
+            install_dir.to_string()
+        };
+
+        let remote_cert_path = format!("{}{}agent-server.pem", resolved_install_dir, sep);
+        let remote_key_path = format!("{}{}agent-server.key", resolved_install_dir, sep);
 
         let cert = crate::certs::generate_agent_server_cert(managed_agent_server_sans(connection));
         let local_cert_tmp = tempfile::NamedTempFile::new_in(std::env::temp_dir())
@@ -2109,15 +2139,27 @@ pub mod install {
             return;
         };
         let install_dir = &install_path[..dir_end];
-        let config_path = if os == RemoteOs::Windows {
-            format!("{}{}remote-agent-config.json", install_dir, sep)
-        } else {
-            format!("{}/remote-agent-config.json", install_dir)
-        };
 
         let token = match api_token {
             Some(t) if !t.is_empty() => t.to_string(),
             _ => return,
+        };
+
+        // Resolve %APPDATA% before using as SCP destination.
+        let resolved_install_dir = if os == RemoteOs::Windows {
+            if let Some(appdata) = resolve_windows_appdata(connection).await {
+                install_dir.replace("%APPDATA%", &appdata)
+            } else {
+                install_dir.to_string()
+            }
+        } else {
+            install_dir.to_string()
+        };
+
+        let config_path = if os == RemoteOs::Windows {
+            format!("{}{}remote-agent-config.json", resolved_install_dir, sep)
+        } else {
+            format!("{}/remote-agent-config.json", resolved_install_dir)
         };
 
         let config_json = serde_json::json!({
