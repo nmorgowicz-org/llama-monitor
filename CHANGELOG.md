@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.20.0...v0.21.0) (2026-05-22)
+
+
+### Features
+
+* **chat:** add next reply plan summary showing active steering inputs ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **chat:** add workspace command palette (Ctrl+K omnibox) with conversation search and quick actions ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **chat:** persist composer drafts per-tab with save/restore/clear lifecycle ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **chat:** track persona version per tab with template_version_or_hash for safe drift detection ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **chat:** use backend message_count for inactive tabs in sidebar and command palette ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **sessions:** add recent-endpoints dashboard to setup screen with one-click reconnect ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **sessions:** extend Session model with connect metadata and GET /api/sessions/recent endpoint ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **ui:** add actionable empty-state copy for GPU and system cards with connecting state ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **ui:** add unified telemetry grade with 9-state derivation and grade chip on agent badge ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **ui:** expose protocol_too_old and protocol_version on WebSocket payload ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+
+
+### Bug Fixes
+
+* **chat:** context notes badge now shows correct per-tab count instead of leaking between tabs ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **chat:** persist ai_gender in DB so gender pill survives reload ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **remote-agent:** restore managed agent upgrade and start flows after HTTPS mTLS hardening ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **settings:** centralize guided-generation settings in backend-backed settingsState ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **settings:** promote shared workflow prefs (enter_to_send, date_format, continuity) to shared storage ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **settings:** remove dead runtime controls from persistent settings panes ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **ui:** correct remote_agent_health_reachable always-equal-to-connected bug ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+* **ui:** correct telemetry metric grid layout to avoid forced full-width span ([72950e3](https://github.com/nmorgowicz-org/llama-monitor/commit/72950e3b25b3023854753b51b10390a9e86b6a78))
+
 ## [0.20.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.19.1...v0.20.0) (2026-05-20)
 
 
