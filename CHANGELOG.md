@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.2](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.21.1...v0.21.2) (2026-05-22)
+
+
+### Bug Fixes
+
+* **agent:** agent cannot start after mTLS hardening — CA installed next to binary not found in certs_dir ([e7d9f7c](https://github.com/nmorgowicz-org/llama-monitor/commit/e7d9f7c42033a73c18deb10b04af39b9bb9cf1db))
+* **agent:** health check loop terminates at 10/20 attempts due to per-request timeout and client rebuild overhead ([e7d9f7c](https://github.com/nmorgowicz-org/llama-monitor/commit/e7d9f7c42033a73c18deb10b04af39b9bb9cf1db))
+* **agent:** LATEST version shows "Unavailable" when setup modal reopened within 30 seconds ([e7d9f7c](https://github.com/nmorgowicz-org/llama-monitor/commit/e7d9f7c42033a73c18deb10b04af39b9bb9cf1db))
+* **agent:** wrong binary path (/tmp/llama-monitor) on Windows — OS detection ran before SSH connection was hydrated ([e7d9f7c](https://github.com/nmorgowicz-org/llama-monitor/commit/e7d9f7c42033a73c18deb10b04af39b9bb9cf1db))
+* **ui:** shimmer animation artifact renders as rectangle left of model name in MODEL & DECODING card ([e7d9f7c](https://github.com/nmorgowicz-org/llama-monitor/commit/e7d9f7c42033a73c18deb10b04af39b9bb9cf1db))
+
 ## [0.21.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.21.0...v0.21.1) (2026-05-22)
 
 
