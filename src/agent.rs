@@ -1557,10 +1557,13 @@ fn build_agent_https_client(timeout: Duration) -> Option<reqwest::Client> {
     // still be reached by IP/hostnames that do not exactly match the certificate
     // SAN set. Keep CA validation and client-auth in place, but relax hostname
     // matching so IP-based remote agent URLs continue to work.
+    //
+    // With reqwest 0.13 + rustls, danger_accept_invalid_hostnames requires
+    // tls_certs_only to be set first; tls_certs_only also replaces the
+    // deprecated add_root_certificate API.
     let mut builder = reqwest::Client::builder()
         .timeout(timeout)
-        .pool_max_idle_per_host(0)
-        .danger_accept_invalid_hostnames(true);
+        .pool_max_idle_per_host(0);
 
     let ca_loaded = if let Some(ca) = crate::certs::Cert::load(
         &crate::certs::certs_dir().join("ca.pem"),
@@ -1568,7 +1571,9 @@ fn build_agent_https_client(timeout: Duration) -> Option<reqwest::Client> {
     ) {
         match reqwest::Certificate::from_pem(ca.pem.as_bytes()) {
             Ok(cert) => {
-                builder = builder.add_root_certificate(cert);
+                builder = builder
+                    .tls_certs_only(std::iter::once(cert))
+                    .danger_accept_invalid_hostnames(true);
                 true
             }
             Err(e) => {
