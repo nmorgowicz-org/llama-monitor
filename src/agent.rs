@@ -2020,7 +2020,7 @@ pub mod install {
         // SCP does not expand Windows environment variables.
         let resolved_install_dir = if os == RemoteOs::Windows {
             if let Some(appdata) = resolve_windows_appdata(connection).await {
-                eprintln!("[agent] Resolved %APPDATA% → {appdata} for CA SCP path");
+               eprintln!("[agent] Resolved %APPDATA% → {appdata} for CA SCP path");
                 install_dir.replace("%APPDATA%", &appdata)
             } else {
                 eprintln!(
