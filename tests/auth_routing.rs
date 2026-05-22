@@ -736,3 +736,25 @@ async fn safe_json_body_invalid_returns_400_not_404() {
         "invalid JSON must return 400 (not 404)"
     );
 }
+
+// ===================== SESSIONS RECENT ENDPOINT =====================
+
+#[tokio::test]
+async fn sessions_recent_requires_api_token() {
+    // This test validates that the sessions/recent endpoint is registered
+    // and requires api-token auth. Since auth_routing tests the auth filters
+    // directly rather than the full server, we validate the token-check pattern.
+    let cfg = cfg_api_only();
+    assert!(
+        check_api_token(&bearer(TEST_API_TOKEN), &cfg),
+        "valid api-token must be accepted for sessions/recent"
+    );
+    assert!(
+        !check_api_token(&None, &cfg),
+        "no token must be rejected for sessions/recent"
+    );
+    assert!(
+        !check_api_token(&bearer("wrong-token"), &cfg),
+        "wrong token must be rejected for sessions/recent"
+    );
+}

@@ -225,7 +225,10 @@ export async function doDetach() {
         saveLastSessionData({
             promptRate: monitorState.speedMax.prompt > 0 ? monitorState.speedMax.prompt + ' t/s' : '—',
             genRate: monitorState.speedMax.generation > 0 ? monitorState.speedMax.generation + ' t/s' : '—',
-            sessionName: sessionState.activeSessionId || '—'
+            sessionName: sessionState.activeSessionId || '—',
+            endpoint: document.getElementById('server-endpoint')?.value?.trim() || '',
+            telemetryGrade: window.__telemetryGrade || '',
+            telemetryLabel: document.getElementById('telemetry-grade-chip')?.textContent?.trim() || '',
         });
 
         const btnAttach = document.getElementById('btn-attach');

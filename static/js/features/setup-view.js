@@ -2,6 +2,7 @@
 // View transitions, animations, quick stats, and view state initialization.
 
 import { setupViewState, chat } from '../core/app-state.js';
+import { doAttachFromSetup } from './attach-detach.js';
 
 // ── View Switching ────────────────────────────────────────────────────────────
 
@@ -106,6 +107,126 @@ function animateSetupCardsEnter() {
     cards.forEach((card, i) => {
         setTimeout(() => card.classList.add('active'), 80 * i);
     });
+}
+
+// ── Recent Sessions ───────────────────────────────────────────────────────────
+
+export async function loadRecentSessions() {
+    try {
+        const headers = window.authHeaders || (() => ({ 'Authorization': 'Bearer ' + (localStorage.getItem('llama-monitor-api-token') || '') }));
+        const resp = await fetch('/api/sessions/recent', { headers: headers() });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        renderRecentEndpoints(data.sessions, data.active_session_id);
+    } catch (e) {
+        // Silent fail — first-run users won't have this endpoint
+    }
+}
+
+export function renderRecentEndpoints(sessions, activeId) {
+    const list = document.getElementById('setup-endpoint-list');
+    const container = document.getElementById('setup-recent-endpoints');
+    const attachBtn = document.getElementById('setup-attach-btn');
+    const lastSession = setupViewState.lastSessionData || loadLastSessionData();
+    if (!list || !container) return;
+
+    if (!sessions || sessions.length === 0) {
+        container.style.display = 'none';
+        if (attachBtn) attachBtn.innerHTML = '<span class="btn-icon">⚡</span> Attach';
+        return;
+    }
+
+    container.style.display = '';
+    if (attachBtn) attachBtn.innerHTML = '<span class="btn-icon">⚡</span> Reconnect Manually';
+    list.innerHTML = '';
+
+    sessions.forEach(session => {
+        const card = document.createElement('div');
+        card.className = 'setup-endpoint-card';
+        if (activeId && session.id === activeId) {
+            card.classList.add('is-active-session');
+        }
+
+        let endpoint = '';
+        if (session.mode && session.mode.Attach) {
+            endpoint = session.mode.Attach.endpoint;
+        } else if (session.mode && session.mode.Spawn) {
+            endpoint = 'http://127.0.0.1:' + session.mode.Spawn.port;
+        }
+
+        const statusClass = session.status === 'Running' ? 'status-running' :
+                            session.status === 'Error' ? 'status-error' : 'status-disconnected';
+
+        const lastConnected = session.last_connected_at ? formatRelativeTime(session.last_connected_at * 1000) : 'Never';
+        const connectCount = session.connect_count || 0;
+
+        const statusDot = document.createElement('div');
+        statusDot.className = 'setup-endpoint-status ' + statusClass;
+
+        const infoWrap = document.createElement('div');
+        infoWrap.className = 'setup-endpoint-info';
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'setup-endpoint-name';
+        nameEl.textContent = session.name || endpoint || 'Unnamed';
+
+        const endpointEl = document.createElement('div');
+        endpointEl.className = 'setup-endpoint-url';
+        endpointEl.textContent = endpoint;
+        endpointEl.title = endpoint;
+
+        const metaEl = document.createElement('div');
+        metaEl.className = 'setup-endpoint-meta';
+        const metaParts = [];
+        if (activeId && session.id === activeId) metaParts.push('Active workspace');
+        else if (session.status === 'Running') metaParts.push('Last seen running');
+        else if (session.status === 'Disconnected') metaParts.push('Ready to reconnect');
+        else if (session.status === 'Error') metaParts.push(session.last_error || 'Needs attention');
+        if (lastSession?.endpoint && endpoint && lastSession.endpoint === endpoint && lastSession.telemetryLabel) {
+            metaParts.push(lastSession.telemetryLabel);
+        }
+        if (lastConnected !== 'Never') metaParts.push(lastConnected);
+        if (connectCount > 0) metaParts.push(connectCount + 'x');
+        let meta = metaParts.join(' · ');
+        if (!meta) meta = 'Saved endpoint';
+        metaEl.textContent = meta;
+
+        infoWrap.appendChild(nameEl);
+        infoWrap.appendChild(endpointEl);
+        infoWrap.appendChild(metaEl);
+
+        const connectBtn = document.createElement('button');
+        connectBtn.className = 'setup-endpoint-connect';
+        connectBtn.textContent = activeId && session.id === activeId
+            ? 'Resume'
+            : (session.last_connected_at ? 'Reconnect' : 'Connect');
+
+        card.appendChild(statusDot);
+        card.appendChild(infoWrap);
+        card.appendChild(connectBtn);
+
+        const doConnect = () => {
+            const urlInput = document.getElementById('setup-endpoint-url');
+            if (urlInput) urlInput.value = endpoint;
+            doAttachFromSetup();
+        };
+        connectBtn.addEventListener('click', (e) => { e.stopPropagation(); doConnect(); });
+        card.addEventListener('click', doConnect);
+
+        list.appendChild(card);
+    });
+}
+
+function formatRelativeTime(ts) {
+    const diff = Date.now() - ts;
+    const seconds = Math.floor(diff / 1000);
+    if (seconds < 60) return 'Just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return minutes + 'm ago';
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return hours + 'h ago';
+    const days = Math.floor(hours / 24);
+    return days + 'd ago';
 }
 
 // ── Session Data ──────────────────────────────────────────────────────────────
@@ -252,6 +373,7 @@ export function initViewState() {
         setTimeout(() => setupView.classList.remove('entering'), 600);
     }
     if (monitorView) monitorView.style.display = 'none';
+    loadRecentSessions();
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

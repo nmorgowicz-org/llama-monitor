@@ -103,7 +103,7 @@ impl SshConnection {
     }
 
     pub fn agent_url(&self, agent_port: u16) -> String {
-        format!("http://{}:{agent_port}", self.host.trim())
+        format!("https://{}:{agent_port}", self.host.trim())
     }
 
     fn username_or_default(&self) -> Result<String> {
@@ -416,7 +416,7 @@ mod tests {
         assert_eq!(connection.host, "example-host");
         assert_eq!(connection.port, 2222);
         assert_eq!(connection.target_label(), "ssh://user@example-host:2222");
-        assert_eq!(connection.agent_url(7779), "http://example-host:7779");
+        assert_eq!(connection.agent_url(7779), "https://example-host:7779");
     }
 
     #[test]

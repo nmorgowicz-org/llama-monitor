@@ -133,17 +133,7 @@ pub fn ensure_agent_client_cert() -> Cert {
 }
 
 /// Generates a server certificate for the agent, signed by the CA.
-pub fn ensure_agent_server_cert(sans: Vec<String>) -> Cert {
-    let dir = certs_dir();
-    let cert_path = dir.join("agent-server.pem");
-    let key_path = dir.join("agent-server.key");
-
-    if let Some(cert) = Cert::load(&cert_path, &key_path)
-        && !cert.needs_renewal()
-    {
-        return cert;
-    }
-
+pub fn generate_agent_server_cert(sans: Vec<String>) -> Cert {
     let ca = ensure_ca();
     let ca_key = rcgen::KeyPair::from_pem(&ca.key).expect("invalid CA key PEM");
 
@@ -159,10 +149,25 @@ pub fn ensure_agent_server_cert(sans: Vec<String>) -> Cert {
         .signed_by(&server_key, &issuer)
         .expect("failed to sign agent server cert");
 
-    let c = Cert {
+    Cert {
         pem: cert.pem(),
         key: server_key.serialize_pem(),
-    };
+    }
+}
+
+/// Generates a server certificate for the agent, signed by the CA.
+pub fn ensure_agent_server_cert(sans: Vec<String>) -> Cert {
+    let dir = certs_dir();
+    let cert_path = dir.join("agent-server.pem");
+    let key_path = dir.join("agent-server.key");
+
+    if let Some(cert) = Cert::load(&cert_path, &key_path)
+        && !cert.needs_renewal()
+    {
+        return cert;
+    }
+
+    let c = generate_agent_server_cert(sans);
 
     let _ = c.save(&cert_path, &key_path);
     c

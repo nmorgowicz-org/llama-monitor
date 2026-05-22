@@ -30,21 +30,38 @@ function cleanup() {
 
 const extraArgs = (process.env.LLAMA_MONITOR_TEST_ARGS || '').split(/\s+/).filter(Boolean);
 
-const cargoArgs = [
-    'run',
-    '--',
-    '--headless',
-    '--port', '7778',
-    '--config-dir', testConfigDir,
-    ...extraArgs,
-];
+// LLAMA_MONITOR_USE_RELEASE=1 skips `cargo run` and uses the pre-built release binary.
+// Useful for local test runs to avoid long build times.
+const useRelease = process.env.LLAMA_MONITOR_USE_RELEASE === '1';
 
-const child = spawn('cargo', cargoArgs, {
-    cwd: repoRoot,
-    stdio: 'inherit',
-    // On Windows, spawn needs shell:false but cargo must be on PATH — which it is
-    // after a standard rustup install. No shell:true needed.
-});
+let child;
+if (useRelease) {
+    const binaryPath = join(repoRoot, 'target', 'release', process.platform === 'win32' ? 'llama-monitor.exe' : 'llama-monitor');
+    child = spawn(binaryPath, [
+        '--headless',
+        '--port', '7778',
+        '--config-dir', testConfigDir,
+        ...extraArgs,
+    ], {
+        cwd: repoRoot,
+        stdio: 'inherit',
+    });
+} else {
+    const cargoArgs = [
+        'run',
+        '--',
+        '--headless',
+        '--port', '7778',
+        '--config-dir', testConfigDir,
+        ...extraArgs,
+    ];
+    child = spawn('cargo', cargoArgs, {
+        cwd: repoRoot,
+        stdio: 'inherit',
+        // On Windows, spawn needs shell:false but cargo must be on PATH — which it is
+        // after a standard rustup install. No shell:true needed.
+    });
+}
 
 child.on('error', err => {
     console.error(`[run-server] Failed to start cargo: ${err.message}`);

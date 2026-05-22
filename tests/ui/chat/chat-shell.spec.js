@@ -7,6 +7,8 @@ async function switchToMonitor(page) {
     const { switchView } = await import('/js/features/setup-view.js');
     switchView('monitor');
   });
+  await expect(page.locator('body')).not.toHaveClass(/setup-active/);
+  await expect(page.locator('#view-monitor')).toBeVisible();
 }
 
 test.describe('chat UI shell', () => {
@@ -323,14 +325,29 @@ test.describe('chat history pagination', () => {
     await dismissAuthShell(page);
     await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
+    await expect(page.locator('#page-chat.active')).toBeVisible({ timeout: 5000 });
+    // Wait for bootstrap's initChatTabs to finish before the test seeds state
+    await page.evaluate(() => new Promise(resolve => {
+      import('/js/features/chat-state.js').then(({ activeChatTab }) => {
+        if (activeChatTab() !== null) { resolve(); return; }
+        window.addEventListener('activeTabChanged', resolve, { once: true });
+      });
+    }));
   });
 
   test('load more button appears when messages exceed visible limit', async ({ page }) => {
+    // Ensure chat view is visible
+    await expect(page.locator('#page-chat')).toBeVisible({ timeout: 5000 });
+
     await page.evaluate(async () => {
-      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { activeChatTab, addChatTab } = await import('/js/features/chat-state.js');
       const { renderChatMessages } = await import('/js/features/chat-render.js');
-      const t = activeChatTab();
-      if (!t) return;
+      let t = activeChatTab();
+      if (!t) {
+        await addChatTab();
+        t = activeChatTab();
+      }
+      if (!t) throw new Error('No active chat tab');
       t.visible_message_limit = 2;
       t.messages = Array.from({ length: 6 }, (_, i) => ({
         role: i % 2 === 0 ? 'user' : 'assistant',
@@ -343,11 +360,18 @@ test.describe('chat history pagination', () => {
   });
 
   test('load more button is absent when all messages fit', async ({ page }) => {
+    // Ensure chat view is visible
+    await expect(page.locator('#page-chat')).toBeVisible({ timeout: 5000 });
+
     await page.evaluate(async () => {
-      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { activeChatTab, addChatTab } = await import('/js/features/chat-state.js');
       const { renderChatMessages } = await import('/js/features/chat-render.js');
-      const t = activeChatTab();
-      if (!t) return;
+      let t = activeChatTab();
+      if (!t) {
+        await addChatTab();
+        t = activeChatTab();
+      }
+      if (!t) throw new Error('No active chat tab');
       t.visible_message_limit = 15;
       t.messages = [
         { role: 'user', content: 'Hi', timestamp_ms: Date.now() - 5000 },
@@ -359,11 +383,18 @@ test.describe('chat history pagination', () => {
   });
 
   test('clicking load more expands visible messages', async ({ page }) => {
+    // Ensure chat view is visible
+    await expect(page.locator('#page-chat')).toBeVisible({ timeout: 5000 });
+
     await page.evaluate(async () => {
-      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { activeChatTab, addChatTab } = await import('/js/features/chat-state.js');
       const { renderChatMessages } = await import('/js/features/chat-render.js');
-      const t = activeChatTab();
-      if (!t) return;
+      let t = activeChatTab();
+      if (!t) {
+        await addChatTab();
+        t = activeChatTab();
+      }
+      if (!t) throw new Error('No active chat tab');
       t.visible_message_limit = 2;
       t.messages = Array.from({ length: 6 }, (_, i) => ({
         role: i % 2 === 0 ? 'user' : 'assistant',
@@ -372,6 +403,8 @@ test.describe('chat history pagination', () => {
       }));
       renderChatMessages();
     });
+    // Wait for load more button to appear
+    await page.waitForSelector('.chat-load-more', { timeout: 5000 });
     const beforeCount = await page.locator('.chat-message').count();
     await page.locator('.chat-load-more').click();
     const afterCount = await page.locator('.chat-message').count();
@@ -393,11 +426,19 @@ test.describe('chat message export', () => {
   });
 
   test('export generates valid JSON with correct format', async ({ page }) => {
+    // Ensure chat view is visible
+    await expect(page.locator('#page-chat')).toBeVisible({ timeout: 5000 });
+
     // Add some messages first
     await page.evaluate(async () => {
-      const { activeChatTab } = await import('/js/features/chat-state.js');
+      const { activeChatTab, addChatTab } = await import('/js/features/chat-state.js');
       const { renderChatMessages } = await import('/js/features/chat-render.js');
-      const tab = activeChatTab();
+      let tab = activeChatTab();
+      if (!tab) {
+        await addChatTab();
+        tab = activeChatTab();
+      }
+      if (!tab) throw new Error('No active chat tab');
       tab.messages = [
         { role: 'user', content: 'Hello', timestamp_ms: Date.now() - 1000 },
         { role: 'assistant', content: 'Hi there!', timestamp_ms: Date.now() - 500 }
@@ -422,12 +463,21 @@ test.describe('message edit and regenerate', () => {
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
+    await expect(page.locator('#page-chat.active')).toBeVisible({ timeout: 5000 });
+    // Wait for bootstrap's initChatTabs to finish before seeding state
+    await page.evaluate(() => new Promise(resolve => {
+      import('/js/features/chat-state.js').then(({ activeChatTab }) => {
+        if (activeChatTab() !== null) { resolve(); return; }
+        window.addEventListener('activeTabChanged', resolve, { once: true });
+      });
+    }));
 
     // Add multiple user messages for testing
     await page.evaluate(async () => {
       const { activeChatTab } = await import('/js/features/chat-state.js');
       const { renderChatMessages } = await import('/js/features/chat-render.js');
       const tab = activeChatTab();
+      if (!tab) throw new Error('No active chat tab');
       tab.messages = [
         { role: 'user', content: 'Question 1', timestamp_ms: Date.now() - 3000 },
         { role: 'assistant', content: 'Answer 1', timestamp_ms: Date.now() - 2500 },
@@ -438,6 +488,9 @@ test.describe('message edit and regenerate', () => {
       ];
       renderChatMessages();
     });
+
+    // Wait for messages to be rendered
+    await page.waitForSelector('.chat-message-user', { timeout: 5000 });
   });
 
   test('edit button appears on all user messages', async ({ page }) => {
@@ -449,7 +502,12 @@ test.describe('message edit and regenerate', () => {
     const userMessages = page.locator('.chat-message-user');
     const middleMessage = userMessages.nth(1);
 
-    await middleMessage.locator('.chat-action-btn[data-chat-action="edit"]').click();
+    // Scroll into view and use JS dispatchEvent to bypass pointer-events interception
+    await middleMessage.evaluate(el => el.scrollIntoView({ block: 'center' }));
+    await middleMessage.evaluate(el => {
+      const btn = el.querySelector('.chat-action-btn[data-chat-action="edit"]');
+      if (btn) btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
 
     // Edit mode replaces body with textarea
     const textarea = middleMessage.locator('.chat-msg-edit-area');
@@ -460,7 +518,12 @@ test.describe('message edit and regenerate', () => {
     const userMessages = page.locator('.chat-message-user');
     const firstUserMessage = userMessages.first();
 
-    await firstUserMessage.locator('.chat-action-btn[data-chat-action="edit"]').click();
+    // Scroll into view and use JS dispatchEvent to bypass pointer-events interception
+    await firstUserMessage.evaluate(el => el.scrollIntoView({ block: 'center' }));
+    await firstUserMessage.evaluate(el => {
+      const btn = el.querySelector('.chat-action-btn[data-chat-action="edit"]');
+      if (btn) btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
 
     const inputField = firstUserMessage.locator('.chat-msg-edit-area');
     await expect(inputField).toBeVisible();

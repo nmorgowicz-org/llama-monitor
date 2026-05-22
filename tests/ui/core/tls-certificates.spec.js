@@ -27,17 +27,15 @@ test.describe('TLS / Certificates settings', () => {
     await certsTab.click();
     await expect(page.locator('#settings-security')).toBeVisible();
 
-    // Helper: switch cert mode via DOM
+    // Wait for loadTlsConfig to complete (status text gets populated)
+    await expect(page.locator('#tls-status-text')).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(500);
+
+    // Helper: switch cert mode using the authoritative settings function
     const setCertMode = (mode) =>
-      page.evaluate((m) => {
-        const panes = document.querySelectorAll('.cert-mode-content');
-        const pills = document.querySelectorAll('.cert-mode-pill');
-        panes.forEach((p) => {
-          p.style.display = p.id === 'cert-mode-' + m ? 'block' : 'none';
-        });
-        pills.forEach((p) => {
-          p.classList.toggle('active', p.dataset.mode === m);
-        });
+      page.evaluate(async (m) => {
+        const mod = await import('/js/features/settings.js');
+        mod.setActiveCertMode(m);
       }, mode);
 
     // Select "No HTTPS" mode
@@ -62,19 +60,13 @@ test.describe('TLS / Certificates settings', () => {
     await certsTab.click();
     await expect(page.locator('#settings-security')).toBeVisible();
 
-    // Wait for ACME element to be in DOM before manipulating
-    await page.waitForSelector('#cert-mode-acme', { state: 'attached', timeout: 10000 });
+    // Wait for loadTlsConfig to complete, then switch to ACME mode
+    await expect(page.locator('#tls-status-text')).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(500);
 
-    // Select ACME mode (DOM helper)
-    await page.evaluate((m) => {
-      const panes = document.querySelectorAll('.cert-mode-content');
-      const pills = document.querySelectorAll('.cert-mode-pill');
-      panes.forEach((p) => {
-        p.style.display = p.id === 'cert-mode-' + m ? 'block' : 'none';
-      });
-      pills.forEach((p) => {
-        p.classList.toggle('active', p.dataset.mode === m);
-      });
+    await page.evaluate(async (m) => {
+      const mod = await import('/js/features/settings.js');
+      mod.setActiveCertMode(m);
     }, 'acme');
     await expect(page.locator('#cert-mode-acme')).toBeVisible();
 
@@ -112,21 +104,16 @@ test.describe('TLS / Certificates settings', () => {
     await certsTab.click();
     await expect(page.locator('#settings-security')).toBeVisible();
 
-    // Confirm baseline: TLS status area is present
+    // Wait for loadTlsConfig to complete
     const tlsStatusText = page.locator('#tls-status-text');
-    await expect(tlsStatusText).toBeVisible();
+    await expect(tlsStatusText).toBeVisible({ timeout: 10000 });
+    await page.waitForTimeout(500);
 
-    // Helper to switch cert mode via DOM
+    // Helper to switch cert mode using authoritative settings function
     const setCertMode = (mode) =>
-      page.evaluate((m) => {
-        const panes = document.querySelectorAll('.cert-mode-content');
-        const pills = document.querySelectorAll('.cert-mode-pill');
-        panes.forEach((p) => {
-          p.style.display = p.id === 'cert-mode-' + m ? 'block' : 'none';
-        });
-        pills.forEach((p) => {
-          p.classList.toggle('active', p.dataset.mode === m);
-        });
+      page.evaluate(async (m) => {
+        const mod = await import('/js/features/settings.js');
+        mod.setActiveCertMode(m);
       }, mode);
 
     // Select "No HTTPS" mode and click "Disable TLS"

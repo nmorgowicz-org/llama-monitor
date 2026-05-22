@@ -5,22 +5,26 @@ import { test, expect } from '@playwright/test';
 export async function switchToChat(page) {
   await page.goto('/');
   await page.waitForSelector('html.modules-ready');
-  
-  // Switch to monitor view
+
+  // Switch to monitor view and wait for transition to complete
   await page.evaluate(() => {
     return import('/js/features/setup-view.js').then(({ switchView }) => {
       switchView('monitor');
     });
   });
-  
+  await expect(page.locator('body')).not.toHaveClass(/setup-active/);
+  await expect(page.locator('#view-monitor')).toBeVisible();
+
   await page.getByRole('button', { name: /chat/i }).click();
-  
-  // Initialize chat tabs
-  await page.evaluate(() => {
-    return import('/js/features/chat-state.js').then(({ initChatTabs }) => {
-      return initChatTabs();
+  await expect(page.locator('#page-chat.active')).toBeVisible({ timeout: 5000 });
+
+  // Wait for bootstrap's initChatTabs to finish
+  await page.evaluate(() => new Promise(resolve => {
+    import('/js/features/chat-state.js').then(({ activeChatTab }) => {
+      if (activeChatTab() !== null) { resolve(); return; }
+      window.addEventListener('activeTabChanged', resolve, { once: true });
     });
-  });
+  }));
 }
 
 export async function enableGuidedGenFeatures(page, features = {}) {

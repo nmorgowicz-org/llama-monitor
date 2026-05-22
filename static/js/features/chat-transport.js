@@ -320,6 +320,7 @@ export async function sendChat() {
     const isSuggestionDraft = input.dataset.suggestionDraft === 'true';
     input.value = '';
     delete input.dataset.suggestionDraft;
+    window.dispatchEvent(new CustomEvent('replyPlanChanged'));
     if (typeof autoResizeChatInput === 'function') autoResizeChatInput();
 
     if (isSuggestionDraft) {
@@ -335,6 +336,8 @@ export async function sendChat() {
     };
     tab.messages.push(userMsg);
     tab.updated_at = Date.now();
+    tab.composer_draft = text;
+    scheduleChatPersist();
 
     if (typeof renderChatMessages === 'function') renderChatMessages();
 
@@ -344,7 +347,12 @@ export async function sendChat() {
         if (typeof chatScroll === 'function') chatScroll(true);
     });
 
-    await _doSendChat(tab);
+    const result = await _doSendChat(tab);
+    if (result) {
+        tab.composer_draft = '';
+        scheduleChatPersist();
+        window.dispatchEvent(new CustomEvent('replyPlanChanged'));
+    }
 }
 
 export async function sendQuickGuideReply() {

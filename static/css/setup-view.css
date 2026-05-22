@@ -1466,3 +1466,137 @@ body.setup-active .sidebar-nav {
     padding: var(--gap-sm) var(--gap-md);
   }
 }
+
+/* ── Recent endpoints section ─────────────────────────────────────────────── */
+
+.setup-recent-endpoints {
+    margin-bottom: 16px;
+}
+
+.setup-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.setup-section-header h3 {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg-muted, var(--color-text-muted));
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0;
+}
+
+.setup-section-header a {
+    font-size: 12px;
+    color: var(--fg-muted, var(--color-text-muted));
+    text-decoration: none;
+}
+
+.setup-section-header a:hover {
+    color: var(--fg-primary, var(--color-text-primary));
+}
+
+.setup-endpoint-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.setup-endpoint-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--bg-card, rgba(255, 255, 255, 0.03));
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+    border-radius: 6px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.setup-endpoint-card:hover {
+    border-color: var(--border-focus, rgba(99, 102, 241, 0.3));
+    background: var(--bg-card-hover, rgba(255, 255, 255, 0.06));
+}
+
+.setup-endpoint-card.is-active-session {
+    border-color: rgba(94, 234, 212, 0.28);
+    background: rgba(20, 184, 166, 0.08);
+}
+
+[data-theme="light"] .setup-endpoint-card.is-active-session {
+    border-color: rgba(13, 148, 136, 0.24);
+    background: rgba(20, 184, 166, 0.12);
+}
+
+.setup-endpoint-status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.setup-endpoint-status.status-running {
+    background: var(--color-ok, #4ade80);
+}
+
+.setup-endpoint-status.status-disconnected {
+    background: var(--color-warning, #fbbf24);
+}
+
+.setup-endpoint-status.status-error {
+    background: var(--color-error, #f87171);
+}
+
+.setup-endpoint-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.setup-endpoint-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--fg-primary, var(--color-text-primary));
+    line-height: 1.25;
+    margin-bottom: 2px;
+}
+
+.setup-endpoint-url {
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--fg-secondary, var(--color-text-secondary, var(--color-text-primary)));
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
+.setup-endpoint-meta {
+    font-size: 11px;
+    color: var(--fg-muted, var(--color-text-muted));
+    margin-top: 4px;
+}
+
+.setup-endpoint-connect {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg-primary, var(--color-text-primary));
+    background: var(--bg-button, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+    border-radius: 4px;
+    padding: 4px 10px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s;
+}
+
+.setup-endpoint-connect:hover {
+    background: var(--bg-button-hover, rgba(255, 255, 255, 0.08));
+}
+
+/* Manual attach section */
+.setup-endpoint-manual {
+    border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+    padding-top: 12px;
+}

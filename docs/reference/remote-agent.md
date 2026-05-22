@@ -23,6 +23,7 @@ When attached to a remote endpoint, the header Agent button and Remote Agent pan
 - **Firewall blocked**:
   - Agent process is considered connected (e.g., started via SSH), but the dashboard cannot reach its HTTP endpoint.
   - Triggered when `remote_agent_connected` is true but `remote_agent_health_reachable` is false.
+  - `remote_agent_health_reachable` is independent from `remote_agent_connected`: it is set to true when the `/metrics` HTTP call succeeds, and reset to false on disconnect.
   - Header shows “Firewall blocked” with a **Fix** button.
   - Remote Agent panel shows “Agent Started, HTTP Blocked” with firewall guidance.
 
@@ -72,6 +73,7 @@ This panel exposes the full runtime controls:
 - This allows multiple independent CAs to be trusted across different agents.
 - If no CA is found, the agent refuses to start.
 - Each dashboard instance can place its own CA into cas/ so that agents trust multiple dashboards (e.g., during migration or in multi-instance setups).
+- Managed installs also provision an `agent-server.pem` / `agent-server.key` pair next to the remote binary so the dashboard can verify the agent over HTTPS using the same CA chain.
 
 ## Agent tokens
 
@@ -89,6 +91,8 @@ This panel exposes the full runtime controls:
   - GET /agent/info: same, plus agent_token for verification.
 - The current protocol version is 1.0.0.
 - The dashboard enforces a minimum protocol version when polling the agent.
+- The dashboard reads `protocol_version` from the agent `/info` endpoint on each poll.
+- Below minimum version: the dashboard enters degraded compatibility mode and sets the `protocol_too_old` flag. The telemetry grade reflects the degraded state in the UI.
 
 ## Version mismatch and degraded mode
 
@@ -141,7 +145,7 @@ Remote-agent connection details are persisted as runtime configuration, not ordi
 
 | Setting | Purpose |
 |---------|---------|
-| **Agent URL** | Explicit polling URL for the remote agent; if left blank, the app infers `http://<remote-host>:7779` from the attached endpoint host |
+| **Agent URL** | Explicit polling URL for the remote agent; if left blank, the app infers `https://<remote-host>:7779` from the attached endpoint host |
 | **Agent Token** | Optional bearer token required by the agent |
 | **SSH target** | Saved `user@host` target for manual agent actions or optional autostart |
 | **After attach, try SSH start if the agent is unreachable** | Enables one autostart attempt after attaching to a remote endpoint |

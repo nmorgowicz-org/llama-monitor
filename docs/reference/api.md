@@ -41,10 +41,21 @@ Returns the persisted session list from `sessions.json`.
     "status": "Stopped",
     "preset_id": "",
     "created_at": 1746000000,
-    "last_active": 1746000000
+    "last_active": 1746000000,
+    "last_connected_at": 0,
+    "connect_count": 0,
+    "last_error": null
   }
 ]
 ```
+
+All `Session` fields now use `#[serde(default)]` for backward compatibility. New fields:
+
+| Field | Type | Default |
+|-------|------|---------|
+| `last_connected_at` | integer (unix timestamp) | `0` |
+| `connect_count` | integer | `0` |
+| `last_error` | string or null | `null` |
 
 `mode` is serde's enum shape:
 - spawn session: `{ "Spawn": { "port": 8001 } }`
@@ -111,6 +122,30 @@ If there is no active session:
 
 ```json
 { "error": "No active session" }
+```
+
+### `GET /api/sessions/recent`
+Auth: api-token.
+Returns recent attach-mode sessions sorted by `last_connected_at` descending, limited to 10.
+
+```json
+{
+  "sessions": [
+    {
+      "id": "session_1746000000000",
+      "name": "Remote Box",
+      "mode": { "Attach": { "endpoint": "http://192.168.1.50:8001" } },
+      "status": "Disconnected",
+      "preset_id": "",
+      "created_at": 1746000000,
+      "last_active": 1746001000,
+      "last_connected_at": 1746002000,
+      "connect_count": 5,
+      "last_error": null
+    }
+  ],
+  "active_session_id": "session_1746000000000"
+}
 ```
 
 ### `POST /api/sessions/active`
@@ -431,7 +466,12 @@ Example:
   "default_sidebar_width": 280,
   "suggestion_prompts": {},
   "suggestion_count": 5,
-  "context_depth": 10
+  "context_depth": 10,
+  "chat_date_format": "MM/DD/YY",
+  "enter_to_send": true,
+  "context_notes_sidebar_expanded": false,
+  "context_notes_intro_hidden": false,
+  "custom_suggestion_categories": {}
 }
 ```
 
@@ -469,7 +509,12 @@ Example:
   "default_sidebar_width": 280,
   "suggestion_prompts": {},
   "suggestion_count": 5,
-  "context_depth": 10
+  "context_depth": 10,
+  "chat_date_format": "MM/DD/YY",
+  "enter_to_send": true,
+  "context_notes_sidebar_expanded": false,
+  "context_notes_intro_hidden": false,
+  "custom_suggestion_categories": {}
 }
 ```
 
@@ -486,6 +531,7 @@ Response:
 Notes:
 - The live handler expects the current full `UiSettings` shape.
 - The frontend also uses a narrow partial-update path for `ws_push_interval_ms`; external clients should prefer sending the full object.
+- `custom_suggestion_categories` is a map of category key to `{ "prompt": string, "explicit": bool }`.
 
 ## GPU Environment
 
@@ -717,11 +763,20 @@ Returns tab metadata only, without message bodies.
     "total_input_tokens": 0,
     "total_output_tokens": 0,
     "message_count": 12,
+    "composer_draft": "",
     "created_at": 1746000000000,
     "updated_at": 1746000100000
   }
 ]
 ```
+
+New field:
+
+| Field | Type | Default |
+|-------|------|---------|
+| `composer_draft` | string | `""` |
+
+`composer_draft` holds per-tab composer draft text. It is persisted to the backend on input, restored on tab switch or reload, and cleared on successful send.
 
 ### `POST /api/chat/tabs`
 Auth: api-token.
@@ -754,6 +809,7 @@ Returns the full tab row plus messages.
   "last_ctx_pct": null,
   "total_input_tokens": 0,
   "total_output_tokens": 0,
+  "composer_draft": "",
   "created_at": 1746000000000,
   "updated_at": 1746000100000,
   "messages": [
@@ -1285,6 +1341,17 @@ ws://localhost:7778/ws
 Limits:
 - Maximum 50 concurrent connections.
 - Excess connections are rejected with 429 Too Many Requests.
+
+The WebSocket payload includes the following remote-agent fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `remote_agent_connected` | boolean | Agent process is reachable |
+| `remote_agent_health_reachable` | boolean | `/metrics` HTTP call succeeds; independent from `remote_agent_connected` |
+| `remote_agent_protocol_too_old` | boolean | True when agent protocol version is below minimum enforced version |
+| `remote_agent_protocol_version` | string or null | Agent's reported protocol version string |
+
+`remote_agent_health_reachable` is set to true when the `/metrics` HTTP call succeeds and reset to false on disconnect. It is used to detect the firewall-blocked state (agent connected but health unreachable).
 
 See `docs/reference/realtime-communication.md` and `docs/reference/capabilities.md`.
 

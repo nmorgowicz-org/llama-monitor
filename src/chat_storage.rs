@@ -33,7 +33,10 @@ CREATE TABLE IF NOT EXISTS tabs (
     total_input_tokens     INTEGER NOT NULL DEFAULT 0,
     total_output_tokens    INTEGER NOT NULL DEFAULT 0,
     created_at             INTEGER NOT NULL,
-    updated_at             INTEGER NOT NULL
+    updated_at             INTEGER NOT NULL,
+    composer_draft         TEXT    NOT NULL DEFAULT '',
+    ai_gender              TEXT,
+    template_version_or_hash TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -118,10 +121,13 @@ pub struct TabMeta {
     pub total_input_tokens: i64,
     pub total_output_tokens: i64,
     pub message_count: i64,
+    pub notes_count: i64,
     pub created_at: i64,
     pub updated_at: i64,
     #[serde(default)]
     pub visibility: String,
+    #[serde(default)]
+    pub composer_draft: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -149,6 +155,12 @@ pub struct ChatTabRow {
     pub updated_at: i64,
     #[serde(default = "default_visibility")]
     pub visibility: String,
+    #[serde(default)]
+    pub composer_draft: String,
+    #[serde(default)]
+    pub ai_gender: Option<String>,
+    #[serde(default)]
+    pub template_version_or_hash: Option<String>,
     #[serde(default)]
     pub messages: Vec<MessageRow>,
 }
@@ -345,7 +357,8 @@ impl ChatStorage {
                     t.pinned, t.tab_order, t.last_ctx_pct,
                     t.total_input_tokens, t.total_output_tokens,
                     COUNT(m.id) as message_count,
-                    t.created_at, t.updated_at, t.visibility
+                    COALESCE(json_array_length(t.context_notes), 0) as notes_count,
+                    t.created_at, t.updated_at, t.visibility, t.composer_draft
              FROM tabs t
              LEFT JOIN messages m ON m.tab_id = t.id AND m.compaction_marker = 0
              {}
@@ -367,9 +380,11 @@ impl ChatStorage {
                 total_input_tokens: row.get(7)?,
                 total_output_tokens: row.get(8)?,
                 message_count: row.get(9)?,
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
-                visibility: row.get(12)?,
+                notes_count: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
+                visibility: row.get(13)?,
+                composer_draft: row.get(14)?,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -386,7 +401,7 @@ impl ChatStorage {
                     model_params, context_notes, sidebar_width,
                     tab_order, pinned, last_ctx_pct,
                     total_input_tokens, total_output_tokens,
-                    created_at, updated_at, visibility
+                    created_at, updated_at, visibility, composer_draft, ai_gender, template_version_or_hash
              FROM tabs WHERE id = ?1",
         )?;
         let mut tab = stmt.query_row(params![id], |row| {
@@ -413,6 +428,9 @@ impl ChatStorage {
                 created_at: row.get(19)?,
                 updated_at: row.get(20)?,
                 visibility: row.get(21)?,
+                composer_draft: row.get(22)?,
+                ai_gender: row.get(23)?,
+                template_version_or_hash: row.get(24)?,
                 messages: vec![],
             })
         })?;
@@ -431,8 +449,8 @@ impl ChatStorage {
                  model_params, context_notes, sidebar_width,
                  tab_order, pinned, last_ctx_pct,
                  total_input_tokens, total_output_tokens,
-                 created_at, updated_at, visibility)
-              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)",
+                 created_at, updated_at, visibility, composer_draft, ai_gender, template_version_or_hash)
+              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25)",
             params![
                 tab.id,
                 tab.name,
@@ -456,6 +474,9 @@ impl ChatStorage {
                 tab.created_at,
                 tab.updated_at,
                 tab.visibility,
+                tab.composer_draft,
+                tab.ai_gender.as_deref(),
+                tab.template_version_or_hash.as_deref(),
             ],
         )?;
         Ok(())
@@ -472,7 +493,7 @@ impl ChatStorage {
                 model_params=?12, context_notes=?13, sidebar_width=?14,
                 pinned=?15, last_ctx_pct=?16,
                 total_input_tokens=?17, total_output_tokens=?18,
-                updated_at=?19, visibility=?20
+                updated_at=?19, visibility=?20, composer_draft=?21, ai_gender=?22, template_version_or_hash=?23
              WHERE id=?1",
             params![
                 tab.id,
@@ -495,6 +516,9 @@ impl ChatStorage {
                 tab.total_output_tokens,
                 tab.updated_at,
                 tab.visibility,
+                tab.composer_draft,
+                tab.ai_gender.as_deref(),
+                tab.template_version_or_hash.as_deref(),
             ],
         )?;
         Ok(())
@@ -545,7 +569,7 @@ impl ChatStorage {
                     model_params, context_notes, sidebar_width,
                     tab_order, pinned, last_ctx_pct,
                     total_input_tokens, total_output_tokens,
-                    created_at, updated_at, visibility
+                    created_at, updated_at, visibility, composer_draft, ai_gender, template_version_or_hash
              FROM tabs WHERE id = ?1",
             params![id],
             |row| {
@@ -574,6 +598,9 @@ impl ChatStorage {
                     created_at: row.get(19)?,
                     updated_at: row.get(20)?,
                     visibility: row.get(21)?,
+                    composer_draft: row.get(22)?,
+                    ai_gender: row.get(23)?,
+                    template_version_or_hash: row.get(24)?,
                     messages: vec![],
                 })
             },
@@ -584,6 +611,11 @@ impl ChatStorage {
             params![id],
             |row| row.get(0),
         )?;
+
+        let notes_count = match &tab.context_notes {
+            serde_json::Value::Array(arr) => arr.len() as i64,
+            _ => 0,
+        };
 
         Ok(TabMeta {
             id: tab.id,
@@ -596,9 +628,11 @@ impl ChatStorage {
             total_input_tokens: tab.total_input_tokens,
             total_output_tokens: tab.total_output_tokens,
             message_count,
+            notes_count,
             created_at: tab.created_at,
             updated_at: tab.updated_at,
             visibility: tab.visibility,
+            composer_draft: tab.composer_draft,
         })
     }
 
@@ -1143,6 +1177,36 @@ fn run_schema_migrations(conn: &Connection) -> Result<()> {
             [],
         )?;
     }
+    let has_composer_draft: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('tabs') WHERE name = 'composer_draft'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_composer_draft {
+        conn.execute(
+            "ALTER TABLE tabs ADD COLUMN composer_draft TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+    let has_ai_gender: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('tabs') WHERE name = 'ai_gender'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_ai_gender {
+        conn.execute("ALTER TABLE tabs ADD COLUMN ai_gender TEXT", [])?;
+    }
+    let has_template_hash: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('tabs') WHERE name = 'template_version_or_hash'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_template_hash {
+        conn.execute(
+            "ALTER TABLE tabs ADD COLUMN template_version_or_hash TEXT",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -1217,8 +1281,77 @@ mod tests {
             created_at: 1,
             updated_at: 1,
             visibility: "active".to_string(),
+            composer_draft: String::new(),
+            ai_gender: None,
+            template_version_or_hash: None,
             messages: Vec::new(),
         }
+    }
+
+    #[test]
+    fn schema_migration_adds_composer_draft_for_existing_databases() {
+        let dir = tempdir().expect("temp dir");
+        let db_path = dir.path().join("chat.db");
+
+        let conn = Connection::open(&db_path).expect("open raw db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE tabs (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                system_prompt TEXT NOT NULL DEFAULT '',
+                ai_name TEXT,
+                user_name TEXT,
+                explicit_level INTEGER NOT NULL DEFAULT 0,
+                active_template_id TEXT,
+                auto_compact INTEGER NOT NULL DEFAULT 1,
+                auto_compact_summarize INTEGER NOT NULL DEFAULT 0,
+                compact_mode TEXT NOT NULL DEFAULT 'percent',
+                compact_threshold REAL NOT NULL DEFAULT 0.8,
+                model_params TEXT NOT NULL DEFAULT '{}',
+                context_notes TEXT NOT NULL DEFAULT '[]',
+                sidebar_width INTEGER NOT NULL DEFAULT 280,
+                tab_order INTEGER NOT NULL DEFAULT 0,
+                pinned INTEGER NOT NULL DEFAULT 0,
+                last_ctx_pct REAL,
+                total_input_tokens INTEGER NOT NULL DEFAULT 0,
+                total_output_tokens INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                visibility TEXT NOT NULL DEFAULT 'active'
+            );
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tab_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp_ms INTEGER NOT NULL DEFAULT 0,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                cumulative_input_tokens INTEGER,
+                cumulative_output_tokens INTEGER,
+                compaction_marker INTEGER NOT NULL DEFAULT 0,
+                variants TEXT,
+                variant_index INTEGER,
+                seq INTEGER NOT NULL
+            );
+            "#,
+        )
+        .expect("create legacy schema");
+        drop(conn);
+
+        let store = ChatStorage::open(&db_path).expect("open migrated storage");
+        let columns: i64 = {
+            let guard = store.conn.lock().expect("lock db");
+            let conn = guard.as_ref().expect("db open");
+            conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tabs') WHERE name = 'composer_draft'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query columns")
+        };
+        assert_eq!(columns, 1);
     }
 
     fn make_message(tab_id: &str, role: &str, content: &str) -> MessageRow {

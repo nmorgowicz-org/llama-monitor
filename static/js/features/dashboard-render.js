@@ -1,4 +1,5 @@
 import { escapeHtml, formatMetricNumber, formatDuration, formatClockReadout } from '../core/format.js';
+import { gradeActionCopy } from './telemetry-grade.js';
 import {
     chat,
     metricSeries,
@@ -485,6 +486,15 @@ function renderGenerationDetailItems(el, parts) {
         .join('');
 }
 
+function primarySpeculativeType(specType) {
+    if (!specType) return '';
+    const parts = String(specType)
+        .split(',')
+        .map(part => part.trim())
+        .filter(part => part && part !== 'none');
+    return parts[0] || '';
+}
+
 function renderDecodingConfig(l, hasActiveEndpoint, isGenerating) {
     const slot = getPrimarySlot(l);
     const specChip = document.getElementById('m-speculative-chip');
@@ -498,14 +508,19 @@ function renderDecodingConfig(l, hasActiveEndpoint, isGenerating) {
     if (modelInfoRow) {
         const modelName = l?.model_name || '';
         const modelParams = l?.model_params || null;
+        const tpd = l?.tokens_per_decode ?? 0;
         if (modelName) {
             const parts = [escapeHtml(modelName)];
             if (modelParams) {
                 parts.push(escapeHtml(formatParamCount(modelParams)));
             }
             const stateClass = isGenerating ? 'generating' : 'idle';
-            // eslint-disable-next-line no-unsanitized/property -- stateClass is hardcoded enum; parts array members are all wrapped in escapeHtml()
-            modelInfoRow.innerHTML = '<span class="model-info-text ' + stateClass + '">' + parts.join(' · ') + '</span>';
+            const decodePill = tpd > 1.05
+                ? '<span class="model-info-pill">' + escapeHtml(tpd.toFixed(2) + '× tok/decode') + '</span>'
+                : '';
+            // eslint-disable-next-line no-unsanitized/property -- stateClass is hardcoded enum; dynamic text is wrapped in escapeHtml()
+            modelInfoRow.innerHTML =
+                '<span class="model-info-text ' + stateClass + '">' + parts.join(' · ') + '</span>' + decodePill;
         } else {
             modelInfoRow.innerHTML = '';
         }
@@ -519,14 +534,12 @@ function renderDecodingConfig(l, hasActiveEndpoint, isGenerating) {
     }
 
     if (specChip) {
-        const specType = slot.speculative_type || '';
+        const specType = primarySpeculativeType(slot.speculative_type || '');
         const nMax = (slot.speculative_config || []).find(item => item.label === 'n_max');
-        const tpd = l?.tokens_per_decode ?? 0;
         if (slot.speculative_enabled || (slot.speculative_config || []).length > 0) {
             const parts = ['Speculative'];
             if (specType) parts.push(specType);
             if (nMax) parts.push('n_max ' + nMax.value);
-            if (tpd > 1.05) parts.push(tpd.toFixed(2) + '× tok/decode');
             specChip.textContent = parts.join(' · ');
             specChip.classList.add('enabled');
         } else {
@@ -603,6 +616,29 @@ function updateMetricDelta(el, previous, current, decimals = 1) {
 function setEmptyState(el, show) {
     if (!el) return;
     el.classList.toggle('visible', !!show);
+}
+
+function hardwareEmptyStateCopy(kind, grade) {
+    const action = gradeActionCopy(grade);
+    if (grade === 'remote_agent_connecting') {
+        return `${kind} telemetry is coming online. ${action}`;
+    }
+    if (grade === 'remote_inference_only') {
+        return `${kind} telemetry requires the remote agent. ${action}`;
+    }
+    if (grade === 'remote_agent_firewall_blocked') {
+        return `${kind} telemetry is blocked even though the agent started. ${action}`;
+    }
+    if (grade === 'remote_partial_sensors') {
+        return `${kind} telemetry is only partially available. ${action}`;
+    }
+    if (grade === 'remote_agent_degraded' || grade === 'remote_agent_update_available') {
+        return `${kind} telemetry is limited by agent compatibility. ${action}`;
+    }
+    if (grade === 'remote_error') {
+        return `${kind} telemetry is unavailable because the remote agent failed. ${action}`;
+    }
+    return `${kind} metrics appear after attach`;
 }
 
 function getMetricTone(kind) {
@@ -959,8 +995,8 @@ function selectVizStyle(card, metric, style) {
     if (cardEl) {
         cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) { el.classList.add('viz-fade-out'); });
         setTimeout(function() {
-            if (card === 'gpu') renderGpuCard(lastGpuData || {}, !!lastGpuData && Object.keys(lastGpuData).length > 0);
-            else renderSystemCard(lastSystemMetrics, !!lastSystemMetrics);
+            if (card === 'gpu') renderGpuCard(lastGpuData || {}, !!lastGpuData && Object.keys(lastGpuData).length > 0, window.__telemetryGrade);
+            else renderSystemCard(lastSystemMetrics, !!lastSystemMetrics, window.__telemetryGrade);
             cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) {
                 el.classList.remove('viz-fade-out');
                 el.classList.add('viz-fade-in');
@@ -990,8 +1026,8 @@ function resetVizPrefs(card) {
     if (cardEl) {
         cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) { el.classList.add('viz-fade-out'); });
         setTimeout(function() {
-            if (card === 'gpu') renderGpuCard(lastGpuData || {}, !!lastGpuData && Object.keys(lastGpuData).length > 0);
-            else renderSystemCard(lastSystemMetrics, !!lastSystemMetrics);
+            if (card === 'gpu') renderGpuCard(lastGpuData || {}, !!lastGpuData && Object.keys(lastGpuData).length > 0, window.__telemetryGrade);
+            else renderSystemCard(lastSystemMetrics, !!lastSystemMetrics, window.__telemetryGrade);
             cardEl.querySelectorAll('.hw-metric-viz').forEach(function(el) {
                 el.classList.remove('viz-fade-out');
                 el.classList.add('viz-fade-in');
@@ -1001,7 +1037,7 @@ function resetVizPrefs(card) {
     }
 }
 
-function renderGpuCard(gpuMap, visible) {
+function renderGpuCard(gpuMap, visible, grade) {
     var card = document.getElementById('gpu-card');
     var emptyEl = document.getElementById('gpu-empty');
     var deviceName = document.getElementById('gpu-device-name');
@@ -1017,6 +1053,8 @@ function renderGpuCard(gpuMap, visible) {
     var entries = Object.entries(gpuMap);
     if (entries.length === 0) {
         setCardState(card, 'unavailable');
+        if (emptyEl) emptyEl.textContent = hardwareEmptyStateCopy('GPU', grade);
+        setChipState(stateChip, grade === 'remote_agent_connecting' ? 'connecting' : 'unavailable', 'warning');
         setEmptyState(emptyEl, true);
         return;
     }
@@ -1114,7 +1152,7 @@ function renderGpuCard(gpuMap, visible) {
     }
 }
 
-function renderSystemCard(sys, visible) {
+function renderSystemCard(sys, visible, grade) {
     var card = document.getElementById('system-card');
     var emptyEl = document.getElementById('sys-empty');
     var deviceName = document.getElementById('sys-device-name');
@@ -1129,6 +1167,8 @@ function renderSystemCard(sys, visible) {
 
     if (!sys) {
         setCardState(card, 'unavailable');
+        if (emptyEl) emptyEl.textContent = hardwareEmptyStateCopy('System', grade);
+        setChipState(stateChip, grade === 'remote_agent_connecting' ? 'connecting' : 'unavailable', 'warning');
         setEmptyState(emptyEl, true);
         return;
     }

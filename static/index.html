@@ -18,6 +18,7 @@
     <link rel="stylesheet" href="/css/agent-modal.css">
     <link rel="stylesheet" href="/css/cards-hardware.css">
     <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/command-palette.css">
     <link rel="stylesheet" href="/css/modal-premium.css">
     <link rel="stylesheet" href="/css/chat.css">
     <link rel="stylesheet" href="/css/chat-guided-generation.css">
@@ -105,6 +106,7 @@
             <div class="strip-right">
                 <div class="agent-status" id="agent-status" style="display:none;" title="Click to manage remote agent" role="button" tabindex="0">
                     <span class="agent-indicator">●</span>
+                    <span class="telemetry-grade-chip" id="telemetry-grade-chip"></span>
                     <span class="agent-text">Remote Agent</span>
                     <span class="agent-latency" id="agent-latency"></span>
                     <button type="button" class="btn-agent-fix" style="display:none;" id="agent-fix-btn" title="Set up remote agent">⚡ Fix</button>
@@ -217,14 +219,25 @@
                         </div>
                         <h2 class="setup-card-title">Attach to Endpoint</h2>
                         <p class="setup-card-desc">Connect to a running llama.cpp server on any machine</p>
-                        <div class="setup-card-form">
-                            <input type="text" class="setup-input" id="setup-endpoint-url" placeholder="http://127.0.0.1:8080">
-                            <button class="setup-btn setup-btn-primary" id="setup-attach-btn">
-                                <span class="btn-icon">⚡</span> Attach
-                            </button>
+                        <div class="setup-recent-endpoints" id="setup-recent-endpoints">
+                            <div class="setup-section-header">
+                                <h3>Recent Endpoints</h3>
+                                <a id="setup-browse-sessions-link">Manage all sessions →</a>
+                            </div>
+                            <div class="setup-endpoint-list" id="setup-endpoint-list">
+                                <!-- Dynamically populated -->
+                            </div>
                         </div>
-                        <div class="setup-card-footer">
-                            <a class="setup-link" id="setup-browse-sessions-link">Browse saved sessions →</a>
+                        <div class="setup-endpoint-manual" id="setup-endpoint-manual">
+                            <div class="setup-section-header">
+                                <h3>Manual Attach</h3>
+                            </div>
+                            <div class="setup-card-form">
+                                <input type="text" class="setup-input" id="setup-endpoint-url" placeholder="http://127.0.0.1:8080">
+                                <button class="setup-btn setup-btn-primary" id="setup-attach-btn">
+                                    <span class="btn-icon">⚡</span> Attach
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="setup-card setup-card-spawn">
@@ -1198,6 +1211,9 @@
                 <span>Not connected to server</span>
                 <button class="disconnected-banner-btn" id="disconnected-banner-setup-btn">Go to Setup</button>
             </div>
+
+            <!-- Reply Plan Summary -->
+            <div class="reply-plan-summary" id="reply-plan-summary"></div>
 
             <!-- Input area -->
              <div class="chat-input-row" id="chat-input-row">
@@ -2288,94 +2304,38 @@
             </div>
             <div class="settings-content">
                 <div class="settings-pane active" id="settings-session">
-                    <h3>Session Settings</h3>
+                    <h3>Session Workspace</h3>
                     <div class="settings-card">
-                        <label class="modal-field">
-                            Default Spawn Mode
-                            <select id="settings-default-spawn-mode">
-                                <option value="spawn">Spawn New Server</option>
-                                <option value="attach">Attach to Existing</option>
-                            </select>
-                        </label>
-                        <label class="modal-field">
-                            Default Server Endpoint
-                            <input type="text" id="settings-default-server-endpoint" value="http://127.0.0.1:8001">
-                        </label>
-                        <label class="modal-field">
-                            Auto-start on Launch
-                            <div style="display:flex;align-items:center;gap:12px;">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="settings-auto-start" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                                <span class="toggle-label">Automatically start server when launching</span>
-                            </div>
-                        </label>
+                        <p class="settings-help">
+                            Session resume is handled from the setup screen and recent-endpoints workspace. Runtime attach targets, remote-agent details, and local launch paths are not edited here.
+                        </p>
+                        <p class="settings-help">
+                            Use the separate Configuration modal for executable paths and remote host details.
+                        </p>
                     </div>
                 </div>
                 <div class="settings-pane" id="settings-gpu">
                     <h3>GPU Configuration</h3>
                     <div class="settings-card">
-                        <label class="modal-field">
-                            Default GPU Layers
-                            <input type="number" id="settings-default-gpu-layers" value="99">
-                        </label>
-                        <label class="modal-field">
-                            GPU Memory Target
-                            <input type="number" id="settings-gpu-memory-target" placeholder="GB">
-                        </label>
+                        <p class="settings-help">
+                            GPU defaults are owned by model presets and runtime configuration. This settings modal no longer exposes placeholder GPU controls that do not persist.
+                        </p>
                     </div>
                 </div>
                 <div class="settings-pane" id="settings-models">
                     <h3>Model Settings</h3>
                     <div class="settings-card">
-                        <label class="modal-field">
-                            Default Model Path
-                            <input type="text" id="settings-default-model-path" placeholder="/path/to/model.gguf">
-                        </label>
-                        <label class="modal-field">
-                            Default Context Size
-                            <input type="number" id="settings-default-context-size" value="128000">
-                        </label>
-                        <label class="modal-field">
-                            Enable Quantization
-                            <div style="display:flex;align-items:center;gap:12px;">
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="settings-enable-quantization" checked>
-                                    <span class="toggle-slider"></span>
-                                </label>
-                                <span class="toggle-label">Use quantized models by default</span>
-                            </div>
-                        </label>
+                        <p class="settings-help">
+                            Model paths, context sizes, speculative decoding, and GPU layering are preset-level concerns. Edit them in Presets or Runtime Configuration rather than through global placeholder fields.
+                        </p>
                     </div>
                 </div>
               <div class="settings-pane" id="settings-appearance">
                       <h3>Appearance</h3>
                       <div class="settings-card">
-                          <label class="modal-field">
-                              Theme
-                              <select id="settings-theme">
-                                  <option value="auto">Auto (System)</option>
-                                  <option value="light">Light</option>
-                                  <option value="dark">Dark</option>
-                              </select>
-                          </label>
-                          <label class="modal-field">
-                              Font Size
-                              <select id="settings-font-size">
-                                  <option value="small">Small (14px)</option>
-                                  <option value="medium" selected>Medium (16px)</option>
-                                  <option value="large">Large (18px)</option>
-                              </select>
-                          </label>
-                          <label class="modal-field">
-                              Dashboard Widgets
-                              <div class="modal-row">
-                                  <label class="chk"><input type="checkbox" id="settings-widget-cpu" checked> CPU Usage</label>
-                                  <label class="chk"><input type="checkbox" id="settings-widget-gpu" checked> GPU Usage</label>
-                                  <label class="chk"><input type="checkbox" id="settings-widget-memory" checked> Memory</label>
-                              </div>
-                          </label>
+                          <p class="settings-help">
+                              Device-specific appearance preferences live in <strong>User → Preferences</strong>. Theme, font scale, spacing, and chat style remain local on purpose so different machines can keep different presentation defaults.
+                          </p>
                       </div>
                   </div>
                   <div class="settings-pane" id="settings-chat">
@@ -2541,22 +2501,9 @@
                         <button type="button" class="btn btn-secondary" id="settings-open-config-btn">Open Runtime Configuration</button>
                     </div>
                     <div class="settings-card">
-                        <label class="modal-field">
-                            Server Binary Path
-                            <input type="text" id="settings-server-binary-path" value="/usr/local/bin/llama-server">
-                        </label>
-                        <label class="modal-field">
-                            Log Level
-                            <select id="settings-log-level">
-                                <option value="info">Info</option>
-                                <option value="warning">Warning</option>
-                                <option value="error">Error</option>
-                            </select>
-                        </label>
-                        <label class="modal-field">
-                            Data Directory
-                            <input type="text" id="settings-data-directory" value="~/.config/llama-monitor">
-                        </label>
+                        <p class="settings-help">
+                            This modal only retains shared workspace settings. Process launch paths, remote-agent SSH details, and environment-specific overrides live in Runtime Configuration instead of duplicating dead controls here.
+                        </p>
                     </div>
                 </div>
 
@@ -3703,6 +3650,23 @@
 
 <div id="focus-mode-exit-beacon" role="button" tabindex="-1" aria-label="Exit Focus Mode">
     <div id="focus-mode-exit-pill">Focus Mode — click to exit &nbsp;×</div>
+</div>
+
+<!-- Command Palette -->
+<div class="command-palette-overlay" id="command-palette-overlay" style="display:none;">
+    <div class="command-palette" role="dialog" aria-label="Command palette">
+        <div class="command-palette-search">
+            <svg class="command-palette-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+            </svg>
+            <input type="text" id="command-palette-input" placeholder="Search conversations, messages, or type a command…" autocomplete="off">
+            <kbd>ESC</kbd>
+        </div>
+        <div class="command-palette-results" id="command-palette-results"></div>
+        <div class="command-palette-footer">
+            <span class="command-palette-hint">↑↓ navigate · enter select · esc close</span>
+        </div>
+    </div>
 </div>
 
 </body>

@@ -2,7 +2,7 @@
 // Model parameter panel, system prompt panel, style/font/enter-to-send controls,
 // and compaction settings.
 
-import { chat, lastLlamaMetrics, monitorState, wsData } from '../core/app-state.js';
+import { chat, lastLlamaMetrics, monitorState, settingsState, wsData } from '../core/app-state.js';
 import {
     activeChatTab,
     getDefaultRoleBoundaryText,
@@ -26,7 +26,9 @@ import { showToast, showToastWithActions } from './toast.js';
 
 // Local state — previously on window, migrated to local variables
 let chatFont = parseInt(localStorage.getItem('llama-monitor-chat-font') || '100');
-let enterToSend = localStorage.getItem('llama-monitor-enter-to-send') !== 'false';
+let enterToSend = localStorage.getItem('llama-monitor-enter-to-send') == null
+    ? settingsState.enter_to_send !== false
+    : localStorage.getItem('llama-monitor-enter-to-send') !== 'false';
 let paramToastTimer = null;
 let chatTelemetryPopoverOpen = false;
 let chatTelemetryPinned = localStorage.getItem('llama-monitor-chat-telemetry-pinned') === 'true';
@@ -1078,7 +1080,7 @@ function applyChatFontSize() {
 
 function onEnterToggleChange(checked) {
     enterToSend = checked;
-    localStorage.setItem('llama-monitor-enter-to-send', checked ? 'true' : 'false');
+    settingsState.enter_to_send = checked;
     const prefCheckbox = document.getElementById('pref-enter-to-send');
     if (prefCheckbox) prefCheckbox.checked = checked;
 }
@@ -1095,6 +1097,14 @@ function initEnterToggle() {
     const toggle = document.getElementById('chat-enter-toggle-input');
     if (toggle) toggle.checked = enterToSend;
 }
+
+window.addEventListener('settings-applied', () => {
+    enterToSend = settingsState.enter_to_send !== false;
+    const toggle = document.getElementById('chat-enter-toggle-input');
+    if (toggle) toggle.checked = enterToSend;
+    const prefCheckbox = document.getElementById('pref-enter-to-send');
+    if (prefCheckbox) prefCheckbox.checked = enterToSend;
+});
 
 function initChatStyle() {
     const savedChatStyle = localStorage.getItem('llama-monitor-chat-style') || 'rounded';

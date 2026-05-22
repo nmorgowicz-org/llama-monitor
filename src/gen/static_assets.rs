@@ -12,6 +12,7 @@ pub const CSS_CARDS_INFERENCE: &str = include_str!("../../static/css/cards-infer
 pub const CSS_CHAT_GUIDED_GENERATION: &str =
     include_str!("../../static/css/chat-guided-generation.css");
 pub const CSS_CHAT: &str = include_str!("../../static/css/chat.css");
+pub const CSS_COMMAND_PALETTE: &str = include_str!("../../static/css/command-palette.css");
 pub const CSS_COMPONENTS: &str = include_str!("../../static/css/components.css");
 pub const CSS_LAYOUT: &str = include_str!("../../static/css/layout.css");
 pub const CSS_LOGS: &str = include_str!("../../static/css/logs.css");
@@ -38,6 +39,8 @@ pub const FEATURES_CHAT_PARAMS_JS: &str = include_str!("../../static/js/features
 pub const FEATURES_CHAT_QUICK_GUIDE_JS: &str =
     include_str!("../../static/js/features/chat-quick-guide.js");
 pub const FEATURES_CHAT_RENDER_JS: &str = include_str!("../../static/js/features/chat-render.js");
+pub const FEATURES_CHAT_REPLY_PLAN_JS: &str =
+    include_str!("../../static/js/features/chat-reply-plan.js");
 pub const FEATURES_CHAT_SEARCH_JS: &str = include_str!("../../static/js/features/chat-search.js");
 pub const FEATURES_CHAT_SESSIONS_SIDEBAR_JS: &str =
     include_str!("../../static/js/features/chat-sessions-sidebar.js");
@@ -72,9 +75,13 @@ pub const FEATURES_SESSIONS_JS: &str = include_str!("../../static/js/features/se
 pub const FEATURES_SETTINGS_JS: &str = include_str!("../../static/js/features/settings.js");
 pub const FEATURES_SETUP_VIEW_JS: &str = include_str!("../../static/js/features/setup-view.js");
 pub const FEATURES_SHORTCUTS_JS: &str = include_str!("../../static/js/features/shortcuts.js");
+pub const FEATURES_TELEMETRY_GRADE_JS: &str =
+    include_str!("../../static/js/features/telemetry-grade.js");
 pub const FEATURES_TOAST_JS: &str = include_str!("../../static/js/features/toast.js");
 pub const FEATURES_UPDATES_JS: &str = include_str!("../../static/js/features/updates.js");
 pub const FEATURES_USER_MENU_JS: &str = include_str!("../../static/js/features/user-menu.js");
+pub const FEATURES_WORKSPACE_COMMAND_PALETTE_JS: &str =
+    include_str!("../../static/js/features/workspace-command-palette.js");
 pub const MANIFEST_JSON: &str = include_str!("../../static/manifest.json");
 pub const ACTION_MD: &str = include_str!("../../static/prompts/action.md");
 pub const CHARACTER_MD: &str = include_str!("../../static/prompts/character.md");
