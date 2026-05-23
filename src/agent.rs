@@ -2035,16 +2035,24 @@ pub mod install {
         let cas_dir = format!("{}{}cas", install_dir, sep);
         let resolved_cas_dir = format!("{}{}cas", resolved_install_dir, sep);
 
-        // Ensure cas/ directory exists on the remote (cmd.exe expands %APPDATA% itself).
+        // Ensure cas/ directory exists on the remote. Use the fully-resolved path
+        // so the mkdir works regardless of whether %APPDATA% is set in the SSH session env.
         let mkdir_cmd = if os == RemoteOs::Windows {
+            let ps_dir = resolved_cas_dir.replace('\'', "''");
             format!(
-                "cmd.exe /C if not exist \"{}\" mkdir \"{}\"",
-                cas_dir, cas_dir
+                "powershell.exe -NoProfile -NonInteractive -Command \"New-Item -ItemType Directory -Path '{ps_dir}' -Force | Out-Null\""
             )
         } else {
             format!("mkdir -p '{}'", cas_dir)
         };
-        let _ = remote_ssh::exec(connection.clone(), mkdir_cmd).await;
+        if let Ok(out) = remote_ssh::exec(connection.clone(), mkdir_cmd).await {
+            if out.status != 0 {
+                eprintln!(
+                    "[warn] Failed to create cas/ directory on remote: {}",
+                    out.stderr.trim()
+                );
+            }
+        }
 
         // Stable instance ID: hash of this instance's CA public key.
         let instance_id = {
@@ -2735,6 +2743,19 @@ Start-Sleep -Seconds 2\""
             command
         );
         eprintln!("[agent] Install path: {}", install_path);
+
+        // Ensure CA and server certs are provisioned before starting. The agent
+        // requires the CA to start (mTLS), and the install step may have failed
+        // to copy it if the cas/ directory wasn't created.
+        let os_for_certs = if install_path.contains('\\')
+            || install_path.to_ascii_lowercase().contains("appdata")
+        {
+            RemoteOs::Windows
+        } else {
+            RemoteOs::Unix
+        };
+        drop_ca_certificate(&connection, install_path, os_for_certs).await;
+        drop_agent_server_certificate(&connection, install_path, os_for_certs).await;
         let start_warning = match tokio::time::timeout(
             Duration::from_secs(15),
             remote_ssh::exec(connection.clone(), command.to_string()),
