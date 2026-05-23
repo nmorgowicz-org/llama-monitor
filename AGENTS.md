@@ -829,9 +829,10 @@ Archive docs are useful context, but they are not the canonical definition of cu
 These are concrete implementation rules. Violations in these areas have caused real bugs. Follow them exactly.
 
 #### Randomness
-- **Always use `rand_core::OsRng`** for any security-sensitive random value: tokens, nonces, session IDs, CSP nonces, key material.
-- **Never derive security values from** timestamps, PIDs, thread IDs, or any other predictable system state — even as a “fallback.” A predictable nonce or token defeats its entire purpose.
-- The `OsRng` API works cross-platform including Windows. There is no valid reason for a non-`OsRng` path in security code.
+- **Primary: use `getrandom::getrandom()`** for any security-sensitive random bytes: tokens, nonces, session IDs, CSP nonces, key material.
+- **Use `rand_core::OsRng` only when a concrete RNG trait object is required** (e.g. argon2 `SaltString::generate`), never as a general-purpose random source.
+- **Never derive security values from** timestamps, PIDs, thread IDs, or any other predictable system state — even as a "fallback." A predictable nonce or token defeats its entire purpose.
+- Both `getrandom` and `rand_core::OsRng` work cross-platform including Windows. There is no valid reason for a non-system RNG path in security code.
 
 #### Token comparison
 - **Always use `subtle::ConstantTimeEq`** (already a dependency via `subtle` crate) when comparing tokens, passwords, or any secret string.
@@ -860,7 +861,7 @@ Before marking a PR ready-to-test, the agent MUST verify every item below. This 
 - [ ] **Auth on all mutating endpoints**: every new POST/PUT/PATCH/DELETE requires at minimum `api-token`; destructive or irreversible operations require `db-admin-token`.
 - [ ] **Token rotation updates in-memory state**: if rotating a token, the live `AppConfig` is updated atomically alongside the on-disk file.
 - [ ] **No `==` on secrets**: all token/credential comparisons use `subtle::ConstantTimeEq`, not `==`.
-- [ ] **No predictable randomness**: all new nonces, tokens, session IDs use `OsRng`. No timestamp/PID fallbacks.
+- [ ] **No predictable randomness**: all new nonces, tokens, session IDs use `getrandom::getrandom()` (or `rand_core::OsRng` when a trait RNG is required). No timestamp/PID fallbacks.
 - [ ] **No direct file ops on live SQLite**: use `ChatStorage::backup()` API; handle WAL sidecars on restore.
 - [ ] **All new file paths from user input** are validated (reject `..`, leading `/`, `\`) and canonicalized within an allowed root.
 - [ ] **No new innerHTML/insertAdjacentHTML** with untrusted data; use `textContent` or `DOMPurify`.

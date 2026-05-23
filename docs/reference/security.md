@@ -128,7 +128,7 @@ Three endpoints rotate tokens at runtime. All require a valid `api-token` (Beare
 
 Important:
 - All three update both the on-disk file and the live in-memory `AppConfig` atomically, so the old token stops working immediately without a restart.
-- Tokens are generated with `OsRng` and stored encrypted (when encryption is configured).
+- Tokens and nonces are generated with `getrandom::getrandom()`; argon2 salt uses `rand_core::OsRng` where a trait RNG is required. All are stored encrypted when encryption is configured.
 
 ## Security Headers and CSP
 
@@ -152,7 +152,7 @@ Applied via `Helmet` with a custom `ContentSecurityPolicy`:
 
 Served with a dedicated CSP that:
 
-- Uses a per-request cryptographic nonce (16-byte, `OsRng`) for inline scripts.
+- Uses a per-request cryptographic nonce (16-byte, `getrandom::getrandom()`) for inline scripts.
 - Allows:
   - `connect-src`: `'self' https: wss:`
   - `script-src`: `'self'` + nonce + `https://cdn.jsdelivr.net`
