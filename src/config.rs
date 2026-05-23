@@ -7,7 +7,8 @@ use aes_gcm::{
     Aes256Gcm,
     aead::{Aead, KeyInit},
 };
-use rand_core::{OsRng, RngCore};
+use rand::TryRng;
+use rand::rngs::SysRng;
 
 use crate::cli::AppArgs;
 
@@ -128,7 +129,7 @@ pub fn init_encryption_key(config_dir: &std::path::Path) {
 
     // 3) Generate and persist a new key
     let mut key = [0u8; 32];
-    OsRng.fill_bytes(&mut key);
+    SysRng.try_fill_bytes(&mut key).expect("SysRng failed");
     let _ = std::fs::create_dir_all(config_dir);
     if std::fs::write(&key_file, key).is_ok() {
         harden_file_permissions(&key_file);
@@ -150,7 +151,7 @@ fn encryption_key() -> Option<[u8; 32]> {
 /// Generate a random 12-byte nonce.
 fn random_nonce() -> [u8; 12] {
     let mut buf = [0u8; 12];
-    OsRng.fill_bytes(&mut buf);
+    SysRng.try_fill_bytes(&mut buf).expect("SysRng failed");
     buf
 }
 
@@ -601,7 +602,7 @@ fn ensure_api_token(config_dir: &PathBuf) -> Option<String> {
 
 pub(crate) fn generate_random_token() -> String {
     let mut buf = [0u8; 16];
-    OsRng.fill_bytes(&mut buf);
+    SysRng.try_fill_bytes(&mut buf).expect("SysRng failed");
     let value = u128::from_be_bytes(buf);
     format!("{value:x}")
 }
