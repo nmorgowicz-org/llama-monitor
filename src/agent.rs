@@ -2064,13 +2064,13 @@ pub mod install {
         } else {
             format!("mkdir -p '{}'", cas_dir)
         };
-        if let Ok(out) = remote_ssh::exec(connection.clone(), mkdir_cmd).await {
-            if out.status != 0 {
-                eprintln!(
-                    "[warn] Failed to create cas/ directory on remote: {}",
-                    out.stderr.trim()
-                );
-            }
+        if let Ok(out) = remote_ssh::exec(connection.clone(), mkdir_cmd).await
+            && out.status != 0
+        {
+            eprintln!(
+                "[warn] Failed to create cas/ directory on remote: {}",
+                out.stderr.trim()
+            );
         }
 
         // Stable instance ID: hash of this instance's CA public key.
@@ -2173,17 +2173,16 @@ pub mod install {
                 Err(e) => eprintln!("[warn] Failed to install agent server cert: {e}"),
             }
         }
-        if std::fs::write(&local_key_tmp, &cert.key).is_ok() {
-            if let Err(e) = remote_ssh::copy_to_remote(
+        if std::fs::write(&local_key_tmp, &cert.key).is_ok()
+            && let Err(e) = remote_ssh::copy_to_remote(
                 connection.clone(),
                 local_key_tmp.to_string_lossy().to_string(),
                 remote_key_path.clone(),
                 0o600,
             )
             .await
-            {
-                eprintln!("[warn] Failed to install agent server key: {e}");
-            }
+        {
+            eprintln!("[warn] Failed to install agent server key: {e}");
         }
 
         let _ = std::fs::remove_file(&local_cert_tmp);
