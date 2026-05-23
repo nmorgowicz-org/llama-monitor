@@ -702,18 +702,39 @@ function _applySearchFilter(q) {
 
 function _groupTabsByRecency(tabs) {
     const now = Date.now();
-    const d  = (ms) => Math.floor(ms / 86400000);
-    const today = d(now);
+
+    // Local-date helpers so "Today/Yesterday/This Week" match the user's calendar.
+    const startOfDay = (date) => {
+        const d = new Date(date);
+        d.setHours(0, 0, 0, 0);
+        return d.getTime();
+    };
+
+    const todayStart = startOfDay(now);
+    const yesterdayStart = todayStart - 86400000;
+    const weekStart = yesterdayStart - 5 * 86400000; // 7 days including today and yesterday
 
     const groups = { pinned: [], today: [], yesterday: [], week: [], older: [] };
+
     for (const tab of tabs) {
         if (tab.pinned) { groups.pinned.push(tab); continue; }
-        const dayDiff = today - d(tab.updated_at || tab.created_at || now);
-        if (dayDiff === 0)      groups.today.push(tab);
-        else if (dayDiff === 1) groups.yesterday.push(tab);
-        else if (dayDiff <= 7)  groups.week.push(tab);
-        else                    groups.older.push(tab);
+        const ts = tab.updated_at || tab.created_at || now;
+        if (ts >= todayStart)            groups.today.push(tab);
+        else if (ts >= yesterdayStart)   groups.yesterday.push(tab);
+        else if (ts >= weekStart)        groups.week.push(tab);
+        else                             groups.older.push(tab);
     }
+
+    // Sort each group by most-recently-updated first.
+    const byRecency = (a, b) =>
+        (b.updated_at || b.created_at || 0) - (a.updated_at || a.created_at || 0);
+
+    groups.pinned.sort(byRecency);
+    groups.today.sort(byRecency);
+    groups.yesterday.sort(byRecency);
+    groups.week.sort(byRecency);
+    groups.older.sort(byRecency);
+
     return groups;
 }
 
