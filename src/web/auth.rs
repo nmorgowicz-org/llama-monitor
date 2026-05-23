@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use argon2::Argon2;
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
-use rand_core::OsRng;
+use argon2::password_hash::phc::PasswordHash;
+use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use subtle::ConstantTimeEq;
 
 use crate::config::{DashboardAuthConfig, TlsMode, generate_random_token};
@@ -404,9 +404,8 @@ fn parse_cookie(cookie_header: Option<&str>, name: &str) -> Option<String> {
 }
 
 fn hash_password(password: &str) -> Option<String> {
-    let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(password.as_bytes())
         .ok()
         .map(|hash| hash.to_string())
 }

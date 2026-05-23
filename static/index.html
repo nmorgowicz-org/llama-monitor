@@ -3051,6 +3051,12 @@
             </div>
             
             <div class="export-panel" style="margin-top:24px;">
+                <!--
+                    TODO: Wire up export-range radios to filter by date.
+                    When implemented, use local-time day boundaries (like chat-sessions-sidebar.js)
+                    for Today / Last 7 Days / Last 30 Days so behavior matches the user's calendar.
+                    Do NOT rely on raw UTC-epoch subtraction for day-based ranges.
+                -->
                 <h3 class="export-section-title">Export Range</h3>
                 <div class="export-options">
                     <label class="export-option">
