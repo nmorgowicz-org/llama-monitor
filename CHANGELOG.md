@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.3](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.21.2...v0.21.3) (2026-05-23)
+
+
+### Bug Fixes
+
+* **agent:** install ring CryptoProvider before rustls TLS setup to prevent agent panic on startup ([ca808d3](https://github.com/nmorgowicz-org/llama-monitor/commit/ca808d3f9b81626fbd5657920987d56202bf9cd8))
+* **agent:** resolve %APPDATA% before SCP so CA cert and server cert are actually written to Windows ([ca808d3](https://github.com/nmorgowicz-org/llama-monitor/commit/ca808d3f9b81626fbd5657920987d56202bf9cd8))
+* **chat:** sort sidebar chats by recency within each group ([abe8da2](https://github.com/nmorgowicz-org/llama-monitor/commit/abe8da28ecc46d823b8d5af70efeb10b144d563e))
+* **chat:** use local-time day boundaries for Today/Yesterday/This Week grouping ([abe8da2](https://github.com/nmorgowicz-org/llama-monitor/commit/abe8da28ecc46d823b8d5af70efeb10b144d563e))
+* **deps:** migrate to rand_core 0.10, rand 0.10, and argon2 0.6-rc ([#174](https://github.com/nmorgowicz-org/llama-monitor/issues/174)) ([f4c91fa](https://github.com/nmorgowicz-org/llama-monitor/commit/f4c91fa40d3f9370bbb8b00f1fe4243c87e311e8))
+* **deps:** update rust crate sysinfo to 0.39 ([#175](https://github.com/nmorgowicz-org/llama-monitor/issues/175)) ([0b011e8](https://github.com/nmorgowicz-org/llama-monitor/commit/0b011e8d7a2124bbe5e400a8255f0ef8e125eb1d))
+* **ui:** use local-time day boundaries in backup filenames and relative-time displays ([abe8da2](https://github.com/nmorgowicz-org/llama-monitor/commit/abe8da28ecc46d823b8d5af70efeb10b144d563e))
+
 ## [0.21.2](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.21.1...v0.21.2) (2026-05-22)
 
 
