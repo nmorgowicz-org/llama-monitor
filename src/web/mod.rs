@@ -382,9 +382,10 @@ fn index_route(
 
 // Simple u128 helper for CSP nonce generation (no extra dependency)
 fn rand_core_getrandom_u128() -> u128 {
-    use rand_core::{OsRng, RngCore};
+    use rand::TryRng;
+    use rand::rngs::SysRng;
     let mut buf = [0u8; 16];
-    OsRng.fill_bytes(&mut buf);
+    SysRng.try_fill_bytes(&mut buf).expect("SysRng failed");
     u128::from_be_bytes(buf)
 }
 
