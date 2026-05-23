@@ -755,6 +755,15 @@ function formatDate(timestamp) {
     if (diff < 60000) return 'just now';
     if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
     if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+
+    // Use local-time day boundaries for "today/yesterday/Xd ago" decisions.
+    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+    const dateStart = new Date(date); dateStart.setHours(0, 0, 0, 0);
+    const dayDiff = Math.floor((todayStart - dateStart) / 86400000);
+
+    if (dayDiff === 0) return 'today';
+    if (dayDiff === 1) return 'yesterday';
+    if (dayDiff < 7) return `${dayDiff}d ago`;
     return date.toLocaleDateString();
 }
 
