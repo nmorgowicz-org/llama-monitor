@@ -399,14 +399,12 @@ fn main() -> Result<()> {
                     continue;
                 }
 
+                // Use local date (not UTC) so late-night backups match the user's calendar day.
                 let date = {
-                    let secs = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    // Format as YYYYMMDD using integer arithmetic (no chrono dep here)
-                    let days = secs / 86400;
-                    format!("{:08}", days)
+                    use chrono::Datelike;
+                    let local = chrono::Local::now();
+                    let d = local.date_naive();
+                    format!("{}{:02}{:02}", d.year(), d.month(), d.day())
                 };
                 let backup_path = daily_backup_dir.join(format!("chat_daily_{}.db", date));
 

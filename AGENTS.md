@@ -199,7 +199,23 @@ npm run validate-js
 
 # Lint static/js with ESLint (catches XSS, no-undef, import-assign)
 npm run lint
+
+# Check for whitespace/indentation issues (CI enforces this)
+git diff --check
 ```
+
+### Mandatory pre-PR checks
+
+Before marking a PR ready (or pushing changes), agents MUST run:
+
+1. `cargo fmt`
+2. `cargo clippy -- -D warnings`
+3. `cargo test` (or a focused subset if the full suite is too slow; CI will run it)
+4. `npm run validate-js`
+5. `npm run lint`
+6. `git diff --check`
+
+If any of these fail, fix the issues before pushing.
 
 ## Documentation Maintenance
 
