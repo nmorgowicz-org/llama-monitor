@@ -246,13 +246,13 @@ test.describe('pin and favorite tabs', () => {
     });
 
     // Pinned tab should appear in "Pinned" group before unpinned tabs
-    const pinnedItem = page.locator('#csp-list .csp-item').filter({ hasText: 'Chat 2' });
+    const pinnedItem = page.locator('#csp-list .csp-item.active');
     await expect(pinnedItem).toBeVisible();
     // Pinned items should be under the "Pinned" section header
     const pinnedSection = page.locator('#csp-list .csp-section-header:has-text("Pinned")');
     await expect(pinnedSection).toBeVisible();
     // Chat 2 should appear in the pinned section (items after that header, before next)
-    const pinnedItems = page.locator('#csp-list .csp-item').filter({ hasText: 'Chat 2' });
+    const pinnedItems = page.locator('#csp-list .csp-item.pinned');
     await expect(pinnedItems.first()).toBeVisible();
   });
 
