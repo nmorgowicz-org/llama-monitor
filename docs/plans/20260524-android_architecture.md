@@ -331,37 +331,30 @@ The Kotlin foreground service communicates device state to the Rust runtime via 
 
 ## 6. UI/UX Architecture
 
-### 6.1 Current Mobile Readiness (Verified Audit)
+### 6.1 The Web UI's Actual Mobile Readiness
 
-The frontend has basic responsive layout and PWA scaffolding, but **zero touch-specific interaction support**. All interactive gestures (drag, swipe, long-press) are mouse-only. The following is verified against the actual codebase as of 2026-05-24.
+The frontend is significantly more mobile-ready than a naive assessment might suggest.
 
 **Already present in the codebase:**
-- `<meta name="viewport" content="width=device-width, initial-scale=1">` (`index.html:6`)
-- `<meta name="apple-mobile-web-app-capable" content="yes">` (`index.html:8`)
-- `<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">` (`index.html:9`)
-- `<meta name="mobile-web-app-capable" content="yes">` (`index.html:7`) — Android equivalent
-- `<link rel="manifest" href="/manifest.json">` (`index.html:10`) — PWA manifest
-- `<link rel="apple-touch-icon" href="/icon.svg">` (`index.html:12`)
-- Responsive CSS breakpoints scattered across 8 CSS files: 1200px, 1080px, 980px, 860px, 820px, 768px, 720px, 640px (not all in `layout.css`; see `cards-inference.css`, `cards-hardware.css`, `chat.css`, `settings-modal.css`, `chat-guided-generation.css`, `auth.css`)
+- `<meta name="viewport" content="width=device-width, initial-scale=1">`
+- `<meta name="apple-mobile-web-app-capable" content="yes">`
+- `<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">`
+- `/manifest.json` (PWA manifest)
+- Responsive CSS breakpoints: 1200px, 980px, 860px, 820px, 768px, 720px, 640px
 - `ResizeObserver` density classes: `shell-width-very-tight` (< 520px), `shell-width-tight` (< 920px), `shell-width-snug` (< 1050px) — applied to `<body>` dynamically
 - `@media (prefers-reduced-motion: reduce)` applied across all 159+ animations
 - `backdrop-filter: blur(16px) saturate(180%)` on cards (GPU-composited)
-- `prefers-color-scheme` detection on initial load (`static/js/features/user-menu.js:201`)
-- `-webkit-overflow-scrolling: touch` on 2 containers: `.db-admin-tabs` (`chat.css:8242`) and one scrollable container in `chat-guided-generation.css:1538`
 - IndexedDB for chat state via `chat-state.js`
-- WebSocket connection uses `location.host` (`dashboard-ws.js:130-131`) — adapts to warp server origin
 
-**Verified missing — must be built from scratch:**
-- **Touch drag handlers** — Sidebar resize (`nav.js:244-264`) uses only `mousedown`/`mousemove`/`mouseup`. No `touchstart`/`touchmove`/`touchend` equivalents exist anywhere.
-- **Swipe gestures** — No swipe or gesture code exists anywhere in the codebase. Left-edge swipe for sidebar toggle needs to be built.
-- **Long-press context menus** — Context menus (`chat-sessions-sidebar.js:413,523`) use only `contextmenu` (right-click) event. No touch long-press handler exists.
-- **Safe area insets** — No `env(safe-area-inset-*)` variables exist in any CSS file. `tokens.css` contains only color, font, radius, gap, shadow, and gradient variables.
-- **Soft keyboard avoidance** — No `visualViewport` reference exists anywhere in the codebase.
-- **Coarse-pointer touch targets** — Zero `@media (pointer: coarse)` rules exist in any of the 15 CSS files.
-- **Folded cover breakpoint** — No `max-width: 420px` media query exists. The smallest existing breakpoint is 520px (`ResizeObserver` density class).
-- **`-webkit-overflow-scrolling: touch` coverage** — Only 2 containers have it. All scrollable containers (`.content-area`, `.chat-messages`, `.log-panel`, `.settings-modal-body`, `.chat-sessions-list`, `.chat-tab-bar`) need it added.
-
-**Key takeaway:** The UI will render responsively on a small screen (existing breakpoints handle ~390px viewport via `shell-width-very-tight`), but **all interactive gestures are mouse-only**. The app will be visually functional but not touch-operable without the additions below.
+**Missing — requires addition:**
+- Touch event handlers for drag interactions (sidebar resize handle, chat tab reorder)
+- `-webkit-overflow-scrolling: touch` on scrollable containers
+- Touch targets sized to 44×44dp minimum (`@media (pointer: coarse)`)
+- Safe area insets (`env(safe-area-inset-*)`) for punch-hole display
+- `visualViewport` resize listener for soft keyboard avoidance in chat
+- Swipe gestures for sidebar open/close
+- Long-press for context menus (currently right-click only)
+- `prefers-color-scheme` media query observation for automatic dark/light switch
 
 ### 6.2 Z Fold 6 Form Factor
 
@@ -373,15 +366,12 @@ The frontend has basic responsive layout and PWA scaffolding, but **zero touch-s
 
 | Physical state | CSS viewport | Density class triggered | Layout result |
 |---|---|---|---|
-| Folded portrait | ~390px wide | `shell-width-very-tight` (< 520px) | Sidebar collapsed (68px), stacked inference cards |
-| Folded landscape | ~748px wide | `shell-width-tight` (< 920px) | Sidebar collapsed, 1-col inference grid |
-| Unfolded landscape | ~932px wide | `shell-width-snug` (< 1050px) | Expanded sidebar, 2-col inference grid |
-| Unfolded portrait | ~692px wide | `shell-width-tight` (< 920px) | Similar to folded landscape |
+| Folded portrait | ~390px wide | `shell-width-tight` | Sidebar collapsed (68px), stacked inference cards |
+| Folded landscape | ~748px wide | `shell-width-tight` | Partial sidebar, 2-col inference grid |
+| Unfolded landscape | ~932px wide | `shell-width-snug` | Expanded sidebar, full 3-col dashboard |
+| Unfolded portrait | ~692px wide | `shell-width-tight` | Similar to folded landscape |
 
-**Inference grid column collapse (verified):**
-- **1100px**: Collapses from 3 columns to 2 columns (`setup-view.css:607-613`)
-- **820px**: Collapses to 1 column (`setup-view.css:753-761`)
-- The 860px breakpoint in `cards-inference.css:1362` only adjusts `.widget-context min-height` and `.context-pill-name max-width` — it does NOT collapse the grid.
+The `inference-grid` collapses at `max-width: 860px` — this means folded portrait and folded landscape both get the stacked layout, which is correct behavior.
 
 **New CSS breakpoint for folded cover (add to `layout.css`):**
 ```css
@@ -448,16 +438,12 @@ body.is-unfolded #page-server .dashboard-grid {
 
 Must have `[data-theme="light"]` overrides for all new selectors (AGENTS.md requirement).
 
-### 6.3 Touch Handling (All Features to Be Built)
+### 6.3 Touch Handling
 
-**Current state:** Zero touch-specific interaction support exists. All interactive gestures (drag, swipe, long-press) are mouse-only. The following features must be built from scratch.
-
-**Sidebar toggle:** Tap works via native `click` event propagation — no changes needed for basic toggle.
-
-**Sidebar drag-to-resize (TO BUILD):**
-The existing implementation (`nav.js:244-264`) uses only `mousedown`/`mousemove`/`mouseup`. Touch equivalents must be added to the same `.sidebar-resize-handle` element:
+**Sidebar toggle:** Tap works via native `click` event propagation — no changes needed. Drag-to-resize needs touch handlers mirroring the existing mouse handlers:
 ```javascript
-// Add touchstart/touchmove/touchend alongside existing mouse handlers
+// Existing: mousedown/mousemove/mouseup on .sidebar-resize-handle
+// Add: touchstart/touchmove/touchend on same element
 resizeHandle.addEventListener('touchstart', (e) => {
     startX = e.touches[0].clientX;
     startWidth = sidebar.offsetWidth;
@@ -470,49 +456,7 @@ resizeHandle.addEventListener('touchmove', (e) => {
 }, { passive: false });
 ```
 
-**Swipe gesture for sidebar (TO BUILD):**
-No swipe code exists anywhere. Implement left-edge swipe to open sidebar and right-edge swipe to close:
-```javascript
-// Touch left-edge swipe on main content → open sidebar
-let touchStartX = 0;
-document.addEventListener('touchstart', (e) => {
-    touchStartX = e.touches[0].clientX;
-}, { passive: true });
-document.addEventListener('touchend', (e) => {
-    const dx = e.changedTouches[0].clientX - touchStartX;
-    if (touchStartX < 30 && dx > 60) sidebar.classList.remove('collapsed');
-    if (dx < -60 && !sidebar.classList.contains('collapsed')) {
-        sidebar.classList.add('collapsed');
-    }
-}, { passive: true });
-```
-
-**Long-press context menus (TO BUILD):**
-Context menus (`chat-sessions-sidebar.js:413,523`) use only `contextmenu` (right-click). Add touch long-press handler:
-```javascript
-// In chat-sessions-sidebar.js — add to session list items
-let longPressTimer = null;
-item.addEventListener('touchstart', () => {
-    longPressTimer = setTimeout(() => openContextMenu(item), 500);
-}, { passive: true });
-item.addEventListener('touchend', () => clearTimeout(longPressTimer), { passive: true });
-item.addEventListener('touchmove', () => clearTimeout(longPressTimer), { passive: true });
-```
-
-**Soft keyboard avoidance (TO BUILD):**
-No `visualViewport` reference exists anywhere. Add resize listener in chat input initialization:
-```javascript
-// In chat input initialization
-if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', () => {
-        const chatMessages = document.getElementById('chat-messages');
-        if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
-    });
-}
-```
-
-**Scrollable containers (TO ADD):**
-Only 2 containers have `-webkit-overflow-scrolling: touch` (`chat.css:8242`, `chat-guided-generation.css:1538`). All scrollable containers need it:
+**Scrollable containers (add to existing CSS):**
 ```css
 .content-area,
 .chat-messages,
@@ -530,8 +474,7 @@ Only 2 containers have `-webkit-overflow-scrolling: touch` (`chat.css:8242`, `ch
 }
 ```
 
-**Coarse-pointer touch targets (TO ADD):**
-Zero `@media (pointer: coarse)` rules exist in any of the 15 CSS files. Add:
+**Touch targets (`@media (pointer: coarse)`):**
 ```css
 @media (pointer: coarse) {
   .sidebar-nav-item {
@@ -547,8 +490,45 @@ Zero `@media (pointer: coarse)` rules exist in any of the 15 CSS files. Add:
 }
 ```
 
-**Safe area insets (TO ADD):**
-No `env(safe-area-inset-*)` variables exist in any CSS file. Add to `tokens.css`:
+**Swipe gesture for sidebar:**
+```javascript
+// Touch left-edge swipe on main content → open sidebar
+let touchStartX = 0;
+document.addEventListener('touchstart', (e) => {
+    touchStartX = e.touches[0].clientX;
+}, { passive: true });
+document.addEventListener('touchend', (e) => {
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    if (touchStartX < 30 && dx > 60) sidebar.classList.remove('collapsed');
+    if (dx < -60 && !sidebar.classList.contains('collapsed')) {
+        sidebar.classList.add('collapsed');
+    }
+}, { passive: true });
+```
+
+**Long-press for context menus:**
+```javascript
+// In chat-sidebar.js — add to session list items
+let longPressTimer = null;
+item.addEventListener('touchstart', () => {
+    longPressTimer = setTimeout(() => openContextMenu(item), 500);
+}, { passive: true });
+item.addEventListener('touchend', () => clearTimeout(longPressTimer), { passive: true });
+item.addEventListener('touchmove', () => clearTimeout(longPressTimer), { passive: true });
+```
+
+**Chat keyboard avoidance:**
+```javascript
+// In chat input initialization
+if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => {
+        const chatMessages = document.getElementById('chat-messages');
+        if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+    });
+}
+```
+
+**Safe area insets (add to `tokens.css`):**
 ```css
 :root {
   --safe-top: env(safe-area-inset-top, 0px);
@@ -606,11 +586,22 @@ CSP in `warp-helmet` configuration must allow `ws://127.0.0.1:PORT` for WebSocke
 
 ### 6.5 Dark/Light Theme
 
-**Already present:** `prefers-color-scheme` detection on initial load exists in `static/js/features/user-menu.js:201`. The theme system uses `[data-theme="light"]` on `<html>` with localStorage persistence.
+The existing theme system uses `[data-theme="light"]` on `<html>` with localStorage persistence. Add `prefers-color-scheme` detection on initial load (JS):
 
-The dark theme (`--color-bg: #0f1115`) is excellent for OLED — true black backgrounds save measurable battery on the Z Fold 6's AMOLED displays. No changes needed for basic theme detection.
+```javascript
+// In theme initialization — add before existing localStorage check
+if (!localStorage.getItem('llm-theme')) {
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+}
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+    if (!localStorage.getItem('llm-theme')) {
+        document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+    }
+});
+```
 
-**To add:** Live `change` event listener so the theme updates when Android system theme switches while the app is running (current code only checks on initial load).
+The dark theme (`--color-bg: #0f1115`) is excellent for OLED — true black backgrounds save measurable battery on the Z Fold 6's AMOLED displays.
 
 ### 6.6 Performance Considerations for Mobile WebView
 
@@ -1236,15 +1227,9 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 
 ## 13. Phased Implementation Plan
 
-> **Timeline note (2026-05-24):** Revised for 100% AI-agent development with Claude Code + Codex running in parallel. With multiple huge-model agents working concurrently, debug cycles that would bottleneck a single agent are absorbed — one agent compiles while another pre-writes the next fix, a third drafts the Kotlin side, and a fourth prepares CI configs. The bottleneck shifts from "waiting for compilation" to "waiting for physical device feedback."
+### Phase 1: Build Infrastructure and Skeleton (Weeks 1-2)
 
-### Phase 1: Build Infrastructure and Skeleton (Week 1)
-
-**Revised from Weeks 1-2.** With multiple agents running in parallel, Wave A (Rust backends), Wave B (JNI), and Wave C (Gradle/Kotlin) overlap aggressively. One agent iterates on `cargo ndk build` errors while others pre-write fixes for known issues (tempfile/rustix workaround, rusqlite+NDK linking flags, JNI symbol naming). The 5-7 debug cycles that would take days for a single agent compress to hours when agents pipeline ahead of each other. Runner image rebuild is the only hard blocker (~1-2 hours).
-
-**Wave A (Day 1 morning):** Steps 1, 3-6, 11 — parallel generation.
-**Wave B (Day 1 afternoon):** Step 2 (JNI) + first `cargo ndk build` attempt; debug cycles begin.
-**Wave C (Day 1-2):** Steps 7-9 (Gradle/Kotlin/cargo-ndk) overlap with debug cycles; steps 10-12 (CI, runner image) follow.
+**Goal:** APK installs; WebView loads dashboard; remote metrics from ryne visible.
 
 1. Add `ssh-control` and `android` features to `Cargo.toml`; move `ssh2` under `ssh-control`
 2. Create `src/android/mod.rs` — JNI entry points (start/stop/status/setPollInterval)
@@ -1258,15 +1243,15 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 9. Add `cargo-ndk` task to Gradle; configure `.cargo/config.toml`
 10. Add `check-android` job to `.github/workflows/ci.yml`
 11. Update `AGENTS.md` pre-PR checklist with Android check command
-12. Merge NDK + `aarch64-linux-android` + `cargo-ndk` changes to `llama-monitor-runner` and trigger image rebuild (prerequisite for jobs in step 10 and Phase 1 release build)
+12. Merge NDK + `aarch64-linux-android` + `cargo-ndk` changes to `llama-monitor-runner` and trigger image rebuild (prerequisite for jobs in steps 10 and Phase 1 release build)
 
 **Before merging:** Run `cargo check --target x86_64-pc-windows-gnu` (always required), `cargo check --target aarch64-linux-android`, `cargo clippy -- -D warnings`, `cargo fmt`. Update `docs/reference/` with Android build instructions.
 
 **Deliverable:** APK installs on Z Fold 6. Dashboard shows with remote agent metrics from ryne. Local Android metrics show correct `availability` codes (no silent nulls).
 
-### Phase 2: Android System Metrics (Week 2)
+### Phase 2: Android System Metrics (Weeks 3-4)
 
-**Revised from Weeks 3-4.** With Phase 1 collapsing to 1 week, Phase 2 starts immediately. Multiple agents write battery.rs, thermal.rs, BatteryMetrics struct, JS handlers, and adaptive polling in parallel. The only sequential dependency is validating JNI data passing end-to-end, which takes one feedback round.
+**Goal:** Battery, CPU load/name, and available thermal metrics live in dashboard.
 
 1. Implement `src/android/battery.rs` — `updateBatteryMetrics` JNI receiver
 2. Implement `src/android/thermal.rs` — enumerate `/sys/class/thermal/`, filter readable
@@ -1279,102 +1264,43 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 
 **Deliverable:** System card shows CPU load, battery level/temp/charging state; polling adapts to screen state.
 
-### Phase 3: Touch Interaction and Foldable UX (Weeks 3-5)
+### Phase 3: Foldable UX and Touch Handling (Weeks 5-6)
 
-**Revised from Weeks 5-8.** CSS work (3A) collapses to a day with parallel agents. Touch JS (3B) and foldable detection (3C) can be written in parallel — the only thing that requires physical device feedback is gesture threshold tuning, which is a small number of async rounds. With multiple agents, one tests on device while another pre-writes the adjusted thresholds based on feedback.
+**Goal:** Full touch-optimized UI; correct folded/unfolded layouts.
 
-#### 3A: CSS Mobile Foundations (Week 3, days 1-2)
-
-All 5 items generated in parallel across agents. Items 1 and 3 share `layout.css` so one agent owns that file.
-
-1. **Folded cover breakpoint** — Add `@media (max-width: 420px)` to `static/css/layout.css`:
-   - Hide sidebar nav, full-width content area, reduced padding on dashboard header and view
-   - Must include `[data-theme="light"]` overrides
-2. **Scrollable container scrolling** — Add `-webkit-overflow-scrolling: touch` and `overscroll-behavior` to: `.content-area`, `.chat-messages`, `.log-panel`, `.settings-modal-body`, `.chat-sessions-list`, `.chat-tab-bar` (spread across `layout.css`, `chat.css`, `settings-modal.css`)
-3. **Coarse-pointer touch targets** — Add `@media (pointer: coarse)` block to `static/css/layout.css`:
-   - `.sidebar-nav-item`: `min-height: 44px`
-   - `.btn-send`, `.btn-chat-tab-close`, `.user-menu-trigger`, `.chat-control-btn`: `min-height: 44px`, `min-width: 44px`
-4. **Safe area insets** — Add to `static/css/tokens.css`:
-   - `:root { --safe-top: env(safe-area-inset-top, 0px); --safe-bottom: env(safe-area-inset-bottom, 0px); --safe-left: env(safe-area-inset-left, 0px); --safe-right: env(safe-area-inset-right, 0px); }`
-   - Apply to `.top-nav` (padding-top) and `.chat-input-area` (padding-bottom)
-5. **Backdrop-filter disable** — Add `@media (pointer: coarse) and (max-resolution: 2.5dppx)` to `static/css/cards-inference.css` to disable `backdrop-filter` on `.widget-card` for budget devices
-
-#### 3B: Touch Interaction (Weeks 3-4)
-
-All 5 touch features written in parallel. Gesture thresholds start with standard values (500ms long-press, 60px swipe) which are proven Android conventions. One round of device feedback tunes them, while another agent pre-writes the adjusted code.
-
-6. **Sidebar drag-to-resize** — In `static/js/features/nav.js`, add `touchstart`/`touchmove`/`touchend` handlers to `.sidebar-resize-handle` element, mirroring the existing `mousedown`/`mousemove`/`mouseup` logic (lines 244-264)
-7. **Left-edge swipe for sidebar** — In `static/js/features/nav.js`, add `touchstart`/`touchend` listeners on `document`:
-   - `touchStartX < 30` and `dx > 60` → open sidebar
-   - `dx < -60` → close sidebar
-   - **Note:** Thresholds need screen-width-relative values (30px is 10% of 390px cover but trivial on 932px unfolded)
-8. **Long-press context menus** — In `static/js/features/chat-sessions-sidebar.js`, add `touchstart`/`touchend`/`touchmove` handlers to session list items:
-   - 500ms timer on `touchstart` → call existing `openContextMenu(item)`
-   - Clear timer on `touchend` or `touchmove`
-   - **Note:** Finger drift during 500ms cancels — emulators don't simulate drift
-9. **Soft keyboard avoidance** — In `static/js/features/chat-input.js` (or wherever chat input is initialized), add `visualViewport.resize` listener to scroll `#chat-messages` to bottom on keyboard appearance
-   - **Note:** `visualViewport` behavior varies by API level and Chrome version in WebView
-10. **Live theme switching** — In `static/js/features/user-menu.js`, add `window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ...)` to update theme when Android system theme changes (existing code only checks on initial load at line 201)
-
-#### 3C: Foldable State Detection (Week 4)
-
-Kotlin, JS, and CSS written in parallel by separate agents. The Kotlin→JS bridge is the only untestable piece — written once with defensive null handling for non-foldable devices. CSS conflicts with `shell-width-*` classes resolved by one agent reading the existing layout system.
-
-11. **Kotlin foldable detection** — In `MainActivity.kt`, use `androidx.window:window-java` to detect `FoldingFeature` state and dispatch `foldstatechange` CustomEvent to WebView via `evaluateJavascript`
-12. **JS foldable handler** — Create `static/js/features/android-foldable.js`:
-    - Listen for `foldstatechange` event
-    - Toggle `body.is-folded`, `body.is-unfolded`, `body.is-half` classes
-13. **Two-panel unfolded layout** — Add CSS for `body.is-unfolded #page-chat` (2-column grid) and `body.is-unfolded #page-server .dashboard-grid` (full 12-column grid). Must include `[data-theme="light"]` overrides
-
-#### 3D: Verification and Integration (Week 5)
-
-Playwright validates desktop regression. Physical device testing of gestures and fold state happens in one focused pass.
-
-14. Run Playwright UI tests; update selectors if any element IDs changed
-15. Run `npm run lint` and `npm run validate-js` on all modified JS files
-16. **Physical device validation** — Test all gestures, fold state transitions, and soft keyboard behavior on Z Fold 6; adjust thresholds as needed
+1. Add `max-width: 420px` CSS breakpoint for folded cover display
+2. Add touch drag handlers for sidebar resize
+3. Add `-webkit-overflow-scrolling: touch` to all scrollable containers
+4. Add `@media (pointer: coarse)` rules for 44dp minimum touch targets
+5. Add `env(safe-area-inset-*)` CSS variables
+6. Implement foldable state detection in Kotlin; dispatch `foldstatechange` event to WebView
+7. Add `body.is-unfolded` two-panel CSS layout
+8. Add swipe gesture for sidebar open/close
+9. Add long-press context menus in chat sidebar
+10. Implement `visualViewport` resize listener for keyboard avoidance
+11. Add `prefers-color-scheme` observation in theme initialization
+12. Add backdrop-filter disable media query for low-end devices
+13. Run Playwright UI tests; update selectors if needed
 
 **Deliverable:** App fully touch-operable; adapts to folded/unfolded states; chat input works with soft keyboard.
 
-### Phase 4: Security Hardening and SSH Control Evaluation (Week 6)
+### Phase 4: Security Hardening and SSH Control Evaluation (Weeks 7-8)
 
-**Revised from Weeks 7-8.** With multiple agents, security review items run in parallel — one agent audits JNI bridge security, another checks WebView/network security config, a third reviews auth patterns. The russh evaluation compresses to a few days when agents read docs and write prototypes concurrently. AndroidKeyStore verification remains a human gate but runs in parallel with all other work.
-
-1. Verify AndroidKeyStore integration in production (not just emulator) — **human gate, runs in parallel, blocks sign-off**
+1. Verify AndroidKeyStore integration in production (not just emulator)
 2. Implement TOFU certificate pinning for remote agent (extend `ssh-known-hosts` model)
 3. Add agent setup UI flow for Android (simplified settings wizard)
-4. Evaluate `russh` as pure-Rust SSH replacement — **evaluation only; migration deferred to Phase 6 if viable**
-5. Security review pass per AGENTS.md security checklist — **~2 weeks for full Android surface area**
+4. Evaluate `russh` as pure-Rust SSH replacement — if viable, migrate desktop too
+5. Security review pass per AGENTS.md security checklist
 
 **Deliverable:** Production-grade secret storage; certificate pinning; security review complete.
 
-### Phase 5: Android GPU Metrics (Week 7, verification deferred)
+### Phase 5: Android GPU Metrics (Weeks 9+)
 
-**Revised from Weeks 9+.** Two agents write the Adreno and Mali sysfs readers in parallel. The code is straightforward — the only uncertainty is whether the sysfs paths work on the actual device, which is deferred to post-merge.
-
-1. Implement `src/gpu/android.rs` with Adreno kgsl sysfs reader — **AI writes code, paths unverified**
-2. Add Mali sysfs reader for Exynos variants — **AI writes code, paths unverified**
-3. ~~Test on Z Fold 6; document exact sysfs paths confirmed readable~~ → **Deferred to post-merge human task**
+1. Implement `src/gpu/android.rs` with Adreno kgsl sysfs reader
+2. Add Mali sysfs reader for Exynos variants
+3. Test on Z Fold 6; document exact sysfs paths confirmed readable
 4. Add GPU clock to GPU dashboard card (clock more reliable than load on Android)
 5. Document Android GPU availability gaps in `docs/reference/android.md`
-
-### Revised Timeline Summary
-
-| Phase | Original | Revised | Delta | Primary Reason |
-|-------|----------|---------|-------|----------------|
-| Phase 1: Build Infrastructure | Weeks 1-2 | **Week 1** | -1 | Multiple agents pipeline debug cycles; one compiles while others pre-write fixes |
-| Phase 2: System Metrics | Weeks 3-4 | **Week 2** | -2 | Parallel agents; starts immediately after Phase 1 |
-| Phase 3: Touch & Foldable UX | Weeks 5-8 | **Weeks 3-5** | -3 | CSS parallelized; gesture thresholds use proven conventions; foldable bridge written defensively |
-| Phase 4: Security Hardening | Weeks 7-8 | **Week 6** | -2 | Security review items parallelized across agents; russh evaluation compressed |
-| Phase 5: GPU Metrics | Weeks 9+ | **Week 7** | deferred | Parallel Adreno/Mali readers; verification deferred to post-merge |
-| **Total** | **~9 weeks** | **~7 weeks** | **-22%** | Parallel huge-model agents absorb debug loops that bottleneck a single agent |
-
-**Key assumptions:**
-- Claude Code + Codex running concurrently; agents pipeline ahead of each other (one compiles, another pre-writes fixes)
-- One person providing physical device feedback for touch gestures (async, ~1 day turnaround)
-- Phase 1 → Phase 2 dependency is hard but Phase 1 is fast enough not to matter
-- Gesture thresholds start with proven Android conventions (500ms long-press, 60px swipe) requiring only 1 tuning round
-- AndroidKeyStore verification remains a human gate but runs in parallel with all other Phase 4 work
 
 ---
 
@@ -1434,14 +1360,8 @@ src/config.rs                — Android paths override
 src/agent.rs                 — `#[cfg(target_os = "android")]` temp file alternative (avoids tempfile→rustix)
 static/js/features/dashboard-ws.js     — Handle data.battery field
 static/js/features/dashboard-render.js — Render battery in system card
-static/js/features/nav.js              — Touch drag resize; left-edge swipe gesture
-static/js/features/chat-sessions-sidebar.js — Long-press context menus
-static/js/features/chat-input.js       — visualViewport keyboard avoidance
-static/js/features/user-menu.js        — Live prefers-color-scheme change listener
-static/js/features/android-foldable.js — Foldable state detection handler (new file)
-static/css/layout.css        — 420px breakpoint; pointer:coarse targets; overflow-scrolling
+static/css/layout.css        — max-width: 420px breakpoint; touch scrolling
 static/css/tokens.css        — env(safe-area-inset-*) variables
-static/css/cards-inference.css — backdrop-filter disable for budget devices
 .github/workflows/ci.yml     — check-android job
 .github/workflows/release.yml — build-android job
 AGENTS.md                   — Android in multi-platform checklist; Android pre-PR check
