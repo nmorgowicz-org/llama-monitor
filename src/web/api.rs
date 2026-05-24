@@ -1910,11 +1910,6 @@ fn api_put_auth_config(
 fn api_remote_agent_latest_release(
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    static LAST_REMOTE_AGENT_LATEST_RELEASE: AtomicU64 = AtomicU64::new(0);
-
     warp::path!("api" / "remote-agent" / "releases" / "latest")
         .and(warp::get())
         .and(warp::header::optional::<String>("authorization"))
@@ -1926,25 +1921,11 @@ fn api_remote_agent_latest_release(
                     return Ok(unauthorized_api_token());
                 }
 
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                let last = LAST_REMOTE_AGENT_LATEST_RELEASE.load(Ordering::Acquire);
-                if now - last < 30 {
-                    let remaining = 30 - (now - last);
-                    return Ok::<_, warp::Rejection>(Box::new(warp::reply::with_status(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": "too soon; please wait",
-                            "seconds_remaining": remaining
-                        })),
-                        warp::http::StatusCode::TOO_MANY_REQUESTS,
-                    ))
-                        as Box<dyn warp::reply::Reply>);
-                }
-                LAST_REMOTE_AGENT_LATEST_RELEASE.store(now, Ordering::Release);
-
+                // latest_release_info() has its own 60-second in-memory cache, so
+                // rapid re-calls (e.g. reopening the setup modal) are served from
+                // cache without hitting GitHub. A separate API-level rate limiter
+                // was redundant and caused "Unavailable" when the modal was
+                // reopened within 30 seconds.
                 match crate::agent::latest_release_info().await {
                     Ok(release) => Ok::<_, warp::Rejection>(Box::new(warp::reply::json(
                         &serde_json::json!({"ok": true, "release": release}),
@@ -2399,10 +2380,9 @@ fn api_remote_agent_start(
                                 as Box<dyn warp::reply::Reply>);
                         }
                     };
-                    let install_path = match request.get("install_path") {
-                        Some(v) => v.as_str().unwrap_or("").to_string(),
-                        None => crate::agent::default_install_path_for_target(&ssh_target).await,
-                    };
+                    // Hydrate the SSH connection before resolving install_path so that
+                    // the OS detection fallback uses an authenticated connection rather
+                    // than a bare target string (which fails auth → Unknown OS → wrong path).
                     let ssh_connection = match hydrate_ssh_connection(
                         request
                             .get("ssh_connection")
@@ -2418,8 +2398,18 @@ fn api_remote_agent_start(
                                 as Box<dyn warp::reply::Reply>);
                         }
                     };
+                    // Detect OS once using the hydrated connection and reuse for
+                    // both install_path resolution and command generation.
+                    let remote_os = if let Some(ref conn) = ssh_connection {
+                        crate::agent::detect_remote_os_with(conn).await
+                    } else {
+                        crate::agent::detect_remote_os_simple(&ssh_target).await
+                    };
+                    let install_path = match request.get("install_path").and_then(|v| v.as_str()) {
+                        Some(p) if !p.is_empty() => p.to_string(),
+                        _ => crate::agent::default_install_path_for_os(remote_os),
+                    };
                     let command = if let Some(ref conn) = ssh_connection {
-                        let remote_os = crate::agent::detect_remote_os_with(conn).await;
                         crate::agent::default_start_command_for_os_with(
                             conn,
                             remote_os,

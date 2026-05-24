@@ -199,7 +199,43 @@ npm run validate-js
 
 # Lint static/js with ESLint (catches XSS, no-undef, import-assign)
 npm run lint
+
+# Check for whitespace/indentation issues (CI enforces this)
+git diff --check
 ```
+
+### Mandatory pre-PR checks
+
+Before pushing or marking a PR ready, agents MUST run these steps in this exact order.
+Any step that modifies files must be committed before continuing.
+
+1. `cargo fmt`
+   - If it changes files, commit them (e.g., `chore: apply cargo fmt`).
+   - Do not push until formatting is committed.
+
+2. `cargo clippy -- -D warnings`
+   - Fix all warnings.
+   - If fixes introduce new formatting changes, run `cargo fmt` again and commit.
+
+3. `cargo test` (or a focused subset if the full suite is too slow; CI will run it)
+   - Do not push with known test failures.
+
+4. `npm run validate-js`
+5. `npm run lint`
+   - Fix issues; re-run after changes.
+
+6. `git diff --check`
+   - Run this AFTER all previous steps, on the final committed state.
+   - If it reports issues, fix them and re-run.
+
+7. Final consistency check (CRITICAL):
+   - Run: `git status`
+   - Ensure:
+     - No uncommitted changes from fmt/clippy/lint.
+     - No generated files (e.g., src/gen/*) left uncommitted after toolchain changes.
+   - If anything is uncommitted, commit it before pushing.
+
+If any of these fail, fix the issues before pushing.
 
 ## Documentation Maintenance
 
@@ -829,9 +865,10 @@ Archive docs are useful context, but they are not the canonical definition of cu
 These are concrete implementation rules. Violations in these areas have caused real bugs. Follow them exactly.
 
 #### Randomness
-- **Always use `rand_core::OsRng`** for any security-sensitive random value: tokens, nonces, session IDs, CSP nonces, key material.
-- **Never derive security values from** timestamps, PIDs, thread IDs, or any other predictable system state — even as a “fallback.” A predictable nonce or token defeats its entire purpose.
-- The `OsRng` API works cross-platform including Windows. There is no valid reason for a non-`OsRng` path in security code.
+- **Primary: use `getrandom::getrandom()`** for any security-sensitive random bytes: tokens, nonces, session IDs, CSP nonces, key material.
+- **Use `rand_core::OsRng` only when a concrete RNG trait object is required** (e.g. argon2 `SaltString::generate`), never as a general-purpose random source.
+- **Never derive security values from** timestamps, PIDs, thread IDs, or any other predictable system state — even as a "fallback." A predictable nonce or token defeats its entire purpose.
+- Both `getrandom` and `rand_core::OsRng` work cross-platform including Windows. There is no valid reason for a non-system RNG path in security code.
 
 #### Token comparison
 - **Always use `subtle::ConstantTimeEq`** (already a dependency via `subtle` crate) when comparing tokens, passwords, or any secret string.
@@ -860,7 +897,7 @@ Before marking a PR ready-to-test, the agent MUST verify every item below. This 
 - [ ] **Auth on all mutating endpoints**: every new POST/PUT/PATCH/DELETE requires at minimum `api-token`; destructive or irreversible operations require `db-admin-token`.
 - [ ] **Token rotation updates in-memory state**: if rotating a token, the live `AppConfig` is updated atomically alongside the on-disk file.
 - [ ] **No `==` on secrets**: all token/credential comparisons use `subtle::ConstantTimeEq`, not `==`.
-- [ ] **No predictable randomness**: all new nonces, tokens, session IDs use `OsRng`. No timestamp/PID fallbacks.
+- [ ] **No predictable randomness**: all new nonces, tokens, session IDs use `getrandom::getrandom()` (or `rand_core::OsRng` when a trait RNG is required). No timestamp/PID fallbacks.
 - [ ] **No direct file ops on live SQLite**: use `ChatStorage::backup()` API; handle WAL sidecars on restore.
 - [ ] **All new file paths from user input** are validated (reject `..`, leading `/`, `\`) and canonicalized within an allowed root.
 - [ ] **No new innerHTML/insertAdjacentHTML** with untrusted data; use `textContent` or `DOMPurify`.

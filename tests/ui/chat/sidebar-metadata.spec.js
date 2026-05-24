@@ -22,53 +22,51 @@ test.describe('sidebar message count', () => {
   });
 
   test('shows message count for inactive tab', async ({ page }) => {
-    // Create a second tab and add messages to the first tab
-    await page.evaluate(async () => {
+    const firstTabId = await page.evaluate(async () => {
       const { chat } = await import('/js/core/app-state.js');
       const { newChatTab, switchChatTab } = await import('/js/features/chat-state.js');
       const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
 
-      // Add messages to the first tab
       const firstTab = chat.tabs[0];
       firstTab.messages = [
         { role: 'user', content: 'Hello', timestamp_ms: Date.now() - 2000 },
         { role: 'assistant', content: 'Hi there!', timestamp_ms: Date.now() - 1000 },
       ];
 
-      // Create and switch to second tab
       const tab2 = newChatTab('Second Tab');
       chat.tabs.push(tab2);
       await switchChatTab(tab2.id);
       renderChatSessionsSidebar();
+
+      return firstTab.id;
     });
 
-    // First tab should show message count in sidebar
-    const firstItem = page.locator('#csp-list .csp-item').first();
+    const firstItem = page.locator(`#csp-list .csp-item[data-tab-id="${firstTabId}"]`);
     const countEl = firstItem.locator('.csp-item-count');
     await expect(countEl).toBeVisible();
     await expect(countEl).toContainText('2 msgs');
   });
 
   test('inactive tab uses message_count from backend when not loaded', async ({ page }) => {
-    await page.evaluate(async () => {
+    const firstTabId = await page.evaluate(async () => {
       const { chat } = await import('/js/core/app-state.js');
       const { newChatTab, switchChatTab } = await import('/js/features/chat-state.js');
       const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
 
-      // Simulate unloaded tab with backend message_count
       const firstTab = chat.tabs[0];
       firstTab.messages = null;
       firstTab._loaded = false;
       firstTab.message_count = 5;
 
-      // Switch to second tab
       const tab2 = newChatTab('Tab 2');
       chat.tabs.push(tab2);
       await switchChatTab(tab2.id);
       renderChatSessionsSidebar();
+
+      return firstTab.id;
     });
 
-    const firstItem = page.locator('#csp-list .csp-item').first();
+    const firstItem = page.locator(`#csp-list .csp-item[data-tab-id="${firstTabId}"]`);
     const countEl = firstItem.locator('.csp-item-count');
     await expect(countEl).toBeVisible();
     await expect(countEl).toContainText('5 msgs');

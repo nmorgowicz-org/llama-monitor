@@ -328,6 +328,11 @@ struct GithubAsset {
 }
 
 pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
+    // Install the ring CryptoProvider before any rustls usage. The dashboard
+    // mode gets this for free via reqwest/hyper-rustls, but the agent runs
+    // without those and would otherwise panic at ServerConfig::builder().
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let bind_addr = format!("{}:{}", app_config.agent_host, app_config.agent_port)
         .parse::<SocketAddr>()
         .context("invalid agent bind address")?;
@@ -584,23 +589,48 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     let mut ca_pems: Vec<String> = Vec::new();
 
     // Legacy single CA (for backward compatibility)
-    if let Some(ca) = crate::certs::Cert::load(
-        &crate::certs::certs_dir().join("ca.pem"),
-        &crate::certs::certs_dir().join("ca.key"),
-    ) {
+    let legacy_ca_path = crate::certs::certs_dir().join("ca.pem");
+    eprintln!(
+        "[agent] Searching for CA: legacy path {}",
+        legacy_ca_path.display()
+    );
+    if let Some(ca) =
+        crate::certs::Cert::load(&legacy_ca_path, &crate::certs::certs_dir().join("ca.key"))
+    {
+        eprintln!("[agent] Loaded legacy CA from {}", legacy_ca_path.display());
         ca_pems.push(ca.pem);
     }
 
-    // Multi-CA directory
-    let cas_dir = crate::certs::agent_cas_dir();
-    if let Ok(entries) = std::fs::read_dir(&cas_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("pem")
-                && let Ok(pem) = std::fs::read_to_string(&path)
-            {
-                ca_pems.push(pem);
+    // Collect all cas/ directories to search: the config-based certs dir and,
+    // for managed installs, the directory next to the running binary (where the
+    // dashboard drops the CA during remote install).
+    let mut cas_dirs_to_search = vec![crate::certs::agent_cas_dir()];
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(exe_dir) = exe.parent()
+    {
+        let install_cas = exe_dir.join("cas");
+        if install_cas != crate::certs::agent_cas_dir() {
+            cas_dirs_to_search.push(install_cas);
+        }
+    }
+
+    for cas_dir in &cas_dirs_to_search {
+        eprintln!("[agent] Searching for CAs in {}", cas_dir.display());
+        if let Ok(entries) = std::fs::read_dir(cas_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("pem")
+                    && let Ok(pem) = std::fs::read_to_string(&path)
+                {
+                    eprintln!("[agent] Loaded CA from {}", path.display());
+                    ca_pems.push(pem);
+                }
             }
+        } else {
+            eprintln!(
+                "[agent] CA directory not found or unreadable: {}",
+                cas_dir.display()
+            );
         }
     }
 
@@ -614,15 +644,23 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
         ca_pems.len()
     );
 
-    let agent_server_cert = load_install_dir_agent_server_cert().unwrap_or_else(|| {
+    let agent_server_cert = if let Some(cert) = load_install_dir_agent_server_cert() {
+        eprintln!("[agent] Using pre-provisioned server cert from install dir");
+        cert
+    } else {
+        eprintln!("[agent] No pre-provisioned server cert found; generating self-signed cert");
         crate::certs::ensure_agent_server_cert(vec![
             "localhost".to_string(),
             "127.0.0.1".to_string(),
         ])
-    });
+    };
 
+    eprintln!("[agent] Building mTLS server config...");
     let tls_config = match crate::certs::build_agent_tls_config(ca_pems, agent_server_cert) {
-        Ok(cfg) => cfg,
+        Ok(cfg) => {
+            eprintln!("[agent] mTLS server config built successfully");
+            cfg
+        }
         Err(e) => {
             eprintln!("[agent] Failed to build mTLS config: {e}; agent cannot start without mTLS");
             return Err(anyhow::anyhow!("agent mTLS config build failed: {e}"));
@@ -1464,19 +1502,38 @@ async fn detect_remote_temp_dir(connection: &SshConnection, os: RemoteOs) -> Str
         RemoteOs::Unknown => return "/tmp".to_string(),
     };
 
-    match tokio::time::timeout(
+    if let Ok(Ok(output)) = tokio::time::timeout(
         Duration::from_secs(5),
         remote_ssh::exec(connection.clone(), temp_cmd),
     )
     .await
     {
-        Ok(Ok(output)) if output.status == 0 && !output.stdout.trim().is_empty() => {
-            output.stdout.trim().to_string()
+        let s = output.stdout.trim().to_string();
+        if output.status == 0 && !s.is_empty() && !s.starts_with('%') {
+            return s;
         }
-        _ => match os {
-            RemoteOs::Windows => "C:\\\\Windows\\\\Temp".to_string(),
-            _ => "/tmp".to_string(),
-        },
+    }
+
+    // cmd.exe failed or returned unexpanded %TEMP% — try PowerShell (same
+    // approach used to resolve %APPDATA%).
+    if os == RemoteOs::Windows {
+        if let Ok(Ok(out)) = tokio::time::timeout(
+            Duration::from_secs(5),
+            remote_ssh::exec(
+                connection.clone(),
+                "powershell.exe -NoProfile -NonInteractive -Command \"$env:TEMP\"".to_string(),
+            ),
+        )
+        .await
+        {
+            let s = out.stdout.trim().to_string();
+            if out.status == 0 && !s.is_empty() && s.contains('\\') && !s.starts_with('%') {
+                return s;
+            }
+        }
+        "C:\\Windows\\Temp".to_string()
+    } else {
+        "/tmp".to_string()
     }
 }
 
@@ -1977,18 +2034,44 @@ pub mod install {
             return;
         };
         let install_dir = &install_path[..dir_end];
-        let cas_dir = format!("{}{}cas", install_dir, sep);
 
-        // Ensure cas/ directory exists on the remote
+        // Resolve %APPDATA% to a real path before using it as an SCP destination —
+        // SCP does not expand Windows environment variables.
+        let resolved_install_dir = if os == RemoteOs::Windows {
+            if let Some(appdata) = resolve_windows_appdata(connection).await {
+                eprintln!("[agent] Resolved %APPDATA% → {appdata} for CA SCP path");
+                install_dir.replace("%APPDATA%", &appdata)
+            } else {
+                eprintln!(
+                    "[agent] Could not resolve %APPDATA%; SCP may fail if path contains env vars"
+                );
+                install_dir.to_string()
+            }
+        } else {
+            install_dir.to_string()
+        };
+
+        let cas_dir = format!("{}{}cas", install_dir, sep);
+        let resolved_cas_dir = format!("{}{}cas", resolved_install_dir, sep);
+
+        // Ensure cas/ directory exists on the remote. Use the fully-resolved path
+        // so the mkdir works regardless of whether %APPDATA% is set in the SSH session env.
         let mkdir_cmd = if os == RemoteOs::Windows {
+            let ps_dir = resolved_cas_dir.replace('\'', "''");
             format!(
-                "cmd.exe /C if not exist \"{}\" mkdir \"{}\"",
-                cas_dir, cas_dir
+                "powershell.exe -NoProfile -NonInteractive -Command \"New-Item -ItemType Directory -Path '{ps_dir}' -Force | Out-Null\""
             )
         } else {
             format!("mkdir -p '{}'", cas_dir)
         };
-        let _ = remote_ssh::exec(connection.clone(), mkdir_cmd).await;
+        if let Ok(out) = remote_ssh::exec(connection.clone(), mkdir_cmd).await
+            && out.status != 0
+        {
+            eprintln!(
+                "[warn] Failed to create cas/ directory on remote: {}",
+                out.stderr.trim()
+            );
+        }
 
         // Stable instance ID: hash of this instance's CA public key.
         let instance_id = {
@@ -2005,7 +2088,7 @@ pub mod install {
         };
 
         let ca = crate::certs::ensure_ca();
-        let remote_ca_path = format!("{}{}{}.pem", cas_dir, sep, instance_id);
+        let remote_ca_path = format!("{}{}{}.pem", resolved_cas_dir, sep, instance_id);
 
         // Write CA cert to temp file and copy to remote
         let local_tmp = tempfile::NamedTempFile::new_in(std::env::temp_dir())
@@ -2013,14 +2096,18 @@ pub mod install {
             .unwrap_or_else(|_| std::env::temp_dir().join("ca.pem"));
 
         if std::fs::write(&local_tmp, &ca.pem).is_ok() {
-            let _ = remote_ssh::copy_to_remote(
+            let result = remote_ssh::copy_to_remote(
                 connection.clone(),
                 local_tmp.to_string_lossy().to_string(),
                 remote_ca_path.clone(),
                 0o644,
             )
             .await;
-            eprintln!("[info] Installed CA as {} on remote agent", remote_ca_path);
+            if result.is_ok() {
+                eprintln!("[info] Installed CA as {} on remote agent", remote_ca_path);
+            } else {
+                eprintln!("[warn] Failed to install CA on remote agent: {:?}", result);
+            }
         }
         let _ = std::fs::remove_file(&local_tmp);
     }
@@ -2048,8 +2135,20 @@ pub mod install {
             return;
         };
         let install_dir = &install_path[..dir_end];
-        let remote_cert_path = format!("{}{}agent-server.pem", install_dir, sep);
-        let remote_key_path = format!("{}{}agent-server.key", install_dir, sep);
+
+        // Resolve %APPDATA% before using as SCP destination.
+        let resolved_install_dir = if os == RemoteOs::Windows {
+            if let Some(appdata) = resolve_windows_appdata(connection).await {
+                install_dir.replace("%APPDATA%", &appdata)
+            } else {
+                install_dir.to_string()
+            }
+        } else {
+            install_dir.to_string()
+        };
+
+        let remote_cert_path = format!("{}{}agent-server.pem", resolved_install_dir, sep);
+        let remote_key_path = format!("{}{}agent-server.key", resolved_install_dir, sep);
 
         let cert = crate::certs::generate_agent_server_cert(managed_agent_server_sans(connection));
         let local_cert_tmp = tempfile::NamedTempFile::new_in(std::env::temp_dir())
@@ -2060,22 +2159,30 @@ pub mod install {
             .unwrap_or_else(|_| std::env::temp_dir().join("agent-server.key"));
 
         if std::fs::write(&local_cert_tmp, &cert.pem).is_ok() {
-            let _ = remote_ssh::copy_to_remote(
+            match remote_ssh::copy_to_remote(
                 connection.clone(),
                 local_cert_tmp.to_string_lossy().to_string(),
-                remote_cert_path,
+                remote_cert_path.clone(),
                 0o644,
             )
-            .await;
+            .await
+            {
+                Ok(()) => {
+                    eprintln!("[agent] Installed agent server cert at {remote_cert_path}")
+                }
+                Err(e) => eprintln!("[warn] Failed to install agent server cert: {e}"),
+            }
         }
-        if std::fs::write(&local_key_tmp, &cert.key).is_ok() {
-            let _ = remote_ssh::copy_to_remote(
+        if std::fs::write(&local_key_tmp, &cert.key).is_ok()
+            && let Err(e) = remote_ssh::copy_to_remote(
                 connection.clone(),
                 local_key_tmp.to_string_lossy().to_string(),
-                remote_key_path,
+                remote_key_path.clone(),
                 0o600,
             )
-            .await;
+            .await
+        {
+            eprintln!("[warn] Failed to install agent server key: {e}");
         }
 
         let _ = std::fs::remove_file(&local_cert_tmp);
@@ -2096,15 +2203,27 @@ pub mod install {
             return;
         };
         let install_dir = &install_path[..dir_end];
-        let config_path = if os == RemoteOs::Windows {
-            format!("{}{}remote-agent-config.json", install_dir, sep)
-        } else {
-            format!("{}/remote-agent-config.json", install_dir)
-        };
 
         let token = match api_token {
             Some(t) if !t.is_empty() => t.to_string(),
             _ => return,
+        };
+
+        // Resolve %APPDATA% before using as SCP destination.
+        let resolved_install_dir = if os == RemoteOs::Windows {
+            if let Some(appdata) = resolve_windows_appdata(connection).await {
+                install_dir.replace("%APPDATA%", &appdata)
+            } else {
+                install_dir.to_string()
+            }
+        } else {
+            install_dir.to_string()
+        };
+
+        let config_path = if os == RemoteOs::Windows {
+            format!("{}{}remote-agent-config.json", resolved_install_dir, sep)
+        } else {
+            format!("{}/remote-agent-config.json", resolved_install_dir)
         };
 
         let config_json = serde_json::json!({
@@ -2123,13 +2242,16 @@ pub mod install {
         }
 
         // On Unix/macOS, use restrictive permissions (0600) so only the agent process can read it.
-        let _ = remote_ssh::copy_to_remote(
+        if let Err(e) = remote_ssh::copy_to_remote(
             connection.clone(),
             local_tmp.to_string_lossy().to_string(),
-            config_path,
+            config_path.clone(),
             0o600,
         )
-        .await;
+        .await
+        {
+            eprintln!("[warn] Failed to install remote-agent-config.json: {e}");
+        }
 
         let _ = std::fs::remove_file(&local_tmp);
     }
@@ -2651,6 +2773,19 @@ Start-Sleep -Seconds 2\""
             command
         );
         eprintln!("[agent] Install path: {}", install_path);
+
+        // Ensure CA and server certs are provisioned before starting. The agent
+        // requires the CA to start (mTLS), and the install step may have failed
+        // to copy it if the cas/ directory wasn't created.
+        let os_for_certs = if install_path.contains('\\')
+            || install_path.to_ascii_lowercase().contains("appdata")
+        {
+            RemoteOs::Windows
+        } else {
+            RemoteOs::Unix
+        };
+        drop_ca_certificate(&connection, install_path, os_for_certs).await;
+        drop_agent_server_certificate(&connection, install_path, os_for_certs).await;
         let start_warning = match tokio::time::timeout(
             Duration::from_secs(15),
             remote_ssh::exec(connection.clone(), command.to_string()),
@@ -2692,24 +2827,43 @@ Start-Sleep -Seconds 2\""
         eprintln!("[agent] Checking agent health at {}", agent_url);
         // /health requires no auth; token is read after startup to avoid a race
         // where a freshly-started agent hasn't written its token file yet.
-        let health_reachable = tokio::time::timeout(Duration::from_secs(20), async {
+        //
+        // Build HTTPS/HTTP clients once and reuse them across all 20 attempts.
+        // Use a 1-second per-request timeout so 20 attempts fit within the
+        // 30-second outer timeout even on slow or firewalled networks.
+        let health_https = build_agent_https_client(Duration::from_secs(1));
+        let health_http = build_plain_http_client(Duration::from_secs(1));
+        let health_reachable = tokio::time::timeout(Duration::from_secs(30), async {
             for i in 1..=20 {
                 eprintln!("[agent] Health check attempt {}/20...", i);
-                if agent_health_reachable_with_token(&agent_url, None).await {
+                let reached = 'check: {
+                    for candidate in agent_url_candidates(&agent_url) {
+                        let client =
+                            agent_client_for_url(&candidate, health_https.as_ref(), &health_http);
+                        if let Ok(resp) = client.get(format!("{}/health", candidate)).send().await
+                            && resp.status().is_success()
+                        {
+                            break 'check true;
+                        }
+                    }
+                    false
+                };
+                if reached {
                     eprintln!("[agent] Agent health check passed");
-                    break;
+                    return true;
                 }
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
+            false
         })
         .await;
 
-        let running = health_reachable.is_ok();
+        let running = matches!(health_reachable, Ok(true));
 
         let error = if !running {
             let health_error = match health_reachable {
-                Err(tokio::time::error::Elapsed { .. }) => Some("Agent did not start within 20 seconds. Check if the agent is listening on 0.0.0.0:7779 and if the remote firewall allows inbound connections on port 7779.".to_string()),
-                Ok(()) => None,
+                Err(tokio::time::error::Elapsed { .. }) => Some("Agent did not start within 30 seconds. Check if the agent is listening on 0.0.0.0:7779 and if the remote firewall allows inbound connections on port 7779.".to_string()),
+                Ok(_) => None,
             };
             if health_error.is_some() {
                 health_error
@@ -2949,7 +3103,8 @@ Start-Sleep -Seconds 2\""
                 "cmd.exe /C taskkill /IM llama-monitor.exe /F >NUL 2>NUL & schtasks /Delete /TN \"{WINDOWS_AGENT_TASK_NAME}\" /F >NUL 2>NUL & schtasks /Delete /TN \"{WINDOWS_AGENT_LEGACY_TASK_NAME}\" /F >NUL 2>NUL & del /F /Q \"{install_path}\" >NUL 2>NUL & exit /B 0"
             ),
             RemoteOs::Unix | RemoteOs::Macos => {
-                format!("pkill -f llama-monitor >/dev/null 2>&1; rm -f {install_path}")
+                let quoted = shell_quote_path(&install_path, os);
+                format!("pkill -f llama-monitor >/dev/null 2>&1; rm -f {quoted}")
             }
             RemoteOs::Unknown => return Err(io::Error::other("Unknown OS").into()),
         };
@@ -3029,10 +3184,6 @@ Start-Sleep -Seconds 2\""
         } else {
             Ok(None)
         }
-    }
-
-    pub async fn default_install_path_for_target(ssh_target: &str) -> String {
-        default_install_path_for_os(detect_remote_os(ssh_target).await)
     }
 
     pub async fn default_start_command_for_target(ssh_target: &str, install_path: &str) -> String {
@@ -3203,9 +3354,9 @@ Start-Sleep -Seconds 2\""
 }
 
 pub use install::{
-    RemoteAgentInstallRequest, default_install_path_for_target, default_start_command_for_target,
-    detect_remote_os_simple, install_remote_agent, remove_remote_agent, self_update_binary,
-    start_remote_agent, status_remote_agent, stop_remote_agent, update_remote_agent,
+    RemoteAgentInstallRequest, default_start_command_for_target, detect_remote_os_simple,
+    install_remote_agent, remove_remote_agent, self_update_binary, start_remote_agent,
+    status_remote_agent, stop_remote_agent, update_remote_agent,
 };
 
 #[cfg(test)]

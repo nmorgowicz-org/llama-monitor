@@ -414,12 +414,16 @@ function formatNoteTime(timestamp) {
     const diffMs = now - date;
     const diffMins = Math.floor(diffMs / 60000);
     const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
+
+    // Use local-time day boundaries so "Xd ago" matches calendar days.
+    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+    const dateStart = new Date(date); dateStart.setHours(0, 0, 0, 0);
+    const dayDiff = Math.floor((todayStart - dateStart) / 86400000);
 
     if (diffMins < 1) return 'Just now';
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
+    if (dayDiff < 7) return `${dayDiff}d ago`;
     return date.toLocaleDateString();
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "llama-monitor"
-version = "0.21.1"
+version = "0.21.4"
 edition = "2024"
 
 [features]
@@ -17,9 +17,10 @@ hyper-util = { version = "0.1", features = ["server", "tokio"] }
 hyper-rustls = { version = "0.27", default-features = false, features = ["ring"] }
     base64 = "0.22"
     aes-gcm = "0.10"
-    argon2 = "0.5"
+    argon2 = { version = "0.6.0-rc.8", features = ["rand_core"] }
     subtle = "2"
-    rand_core = { version = "0.6", features = ["getrandom"] }
+   rand = "0.10"
+    rand_core = "0.10"
     sha1 = "0.11"
     sha2 = "0.11"
     hkdf = "0.13"
@@ -36,7 +37,7 @@ hyper-rustls = { version = "0.27", default-features = false, features = ["ring"]
     serde_json = "1"
     shlex = "2"
     ssh2 = { version = "0.9", features = ["vendored-openssl"] }
-    sysinfo = "0.38"
+    sysinfo = "0.39"
     tempfile = "3"
     tokio = { version = "1.52", features = ["full"] }
     tokio-stream = "0.1"
