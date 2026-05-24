@@ -1236,9 +1236,15 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 
 ## 13. Phased Implementation Plan
 
-### Phase 1: Build Infrastructure and Skeleton (Weeks 1-2)
+> **Timeline note (2026-05-24):** Revised for 100% AI-agent development with Claude Code + Codex running in parallel. With multiple huge-model agents working concurrently, debug cycles that would bottleneck a single agent are absorbed — one agent compiles while another pre-writes the next fix, a third drafts the Kotlin side, and a fourth prepares CI configs. The bottleneck shifts from "waiting for compilation" to "waiting for physical device feedback."
 
-**Goal:** APK installs; WebView loads dashboard; remote metrics from ryne visible.
+### Phase 1: Build Infrastructure and Skeleton (Week 1)
+
+**Revised from Weeks 1-2.** With multiple agents running in parallel, Wave A (Rust backends), Wave B (JNI), and Wave C (Gradle/Kotlin) overlap aggressively. One agent iterates on `cargo ndk build` errors while others pre-write fixes for known issues (tempfile/rustix workaround, rusqlite+NDK linking flags, JNI symbol naming). The 5-7 debug cycles that would take days for a single agent compress to hours when agents pipeline ahead of each other. Runner image rebuild is the only hard blocker (~1-2 hours).
+
+**Wave A (Day 1 morning):** Steps 1, 3-6, 11 — parallel generation.
+**Wave B (Day 1 afternoon):** Step 2 (JNI) + first `cargo ndk build` attempt; debug cycles begin.
+**Wave C (Day 1-2):** Steps 7-9 (Gradle/Kotlin/cargo-ndk) overlap with debug cycles; steps 10-12 (CI, runner image) follow.
 
 1. Add `ssh-control` and `android` features to `Cargo.toml`; move `ssh2` under `ssh-control`
 2. Create `src/android/mod.rs` — JNI entry points (start/stop/status/setPollInterval)
@@ -1252,15 +1258,15 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 9. Add `cargo-ndk` task to Gradle; configure `.cargo/config.toml`
 10. Add `check-android` job to `.github/workflows/ci.yml`
 11. Update `AGENTS.md` pre-PR checklist with Android check command
-12. Merge NDK + `aarch64-linux-android` + `cargo-ndk` changes to `llama-monitor-runner` and trigger image rebuild (prerequisite for jobs in steps 10 and Phase 1 release build)
+12. Merge NDK + `aarch64-linux-android` + `cargo-ndk` changes to `llama-monitor-runner` and trigger image rebuild (prerequisite for jobs in step 10 and Phase 1 release build)
 
 **Before merging:** Run `cargo check --target x86_64-pc-windows-gnu` (always required), `cargo check --target aarch64-linux-android`, `cargo clippy -- -D warnings`, `cargo fmt`. Update `docs/reference/` with Android build instructions.
 
 **Deliverable:** APK installs on Z Fold 6. Dashboard shows with remote agent metrics from ryne. Local Android metrics show correct `availability` codes (no silent nulls).
 
-### Phase 2: Android System Metrics (Weeks 3-4)
+### Phase 2: Android System Metrics (Week 2)
 
-**Goal:** Battery, CPU load/name, and available thermal metrics live in dashboard.
+**Revised from Weeks 3-4.** With Phase 1 collapsing to 1 week, Phase 2 starts immediately. Multiple agents write battery.rs, thermal.rs, BatteryMetrics struct, JS handlers, and adaptive polling in parallel. The only sequential dependency is validating JNI data passing end-to-end, which takes one feedback round.
 
 1. Implement `src/android/battery.rs` — `updateBatteryMetrics` JNI receiver
 2. Implement `src/android/thermal.rs` — enumerate `/sys/class/thermal/`, filter readable
@@ -1273,13 +1279,14 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 
 **Deliverable:** System card shows CPU load, battery level/temp/charging state; polling adapts to screen state.
 
-### Phase 3: Touch Interaction and Foldable UX (Weeks 5-8)
+### Phase 3: Touch Interaction and Foldable UX (Weeks 3-5)
 
-**Goal:** App fully touch-operable; adapts to folded/unfolded states; chat input works with soft keyboard.
+**Revised from Weeks 5-8.** CSS work (3A) collapses to a day with parallel agents. Touch JS (3B) and foldable detection (3C) can be written in parallel — the only thing that requires physical device feedback is gesture threshold tuning, which is a small number of async rounds. With multiple agents, one tests on device while another pre-writes the adjusted thresholds based on feedback.
 
-**Note:** All touch interaction features are built from scratch — none exist in the current codebase. This phase is larger than it appears because the UI has zero touch support.
+#### 3A: CSS Mobile Foundations (Week 3, days 1-2)
 
-#### 3A: CSS Mobile Foundations
+All 5 items generated in parallel across agents. Items 1 and 3 share `layout.css` so one agent owns that file.
+
 1. **Folded cover breakpoint** — Add `@media (max-width: 420px)` to `static/css/layout.css`:
    - Hide sidebar nav, full-width content area, reduced padding on dashboard header and view
    - Must include `[data-theme="light"]` overrides
@@ -1292,47 +1299,82 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
    - Apply to `.top-nav` (padding-top) and `.chat-input-area` (padding-bottom)
 5. **Backdrop-filter disable** — Add `@media (pointer: coarse) and (max-resolution: 2.5dppx)` to `static/css/cards-inference.css` to disable `backdrop-filter` on `.widget-card` for budget devices
 
-#### 3B: Touch Interaction (JavaScript)
+#### 3B: Touch Interaction (Weeks 3-4)
+
+All 5 touch features written in parallel. Gesture thresholds start with standard values (500ms long-press, 60px swipe) which are proven Android conventions. One round of device feedback tunes them, while another agent pre-writes the adjusted code.
+
 6. **Sidebar drag-to-resize** — In `static/js/features/nav.js`, add `touchstart`/`touchmove`/`touchend` handlers to `.sidebar-resize-handle` element, mirroring the existing `mousedown`/`mousemove`/`mouseup` logic (lines 244-264)
 7. **Left-edge swipe for sidebar** — In `static/js/features/nav.js`, add `touchstart`/`touchend` listeners on `document`:
    - `touchStartX < 30` and `dx > 60` → open sidebar
    - `dx < -60` → close sidebar
+   - **Note:** Thresholds need screen-width-relative values (30px is 10% of 390px cover but trivial on 932px unfolded)
 8. **Long-press context menus** — In `static/js/features/chat-sessions-sidebar.js`, add `touchstart`/`touchend`/`touchmove` handlers to session list items:
    - 500ms timer on `touchstart` → call existing `openContextMenu(item)`
    - Clear timer on `touchend` or `touchmove`
+   - **Note:** Finger drift during 500ms cancels — emulators don't simulate drift
 9. **Soft keyboard avoidance** — In `static/js/features/chat-input.js` (or wherever chat input is initialized), add `visualViewport.resize` listener to scroll `#chat-messages` to bottom on keyboard appearance
+   - **Note:** `visualViewport` behavior varies by API level and Chrome version in WebView
 10. **Live theme switching** — In `static/js/features/user-menu.js`, add `window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ...)` to update theme when Android system theme changes (existing code only checks on initial load at line 201)
 
-#### 3C: Foldable State Detection (Kotlin + JS)
+#### 3C: Foldable State Detection (Week 4)
+
+Kotlin, JS, and CSS written in parallel by separate agents. The Kotlin→JS bridge is the only untestable piece — written once with defensive null handling for non-foldable devices. CSS conflicts with `shell-width-*` classes resolved by one agent reading the existing layout system.
+
 11. **Kotlin foldable detection** — In `MainActivity.kt`, use `androidx.window:window-java` to detect `FoldingFeature` state and dispatch `foldstatechange` CustomEvent to WebView via `evaluateJavascript`
 12. **JS foldable handler** — Create `static/js/features/android-foldable.js`:
     - Listen for `foldstatechange` event
     - Toggle `body.is-folded`, `body.is-unfolded`, `body.is-half` classes
 13. **Two-panel unfolded layout** — Add CSS for `body.is-unfolded #page-chat` (2-column grid) and `body.is-unfolded #page-server .dashboard-grid` (full 12-column grid). Must include `[data-theme="light"]` overrides
 
-#### 3D: Verification
+#### 3D: Verification and Integration (Week 5)
+
+Playwright validates desktop regression. Physical device testing of gestures and fold state happens in one focused pass.
+
 14. Run Playwright UI tests; update selectors if any element IDs changed
 15. Run `npm run lint` and `npm run validate-js` on all modified JS files
+16. **Physical device validation** — Test all gestures, fold state transitions, and soft keyboard behavior on Z Fold 6; adjust thresholds as needed
 
 **Deliverable:** App fully touch-operable; adapts to folded/unfolded states; chat input works with soft keyboard.
 
-### Phase 4: Security Hardening and SSH Control Evaluation (Weeks 7-8)
+### Phase 4: Security Hardening and SSH Control Evaluation (Week 6)
 
-1. Verify AndroidKeyStore integration in production (not just emulator)
+**Revised from Weeks 7-8.** With multiple agents, security review items run in parallel — one agent audits JNI bridge security, another checks WebView/network security config, a third reviews auth patterns. The russh evaluation compresses to a few days when agents read docs and write prototypes concurrently. AndroidKeyStore verification remains a human gate but runs in parallel with all other work.
+
+1. Verify AndroidKeyStore integration in production (not just emulator) — **human gate, runs in parallel, blocks sign-off**
 2. Implement TOFU certificate pinning for remote agent (extend `ssh-known-hosts` model)
 3. Add agent setup UI flow for Android (simplified settings wizard)
-4. Evaluate `russh` as pure-Rust SSH replacement — if viable, migrate desktop too
-5. Security review pass per AGENTS.md security checklist
+4. Evaluate `russh` as pure-Rust SSH replacement — **evaluation only; migration deferred to Phase 6 if viable**
+5. Security review pass per AGENTS.md security checklist — **~2 weeks for full Android surface area**
 
 **Deliverable:** Production-grade secret storage; certificate pinning; security review complete.
 
-### Phase 5: Android GPU Metrics (Weeks 9+)
+### Phase 5: Android GPU Metrics (Week 7, verification deferred)
 
-1. Implement `src/gpu/android.rs` with Adreno kgsl sysfs reader
-2. Add Mali sysfs reader for Exynos variants
-3. Test on Z Fold 6; document exact sysfs paths confirmed readable
+**Revised from Weeks 9+.** Two agents write the Adreno and Mali sysfs readers in parallel. The code is straightforward — the only uncertainty is whether the sysfs paths work on the actual device, which is deferred to post-merge.
+
+1. Implement `src/gpu/android.rs` with Adreno kgsl sysfs reader — **AI writes code, paths unverified**
+2. Add Mali sysfs reader for Exynos variants — **AI writes code, paths unverified**
+3. ~~Test on Z Fold 6; document exact sysfs paths confirmed readable~~ → **Deferred to post-merge human task**
 4. Add GPU clock to GPU dashboard card (clock more reliable than load on Android)
 5. Document Android GPU availability gaps in `docs/reference/android.md`
+
+### Revised Timeline Summary
+
+| Phase | Original | Revised | Delta | Primary Reason |
+|-------|----------|---------|-------|----------------|
+| Phase 1: Build Infrastructure | Weeks 1-2 | **Week 1** | -1 | Multiple agents pipeline debug cycles; one compiles while others pre-write fixes |
+| Phase 2: System Metrics | Weeks 3-4 | **Week 2** | -2 | Parallel agents; starts immediately after Phase 1 |
+| Phase 3: Touch & Foldable UX | Weeks 5-8 | **Weeks 3-5** | -3 | CSS parallelized; gesture thresholds use proven conventions; foldable bridge written defensively |
+| Phase 4: Security Hardening | Weeks 7-8 | **Week 6** | -2 | Security review items parallelized across agents; russh evaluation compressed |
+| Phase 5: GPU Metrics | Weeks 9+ | **Week 7** | deferred | Parallel Adreno/Mali readers; verification deferred to post-merge |
+| **Total** | **~9 weeks** | **~7 weeks** | **-22%** | Parallel huge-model agents absorb debug loops that bottleneck a single agent |
+
+**Key assumptions:**
+- Claude Code + Codex running concurrently; agents pipeline ahead of each other (one compiles, another pre-writes fixes)
+- One person providing physical device feedback for touch gestures (async, ~1 day turnaround)
+- Phase 1 → Phase 2 dependency is hard but Phase 1 is fast enough not to matter
+- Gesture thresholds start with proven Android conventions (500ms long-press, 60px swipe) requiring only 1 tuning round
+- AndroidKeyStore verification remains a human gate but runs in parallel with all other Phase 4 work
 
 ---
 
