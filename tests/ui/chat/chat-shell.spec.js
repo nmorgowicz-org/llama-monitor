@@ -235,7 +235,7 @@ test.describe('pin and favorite tabs', () => {
   });
 
  test('pinned tabs appear before unpinned tabs', async ({ page }) => {
-    // Pin the Chat 2 tab via JS
+    // Pin the Chat 2 tab via JS and re-render
     await page.evaluate(async () => {
       const { chat } = await import('/js/core/app-state.js');
       const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
@@ -246,10 +246,9 @@ test.describe('pin and favorite tabs', () => {
       }
     });
 
+    // Wait for sidebar to re-render with pinned section
+    await page.waitForSelector('#csp-list .csp-section-header:has-text("Pinned")', { timeout: 5000 });
     // Pinned items should be under the "Pinned" section header
-    const pinnedSection = page.locator('#csp-list .csp-section-header:has-text("Pinned")');
-    await expect(pinnedSection).toBeVisible();
-    // There should be at least one pinned item
     const pinnedItems = page.locator('#csp-list .csp-item[data-pinned="true"]');
     await expect(pinnedItems.first()).toBeVisible();
   });

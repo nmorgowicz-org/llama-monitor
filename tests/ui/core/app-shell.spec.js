@@ -106,8 +106,9 @@ test.describe('modals and menus', () => {
     await expect(page.locator('#models-list')).toBeVisible();
   });
 
-  test('profile menu remains open after click', async ({ page }) => {
+  test('profile menu opens and shows options', async ({ page }) => {
     await page.locator('#nav-user-btn').click();
+    await page.waitForSelector('#nav-user-menu-items', { state: 'visible', timeout: 5000 });
     await expect(page.locator('.nav-user-menu')).toHaveClass(/open/);
     await expect(page.getByRole('link', { name: 'Preferences' })).toBeVisible();
   });
