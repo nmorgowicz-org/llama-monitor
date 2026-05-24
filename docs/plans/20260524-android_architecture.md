@@ -2,27 +2,8 @@
 
 **Date:** 2026-05-24  
 **Author:** Claude (full codebase analysis)  
-**Status:** Revised v2 — supplemented with llama-monitor-runner repo analysis (2026-05-24)  
+**Status:** Draft  
 **Branch:** feat/android-compatibility
-
----
-
-## 0. Corrections to the Initial Draft
-
-Material inaccuracies in the initial draft that led to wrong assumptions:
-
-| Claim in Initial Draft | Reality |
-|---|---|
-| "wry, winit, tray-icon are blockers for Android" | These are **optional features** (`native-tray`, `webview-popover`) and drop out with `--no-default-features`. They are not unconditional blockers. |
-| "gtk is a blocker" | `gtk` is gated behind `cfg(target_os = "linux")`, which does **NOT** match `aarch64-linux-android` (target_os = "android"). It will not be compiled. |
-| "The existing web UI needs backend changes" | The web UI is **vanilla JS/ES modules, no framework, no bundler**. It can be embedded in the APK and served from a local warp server or loaded from assets. Zero rewrite required for basic function. |
-| "reqwest uses rustls by default" | Correct, and `default-features = false` is **already set** in Cargo.toml with explicit `rustls` feature. Android-clean as-is. |
-| "dirs 6 on Android — status UNCERTAIN" | `dirs` returns empty paths on Android (no XDG_* vars). Needs a single `#[cfg(target_os = "android")]` path override. Not a blocker. |
-| "ssh2 0.9 — UNCERTAIN" | The **only** reason ssh2 is problematic is `vendored-openssl`. Solvable by feature-gating ssh2 on Android. Not a fundamental blocker. |
-| "Chat history: rusqlite + SQLCipher" | The codebase uses `rusqlite` with `bundled` feature — plain SQLite, no SQLCipher. Bundled SQLite cross-compiles cleanly with NDK. |
-| "sensor_bridge uses stdout-based IPC" | The actual implementation is an **HTTP server on 127.0.0.1:7780** (already corrected in reference docs). |
-| No mention of PWA meta tags | index.html already has `apple-mobile-web-app-capable` and a `manifest.json`. The web UI is partially PWA-ready. |
-| No mention of existing responsive breakpoints | CSS has breakpoints down to 520px driven by `ResizeObserver`. The folded front panel (~370dp) triggers these automatically. |
 
 ---
 
@@ -91,7 +72,7 @@ Building with `--no-default-features` removes `wry`, `winit`, `tray-icon`, and a
 | `mac-notification-sys 0.6` | `cfg(target_os = "macos")` | ✅ Excluded |
 | `wmi 0.18.4` | `cfg(windows)` | ✅ Excluded |
 
-`cfg(target_os = "linux")` does **not** match `aarch64-linux-android`. This is a fundamental Rust target triple distinction that the initial draft missed entirely.
+`cfg(target_os = "linux")` does **not** match `aarch64-linux-android`. This is a fundamental Rust target triple distinction — `aarch64-linux-android` has `target_os = "android"`, not `"linux"`.
 
 ### 2.3 Real Remaining Issues After `--no-default-features`
 
@@ -101,6 +82,7 @@ Building with `--no-default-features` removes `wry`, `winit`, `tray-icon`, and a
 | `rusqlite 0.39` + `bundled` | Bundles SQLite C source | **Medium** | Solvable — SQLite cross-compiles cleanly with NDK; `bundled` feature is designed for this |
 | `dirs 6.0.0` | Returns empty paths on Android | **Low** | Single `#[cfg(target_os = "android")]` path override |
 | `sysinfo 0.39` | Reduced metrics on Android | **Low** | Use as-is; returns what Android allows |
+| `tempfile 3.27` | Depends on `rustix 1.1.4` which has unresolved Android compile errors (`linux_raw_sys` refs on bionic libc). PR #1577 to fix this has been open since Feb 2026 with no merge. | **High** | Use `#[cfg(target_os = "android")]` alternative: create temp files manually in app's private storage (`filesDir`) instead of relying on `tempfile` crate |
 | `src/main.rs` | Desktop entry with tray/GUI setup | **Medium** | Android uses cdylib JNI entry; `main.rs` excluded from cdylib target |
 | `src/system.rs` | Platform-specific commands/paths | **Medium** | Add `#[cfg(target_os = "android")]` backends |
 | `src/gpu/mod.rs` | No Android GPU backend | **Medium** | Add `AndroidGpuBackend` (dummy initially) |
@@ -183,7 +165,7 @@ Two approaches were considered:
 **Decision: Option B.**
 
 Rationale:
-1. **Zero web UI changes** — `dashboard-ws.js` connects to `location.host`. On Android, `location.host` is `127.0.0.1:PORT`. No modifications needed.
+1. **Zero web UI changes** — `dashboard-ws.js` connects to `location.host`. The WebView loads `http://127.0.0.1:PORT/` directly from the warp server (not `file://`), so `location.host` resolves to `127.0.0.1:PORT`. WebSocket and all `fetch` calls work without modification.
 2. **Reuses full existing message protocol** — JSON push schema, capability negotiation, availability enums, telemetry grades all work as-is.
 3. **Single code path** — Warp handlers, auth, and push logic serve Android identically to desktop.
 4. **Debuggable** — Chrome DevTools remote debugging works on Android WebView; the HTTP server can be hit directly with `adb forward`.
@@ -191,15 +173,19 @@ Rationale:
 
 Trade-off: ~2-5MB RAM overhead for loopback. Acceptable on Z Fold 6 (12GB RAM).
 
+**Important:** Loading from `file://` (APK assets) is NOT viable — `file://` URLs have no `host:port` in the origin, so `location.host` is empty and `ws:///ws` is an invalid WebSocket URL. Loading from the warp server avoids this entirely.
+
 ### 3.4 Web UI Asset Strategy
 
-Two strategies for getting the static web files into the APK:
+**Strategy 2 is the recommended approach from Phase 1.** Use the existing `include_str!` mechanism in the cdylib (same as desktop). Assets compiled into `libllama.so`. The warp server serves them via the existing `static_routes()` function. The WebView loads `http://127.0.0.1:PORT/` directly from the warp server.
 
-**Strategy 1 (Phase 1-2):** Copy `static/` into `android/app/src/main/assets/`. Warp serves them from a JNI-provided assets path. Faster iteration — JS/CSS changes don't require Rust recompile.
+Benefits:
+- **Zero JS changes** — `location.host` resolves correctly; WebSocket and `fetch` work as-is
+- **Consistent with desktop** — same asset pipeline, same `build.rs` generation
+- **Single code path** — `gen/routes.rs` compiles fine in a cdylib; warp serves assets identically
+- **No APK assets management** — no separate asset copy step in Gradle build
 
-**Strategy 2 (Phase 3+):** Use existing `include_str!` mechanism in the cdylib (same as desktop). Assets compiled into `libllama.so`. Fully self-contained, consistent with desktop asset management.
-
-Start with Strategy 1, migrate to Strategy 2 once the port stabilizes.
+The APK only needs the Kotlin app shell (Activity, Service, JNI declarations) and the `libllama.so` cdylib. All web assets flow through the warp server.
 
 ---
 
@@ -347,7 +333,7 @@ The Kotlin foreground service communicates device state to the Rust runtime via 
 
 ### 6.1 The Web UI's Actual Mobile Readiness
 
-The frontend is significantly more mobile-ready than the initial draft assumed.
+The frontend is significantly more mobile-ready than a naive assessment might suggest.
 
 **Already present in the codebase:**
 - `<meta name="viewport" content="width=device-width, initial-scale=1">`
@@ -852,7 +838,7 @@ Output: `android/app/src/main/jniLibs/arm64-v8a/libllama.so`
 | `dirs 6.0.0` | ⚠️ Empty paths | Override with `#[cfg(target_os = "android")]` path function |
 | `ssh2 0.9.5` | ✅ Feature-gated out | `--no-default-features` excludes `ssh-control` feature |
 | `wry/winit/gtk/tray-icon` | ✅ All excluded | `--no-default-features` + platform cfg gates |
-| `tempfile 3` | ✅ Works | Uses `/tmp` or `/data/local/tmp` |
+| `tempfile 3.27` | ❌ Compile error | Depends on `rustix 1.1.4` which fails on Android (unresolved `linux_raw_sys` refs); PR #1577 open since Feb 2026, not merged. Use `#[cfg(target_os = "android")]` alternative |
 | `clap 4` | N/A — not in cdylib | CLI parsing not needed in library mode |
 
 ### 9.5 rusqlite Bundled on Android: The Mechanics
@@ -1129,8 +1115,6 @@ The `llama-monitor-runner` repo (`ghcr.io/nmorgowicz-org/llama-monitor-runner:la
 
 The following changes to `llama-monitor-runner/Dockerfile` add Android NDK, the Android Rust target, and `cargo-ndk`. All insertions are relative to the current `main` branch.
 
-**Corrections from initial draft:** The initial §12.1 used `wget` (not in the image) and understated the NDK size (~400–600 MB quoted vs. ~3.5 GB reality for the full extracted toolchain). The `rustup target add` and `cargo install` additions must slot into the existing `USER 1000:1000` blocks, not as separate root-level `RUN` commands.
-
 **Step 1 — NDK installation (as `root`, after the existing aarch64 sysroot COPY/symlink section, before the runner agent install block):**
 
 ```dockerfile
@@ -1212,7 +1196,7 @@ build-android:
           --no-default-features --features android
       env:
         ANDROID_NDK_ROOT: /opt/android-ndk          # set by Dockerfile ENV; listed explicitly for clarity
-        CARGO_TARGET_DIR: /var/cache/builds/target  # pod build cache mount (corrected from initial draft)
+        CARGO_TARGET_DIR: /var/cache/builds/target  # pod build cache mount
 
     - name: Build APK
       run: cd android && ./gradlew assembleRelease
@@ -1250,10 +1234,11 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 1. Add `ssh-control` and `android` features to `Cargo.toml`; move `ssh2` under `ssh-control`
 2. Create `src/android/mod.rs` — JNI entry points (start/stop/status/setPollInterval)
 3. Create `src/android/paths.rs` — Android config dir override
-4. Add `#[cfg(target_os = "android")]` GPU stub to `src/gpu/mod.rs` (DummyAndroidBackend)
-5. Add `#[cfg(target_os = "android")]` stub to `src/system.rs` (sysinfo-only; no platform commands)
-6. Set up `android/` Gradle project with Activity + WebView layout
-7. Implement `LlamaMonitorService` (foreground service, notification)
+4. Add `#[cfg(target_os = "android")]` temp file alternative (avoids `tempfile` → `rustix` compile error)
+5. Add `#[cfg(target_os = "android")]` GPU stub to `src/gpu/mod.rs` (DummyAndroidBackend)
+6. Add `#[cfg(target_os = "android")]` stub to `src/system.rs` (sysinfo-only; no platform commands)
+7. Set up `android/` Gradle project with Activity + WebView layout (WebView loads `http://127.0.0.1:PORT/` from warp server, not `file://`)
+8. Implement `LlamaMonitorService` (foreground service, notification)
 8. Implement `KeystoreHelper.kt`
 9. Add `cargo-ndk` task to Gradle; configure `.cargo/config.toml`
 10. Add `check-android` job to `.github/workflows/ci.yml`
@@ -1323,6 +1308,7 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 
 | Risk | Probability | Mitigation |
 |---|---|---|
+| `tempfile` → `rustix` compile error on Android | High | Use `#[cfg(target_os = "android")]` alternative: create temp files manually in app's private storage; do not rely on `tempfile` crate for Android target |
 | `rusqlite` + `bundled` fails NDK cross-compile | Low | Use specific NDK version r27c (tested); document in AGENTS.md |
 | Tokio worker panics on missing Android syscall | Low | Limit `worker_threads(2)`; test on API 30+ |
 | WebView blocks `ws://127.0.0.1` | Medium | Set `network_security_config.xml` correctly; test on API 30 emulator |
@@ -1347,6 +1333,7 @@ src/android/battery.rs      — BatteryManager JNI receiver
 src/android/thermal.rs      — /sys/class/thermal reader
 src/android/paths.rs        — Android config directory
 src/android/keystore.rs     — AndroidKeyStore JNI bridge
+src/android/tempfile.rs     — Android temp file alternative (avoids rustix compile error)
 src/gpu/android.rs          — Android GPU backend
 
 android/
@@ -1370,6 +1357,7 @@ Cargo.toml                   — ssh-control + android features; ssh2 optional
 src/gpu/mod.rs               — Android backend dispatch
 src/system.rs                — Android metric collection paths
 src/config.rs                — Android paths override
+src/agent.rs                 — `#[cfg(target_os = "android")]` temp file alternative (avoids tempfile→rustix)
 static/js/features/dashboard-ws.js     — Handle data.battery field
 static/js/features/dashboard-render.js — Render battery in system card
 static/css/layout.css        — max-width: 420px breakpoint; touch scrolling
@@ -1389,13 +1377,13 @@ Dockerfile                   — NDK r27c install; aarch64-linux-android target;
 ## 16. Decisions Required
 
 1. **SSH control for Phase 4:** Relay vs. evaluate `russh` (pure-Rust SSH2)? `russh` would eliminate OpenSSL from the entire project.
-2. **Web UI asset strategy:** APK assets (Phase 1) is the recommended start. Confirm migration to `include_str!` in cdylib for Phase 3+.
-3. **App package name:** `com.llamamonitor.app` or another namespace?
-4. **Distribution method:** Sideload (`.apk` artifact from CI) vs. future Play Store consideration? Given the app's nature, sideload is appropriate.
-5. **SSH known-hosts + TOFU cert pinning:** Extend the existing `ssh-known-hosts.json` model to HTTPS certs for the remote agent, or use a separate cert store?
-6. **APK build job split (Phase 1):** Confirm Option A (split `build-android-lib` on `arc-llama-monitor` + `build-android-apk` on `ubuntu-latest`) vs. adding Android SDK to the runner image now.
-7. **NDK image size:** Accept ~3.5 GB increase to runner image, or implement a post-extract trim to reduce to ~800 MB?
+2. **App package name:** `com.llamamonitor.app` or another namespace?
+3. **Distribution method:** Sideload (`.apk` artifact from CI) vs. future Play Store consideration? Given the app's nature, sideload is appropriate.
+4. **SSH known-hosts + TOFU cert pinning:** Extend the existing `ssh-known-hosts.json` model to HTTPS certs for the remote agent, or use a separate cert store?
+5. **APK build job split (Phase 1):** Confirm Option A (split `build-android-lib` on `arc-llama-monitor` + `build-android-apk` on `ubuntu-latest`) vs. adding Android SDK to the runner image now.
+6. **NDK image size:** Accept ~3.5 GB increase to runner image, or implement a post-extract trim to reduce to ~800 MB?
+7. **`tempfile` replacement strategy:** Which code paths use `tempfile`? Audit and add `#[cfg(target_os = "android")]` alternatives for each (manual temp file creation in app's private storage).
 
 ---
 
-*End of document. Revised v2 — supplemented with llama-monitor-runner repo analysis.*
+*End of document.*
