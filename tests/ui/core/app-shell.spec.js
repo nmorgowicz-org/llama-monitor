@@ -112,8 +112,9 @@ test.describe('modals and menus', () => {
     await expect(page.getByRole('link', { name: 'Preferences' })).toBeVisible();
   });
 
-  test('profile dropdown actions are wired', async ({ page }) => {
+ test('profile dropdown actions are wired', async ({ page }) => {
     await page.locator('#nav-user-btn').click();
+    await page.waitForSelector('#nav-user-menu-items', { state: 'visible' });
     await page.getByRole('link', { name: 'Preferences' }).click();
     await expect(page.locator('#user-preferences-modal')).toHaveClass(/open/);
     await page.locator('#user-preferences-modal .modal-close').click();

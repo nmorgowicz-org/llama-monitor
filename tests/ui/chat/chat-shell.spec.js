@@ -82,9 +82,10 @@ test.describe('chat tabs', () => {
     await expect(page.locator('#csp-list .csp-item').first()).toHaveClass(/active/);
   });
 
-  test('Ctrl+Shift+ArrowRight cycles to next tab', async ({ page }) => {
+test('Ctrl+Shift+ArrowRight cycles to next tab', async ({ page }) => {
+    // Need at least 2 tabs for cycling to land on a different tab
     await page.locator('#csp-new-btn').click();
-    // New tab becomes active; it is rendered near the top of "Today", not necessarily last.
+    await page.locator('#csp-new-btn').click();
     const activeItem = page.locator('#csp-list .csp-item.active');
     await expect(activeItem).toBeVisible();
     const beforeId = await activeItem.getAttribute('data-tab-id');
