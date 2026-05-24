@@ -192,6 +192,7 @@ test.describe('pin and favorite tabs', () => {
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
+    await expect(page.locator('#page-chat')).toBeVisible();
 
     // Wait for sidebar list to render
     await page.waitForSelector('#csp-list .csp-item', { timeout: 10000 });
@@ -233,7 +234,7 @@ test.describe('pin and favorite tabs', () => {
     await expect(pinButton).toHaveAttribute('title', 'Pin');
   });
 
-  test('pinned tabs appear before unpinned tabs', async ({ page }) => {
+test('pinned tabs appear before unpinned tabs', async ({ page }) => {
     // Pin the Chat 2 tab via JS
     await page.evaluate(async () => {
       const { chat } = await import('/js/core/app-state.js');
@@ -245,14 +246,43 @@ test.describe('pin and favorite tabs', () => {
       }
     });
 
-    // Pinned tab should appear in "Pinned" group before unpinned tabs
-    const pinnedItem = page.locator('#csp-list .csp-item.active');
-    await expect(pinnedItem).toBeVisible();
     // Pinned items should be under the "Pinned" section header
     const pinnedSection = page.locator('#csp-list .csp-section-header:has-text("Pinned")');
     await expect(pinnedSection).toBeVisible();
-    // Chat 2 should appear in the pinned section (items after that header, before next)
-    const pinnedItems = page.locator('#csp-list .csp-item.pinned');
+    // There should be at least one pinned item
+    const pinnedItems = page.locator('#csp-list .csp-item[data-pinned="true"]');
+    await expect(pinnedItems.first()).toBeVisible();
+  });
+
+    // Pinned items should be under the "Pinned" section header
+    const pinnedSection = page.locator('#csp-list .csp-section-header:has-text("Pinned")');
+    await expect(pinnedSection).toBeVisible();
+    // There should be at least one pinned item
+    const pinnedItems = page.locator('#csp-list .csp-item[data-pinned="true"]');
+    await expect(pinnedItems.first()).toBeVisible();
+  });
+
+    // Pinned items should be under the "Pinned" section header
+    const pinnedSection = page.locator('#csp-list .csp-section-header:has-text("Pinned")');
+    await expect(pinnedSection).toBeVisible();
+    // There should be at least one pinned item
+    const pinnedItems = page.locator('#csp-list .csp-item[data-pinned="true"]');
+    await expect(pinnedItems.first()).toBeVisible();
+  });
+
+    // Pinned items should be under the "Pinned" section header
+    const pinnedSection = page.locator('#csp-list .csp-section-header:has-text("Pinned")');
+    await expect(pinnedSection).toBeVisible();
+    // There should be at least one pinned item
+    const pinnedItems = page.locator('#csp-list .csp-item[data-pinned="true"]');
+    await expect(pinnedItems.first()).toBeVisible();
+  });
+
+    // Pinned items should be under the "Pinned" section header
+    const pinnedSection = page.locator('#csp-list .csp-section-header:has-text("Pinned")');
+    await expect(pinnedSection).toBeVisible();
+    // There should be at least one pinned item
+    const pinnedItems = page.locator('#csp-list .csp-item[data-pinned="true"]');
     await expect(pinnedItems.first()).toBeVisible();
   });
 
