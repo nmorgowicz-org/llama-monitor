@@ -176,21 +176,77 @@ Approach:
   - Build a static/shared library (cdylib) for Android.
   - Keep desktop binary as is.
 
-Key crates:
-- warp:
-  - Pure Rust; compiles for Android.
-- rusqlite:
-  - Needs SQLite bundled or via system; we’ll bundle.
-- rustls:
-  - Pure Rust; good fit for Android.
-- ssh2:
-  - Heavy (vendored OpenSSL); required for full SSH control.
+Key crates (validated against current Cargo.toml / docs):
+
+- tokio 1.52:
+  - Pure Rust; supports aarch64-linux-android.
+
+- warp 0.4:
+  - Pure Rust (hyper-based); supports aarch64-linux-android.
+
+- reqwest 0.13:
+  - Uses rustls by default; supports aarch64-linux-android.
+
+- rusqlite 0.39:
+  - With bundled feature, compiles SQLite from source;
+    supports aarch64-linux-android.
+
+- ssh2 0.9:
+  - Uses vendored-openssl; cross-compilation possible but complex;
+    requires NDK toolchain configuration.
   - Options:
-    - Include it for Android (preferred for consistency with desktop).
+    - Include for Android (preferred for full SSH control).
     - Or feature-gate it and use a relay for SSH initially.
   - Use cargo features to control inclusion on Android builds.
-- sysinfo:
-  - Works on Android; can be used for limited metrics.
+  - Status: UNCERTAIN—needs hands-on build verification.
+
+- sysinfo 0.39:
+  - Explicitly supports Android; can be used for limited metrics.
+
+- rustls 0.23:
+  - Pure Rust; supports aarch64-linux-android.
+
+- tokio-rustls 0.26:
+  - Pure Rust; supports aarch64-linux-android.
+
+- hyper 1:
+  - Pure Rust; supports aarch64-linux-android.
+
+- hyper-rustls 0.27:
+  - Pure Rust; supports aarch64-linux-android.
+
+- argon2 0.6.0-rc.8:
+  - Pure Rust; supports aarch64-linux-android.
+
+- rand 0.10:
+  - Pure Rust; supports aarch64-linux-android.
+
+- aes-gcm 0.10:
+  - Pure Rust; supports aarch64-linux-android.
+
+- sha1 0.11, sha2 0.11, hkdf 0.13:
+  - Pure Rust; supports aarch64-linux-android.
+
+- clap 4:
+  - Pure Rust; supports aarch64-linux-android.
+
+- dirs 6:
+  - Uses platform-specific APIs;
+    may not work out-of-the-box on Android;
+    may require Android-specific paths or fallback.
+  - Status: UNCERTAIN—needs verification.
+
+- tempfile 3:
+  - Pure Rust; supports aarch64-linux-android.
+
+- url 2:
+  - Pure Rust; supports aarch64-linux-android.
+
+- futures-util 0.3:
+  - Pure Rust; supports aarch64-linux-android.
+
+- warp-helmet 1.0:
+  - Pure Rust; supports aarch64-linux-android.
 
 Design rules:
 - Use #[cfg(target_os = "android")] guards:
@@ -356,8 +412,20 @@ Phase 5: Advanced Features
 ## 10. Risks and Mitigations
 
 - Build complexity:
-  - Risk: Cross-compilation failures, especially with ssh2/OpenSSL.
+  - Risk: Cross-compilation failures, especially with ssh2/OpenSSL and platform-specific crates.
   - Mitigation: Feature-gate SSH; use cargo-ndk; iterate carefully.
+
+- ssh2 0.9 (vendored-openssl) on Android:
+  - Risk: Complex cross-compilation; may require custom NDK toolchain setup; could block full SSH control on-device.
+  - Mitigation:
+    - Initially feature-gate ssh2 on Android and use a relay for SSH operations.
+    - Validate with a dedicated cross-compile test; only enable on Android if build is stable.
+
+- dirs 6 on Android:
+  - Risk: Uses platform-specific paths; may not work out-of-the-box on Android.
+  - Mitigation:
+    - Provide Android-specific path overrides via #[cfg(target_os = "android")].
+    - Verify during initial cross-compile and runtime tests.
 - WebView security:
   - Risk: CSP/origin issues.
   - Mitigation: Lock down allowed origins; test extensively.
@@ -368,7 +436,60 @@ Phase 5: Advanced Features
   - Risk: Users expect GPU monitoring on phone.
   - Mitigation: Make it clear GPU stats come from ryne’s agent; design UI to show source.
 
-## 11. Next Steps
+## 11. Cross-Compilation Infrastructure (arc-runner)
+
+We will use the existing arc-runner VM (k3s + ARC) and the llama-monitor-runner image
+to perform Android cross-compilation in CI, rather than relying on local builds.
+
+Key facts (from llama-monitor-runner repo):
+- Proxmox VM “arc-runner” runs:
+  - k3s (single-node)
+  - ARC controller (arc-systems namespace)
+  - Scale set: arc-llama-monitor (arc-runners namespace)
+- Runner image:
+  - Based on osxcross-base (macOS cross-compile).
+  - Uses cross-rs + Docker-in-Docker for Linux/Windows targets.
+  - Rust toolchain + multiple targets + persistent build cache.
+
+Requirements for Android:
+- Add to the existing llama-monitor-runner image:
+  - Android NDK (e.g., via sdkmanager or a minimal NDK install).
+  - Rust target: aarch64-linux-android.
+  - cargo-ndk (or equivalent helper) for building Android cdylibs.
+- Ensure:
+  - NDK and Rust targets are installed once in the image (not per-job).
+  - Build cache includes cargo registry and NDK toolchains.
+- Use:
+  - A dedicated GitHub Actions job that:
+    - Runs on the arc-llama-monitor runner.
+    - Builds the Android cdylib (e.g., cargo-ndk build --release).
+    - Uploads the .so as an artifact for the Android build.
+
+Architecture recommendation:
+- Extend the existing llama-monitor-runner (preferred):
+  - Pros:
+    - Single runner image for all cross-compiles (macOS, Windows, Linux, Android).
+    - Reuses existing k3s, ARC, cache, and GHCR setup.
+    - Simpler to operate and audit.
+  - Cons:
+    - Slightly larger image (NDK adds ~400–600 MB), but still reasonable.
+- Dedicated Android runner (only if needed later):
+  - Trigger:
+    - Android builds become very heavy, flaky, or require strict isolation.
+  - Implementation:
+    - New runner image (llama-monitor-runner-android).
+    - New ARC scale set (arc-llama-monitor-android).
+  - Use only if operational complexity is justified.
+
+Design rules:
+- All Android cross-compilation:
+  - Must be fully automated in CI.
+  - Must not require local NDK installs on developer machines.
+- Android-specific tooling:
+  - Should be optional and isolated in the Dockerfile so it does not affect
+    existing macOS/Linux/Windows cross-compilation paths.
+
+## 12. Next Steps
 
 - Confirm:
   - This architecture and security model are acceptable.
@@ -376,7 +497,8 @@ Phase 5: Advanced Features
   - Initial auth method (tokens vs mTLS).
   - Whether to use HTTPS-only for Android or include SSH.
 - Begin:
-  - Setting up Android project and cross-compilation.
+  - Extending llama-monitor-runner with Android NDK and cargo-ndk.
+  - Adding a CI job for Android cdylib builds on arc-runner.
   - Adjusting llama-monitor code with Android-specific guards.
 
 End of document.
