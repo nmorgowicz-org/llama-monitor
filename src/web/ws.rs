@@ -101,7 +101,7 @@ pub fn ws_route(
                                     crate::state::SessionMode::Spawn { port } => {
                                         format!("http://127.0.0.1:{port}")
                                     }
-                                    crate::state::SessionMode::Attach { endpoint } => {
+                                    crate::state::SessionMode::Attach { endpoint, .. } => {
                                         endpoint.clone()
                                     }
                                 })

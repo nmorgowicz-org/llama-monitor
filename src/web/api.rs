@@ -108,7 +108,7 @@ fn active_chat_completions_url(state: &AppState) -> Result<String, warp::Rejecti
         crate::state::SessionMode::Spawn { port } => {
             format!("http://127.0.0.1:{port}/v1/chat/completions")
         }
-        crate::state::SessionMode::Attach { endpoint } => {
+        crate::state::SessionMode::Attach { endpoint, .. } => {
             format!("{endpoint}/v1/chat/completions")
         }
     })
@@ -5955,7 +5955,7 @@ fn api_get_active_session(
                     Some(s) => {
                         let mode_str = match s.mode {
                             crate::state::SessionMode::Spawn { port } => format!("Spawn:{}", port),
-                            crate::state::SessionMode::Attach { endpoint } => {
+                            crate::state::SessionMode::Attach { endpoint, .. } => {
                                 format!("Attach:{}", endpoint)
                             }
                         };
@@ -6316,6 +6316,12 @@ fn api_attach(
                     }
                 };
 
+                // Extract optional API key for remote server authentication
+                let api_key: Option<String> = payload.get("api_key")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string());
+
                 // Pre-attach health check
                 let client = match reqwest::Client::builder()
                     .timeout(std::time::Duration::from_secs(15))
@@ -6333,9 +6339,13 @@ fn api_attach(
                     }
                 };
 
-                // Check if server is reachable
+                // Check if server is reachable (with API key if provided)
                 eprintln!("[info] Health-checking llama-server at {}", endpoint);
-                let server_up = match client.get(&endpoint).send().await {
+                let mut health_req = client.get(&endpoint);
+                if let Some(ref key) = api_key {
+                    health_req = health_req.header("Authorization", format!("Bearer {}", key));
+                }
+                let server_up = match health_req.send().await {
                     Ok(resp) => {
                         eprintln!("[info] llama-server health check status: {}", resp.status());
                         true
@@ -6355,18 +6365,18 @@ fn api_attach(
                     ));
                 }
 
-                // Check if metrics endpoint is available
-                let metrics_available = client
-                    .get(format!("{}/health", endpoint.trim_end_matches('/')))
-                    .send()
-                    .await
-                    .is_ok();
+                // Check if metrics endpoint is available (with API key if provided)
+                let mut metrics_req = client.get(format!("{}/health", endpoint.trim_end_matches('/')));
+                if let Some(ref key) = api_key {
+                    metrics_req = metrics_req.header("Authorization", format!("Bearer {}", key));
+                }
+                let metrics_available = metrics_req.send().await.is_ok();
 
                 // Check if there's already an attach session for this endpoint
                 let existing_session_id = {
                     let sessions = state.sessions.lock().unwrap();
                     sessions.iter().find(|s| {
-                        if let crate::state::SessionMode::Attach { endpoint: ep } = &s.mode {
+                        if let crate::state::SessionMode::Attach { endpoint: ep, .. } = &s.mode {
                             *ep == endpoint
                         } else {
                             false
@@ -6385,6 +6395,7 @@ fn api_attach(
                         session_id.clone(),
                         format!("Attached: {}", endpoint),
                         endpoint,
+                        api_key.clone(),
                     );
                     if !state.add_session(session) {
                         return Ok::<_, warp::Rejection>(warp::reply::with_status(
@@ -6471,6 +6482,8 @@ fn api_detach(
                 drop(sessions);
                 // Clear the active session only - server_running is managed by the poller
                 state.set_active_session("");
+                // Notify poller so it stops polling immediately
+                state.llama_poll_notify.notify_waiters();
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(&serde_json::json!({"ok": true}))))
             }

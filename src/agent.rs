@@ -1310,7 +1310,7 @@ fn remote_agent_url_for_active_session(
         sessions.iter().find(|s| s.id == active_id).cloned()
     }?;
 
-    let SessionMode::Attach { endpoint } = session.mode else {
+    let SessionMode::Attach { endpoint, .. } = session.mode else {
         return None;
     };
 
