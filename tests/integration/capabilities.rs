@@ -97,6 +97,7 @@ fn local_attach_has_full_metrics() {
         "attach_local_test".to_string(),
         "Attach Local Test".to_string(),
         "http://127.0.0.1:8001".to_string(),
+        None,
     );
     state.add_session(session);
     state.set_active_session("attach_local_test");
@@ -153,6 +154,7 @@ fn remote_attach_has_inference_only() {
         "attach_remote_test".to_string(),
         "Attach Remote Test".to_string(),
         "http://203.0.113.10:8001".to_string(),
+        None,
     );
     state.add_session(session);
     state.set_active_session("attach_remote_test");
@@ -325,6 +327,7 @@ fn session_serialization_includes_new_fields() {
         "test_new_fields".to_string(),
         "New Fields Test".to_string(),
         "http://remote.example.com:8080".to_string(),
+        None,
     );
 
     // Verify new fields have correct defaults

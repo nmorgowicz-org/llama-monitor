@@ -62,15 +62,11 @@ test.describe('command palette', () => {
 
     await page.keyboard.press('Control+K');
     await page.locator('#command-palette-input').fill('Beta');
-    await page.waitForTimeout(200);
 
-    const items = page.locator('.command-palette-item');
-    const count = await items.count();
-    expect(count).toBeGreaterThanOrEqual(1);
-
+    // Wait for search results to render (performSearch is async — awaits FTS HTTP call)
     const titles = page.locator('.command-palette-item-title');
-    const hasBeta = await titles.first().textContent();
-    expect(hasBeta).toContain('Beta');
+    // Wait until at least one title contains "Beta"
+    await expect(titles.filter({ hasText: 'Beta' })).toHaveCount(1, { timeout: 5000 });
   });
 
   test('keyboard navigation with arrow keys and Enter', async ({ page }) => {

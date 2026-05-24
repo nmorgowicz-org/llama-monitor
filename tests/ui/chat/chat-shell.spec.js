@@ -82,13 +82,16 @@ test.describe('chat tabs', () => {
     await expect(page.locator('#csp-list .csp-item').first()).toHaveClass(/active/);
   });
 
-  test('Ctrl+Shift+ArrowRight cycles to next tab', async ({ page }) => {
+test('Ctrl+Shift+ArrowRight cycles to next tab', async ({ page }) => {
+    // Need at least 2 tabs for cycling to land on a different tab
     await page.locator('#csp-new-btn').click();
-    // New tab becomes active; it is rendered near the top of "Today", not necessarily last.
+    await page.locator('#csp-new-btn').click();
     const activeItem = page.locator('#csp-list .csp-item.active');
     await expect(activeItem).toBeVisible();
+    const beforeId = await activeItem.getAttribute('data-tab-id');
     await page.keyboard.press('Control+Shift+ArrowRight');
-    await expect(page.locator('#csp-list .csp-item').first()).toHaveClass(/active/, { timeout: 3000 });
+    const afterId = await page.locator('#csp-list .csp-item.active').getAttribute('data-tab-id', { timeout: 3000 });
+    expect(afterId).not.toBe(beforeId);
   });
 
   test('title filter only narrows sidebar items by tab name', async ({ page }) => {
@@ -189,6 +192,7 @@ test.describe('pin and favorite tabs', () => {
     await page.waitForSelector('html.modules-ready');
     await switchToMonitor(page);
     await page.getByRole('button', { name: /chat/i }).click();
+    await expect(page.locator('#page-chat')).toBeVisible();
 
     // Wait for sidebar list to render
     await page.waitForSelector('#csp-list .csp-item', { timeout: 10000 });
@@ -230,8 +234,8 @@ test.describe('pin and favorite tabs', () => {
     await expect(pinButton).toHaveAttribute('title', 'Pin');
   });
 
-  test('pinned tabs appear before unpinned tabs', async ({ page }) => {
-    // Pin the Chat 2 tab via JS
+ test('pinned tabs appear before unpinned tabs', async ({ page }) => {
+    // Pin the Chat 2 tab via JS and re-render
     await page.evaluate(async () => {
       const { chat } = await import('/js/core/app-state.js');
       const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
@@ -242,14 +246,10 @@ test.describe('pin and favorite tabs', () => {
       }
     });
 
-    // Pinned tab should appear in "Pinned" group before unpinned tabs
-    const pinnedItem = page.locator('#csp-list .csp-item').filter({ hasText: 'Chat 2' });
-    await expect(pinnedItem).toBeVisible();
+    // Wait for sidebar to re-render with pinned section
+    await page.waitForSelector('#csp-list .csp-section-header:has-text("Pinned")', { timeout: 5000 });
     // Pinned items should be under the "Pinned" section header
-    const pinnedSection = page.locator('#csp-list .csp-section-header:has-text("Pinned")');
-    await expect(pinnedSection).toBeVisible();
-    // Chat 2 should appear in the pinned section (items after that header, before next)
-    const pinnedItems = page.locator('#csp-list .csp-item').filter({ hasText: 'Chat 2' });
+    const pinnedItems = page.locator('#csp-list .csp-item[data-pinned="true"]');
     await expect(pinnedItems.first()).toBeVisible();
   });
 

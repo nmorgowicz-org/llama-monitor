@@ -85,8 +85,8 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             continue;
         }
 
-        // Determine endpoint from active session
-        let endpoint = {
+        // Determine endpoint and optional API key from active session
+        let (base, api_key) = {
             let session = {
                 let sessions = state.sessions.lock().unwrap();
                 sessions.iter().find(|s| s.id == active_id).cloned()
@@ -95,9 +95,9 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             if let Some(sess) = session {
                 match sess.mode {
                     crate::state::SessionMode::Spawn { port } => {
-                        format!("http://127.0.0.1:{}", port)
+                        (format!("http://127.0.0.1:{}", port), None)
                     }
-                    crate::state::SessionMode::Attach { endpoint } => endpoint,
+                    crate::state::SessionMode::Attach { endpoint, api_key } => (endpoint, api_key),
                 }
             } else {
                 enabled = false;
@@ -108,14 +108,26 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             }
         };
 
-        let base = endpoint;
+        // Helper to add auth header if API key is set
+        fn with_auth(
+            mut req: reqwest::RequestBuilder,
+            api_key: &Option<String>,
+        ) -> reqwest::RequestBuilder {
+            if let Some(key) = api_key {
+                req = req.header("Authorization", format!("Bearer {}", key));
+            }
+            req
+        }
 
         // First check if server is up at all
-        let server_up = client.get(&base).send().await.is_ok();
+        let server_up = with_auth(client.get(&base), &api_key).send().await.is_ok();
 
         let server_reachable = if server_up {
             // Try /health for detailed status
-            match client.get(format!("{base}/health")).send().await {
+            match with_auth(client.get(format!("{base}/health")), &api_key)
+                .send()
+                .await
+            {
                 Ok(resp) => match resp.text().await {
                     Ok(body) => {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
@@ -153,7 +165,9 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
             continue;
         }
 
-        if let Ok(resp) = client.get(format!("{base}/metrics")).send().await
+        if let Ok(resp) = with_auth(client.get(format!("{base}/metrics")), &api_key)
+            .send()
+            .await
             && let Ok(body) = resp.text().await
         {
             let prom = parse_prometheus_metrics(&body);
@@ -210,7 +224,9 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
         }
 
         // Poll /slots — get per-slot processing state + total context
-        if let Ok(resp) = client.get(format!("{base}/slots")).send().await
+        if let Ok(resp) = with_auth(client.get(format!("{base}/slots")), &api_key)
+            .send()
+            .await
             && let Ok(body) = resp.text().await
             && let Some(slots) = parse_slot_metrics(&body)
         {
@@ -242,7 +258,9 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
         }
 
         // Poll /v1/models — get model name and metadata
-        if let Ok(resp) = client.get(format!("{base}/v1/models")).send().await
+        if let Ok(resp) = with_auth(client.get(format!("{base}/v1/models")), &api_key)
+            .send()
+            .await
             && let Ok(body) = resp.text().await
             && let Ok(json) = serde_json::from_str::<serde_json::Value>(&body)
             && let Some(model_name) = json["data"][0]["id"].as_str()
