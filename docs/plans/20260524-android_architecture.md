@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-24  
 **Author:** Claude (full codebase analysis)  
-**Status:** Revised — supersedes initial draft of same date  
+**Status:** Revised v2 — supplemented with llama-monitor-runner repo analysis (2026-05-24)  
 **Branch:** feat/android-compatibility
 
 ---
@@ -1084,24 +1084,94 @@ Android Doze mode (screen off + unplugged + stationary) limits network access an
 
 ## 12. CI/CD Integration
 
-### 12.1 Extending the arc-runner Image
+### 12.0 Runner Repo: Current State (as of 2026-05-24)
 
-Add to `llama-monitor-runner` Dockerfile:
+The `llama-monitor-runner` repo (`ghcr.io/nmorgowicz-org/llama-monitor-runner:latest`) is the custom ARC runner image for all llama-monitor CI. Understanding its current state is required context before implementing §12.1–12.4.
+
+**What is already in the runner image:**
+
+| Component | Status | Detail |
+|---|---|---|
+| Rust stable toolchain | ✅ Installed (UID 1000) | `RUSTUP_HOME=/opt/rustup`, `CARGO_HOME=/opt/cargo` |
+| `aarch64-unknown-linux-gnu` Rust target | ✅ Pre-installed | Linux ARM64 cross-compilation (via cross-rs) |
+| `aarch64-apple-darwin` Rust target | ✅ Pre-installed | macOS ARM64 via osxcross |
+| `x86_64-pc-windows-gnu` Rust target | ✅ Pre-installed | Windows cross-compilation |
+| `rust-src` component | ✅ Pre-installed | Prevents concurrent rustup download races |
+| `cross-rs` (from git) | ✅ Installed | Used for Linux ARM64 and Windows builds |
+| `aarch64-linux-gnu` Ubuntu sysroot | ✅ Present | GTK/WebKit ARM64 headers — for **Linux**, NOT Android |
+| `unzip` | ✅ Installed | In the apt package list |
+| `curl` | ✅ Installed | Used throughout; `wget` is **not** available |
+| Android NDK | ❌ Not present | Must be added to Dockerfile |
+| `aarch64-linux-android` Rust target | ❌ Not pre-installed | Must be added to Dockerfile |
+| `cargo-ndk` | ❌ Not installed | Must be added to Dockerfile |
+| Android SDK (`ANDROID_HOME`) | ❌ Not present | Required only for `gradlew assembleRelease` (APK assembly) |
+
+**Critical distinction:** `aarch64-unknown-linux-gnu` (Linux ARM64) and `aarch64-linux-android` (Android ARM64) are different Rust targets despite sharing hardware. The Ubuntu `aarch64-linux-gnu` sysroot already in the Dockerfile provides GTK/WebKit headers for Linux cross-builds via cross-rs — it is **not** usable as an Android NDK sysroot.
+
+**Runner scale sets in use:**
+
+| Scale set name | Runners | CPU | Memory | Build cache |
+|---|---|---|---|---|
+| `arc-llama-monitor` | 0–4 | 2–4 cores | 2–5 GiB | `/var/cache/builds` (20 GiB emptyDir) |
+| `arc-llama-monitor-fast` | 0–2 | 4–8 cores | 4–8 GiB | `/var/cache/builds` (30 GiB emptyDir) |
+
+`CARGO_HOME` is overridden at pod runtime to `/var/cache/builds/cargo` by the pod spec env. CI jobs should use `CARGO_TARGET_DIR: /var/cache/builds/target` for Rust build artifacts — `/cache/target` does not exist in the pod spec.
+
+**Image build pipeline:**
+
+- Trigger: push to `Dockerfile` or `.github/workflows/runner-image.yml`; weekly Sunday 03:00 UTC; `workflow_dispatch`
+- Build runner: `arc-general-docker` (stock ARC runner with DinD — the custom image is not used to build itself)
+- Push targets: `ghcr.io/nmorgowicz-org/llama-monitor-runner:latest` + `:<sha>`
+- Base image: `ghcr.io/nmorgowicz-org/osxcross-base:darwin25.1` (private)
+- Tag cleanup: keeps 5 most recent versions (cleanup job runs on `arc-general`)
+
+### 12.1 Extending the arc-runner Image (Precise Dockerfile Diff)
+
+The following changes to `llama-monitor-runner/Dockerfile` add Android NDK, the Android Rust target, and `cargo-ndk`. All insertions are relative to the current `main` branch.
+
+**Corrections from initial draft:** The initial §12.1 used `wget` (not in the image) and understated the NDK size (~400–600 MB quoted vs. ~3.5 GB reality for the full extracted toolchain). The `rustup target add` and `cargo install` additions must slot into the existing `USER 1000:1000` blocks, not as separate root-level `RUN` commands.
+
+**Step 1 — NDK installation (as `root`, after the existing aarch64 sysroot COPY/symlink section, before the runner agent install block):**
+
 ```dockerfile
-# Android NDK r27c (~400MB extracted toolchain subset)
+# ── 1c. Android NDK r27c ──────────────────────────────────────────────────────
+# Owned by UID 1000 so cargo-ndk (running as the runner user) can read the toolchain.
 ARG NDK_VERSION=r27c
-RUN wget -q https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip \
-    && unzip -q android-ndk-${NDK_VERSION}-linux.zip -d /opt \
-    && mv /opt/android-ndk-${NDK_VERSION} /opt/android-ndk \
-    && rm android-ndk-${NDK_VERSION}-linux.zip
-ENV ANDROID_NDK_ROOT=/opt/android-ndk
+RUN curl -fsSL \
+      "https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip" \
+      -o /tmp/android-ndk.zip \
+    && unzip -q /tmp/android-ndk.zip -d /opt \
+    && mv "/opt/android-ndk-${NDK_VERSION}" /opt/android-ndk \
+    && rm /tmp/android-ndk.zip \
+    && chown -R 1000:1000 /opt/android-ndk
 
-# Rust Android target + cargo-ndk
-RUN rustup target add aarch64-linux-android \
+ENV ANDROID_NDK_ROOT=/opt/android-ndk
+```
+
+**Step 2 — Android Rust target (add `aarch64-linux-android` to the existing `rustup target add` block, as `USER 1000:1000`):**
+
+```dockerfile
+# Targets: native + macOS + Android (cross-rs handles Linux ARM64 and Windows at runtime)
+RUN rustup target add \
+    x86_64-unknown-linux-gnu \
+    aarch64-unknown-linux-gnu \
+    x86_64-pc-windows-gnu \
+    aarch64-apple-darwin \
+    aarch64-linux-android && \
+    rustup component add rust-src
+```
+
+**Step 3 — `cargo-ndk` (add to the existing `cargo install cross` line, as `USER 1000:1000`):**
+
+```dockerfile
+# Install cross-rs and cargo-ndk
+RUN cargo install cross --git https://github.com/cross-rs/cross \
     && cargo install cargo-ndk --locked
 ```
 
-This adds ~400-600MB to the image. The NDK toolchain is self-contained and does not affect existing macOS/Linux/Windows cross-compilation paths.
+**Image size impact:** NDK r27c is ~1.3 GB zip → ~3.5 GB extracted (full multi-architecture toolchain). Estimated runner image size increase: ~3.5 GB (current image ~6–7 GB; new total ~10 GB). If image size becomes a concern, the NDK can be trimmed post-extract to remove non-ARM64 prebuilt binaries (reduces to ~800 MB–1 GB), but this is deferred to Phase 2.
+
+**Triggering a rebuild:** Merging the Dockerfile changes to `llama-monitor-runner/main` triggers the `Build Runner Image` workflow automatically (push path filter on `Dockerfile`). Android CI jobs cannot run until `:latest` is updated with the new image.
 
 ### 12.2 CI Check Job (No NDK Required)
 
@@ -1112,8 +1182,6 @@ check-android:
   runs-on: arc-llama-monitor
   steps:
     - uses: actions/checkout@v4
-    - name: Add Android Rust target
-      run: rustup target add aarch64-linux-android
     - name: cargo check for Android
       run: |
         cargo check \
@@ -1122,17 +1190,18 @@ check-android:
           --features android
 ```
 
-`cargo check` resolves the dependency graph and type-checks without invoking the C linker. NDK not required. Catches cfg mistakes and Android-incompatible type usage at PR time.
+`cargo check` resolves the dependency graph and type-checks without invoking the C linker. With `aarch64-linux-android` pre-installed in the image (per §12.1 Step 2), no `rustup target add` step is needed. `cargo check` for a non-native target does not invoke the NDK linker — it catches `#[cfg]` mistakes and Android-incompatible type usage without requiring the NDK at check time.
 
 ### 12.3 Release Build Job
 
 Add to `.github/workflows/release.yml`:
 ```yaml
 build-android:
-  name: Build Android APK (aarch64)
+  name: Build Android (aarch64)
   runs-on: arc-llama-monitor
   steps:
     - uses: actions/checkout@v4
+
     - name: Build Android cdylib
       run: |
         cargo ndk \
@@ -1142,17 +1211,24 @@ build-android:
           build --release \
           --no-default-features --features android
       env:
-        ANDROID_NDK_ROOT: /opt/android-ndk
-        CARGO_TARGET_DIR: /cache/target
+        ANDROID_NDK_ROOT: /opt/android-ndk          # set by Dockerfile ENV; listed explicitly for clarity
+        CARGO_TARGET_DIR: /var/cache/builds/target  # pod build cache mount (corrected from initial draft)
+
     - name: Build APK
       run: cd android && ./gradlew assembleRelease
       env:
         ANDROID_HOME: /opt/android-sdk
+
     - uses: actions/upload-artifact@v4
       with:
         name: llama-monitor-android-aarch64
         path: android/app/build/outputs/apk/release/*.apk
 ```
+
+**Android SDK gap:** `ANDROID_HOME` for `gradlew assembleRelease` requires Android SDK build tools (`aapt2`, `d8`, `zipalign`), which are **not** in the runner image. Two options for Phase 1:
+
+- **Option A (recommended):** Split into two jobs — `build-android-lib` on `arc-llama-monitor` (produces `libllama.so` as a workflow artifact) and `build-android-apk` on `ubuntu-latest` GitHub-hosted runner (which has Android SDK pre-installed at `/usr/local/lib/android/sdk`) downloading the `.so` artifact and running `gradlew`.
+- **Option B (Phase 2+):** Add Android SDK command-line tools to the runner image (~300 MB + platform packages). Appropriate once the APK build is stable and worth the added image maintenance.
 
 ### 12.4 AGENTS.md Update Required
 
@@ -1182,6 +1258,7 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 9. Add `cargo-ndk` task to Gradle; configure `.cargo/config.toml`
 10. Add `check-android` job to `.github/workflows/ci.yml`
 11. Update `AGENTS.md` pre-PR checklist with Android check command
+12. Merge NDK + `aarch64-linux-android` + `cargo-ndk` changes to `llama-monitor-runner` and trigger image rebuild (prerequisite for jobs in steps 10 and Phase 1 release build)
 
 **Before merging:** Run `cargo check --target x86_64-pc-windows-gnu` (always required), `cargo check --target aarch64-linux-android`, `cargo clippy -- -D warnings`, `cargo fmt`. Update `docs/reference/` with Android build instructions.
 
@@ -1257,6 +1334,7 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 | JNI global reference leaks → memory growth | Medium | Use `jni-rs` `GlobalRef` wrappers; profile with Android Studio memory profiler |
 | New `#[cfg(target_os = "android")]` breaks Windows build | Medium | Mandatory `cargo check --target x86_64-pc-windows-gnu` in pre-PR checklist |
 | `dirs 6` empty path not caught → chat DB in wrong location | Low | `src/android/paths.rs` override; add test asserting non-empty config path on Android |
+| Runner image rebuild required before any Android CI runs | Medium | Merge `llama-monitor-runner` Dockerfile changes first; coordinate with Phase 1 step 12 |
 
 ---
 
@@ -1301,6 +1379,11 @@ static/css/tokens.css        — env(safe-area-inset-*) variables
 AGENTS.md                   — Android in multi-platform checklist; Android pre-PR check
 ```
 
+### llama-monitor-runner Changes Required (separate repo)
+```
+Dockerfile                   — NDK r27c install; aarch64-linux-android target; cargo-ndk
+```
+
 ---
 
 ## 16. Decisions Required
@@ -1310,7 +1393,9 @@ AGENTS.md                   — Android in multi-platform checklist; Android pre
 3. **App package name:** `com.llamamonitor.app` or another namespace?
 4. **Distribution method:** Sideload (`.apk` artifact from CI) vs. future Play Store consideration? Given the app's nature, sideload is appropriate.
 5. **SSH known-hosts + TOFU cert pinning:** Extend the existing `ssh-known-hosts.json` model to HTTPS certs for the remote agent, or use a separate cert store?
+6. **APK build job split (Phase 1):** Confirm Option A (split `build-android-lib` on `arc-llama-monitor` + `build-android-apk` on `ubuntu-latest`) vs. adding Android SDK to the runner image now.
+7. **NDK image size:** Accept ~3.5 GB increase to runner image, or implement a post-extract trim to reduce to ~800 MB?
 
 ---
 
-*End of document. Supersedes initial draft of 2026-05-24.*
+*End of document. Revised v2 — supplemented with llama-monitor-runner repo analysis.*
