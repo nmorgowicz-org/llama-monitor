@@ -206,14 +206,34 @@ git diff --check
 
 ### Mandatory pre-PR checks
 
-Before marking a PR ready (or pushing changes), agents MUST run:
+Before pushing or marking a PR ready, agents MUST run these steps in this exact order.
+Any step that modifies files must be committed before continuing.
 
 1. `cargo fmt`
+   - If it changes files, commit them (e.g., `chore: apply cargo fmt`).
+   - Do not push until formatting is committed.
+
 2. `cargo clippy -- -D warnings`
+   - Fix all warnings.
+   - If fixes introduce new formatting changes, run `cargo fmt` again and commit.
+
 3. `cargo test` (or a focused subset if the full suite is too slow; CI will run it)
+   - Do not push with known test failures.
+
 4. `npm run validate-js`
 5. `npm run lint`
+   - Fix issues; re-run after changes.
+
 6. `git diff --check`
+   - Run this AFTER all previous steps, on the final committed state.
+   - If it reports issues, fix them and re-run.
+
+7. Final consistency check (CRITICAL):
+   - Run: `git status`
+   - Ensure:
+     - No uncommitted changes from fmt/clippy/lint.
+     - No generated files (e.g., src/gen/*) left uncommitted after toolchain changes.
+   - If anything is uncommitted, commit it before pushing.
 
 If any of these fail, fix the issues before pushing.
 

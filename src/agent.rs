@@ -1502,19 +1502,38 @@ async fn detect_remote_temp_dir(connection: &SshConnection, os: RemoteOs) -> Str
         RemoteOs::Unknown => return "/tmp".to_string(),
     };
 
-    match tokio::time::timeout(
+    if let Ok(Ok(output)) = tokio::time::timeout(
         Duration::from_secs(5),
         remote_ssh::exec(connection.clone(), temp_cmd),
     )
     .await
     {
-        Ok(Ok(output)) if output.status == 0 && !output.stdout.trim().is_empty() => {
-            output.stdout.trim().to_string()
+        let s = output.stdout.trim().to_string();
+        if output.status == 0 && !s.is_empty() && !s.starts_with('%') {
+            return s;
         }
-        _ => match os {
-            RemoteOs::Windows => "C:\\\\Windows\\\\Temp".to_string(),
-            _ => "/tmp".to_string(),
-        },
+    }
+
+    // cmd.exe failed or returned unexpanded %TEMP% — try PowerShell (same
+    // approach used to resolve %APPDATA%).
+    if os == RemoteOs::Windows {
+        if let Ok(Ok(out)) = tokio::time::timeout(
+            Duration::from_secs(5),
+            remote_ssh::exec(
+                connection.clone(),
+                "powershell.exe -NoProfile -NonInteractive -Command \"$env:TEMP\"".to_string(),
+            ),
+        )
+        .await
+        {
+            let s = out.stdout.trim().to_string();
+            if out.status == 0 && !s.is_empty() && s.contains('\\') && !s.starts_with('%') {
+                return s;
+            }
+        }
+        "C:\\Windows\\Temp".to_string()
+    } else {
+        "/tmp".to_string()
     }
 }
 
@@ -2035,16 +2054,24 @@ pub mod install {
         let cas_dir = format!("{}{}cas", install_dir, sep);
         let resolved_cas_dir = format!("{}{}cas", resolved_install_dir, sep);
 
-        // Ensure cas/ directory exists on the remote (cmd.exe expands %APPDATA% itself).
+        // Ensure cas/ directory exists on the remote. Use the fully-resolved path
+        // so the mkdir works regardless of whether %APPDATA% is set in the SSH session env.
         let mkdir_cmd = if os == RemoteOs::Windows {
+            let ps_dir = resolved_cas_dir.replace('\'', "''");
             format!(
-                "cmd.exe /C if not exist \"{}\" mkdir \"{}\"",
-                cas_dir, cas_dir
+                "powershell.exe -NoProfile -NonInteractive -Command \"New-Item -ItemType Directory -Path '{ps_dir}' -Force | Out-Null\""
             )
         } else {
             format!("mkdir -p '{}'", cas_dir)
         };
-        let _ = remote_ssh::exec(connection.clone(), mkdir_cmd).await;
+        if let Ok(out) = remote_ssh::exec(connection.clone(), mkdir_cmd).await
+            && out.status != 0
+        {
+            eprintln!(
+                "[warn] Failed to create cas/ directory on remote: {}",
+                out.stderr.trim()
+            );
+        }
 
         // Stable instance ID: hash of this instance's CA public key.
         let instance_id = {
@@ -2132,22 +2159,30 @@ pub mod install {
             .unwrap_or_else(|_| std::env::temp_dir().join("agent-server.key"));
 
         if std::fs::write(&local_cert_tmp, &cert.pem).is_ok() {
-            let _ = remote_ssh::copy_to_remote(
+            match remote_ssh::copy_to_remote(
                 connection.clone(),
                 local_cert_tmp.to_string_lossy().to_string(),
-                remote_cert_path,
+                remote_cert_path.clone(),
                 0o644,
             )
-            .await;
+            .await
+            {
+                Ok(()) => {
+                    eprintln!("[agent] Installed agent server cert at {remote_cert_path}")
+                }
+                Err(e) => eprintln!("[warn] Failed to install agent server cert: {e}"),
+            }
         }
-        if std::fs::write(&local_key_tmp, &cert.key).is_ok() {
-            let _ = remote_ssh::copy_to_remote(
+        if std::fs::write(&local_key_tmp, &cert.key).is_ok()
+            && let Err(e) = remote_ssh::copy_to_remote(
                 connection.clone(),
                 local_key_tmp.to_string_lossy().to_string(),
-                remote_key_path,
+                remote_key_path.clone(),
                 0o600,
             )
-            .await;
+            .await
+        {
+            eprintln!("[warn] Failed to install agent server key: {e}");
         }
 
         let _ = std::fs::remove_file(&local_cert_tmp);
@@ -2207,13 +2242,16 @@ pub mod install {
         }
 
         // On Unix/macOS, use restrictive permissions (0600) so only the agent process can read it.
-        let _ = remote_ssh::copy_to_remote(
+        if let Err(e) = remote_ssh::copy_to_remote(
             connection.clone(),
             local_tmp.to_string_lossy().to_string(),
-            config_path,
+            config_path.clone(),
             0o600,
         )
-        .await;
+        .await
+        {
+            eprintln!("[warn] Failed to install remote-agent-config.json: {e}");
+        }
 
         let _ = std::fs::remove_file(&local_tmp);
     }
@@ -2735,6 +2773,19 @@ Start-Sleep -Seconds 2\""
             command
         );
         eprintln!("[agent] Install path: {}", install_path);
+
+        // Ensure CA and server certs are provisioned before starting. The agent
+        // requires the CA to start (mTLS), and the install step may have failed
+        // to copy it if the cas/ directory wasn't created.
+        let os_for_certs = if install_path.contains('\\')
+            || install_path.to_ascii_lowercase().contains("appdata")
+        {
+            RemoteOs::Windows
+        } else {
+            RemoteOs::Unix
+        };
+        drop_ca_certificate(&connection, install_path, os_for_certs).await;
+        drop_agent_server_certificate(&connection, install_path, os_for_certs).await;
         let start_warning = match tokio::time::timeout(
             Duration::from_secs(15),
             remote_ssh::exec(connection.clone(), command.to_string()),
@@ -3052,7 +3103,8 @@ Start-Sleep -Seconds 2\""
                 "cmd.exe /C taskkill /IM llama-monitor.exe /F >NUL 2>NUL & schtasks /Delete /TN \"{WINDOWS_AGENT_TASK_NAME}\" /F >NUL 2>NUL & schtasks /Delete /TN \"{WINDOWS_AGENT_LEGACY_TASK_NAME}\" /F >NUL 2>NUL & del /F /Q \"{install_path}\" >NUL 2>NUL & exit /B 0"
             ),
             RemoteOs::Unix | RemoteOs::Macos => {
-                format!("pkill -f llama-monitor >/dev/null 2>&1; rm -f {install_path}")
+                let quoted = shell_quote_path(&install_path, os);
+                format!("pkill -f llama-monitor >/dev/null 2>&1; rm -f {quoted}")
             }
             RemoteOs::Unknown => return Err(io::Error::other("Unknown OS").into()),
         };
