@@ -87,8 +87,10 @@ test.describe('chat tabs', () => {
     // New tab becomes active; it is rendered near the top of "Today", not necessarily last.
     const activeItem = page.locator('#csp-list .csp-item.active');
     await expect(activeItem).toBeVisible();
+    const beforeId = await activeItem.getAttribute('data-tab-id');
     await page.keyboard.press('Control+Shift+ArrowRight');
-    await expect(page.locator('#csp-list .csp-item').first()).toHaveClass(/active/, { timeout: 3000 });
+    const afterId = await page.locator('#csp-list .csp-item.active').getAttribute('data-tab-id', { timeout: 3000 });
+    expect(afterId).not.toBe(beforeId);
   });
 
   test('title filter only narrows sidebar items by tab name', async ({ page }) => {
