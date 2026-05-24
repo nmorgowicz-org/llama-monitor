@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.4](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.21.3...v0.21.4) (2026-05-24)
+
+
+### Bug Fixes
+
+* **agent:** fix 4 bugs found in Windows remote install audit ([19c562c](https://github.com/nmorgowicz-org/llama-monitor/commit/19c562c0908c655c701066f2c692e244410e0240))
+* **agent:** use resolved path for Windows cas/ mkdir and provision certs on Start ([19c562c](https://github.com/nmorgowicz-org/llama-monitor/commit/19c562c0908c655c701066f2c692e244410e0240))
+
 ## [0.21.3](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.21.2...v0.21.3) (2026-05-23)
 
 
