@@ -232,6 +232,7 @@ function _buildSessionItem(tab, isActive) {
     el.className = 'csp-item' + (isActive ? ' active' : '');
     el.dataset.tabId = tab.id;
     el.dataset.ctx = ctxLevel;
+    if (tab.pinned) el.dataset.pinned = 'true';
     el.setAttribute('role', 'button');
     el.setAttribute('tabindex', '0');
     el.setAttribute('aria-current', isActive ? 'true' : 'false');
