@@ -1227,9 +1227,11 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 
 ## 13. Phased Implementation Plan
 
-### Phase 1: Build Infrastructure and Skeleton (Weeks 1-2)
+> **Timeline note (2026-05-24):** Revised for 100% AI-agent development with Claude Code + Codex running in parallel. Debug cycles that bottleneck a single agent are absorbed — one agent compiles while another pre-writes the next fix. The bottleneck shifts from "waiting for compilation" to "waiting for physical device feedback."
 
-**Goal:** APK installs; WebView loads dashboard; remote metrics from ryne visible.
+### Phase 1: Build Infrastructure and Skeleton (Week 1)
+
+**Revised from Weeks 1-2.** Waves A (Rust backends), B (JNI), and C (Gradle/Kotlin) overlap aggressively. One agent iterates on `cargo ndk build` errors while others pre-write fixes for known issues (tempfile/rustix workaround, rusqlite+NDK linking flags, JNI symbol naming). The 5-7 debug cycles that would take days for a single agent compress to hours when agents pipeline ahead of each other. Runner image rebuild is the only hard blocker (~1-2 hours).
 
 1. Add `ssh-control` and `android` features to `Cargo.toml`; move `ssh2` under `ssh-control`
 2. Create `src/android/mod.rs` — JNI entry points (start/stop/status/setPollInterval)
@@ -1249,9 +1251,9 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 
 **Deliverable:** APK installs on Z Fold 6. Dashboard shows with remote agent metrics from ryne. Local Android metrics show correct `availability` codes (no silent nulls).
 
-### Phase 2: Android System Metrics (Weeks 3-4)
+### Phase 2: Android System Metrics (Week 2)
 
-**Goal:** Battery, CPU load/name, and available thermal metrics live in dashboard.
+**Revised from Weeks 3-4.** With Phase 1 collapsing to 1 week, Phase 2 starts immediately. Multiple agents write battery.rs, thermal.rs, BatteryMetrics struct, JS handlers, and adaptive polling in parallel. The only sequential dependency is validating JNI data passing end-to-end, which takes one feedback round.
 
 1. Implement `src/android/battery.rs` — `updateBatteryMetrics` JNI receiver
 2. Implement `src/android/thermal.rs` — enumerate `/sys/class/thermal/`, filter readable
@@ -1264,9 +1266,9 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 
 **Deliverable:** System card shows CPU load, battery level/temp/charging state; polling adapts to screen state.
 
-### Phase 3: Foldable UX and Touch Handling (Weeks 5-6)
+### Phase 3: Touch Interaction and Foldable UX (Weeks 3-5)
 
-**Goal:** Full touch-optimized UI; correct folded/unfolded layouts.
+**Revised from Weeks 5-8.** CSS work collapses to a day with parallel agents. Touch JS and foldable detection written in parallel. Gesture thresholds start with proven Android conventions (500ms long-press, 60px swipe) requiring only 1 tuning round. Kotlin foldable detection written defensively with null handling for non-foldable devices.
 
 1. Add `max-width: 420px` CSS breakpoint for folded cover display
 2. Add touch drag handlers for sidebar resize
@@ -1284,23 +1286,45 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 
 **Deliverable:** App fully touch-operable; adapts to folded/unfolded states; chat input works with soft keyboard.
 
-### Phase 4: Security Hardening and SSH Control Evaluation (Weeks 7-8)
+### Phase 4: Security Hardening and SSH Control Evaluation (Week 6)
 
-1. Verify AndroidKeyStore integration in production (not just emulator)
-2. Implement TOFU certificate pinning for remote agent (extend `ssh-known-hosts` model)
+**Revised from Weeks 7-8.** Security review items parallelized across agents. russh evaluation scoped to evaluation only — migration becomes Phase 6 if viable. AndroidKeyStore verification remains a human gate but runs in parallel with all other work.
+
+1. Verify AndroidKeyStore integration in production — **human gate, runs in parallel, blocks sign-off**
+2. Implement TOFU certificate pinning for remote agent
 3. Add agent setup UI flow for Android (simplified settings wizard)
-4. Evaluate `russh` as pure-Rust SSH replacement — if viable, migrate desktop too
+4. Evaluate `russh` as pure-Rust SSH replacement — **evaluation only; migration deferred to Phase 6 if viable**
 5. Security review pass per AGENTS.md security checklist
 
 **Deliverable:** Production-grade secret storage; certificate pinning; security review complete.
 
-### Phase 5: Android GPU Metrics (Weeks 9+)
+### Phase 5: Android GPU Metrics (Week 7, verification deferred)
 
-1. Implement `src/gpu/android.rs` with Adreno kgsl sysfs reader
-2. Add Mali sysfs reader for Exynos variants
-3. Test on Z Fold 6; document exact sysfs paths confirmed readable
-4. Add GPU clock to GPU dashboard card (clock more reliable than load on Android)
+**Revised from Weeks 9+.** Adreno and Mali sysfs readers written in parallel; verification deferred to post-merge.
+
+1. Implement `src/gpu/android.rs` with Adreno kgsl sysfs reader — **AI writes code, paths unverified**
+2. Add Mali sysfs reader for Exynos variants — **AI writes code, paths unverified**
+3. ~~Test on Z Fold 6~~ → **Deferred to post-merge human task**
+4. Add GPU clock to GPU dashboard card
 5. Document Android GPU availability gaps in `docs/reference/android.md`
+
+### Revised Timeline Summary
+
+| Phase | Original | Revised | Delta | Primary Reason |
+|-------|----------|---------|-------|----------------|
+| Phase 1: Build Infrastructure | Weeks 1-2 | **Week 1** | -1 | Multiple agents pipeline debug cycles |
+| Phase 2: System Metrics | Weeks 3-4 | **Week 2** | -2 | Parallel agents; starts immediately after Phase 1 |
+| Phase 3: Touch & Foldable UX | Weeks 5-8 | **Weeks 3-5** | -3 | CSS parallelized; gesture thresholds use proven conventions |
+| Phase 4: Security Hardening | Weeks 7-8 | **Week 6** | -2 | Security review items parallelized |
+| Phase 5: GPU Metrics | Weeks 9+ | **Week 7** | deferred | Parallel Adreno/Mali readers; verification deferred |
+| **Total** | **~9 weeks** | **~7 weeks** | **-22%** | Parallel huge-model agents absorb debug loops |
+
+**Key assumptions:**
+- Claude Code + Codex running concurrently; agents pipeline ahead of each other
+- One person providing physical device feedback for touch gestures (async, ~1 day turnaround)
+- Phase 1 → Phase 2 dependency is hard but Phase 1 is fast enough
+- Gesture thresholds start with proven Android conventions (500ms long-press, 60px swipe)
+- AndroidKeyStore verification remains a human gate but runs in parallel
 
 ---
 
