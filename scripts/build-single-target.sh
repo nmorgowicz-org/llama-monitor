@@ -29,25 +29,29 @@ case "$TARGET" in
     ;;
   aarch64-unknown-linux-gnu)
     PKG_CONFIG_ALLOW_CROSS=1 \
-      PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig \
-      CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
-      CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ \
-      AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar \
-      cargo build --release --target aarch64-unknown-linux-gnu
+       PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig \
+       CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+       CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ \
+       AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar \
+       cargo build --release --target aarch64-unknown-linux-gnu
     ;;
   x86_64-pc-windows-gnu)
-    CROSS_REMOTE=1 \
-      CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-C target-feature=+crt-static" \
-      cross build --release --target x86_64-pc-windows-gnu \
-      --no-default-features --features native-tray
+    CROSS_Remote=1 \
+       CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS="-C target-feature=+crt-static" \
+       cross build --release --target x86_64-pc-windows-gnu \
+       --no-default-features --features native-tray
     ;;
   aarch64-apple-darwin)
     SDKROOT=/opt/osxcross/target/SDK/MacOSX26.1.sdk \
-      CC_aarch64_apple_darwin=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-clang \
-      AR_aarch64_apple_darwin=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
-      AR=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
-      RANLIB=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ranlib \
-      cargo build --release --target aarch64-apple-darwin
+       CC_aarch64_apple_darwin=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-clang \
+       AR_aarch64_apple_darwin=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
+       AR=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ar \
+       RANLIB=/opt/osxcross/target/bin/aarch64-apple-darwin25.1-ranlib \
+       cargo build --release --target aarch64-apple-darwin
+    ;;
+  aarch64-linux-android)
+    cargo ndk --target aarch64-linux-android --platform 30 -o android/app/src/main/jniLibs \
+      build --release --no-default-features --features android
     ;;
   *)
     echo "ERROR: unknown target '$TARGET'" >&2

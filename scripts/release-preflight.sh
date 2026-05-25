@@ -24,10 +24,16 @@ for target in \
   x86_64-unknown-linux-gnu \
   aarch64-unknown-linux-gnu \
   x86_64-pc-windows-gnu \
-  aarch64-apple-darwin; do
+  aarch64-apple-darwin \
+  aarch64-linux-android; do
   rustup target list --installed | grep -q "^${target}$" \
     || { echo "FAIL: rustup target ${target} not installed"; exit 1; }
 done
+
+# Android NDK checks
+test -n "$ANDROID_NDK_ROOT" || { echo "FAIL: ANDROID_NDK_ROOT not set"; exit 1; }
+test -d "$ANDROID_NDK_ROOT" || { echo "FAIL: Android NDK not found at $ANDROID_NDK_ROOT"; exit 1; }
+command -v cargo-ndk >/dev/null || { echo "FAIL: cargo-ndk not found"; exit 1; }
 
 pkg-config --libs webkit2gtk-4.1 >/dev/null
 pkg-config --libs javascriptcoregtk-4.1 >/dev/null
