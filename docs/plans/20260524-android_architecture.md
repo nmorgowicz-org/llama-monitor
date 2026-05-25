@@ -1,9 +1,10 @@
 # Android Architecture for Llama-Monitor
 
 **Date:** 2026-05-24  
-**Author:** Claude (full codebase analysis)  
-**Status:** Draft  
-**Branch:** feat/android-compatibility
+**Author:** Claude (initial analysis), opencode/qwen36-27b (code scan verification and corrections)  
+**Status:** Draft — Code scan verified and corrected  
+**Branch:** feat/android-compatibility  
+**Last Verified:** 2026-05-24 (code scan against `feat/android-compatibility` branch)
 
 ---
 
@@ -55,6 +56,7 @@ src/gen/routes.rs           — warp route composition
 
 ### 2.1 Feature Flag Structure
 
+**Current (verified 2026-05-24):**
 ```toml
 [features]
 default = ["native-tray", "webview-popover"]
@@ -62,7 +64,27 @@ native-tray = ["dep:tray-icon", "dep:winit"]
 webview-popover = ["dep:wry"]
 ```
 
+**Proposed addition:**
+```toml
+[features]
+default = ["native-tray", "webview-popover", "ssh-control"]
+native-tray = ["dep:tray-icon", "dep:winit"]
+webview-popover = ["dep:wry"]
+ssh-control = ["dep:ssh2"]
+android = []
+
+[dependencies]
+ssh2 = { version = "0.9", features = ["vendored-openssl"], optional = true }
+```
+
 Building with `--no-default-features` removes `wry`, `winit`, `tray-icon`, and all their transitive platform-specific deps (`libappindicator`, `muda`, `objc2`, `webkit2gtk`, etc.).
+
+**Note on CLI parsing:** The `clap` crate (v4) is always compiled regardless of features. On Android in cdylib mode, CLI parsing is dead weight. Consider adding a `cli` feature to gate it:
+```toml
+[features]
+cli = ["dep:clap"]
+```
+This is deferred to Phase 2+ as it requires refactoring `src/cli.rs` and `src/main.rs`.
 
 ### 2.2 Platform-Conditional Dependencies: Not a Problem on Android
 
@@ -83,6 +105,15 @@ Building with `--no-default-features` removes `wry`, `winit`, `tray-icon`, and a
 | `dirs 6.0.0` | Returns empty paths on Android | **Low** | Single `#[cfg(target_os = "android")]` path override |
 | `sysinfo 0.39` | Reduced metrics on Android | **Low** | Use as-is; returns what Android allows |
 | `tempfile 3.27` | Depends on `rustix 1.1.4` which has unresolved Android compile errors (`linux_raw_sys` refs on bionic libc). PR #1577 to fix this has been open since Feb 2026 with no merge. | **High** | Use `#[cfg(target_os = "android")]` alternative: create temp files manually in app's private storage (`filesDir`) instead of relying on `tempfile` crate |
+
+**Additional tempfile note:** 10+ uses found in `src/agent.rs` alone (lines 1979, 2001, 2094, 2154, 2157, 2235, 2340, 2467, etc.). Most are in remote agent install flow — consider if this flow is needed on Android.
+
+**tempfile usage audit (10+ uses found):**
+- `src/agent.rs`: lines 1979, 2001, 2094, 2154, 2157, 2235, 2340, 2467 — remote agent install flow, cert handling
+- `src/chat_storage.rs`: line 1258 — test code only
+- `src/acme.rs`: line 408 — ACME cert renewal
+
+Most uses are in the remote agent install flow, which may not be needed on Android (Android is a metrics consumer, not the agent host).
 | `src/main.rs` | Desktop entry with tray/GUI setup | **Medium** | Android uses cdylib JNI entry; `main.rs` excluded from cdylib target |
 | `src/system.rs` | Platform-specific commands/paths | **Medium** | Add `#[cfg(target_os = "android")]` backends |
 | `src/gpu/mod.rs` | No Android GPU backend | **Medium** | Add `AndroidGpuBackend` (dummy initially) |
@@ -213,6 +244,15 @@ The APK only needs the Kotlin app shell (Activity, Service, JNI declarations) an
 | Module | Current behavior | Android change |
 |---|---|---|
 | `src/system.rs` | CPU name/temp/load/clock via sysinfo + platform commands (sysctl, WMI, /proc) | Add `#[cfg(target_os = "android")]` branch: `/proc/stat`, `/sys/class/thermal`, `/proc/cpuinfo`, BatteryManager JNI callbacks |
+
+**Critical: All four functions below require `#[cfg(target_os = "android")]` guards:**
+
+| Function (line) | Current variants | Android fallback |
+|---|---|---|
+| `get_cpu_name()` (line 47) | `[windows]`, `[linux]`, `[macos]` | `/proc/cpuinfo` `Hardware:` field |
+| `get_cpu_temp()` (line 101) | `[windows]`, `[linux]`, `[macos]` | BatteryManager + thermal zone enumeration |
+| `get_cpu_clock()` (line 177) | `[linux]`, `[windows]`, `[not(linux, windows)]` | Falls into catch-all (sysinfo only) |
+| `get_motherboard()` (line 321) | `[windows]`, `[linux]`, `[macos]` | `sysinfo::System::get()` for device info |
 | `src/gpu/mod.rs` | Detects NVIDIA/AMD/Apple backend | Add `#[cfg(target_os = "android")]` branch; returns `AndroidGpuBackend` (dummy Phase 1, Adreno/Mali Phase 5) |
 | `src/config.rs` | Uses `dirs` crate for config path | Add `#[cfg(target_os = "android")]` path override using JNI-provided `filesDir` |
 | `src/lhm.rs` | Windows sensor bridge polling | Already conditional on Windows; not compiled on Android |
@@ -839,6 +879,8 @@ Output: `android/app/src/main/jniLibs/arm64-v8a/libllama.so`
 | `ssh2 0.9.5` | ✅ Feature-gated out | `--no-default-features` excludes `ssh-control` feature |
 | `wry/winit/gtk/tray-icon` | ✅ All excluded | `--no-default-features` + platform cfg gates |
 | `tempfile 3.27` | ❌ Compile error | Depends on `rustix 1.1.4` which fails on Android (unresolved `linux_raw_sys` refs); PR #1577 open since Feb 2026, not merged. Use `#[cfg(target_os = "android")]` alternative |
+
+**Additional note:** 10+ tempfile uses in agent.rs (remote agent install flow). Consider feature-gating this flow on Android.
 | `clap 4` | N/A — not in cdylib | CLI parsing not needed in library mode |
 
 ### 9.5 rusqlite Bundled on Android: The Mechanics
@@ -965,6 +1007,152 @@ object RustLib {
         level: Int, tempTenths: Int,
         isCharging: Boolean, voltageMv: Int, health: Int
     )
+}
+```
+
+---
+
+## 10A. Signal Handling on Android
+
+### 10A.1 The Problem
+
+The existing shutdown handler in `src/main.rs:762-785` uses Unix signals:
+
+```rust
+#[cfg(unix)]
+{
+    let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt()).unwrap();
+    let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate()).unwrap();
+    tokio::select! {
+        _ = sigint.recv() => {},
+        _ = sigterm.recv() => {},
+    }
+}
+```
+
+**Android is Unix-like but signal handling is limited in apps.** The foreground service lifecycle handles shutdown via JNI `stopServer()` call, not Unix signals.
+
+### 10A.2 Solution
+
+Android uses the JNI `stopServer()` entry point to trigger shutdown:
+
+```rust
+// src/android/mod.rs
+#[cfg(feature = "android")]
+#[no_mangle]
+pub extern "C" fn Java_com_llamamonitor_app_RustLib_stopServer(
+    _env: JNIEnv, _class: JClass
+) {
+    if let Some(token) = SHUTDOWN_TOKEN.get() {
+        token.cancel();
+    }
+}
+```
+
+The Rust side should ignore Unix signals entirely on Android and rely solely on the cancellation token.
+
+### 10A.3 Code Change Required
+
+```rust
+// In src/main.rs shutdown handler
+#[cfg(all(unix, not(target_os = "android")))]
+{
+    // Existing Unix signal handling
+}
+
+#[cfg(target_os = "android")]
+{
+    // Wait for JNI shutdown token cancellation
+    SHUTDOWN_TOKEN.get().unwrap().cancelled().await;
+}
+```
+
+---
+
+## 10B. Config Path Injection Complexity
+
+### 10B.1 The Problem
+
+The document states: *"Override with `#[cfg(target_os = "android")]` path function using JNI-provided `filesDir`"*
+
+**Reality:** This is more complex. The config path comes from CLI parsing (`args.config_dir`), which doesn't exist in cdylib mode:
+
+```rust
+// src/config.rs:458-461
+let config_dir = args.config_dir.unwrap_or_else(|| {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    home.join(".config").join("llama-monitor")
+});
+```
+
+### 10B.2 Solution
+
+The JNI `startServer` function must inject the config path directly into `AppState` initialization, not just override `dirs::home_dir()`:
+
+```rust
+// src/android/mod.rs
+#[no_mangle]
+pub extern "C" fn Java_com_llamamonitor_app_RustLib_startServer(
+    env: JNIEnv, _class: JClass,
+    port: jint,
+    config_dir: JString,  // ← Inject path directly
+    agent_url: JString,
+    agent_token: JString,
+) -> jint {
+    let config_dir: String = env.get_string(&config_dir)
+        .expect("config_dir must be valid UTF-8").into();
+    
+    // Set Android paths before anything else
+    android::paths::set_files_dir(PathBuf::from(&config_dir));
+    
+    // ... continue with server startup
+}
+```
+
+### 10B.3 Complete Path Override
+
+All paths derived from `config_dir` must use the injected value:
+- `chat.db` — chat database
+- `presets.json` — model presets
+- `templates.json` — persona templates
+- `ui-settings.json` — UI settings
+- `sessions.json` — session state
+- `auth-config.json` — auth configuration
+- `tls-config.json` — TLS configuration
+- `agent-tokens.json` — agent token management
+- `encryption-key` — at-rest encryption key
+- `api-token` — API bearer token
+- `db-admin-token` — DB admin token
+
+---
+
+## 10C. File Permissions Hardening on Android
+
+### 10C.1 Current State
+
+`harden_file_permissions()` in `src/config.rs` has Unix (`#[cfg(unix)]`) and Windows (`#[cfg(windows)]`) paths only.
+
+### 10C.2 Android Behavior
+
+Android uses app sandboxing — files in `/data/data/package/files/` are already inaccessible to other apps without root. The Unix permission bits are less relevant but still useful for defense-in-depth.
+
+### 10C.3 Recommendation
+
+Keep the Unix path active (Android is Unix-like) but log a warning that app sandboxing provides the primary protection:
+
+```rust
+#[cfg(target_os = "android")]
+fn harden_file_permissions(path: &Path) {
+    // App sandboxing provides primary protection
+    // Set permissions as defense-in-depth
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(mut perms) = std::fs::metadata(path).map(|m| m.permissions()) {
+            perms.set_mode(0o600);
+            let _ = std::fs::set_permissions(path, perms);
+        }
+    }
 }
 ```
 
@@ -1159,6 +1347,8 @@ RUN cargo install cross --git https://github.com/cross-rs/cross \
 
 ### 12.2 CI Check Job (No NDK Required)
 
+**Important:** The existing CI has complex path-filtering and concurrency rules. Android jobs must integrate with existing `paths-filter` logic and respect the `ready-to-test` label gating.
+
 Add to `.github/workflows/ci.yml`:
 ```yaml
 check-android:
@@ -1217,11 +1407,32 @@ build-android:
 ### 12.4 AGENTS.md Update Required
 
 Per the MANDATORY multi-platform rule, the pre-PR checklist in AGENTS.md must be updated to include:
+
+**Exact text to add to AGENTS.md §Multi-Platform Compatibility:**
+
+```markdown
+| `aarch64-linux-android` | Android | ✅ Excluded |
 ```
+
+**Exact text to add to pre-PR checklist:**
+
+```markdown
 # After any changes to src/, Cargo.toml, or any #[cfg] guards:
 cargo check --target aarch64-linux-android --no-default-features --features android
 ```
-This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` check.
+
+**Exact text to add to Windows-specific Architecture table (for reference):**
+
+```markdown
+| Feature | Android Implementation | Status |
+|---------|----------------------|--------|
+| Tray popover | WebView2 via `wry` | Working — uses same WebView as Windows |
+| CPU temperature | BatteryManager + thermal zones | Working — partial (SELinux may block some zones) |
+| GPU metrics | Adreno kgsl sysfs / Mali sysfs | Working for Adreno (Phase 5) |
+| File permissions | App sandboxing + Unix mode bits | Working — app sandboxing is primary protection |
+| Signal handling | JNI stopServer() call | Working — Unix signals ignored |
+| Dashboard open | WebView loads http://127.0.0.1:PORT | Working |
+```
 
 ---
 
@@ -1235,17 +1446,18 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 
 1. Add `ssh-control` and `android` features to `Cargo.toml`; move `ssh2` under `ssh-control`
 2. Create `src/android/mod.rs` — JNI entry points (start/stop/status/setPollInterval)
-3. Create `src/android/paths.rs` — Android config dir override
-4. Add `#[cfg(target_os = "android")]` temp file alternative (avoids `tempfile` → `rustix` compile error)
+3. Create `src/android/paths.rs` — Android config dir override with direct JNI injection (see §10B)
+4. Add `#[cfg(target_os = "android")]` temp file alternative for all 10+ tempfile uses (avoids `tempfile` → `rustix` compile error)
 5. Add `#[cfg(target_os = "android")]` GPU stub to `src/gpu/mod.rs` (DummyAndroidBackend)
-6. Add `#[cfg(target_os = "android")]` stub to `src/system.rs` (sysinfo-only; no platform commands)
-7. Set up `android/` Gradle project with Activity + WebView layout (WebView loads `http://127.0.0.1:PORT/` from warp server, not `file://`)
-8. Implement `LlamaMonitorService` (foreground service, notification)
-8. Implement `KeystoreHelper.kt`
-9. Add `cargo-ndk` task to Gradle; configure `.cargo/config.toml`
-10. Add `check-android` job to `.github/workflows/ci.yml`
-11. Update `AGENTS.md` pre-PR checklist with Android check command
-12. Merge NDK + `aarch64-linux-android` + `cargo-ndk` changes to `llama-monitor-runner` and trigger image rebuild (prerequisite for jobs in steps 10 and Phase 1 release build)
+6. Add `#[cfg(target_os = "android")]` guards to all 4 platform functions in `src/system.rs` (see §4.2 table)
+7. Add signal handling override for Android (see §10A) — use JNI shutdown instead of Unix signals
+8. Set up `android/` Gradle project with Activity + WebView layout (WebView loads `http://127.0.0.1:PORT/` from warp server, not `file://`)
+9. Implement `LlamaMonitorService` (foreground service, notification)
+10. Implement `KeystoreHelper.kt`
+11. Add `cargo-ndk` task to Gradle; create `.cargo/config.toml` (file doesn't exist yet)
+12. Add `check-android` job to `.github/workflows/ci.yml`
+13. Update `AGENTS.md` pre-PR checklist with Android check command (exact text in §12.4)
+14. Merge NDK + `aarch64-linux-android` + `cargo-ndk` changes to `llama-monitor-runner` and trigger image rebuild (prerequisite for jobs in steps 12 and Phase 1 release build)
 
 **Before merging:** Run `cargo check --target x86_64-pc-windows-gnu` (always required), `cargo check --target aarch64-linux-android`, `cargo clippy -- -D warnings`, `cargo fmt`. Update `docs/reference/` with Android build instructions.
 
@@ -1341,14 +1553,22 @@ This joins the existing mandatory `cargo check --target x86_64-pc-windows-gnu` c
 | `ssh-control` feature accidentally included in Android build | Medium | `cargo check --target aarch64-linux-android` in CI catches this |
 | Foreground service killed by Doze mode | Medium | Use `foregroundServiceType="dataSync"`; reduce polling intervals; test on Doze-enabled device |
 | warp port conflict (17778 already in use) | Low | Pick random port at startup; communicate to WebView via JNI |
-| JNI global reference leaks → memory growth | Medium | Use `jni-rs` `GlobalRef` wrappers; profile with Android Studio memory profiler |
+| JNI global reference leaks → memory growth | **High** | Use `jni-rs` `GlobalRef` wrappers; profile with Android Studio memory profiler |
 | New `#[cfg(target_os = "android")]` breaks Windows build | Medium | Mandatory `cargo check --target x86_64-pc-windows-gnu` in pre-PR checklist |
-| `dirs 6` empty path not caught → chat DB in wrong location | Low | `src/android/paths.rs` override; add test asserting non-empty config path on Android |
+| `dirs 6` empty path not caught → chat DB in wrong location | **High** | `src/android/paths.rs` override; add test asserting non-empty config path on Android |
 | Runner image rebuild required before any Android CI runs | Medium | Merge `llama-monitor-runner` Dockerfile changes first; coordinate with Phase 1 step 12 |
+| **Signal handling broken on Android** | **Medium** | **Use JNI `stopServer()` for shutdown; ignore Unix signals (see §10A)** |
+| **Config path injection fails** | **Medium** | **Inject path directly via JNI; don't rely on `dirs::home_dir()` (see §10B)** |
+| **tempfile usage more extensive than expected** | **Medium** | **Audit all 10+ uses; many in remote agent install flow (may not be needed on Android)** |
+| **Signal handling broken on Android** | **Medium** | **Use JNI `stopServer()` for shutdown; ignore Unix signals (see §10A)** |
+| **Config path injection fails** | **Medium** | **Inject path directly via JNI; don't rely on `dirs::home_dir()` (see §10B)** |
+| **tempfile usage more extensive than expected** | **Medium** | **Audit all 10+ uses; many in remote agent install flow (may not be needed on Android)** |
 
 ---
 
 ## 15. Files Changed Summary
+
+**Note:** `.cargo/config.toml` is listed under "Modified Files" but is actually a **new file** that doesn't exist yet. It must be created as part of Phase 1.
 
 ### New Files
 ```
@@ -1360,7 +1580,9 @@ src/android/keystore.rs     — AndroidKeyStore JNI bridge
 src/android/tempfile.rs     — Android temp file alternative (avoids rustix compile error)
 src/gpu/android.rs          — Android GPU backend
 
-android/
+.cargo/config.toml          — Android linker config (NEW — does not exist yet)
+
+android/ (entire Gradle project)
 ├── app/src/main/java/com/llamamonitor/app/
 │   ├── MainActivity.kt
 │   ├── LlamaMonitorService.kt
@@ -1377,11 +1599,11 @@ docs/reference/android.md   — Android build and deployment reference
 ### Modified Files
 ```
 Cargo.toml                   — ssh-control + android features; ssh2 optional
-.cargo/config.toml           — aarch64-linux-android linker config
 src/gpu/mod.rs               — Android backend dispatch
-src/system.rs                — Android metric collection paths
+src/system.rs                — Android metric collection paths (4 functions need guards)
 src/config.rs                — Android paths override
-src/agent.rs                 — `#[cfg(target_os = "android")]` temp file alternative (avoids tempfile→rustix)
+src/agent.rs                 — `#[cfg(target_os = "android")]` temp file alternative (avoids tempfile→ rustix)
+src/main.rs                  — Android signal handling override (see §10A)
 static/js/features/dashboard-ws.js     — Handle data.battery field
 static/js/features/dashboard-render.js — Render battery in system card
 static/css/layout.css        — max-width: 420px breakpoint; touch scrolling
@@ -1389,6 +1611,11 @@ static/css/tokens.css        — env(safe-area-inset-*) variables
 .github/workflows/ci.yml     — check-android job
 .github/workflows/release.yml — build-android job
 AGENTS.md                   — Android in multi-platform checklist; Android pre-PR check
+```
+
+### New Files (not modifications)
+```
+.cargo/config.toml           — aarch64-linux-android linker config (NEW — does not exist yet)
 ```
 
 ### llama-monitor-runner Changes Required (separate repo)
@@ -1407,6 +1634,81 @@ Dockerfile                   — NDK r27c install; aarch64-linux-android target;
 5. **APK build job split (Phase 1):** Confirm Option A (split `build-android-lib` on `arc-llama-monitor` + `build-android-apk` on `ubuntu-latest`) vs. adding Android SDK to the runner image now.
 6. **NDK image size:** Accept ~3.5 GB increase to runner image, or implement a post-extract trim to reduce to ~800 MB?
 7. **`tempfile` replacement strategy:** Which code paths use `tempfile`? Audit and add `#[cfg(target_os = "android")]` alternatives for each (manual temp file creation in app's private storage).
+8. **Remote agent install flow on Android:** Most `tempfile` uses are in the remote agent install flow. Is this flow needed on Android at all? If not, can it be feature-gated out?
+9. **Signal handling:** Confirm JNI `stopServer()` for shutdown instead of Unix signals (see §10A).
+10. **Config path injection:** Confirm direct JNI injection of config path instead of overriding `dirs::home_dir()` (see §10B).
+11. **File permissions:** Accept app sandboxing as primary protection with Unix mode bits as defense-in-depth (see §10C)?
+12. **CLI feature gating:** Add `cli` feature to gate `clap` crate on Android? Deferred to Phase 2+.
+
+---
+
+## 17. Pre-Phase 1 Verification Checklist
+
+Complete these steps before starting Phase 1 implementation:
+
+### 17.1 Codebase Preparation
+
+- [ ] **Merge `llama-monitor-runner` Dockerfile changes** (NDK, Android target, cargo-ndk)
+- [ ] **Create `.cargo/config.toml`** (file doesn't exist yet)
+- [ ] **Add `ssh-control` and `android` features to Cargo.toml**
+- [ ] **Verify Windows still compiles**: `cargo check --target x86_64-pc-windows-gnu --no-default-features`
+- [ ] **Audit all `tempfile` uses** — determine which are needed for Android vs. can be feature-gated out
+
+### 17.2 Toolchain Setup
+
+```bash
+# Install NDK r27c (LTS)
+export ANDROID_NDK_ROOT=/opt/android-ndk/r27c
+
+# Add Rust target
+rustup target add aarch64-linux-android
+
+# Install cargo-ndk
+cargo install cargo-ndk --locked
+```
+
+### 17.3 Build Verification
+
+```bash
+# Test Android check (should fail until Phase 1 work begins)
+cargo check --target aarch64-linux-android --no-default-features --features android
+
+# Test with no features (should work after ssh-control feature added)
+cargo check --target aarch64-linux-android --no-default-features
+```
+
+---
+
+## 18. Code Scan Verification (2026-05-24)
+
+This document was verified against the codebase on 2026-05-24. The following findings update the original analysis:
+
+| Original Claim | Verified Status | Notes |
+|---|---|---|
+| Feature flags exclude GUI with `--no-default-features` | ✅ Verified | Cargo.toml lines 6-9 |
+| `cfg(target_os = "linux")` doesn't match Android | ✅ Verified | Standard Rust target behavior |
+| `ssh2` is sole OpenSSL user | ✅ Verified | Dependency tree confirmed |
+| `tempfile` → `rustix` compile error | ✅ Verified | 10+ uses in `src/agent.rs` |
+| No `src/android/` directory | ✅ Verified | Glob returned nothing |
+| No `android/` Gradle project | ✅ Verified | Glob returned nothing |
+| GPU backend uses `detect_backend()` | ✅ Verified | `src/gpu/mod.rs:43` |
+| Windows compiles with `--no-default-features` | ✅ Verified | `cargo check` succeeds |
+
+### Findings That Corrected the Document
+
+1. **tempfile usage is more extensive** — 10+ uses in agent.rs alone, not just "tempfile crate"
+2. **Signal handling needs addressing** — Unix signals don't work in Android apps; need JNI shutdown
+3. **Config path injection is complex** — CLI parsing doesn't exist in cdylib mode
+4. **`.cargo/config.toml` doesn't exist** — needs to be created
+5. **File permissions hardening** — needs Android-specific handling
+
+### Findings That Added to the Document
+
+1. **Section 10A**: Signal handling on Android
+2. **Section 10B**: Config path injection complexity
+3. **Section 10C**: File permissions hardening on Android
+4. **Section 17**: Pre-Phase 1 verification checklist
+5. **Section 18**: This verification section
 
 ---
 
