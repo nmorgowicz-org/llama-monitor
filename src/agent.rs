@@ -1923,7 +1923,8 @@ fn build_agent_https_client(timeout: Duration) -> Option<reqwest::Client> {
     if let Some(ca) = crate::certs::Cert::load(
         &crate::certs::certs_dir().join("ca.pem"),
         &crate::certs::certs_dir().join("ca.key"),
-    ) && let Ok(cert) = reqwest::Certificate::from_pem(ca.pem.as_bytes()) {
+    ) && let Ok(cert) = reqwest::Certificate::from_pem(ca.pem.as_bytes())
+    {
         trust_anchors.push(cert);
     }
     trust_anchors.extend(crate::certs::load_remote_agent_ca_certs());
@@ -1993,7 +1994,8 @@ fn build_enrollment_https_client(timeout: Duration) -> Option<reqwest::Client> {
     if let Some(ca) = crate::certs::Cert::load(
         &crate::certs::certs_dir().join("ca.pem"),
         &crate::certs::certs_dir().join("ca.key"),
-    ) && let Ok(cert) = reqwest::Certificate::from_pem(ca.pem.as_bytes()) {
+    ) && let Ok(cert) = reqwest::Certificate::from_pem(ca.pem.as_bytes())
+    {
         trust_anchors.push(cert);
     }
     trust_anchors.extend(crate::certs::load_remote_agent_ca_certs());
