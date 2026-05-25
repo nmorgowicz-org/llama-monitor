@@ -717,18 +717,24 @@ function _groupTabsByRecency(tabs) {
 
     const groups = { pinned: [], today: [], yesterday: [], week: [], older: [] };
 
+    // Use last_message_at (server-computed max message timestamp) for grouping
+    // so that parameter/settings changes don't push tabs into "Today" when no
+    // new messages were sent.  Fall back to updated_at → created_at → now for
+    // tabs that have never had a message.
+    const tabTs = (tab) =>
+        tab.last_message_at || tab.updated_at || tab.created_at || now;
+
     for (const tab of tabs) {
         if (tab.pinned) { groups.pinned.push(tab); continue; }
-        const ts = tab.updated_at || tab.created_at || now;
+        const ts = tabTs(tab);
         if (ts >= todayStart)            groups.today.push(tab);
         else if (ts >= yesterdayStart)   groups.yesterday.push(tab);
         else if (ts >= weekStart)        groups.week.push(tab);
         else                             groups.older.push(tab);
     }
 
-    // Sort each group by most-recently-updated first.
-    const byRecency = (a, b) =>
-        (b.updated_at || b.created_at || 0) - (a.updated_at || a.created_at || 0);
+    // Sort each group by most-recently-messaged first (same priority as grouping).
+    const byRecency = (a, b) => tabTs(b) - tabTs(a);
 
     groups.pinned.sort(byRecency);
     groups.today.sort(byRecency);

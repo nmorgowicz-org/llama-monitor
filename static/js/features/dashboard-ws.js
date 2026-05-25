@@ -328,7 +328,9 @@ function updateAgentStatus(d) {
         const chipGrade = window.__telemetryGrade || 'local_full';
         gradeChip.textContent = gradeLabel(chipGrade);
         gradeChip.className = 'telemetry-grade-chip grade-' + gradeStatusClass(chipGrade);
-        gradeChip.style.display = (d.endpoint_kind === 'Remote') ? '' : 'none';
+        // Hide chip when agent is fully healthy — the endpoint-status pill already
+        // shows "Full telemetry" and the badge label alone is sufficient.
+        gradeChip.style.display = (d.endpoint_kind === 'Remote' && chipGrade !== 'remote_agent_connected') ? '' : 'none';
     }
 
     if (grade === 'remote_agent_firewall_blocked') {
