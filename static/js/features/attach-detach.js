@@ -174,12 +174,16 @@ export async function doAttach() {
         return;
     }
 
+    // Read API key from welcome screen or monitor view input
+    const apiKeyInput = document.getElementById('setup-endpoint-api-key');
+    const apiKey = apiKeyInput ? apiKeyInput.value.trim() : '';
+
     const resp = await fetch('/api/attach', {
         method: 'POST',
         headers: (typeof window.authHeaders === 'function')
             ? window.authHeaders({ 'Content-Type': 'application/json' })
             : { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ endpoint }),
+        body: JSON.stringify({ endpoint, api_key: apiKey || undefined }),
     });
     const data = await resp.json();
 
@@ -209,49 +213,55 @@ export async function doAttach() {
 }
 
 export async function doDetach() {
-    const headers = window.authHeaders ? window.authHeaders() : {};
-    const resp = await fetch('/api/detach', { method: 'POST', headers });
-    if (resp.status === 401) {
-        showToast('Detach failed: authentication required', 'error');
-        return;
-    }
-    const data = await resp.json();
-
-    if (!data.ok) {
-        showToast('Detach failed: ' + (data.error || 'unknown'), 'error');
-    } else {
-        showToast('Detached from server', 'success');
-
-        saveLastSessionData({
-            promptRate: monitorState.speedMax.prompt > 0 ? monitorState.speedMax.prompt + ' t/s' : '—',
-            genRate: monitorState.speedMax.generation > 0 ? monitorState.speedMax.generation + ' t/s' : '—',
-            sessionName: sessionState.activeSessionId || '—',
-            endpoint: document.getElementById('server-endpoint')?.value?.trim() || '',
-            telemetryGrade: window.__telemetryGrade || '',
-            telemetryLabel: document.getElementById('telemetry-grade-chip')?.textContent?.trim() || '',
-        });
-
-        const btnAttach = document.getElementById('btn-attach');
-        const btnDetach = document.getElementById('btn-detach');
-        const btnDetachTop = document.getElementById('btn-detach-top');
-
-        if (btnAttach && btnDetach) {
-            btnAttach.style.display = 'inline-block';
-            btnDetach.style.display = 'none';
+    try {
+        const headers = window.authHeaders
+            ? window.authHeaders({ 'Content-Type': 'application/json' })
+            : { 'Content-Type': 'application/json' };
+        const resp = await fetch('/api/detach', { method: 'POST', headers });
+        if (resp.status === 401) {
+            showToast('Detach failed: authentication required', 'error');
+            return;
         }
-        if (btnDetachTop) btnDetachTop.style.display = 'none';
+        const data = await resp.json();
 
-        const serverHeader = document.getElementById('server-header');
-        if (serverHeader) serverHeader.style.display = '';
+        if (!data.ok) {
+            showToast('Detach failed: ' + (data.error || 'unknown'), 'error');
+        } else {
+            showToast('Detached from server', 'success');
 
-        const historicBadge = document.getElementById('inference-historic-badge');
-        if (historicBadge) historicBadge.style.display = 'inline-block';
+            saveLastSessionData({
+                promptRate: monitorState.speedMax.prompt > 0 ? monitorState.speedMax.prompt + ' t/s' : '—',
+                genRate: monitorState.speedMax.generation > 0 ? monitorState.speedMax.generation + ' t/s' : '—',
+                sessionName: sessionState.activeSessionId || '—',
+                endpoint: document.getElementById('server-endpoint')?.value?.trim() || '',
+                telemetryGrade: window.__telemetryGrade || '',
+                telemetryLabel: document.getElementById('telemetry-grade-chip')?.textContent?.trim() || '',
+            });
 
-        monitorState.speedMax = { prompt: 0, generation: 0 };
-        switchView('setup');
+            const btnAttach = document.getElementById('btn-attach');
+            const btnDetach = document.getElementById('btn-detach');
+            const btnDetachTop = document.getElementById('btn-detach-top');
+
+            if (btnAttach && btnDetach) {
+                btnAttach.style.display = 'inline-block';
+                btnDetach.style.display = 'none';
+            }
+            if (btnDetachTop) btnDetachTop.style.display = 'none';
+
+            const serverHeader = document.getElementById('server-header');
+            if (serverHeader) serverHeader.style.display = '';
+
+            const historicBadge = document.getElementById('inference-historic-badge');
+            if (historicBadge) historicBadge.style.display = 'inline-block';
+
+            monitorState.speedMax = { prompt: 0, generation: 0 };
+            switchView('setup');
+        }
+
+        updateActiveSessionInfo();
+    } catch (err) {
+        showToast('Detach failed: ' + err.message, 'error');
     }
-
-    updateActiveSessionInfo();
 }
 
 // ── Setup page helpers ─────────────────────────────────────────────────────────

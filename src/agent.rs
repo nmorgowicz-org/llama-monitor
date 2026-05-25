@@ -1310,7 +1310,7 @@ fn remote_agent_url_for_active_session(
         sessions.iter().find(|s| s.id == active_id).cloned()
     }?;
 
-    let SessionMode::Attach { endpoint } = session.mode else {
+    let SessionMode::Attach { endpoint, .. } = session.mode else {
         return None;
     };
 
@@ -2840,10 +2840,20 @@ Start-Sleep -Seconds 2\""
                     for candidate in agent_url_candidates(&agent_url) {
                         let client =
                             agent_client_for_url(&candidate, health_https.as_ref(), &health_http);
-                        if let Ok(resp) = client.get(format!("{}/health", candidate)).send().await
-                            && resp.status().is_success()
-                        {
-                            break 'check true;
+                        match client.get(format!("{}/health", candidate)).send().await {
+                            Ok(resp) if resp.status().is_success() => {
+                                break 'check true;
+                            }
+                            Ok(resp) => {
+                                eprintln!(
+                                    "[agent] Health check {} returned status {}",
+                                    candidate,
+                                    resp.status()
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!("[agent] Health check {} error: {}", candidate, e);
+                            }
                         }
                     }
                     false

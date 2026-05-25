@@ -273,20 +273,68 @@ pub async fn copy_to_remote(
         let session = connection.connect_blocking()?;
         let bytes = std::fs::read(&local_path)
             .with_context(|| format!("failed to read local file {local_path}"))?;
-        let mut channel = session
-            .scp_send(Path::new(&remote_path), mode, bytes.len() as u64, None)
-            .with_context(|| format!("failed to open remote SCP target {remote_path}"))?;
-        channel
-            .write_all(&bytes)
-            .context("failed to write remote SCP payload")?;
-        channel.send_eof().ok();
-        channel.wait_eof().ok();
-        channel.close().ok();
-        channel.wait_close().ok();
-        Ok(())
+        copy_bytes_via_sftp(&session, &bytes, &remote_path, mode)
+            .with_context(|| format!("failed to copy to remote {remote_path}"))
     })
     .await
     .context("SSH copy task failed")?
+}
+
+/// Upload bytes to a remote path using the SFTP subsystem.
+///
+/// SFTP is used instead of SCP because libssh2's `scp_send` uses
+/// LIBSSH2_ERROR_SCP_PROTOCOL (-28) when Windows OpenSSH rejects paths that
+/// contain backslashes or drive-letter colons in the SCP C-command filename
+/// field. SFTP avoids the SCP handshake entirely.
+///
+/// Windows OpenSSH SFTP uses `/C:/...` absolute paths (forward slashes,
+/// leading slash before the drive letter). Unix SFTP uses plain `/...` paths.
+fn copy_bytes_via_sftp(
+    session: &ssh2::Session,
+    bytes: &[u8],
+    remote_path: &str,
+    mode: i32,
+) -> Result<()> {
+    // Convert the path to SFTP format.
+    //   Windows backslash paths  →  C:\Users\nick\...  →  /C:/Users/nick/...
+    //   Unix paths               →  /home/user/...     →  /home/user/...  (unchanged)
+    let sftp_path = to_sftp_path(remote_path);
+
+    let sftp = session.sftp().context("failed to open SFTP subsystem")?;
+
+    let mut file = sftp
+        .open_mode(
+            Path::new(&sftp_path),
+            ssh2::OpenFlags::WRITE | ssh2::OpenFlags::CREATE | ssh2::OpenFlags::TRUNCATE,
+            mode,
+            ssh2::OpenType::File,
+        )
+        .with_context(|| format!("SFTP open failed for {sftp_path}"))?;
+
+    file.write_all(bytes)
+        .context("failed to write SFTP payload")?;
+
+    Ok(())
+}
+
+/// Convert an OS-specific file path to the absolute path format expected by
+/// Windows OpenSSH SFTP (`/C:/Users/...`) or leave Unix paths unchanged.
+fn to_sftp_path(remote_path: &str) -> String {
+    // Normalise separators first.
+    let forward = remote_path.replace('\\', "/");
+
+    // A Windows absolute path starts with a drive letter followed by ':'.
+    // Windows OpenSSH SFTP expects a leading '/' before the drive letter.
+    //   C:/Users/nick/... → /C:/Users/nick/...
+    let is_windows_abs = forward.len() >= 2
+        && forward.as_bytes()[0].is_ascii_alphabetic()
+        && forward.as_bytes()[1] == b':';
+
+    if is_windows_abs {
+        format!("/{forward}")
+    } else {
+        forward
+    }
 }
 
 fn exec_blocking(connection: &SshConnection, command: &str) -> Result<SshCommandOutput> {

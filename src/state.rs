@@ -193,8 +193,13 @@ fn default_ws_push_interval_ms() -> u64 {
 /// Session mode: either spawn a new server or attach to existing
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub enum SessionMode {
-    Spawn { port: u16 },
-    Attach { endpoint: String },
+    Spawn {
+        port: u16,
+    },
+    Attach {
+        endpoint: String,
+        api_key: Option<String>,
+    },
 }
 
 impl Default for SessionMode {
@@ -252,12 +257,12 @@ impl Session {
         }
     }
 
-    pub fn new_attach(id: String, name: String, endpoint: String) -> Self {
+    pub fn new_attach(id: String, name: String, endpoint: String, api_key: Option<String>) -> Self {
         let now = Self::now();
         Self {
             id,
             name,
-            mode: SessionMode::Attach { endpoint },
+            mode: SessionMode::Attach { endpoint, api_key },
             status: SessionStatus::Disconnected,
             preset_id: String::new(),
             created_at: now,
@@ -739,7 +744,7 @@ impl AppState {
 
         match session.map(|s| s.mode) {
             Some(SessionMode::Spawn { .. }) => EndpointKind::Local,
-            Some(SessionMode::Attach { endpoint }) => endpoint_kind_from_endpoint(&endpoint),
+            Some(SessionMode::Attach { endpoint, .. }) => endpoint_kind_from_endpoint(&endpoint),
             None => EndpointKind::Unknown,
         }
     }
@@ -767,7 +772,7 @@ impl AppState {
 
         match session.map(|s| s.mode) {
             Some(SessionMode::Spawn { .. }) => true,
-            Some(SessionMode::Attach { endpoint }) => endpoint_is_local(&endpoint),
+            Some(SessionMode::Attach { endpoint, .. }) => endpoint_is_local(&endpoint),
             None => true,
         }
     }
@@ -829,7 +834,7 @@ impl AppState {
         match session {
             Some(ref s) if matches!(s.mode, SessionMode::Spawn { .. }) => full,
             Some(ref s)
-                if matches!(&s.mode, SessionMode::Attach { endpoint }
+                if matches!(&s.mode, SessionMode::Attach { endpoint, .. }
                     if endpoint_is_local(endpoint)) =>
             {
                 full
@@ -1072,6 +1077,7 @@ mod tests {
                     "test".to_string(),
                     "Test".to_string(),
                     "http://remote.example.com:8001".to_string(),
+                    None,
                 )
             };
             state.add_session(session);
@@ -1107,6 +1113,7 @@ mod tests {
             "saved".to_string(),
             "Saved".to_string(),
             "http://remote.example.com:8001".to_string(),
+            None,
         )];
         std::fs::write(&sessions_path, serde_json::to_string(&sessions).unwrap()).unwrap();
 

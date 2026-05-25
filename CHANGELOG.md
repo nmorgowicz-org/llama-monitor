@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.22.0...v0.22.1) (2026-05-25)
+
+
+### Bug Fixes
+
+* **agent:** fix mTLS role check to search raw DER bytes instead of base64 output ([e3aab16](https://github.com/nmorgowicz-org/llama-monitor/commit/e3aab1600a0b7e40a1e5b6fb5e68756f5c2533a6))
+* **agent:** switch SCP to SFTP for Windows-compatible remote file transfer ([e3aab16](https://github.com/nmorgowicz-org/llama-monitor/commit/e3aab1600a0b7e40a1e5b6fb5e68756f5c2533a6))
+* **agent:** use ~/.config path for certs on all platforms including macOS ([e3aab16](https://github.com/nmorgowicz-org/llama-monitor/commit/e3aab1600a0b7e40a1e5b6fb5e68756f5c2533a6))
+* **agent:** use distinct CA CN to resolve TLS chain ambiguity on all clients ([e3aab16](https://github.com/nmorgowicz-org/llama-monitor/commit/e3aab1600a0b7e40a1e5b6fb5e68756f5c2533a6))
+
+## [0.22.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.21.4...v0.22.0) (2026-05-24)
+
+
+### Features
+
+* **attach:** add optional API key support for remote endpoint authentication ([381f46b](https://github.com/nmorgowicz-org/llama-monitor/commit/381f46b73f221bfcc2dad02d5bdd5407d314c79b))
+
+
+### Bug Fixes
+
+* **attach:** fix broken detach button with proper headers and error handling ([381f46b](https://github.com/nmorgowicz-org/llama-monitor/commit/381f46b73f221bfcc2dad02d5bdd5407d314c79b))
+* **test:** fix flaky command palette, tab cycling, pinned tabs, and profile menu tests ([381f46b](https://github.com/nmorgowicz-org/llama-monitor/commit/381f46b73f221bfcc2dad02d5bdd5407d314c79b))
+* **ui:** set data-pinned attribute on pinned sidebar items ([381f46b](https://github.com/nmorgowicz-org/llama-monitor/commit/381f46b73f221bfcc2dad02d5bdd5407d314c79b))
+
 ## [0.21.4](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.21.3...v0.21.4) (2026-05-24)
 
 

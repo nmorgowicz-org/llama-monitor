@@ -11,13 +11,42 @@
 use std::path::{Path, PathBuf};
 
 /// Returns the path to the certs directory, creating it if necessary.
+///
+/// Uses `~/.config/llama-monitor/certs` on all platforms (XDG-style) so that
+/// cert files live alongside the rest of the config. On macOS, `dirs::config_dir()`
+/// would return `~/Library/Application Support/` instead; we use the home-dir
+/// approach directly to keep the layout consistent.
+///
+/// If certs already exist at the old macOS path they are migrated once on first
+/// access so existing installations are not broken by the path change.
 pub fn certs_dir() -> PathBuf {
-    let dir = dirs::config_dir()
+    let xdg_dir = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
+        .join(".config")
         .join("llama-monitor")
         .join("certs");
-    let _ = std::fs::create_dir_all(&dir);
-    dir
+
+    // One-time migration: if certs exist at the macOS Library path but not at
+    // the XDG path, move them so they are found from now on.
+    #[cfg(target_os = "macos")]
+    if !xdg_dir.join("ca.pem").exists()
+        && let Some(lib_dir) = dirs::config_dir()
+    {
+        let old = lib_dir.join("llama-monitor").join("certs");
+        if old.join("ca.pem").exists() {
+            let _ = std::fs::create_dir_all(&xdg_dir);
+            for entry in std::fs::read_dir(&old).into_iter().flatten().flatten() {
+                let dest = xdg_dir.join(entry.file_name());
+                if !dest.exists() {
+                    let _ = std::fs::rename(entry.path(), &dest)
+                        .or_else(|_| std::fs::copy(entry.path(), &dest).map(|_| ()));
+                }
+            }
+        }
+    }
+
+    let _ = std::fs::create_dir_all(&xdg_dir);
+    xdg_dir
 }
 
 /// Returns the path to the agent's multi-CA directory, creating it if necessary.
@@ -64,7 +93,7 @@ impl Cert {
     }
 }
 
-/// Generates a self-signed certificate for testing.
+/// Generates a self-signed certificate for general use (non-agent TLS).
 pub fn generate_self_signed(sans: Vec<String>) -> Cert {
     let rcgen::CertifiedKey { cert, signing_key } =
         rcgen::generate_simple_self_signed(sans).unwrap();
@@ -74,20 +103,70 @@ pub fn generate_self_signed(sans: Vec<String>) -> Cert {
     }
 }
 
+/// The Common Name used for the mTLS CA so that the CA and leaf certs have
+/// distinct subjects. When all certs share the same DN (rcgen's default
+/// "rcgen self signed cert"), TLS libraries treat leaf certs as self-signed
+/// because `subject == issuer` and decline to verify the chain.
+const AGENT_CA_CN: &str = "llama-monitor CA";
+
+/// Build the rcgen `Issuer` for signing agent leaf certs.
+/// The issuer DN must match the CA cert's subject DN exactly.
+fn ca_issuer(ca_key: rcgen::KeyPair) -> rcgen::Issuer<'static, rcgen::KeyPair> {
+    let mut dn = rcgen::DistinguishedName::new();
+    dn.push(rcgen::DnType::CommonName, AGENT_CA_CN);
+    let mut params = rcgen::CertificateParams::default();
+    params.distinguished_name = dn;
+    rcgen::Issuer::new(params, ca_key)
+}
+
+/// Generate a new CA certificate with a stable, recognisable subject DN.
+fn generate_ca() -> Cert {
+    let key = rcgen::KeyPair::generate().expect("failed to generate CA key");
+    let mut dn = rcgen::DistinguishedName::new();
+    dn.push(rcgen::DnType::CommonName, AGENT_CA_CN);
+    let mut params = rcgen::CertificateParams::default();
+    params.distinguished_name = dn;
+    params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+    let cert = params
+        .self_signed(&key)
+        .expect("failed to self-sign CA cert");
+    Cert {
+        pem: cert.pem(),
+        key: key.serialize_pem(),
+    }
+}
+
 /// Ensures the CA certificate exists, generating it if necessary.
+///
+/// If the existing CA was generated with the old ambiguous DN (rcgen default
+/// "rcgen self signed cert"), it is rotated: old CA + leaf certs are removed
+/// so they are regenerated with a properly distinct CA CN on the next call.
 pub fn ensure_ca() -> Cert {
     let dir = certs_dir();
     let ca_path = dir.join("ca.pem");
     let ca_key_path = dir.join("ca.key");
+    // Sentinel written alongside every new-format CA.
+    let sentinel = dir.join(".ca-v2");
 
-    match Cert::load(&ca_path, &ca_key_path) {
-        Some(ca) if !ca.needs_renewal() => ca,
-        _ => {
-            let ca = generate_self_signed(vec!["localhost".to_string()]);
-            let _ = ca.save(&ca_path, &ca_key_path);
-            ca
-        }
+    if sentinel.exists()
+        && let Some(ca) = Cert::load(&ca_path, &ca_key_path)
+        && !ca.needs_renewal()
+    {
+        return ca;
     }
+
+    // No sentinel → old CA or first run. Rotate everything.
+    let _ = std::fs::remove_file(&ca_path);
+    let _ = std::fs::remove_file(&ca_key_path);
+    let _ = std::fs::remove_file(dir.join("agent-client.pem"));
+    let _ = std::fs::remove_file(dir.join("agent-client.key"));
+    let _ = std::fs::remove_file(dir.join("agent-server.pem"));
+    let _ = std::fs::remove_file(dir.join("agent-server.key"));
+
+    let ca = generate_ca();
+    let _ = ca.save(&ca_path, &ca_key_path);
+    let _ = std::fs::write(&sentinel, b"2");
+    ca
 }
 
 /// Ensures a client certificate for the dashboard to present to agent servers.
@@ -108,14 +187,9 @@ pub fn ensure_agent_client_cert() -> Cert {
 
     let ca = ensure_ca();
     let ca_key = rcgen::KeyPair::from_pem(&ca.key).expect("invalid CA key PEM");
+    let issuer = ca_issuer(ca_key);
 
-    // Create issuer from CA params
-    let ca_params = rcgen::CertificateParams::new(vec!["localhost".to_string()]).unwrap();
-    let issuer = rcgen::Issuer::new(ca_params, ca_key);
-
-    // Generate client key
     let client_key = rcgen::KeyPair::generate().expect("failed to generate client key");
-
     let mut params = rcgen::CertificateParams::new(vec!["agent-client".to_string()]).unwrap();
     params.is_ca = rcgen::IsCa::NoCa;
 
@@ -127,7 +201,6 @@ pub fn ensure_agent_client_cert() -> Cert {
         pem: cert.pem(),
         key: client_key.serialize_pem(),
     };
-
     let _ = c.save(&cert_path, &key_path);
     c
 }
@@ -136,12 +209,9 @@ pub fn ensure_agent_client_cert() -> Cert {
 pub fn generate_agent_server_cert(sans: Vec<String>) -> Cert {
     let ca = ensure_ca();
     let ca_key = rcgen::KeyPair::from_pem(&ca.key).expect("invalid CA key PEM");
-
-    let ca_params = rcgen::CertificateParams::new(vec!["localhost".to_string()]).unwrap();
-    let issuer = rcgen::Issuer::new(ca_params, ca_key);
+    let issuer = ca_issuer(ca_key);
 
     let server_key = rcgen::KeyPair::generate().expect("failed to generate server key");
-
     let mut params = rcgen::CertificateParams::new(sans).unwrap();
     params.is_ca = rcgen::IsCa::NoCa;
 
@@ -311,12 +381,10 @@ impl rustls::server::danger::ClientCertVerifier for AgentClientCertVerifier {
         self.inner
             .verify_client_cert(end_entity, intermediates, now)?;
 
-        // 2) Role check: client must have "agent-client" in its SANs.
-        //    We check the PEM for the SAN string since rustls already validated
-        //    the chain. Our agent-client certs are generated with "agent-client"
-        //    as a DNS SAN, and this is a reliable marker.
-        let client_pem = pem_from_der_bytes(end_entity.as_ref());
-        if !client_pem.contains("agent-client") {
+        // 2) Role check: client cert must have "agent-client" as a SAN.
+        //    DNS SANs are stored as raw ASCII bytes in DER (IA5String), so we
+        //    can search the raw DER bytes directly — no parser needed.
+        if !der_contains_ascii(end_entity.as_ref(), b"agent-client") {
             eprintln!("[info] Agent mTLS reject: client cert missing agent-client role");
             return Err(rustls::Error::InvalidCertificate(
                 rustls::CertificateError::NotValidForName,
@@ -349,66 +417,28 @@ impl rustls::server::danger::ClientCertVerifier for AgentClientCertVerifier {
     }
 }
 
-/// Helper: convert a DER certificate (as bytes) to PEM.
-fn pem_from_der_bytes(bytes: &[u8]) -> String {
-    let mut pem = String::new();
-    pem.push_str("-----BEGIN CERTIFICATE-----\n");
-    let b64 = base64_encode(bytes);
-    let mut pos = 0usize;
-    while pos < b64.len() {
-        let end = (pos + 64).min(b64.len());
-        pem.push_str(&b64[pos..end]);
-        pem.push('\n');
-        pos = end;
-    }
-    pem.push_str("-----END CERTIFICATE-----");
-    pem
+/// Returns true if `needle` (an ASCII string) appears as a contiguous byte
+/// sequence anywhere in the DER-encoded certificate.
+///
+/// X.509 DNS SANs are encoded as IA5String in DER, which stores ASCII bytes
+/// literally — no encoding layer — so a plain byte search is sufficient.
+fn der_contains_ascii(der: &[u8], needle: &[u8]) -> bool {
+    der.windows(needle.len()).any(|w| w == needle)
 }
 
 /// Extracts a human-readable subject from a DER-encoded client certificate.
 ///
-/// Uses a lightweight heuristic: if the PEM contains known role strings,
-/// returns those; otherwise returns "unknown".
+/// Checks for known role strings in the raw DER bytes (DNS SANs are stored
+/// as literal ASCII in DER IA5String encoding).
 pub fn extract_cert_subject_pem(cert: &rustls::pki_types::CertificateDer<'_>) -> String {
-    let pem = pem_from_der_bytes(cert.as_ref());
-    if pem.contains("agent-client") {
+    let der = cert.as_ref();
+    if der_contains_ascii(der, b"agent-client") {
         return "agent-client".to_string();
     }
-    if pem.contains("agent-server") {
+    if der_contains_ascii(der, b"agent-server") {
         return "agent-server".to_string();
     }
     "unknown".to_string()
-}
-
-fn base64_encode(input: &[u8]) -> String {
-    let mut result = String::with_capacity((input.len() as f64 * 1.3333).ceil() as usize);
-    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut i = 0usize;
-    while i + 2 < input.len() {
-        let n0 = input[i] as u32;
-        let n1 = input[i + 1] as u32;
-        let n2 = input[i + 2] as u32;
-        result.push(CHARS[((n0 >> 2) & 0x3F) as usize] as char);
-        result.push(CHARS[(((n0 & 0x03) << 4) | (n1 >> 4)) as usize] as char);
-        result.push(CHARS[(((n1 & 0x0F) << 2) | (n2 >> 6)) as usize] as char);
-        result.push(CHARS[(n2 & 0x3F) as usize] as char);
-        i += 3;
-    }
-    if i + 2 == input.len() {
-        let n0 = input[i] as u32;
-        let n1 = input[i + 1] as u32;
-        result.push(CHARS[((n0 >> 2) & 0x3F) as usize] as char);
-        result.push(CHARS[(((n0 & 0x03) << 4) | (n1 >> 4)) as usize] as char);
-        result.push(CHARS[((n1 & 0x0F) << 2) as usize] as char);
-        result.push('=');
-    } else if i + 1 == input.len() {
-        let n0 = input[i] as u32;
-        result.push(CHARS[((n0 >> 2) & 0x3F) as usize] as char);
-        result.push(CHARS[((n0 & 0x03) << 4) as usize] as char);
-        result.push('=');
-        result.push('=');
-    }
-    result
 }
 
 #[cfg(test)]
@@ -430,11 +460,15 @@ mod tests {
 
     fn make_ca() -> (rcgen::Certificate, rcgen::KeyPair) {
         let ca_key = rcgen::KeyPair::generate().expect("generate CA key");
-        let ca_params = rcgen::CertificateParams::new(vec!["localhost".to_string()]).unwrap();
-        let ca_key_for_issuer =
+        let issuer_key =
             rcgen::KeyPair::from_pem(&ca_key.serialize_pem()).expect("CA key from PEM");
-        let issuer = rcgen::Issuer::new(ca_params.clone(), ca_key_for_issuer);
-        let ca_cert = ca_params.signed_by(&ca_key, &issuer).expect("sign CA");
+        let issuer = ca_issuer(issuer_key);
+        let mut params = rcgen::CertificateParams::default();
+        let mut dn = rcgen::DistinguishedName::new();
+        dn.push(rcgen::DnType::CommonName, AGENT_CA_CN);
+        params.distinguished_name = dn;
+        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let ca_cert = params.signed_by(&ca_key, &issuer).expect("sign CA");
         (ca_cert, ca_key)
     }
 
@@ -442,15 +476,11 @@ mod tests {
         cert.pem()
     }
 
-    #[allow(dead_code)]
-    fn client_cert_with_agent_role(
-        ca_key: &rcgen::KeyPair,
-        ca_params: rcgen::CertificateParams,
-    ) -> rcgen::Certificate {
+    fn client_cert_with_agent_role(ca_key: &rcgen::KeyPair) -> rcgen::Certificate {
         let client_key = rcgen::KeyPair::generate().expect("generate client key");
         let issuer_key =
             rcgen::KeyPair::from_pem(&ca_key.serialize_pem()).expect("CA key from PEM");
-        let issuer = rcgen::Issuer::new(ca_params, issuer_key);
+        let issuer = ca_issuer(issuer_key);
         let mut params = rcgen::CertificateParams::new(vec!["agent-client".to_string()]).unwrap();
         params.is_ca = rcgen::IsCa::NoCa;
         params
@@ -458,14 +488,11 @@ mod tests {
             .expect("sign agent-client cert")
     }
 
-    fn client_cert_without_agent_role(
-        ca_key: &rcgen::KeyPair,
-        ca_params: rcgen::CertificateParams,
-    ) -> rcgen::Certificate {
+    fn client_cert_without_agent_role(ca_key: &rcgen::KeyPair) -> rcgen::Certificate {
         let client_key = rcgen::KeyPair::generate().expect("generate client key");
         let issuer_key =
             rcgen::KeyPair::from_pem(&ca_key.serialize_pem()).expect("CA key from PEM");
-        let issuer = rcgen::Issuer::new(ca_params, issuer_key);
+        let issuer = ca_issuer(issuer_key);
         let mut params =
             rcgen::CertificateParams::new(vec!["some-other-role".to_string()]).unwrap();
         params.is_ca = rcgen::IsCa::NoCa;
@@ -478,10 +505,25 @@ mod tests {
         rustls::pki_types::CertificateDer::from(cert.der().to_vec())
     }
 
-    // NOTE: The AgentClientCertVerifier currently uses a heuristic: it checks
-    // whether the PEM of the client cert contains the literal string "agent-client".
-    // This is not a robust SAN parser and will be improved in a future change.
-    // For now, we only test the negative path (reject when role is clearly absent).
+    #[test]
+    fn verify_agent_client_cert_accepts_agent_role() {
+        ensure_crypto_provider();
+        let (ca_cert, ca_key) = make_ca();
+        let ca_pem = ca_pem_from_cert(&ca_cert);
+
+        let client_cert = client_cert_with_agent_role(&ca_key);
+        let client_der = der_from_cert(&client_cert);
+
+        let verifier = AgentClientCertVerifier::new(vec![ca_pem]);
+        let now = rustls::pki_types::UnixTime::now();
+
+        let result = verifier.verify_client_cert(&client_der, &[], now);
+        assert!(
+            result.is_ok(),
+            "agent-client cert should be accepted, got: {:?}",
+            result
+        );
+    }
 
     #[test]
     fn verify_agent_client_cert_rejects_missing_role() {
@@ -489,12 +531,10 @@ mod tests {
         let (ca_cert, ca_key) = make_ca();
         let ca_pem = ca_pem_from_cert(&ca_cert);
 
-        let ca_params = rcgen::CertificateParams::new(vec!["localhost".to_string()]).unwrap();
-        let client_cert = client_cert_without_agent_role(&ca_key, ca_params);
+        let client_cert = client_cert_without_agent_role(&ca_key);
         let client_der = der_from_cert(&client_cert);
 
         let verifier = AgentClientCertVerifier::new(vec![ca_pem]);
-
         let now = rustls::pki_types::UnixTime::now();
 
         let result = verifier.verify_client_cert(&client_der, &[], now);
@@ -506,13 +546,15 @@ mod tests {
     }
 
     #[test]
-    fn extract_cert_subject_pem_returns_unknown_for_non_role_cert() {
+    fn extract_cert_subject_pem_identifies_roles() {
         let (_ca_cert, ca_key) = make_ca();
-        let ca_params = rcgen::CertificateParams::new(vec!["localhost".to_string()]).unwrap();
-        let client_cert = client_cert_without_agent_role(&ca_key, ca_params);
-        let client_der = der_from_cert(&client_cert);
 
-        let subject = extract_cert_subject_pem(&client_der);
-        assert_eq!(subject, "unknown");
+        let agent_cert = client_cert_with_agent_role(&ca_key);
+        let agent_der = der_from_cert(&agent_cert);
+        assert_eq!(extract_cert_subject_pem(&agent_der), "agent-client");
+
+        let other_cert = client_cert_without_agent_role(&ca_key);
+        let other_der = der_from_cert(&other_cert);
+        assert_eq!(extract_cert_subject_pem(&other_der), "unknown");
     }
 }
