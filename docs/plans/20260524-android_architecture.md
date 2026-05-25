@@ -254,7 +254,9 @@ The APK only needs the Kotlin app shell (Activity, Service, JNI declarations) an
 | `get_cpu_clock()` (line 177) | `[linux]`, `[windows]`, `[not(linux, windows)]` | Falls into catch-all (sysinfo only) |
 | `get_motherboard()` (line 321) | `[windows]`, `[linux]`, `[macos]` | `sysinfo::System::get()` for device info |
 | `src/gpu/mod.rs` | Detects NVIDIA/AMD/Apple backend | Add `#[cfg(target_os = "android")]` branch; returns `AndroidGpuBackend` (dummy Phase 1, Adreno/Mali Phase 5) |
+| `src/certs.rs` | `certs_dir()` (line 22) derives path from `dirs::home_dir() + ".config/llama-monitor/certs"` | **Must also be overridden for Android** — add `#[cfg(target_os = "android")]` arm that reads from `android::paths::files_dir()` instead of `dirs::home_dir()`; this is separate from the `config.rs` override |
 | `src/config.rs` | Uses `dirs` crate for config path | Add `#[cfg(target_os = "android")]` path override using JNI-provided `filesDir` |
+| `src/gpu/mod.rs` | `is_apple_silicon()` calls `Command::new("sysctl")` before the backend dispatch | Add `#[cfg(target_os = "android")] { return false; }` early-exit at the top of `is_apple_silicon()` — without this, `sysctl` is spawned as a subprocess on Android (fails harmlessly but wastes time) |
 | `src/lhm.rs` | Windows sensor bridge polling | Already conditional on Windows; not compiled on Android |
 | `src/tray.rs` | Desktop tray management | Already feature-gated; excluded by `--no-default-features` |
 | `src/main.rs` | Binary entry point | Android uses cdylib JNI; `main.rs` not in cdylib target |
@@ -388,13 +390,15 @@ The frontend is significantly more mobile-ready than a naive assessment might su
 
 **Missing — requires addition:**
 - Touch event handlers for drag interactions (sidebar resize handle, chat tab reorder)
-- `-webkit-overflow-scrolling: touch` on scrollable containers
-- Touch targets sized to 44×44dp minimum (`@media (pointer: coarse)`)
-- Safe area insets (`env(safe-area-inset-*)`) for punch-hole display
-- `visualViewport` resize listener for soft keyboard avoidance in chat
-- Swipe gestures for sidebar open/close
-- Long-press for context menus (currently right-click only)
-- `prefers-color-scheme` media query observation for automatic dark/light switch
+- `-webkit-overflow-scrolling: touch` on remaining scrollable containers (already present in `chat.css` and `chat-guided-generation.css`; still needed on `.content-area`, `.log-panel`, `.settings-modal-body`, `.chat-sessions-list`)
+- Touch targets sized to 44×44dp minimum (`@media (pointer: coarse)`) — not present anywhere in the CSS
+- Safe area insets (`env(safe-area-inset-*)`) for punch-hole display — not present
+- `visualViewport` resize listener for soft keyboard avoidance in chat — not present (only `window.innerHeight` is used)
+- Swipe gestures for sidebar open/close — not present
+- Long-press for context menus (currently right-click / `contextmenu` event only) — not present
+- `prefers-color-scheme` CSS `@media` rules for automatic dark/light switch (JS detection via `window.matchMedia` already present in `user-menu.js`; CSS-level rules still missing)
+- Passive touch event listener discipline: drag-prevention handlers use `{ passive: false }` (required for `preventDefault()`); all others use `{ passive: true }` to avoid scroll jank
+- Mobile URL input optimization: endpoint/URL fields in setup should use `type="url"` + `inputmode="url"` to get the correct mobile keyboard and suppress autocorrect
 
 ### 6.2 Z Fold 6 Form Factor
 
@@ -412,6 +416,8 @@ The frontend is significantly more mobile-ready than a naive assessment might su
 | Unfolded portrait | ~692px wide | `shell-width-tight` | Similar to folded landscape |
 
 The `inference-grid` collapses at `max-width: 860px` — this means folded portrait and folded landscape both get the stacked layout, which is correct behavior.
+
+**Note:** A `max-width: min(420px, 92vw)` rule already exists in `chat.css` for a specific chat element — this is NOT the global layout breakpoint described below. The following new rule is still needed in `layout.css` to hide the sidebar on the folded cover display.
 
 **New CSS breakpoint for folded cover (add to `layout.css`):**
 ```css
@@ -497,9 +503,15 @@ resizeHandle.addEventListener('touchmove', (e) => {
 ```
 
 **Scrollable containers (add to existing CSS):**
+
+`-webkit-overflow-scrolling: touch` is already present in `chat.css` (covers `.chat-messages`) and `chat-guided-generation.css`. Add only the remaining containers:
+
 ```css
+/* Already present in chat.css — do NOT duplicate */
+/* .chat-messages { -webkit-overflow-scrolling: touch; } */
+
+/* Add these to layout.css or a new android.css partial */
 .content-area,
-.chat-messages,
 .log-panel,
 .settings-modal-body,
 .chat-sessions-list {
@@ -552,10 +564,24 @@ document.addEventListener('touchend', (e) => {
 let longPressTimer = null;
 item.addEventListener('touchstart', () => {
     longPressTimer = setTimeout(() => openContextMenu(item), 500);
-}, { passive: true });
+}, { passive: true });   // passive: true — no preventDefault needed
 item.addEventListener('touchend', () => clearTimeout(longPressTimer), { passive: true });
 item.addEventListener('touchmove', () => clearTimeout(longPressTimer), { passive: true });
 ```
+
+**Passive event listener discipline (applies to all touch handlers added for Android):**
+- Sidebar resize drag handlers: `{ passive: false }` — they call `e.preventDefault()` to suppress scroll during drag
+- Swipe detection (touchstart/touchend): `{ passive: true }` — no scroll suppression needed
+- Long-press timers: `{ passive: true }` — no scroll suppression needed
+- Chrome logs a warning and scroll jank occurs if `preventDefault()` is called in a passive listener; the reverse (missing `passive: false`) silently blocks native scroll
+
+**Mobile URL input optimization (add to connection setup form):**
+```html
+<!-- Connection setup endpoint fields -->
+<input type="url" inputmode="url" autocorrect="off" autocapitalize="none"
+       placeholder="http://192.168.2.16:8001">
+```
+Applies to: llama-server endpoint, remote agent URL. Without this, the iOS/Android soft keyboard shows the generic text keyboard and autocorrect mangles URLs.
 
 **Chat keyboard avoidance:**
 ```javascript
@@ -1060,6 +1086,8 @@ The Rust side should ignore Unix signals entirely on Android and rely solely on 
 
 ### 10A.3 Code Change Required
 
+**Critical:** `#[cfg(unix)]` matches Android (Android is Unix-like), so the existing signal handler **compiles fine** for Android — but **panics at runtime** when Tokio tries to register Unix signals that do not function in Android app processes. This is a runtime crash, not a compile error, and will not be caught by `cargo check`. It must be fixed before the first Android test run.
+
 ```rust
 // In src/main.rs shutdown handler
 #[cfg(all(unix, not(target_os = "android")))]
@@ -1454,17 +1482,20 @@ cargo check --target aarch64-linux-android --no-default-features --features andr
 1. Add `ssh-control` and `android` features to `Cargo.toml`; move `ssh2` under `ssh-control`
 2. Create `src/android/mod.rs` — JNI entry points (start/stop/status/setPollInterval)
 3. Create `src/android/paths.rs` — Android config dir override with direct JNI injection (see §10B)
-4. Add `#[cfg(target_os = "android")]` temp file alternative for all 10+ tempfile uses (avoids `tempfile` → `rustix` compile error)
-5. Add `#[cfg(target_os = "android")]` GPU stub to `src/gpu/mod.rs` (DummyAndroidBackend)
-6. Add `#[cfg(target_os = "android")]` guards to all 4 platform functions in `src/system.rs` (see §4.2 table)
-7. Add signal handling override for Android (see §10A) — use JNI shutdown instead of Unix signals
-8. Set up `android/` Gradle project with Activity + WebView layout (WebView loads `http://127.0.0.1:PORT/` from warp server, not `file://`)
-9. Implement `LlamaMonitorService` (foreground service, notification)
-10. Implement `KeystoreHelper.kt`
-11. Add `cargo-ndk` task to Gradle; create `.cargo/config.toml` (file doesn't exist yet)
-12. Add `check-android` job to `.github/workflows/ci.yml`
-13. Update `AGENTS.md` pre-PR checklist with Android check command (exact text in §12.4)
-14. Merge NDK + `aarch64-linux-android` + `cargo-ndk` changes to `llama-monitor-runner` and trigger image rebuild (prerequisite for jobs in steps 12 and Phase 1 release build)
+4. Add `#[cfg(target_os = "android")]` arm to `certs_dir()` in `src/certs.rs` — reads from `android::paths::files_dir()` instead of `dirs::home_dir()` (see §4.2; this is separate from the config.rs override)
+5. Add `#[cfg(target_os = "android")]` temp file alternative for all 10+ tempfile uses (avoids `tempfile` → `rustix` compile error)
+6. Add `#[cfg(target_os = "android")]` GPU stub to `src/gpu/mod.rs` (DummyAndroidBackend) AND add early-exit to `is_apple_silicon()` before the `Command::new("sysctl")` call
+7. Add `#[cfg(target_os = "android")]` guards to all 4 platform functions in `src/system.rs` (see §4.2 table)
+8. Add signal handling override for Android (see §10A) — **this is a RUNTIME PANIC without the fix**, not just a compile issue; highest priority in Phase 1
+9. Set up `android/` Gradle project with Activity + WebView layout (WebView loads `http://127.0.0.1:PORT/` from warp server, not `file://`)
+10. Implement `LlamaMonitorService` (foreground service, notification)
+11. Implement `KeystoreHelper.kt`
+12. Add `cargo-ndk` task to Gradle; create `.cargo/config.toml` (file doesn't exist yet)
+13. Add `check-android` job to `.github/workflows/ci.yml`
+14. Update `AGENTS.md` pre-PR checklist with Android check command (exact text in §12.4)
+15. Merge NDK + `aarch64-linux-android` + `cargo-ndk` changes to `llama-monitor-runner` and trigger image rebuild (prerequisite for jobs in steps 13 and Phase 1 release build)
+
+**Note on multi-client enrollment (see §20):** Phase 1 delivers Android as a single secondary client. The full self-service enrollment API (letting Android pair without manual SSH) is tracked in §20 and targeted for Phase 4 alongside other security hardening. For Phase 1 testing, Android's CA can be manually deployed to RYNE.
 
 **Before merging:** Run `cargo check --target x86_64-pc-windows-gnu` (always required), `cargo check --target aarch64-linux-android`, `cargo clippy -- -D warnings`, `cargo fmt`. Update `docs/reference/` with Android build instructions.
 
@@ -1564,12 +1595,13 @@ cargo check --target aarch64-linux-android --no-default-features --features andr
 | New `#[cfg(target_os = "android")]` breaks Windows build | Medium | Mandatory `cargo check --target x86_64-pc-windows-gnu` in pre-PR checklist |
 | `dirs 6` empty path not caught → chat DB in wrong location | **High** | `src/android/paths.rs` override; add test asserting non-empty config path on Android |
 | Runner image rebuild required before any Android CI runs | Medium | Merge `llama-monitor-runner` Dockerfile changes first; coordinate with Phase 1 step 12 |
-| **Signal handling broken on Android** | **Medium** | **Use JNI `stopServer()` for shutdown; ignore Unix signals (see §10A)** |
+| **Signal handling RUNTIME PANIC on Android** | **High** | **`#[cfg(unix)]` matches Android and compiles fine but panics at runtime; fix in Phase 1 task 8 before any device test (see §10A)** |
 | **Config path injection fails** | **Medium** | **Inject path directly via JNI; don't rely on `dirs::home_dir()` (see §10B)** |
+| **`certs_dir()` uses wrong path on Android** | **High** | **`src/certs.rs:22` has its own `dirs::home_dir()` call independent of config.rs; both must be overridden (see §4.2)** |
 | **tempfile usage more extensive than expected** | **Medium** | **Audit all 10+ uses; many in remote agent install flow (may not be needed on Android)** |
-| **Signal handling broken on Android** | **Medium** | **Use JNI `stopServer()` for shutdown; ignore Unix signals (see §10A)** |
-| **Config path injection fails** | **Medium** | **Inject path directly via JNI; don't rely on `dirs::home_dir()` (see §10B)** |
-| **tempfile usage more extensive than expected** | **Medium** | **Audit all 10+ uses; many in remote agent install flow (may not be needed on Android)** |
+| **Android client cert not trusted by RYNE** | **High** | **Multi-client enrollment API not yet implemented; Android CA must be manually deployed for Phase 1 testing (see §20)** |
+| **`sysctl` subprocess spawned on Android** | **Low** | **`is_apple_silicon()` in gpu/mod.rs calls `Command::new("sysctl")` without Android guard; add early-exit (see §4.2)** |
+| **Touch drag handlers block scroll (missing passive flag)** | **Medium** | **All new touch handlers must specify `passive: false` or `passive: true` explicitly; wrong passive setting causes scroll jank or Chrome warnings** |
 
 ---
 
@@ -1606,15 +1638,17 @@ docs/reference/android.md   — Android build and deployment reference
 ### Modified Files
 ```
 Cargo.toml                   — ssh-control + android features; ssh2 optional
-src/gpu/mod.rs               — Android backend dispatch
+src/certs.rs                 — certs_dir() Android path override (NEW — see §4.2)
+src/gpu/mod.rs               — Android backend dispatch + is_apple_silicon() early-exit
 src/system.rs                — Android metric collection paths (4 functions need guards)
 src/config.rs                — Android paths override
-src/agent.rs                 — `#[cfg(target_os = "android")]` temp file alternative (avoids tempfile→ rustix)
-src/main.rs                  — Android signal handling override (see §10A)
+src/agent.rs                 — #[cfg(target_os = "android")] temp file alternative (avoids tempfile→rustix)
+src/main.rs                  — Android signal handling override — RUNTIME PANIC without this fix (see §10A)
 static/js/features/dashboard-ws.js     — Handle data.battery field
 static/js/features/dashboard-render.js — Render battery in system card
-static/css/layout.css        — max-width: 420px breakpoint; touch scrolling
+static/css/layout.css        — max-width: 420px global breakpoint for folded display (NOT the chat.css component rule)
 static/css/tokens.css        — env(safe-area-inset-*) variables
+static/js/                   — passive touch event listeners; type="url" form inputs; visualViewport listener
 .github/workflows/ci.yml     — check-android job
 .github/workflows/release.yml — build-android job
 AGENTS.md                   — Android in multi-platform checklist; Android pre-PR check
@@ -1825,6 +1859,130 @@ Remote Agent Certificate Pinning Flow:
 - Allows agent (or SSH-managed operations) to authenticate to dashboard endpoints
 
 **Android impact:** Not directly applicable since Android is a metrics consumer, not the agent host. The config file is written to the remote agent host.
+
+---
+
+---
+
+## 20. Multi-Client Remote Agent Enrollment (Security Bug)
+
+**Added:** 2026-05-25  
+**Priority:** Phase 4 (full implementation); Phase 1 workaround documented below  
+**Status:** Bug — multi-client infrastructure exists but enrollment is manual-only
+
+### 20.1 Current State
+
+The agent already supports multiple trust anchors via the `cas/` directory:
+```
+~/.config/llama-monitor/certs/
+├── ca.pem                          # Legacy single CA (primary dashboard)
+└── cas/
+    ├── <instance-id-1>.pem        # Per-dashboard CA (SHA1 of CA pubkey, hex)
+    └── <instance-id-2>.pem        # Second dashboard CA, etc.
+```
+
+The agent loads all `.pem` files from `cas/` at startup and builds a combined TLS trust store. Multiple independent dashboards CAN connect to the same agent IF their CAs are pre-loaded. Token auth is also multi-client: `agent-tokens.json` accepts any token in the array.
+
+**The gap:** There is no self-service enrollment API. A second client (Android, second Mac, etc.) must:
+1. Generate its CA + client cert
+2. Manually copy its CA `.pem` to `cas/` on the agent host (requires SSH or filesystem access to RYNE)
+3. Restart the agent (CAs are loaded once at startup — no dynamic reload)
+
+This works for technical users managing multiple desktop dashboards. It is a blocking UX problem for Android users who may not have SSH access to RYNE.
+
+### 20.2 What's Needed
+
+Four additions to make multi-client enrollment self-service:
+
+**A. Dynamic CA reload without restart**
+
+When a new `.pem` file is added to `cas/`, the agent should reload its trust store without dropping existing connections. Use `tokio::fs::watch` or a timed reload (e.g., check `cas/` every 60 seconds for new files).
+
+**B. Client CA registration endpoint**
+
+```
+POST /api/agent/trust-ca
+Authorization: Bearer <db-admin-token>
+Content-Type: application/json
+
+{ "ca_pem": "-----BEGIN CERTIFICATE-----\n..." }
+```
+
+- Requires `db-admin-token` (elevated privilege — same as destructive operations)
+- Validates the PEM is a valid CA certificate
+- Writes to `cas/<instance-id>.pem` (instance-id = first 16 hex chars of SHA1(pubkey))
+- Triggers dynamic reload
+- Returns `{ "instance_id": "<hex>", "trusted": true }`
+
+This endpoint allows the dashboard UI on Mac to push Android's CA to RYNE on behalf of the user — no SSH required.
+
+**C. Secure Android pairing flow (UI)**
+
+```
+Android App (first run)          Mac Dashboard             RYNE Agent
+      │                               │                        │
+      │  1. Generate CA + client cert │                        │
+      │  2. Display QR code with:     │                        │
+      │     - CA public cert (PEM)    │                        │
+      │     - Preferred agent URL     │                        │
+      │                               │                        │
+      │          3. Mac scans QR      │                        │
+      │          4. POST /api/agent/  │                        │
+      │             trust-ca with     │                        │
+      │             db-admin-token    │──────────────────────▶│
+      │                               │  5. CA written to cas/ │
+      │                               │  6. Trust store reload  │
+      │                               │                        │
+      │◀─────────────────────────────────────────────────────│
+      │  7. Android connects directly (mTLS succeeds)          │
+```
+
+The QR code only contains the Android CA public cert (not private key). The Mac dashboard acts as the enrollment relay, authenticating to the agent with its existing `db-admin-token`.
+
+**D. Per-client token issuance (Phase 5+ consideration)**
+
+Currently all clients share tokens from `agent-tokens.json`. Per-client tokens with individual revocation would allow removing one client without affecting others. This is a larger architecture change — deferred until multiple Android clients exist in practice.
+
+### 20.3 Phase 1 Workaround
+
+For Phase 1 development and testing, Android connects via the manual process:
+
+```bash
+# On RYNE (as the agent host user):
+mkdir -p ~/.config/llama-monitor/certs/cas/
+
+# On Android (or from adb shell):
+# 1. Start llama-monitor Android app once — this generates the CA at:
+#    /data/data/com.llamamonitor.app/files/llama-monitor/certs/ca.pem
+
+# 2. Pull the CA from the device:
+adb pull /data/data/com.llamamonitor.app/files/llama-monitor/certs/ca.pem /tmp/android-ca.pem
+
+# 3. Deploy to RYNE:
+scp /tmp/android-ca.pem nick@ryne:~/.config/llama-monitor/certs/cas/android-<date>.pem
+
+# 4. Restart the agent:
+ssh nick@ryne "systemctl restart llama-monitor-agent"
+# (or however the agent is managed on RYNE)
+```
+
+Document this procedure in `docs/reference/android.md` alongside the Phase 1 deliverables.
+
+### 20.4 Agent Restart Gap
+
+The dynamic CA reload (§20.2-A) is required before the QR pairing flow works in production. Without it, the `POST /api/agent/trust-ca` endpoint writes the file but the new CA only takes effect after an agent restart — defeating the self-service UX goal.
+
+The reload should be implemented as: after writing a new CA file, rebuild the `ServerConfig` and hot-swap it into the warp server's TLS acceptor. This requires plumbing a `watch::Receiver<Arc<ServerConfig>>` through the agent's TLS setup, which is a moderate but self-contained change.
+
+### 20.5 Files Impacted (Phase 4)
+
+```
+src/agent.rs        — POST /api/agent/trust-ca handler; dynamic ServerConfig reload
+src/certs.rs        — watch-based CA directory monitor; build_combined_tls_config()
+android/app/…/      — QR code generation + display on first-run screen
+static/js/          — Enrollment relay UI: scan QR → POST to agent → confirm
+docs/reference/     — android.md Phase 1 manual enrollment procedure
+```
 
 ---
 
