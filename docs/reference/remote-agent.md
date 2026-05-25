@@ -67,13 +67,15 @@ This panel exposes the full runtime controls:
 ## mTLS and trust
 
 - Remote agents communicate with the dashboard over mTLS.
+- The dashboard's internal CA (`CN=llama-monitor CA`, stored at `~/.config/llama-monitor/certs/ca.pem`) is the trust root.
 - The agent loads trust anchors from:
   - A legacy single CA (ca.pem), if present, and
-  - All .pem files in the cas/ directory (multi-CA support).
+  - All .pem files in the `cas/` directory inside the agent install directory (multi-CA support).
 - This allows multiple independent CAs to be trusted across different agents.
 - If no CA is found, the agent refuses to start.
-- Each dashboard instance can place its own CA into cas/ so that agents trust multiple dashboards (e.g., during migration or in multi-instance setups).
+- Each dashboard instance can place its own CA into `cas/` so that agents trust multiple dashboards (e.g., during migration or in multi-instance setups).
 - Managed installs also provision an `agent-server.pem` / `agent-server.key` pair next to the remote binary so the dashboard can verify the agent over HTTPS using the same CA chain.
+- Files are transferred to the remote machine over SFTP (not SCP) so that Windows paths are handled correctly by OpenSSH.
 
 ## Agent tokens
 
