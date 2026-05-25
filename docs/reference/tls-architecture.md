@@ -150,21 +150,27 @@ Remote-agent communication uses mutual TLS (mTLS) to ensure only trusted agents 
 Key points:
 - mTLS is separate from ACME.
 - Trust root:
-  - Internal CA managed by llama-monitor.
+  - Internal CA managed by llama-monitor (`CN=llama-monitor CA`).
   - ACME leaf certificates are not used as the agent trust root.
+  - The CA is stored at `~/.config/llama-monitor/certs/ca.pem` on all platforms.
+- CA versioning and auto-rotation:
+  - A `.ca-v2` sentinel file is written alongside every correctly-formatted CA.
+  - On startup, if the sentinel is absent (old installation or first run), all CA and leaf certs are deleted and regenerated with the correct CA DN.
+  - This ensures that old certs with an ambiguous subject (`CN=rcgen self signed cert`) are rotated out automatically without user intervention.
 - Enforcement:
   - Agent endpoints require a client certificate.
-  - AgentClientCertVerifier:
-    - Validates certificate against internal CA.
-    - Requires "agent-client" role (currently via a heuristic in certs.rs).
+  - `AgentClientCertVerifier`:
+    - Validates the certificate chain against the internal CA using rustls `WebPkiClientVerifier`.
+    - Enforces a role check: searches the raw DER bytes of the presented certificate for the DNS SAN `agent-client` (stored as plain ASCII `IA5String` in DER encoding).
+    - Rejects any certificate that does not carry this marker, even if it is otherwise validly signed.
 - Logging:
   - On agent connection, logs:
     - Client certificate subject.
     - Remote address.
 
 For agent clients:
-- Must present a client certificate signed by llama-monitor’s internal CA.
-- Must carry the expected role marker ("agent-client") in the certificate.
+- Must present a client certificate signed by llama-monitor’s internal CA (`CN=llama-monitor CA`).
+- Must carry `agent-client` as a DNS Subject Alternative Name in the certificate.
 
 ## Reverse Proxy Usage
 
@@ -240,8 +246,9 @@ Common issues:
 - Remote-agent mTLS connection refused:
   - Confirm:
     - Agent presents a client certificate.
-    - Certificate is signed by llama-monitor’s internal CA.
-    - Certificate includes "agent-client" role marker.
+    - Certificate is signed by llama-monitor’s internal CA (`CN=llama-monitor CA`).
+    - Certificate includes `agent-client` as a DNS SAN.
+    - If upgrading from an old install, restart the dashboard once so the `.ca-v2` sentinel triggers automatic cert rotation.
 
 For deeper technical details and code references, see:
 - docs/archive/security/20260516-tls_acme_implementation.md
