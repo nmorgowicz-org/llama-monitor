@@ -1,7 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -209,6 +210,23 @@ pub struct AgentMetrics {
 }
 
 const AGENT_PROTOCOL_VERSION: &str = "1.0.0";
+
+/// Enrollment port offset: agent listens on port N for mTLS, and on port N+1 for
+/// unenrolled-client CA registration (server-TLS only, bearer token auth).
+const ENROLLMENT_PORT_OFFSET: u16 = 1;
+
+/// Global cooldown for enrollment requests (30 seconds between registrations).
+static LAST_ENROLLMENT_UNIX_SECS: AtomicU64 = AtomicU64::new(0);
+
+/// Request body for `POST /api/agent/register-ca` on the enrollment port.
+#[derive(Debug, Deserialize)]
+pub struct RegisterCaRequest {
+    /// PEM-encoded CA certificate to trust (max 64 KB).
+    pub ca_pem: String,
+    /// Must be the literal string `"register-ca"` to prevent accidental registration.
+    #[serde(default)]
+    pub confirm: String,
+}
 
 /// Load all allowed agent tokens from agent-tokens.json (if present).
 fn load_agent_tokens(config_dir: &std::path::Path) -> Vec<String> {
@@ -656,7 +674,8 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     };
 
     eprintln!("[agent] Building mTLS server config...");
-    let tls_config = match crate::certs::build_agent_tls_config(ca_pems, agent_server_cert) {
+    let tls_config = match crate::certs::build_agent_tls_config(ca_pems, agent_server_cert.clone())
+    {
         Ok(cfg) => {
             eprintln!("[agent] mTLS server config built successfully");
             cfg
@@ -667,7 +686,30 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
         }
     };
 
-    let tls_acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(tls_config));
+    // Watch channel allows hot-reloading the mTLS ServerConfig when new client CAs are
+    // registered via the enrollment port, without restarting the agent.
+    let (tls_tx, tls_rx) = tokio::sync::watch::channel(std::sync::Arc::new(tls_config));
+    let tls_tx = std::sync::Arc::new(tls_tx);
+
+    // Spawn enrollment server (agent port + 1) for unenrolled clients to register their CA.
+    let enrollment_port = bind_addr.port().saturating_add(ENROLLMENT_PORT_OFFSET);
+    let enrollment_addr = SocketAddr::new(bind_addr.ip(), enrollment_port);
+    let enroll_tokens = allowed_tokens.clone();
+    let enroll_tx = tls_tx.clone();
+    let enroll_server_cert = agent_server_cert.clone();
+    tokio::spawn(async move {
+        if let Err(e) = run_enrollment_server(
+            enrollment_addr,
+            enroll_server_cert,
+            enroll_tokens,
+            enroll_tx,
+        )
+        .await
+        {
+            eprintln!("[agent] Enrollment server stopped: {e}");
+        }
+    });
+
     let listener = match tokio::net::TcpListener::bind(bind_addr).await {
         Ok(l) => l,
         Err(e) => {
@@ -677,6 +719,9 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     };
 
     println!("[agent] Remote metrics agent listening on https://{bind_addr} (mTLS enforced)");
+    println!(
+        "[agent] CA enrollment available on https://{enrollment_addr} (server-TLS, bearer auth)"
+    );
 
     loop {
         let (stream, peer) = match listener.accept().await {
@@ -687,7 +732,11 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
             }
         };
 
-        let acceptor = tls_acceptor.clone();
+        // Read current TLS config from watch — picks up newly registered client CAs
+        // without restarting. Creating TlsAcceptor per-connection is cheap relative
+        // to the TLS handshake itself.
+        let current_config = tls_rx.borrow().clone();
+        let acceptor = tokio_rustls::TlsAcceptor::from(current_config);
         let routes_clone = routes.clone();
 
         tokio::spawn(async move {
@@ -731,6 +780,224 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
             }
         });
     }
+}
+
+/// Runs the enrollment server on the agent's secondary port (agent port + 1).
+///
+/// Accepts unenrolled clients (no mTLS client cert required). Exposes a single
+/// endpoint: `POST /api/agent/register-ca`. Authenticated by bearer token only.
+///
+/// On successful registration, writes the new CA to `cas/<instance_id>.pem` and
+/// sends an updated `ServerConfig` to the watch channel, causing the main mTLS
+/// acceptor to trust the new CA for subsequent connections — no agent restart needed.
+async fn run_enrollment_server(
+    addr: SocketAddr,
+    server_cert: crate::certs::Cert,
+    allowed_tokens: std::sync::Arc<Vec<String>>,
+    tls_tx: std::sync::Arc<tokio::sync::watch::Sender<std::sync::Arc<rustls::ServerConfig>>>,
+) -> Result<()> {
+    let enrollment_tls_config = crate::certs::build_enrollment_tls_config(&server_cert)
+        .map_err(|e| anyhow::anyhow!("enrollment TLS build failed: {e}"))?;
+    let enrollment_tls_acceptor =
+        tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(enrollment_tls_config));
+
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| anyhow::anyhow!("enrollment server bind failed on {addr}: {e}"))?;
+
+    // Enrollment route: POST /api/agent/register-ca
+    let route = {
+        let allowed = allowed_tokens.clone();
+        let tx = tls_tx.clone();
+        let srv_cert = server_cert.clone();
+        warp::path!("api" / "agent" / "register-ca")
+            .and(warp::post())
+            .and(warp::header::headers_cloned())
+            .and(warp::body::content_length_limit(65_536)) // 64 KB max
+            .and(warp::body::json::<RegisterCaRequest>())
+            .and_then(
+                move |headers: warp::http::HeaderMap, body: RegisterCaRequest| {
+                    let allowed = allowed.clone();
+                    let tx = tx.clone();
+                    let srv_cert = srv_cert.clone();
+                    async move { handle_register_ca(headers, body, allowed, tx, srv_cert).await }
+                },
+            )
+    };
+
+    loop {
+        let (stream, peer) = match listener.accept().await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[enroll] accept error: {e}");
+                continue;
+            }
+        };
+
+        let acceptor = enrollment_tls_acceptor.clone();
+        let route_clone = route.clone();
+
+        tokio::spawn(async move {
+            let tls_stream = match acceptor.accept(stream).await {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[enroll] TLS error from {peer}: {e}");
+                    return;
+                }
+            };
+
+            let svc = warp::service(route_clone);
+            let svc = hyper_util::service::TowerToHyperService::new(svc);
+            let io = hyper_util::rt::TokioIo::new(tls_stream);
+
+            if let Err(e) =
+                hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+                    .http1()
+                    .serve_connection_with_upgrades(io, svc)
+                    .await
+            {
+                eprintln!("[enroll] connection error from {peer}: {e}");
+            }
+        });
+    }
+}
+
+/// Handler for `POST /api/agent/register-ca`.
+///
+/// Validates the submitted CA PEM, writes it to `cas/<instance_id>.pem`, and
+/// hot-reloads the main mTLS ServerConfig so subsequent connections from this
+/// client succeed without an agent restart.
+async fn handle_register_ca(
+    headers: warp::http::HeaderMap,
+    body: RegisterCaRequest,
+    allowed_tokens: std::sync::Arc<Vec<String>>,
+    tls_tx: std::sync::Arc<tokio::sync::watch::Sender<std::sync::Arc<rustls::ServerConfig>>>,
+    server_cert: crate::certs::Cert,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    use subtle::ConstantTimeEq;
+
+    // Bearer token auth — constant-time comparison against all allowed tokens.
+    let bearer = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+
+    let authed = if let Some(tok) = bearer {
+        allowed_tokens
+            .iter()
+            .any(|t| tok.as_bytes().ct_eq(t.as_bytes()).into())
+    } else {
+        false
+    };
+
+    if !authed {
+        return Ok(warp::reply::with_status(
+            warp::reply::json(&serde_json::json!({
+                "ok": false,
+                "error": "unauthorized"
+            })),
+            warp::http::StatusCode::UNAUTHORIZED,
+        ));
+    }
+
+    // Confirmation field prevents accidental registration.
+    if body.confirm != "register-ca" {
+        return Ok(warp::reply::with_status(
+            warp::reply::json(&serde_json::json!({
+                "ok": false,
+                "error": "missing or invalid confirm field; must be \"register-ca\""
+            })),
+            warp::http::StatusCode::BAD_REQUEST,
+        ));
+    }
+
+    // Global 30-second cooldown between registrations.
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let last = LAST_ENROLLMENT_UNIX_SECS.load(Ordering::Acquire);
+    if now_secs.saturating_sub(last) < 30 {
+        return Ok(warp::reply::with_status(
+            warp::reply::json(&serde_json::json!({
+                "ok": false,
+                "error": "enrollment cooldown active; retry after 30 seconds"
+            })),
+            warp::http::StatusCode::TOO_MANY_REQUESTS,
+        ));
+    }
+
+    // Validate CA PEM and derive a stable instance ID.
+    let instance_id = match crate::certs::validate_and_get_ca_instance_id(&body.ca_pem) {
+        Ok(id) => id,
+        Err(reason) => {
+            return Ok(warp::reply::with_status(
+                warp::reply::json(&serde_json::json!({
+                    "ok": false,
+                    "error": format!("invalid CA PEM: {reason}")
+                })),
+                warp::http::StatusCode::BAD_REQUEST,
+            ));
+        }
+    };
+
+    // Check if this CA is already trusted.
+    let cas_dir = crate::certs::agent_cas_dir();
+    let ca_path = cas_dir.join(format!("{instance_id}.pem"));
+    if ca_path.exists() {
+        return Ok(warp::reply::with_status(
+            warp::reply::json(&serde_json::json!({
+                "ok": true,
+                "already_trusted": true,
+                "instance_id": instance_id
+            })),
+            warp::http::StatusCode::OK,
+        ));
+    }
+
+    // Write CA to cas/ directory with restrictive permissions.
+    if let Err(e) = std::fs::write(&ca_path, &body.ca_pem) {
+        eprintln!("[enroll] Failed to write CA {instance_id}: {e}");
+        return Ok(warp::reply::with_status(
+            warp::reply::json(&serde_json::json!({
+                "ok": false,
+                "error": "failed to persist CA certificate"
+            })),
+            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+        ));
+    }
+    crate::config::harden_file_permissions(&ca_path);
+
+    // Record cooldown timestamp.
+    LAST_ENROLLMENT_UNIX_SECS.store(now_secs, Ordering::Release);
+
+    eprintln!(
+        "[agent] Registered new client CA: instance_id={instance_id}, path={}",
+        ca_path.display()
+    );
+
+    // Hot-reload mTLS trust store: rebuild ServerConfig from all CAs now on disk.
+    let all_cas = crate::certs::load_all_agent_cas();
+    match crate::certs::build_agent_tls_config(all_cas, server_cert) {
+        Ok(new_config) => {
+            let _ = tls_tx.send(std::sync::Arc::new(new_config));
+            eprintln!("[agent] mTLS trust store reloaded; new client can now connect");
+        }
+        Err(e) => {
+            // Non-fatal: CA is on disk, but in-memory reload failed.
+            // The agent can be restarted to pick it up.
+            eprintln!("[agent] Warning: CA written to disk but in-memory reload failed: {e}");
+        }
+    }
+
+    Ok(warp::reply::with_status(
+        warp::reply::json(&serde_json::json!({
+            "ok": true,
+            "already_trusted": false,
+            "instance_id": instance_id
+        })),
+        warp::http::StatusCode::OK,
+    ))
 }
 
 pub async fn latest_release_info() -> Result<LatestReleaseInfo> {
@@ -947,6 +1214,9 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
     let http_client = build_plain_http_client(Duration::from_secs(2));
     let mut autostart_attempted = false;
     let mut enabled = false;
+    // Tracks which agent base URLs we have already attempted (or confirmed) enrollment
+    // for in this session. Avoids re-running enrollment on every poll after success.
+    let mut enrolled_urls: HashSet<String> = HashSet::new();
 
     loop {
         if !enabled {
@@ -968,6 +1238,7 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
         if let Some(url) = url {
             let mut metrics_result = None;
             let mut saw_unauthorized = false;
+            let mut saw_connect_error = false;
 
             for candidate in agent_url_candidates(&url) {
                 let client = agent_client_for_url(&candidate, https_client.as_ref(), &http_client);
@@ -978,6 +1249,8 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
 
                 match request.send().await {
                     Ok(resp) if resp.status().is_success() => {
+                        // Successful connection — mark enrollment confirmed for this base URL.
+                        enrolled_urls.insert(url.trim_end_matches('/').to_string());
                         metrics_result = Some((candidate, resp));
                         break;
                     }
@@ -986,7 +1259,24 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                             saw_unauthorized = true;
                         }
                     }
+                    Err(e) if e.is_connect() || e.is_timeout() => {
+                        saw_connect_error = true;
+                    }
                     Err(_) => {}
+                }
+            }
+
+            // Auto-enrollment: if we got a connection-level error (which includes mTLS
+            // rejections) and haven't enrolled this URL yet in this session, attempt to
+            // register our CA with the agent's enrollment port. After enrollment, the
+            // next poll iteration will retry the mTLS connection.
+            if metrics_result.is_none() && saw_connect_error {
+                let base_url = url.trim_end_matches('/').to_string();
+                // Mark as attempted regardless of outcome so we don't loop on every poll.
+                // The next poll iteration will retry the mTLS connection with the new CA.
+                if !enrolled_urls.contains(&base_url) && try_enroll_ca(&url, token.as_deref()).await
+                {
+                    enrolled_urls.insert(base_url);
                 }
             }
 
@@ -1668,6 +1958,130 @@ fn build_agent_https_client(timeout: Duration) -> Option<reqwest::Client> {
         Err(e) => {
             eprintln!("[agent] Failed to build HTTPS agent client: {e}");
             None
+        }
+    }
+}
+
+/// Derives the enrollment port URL from an agent URL.
+/// The enrollment server listens on agent port + 1 (e.g., 7779 → 7780).
+fn enrollment_url_from_agent_url(agent_url: &str) -> Option<String> {
+    let url = reqwest::Url::parse(agent_url.trim_end_matches('/')).ok()?;
+    let port = url.port().unwrap_or(7779);
+    let enroll_port = port.saturating_add(ENROLLMENT_PORT_OFFSET);
+    let mut enroll_url = url.clone();
+    let _ = enroll_url.set_port(Some(enroll_port));
+    let _ = enroll_url.set_scheme("https");
+    Some(enroll_url.to_string().trim_end_matches('/').to_string())
+}
+
+/// Builds an HTTPS client without a client certificate for use on the enrollment port.
+/// The enrollment port uses server-only TLS; clients do not present a client cert.
+/// We still validate the server cert using our CA so the bearer token is protected in transit.
+fn build_enrollment_https_client(timeout: Duration) -> Option<reqwest::Client> {
+    let mut builder = reqwest::Client::builder()
+        .timeout(timeout)
+        .pool_max_idle_per_host(0);
+
+    if let Some(ca) = crate::certs::Cert::load(
+        &crate::certs::certs_dir().join("ca.pem"),
+        &crate::certs::certs_dir().join("ca.key"),
+    ) {
+        if let Ok(cert) = reqwest::Certificate::from_pem(ca.pem.as_bytes()) {
+            builder = builder
+                .tls_certs_only(std::iter::once(cert))
+                .danger_accept_invalid_hostnames(true); // Agent may be on IP with no matching SAN
+        }
+    } else {
+        // No CA available — skip server cert validation so enrollment can still proceed.
+        // The bearer token provides authentication. This only happens on the very first run
+        // before any certs are generated.
+        builder = builder.danger_accept_invalid_certs(true);
+    }
+
+    // No client cert — this is intentionally not mTLS.
+    builder.build().ok()
+}
+
+/// Attempts to register our local CA with a remote agent's enrollment endpoint.
+///
+/// Returns `true` if the CA is now trusted (either newly registered or already was).
+/// Errors are logged but not propagated — enrollment failure is non-fatal for the
+/// poller; the agent just stays disconnected until enrollment succeeds.
+async fn try_enroll_ca(agent_url: &str, token: Option<&str>) -> bool {
+    let Some(enroll_url) = enrollment_url_from_agent_url(agent_url) else {
+        eprintln!("[agent] Cannot derive enrollment URL from {agent_url}");
+        return false;
+    };
+
+    let Some(client) = build_enrollment_https_client(Duration::from_secs(5)) else {
+        eprintln!("[agent] Could not build enrollment client");
+        return false;
+    };
+
+    // Load our own CA PEM to register with the remote agent.
+    let Some(ca) = crate::certs::Cert::load(
+        &crate::certs::certs_dir().join("ca.pem"),
+        &crate::certs::certs_dir().join("ca.key"),
+    ) else {
+        eprintln!("[agent] No local CA found; cannot enroll with agent");
+        return false;
+    };
+
+    let enroll_endpoint = format!("{enroll_url}/api/agent/register-ca");
+    eprintln!("[agent] Attempting CA enrollment at {enroll_endpoint}");
+
+    let mut req = client.post(&enroll_endpoint).json(&serde_json::json!({
+        "ca_pem": ca.pem,
+        "confirm": "register-ca"
+    }));
+
+    if let Some(tok) = token {
+        req = req.bearer_auth(tok);
+    }
+
+    match req.send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            match resp.json::<serde_json::Value>().await {
+                Ok(json) if json.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) => {
+                    let already = json
+                        .get("already_trusted")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if already {
+                        eprintln!(
+                            "[agent] CA already trusted by remote agent; mTLS should succeed"
+                        );
+                    } else {
+                        let id = json
+                            .get("instance_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        eprintln!(
+                            "[agent] CA registered with remote agent (instance_id={id}); retrying mTLS connection"
+                        );
+                    }
+                    true
+                }
+                Ok(json) => {
+                    let err = json
+                        .get("error")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown error");
+                    eprintln!("[agent] CA enrollment rejected (HTTP {status}): {err}");
+                    false
+                }
+                Err(e) => {
+                    eprintln!("[agent] CA enrollment response parse error: {e}");
+                    false
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "[agent] CA enrollment request failed (agent may not support enrollment or port {ENROLLMENT_PORT_OFFSET} offset): {e}"
+            );
+            false
         }
     }
 }
