@@ -56,8 +56,170 @@ pub fn agent_cas_dir() -> PathBuf {
     dir
 }
 
+/// Returns the path to the remote-agent trust-anchor directory, creating it if necessary.
+///
+/// This holds CA certs fetched from remote agents via SSH during enrollment bootstrap.
+/// These are used as TLS trust anchors when connecting to those remote agents — separate
+/// from the device's own CA (`ca.pem`/`ca.key`) which is used for client-cert signing.
+pub fn remote_agent_cas_dir() -> PathBuf {
+    let dir = certs_dir().join("remote-cas");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Persists a remote agent's CA cert to `remote-cas/<sanitized_host>.pem` (mode 0600).
+///
+/// Called during SSH bootstrap enrollment so the client can validate the remote agent's
+/// TLS server certificate on all subsequent connections.
+pub fn save_remote_agent_ca(host: &str, pem: &str) {
+    if pem.trim().is_empty() {
+        return;
+    }
+    let dir = remote_agent_cas_dir();
+    let sanitized: String = host
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let path = dir.join(format!("{sanitized}.pem"));
+    if std::fs::write(&path, pem).is_ok() {
+        crate::config::harden_file_permissions(&path);
+    }
+}
+
+/// Loads all remote-agent CA certs from `remote-cas/` as `reqwest::Certificate` values.
+///
+/// Added to the TLS trust store in `build_agent_https_client` and
+/// `build_enrollment_https_client` so fresh devices (whose own `ca.pem` differs from
+/// the remote agent's CA) can still validate the server cert.
+pub fn load_remote_agent_ca_certs() -> Vec<reqwest::Certificate> {
+    let dir = remote_agent_cas_dir();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<_> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("pem"))
+        .collect();
+    paths.sort();
+    paths
+        .iter()
+        .filter_map(|p| std::fs::read(p).ok())
+        .filter_map(|bytes| reqwest::Certificate::from_pem(&bytes).ok())
+        .collect()
+}
+
+/// Loads all trusted CA PEMs from the local certs directory:
+/// the legacy `ca.pem` plus every `*.pem` file inside `cas/`.
+///
+/// Used to rebuild the mTLS trust store after a new CA is registered,
+/// without restarting the agent.
+pub fn load_all_agent_cas() -> Vec<String> {
+    let mut ca_pems = Vec::new();
+    let dir = certs_dir();
+
+    // Legacy single CA — always checked first for backward compat.
+    if let Ok(pem) = std::fs::read_to_string(dir.join("ca.pem"))
+        && !pem.trim().is_empty()
+    {
+        ca_pems.push(pem);
+    }
+
+    // Multi-client CAs in cas/
+    let cas_dir = dir.join("cas");
+    if let Ok(entries) = std::fs::read_dir(&cas_dir) {
+        let mut paths: Vec<_> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("pem"))
+            .collect();
+        paths.sort(); // deterministic order for stable ServerConfig rebuilds
+        for path in paths {
+            if let Ok(pem) = std::fs::read_to_string(&path)
+                && !pem.trim().is_empty()
+            {
+                ca_pems.push(pem);
+            }
+        }
+    }
+
+    ca_pems
+}
+
+/// Validates a PEM string as a CA certificate and returns a stable instance ID.
+///
+/// The instance ID is the first 32 hex chars of SHA-256 of the raw DER bytes.
+/// This is the filename used when writing to `cas/<instance_id>.pem`.
+///
+/// Returns `Ok(instance_id)` or `Err(human-readable reason)`.
+pub fn validate_and_get_ca_instance_id(pem: &str) -> Result<String, String> {
+    use std::io::BufReader;
+
+    if pem.len() > 65536 {
+        return Err("CA PEM exceeds 64 KB size limit".to_string());
+    }
+
+    let mut reader = BufReader::new(pem.as_bytes());
+    let certs: Vec<rustls::pki_types::CertificateDer<'static>> = rustls_pemfile::certs(&mut reader)
+        .filter_map(|c| c.ok())
+        .collect();
+
+    if certs.is_empty() {
+        return Err("no valid certificate found in PEM".to_string());
+    }
+
+    let der = certs[0].as_ref();
+
+    // Verify the cert can be added to a RootCertStore (rustls validates CA constraints).
+    let mut store = rustls::RootCertStore::empty();
+    if let Err(e) = store.add(rustls::pki_types::CertificateDer::from(der.to_vec())) {
+        return Err(format!("certificate is not a valid CA trust anchor: {e}"));
+    }
+
+    // Stable instance ID: first 32 hex chars of SHA-256 of DER bytes.
+    use sha2::Digest;
+    let hash = sha2::Sha256::digest(der);
+    let instance_id: String = hash[..16].iter().map(|b| format!("{b:02x}")).collect();
+
+    Ok(instance_id)
+}
+
+/// Builds a rustls ServerConfig for the enrollment port (server-only TLS, no client cert required).
+///
+/// This is intentionally NOT mTLS — the enrollment endpoint is authenticated by bearer token
+/// only. The TLS layer protects the token and CA PEM in transit.
+pub fn build_enrollment_tls_config(server_cert: &Cert) -> Result<rustls::ServerConfig, String> {
+    use std::io::BufReader;
+
+    let mut cert_reader = BufReader::new(server_cert.pem.as_bytes());
+    let certs: Vec<rustls::pki_types::CertificateDer<'static>> =
+        rustls_pemfile::certs(&mut cert_reader)
+            .filter_map(|c| c.ok())
+            .collect();
+    if certs.is_empty() {
+        return Err("no certificate found in enrollment server cert".to_string());
+    }
+
+    let mut key_reader = BufReader::new(server_cert.key.as_bytes());
+    let key: rustls::pki_types::PrivateKeyDer<'static> =
+        rustls_pemfile::private_key(&mut key_reader)
+            .map_err(|_| "failed to read enrollment server private key".to_string())?
+            .ok_or_else(|| "no private key found in enrollment server key".to_string())?;
+
+    rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| format!("failed to build enrollment TLS config: {e}"))
+}
+
 /// Represents a certificate and its key pair.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Cert {
     pub pem: String,
     pub key: String,

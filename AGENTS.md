@@ -486,6 +486,18 @@ In CI:
       - Use `test.skip(!hasAi, 'Set LLAMA_MONITOR_HAS_AI=1 to run AI-dependent tests.')`.
       - Never make AI-dependent tests mandatory for CI.
 
+### Known Flakiness
+
+Some tests exhibit timing issues when run with multiple workers in parallel. CI mitigates this via:
+- `workers: 1` — single worker (sequential execution)
+- `fullyParallel: false` — no parallel test execution
+- `retries: 2` — failed tests retry up to 2 times
+
+**Debugging flaky failures:**
+1. Run the test in isolation: `npm test -- --grep "test name"`
+2. If it passes in isolation, the failure was likely a parallel timing issue
+3. Do not mark PR as ready-to-test if isolation fails — that indicates a real bug
+
 ### Maintenance Rules
 
 UI e2e tests are first-class and must be kept in sync with the application. Agents MUST treat them similarly to reference documentation: update them as part of the same PR that changes the feature.

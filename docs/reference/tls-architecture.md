@@ -145,25 +145,33 @@ Provider-agnostic design:
 
 ## mTLS for Remote Agent
 
-Remote-agent communication uses mutual TLS (mTLS) to ensure only trusted agents can connect.
+Remote-agent communication uses mutual TLS (mTLS) to ensure only trusted clients can connect.
 
 Key points:
 - mTLS is separate from ACME.
 - Trust root:
-  - Internal CA managed by llama-monitor.
+  - Each device has its own CA (`ca.pem` / `ca.key`) that signs its own client cert.
   - ACME leaf certificates are not used as the agent trust root.
-- Enforcement:
-  - Agent endpoints require a client certificate.
-  - AgentClientCertVerifier:
-    - Validates certificate against internal CA.
-    - Requires "agent-client" role (currently via a heuristic in certs.rs).
+- Agent-side trust (who can connect to the agent):
+  - `cas/` directory: one `.pem` per enrolled device CA.
+  - Legacy single-CA fallback (`ca.pem`) supported for old installs.
+  - A watch channel allows new `cas/` entries to be trusted without restart.
+  - AgentClientCertVerifier validates each client cert against the loaded CA set and requires the "agent-client" role marker.
+- Dashboard-side trust (which agents can be connected to):
+  - `remote-cas/` directory: one `.pem` per remote agent host.
+  - The dashboard loads all entries in this directory when building its HTTPS client.
+- Enrollment:
+  - The dashboard automatically enrolls via SSH bootstrap when mTLS fails.
+  - No user interaction is required beyond SSH setup.
+  - See the Remote Agent reference doc for the full enrollment flow.
 - Logging:
   - On agent connection, logs:
     - Client certificate subject.
     - Remote address.
 
 For agent clients:
-- Must present a client certificate signed by llama-monitor’s internal CA.
+- Must present a client certificate signed by their device’s CA.
+- The device CA must be enrolled in the agent’s `cas/` directory.
 - Must carry the expected role marker ("agent-client") in the certificate.
 
 ## Reverse Proxy Usage
@@ -238,9 +246,11 @@ Common issues:
     - Confirm no reverse proxy is interfering.
 
 - Remote-agent mTLS connection refused:
-  - Confirm:
-    - Agent presents a client certificate.
-    - Certificate is signed by llama-monitor’s internal CA.
+  - The dashboard will automatically attempt SSH bootstrap enrollment on the next poll.
+  - To force re-enrollment: remove the relevant entry from `remote-cas/` on the client and from `cas/` on the agent, then restart the agent.
+  - Manual check:
+    - Client certificate is signed by the device’s CA.
+    - Device CA is present in the agent’s `cas/` directory.
     - Certificate includes "agent-client" role marker.
 
 For deeper technical details and code references, see:

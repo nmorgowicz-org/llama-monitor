@@ -354,7 +354,6 @@ pub fn save_ui_settings(path: &Path, settings: &UiSettings) -> anyhow::Result<()
         std::fs::create_dir_all(parent)?;
     }
 
-    // Encrypt remote_agent_token before writing
     let mut to_save = settings.clone();
     to_save.remote_agent_token = encrypt_value(&to_save.remote_agent_token);
 
