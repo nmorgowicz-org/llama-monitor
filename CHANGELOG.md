@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.1](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.22.0...v0.22.1) (2026-05-25)
+
+
+### Bug Fixes
+
+* **agent:** fix mTLS role check to search raw DER bytes instead of base64 output ([e3aab16](https://github.com/nmorgowicz-org/llama-monitor/commit/e3aab1600a0b7e40a1e5b6fb5e68756f5c2533a6))
+* **agent:** switch SCP to SFTP for Windows-compatible remote file transfer ([e3aab16](https://github.com/nmorgowicz-org/llama-monitor/commit/e3aab1600a0b7e40a1e5b6fb5e68756f5c2533a6))
+* **agent:** use ~/.config path for certs on all platforms including macOS ([e3aab16](https://github.com/nmorgowicz-org/llama-monitor/commit/e3aab1600a0b7e40a1e5b6fb5e68756f5c2533a6))
+* **agent:** use distinct CA CN to resolve TLS chain ambiguity on all clients ([e3aab16](https://github.com/nmorgowicz-org/llama-monitor/commit/e3aab1600a0b7e40a1e5b6fb5e68756f5c2533a6))
+
 ## [0.22.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.21.4...v0.22.0) (2026-05-24)
 
 
