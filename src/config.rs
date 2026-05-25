@@ -440,6 +440,9 @@ pub struct AppConfig {
     pub agent_token: Option<String>,
     pub remote_agent_url: Option<String>,
     pub remote_agent_token: Option<String>,
+    /// One-time enrollment code for initial CA registration with a remote agent.
+    /// Obtained via SSH on the agent machine. Cleared after successful enrollment.
+    pub remote_agent_enrollment_token: Option<String>,
     pub remote_agent_ssh_autostart: bool,
     pub remote_agent_ssh_target: Option<String>,
     pub remote_agent_ssh_command: Option<String>,
@@ -489,6 +492,7 @@ impl AppConfig {
             agent_token: args.agent_token,
             remote_agent_url: args.remote_agent_url,
             remote_agent_token: args.remote_agent_token,
+            remote_agent_enrollment_token: args.remote_agent_enrollment_token,
             remote_agent_ssh_autostart: args.remote_agent_ssh_autostart,
             remote_agent_ssh_target: args.remote_agent_ssh_target,
             remote_agent_ssh_command: args.remote_agent_ssh_command,
@@ -548,6 +552,7 @@ impl AppConfig {
             agent_token: None,
             remote_agent_url: None,
             remote_agent_token: None,
+            remote_agent_enrollment_token: None,
             remote_agent_ssh_autostart: false,
             remote_agent_ssh_target: None,
             remote_agent_ssh_command: None,

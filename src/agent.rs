@@ -1,8 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -212,11 +211,39 @@ pub struct AgentMetrics {
 const AGENT_PROTOCOL_VERSION: &str = "1.0.0";
 
 /// Enrollment port offset: agent listens on port N for mTLS, and on port N+1 for
-/// unenrolled-client CA registration (server-TLS only, bearer token auth).
+/// unenrolled-client CA registration (server-TLS only, one-time token auth).
 const ENROLLMENT_PORT_OFFSET: u16 = 1;
 
-/// Global cooldown for enrollment requests (30 seconds between registrations).
-static LAST_ENROLLMENT_UNIX_SECS: AtomicU64 = AtomicU64::new(0);
+/// How long the enrollment token is valid after generation.
+const ENROLLMENT_TOKEN_EXPIRY_SECS: u64 = 600; // 10 minutes
+
+/// Filename for the enrollment token within the certs directory.
+const ENROLLMENT_TOKEN_FILE: &str = "enrollment-token";
+
+/// Active one-time enrollment token. Set at agent startup; cleared on first use or expiry.
+/// SSH access to the agent machine is the authorization gate — the token is only readable
+/// there (mode 0600 file + startup log output).
+struct EnrollmentTokenState {
+    token: String,
+    expires_at: Instant,
+}
+
+static ENROLLMENT_TOKEN_STATE: LazyLock<Mutex<Option<EnrollmentTokenState>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+/// Outcome of validating a submitted enrollment token.
+enum EnrollmentAuthResult {
+    /// Token matched and was consumed (one-time use).
+    Authenticated,
+    /// No bearer token submitted.
+    NoBearer,
+    /// No active enrollment token on the server (none generated, or already used).
+    NoActiveToken,
+    /// The server's enrollment token has expired.
+    Expired,
+    /// Bearer token did not match the server's enrollment token.
+    InvalidToken,
+}
 
 /// Request body for `POST /api/agent/register-ca` on the enrollment port.
 #[derive(Debug, Deserialize)]
@@ -226,6 +253,36 @@ pub struct RegisterCaRequest {
     /// Must be the literal string `"register-ca"` to prevent accidental registration.
     #[serde(default)]
     pub confirm: String,
+}
+
+/// Generates a one-time enrollment token, stores it in the global state, and writes it
+/// to `enrollment-token` in the certs directory (mode 0600).
+///
+/// SSH access to the agent machine is the authorization gate — the token is only
+/// readable there via the log output or `cat ~/.config/llama-monitor/enrollment-token`.
+/// The token expires after `ENROLLMENT_TOKEN_EXPIRY_SECS` or on first successful use.
+fn generate_and_persist_enrollment_token() -> String {
+    use rand::Rng;
+    let mut bytes = [0u8; 6];
+    rand::rng().fill_bytes(&mut bytes);
+    // Format as XXXX-XXXX-XXXX (12 uppercase hex characters, easy to read and type).
+    let hex: String = bytes.iter().map(|b| format!("{b:02X}")).collect();
+    let token = format!("{}-{}-{}", &hex[0..4], &hex[4..8], &hex[8..12]);
+
+    let expires_at = Instant::now() + Duration::from_secs(ENROLLMENT_TOKEN_EXPIRY_SECS);
+    if let Ok(mut state) = ENROLLMENT_TOKEN_STATE.lock() {
+        *state = Some(EnrollmentTokenState {
+            token: token.clone(),
+            expires_at,
+        });
+    }
+
+    // Write to file so the agent operator can retrieve it via SSH.
+    let token_path = crate::certs::certs_dir().join(ENROLLMENT_TOKEN_FILE);
+    let _ = std::fs::write(&token_path, &token);
+    crate::config::harden_file_permissions(&token_path);
+
+    token
 }
 
 /// Load all allowed agent tokens from agent-tokens.json (if present).
@@ -694,17 +751,10 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
     // Spawn enrollment server (agent port + 1) for unenrolled clients to register their CA.
     let enrollment_port = bind_addr.port().saturating_add(ENROLLMENT_PORT_OFFSET);
     let enrollment_addr = SocketAddr::new(bind_addr.ip(), enrollment_port);
-    let enroll_tokens = allowed_tokens.clone();
     let enroll_tx = tls_tx.clone();
     let enroll_server_cert = agent_server_cert.clone();
     tokio::spawn(async move {
-        if let Err(e) = run_enrollment_server(
-            enrollment_addr,
-            enroll_server_cert,
-            enroll_tokens,
-            enroll_tx,
-        )
-        .await
+        if let Err(e) = run_enrollment_server(enrollment_addr, enroll_server_cert, enroll_tx).await
         {
             eprintln!("[agent] Enrollment server stopped: {e}");
         }
@@ -718,9 +768,19 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
         }
     };
 
+    // Generate a one-time enrollment token. SSH access to this machine is the auth gate —
+    // the operator reads the token from here or from the enrollment-token file.
+    let enrollment_code = generate_and_persist_enrollment_token();
     println!("[agent] Remote metrics agent listening on https://{bind_addr} (mTLS enforced)");
+    println!("[agent] CA enrollment available on https://{enrollment_addr} (server-TLS only)");
+    println!("[agent] ╔══════════════════════════════════════════╗");
+    println!("[agent] ║  ENROLLMENT CODE: {enrollment_code:<24} ║");
+    println!("[agent] ║  Valid for 10 minutes · one-time use     ║");
+    println!("[agent] ╚══════════════════════════════════════════╝");
+    println!("[agent] To enroll a new client device:");
+    println!("[agent]   1. Point the client at: https://{bind_addr}");
     println!(
-        "[agent] CA enrollment available on https://{enrollment_addr} (server-TLS, bearer auth)"
+        "[agent]   2. Enter the enrollment code when prompted (or read it via SSH: cat ~/.config/llama-monitor/enrollment-token)"
     );
 
     loop {
@@ -785,7 +845,7 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
 /// Runs the enrollment server on the agent's secondary port (agent port + 1).
 ///
 /// Accepts unenrolled clients (no mTLS client cert required). Exposes a single
-/// endpoint: `POST /api/agent/register-ca`. Authenticated by bearer token only.
+/// endpoint: `POST /api/agent/register-ca`. Authenticated by one-time enrollment token.
 ///
 /// On successful registration, writes the new CA to `cas/<instance_id>.pem` and
 /// sends an updated `ServerConfig` to the watch channel, causing the main mTLS
@@ -793,7 +853,6 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
 async fn run_enrollment_server(
     addr: SocketAddr,
     server_cert: crate::certs::Cert,
-    allowed_tokens: std::sync::Arc<Vec<String>>,
     tls_tx: std::sync::Arc<tokio::sync::watch::Sender<std::sync::Arc<rustls::ServerConfig>>>,
 ) -> Result<()> {
     let enrollment_tls_config = crate::certs::build_enrollment_tls_config(&server_cert)
@@ -807,7 +866,6 @@ async fn run_enrollment_server(
 
     // Enrollment route: POST /api/agent/register-ca
     let route = {
-        let allowed = allowed_tokens.clone();
         let tx = tls_tx.clone();
         let srv_cert = server_cert.clone();
         warp::path!("api" / "agent" / "register-ca")
@@ -817,10 +875,9 @@ async fn run_enrollment_server(
             .and(warp::body::json::<RegisterCaRequest>())
             .and_then(
                 move |headers: warp::http::HeaderMap, body: RegisterCaRequest| {
-                    let allowed = allowed.clone();
                     let tx = tx.clone();
                     let srv_cert = srv_cert.clone();
-                    async move { handle_register_ca(headers, body, allowed, tx, srv_cert).await }
+                    async move { handle_register_ca(headers, body, tx, srv_cert).await }
                 },
             )
     };
@@ -870,34 +927,73 @@ async fn run_enrollment_server(
 async fn handle_register_ca(
     headers: warp::http::HeaderMap,
     body: RegisterCaRequest,
-    allowed_tokens: std::sync::Arc<Vec<String>>,
     tls_tx: std::sync::Arc<tokio::sync::watch::Sender<std::sync::Arc<rustls::ServerConfig>>>,
     server_cert: crate::certs::Cert,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     use subtle::ConstantTimeEq;
 
-    // Bearer token auth — constant-time comparison against all allowed tokens.
     let bearer = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "));
 
-    let authed = if let Some(tok) = bearer {
-        allowed_tokens
-            .iter()
-            .any(|t| tok.as_bytes().ct_eq(t.as_bytes()).into())
-    } else {
-        false
+    // Validate one-time enrollment token atomically: check, compare, consume.
+    let auth_result = {
+        let mut state = ENROLLMENT_TOKEN_STATE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        match (bearer, state.as_ref()) {
+            (None, _) => EnrollmentAuthResult::NoBearer,
+            (_, None) => EnrollmentAuthResult::NoActiveToken,
+            (Some(submitted), Some(ets)) => {
+                if Instant::now() >= ets.expires_at {
+                    *state = None;
+                    EnrollmentAuthResult::Expired
+                } else if submitted.as_bytes().ct_eq(ets.token.as_bytes()).into() {
+                    // Consume: clear token state and remove file so it cannot be reused.
+                    *state = None;
+                    let token_path = crate::certs::certs_dir().join(ENROLLMENT_TOKEN_FILE);
+                    let _ = std::fs::remove_file(&token_path);
+                    EnrollmentAuthResult::Authenticated
+                } else {
+                    EnrollmentAuthResult::InvalidToken
+                }
+            }
+        }
     };
 
-    if !authed {
-        return Ok(warp::reply::with_status(
-            warp::reply::json(&serde_json::json!({
-                "ok": false,
-                "error": "unauthorized"
-            })),
-            warp::http::StatusCode::UNAUTHORIZED,
-        ));
+    match auth_result {
+        EnrollmentAuthResult::Authenticated => {} // proceed
+        EnrollmentAuthResult::NoActiveToken => {
+            eprintln!("[enroll] Rejected: no active enrollment token");
+            return Ok(warp::reply::with_status(
+                warp::reply::json(&serde_json::json!({
+                    "ok": false,
+                    "error": "no active enrollment token; restart the agent to generate a new one"
+                })),
+                warp::http::StatusCode::SERVICE_UNAVAILABLE,
+            ));
+        }
+        EnrollmentAuthResult::Expired => {
+            eprintln!("[enroll] Rejected: enrollment token has expired");
+            return Ok(warp::reply::with_status(
+                warp::reply::json(&serde_json::json!({
+                    "ok": false,
+                    "error": "enrollment token has expired; restart the agent to generate a new one"
+                })),
+                warp::http::StatusCode::UNAUTHORIZED,
+            ));
+        }
+        EnrollmentAuthResult::NoBearer | EnrollmentAuthResult::InvalidToken => {
+            eprintln!("[enroll] Rejected: invalid or missing enrollment token");
+            return Ok(warp::reply::with_status(
+                warp::reply::json(&serde_json::json!({
+                    "ok": false,
+                    "error": "invalid or missing enrollment token"
+                })),
+                warp::http::StatusCode::UNAUTHORIZED,
+            ));
+        }
     }
 
     // Confirmation field prevents accidental registration.
@@ -908,22 +1004,6 @@ async fn handle_register_ca(
                 "error": "missing or invalid confirm field; must be \"register-ca\""
             })),
             warp::http::StatusCode::BAD_REQUEST,
-        ));
-    }
-
-    // Global 30-second cooldown between registrations.
-    let now_secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let last = LAST_ENROLLMENT_UNIX_SECS.load(Ordering::Acquire);
-    if now_secs.saturating_sub(last) < 30 {
-        return Ok(warp::reply::with_status(
-            warp::reply::json(&serde_json::json!({
-                "ok": false,
-                "error": "enrollment cooldown active; retry after 30 seconds"
-            })),
-            warp::http::StatusCode::TOO_MANY_REQUESTS,
         ));
     }
 
@@ -967,9 +1047,6 @@ async fn handle_register_ca(
         ));
     }
     crate::config::harden_file_permissions(&ca_path);
-
-    // Record cooldown timestamp.
-    LAST_ENROLLMENT_UNIX_SECS.store(now_secs, Ordering::Release);
 
     eprintln!(
         "[agent] Registered new client CA: instance_id={instance_id}, path={}",
@@ -1266,17 +1343,39 @@ pub async fn remote_agent_poller(state: AppState, app_config: Arc<AppConfig>) {
                 }
             }
 
-            // Auto-enrollment: if we got a connection-level error (which includes mTLS
-            // rejections) and haven't enrolled this URL yet in this session, attempt to
-            // register our CA with the agent's enrollment port. After enrollment, the
-            // next poll iteration will retry the mTLS connection.
+            // Enrollment hint: if we got a connection-level error (which includes mTLS
+            // rejections) and haven't attempted enrollment for this URL yet, try once.
+            // Enrollment requires the one-time code shown on the agent machine at startup
+            // (or read via SSH: cat ~/.config/llama-monitor/enrollment-token).
+            // The enrollment_token is configured separately from the api_token — it is a
+            // short-lived pairing code, not a persistent API credential.
             if metrics_result.is_none() && saw_connect_error {
                 let base_url = url.trim_end_matches('/').to_string();
-                // Mark as attempted regardless of outcome so we don't loop on every poll.
-                // The next poll iteration will retry the mTLS connection with the new CA.
-                if !enrolled_urls.contains(&base_url) && try_enroll_ca(&url, token.as_deref()).await
-                {
-                    enrolled_urls.insert(base_url);
+                if !enrolled_urls.contains(&base_url) {
+                    let enrollment_code = first_non_empty([
+                        app_config.remote_agent_enrollment_token.as_deref(),
+                        Some(settings.remote_agent_enrollment_token.as_str()),
+                    ]);
+                    if enrollment_code.is_some() {
+                        if try_enroll_ca(&url, enrollment_code.as_deref()).await {
+                            enrolled_urls.insert(base_url);
+                            // Clear the one-time code from settings — it has been consumed.
+                            {
+                                let mut s = state.ui_settings.lock().unwrap();
+                                s.remote_agent_enrollment_token = String::new();
+                                let _ = crate::state::save_ui_settings(&state.ui_settings_path, &s);
+                            }
+                        }
+                    } else {
+                        // No enrollment code configured — log once so the user knows what to do.
+                        enrolled_urls.insert(base_url); // suppress repeated log
+                        eprintln!(
+                            "[agent] Cannot connect to remote agent at {url}. If this is a new \
+                             client, enroll by obtaining the one-time code from the agent machine \
+                             (shown at startup or via SSH: cat ~/.config/llama-monitor/enrollment-token) \
+                             and setting remote_agent_enrollment_token in your config."
+                        );
+                    }
                 }
             }
 
@@ -1993,7 +2092,7 @@ fn build_enrollment_https_client(timeout: Duration) -> Option<reqwest::Client> {
         }
     } else {
         // No CA available — skip server cert validation so enrollment can still proceed.
-        // The bearer token provides authentication. This only happens on the very first run
+        // The enrollment token provides authentication. This only happens on the very first run
         // before any certs are generated.
         builder = builder.danger_accept_invalid_certs(true);
     }
@@ -2004,10 +2103,14 @@ fn build_enrollment_https_client(timeout: Duration) -> Option<reqwest::Client> {
 
 /// Attempts to register our local CA with a remote agent's enrollment endpoint.
 ///
+/// `enrollment_code` is the one-time code visible on the agent machine at startup
+/// (or via `cat ~/.config/llama-monitor/enrollment-token` over SSH). It is NOT
+/// the api_token used for authenticated API calls.
+///
 /// Returns `true` if the CA is now trusted (either newly registered or already was).
 /// Errors are logged but not propagated — enrollment failure is non-fatal for the
 /// poller; the agent just stays disconnected until enrollment succeeds.
-async fn try_enroll_ca(agent_url: &str, token: Option<&str>) -> bool {
+async fn try_enroll_ca(agent_url: &str, enrollment_code: Option<&str>) -> bool {
     let Some(enroll_url) = enrollment_url_from_agent_url(agent_url) else {
         eprintln!("[agent] Cannot derive enrollment URL from {agent_url}");
         return false;
@@ -2035,8 +2138,8 @@ async fn try_enroll_ca(agent_url: &str, token: Option<&str>) -> bool {
         "confirm": "register-ca"
     }));
 
-    if let Some(tok) = token {
-        req = req.bearer_auth(tok);
+    if let Some(code) = enrollment_code {
+        req = req.bearer_auth(code);
     }
 
     match req.send().await {
@@ -3942,5 +4045,118 @@ mod tests {
                 "http://192.168.2.16:7779".to_string()
             ]
         );
+    }
+
+    // ── Enrollment token tests ────────────────────────────────────────────────
+    // Tests avoid sharing the process-global ENROLLMENT_TOKEN_STATE to prevent
+    // parallel-test poisoning. Instead they test the logic with local state.
+
+    fn make_enrollment_token_state(
+        token: &str,
+        expires_in: Duration,
+    ) -> Option<EnrollmentTokenState> {
+        Some(EnrollmentTokenState {
+            token: token.to_string(),
+            expires_at: Instant::now() + expires_in,
+        })
+    }
+
+    fn simulate_auth(
+        submitted: Option<&str>,
+        state: &mut Option<EnrollmentTokenState>,
+    ) -> EnrollmentAuthResult {
+        use subtle::ConstantTimeEq;
+        match (submitted, state.as_ref()) {
+            (None, _) => EnrollmentAuthResult::NoBearer,
+            (_, None) => EnrollmentAuthResult::NoActiveToken,
+            (Some(sub), Some(ets)) => {
+                if Instant::now() >= ets.expires_at {
+                    *state = None;
+                    EnrollmentAuthResult::Expired
+                } else if sub.as_bytes().ct_eq(ets.token.as_bytes()).into() {
+                    *state = None; // consume
+                    EnrollmentAuthResult::Authenticated
+                } else {
+                    EnrollmentAuthResult::InvalidToken
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn enrollment_token_format_is_xxxx_xxxx_xxxx() {
+        // generate_and_persist_enrollment_token writes a file; test only the format.
+        use rand::Rng;
+        let mut bytes = [0u8; 6];
+        rand::rng().fill_bytes(&mut bytes);
+        let hex: String = bytes.iter().map(|b| format!("{b:02X}")).collect();
+        let token = format!("{}-{}-{}", &hex[0..4], &hex[4..8], &hex[8..12]);
+
+        assert_eq!(token.len(), 14, "token should be 14 chars (XXXX-XXXX-XXXX)");
+        let parts: Vec<&str> = token.split('-').collect();
+        assert_eq!(parts.len(), 3, "token should have 3 dash-separated parts");
+        for part in &parts {
+            assert_eq!(part.len(), 4, "each part should be 4 hex chars");
+            assert!(
+                part.chars()
+                    .all(|c| c.is_ascii_hexdigit() && !c.is_lowercase()),
+                "each part should be uppercase hex"
+            );
+        }
+    }
+
+    #[test]
+    fn enrollment_auth_correct_token_is_authenticated_and_consumed() {
+        let mut state = make_enrollment_token_state("AAAA-BBBB-CCCC", Duration::from_secs(600));
+        assert!(matches!(
+            simulate_auth(Some("AAAA-BBBB-CCCC"), &mut state),
+            EnrollmentAuthResult::Authenticated
+        ));
+        // Token must be consumed after successful auth.
+        assert!(state.is_none(), "token must be consumed after first use");
+    }
+
+    #[test]
+    fn enrollment_auth_wrong_token_is_rejected_and_not_consumed() {
+        let mut state = make_enrollment_token_state("AAAA-BBBB-CCCC", Duration::from_secs(600));
+        assert!(matches!(
+            simulate_auth(Some("ZZZZ-ZZZZ-ZZZZ"), &mut state),
+            EnrollmentAuthResult::InvalidToken
+        ));
+        // Token must remain after a failed attempt (not consumed).
+        assert!(state.is_some(), "token must not be consumed on wrong input");
+    }
+
+    #[test]
+    fn enrollment_auth_missing_bearer_is_rejected() {
+        let mut state = make_enrollment_token_state("AAAA-BBBB-CCCC", Duration::from_secs(600));
+        assert!(matches!(
+            simulate_auth(None, &mut state),
+            EnrollmentAuthResult::NoBearer
+        ));
+    }
+
+    #[test]
+    fn enrollment_auth_no_active_token_returns_correct_variant() {
+        let mut state: Option<EnrollmentTokenState> = None;
+        assert!(matches!(
+            simulate_auth(Some("AAAA-BBBB-CCCC"), &mut state),
+            EnrollmentAuthResult::NoActiveToken
+        ));
+    }
+
+    #[test]
+    fn enrollment_auth_expired_token_is_rejected_and_cleared() {
+        let mut state = make_enrollment_token_state("AAAA-BBBB-CCCC", Duration::from_millis(0));
+        // Push expiry into the past.
+        if let Some(ref mut ets) = state {
+            ets.expires_at = Instant::now() - Duration::from_secs(1);
+        }
+        assert!(matches!(
+            simulate_auth(Some("AAAA-BBBB-CCCC"), &mut state),
+            EnrollmentAuthResult::Expired
+        ));
+        // State must be cleared on expiry detection.
+        assert!(state.is_none(), "expired token must be cleared");
     }
 }

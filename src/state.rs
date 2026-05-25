@@ -97,6 +97,10 @@ pub struct UiSettings {
     pub remote_agent_url: String,
     #[serde(default)]
     pub remote_agent_token: String,
+    /// One-time enrollment code for initial CA registration with a remote agent.
+    /// Obtained via SSH on the agent machine. Cleared from settings after enrollment.
+    #[serde(default)]
+    pub remote_agent_enrollment_token: String,
     #[serde(default)]
     pub remote_agent_ssh_autostart: bool,
     #[serde(default)]
@@ -315,6 +319,7 @@ impl Default for UiSettings {
             llama_poll_interval: default_llama_poll_interval(),
             remote_agent_url: String::new(),
             remote_agent_token: String::new(),
+            remote_agent_enrollment_token: String::new(),
             remote_agent_ssh_autostart: false,
             remote_agent_ssh_target: String::new(),
             remote_agent_ssh_command: String::new(),
@@ -344,6 +349,7 @@ pub fn load_ui_settings(path: &Path) -> UiSettings {
         && let Ok(mut s) = serde_json::from_str::<UiSettings>(&contents)
     {
         s.remote_agent_token = decrypt_value(&s.remote_agent_token);
+        s.remote_agent_enrollment_token = decrypt_value(&s.remote_agent_enrollment_token);
         return s;
     }
     UiSettings::default()
@@ -354,9 +360,9 @@ pub fn save_ui_settings(path: &Path, settings: &UiSettings) -> anyhow::Result<()
         std::fs::create_dir_all(parent)?;
     }
 
-    // Encrypt remote_agent_token before writing
     let mut to_save = settings.clone();
     to_save.remote_agent_token = encrypt_value(&to_save.remote_agent_token);
+    to_save.remote_agent_enrollment_token = encrypt_value(&to_save.remote_agent_enrollment_token);
 
     let tmp = path.with_extension("json.tmp");
     let json = serde_json::to_string_pretty(&to_save)?;

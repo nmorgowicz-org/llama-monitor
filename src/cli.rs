@@ -113,6 +113,12 @@ pub struct AppArgs {
     #[arg(long)]
     pub remote_agent_token: Option<String>,
 
+    /// One-time enrollment code for registering this client's CA with a remote agent.
+    /// Obtain it from the agent machine at startup (shown in logs or via SSH:
+    /// cat ~/.config/llama-monitor/enrollment-token). Used once; clear after enrollment.
+    #[arg(long)]
+    pub remote_agent_enrollment_token: Option<String>,
+
     /// Enable SSH autostart when a remote metrics agent is unreachable
     #[arg(long)]
     pub remote_agent_ssh_autostart: bool,
