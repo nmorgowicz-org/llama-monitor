@@ -66,14 +66,42 @@ This panel exposes the full runtime controls:
 
 ## mTLS and trust
 
-- Remote agents communicate with the dashboard over mTLS.
-- The agent loads trust anchors from:
-  - A legacy single CA (ca.pem), if present, and
-  - All .pem files in the cas/ directory (multi-CA support).
-- This allows multiple independent CAs to be trusted across different agents.
-- If no CA is found, the agent refuses to start.
-- Each dashboard instance can place its own CA into cas/ so that agents trust multiple dashboards (e.g., during migration or in multi-instance setups).
-- Managed installs also provision an `agent-server.pem` / `agent-server.key` pair next to the remote binary so the dashboard can verify the agent over HTTPS using the same CA chain.
+Remote agents and dashboards communicate over mutual TLS (mTLS). Both sides present certificates; both sides verify them.
+
+### Per-device CA model
+
+Each device (Mac, Android, etc.) generates its own CA (`ca.pem` / `ca.key`) and signs its own client certificate. Device CAs are kept independent — no device's key ever leaves that device.
+
+Trust is established in two directions:
+
+**Agent trusts clients** via the `cas/` directory:
+- Each enrolled device has its own `cas/<instance-id>.pem` entry.
+- On startup the agent loads all entries in this directory.
+- A `tokio::sync::watch` channel allows new entries to take effect without a restart.
+- A legacy single-CA fallback (`ca.pem`) is also supported for old installs.
+
+**Dashboard trusts the agent** via the `remote-cas/` directory:
+- Each agent host has its own `remote-cas/<hostname>.pem` entry.
+- The dashboard loads all entries in this directory when building its HTTPS client.
+- This allows connecting to multiple remote agents, each with its own CA.
+
+### Automatic SSH bootstrap enrollment
+
+When a dashboard fails to connect to a remote agent (mTLS rejection) and SSH is configured, it automatically bootstraps trust without any user interaction:
+
+1. Reads the agent's CA cert (`ca.pem`) from the remote machine via SSH → saved to `remote-cas/<hostname>.pem`.
+2. Reads the agent's api-token from the remote machine via SSH.
+3. Ensures this device has a local CA + client cert (generates if missing).
+4. POSTs this device's CA to the agent's enrollment endpoint, authenticated with the api-token.
+5. Saves the api-token so ongoing API calls authenticate correctly.
+
+On the next poll iteration, mTLS succeeds in both directions.
+
+This flow requires only that SSH is configured (via Guided SSH Setup). No codes, QR codes, or manual credential management are needed.
+
+### Multi-device independence
+
+Each device that enrolls gets its own entry in the agent's `cas/` directory. Enrolling a new device does not affect existing enrolled devices.
 
 ## Agent tokens
 

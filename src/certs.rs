@@ -56,6 +56,65 @@ pub fn agent_cas_dir() -> PathBuf {
     dir
 }
 
+/// Returns the path to the remote-agent trust-anchor directory, creating it if necessary.
+///
+/// This holds CA certs fetched from remote agents via SSH during enrollment bootstrap.
+/// These are used as TLS trust anchors when connecting to those remote agents — separate
+/// from the device's own CA (`ca.pem`/`ca.key`) which is used for client-cert signing.
+pub fn remote_agent_cas_dir() -> PathBuf {
+    let dir = certs_dir().join("remote-cas");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Persists a remote agent's CA cert to `remote-cas/<sanitized_host>.pem` (mode 0600).
+///
+/// Called during SSH bootstrap enrollment so the client can validate the remote agent's
+/// TLS server certificate on all subsequent connections.
+pub fn save_remote_agent_ca(host: &str, pem: &str) {
+    if pem.trim().is_empty() {
+        return;
+    }
+    let dir = remote_agent_cas_dir();
+    let sanitized: String = host
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let path = dir.join(format!("{sanitized}.pem"));
+    if std::fs::write(&path, pem).is_ok() {
+        crate::config::harden_file_permissions(&path);
+    }
+}
+
+/// Loads all remote-agent CA certs from `remote-cas/` as `reqwest::Certificate` values.
+///
+/// Added to the TLS trust store in `build_agent_https_client` and
+/// `build_enrollment_https_client` so fresh devices (whose own `ca.pem` differs from
+/// the remote agent's CA) can still validate the server cert.
+pub fn load_remote_agent_ca_certs() -> Vec<reqwest::Certificate> {
+    let dir = remote_agent_cas_dir();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<_> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("pem"))
+        .collect();
+    paths.sort();
+    paths
+        .iter()
+        .filter_map(|p| std::fs::read(p).ok())
+        .filter_map(|bytes| reqwest::Certificate::from_pem(&bytes).ok())
+        .collect()
+}
+
 /// Loads all trusted CA PEMs from the local certs directory:
 /// the legacy `ca.pem` plus every `*.pem` file inside `cas/`.
 ///
