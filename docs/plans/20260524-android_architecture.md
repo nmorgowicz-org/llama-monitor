@@ -809,7 +809,14 @@ SQLite encryption (SQLCipher): defer to Phase 4. App-private storage provides ad
 
 ### 8.4 Certificate Pinning
 
-Implement TOFU (Trust On First Use) for the remote agent's HTTPS certificate, extending the existing `ssh-known-hosts.json` model to HTTPS: store the agent's CA certificate fingerprint on first connection, verify on subsequent connections. This is architecturally identical to the SSH host key model already implemented.
+Implement TOFU (Trust On First Use) for the remote agent's HTTPS certificate, extending the existing `ssh-known-hosts.json` model to HTTPS:
+
+**Flow:**
+1. First connection: store agent's CA fingerprint
+2. Subsequent connections: verify fingerprint matches
+3. Mismatch: prompt user to re-scan and trust new key (like SSH host key verification)
+
+This is architecturally identical to the SSH host key model already implemented.
 
 ### 8.5 LAN llama-server Security
 
@@ -1709,6 +1716,115 @@ This document was verified against the codebase on 2026-05-24. The following fin
 3. **Section 10C**: File permissions hardening on Android
 4. **Section 17**: Pre-Phase 1 verification checklist
 5. **Section 18**: This verification section
+
+---
+
+## 19. Updated mTLS and Remote Agent Analysis (2026-05-24)
+
+This section incorporates findings from the updated `tls-architecture.md` and `remote-agent.md` reference documents, reflecting recent bugfixes and architectural clarifications.
+
+### 19.1 CA Versioning and Auto-Rotation
+
+**New finding:** The `.ca-v2` sentinel file mechanism ensures backward compatibility:
+
+- A `.ca-v2` sentinel file is written alongside every correctly-formatted CA
+- On startup, if the sentinel is absent (old installation or first run), all CA and leaf certs are deleted and regenerated with the correct CA DN
+- This ensures that old certs with an ambiguous subject (`CN=rcgen self signed cert`) are rotated out automatically without user intervention
+
+**Android impact:** The auto-rotation mechanism works unchanged on Android since it's based on file I/O in the config directory. The sentinel file will be created at `~/.config/llama-monitor/certs/.ca-v2`.
+
+### 19.2 Multi-CA Support
+
+**New finding:** The agent supports multiple independent CAs:
+
+```
+~/.config/llama-monitor/certs/
+├── ca.pem                    # Primary CA
+└── cas/
+    ├── <instance-id>.pem    # Per-dashboard CA certificates
+    └── ...
+```
+
+**Android impact:** The multi-CA support works unchanged — the agent loads trust anchors from both the legacy single CA and all `.pem` files in the `cas/` directory. This is critical for multi-dashboard setups where a single agent serves multiple dashboards.
+
+### 19.3 Agent Token Management
+
+**Updated understanding:** The `agent-tokens.json` file enables multi-client setups:
+
+```json
+{
+  "tokens": ["<token1>", "<token2>"]
+}
+```
+
+- The primary agent token is automatically ensured in this file on startup
+- Any token in the list is accepted for authenticated agent endpoints
+- Enables multiple dashboards to poll the same agent
+
+**Android impact:** Android will be a metrics consumer, so it will use the primary `api-token` file. The `agent-tokens.json` mechanism is primarily for agent-side multi-client support.
+
+### 19.4 Protocol Versioning
+
+**New finding:** The remote agent protocol uses versioning:
+
+- Current protocol version: **1.0.0**
+- The dashboard enforces a minimum protocol version when polling the agent
+- Below minimum version: degraded compatibility mode with `protocol_too_old` flag
+- Missing version: treated as protocol too old (older agents)
+
+**Android impact:** The protocol versioning ensures backward compatibility. Android will enforce the same minimum version as other platforms.
+
+### 19.5 Agent States and Indicators
+
+**Updated states for Android dashboard:**
+
+| State | Description | Android Behavior |
+|-------|-------------|------------------|
+| Connected | Agent reachable, health checks succeed | Normal operation |
+| Firewall blocked | Agent started but HTTP endpoint unreachable | Show "Fix" button with firewall guidance |
+| Update Available | Agent version older than latest release | Show "Upgrade" button |
+| Protocol too old | Agent below minimum protocol version | Enter degraded mode |
+
+**Android-specific consideration:** The "Firewall blocked" state is more likely on Android due to mobile network configurations. The UI guidance should include mobile network troubleshooting.
+
+### 19.6 Certificate Pinning for Remote Agents
+
+**Updated TOFU implementation:**
+
+```
+Remote Agent Certificate Pinning Flow:
+1. First connection: store agent's CA fingerprint
+2. Subsequent connections: verify fingerprint matches
+3. Mismatch: prompt user to re-scan and trust new key (like SSH host key verification)
+```
+
+**Android impact:** Extend the existing `ssh-known-hosts.json` model to HTTPS certificates. The verification flow is architecturally identical to SSH host key verification.
+
+### 19.7 Endpoint Authentication
+
+**Updated authentication requirements:**
+
+| Token Type | Endpoints |
+|------------|-----------|
+| `api-token` | Standard operations (attach, DB queries, TLS/ACME, most remote-agent endpoints) |
+| `db-admin-token` | Elevated operations (install/remove on remote-agent endpoints) |
+
+**Android impact:** Authentication works unchanged — Android uses the same token management as other platforms.
+
+### 19.8 Remote Agent Config File
+
+**New finding:** The dashboard writes `remote-agent-config.json` during install:
+
+```json
+{
+  "api_token": "<dashboard-api-token>"
+}
+```
+
+- Written with restrictive permissions (0600 on Unix/macOS)
+- Allows agent (or SSH-managed operations) to authenticate to dashboard endpoints
+
+**Android impact:** Not directly applicable since Android is a metrics consumer, not the agent host. The config file is written to the remote agent host.
 
 ---
 
