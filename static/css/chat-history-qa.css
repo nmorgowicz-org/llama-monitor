@@ -440,6 +440,138 @@
   opacity: 0.55;
 }
 
+/* ── Context injection panel ─────────────────────────────────────────────── */
+
+.chqa-inject-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chqa-inject-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  font-family: var(--font-body);
+  font-size: 11px;
+  padding: 4px 9px;
+  cursor: pointer;
+  align-self: flex-start;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  user-select: none;
+}
+
+.chqa-inject-toggle:hover {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.24);
+  color: var(--color-text-secondary);
+}
+
+.chqa-inject-toggle[aria-expanded="true"] {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.32);
+  color: var(--color-primary-light, #818cf8);
+}
+
+.chqa-inject-toggle:focus-visible {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.64);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+}
+
+.chqa-inject-badge {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary-light, #818cf8);
+  flex-shrink: 0;
+  font-size: 0;
+  line-height: 0;
+}
+
+.chqa-inject-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: rgba(99, 102, 241, 0.04);
+  border: 1px solid rgba(99, 102, 241, 0.16);
+  border-radius: 10px;
+  padding: 9px 11px;
+  animation: chqa-inject-slide-in 0.18s ease;
+}
+
+@keyframes chqa-inject-slide-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.chqa-inject-input {
+  background: none;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-xs, 0.75rem);
+  line-height: 1.55;
+  min-height: 56px;
+  max-height: 140px;
+  overflow-y: auto;
+  caret-color: var(--color-primary-light, #818cf8);
+}
+
+.chqa-inject-input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+.chqa-inject-input::-webkit-scrollbar { width: 2px; }
+.chqa-inject-input::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 2px;
+}
+
+.chqa-inject-hint {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* ── Status bar ──────────────────────────────────────────────────────────── */
+
+.chqa-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 2px;
+}
+
+.chqa-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary-light, #818cf8);
+  flex-shrink: 0;
+  animation: chqa-status-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes chqa-status-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50%       { opacity: 1;   transform: scale(1.1);  }
+}
+
+.chqa-status-text {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
 /* ── Utility ─────────────────────────────────────────────────────────────── */
 
 .chqa-hidden {
@@ -527,6 +659,36 @@
   border-top-color: rgba(0, 0, 0, 0.07);
 }
 
+[data-theme="light"] .chqa-inject-toggle {
+  border-color: rgba(0, 0, 0, 0.09);
+  color: #6b7280;
+}
+
+[data-theme="light"] .chqa-inject-toggle:hover {
+  background: rgba(99, 102, 241, 0.05);
+  border-color: rgba(99, 102, 241, 0.18);
+  color: #4b5563;
+}
+
+[data-theme="light"] .chqa-inject-toggle[aria-expanded="true"] {
+  background: rgba(99, 102, 241, 0.07);
+  border-color: rgba(99, 102, 241, 0.24);
+  color: #4338ca;
+}
+
+[data-theme="light"] .chqa-inject-panel {
+  background: rgba(99, 102, 241, 0.03);
+  border-color: rgba(99, 102, 241, 0.12);
+}
+
+[data-theme="light"] .chqa-inject-input {
+  color: #1e293b;
+}
+
+[data-theme="light"] .chqa-status-text {
+  color: #9ca3af;
+}
+
 /* ── Reduced motion ──────────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
@@ -537,5 +699,14 @@
 
   .chqa-send-btn:hover:not(:disabled) {
     transform: none !important;
+  }
+
+  .chqa-status-dot {
+    animation: none !important;
+    opacity: 0.7;
+  }
+
+  .chqa-inject-panel {
+    animation: none !important;
   }
 }
