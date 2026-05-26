@@ -5,7 +5,7 @@
 //
 // Thread state is ephemeral (per session, per tab) — never persisted.
 
-import { activeChatTab, scheduleChatPersist } from './chat-state.js';
+import { activeChatTab, scheduleChatPersist, registerChatViewBindings } from './chat-state.js';
 import { renderMd, renderMdStreaming, renderChatMessages } from './chat-render.js';
 import { showToast } from './toast.js';
 import { escapeHtml } from '../core/format.js';
@@ -127,7 +127,7 @@ export function initChatHistoryQA() {
     if (insertTextarea) {
         insertTextarea.addEventListener('input', () => autoResize(insertTextarea));
         insertTextarea.addEventListener('keydown', e => {
-            if (e.key === 'Escape') { e.preventDefault(); closeInsertEditor(); }
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeInsertEditor(); }
         });
     }
 
@@ -146,6 +146,31 @@ export function initChatHistoryQA() {
     if (injectInput) {
         injectInput.addEventListener('input', updateInjectBadge);
     }
+
+    // Escape: close insert editor first if open, otherwise close the whole panel.
+    const panel = document.getElementById(PANEL_ID);
+    if (panel) {
+        panel.addEventListener('keydown', e => {
+            if (e.key !== 'Escape' || e.defaultPrevented) return;
+            const editorOpen = !document.getElementById(INSERT_EDITOR_ID)?.classList.contains('chqa-hidden');
+            if (editorOpen) {
+                closeInsertEditor();
+            } else {
+                closeHistoryQAPanel();
+            }
+            e.preventDefault();
+        });
+    }
+
+    // Register binding so the panel refreshes whenever the active tab changes.
+    registerChatViewBindings({
+        refreshChatHistoryQA: () => {
+            const panelEl = document.getElementById(PANEL_ID);
+            if (!panelEl?.classList.contains('open')) return;
+            closeInsertEditor();
+            refreshForCurrentTab();
+        },
+    });
 
     renderSuggestions();
 }
@@ -266,28 +291,46 @@ function buildEntryEl(entry) {
     setAnswerBodyContent(bodyEl, entry);
     aEl.appendChild(bodyEl);
 
-    if (!entry.streaming && !entry.error && entry.answer) {
-        aEl.appendChild(buildInsertActionBar(entry.answer));
+    if (!entry.streaming && !entry.error && entry.answer && entry.answer !== '[Stopped]') {
+        aEl.appendChild(buildAnswerActions(entry.answer));
     }
 
     div.appendChild(aEl);
     return div;
 }
 
-function buildInsertActionBar(answerText) {
+function buildAnswerActions(answerText) {
     const bar = document.createElement('div');
     bar.className = 'chqa-answer-actions';
 
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'chqa-insert-btn';
-    btn.title = 'Insert this into the conversation history';
-    btn.setAttribute('aria-label', 'Insert into conversation history');
-    btn.innerHTML =
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'chqa-copy-btn';
+    copyBtn.title = 'Copy answer to clipboard';
+    copyBtn.setAttribute('aria-label', 'Copy answer');
+    copyBtn.innerHTML =
+        '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>' +
+        '<span>Copy</span>';
+    copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(answerText).then(() => {
+            showToast('Copied', 'success', 'Answer copied to clipboard.');
+        }).catch(() => {
+            showToast('Copy failed', 'error', 'Could not access clipboard.');
+        });
+    });
+    bar.appendChild(copyBtn);
+
+    const insertBtn = document.createElement('button');
+    insertBtn.type = 'button';
+    insertBtn.className = 'chqa-insert-btn';
+    insertBtn.title = 'Insert this into the conversation history';
+    insertBtn.setAttribute('aria-label', 'Insert into conversation history');
+    insertBtn.innerHTML =
         '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>' +
         '<span>Insert into history</span>';
-    btn.addEventListener('click', () => openInsertEditor(answerText));
-    bar.appendChild(btn);
+    insertBtn.addEventListener('click', () => openInsertEditor(answerText));
+    bar.appendChild(insertBtn);
+
     return bar;
 }
 
@@ -298,6 +341,10 @@ function setAnswerBodyContent(bodyEl, entry) {
     }
     if (entry.error) {
         bodyEl.innerHTML = `<span class="chqa-answer-error">${escapeHtml(entry.answer || 'Something went wrong.')}</span>`;
+        return;
+    }
+    if (entry.answer === '[Stopped]') {
+        bodyEl.innerHTML = '<span class="chqa-answer-stopped">Response stopped</span>';
         return;
     }
     if (entry.answer) {
@@ -318,11 +365,14 @@ function updateEntryDOM(entryId, answer, done, error) {
     if (error) {
         bodyEl.innerHTML = `<span class="chqa-answer-error">${escapeHtml(answer || 'Something went wrong.')}</span>`;
     } else if (done && answer) {
-        // eslint-disable-next-line no-unsanitized/property -- local LLM output, rendered via marked+DOMPurify
-        bodyEl.innerHTML = renderMd(answer);
-        // Add insert action bar once streaming is complete
-        if (!aEl.querySelector('.chqa-answer-actions')) {
-            aEl.appendChild(buildInsertActionBar(answer));
+        if (answer === '[Stopped]') {
+            bodyEl.innerHTML = '<span class="chqa-answer-stopped">Response stopped</span>';
+        } else {
+            // eslint-disable-next-line no-unsanitized/property -- local LLM output, rendered via marked+DOMPurify
+            bodyEl.innerHTML = renderMd(answer);
+            if (!aEl.querySelector('.chqa-answer-actions')) {
+                aEl.appendChild(buildAnswerActions(answer));
+            }
         }
     } else if (answer) {
         // eslint-disable-next-line no-unsanitized/property -- local LLM output, rendered via marked+DOMPurify
