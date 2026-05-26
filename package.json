@@ -5,9 +5,9 @@
     "validate-js": "node scripts/validate-js.mjs"
   },
 "devDependencies": {
-    "eslint": "^10.0.0",
-    "eslint-plugin-no-unsanitized": "^4.1.5",
-    "globals": "^17.6.0",
+    "eslint": "10.4.0",
+    "eslint-plugin-no-unsanitized": "4.1.5",
+    "globals": "17.6.0",
     "puppeteer": "25.0.4"
   },
   "dependencies": {
