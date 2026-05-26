@@ -178,8 +178,18 @@ jobs:
         working-directory: tests/ui
         run: npm ci
 
+      - name: Cache Playwright Chromium
+        id: pw-cache
+        uses: actions/cache@5a3ec84efe688217d2e36397a8c4b9b604a4ec8d # v4.2.3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ hashFiles('tests/ui/package-lock.json') }}
+
       - name: Install Playwright Chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
         working-directory: tests/ui
+        env:
+          UV_USE_IO_URING: "0"
         run: npx playwright install chromium
 
       - name: Start UI smoke server
