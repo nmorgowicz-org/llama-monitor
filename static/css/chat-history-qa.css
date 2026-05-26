@@ -1,0 +1,541 @@
+/* ==========================================================================
+   Chat History Q&A Panel
+   Slide-in panel for asking natural language questions about chat history.
+   All panel-specific styles use the .chqa- prefix.
+   Base .slide-panel shell (position, dimensions, backdrop, animation) is in
+   layout.css — only panel-content styles live here.
+   ========================================================================== */
+
+/* ── Thread area ─────────────────────────────────────────────────────────── */
+
+.chqa-thread {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px;
+  gap: 10px;
+  scroll-behavior: smooth;
+}
+
+.chqa-thread::-webkit-scrollbar { width: 3px; }
+.chqa-thread::-webkit-scrollbar-track { background: transparent; }
+.chqa-thread::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 2px;
+}
+.chqa-thread::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.5);
+}
+
+/* ── Empty state ─────────────────────────────────────────────────────────── */
+
+.chqa-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+  padding: 24px 12px 32px;
+  min-height: 160px;
+}
+
+.chqa-empty-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 40% 35%, rgba(99, 102, 241, 0.22), transparent 60%),
+    rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-primary-light, #818cf8);
+  flex-shrink: 0;
+}
+
+.chqa-empty-title {
+  font-size: var(--text-sm, 0.875rem);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.chqa-empty-desc {
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--color-text-muted);
+  margin: 0;
+  line-height: 1.55;
+  max-width: 240px;
+}
+
+/* ── Suggestion chips ────────────────────────────────────────────────────── */
+
+.chqa-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  max-width: 288px;
+  margin-top: 4px;
+}
+
+.chqa-suggestion-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: var(--color-text-secondary);
+  font-family: var(--font-body);
+  font-size: var(--text-xs, 0.75rem);
+  padding: 8px 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  line-height: 1.45;
+}
+
+.chqa-suggestion-btn:hover {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.28);
+  color: var(--color-text-primary);
+}
+
+.chqa-suggestion-btn:focus-visible {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.64);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+}
+
+/* ── Q&A entries ─────────────────────────────────────────────────────────── */
+
+.chqa-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* User question bubble — right-aligned, indigo tint */
+.chqa-question {
+  align-self: flex-end;
+  max-width: 90%;
+  background:
+    radial-gradient(circle at 20% 30%, rgba(99, 102, 241, 0.18), transparent 60%),
+    linear-gradient(135deg, rgba(99, 102, 241, 0.16), rgba(99, 102, 241, 0.08));
+  border: 1px solid rgba(99, 102, 241, 0.28);
+  border-radius: 14px 14px 4px 14px;
+  padding: 9px 13px;
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+  word-break: break-word;
+  box-shadow:
+    0 4px 12px rgba(99, 102, 241, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+/* AI answer bubble — left-aligned, neutral surface */
+.chqa-answer {
+  align-self: flex-start;
+  max-width: 100%;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 4px 14px 14px 14px;
+  padding: 11px 13px;
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  word-break: break-word;
+  transition: border-color 0.2s ease;
+}
+
+.chqa-answer.streaming {
+  border-color: rgba(99, 102, 241, 0.22);
+}
+
+/* ── Answer markdown body ─────────────────────────────────────────────────── */
+
+.chqa-answer-body p {
+  margin: 0 0 8px;
+}
+
+.chqa-answer-body p:last-child {
+  margin-bottom: 0;
+}
+
+.chqa-answer-body ul,
+.chqa-answer-body ol {
+  margin: 4px 0 8px 18px;
+  padding: 0;
+}
+
+.chqa-answer-body li {
+  margin-bottom: 3px;
+  line-height: 1.5;
+}
+
+.chqa-answer-body code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.chqa-answer-body pre {
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 7px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 6px 0;
+}
+
+.chqa-answer-body pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11.5px;
+}
+
+.chqa-answer-body h1,
+.chqa-answer-body h2,
+.chqa-answer-body h3 {
+  font-size: var(--text-sm, 0.875rem);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 10px 0 4px;
+}
+
+.chqa-answer-body strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.chqa-answer-body em {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.chqa-answer-body blockquote {
+  border-left: 2px solid rgba(99, 102, 241, 0.4);
+  margin: 6px 0;
+  padding-left: 10px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* Error state */
+.chqa-answer-error {
+  color: #f87171;
+  font-size: var(--text-xs, 0.75rem);
+  font-style: italic;
+}
+
+/* ── Streaming indicator ──────────────────────────────────────────────────── */
+
+.chqa-thinking-dots {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 3px 0;
+}
+
+.chqa-thinking-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(99, 102, 241, 0.65);
+  animation: chqa-dot-pulse 1.4s ease-in-out infinite;
+}
+
+.chqa-thinking-dots span:nth-child(2) { animation-delay: 0.22s; }
+.chqa-thinking-dots span:nth-child(3) { animation-delay: 0.44s; }
+
+@keyframes chqa-dot-pulse {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1.1); }
+}
+
+/* ── Header extras ───────────────────────────────────────────────────────── */
+
+.chqa-context-label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chqa-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chqa-clear-btn,
+.chqa-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.chqa-clear-btn {
+  width: 26px;
+  height: 26px;
+}
+
+.chqa-close-btn {
+  width: 28px;
+  height: 28px;
+}
+
+.chqa-clear-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.28);
+  color: #f87171;
+}
+
+.chqa-close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--color-text-primary);
+}
+
+.chqa-clear-btn:focus-visible,
+.chqa-close-btn:focus-visible {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.64);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+}
+
+/* ── Footer / input area ─────────────────────────────────────────────────── */
+
+.chqa-footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.chqa-input-wrap {
+  display: flex;
+  align-items: flex-end;
+  gap: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  padding: 9px 9px 9px 13px;
+  transition: border-color 0.18s ease;
+}
+
+.chqa-input-wrap:focus-within {
+  border-color: rgba(99, 102, 241, 0.4);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.08);
+}
+
+.chqa-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-sm, 0.875rem);
+  line-height: 1.5;
+  min-height: 20px;
+  max-height: 120px;
+  overflow-y: auto;
+  caret-color: var(--color-primary-light, #818cf8);
+}
+
+.chqa-input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.8;
+}
+
+.chqa-input::-webkit-scrollbar { width: 2px; }
+.chqa-input::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 2px;
+}
+
+.chqa-input-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.chqa-send-btn,
+.chqa-stop-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease, opacity 0.16s ease;
+}
+
+.chqa-send-btn {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.9), rgba(79, 70, 229, 0.8));
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.28);
+}
+
+.chqa-send-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 1), rgba(79, 70, 229, 0.95));
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.38);
+  transform: translateY(-1px);
+}
+
+.chqa-send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.chqa-stop-btn {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  color: #f87171;
+}
+
+.chqa-stop-btn:hover {
+  background: rgba(239, 68, 68, 0.22);
+  border-color: rgba(239, 68, 68, 0.42);
+}
+
+.chqa-send-btn:focus-visible,
+.chqa-stop-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.24);
+}
+
+.chqa-disclaimer {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-align: center;
+  opacity: 0.55;
+}
+
+/* ── Utility ─────────────────────────────────────────────────────────────── */
+
+.chqa-hidden {
+  display: none !important;
+}
+
+/* ── Light theme ─────────────────────────────────────────────────────────── */
+
+[data-theme="light"] .chqa-question {
+  background:
+    radial-gradient(circle at 20% 30%, rgba(99, 102, 241, 0.1), transparent 60%),
+    linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(99, 102, 241, 0.04));
+  border-color: rgba(99, 102, 241, 0.2);
+  color: #1e293b;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.06);
+}
+
+[data-theme="light"] .chqa-answer {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(0, 0, 0, 0.07);
+  color: #374151;
+}
+
+[data-theme="light"] .chqa-answer-body code {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .chqa-answer-body pre {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.07);
+}
+
+[data-theme="light"] .chqa-answer-body strong {
+  color: #1e293b;
+}
+
+[data-theme="light"] .chqa-suggestion-btn {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.07);
+  color: #374151;
+}
+
+[data-theme="light"] .chqa-suggestion-btn:hover {
+  background: rgba(99, 102, 241, 0.07);
+  border-color: rgba(99, 102, 241, 0.2);
+  color: #1e293b;
+}
+
+[data-theme="light"] .chqa-input-wrap {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .chqa-input {
+  color: #1e293b;
+}
+
+[data-theme="light"] .chqa-context-label {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #6b7280;
+}
+
+[data-theme="light"] .chqa-clear-btn,
+[data-theme="light"] .chqa-close-btn {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #6b7280;
+}
+
+[data-theme="light"] .chqa-close-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #1e293b;
+}
+
+[data-theme="light"] .chqa-empty-icon {
+  background:
+    radial-gradient(circle at 40% 35%, rgba(99, 102, 241, 0.12), transparent 60%),
+    rgba(0, 0, 0, 0.03);
+  border-color: rgba(99, 102, 241, 0.15);
+}
+
+[data-theme="light"] .chqa-footer {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .chqa-thinking-dots span {
+    animation: none !important;
+    opacity: 0.6;
+  }
+
+  .chqa-send-btn:hover:not(:disabled) {
+    transform: none !important;
+  }
+}

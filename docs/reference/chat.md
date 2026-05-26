@@ -271,6 +271,41 @@ Message timestamps follow the shared workspace date-format setting:
 
 Enter-to-send is stored in shared settings. When disabled, `Enter` inserts a newline and `Ctrl+Enter` sends.
 
+## History Q&A
+
+The History Q&A panel lets you ask natural language questions about an active conversation without disturbing the live chat context.
+
+### Opening the Panel
+
+Click the **History** button (clock icon) in the chat header, to the left of the Focus button. The panel slides in from the right edge of the screen. Click the button again, or the × in the panel header, to close it.
+
+### How It Works
+
+When you submit a question, the panel builds a read-only transcript of the current tab's message history — including any compacted memory blocks — and sends it as context to the connected model in a separate, ephemeral API call. The answer streams back in real time and is displayed in the panel's Q&A thread. The live chat conversation and its context are never modified.
+
+For very long conversations that exceed the transcript budget, the panel preserves the first 25 % (setup, persona, initial context) and the last 75 % (recent events), inserting a placeholder where the middle was omitted.
+
+### Q&A Thread
+
+- Each question appears as an indigo-tinted bubble; answers render below it with full Markdown support.
+- The thread is per-tab and per-session — it resets on page reload and is never persisted.
+- Switching tabs while the panel is open resets the visible thread to that tab's history; the previous tab's thread is preserved in memory for the duration of the session.
+- The **trash** icon in the panel header clears the current tab's thread.
+
+### Stopping a Response
+
+Click the red **stop** button that appears in the input area while a response is streaming to abort generation. Any partial answer that arrived before the stop is kept in the thread.
+
+### Suggested Questions
+
+When the thread is empty, four suggested questions appear as chip buttons. Clicking one fills the input and immediately sends it. Suggestions are generic starters; any free-form question works.
+
+### Limitations
+
+- Answers reflect only what is in the conversation transcript. The panel does not have access to context notes, persona settings, or any information outside the message history.
+- The panel shares the same connected model as the main chat. If no model is running, questions will fail.
+- Thread state is not persisted and is lost on page reload.
+
 ## Guided Generation
 
 Guided-generation features shape the next assistant reply without forcing you to rewrite the base persona or model settings for the whole tab.

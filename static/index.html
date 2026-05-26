@@ -22,6 +22,7 @@
     <link rel="stylesheet" href="/css/modal-premium.css">
     <link rel="stylesheet" href="/css/chat.css">
     <link rel="stylesheet" href="/css/chat-guided-generation.css">
+    <link rel="stylesheet" href="/css/chat-history-qa.css">
     <link rel="stylesheet" href="/css/auth.css">
     <link rel="stylesheet" href="/css/setup-view.css">
     <link rel="stylesheet" href="/css/settings-modal.css">
@@ -797,11 +798,17 @@
                             <button id="chat-file-import-item">Import conversation</button>
                         </div>
                     </div>
-                    <button class="chat-header-btn" id="chat-persona-btn" title="Personas & Templates">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="8" r="7"/><path d="M2 21h20M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/>
+                    <button id="chat-history-qa-btn"
+                            class="chat-header-btn"
+                            type="button"
+                            title="History Q&amp;A — ask questions about this conversation"
+                            aria-pressed="false"
+                            aria-label="Toggle History Q&amp;A panel">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <circle cx="12" cy="12" r="10"/>
+                            <polyline points="12 6 12 12 16 14"/>
                         </svg>
-                        <span class="chat-header-label">Persona</span>
+                        <span class="chat-header-label">History</span>
                     </button>
                     <button id="chat-focus-mode-btn"
                             class="chat-header-btn"
@@ -814,19 +821,6 @@
                         </svg>
                         <span class="chat-header-label">Focus</span>
                     </button>
-                    <div id="chat-persona-menu" class="chat-persona-menu hidden">
-                        <div class="chat-persona-menu-header">
-                            <span>Active: <span id="chat-persona-menu-name">None</span></span>
-                            <button class="chat-persona-menu-edit-btn" id="chat-persona-edit-prompt" title="Manage Templates">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                                </svg>
-                            </button>
-                        </div>
-                        <div class="chat-persona-menu-list" id="chat-persona-menu-list">
-                            <div class="chat-persona-menu-loading">Loading personas...</div>
-                        </div>
-                    </div>
                 </div>
             </div>
 
@@ -3636,6 +3630,70 @@
 </div>
 
     <script type="module" src="/js/bootstrap.js?v={{ VERSION }}"></script>
+<!-- History Q&A Panel -->
+<div id="chat-history-qa-panel" class="slide-panel" aria-label="History Q&amp;A" role="complementary">
+    <div class="slide-panel-header">
+        <div class="slide-panel-title-group">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color:var(--color-primary-light,#818cf8);flex-shrink:0;">
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <h3>History Q&amp;A</h3>
+            <span id="chqa-context-label" class="chqa-context-label"></span>
+        </div>
+        <div class="chqa-header-actions">
+            <button type="button" id="chqa-clear-btn" class="chqa-clear-btn" title="Clear this Q&amp;A thread" aria-label="Clear thread">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                </svg>
+            </button>
+            <button type="button" id="chqa-close-btn" class="chqa-close-btn" aria-label="Close History Q&amp;A">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+        </div>
+    </div>
+    <div class="chqa-thread" id="chqa-thread" role="log" aria-live="polite" aria-label="Q&amp;A thread">
+        <div class="chqa-empty" id="chqa-empty">
+            <div class="chqa-empty-icon" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                </svg>
+            </div>
+            <p class="chqa-empty-title">Ask about your chat history</p>
+            <p class="chqa-empty-desc">Ask any question about what happened in this conversation — characters, events, decisions, or plot details.</p>
+            <div class="chqa-suggestions" id="chqa-suggestions" aria-label="Suggested questions"></div>
+        </div>
+    </div>
+    <div class="chqa-footer">
+        <div class="chqa-input-wrap">
+            <textarea
+                id="chqa-input"
+                class="chqa-input"
+                placeholder="Ask about the conversation…"
+                rows="1"
+                aria-label="History question input"
+                autocomplete="off"
+                autocorrect="off"
+                spellcheck="true"
+            ></textarea>
+            <div class="chqa-input-actions">
+                <button type="button" id="chqa-stop-btn" class="chqa-stop-btn chqa-hidden" aria-label="Stop generating">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+                        <rect x="4" y="4" width="16" height="16" rx="2"/>
+                    </svg>
+                </button>
+                <button type="button" id="chqa-send-btn" class="chqa-send-btn" aria-label="Send question">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <p class="chqa-disclaimer">Answers draw only from this conversation's history</p>
+    </div>
+</div>
+
 <!-- Release Notes Panel -->
 <div id="release-notes-overlay" class="modal-overlay" style="z-index:1399;"></div>
 <div id="release-notes-panel" class="slide-panel">
