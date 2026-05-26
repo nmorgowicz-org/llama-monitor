@@ -3356,9 +3356,14 @@ Start-Sleep -Seconds 2\""
         // Build HTTPS/HTTP clients once and reuse them across all 20 attempts.
         // Use a 1-second per-request timeout so 20 attempts fit within the
         // 30-second outer timeout even on slow or firewalled networks.
+        //
+        // Wait a few seconds before the first poll: the scheduled-task startup
+        // on Windows typically takes 3–5 s, so an immediate check produces
+        // several noisy "error sending request" lines before the agent is ready.
         let health_https = build_agent_https_client(Duration::from_secs(1));
         let health_http = build_plain_http_client(Duration::from_secs(1));
         let health_reachable = tokio::time::timeout(Duration::from_secs(30), async {
+            tokio::time::sleep(Duration::from_secs(3)).await;
             for i in 1..=20 {
                 eprintln!("[agent] Health check attempt {}/20...", i);
                 let reached = 'check: {

@@ -227,6 +227,18 @@
   display: inline-flex;
 }
 
+/* Transparent bridge keeps :hover active while the cursor crosses the gap
+   between the pill and the capability popover below it. */
+.endpoint-status-wrap::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 12px;
+  pointer-events: auto;
+}
+
 .endpoint-status-wrap .endpoint-status {
   margin-left: 0;
   cursor: help;
@@ -943,6 +955,7 @@ body.sidebar-collapsed .content-area {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .page.active {

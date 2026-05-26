@@ -124,6 +124,9 @@ pub struct TabMeta {
     pub notes_count: i64,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Timestamp of the most-recent message in this tab; None if the tab has no messages.
+    #[serde(default)]
+    pub last_message_at: Option<i64>,
     #[serde(default)]
     pub visibility: String,
     #[serde(default)]
@@ -358,7 +361,8 @@ impl ChatStorage {
                     t.total_input_tokens, t.total_output_tokens,
                     COUNT(m.id) as message_count,
                     COALESCE(json_array_length(t.context_notes), 0) as notes_count,
-                    t.created_at, t.updated_at, t.visibility, t.composer_draft
+                    t.created_at, t.updated_at, t.visibility, t.composer_draft,
+                    MAX(m.timestamp_ms) as last_message_at
              FROM tabs t
              LEFT JOIN messages m ON m.tab_id = t.id AND m.compaction_marker = 0
              {}
@@ -385,6 +389,7 @@ impl ChatStorage {
                 updated_at: row.get(12)?,
                 visibility: row.get(13)?,
                 composer_draft: row.get(14)?,
+                last_message_at: row.get(15)?,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
@@ -631,6 +636,7 @@ impl ChatStorage {
             notes_count,
             created_at: tab.created_at,
             updated_at: tab.updated_at,
+            last_message_at: None,
             visibility: tab.visibility,
             composer_draft: tab.composer_draft,
         })

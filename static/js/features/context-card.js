@@ -4,7 +4,7 @@
 import { chat } from '../core/app-state.js';
 import { escapeHtml, formatMetricNumber } from '../core/format.js';
 import { setCardState, setChipState, setEmptyState } from './dashboard-render.js';
-import { scheduleChatPersist, switchChatTab } from './chat-state.js';
+import { switchChatTab } from './chat-state.js';
 import { showToast, showToastWithActions } from './toast.js';
 import { compactChatTab } from './chat-params.js';
 
@@ -72,17 +72,14 @@ function deriveCtxPctFromMessages(tab, capacity) {
 // Backfill last_ctx_pct for tabs that don't have it persisted yet.
 // Called when llama metrics arrive with a known capacity.
 function backfillCtxPct(capacity) {
-    let dirty = false;
     for (const tab of chat.tabs) {
         if (!tab.last_ctx_pct) {
             const derived = deriveCtxPctFromMessages(tab, capacity);
             if (derived != null && derived > 0) {
                 tab.last_ctx_pct = derived;
-                dirty = true;
             }
         }
     }
-    if (dirty) scheduleChatPersist();
 }
 
 let _lastSeenCapacity = 0;
