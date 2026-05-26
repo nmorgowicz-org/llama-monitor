@@ -61,7 +61,7 @@ rustls-pemfile = "2"
     gtk = "0.18"
 
 [dev-dependencies]
-warp = { version = "0.4", features = ["test"] }
+warp = { version = "=0.4.3", features = ["test"] }
 
 [[test]]
 name = "capabilities"
