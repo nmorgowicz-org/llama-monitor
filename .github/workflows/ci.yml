@@ -4,6 +4,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, ready_for_review]
   workflow_dispatch:
+    # Allows manual triggering from the Actions tab
 
 permissions:
   contents: read
