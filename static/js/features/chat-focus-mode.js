@@ -1,5 +1,4 @@
 import { showToast } from './toast.js';
-import { pinComfortableDensity, unpinDensity } from './chat-width-observer.js';
 
 const STORAGE_KEY = 'llama-monitor-chat-focus-mode';
 let focusModeActive = false;
@@ -25,7 +24,6 @@ export function enterFocusMode(silent = false) {
     document.body.classList.add('chat-focus-mode');
     updateFocusModeButton();
     localStorage.setItem(STORAGE_KEY, '1');
-    pinComfortableDensity();
 
     if (!silent && !toastShown) {
         toastShown = true;
@@ -38,7 +36,6 @@ export function exitFocusMode() {
     document.body.classList.remove('chat-focus-mode');
     updateFocusModeButton();
     localStorage.removeItem(STORAGE_KEY);
-    unpinDensity();
 }
 
 export function toggleFocusMode() {
