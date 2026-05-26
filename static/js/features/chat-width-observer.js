@@ -4,7 +4,7 @@
 //   shell-width-tight     — all labels hidden, padding/inputs reduced
 //   shell-width-very-tight — maximum compression
 // Integration: call initChatWidthObserver() from bootstrap.js after DOM ready.
-// Focus mode integration: call pinComfortableDensity() / unpinDensity() from chat-focus-mode.js.
+// Test helper: call pinComfortableDensity() / unpinDensity() to lock density during Playwright tests.
 
 const THRESHOLDS = {
     veryTight: 520,
