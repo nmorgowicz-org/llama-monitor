@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.4](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.22.3...v0.22.4) (2026-05-26)
+
+
+### Bug Fixes
+
+* **chat:** restore density-class updates in focus mode ([c48922b](https://github.com/nmorgowicz-org/llama-monitor/commit/c48922bd9e69eb52b7472e58ffc849267952d766))
+
 ## [0.22.3](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.22.2...v0.22.3) (2026-05-26)
 
 
