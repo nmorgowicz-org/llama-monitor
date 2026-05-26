@@ -201,7 +201,8 @@ mod tests {
 
     #[test]
     fn test_scan_models_dir() {
-        let dir = std::env::temp_dir().join("llama-monitor-model-test");
+        let dir =
+            std::env::temp_dir().join(format!("llama-monitor-model-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
 
         // Create test files

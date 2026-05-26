@@ -354,7 +354,9 @@ mod tests {
 
     #[test]
     fn test_load_save_roundtrip() {
-        let dir = std::env::temp_dir().join("llama-monitor-test");
+        // Use PID in the directory name to avoid races when multiple cargo
+        // test processes run simultaneously (e.g., concurrent CI builds).
+        let dir = std::env::temp_dir().join(format!("llama-monitor-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("test-presets.json");
 
@@ -371,16 +373,21 @@ mod tests {
 
     #[test]
     fn test_load_missing_file_returns_defaults() {
-        let path = std::path::PathBuf::from("/tmp/nonexistent-llama-presets-12345.json");
+        let path = std::env::temp_dir().join(format!(
+            "llama-monitor-missing-presets-{}.json",
+            std::process::id()
+        ));
         let loaded = load_presets(&path);
         assert_eq!(loaded.len(), 4);
-        // Clean up the file that load_presets creates
         std::fs::remove_file(&path).ok();
     }
 
     #[test]
     fn test_load_corrupt_file_returns_defaults() {
-        let path = std::env::temp_dir().join("corrupt-presets.json");
+        let path = std::env::temp_dir().join(format!(
+            "llama-monitor-corrupt-presets-{}.json",
+            std::process::id()
+        ));
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(b"not json").unwrap();
         let loaded = load_presets(&path);

@@ -922,11 +922,19 @@ Query params:
 - `q`: required search string
 - `limit`: optional page size, default `20`, max `100`
 - `offset`: optional result offset, default `0`
+- `visibility`: optional comma-separated visibility filter (e.g., `public,private`)
+- `tab_id`: optional tab ID — when present, restricts results to that single conversation
 
-Example:
+Example (app-wide search):
 
 ```text
 /api/chat/search?q=slow%20endpoint&limit=20&offset=0
+```
+
+Example (scoped to one tab):
+
+```text
+/api/chat/search?q=dragon&tab_id=tab_1746000000000
 ```
 
 Response:

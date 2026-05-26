@@ -442,9 +442,22 @@ npx playwright install chromium
 npm test
 ```
 
+**IMPORTANT: Always run with CI-equivalent flags to catch real failures and match CI behavior exactly:**
+
+```bash
+# CI-equivalent run (sequential, 2 retries) — use this before marking a PR ready
+npx playwright test --workers=1 --retries=2
+```
+
+Running without `--workers=1` uses multiple workers in parallel, which can cause false
+failures from timing races. A test that passes with `--workers=1` but fails with many
+workers in parallel is a timing issue, not a functional bug. A test that fails with
+`--workers=1 --retries=2` is a real failure — fix it before pushing.
+
 Useful variants:
 
-- `npm test` — run all tests (headless)
+- `npm test` — run all tests headless (default workers, no retries)
+- `npx playwright test --workers=1 --retries=2` — CI-equivalent sequential run (**preferred**)
 - `npm run test:headed` — run with browser visible
 - `npm run test:debug` — run in Playwright inspector
 - `npm run test:ssh` — run SSH integration tests (requires LLAMA_MONITOR_SSH_TARGET)
@@ -452,7 +465,7 @@ Useful variants:
 
 Notes:
 
-- Tests use a fresh temporary config dir via `run-server.sh`; they do not depend on your local `~/.config/llama-monitor/`.
+- Tests use a fresh temporary config dir via `run-server.mjs`; they do not depend on your local `~/.config/llama-monitor/`.
 - The UI URL defaults to `http://127.0.0.1:7778`. You can override with `LLAMA_MONITOR_UI_URL`.
 
 ### When to Run
@@ -494,9 +507,18 @@ Some tests exhibit timing issues when run with multiple workers in parallel. CI 
 - `retries: 2` — failed tests retry up to 2 times
 
 **Debugging flaky failures:**
-1. Run the test in isolation: `npm test -- --grep "test name"`
-2. If it passes in isolation, the failure was likely a parallel timing issue
-3. Do not mark PR as ready-to-test if isolation fails — that indicates a real bug
+1. Run with CI-equivalent flags first: `npx playwright test --workers=1 --retries=2`
+2. If that passes, the local failure was a parallel timing race — not a real bug
+3. Run the test in isolation to confirm: `npx playwright test --workers=1 --grep "test name"`
+4. Do not mark PR as ready-to-test if `--workers=1 --retries=2` fails — that is a real bug
+
+**Cargo test flakiness from concurrent processes:**
+Rust unit tests that write to shared temp paths (e.g., `std::env::temp_dir()`) can fail
+with "No such file or directory" when two separate `cargo test` processes run at the same
+time (e.g., you have a background build running while launching another test run). Always:
+- Ensure no other `cargo test` or `cargo build` processes are running before `cargo test`
+- Use PID-unique temp paths in tests: `temp_dir().join(format!("name-{}", std::process::id()))`
+- Never use a shared, collision-prone path like `temp_dir().join("llama-monitor-test")`
 
 ### Maintenance Rules
 

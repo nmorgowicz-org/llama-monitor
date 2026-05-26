@@ -748,12 +748,17 @@ impl ChatStorage {
             .replace("&lt;/mark&gt;", "</mark>")
     }
 
+    /// Search messages using the FTS index.
+    ///
+    /// `tab_id`: when `Some`, restricts results to that tab only; when
+    /// `None`, searches across all tabs (subject to `visibilities`).
     pub fn search(
         &self,
         query: &str,
         limit: usize,
         offset: usize,
         visibilities: &[TabVisibility],
+        tab_id: Option<&str>,
     ) -> Result<SearchResultsPage> {
         let normalized_query = normalize_fts_query(query);
         if normalized_query.is_empty() {
@@ -769,11 +774,33 @@ impl ChatStorage {
         let guard = self.conn.lock().unwrap();
         let conn = guard.as_ref().expect("db open");
 
-        let vis_filter = if visibilities.is_empty() {
-            String::new()
-        } else {
+        // Build optional WHERE clauses.  Track count so LIMIT/OFFSET positions
+        // are computed correctly.
+        let mut extra_filters = String::new();
+        if !visibilities.is_empty() {
             let placeholders: Vec<_> = visibilities.iter().map(|_| "?").collect();
-            format!("AND t.visibility IN ({})", placeholders.join(", "))
+            extra_filters.push_str(&format!(
+                " AND t.visibility IN ({})",
+                placeholders.join(", ")
+            ));
+        }
+        if tab_id.is_some() {
+            extra_filters.push_str(" AND m.tab_id = ?");
+        }
+        // ?1 = query, then visibilities, then optional tab_id
+        let extra_param_count = visibilities.len() + usize::from(tab_id.is_some());
+
+        // Helper: build the shared base parameter list (query + vis + tab_id).
+        let base_params = || -> Vec<Box<dyn rusqlite::ToSql>> {
+            let mut p: Vec<Box<dyn rusqlite::ToSql>> =
+                vec![Box::new(normalized_query.clone()) as Box<dyn rusqlite::ToSql>];
+            for v in visibilities {
+                p.push(Box::new(v.to_string()));
+            }
+            if let Some(tid) = tab_id {
+                p.push(Box::new(tid.to_string()));
+            }
+            p
         };
 
         let total_sql = format!(
@@ -784,20 +811,11 @@ impl ChatStorage {
              WHERE messages_fts MATCH ?1
                AND m.compaction_marker = 0
                {}",
-            vis_filter
+            extra_filters
         );
-        let total: i64 = conn.query_row(
-            &total_sql,
-            params_from_iter(
-                std::iter::once(Box::new(normalized_query.as_str()) as Box<dyn rusqlite::ToSql>)
-                    .chain(
-                        visibilities
-                            .iter()
-                            .map(|v| Box::new(v.to_string()) as Box<dyn rusqlite::ToSql>),
-                    ),
-            ),
-            |row| row.get(0),
-        )?;
+        let total: i64 = conn.query_row(&total_sql, params_from_iter(base_params()), |row| {
+            row.get(0)
+        })?;
 
         let results_sql = format!(
             "SELECT t.id, t.name, m.id, m.role,
@@ -811,16 +829,12 @@ impl ChatStorage {
                {}
              ORDER BY rank
              LIMIT ?{} OFFSET ?{}",
-            vis_filter,
-            visibilities.len() + 2,
-            visibilities.len() + 3,
+            extra_filters,
+            extra_param_count + 2,
+            extra_param_count + 3,
         );
         let mut stmt = conn.prepare(&results_sql)?;
-        let mut result_params: Vec<Box<dyn rusqlite::ToSql>> =
-            vec![Box::new(normalized_query.as_str())];
-        for v in visibilities {
-            result_params.push(Box::new(v.to_string()));
-        }
+        let mut result_params = base_params();
         result_params.push(Box::new(limit as i64));
         result_params.push(Box::new(offset as i64));
 
@@ -1405,7 +1419,9 @@ mod tests {
             ))
             .expect("append message");
 
-        let results = store.search("rai", 10, 0, &[]).expect("prefix search");
+        let results = store
+            .search("rai", 10, 0, &[], None)
+            .expect("prefix search");
         assert_eq!(results.total, 1);
         assert_eq!(results.results.len(), 1);
         assert_eq!(results.results[0].tab_name, "Noir Scene");
@@ -1429,16 +1445,59 @@ mod tests {
             .expect("append message");
 
         let hyphenated = store
-            .search("gpu-43c", 10, 0, &[])
+            .search("gpu-43c", 10, 0, &[], None)
             .expect("hyphenated search");
         assert_eq!(hyphenated.total, 1);
         assert_eq!(hyphenated.results.len(), 1);
 
         let punctuated = store
-            .search("slow HTTP endpoint.", 10, 0, &[])
+            .search("slow HTTP endpoint.", 10, 0, &[], None)
             .expect("punctuated search");
         assert_eq!(punctuated.total, 1);
         assert_eq!(punctuated.results.len(), 1);
         assert_eq!(punctuated.results[0].tab_name, "Debug Session");
+    }
+
+    #[test]
+    fn search_scoped_to_tab_excludes_other_tabs() {
+        let dir = tempdir().expect("temp dir");
+        let db_path = dir.path().join("chat.db");
+        let store = ChatStorage::open(&db_path).expect("open storage");
+
+        let tab_a = make_tab("tab-a", "Conversation A");
+        let tab_b = make_tab("tab-b", "Conversation B");
+        store.create_tab(&tab_a).expect("create tab a");
+        store.create_tab(&tab_b).expect("create tab b");
+
+        store
+            .append_message(&make_message("tab-a", "user", "The dragon breathed fire."))
+            .expect("msg a");
+        store
+            .append_message(&make_message("tab-b", "user", "The dragon slept quietly."))
+            .expect("msg b");
+
+        // Unscoped search returns both tabs.
+        let all = store.search("dragon", 10, 0, &[], None).expect("unscoped");
+        assert_eq!(all.total, 2);
+
+        // Scoped to tab-a returns only tab-a result.
+        let scoped = store
+            .search("dragon", 10, 0, &[], Some("tab-a"))
+            .expect("scoped");
+        assert_eq!(scoped.total, 1);
+        assert_eq!(scoped.results[0].tab_id, "tab-a");
+
+        // Scoped to tab-b returns only tab-b result.
+        let scoped_b = store
+            .search("dragon", 10, 0, &[], Some("tab-b"))
+            .expect("scoped b");
+        assert_eq!(scoped_b.total, 1);
+        assert_eq!(scoped_b.results[0].tab_id, "tab-b");
+
+        // Scoped to a nonexistent tab returns nothing.
+        let empty = store
+            .search("dragon", 10, 0, &[], Some("tab-x"))
+            .expect("empty scope");
+        assert_eq!(empty.total, 0);
     }
 }
