@@ -9,6 +9,7 @@ import { activeChatTab, scheduleChatPersist } from './chat-state.js';
 import { renderMd, renderMdStreaming, renderChatMessages } from './chat-render.js';
 import { showToast } from './toast.js';
 import { escapeHtml } from '../core/format.js';
+import { lastLlamaMetrics } from '../core/app-state.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -37,11 +38,39 @@ const INSERT_CONFIRM_ID      = 'chqa-insert-confirm';
 const INSERT_CANCEL_ID       = 'chqa-insert-cancel';
 const INSERT_WRITE_BTN_ID    = 'chqa-write-scene-btn';
 
-const MAX_TRANSCRIPT_CHARS  = 120_000;
+// Fixed limits
 const MAX_QA_HISTORY_TURNS  = 6;   // sliding window — older turns pruned first
-const MAX_SEARCH_MATCHES    = 6;
-const MAX_MATCH_CHARS       = 420; // per matched message in search block
 const KEYWORD_TIMEOUT_MS    = 3_000;
+
+// Dynamic limits — scale with the live context window.
+// Called fresh on every question so the values track model changes mid-session.
+function getContextLimits() {
+    const capacityTokens =
+        lastLlamaMetrics?.context_capacity_tokens ||
+        lastLlamaMetrics?.kv_cache_max ||
+        0;
+
+    if (capacityTokens <= 0) {
+        // No live metrics yet — use conservative defaults.
+        return { maxTranscriptChars: 120_000, maxSearchMatches: 6, maxMatchChars: 420 };
+    }
+
+    // Transcript: budget ~75 % of context for the transcript itself
+    // (leaving 25 % for the Q&A exchange overhead, system prompt, and answer).
+    // chars ≈ tokens × 4 for typical conversation prose.
+    const transcriptTokenBudget = Math.floor(capacityTokens * 0.75);
+    const maxTranscriptChars    = Math.min(transcriptTokenBudget * 4, 800_000);
+
+    // Search matches: more context → more citations worth surfacing.
+    // Scale from 6 at ≤32k up to 20 at ≥200k, clamped.
+    const maxSearchMatches = Math.min(20, Math.max(6, Math.floor(capacityTokens / 10_000)));
+
+    // Per-match snippet: larger context → we can afford longer excerpts.
+    // Scale from 420 at ≤32k up to 1200 at ≥200k.
+    const maxMatchChars = Math.min(1_200, Math.max(420, Math.floor(capacityTokens / 200)));
+
+    return { maxTranscriptChars, maxSearchMatches, maxMatchChars };
+}
 
 const SYSTEM_PROMPT =
     'You are a precise conversation analyst. You have been given the full transcript of an ongoing chat.\n\n' +
@@ -510,20 +539,23 @@ async function submitQuestion(tab, question, injectionText) {
     const thread        = getThread(tab.id);
     const isFirstTurn   = thread.apiHistory.length === 0;
 
+    // Snapshot context limits once per question so all steps use consistent values.
+    const limits = getContextLimits();
+
     const entry = addEntry(tab.id, { question, answer: '', streaming: true, error: false });
     setStreamingUI(true);
 
     // ── Step 1: AI keyword extraction + in-memory search ─────────────────────
     setStatus('Searching history…');
     const keywords    = await extractKeywords(question);
-    const searchBlock = keywords ? searchMessages(tab.messages, keywords) : null;
+    const searchBlock = keywords ? searchMessages(tab.messages, keywords, limits) : null;
     setStatus(null);
 
     // ── Step 2: Build the API messages array ──────────────────────────────────
     let messages;
     if (isFirstTurn) {
         // First question: bundle transcript into the opening user message
-        let transcript = buildHistoryTranscript(tab);
+        let transcript = buildHistoryTranscript(tab, limits);
 
         if (searchBlock) {
             transcript = `=== RELEVANT MESSAGES FOUND BY SEARCH ===\n${searchBlock}\n\n=== FULL TRANSCRIPT ===\n${transcript}`;
@@ -726,7 +758,8 @@ function extractKeywordsFallback(question) {
 
 // ── In-memory message search ──────────────────────────────────────────────────
 
-function searchMessages(messages, keywordsStr) {
+function searchMessages(messages, keywordsStr, limits) {
+    const { maxSearchMatches, maxMatchChars } = limits;
     const keywords = keywordsStr
         .split(',')
         .map(k => k.trim().toLowerCase())
@@ -746,7 +779,7 @@ function searchMessages(messages, keywordsStr) {
         })
         .filter(({ hits }) => hits > 0)
         .sort((a, b) => b.hits - a.hits)
-        .slice(0, MAX_SEARCH_MATCHES)
+        .slice(0, maxSearchMatches)
         .map(({ m }) => m);
 
     if (!scored.length) return null;
@@ -754,8 +787,8 @@ function searchMessages(messages, keywordsStr) {
     return scored
         .map(m => {
             const label   = m.role === 'user' ? 'User' : 'Assistant';
-            const content = m.content.length > MAX_MATCH_CHARS
-                ? m.content.slice(0, MAX_MATCH_CHARS) + '…'
+            const content = m.content.length > maxMatchChars
+                ? m.content.slice(0, maxMatchChars) + '…'
                 : m.content;
             return `${label}: ${content}`;
         })
@@ -764,7 +797,8 @@ function searchMessages(messages, keywordsStr) {
 
 // ── Transcript builder ────────────────────────────────────────────────────────
 
-function buildHistoryTranscript(tab) {
+function buildHistoryTranscript(tab, limits) {
+    const { maxTranscriptChars } = limits;
     const compactionMarkers = (tab.messages ?? []).filter(m => m.compaction_marker && m.content?.trim());
     const conversational    = (tab.messages ?? []).filter(m => !m.compaction_marker && m.role !== 'system');
 
@@ -785,9 +819,9 @@ function buildHistoryTranscript(tab) {
 
     let transcript = parts.join('\n\n');
 
-    if (transcript.length > MAX_TRANSCRIPT_CHARS) {
-        const headChars = Math.floor(MAX_TRANSCRIPT_CHARS * 0.25);
-        const tailChars = MAX_TRANSCRIPT_CHARS - headChars;
+    if (transcript.length > maxTranscriptChars) {
+        const headChars = Math.floor(maxTranscriptChars * 0.25);
+        const tailChars = maxTranscriptChars - headChars;
         transcript =
             transcript.slice(0, headChars) +
             '\n\n[... middle of conversation omitted for length ...]\n\n' +
