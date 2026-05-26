@@ -3666,7 +3666,44 @@
         </div>
     </div>
     <div class="chqa-footer">
-        <!-- Context injection: expandable panel above the input -->
+        <!-- History insertion editor: appears when user clicks "Insert into history" or "Write scene" -->
+        <div id="chqa-insert-editor" class="chqa-insert-editor chqa-hidden" aria-hidden="true" role="region" aria-label="Insert scene into conversation history">
+            <div class="chqa-insert-editor-header">
+                <span class="chqa-insert-editor-title">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+                    Insert into history
+                </span>
+                <div class="chqa-insert-role-toggle" role="group" aria-label="Role for inserted message">
+                    <label class="chqa-insert-role-label">
+                        <input type="radio" id="chqa-insert-role-user" name="chqa-insert-role" value="user" class="chqa-insert-role-radio">
+                        <span>User</span>
+                    </label>
+                    <label class="chqa-insert-role-label">
+                        <input type="radio" id="chqa-insert-role-asst" name="chqa-insert-role" value="assistant" class="chqa-insert-role-radio" checked>
+                        <span>Assistant</span>
+                    </label>
+                </div>
+            </div>
+            <textarea
+                id="chqa-insert-textarea"
+                class="chqa-insert-textarea"
+                placeholder="Write or edit the scene to insert into the conversation history…"
+                rows="4"
+                aria-label="Scene content to insert"
+                spellcheck="true"
+            ></textarea>
+            <p class="chqa-insert-hint">Appended to the end of the conversation as a permanent message the AI will see going forward.</p>
+            <div class="chqa-insert-actions">
+                <button type="button" id="chqa-insert-cancel" class="chqa-insert-cancel-btn">Cancel</button>
+                <button type="button" id="chqa-insert-confirm" class="chqa-insert-confirm-btn">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+                    Insert into history
+                </button>
+            </div>
+        </div>
+
+        <!-- Utility row: context injection toggle + write-scene shortcut -->
+        <div class="chqa-utility-row">
         <div class="chqa-inject-wrap">
             <button type="button" id="chqa-inject-toggle" class="chqa-inject-toggle" aria-expanded="false" aria-controls="chqa-inject-panel">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
@@ -3687,6 +3724,11 @@
                 ></textarea>
                 <p class="chqa-inject-hint">Prepended to your next question only, then cleared automatically.</p>
             </div>
+        </div>
+        <button type="button" id="chqa-write-scene-btn" class="chqa-write-scene-btn" title="Compose a new scene to insert into the conversation history">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+            Write scene
+        </button>
         </div>
         <!-- Status bar: shown while keyword search or streaming is in progress -->
         <div id="chqa-status-bar" class="chqa-status-bar chqa-hidden" role="status" aria-live="polite">

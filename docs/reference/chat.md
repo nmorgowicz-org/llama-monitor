@@ -281,9 +281,19 @@ Click the **History** button (clock icon) in the chat header, to the left of the
 
 ### How It Works
 
-When you submit a question, the panel builds a read-only transcript of the current tab's message history — including any compacted memory blocks — and sends it as context to the connected model in a separate, ephemeral API call. The answer streams back in real time and is displayed in the panel's Q&A thread. The live chat conversation and its context are never modified.
+When you submit a question, the panel:
+
+1. Fires a lightweight keyword-extraction call to the model to identify search terms in your question.
+2. Scores every message in the conversation against those keywords and pulls the top matches as a focused citation block.
+3. Builds a full transcript of the message history — including compacted memory blocks — and combines it with the citation block and your question.
+4. Sends that bundle to the model in a separate, ephemeral API call that never affects the live conversation.
+5. Streams the answer back into the panel's Q&A thread.
 
 For very long conversations that exceed the transcript budget, the panel preserves the first 25 % (setup, persona, initial context) and the last 75 % (recent events), inserting a placeholder where the middle was omitted.
+
+### Multi-Turn Q&A
+
+The panel maintains a conversation thread across questions within a session. Follow-up questions like "What happened before that?" or "Who else was involved?" are answered in the context of your prior Q&A exchanges — you do not need to re-state the conversation each time. The thread carries up to 6 prior turns before older turns are pruned.
 
 ### Q&A Thread
 
@@ -300,11 +310,39 @@ Click the red **stop** button that appears in the input area while a response is
 
 When the thread is empty, four suggested questions appear as chip buttons. Clicking one fills the input and immediately sends it. Suggestions are generic starters; any free-form question works.
 
+### Add Context
+
+Click **+ Add context** (above the question input) to expand a text area where you can paste a passage from your notes, a previous session, or any text you want the model to draw from when answering the next question. The pasted text is prepended to that one question only, then automatically cleared. A dot badge on the button indicates pending context.
+
+Use "Add context" to anchor a question to a specific scene you remember but that may not be surfaced by the keyword search.
+
+### Inserting into Conversation History
+
+When the model's answer reveals that a piece of story information is genuinely missing from the conversation, you can add it directly:
+
+- **From a Q&A answer**: Click **↓ Insert into history** on any completed answer bubble. The text pre-fills an editor where you can revise it before confirming.
+- **From scratch**: Click **✎ Write scene** in the footer to open the same editor blank.
+
+The editor lets you:
+- Edit the text freely before inserting.
+- Choose the role: **User** (written from the user's perspective) or **Assistant** (narrator/AI perspective — the default).
+- Confirm with **Insert into history** or dismiss with **Cancel**.
+
+On confirm, the message is appended to the end of the conversation as a permanent turn. The main chat view updates immediately and the model will see the new content as part of its context in future exchanges. The insertion cannot be undone from the panel — use the main chat's message editing or deletion controls if you need to revise it afterward.
+
+**Typical workflow when content is missing:**
+
+1. Ask a question in the panel → model says "I don't have information about that."
+2. Click **✎ Write scene** and write the missing scene (or paste notes you have from outside the app).
+3. Choose role and confirm.
+4. Ask the same question again — the model now has that content as part of the conversation history.
+
 ### Limitations
 
-- Answers reflect only what is in the conversation transcript. The panel does not have access to context notes, persona settings, or any information outside the message history.
+- Answers draw from the conversation transcript and any context you add. The panel does not have access to context notes, persona settings, or information outside the message history.
 - The panel shares the same connected model as the main chat. If no model is running, questions will fail.
 - Thread state is not persisted and is lost on page reload.
+- Inserted messages are appended at the end of the conversation, not at a specific historical position. The model treats them as the most recent context, so write them as "what the AI now knows" rather than as time-stamped past events.
 
 ## Guided Generation
 

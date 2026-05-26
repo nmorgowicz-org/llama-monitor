@@ -5,8 +5,9 @@
 //
 // Thread state is ephemeral (per session, per tab) — never persisted.
 
-import { activeChatTab } from './chat-state.js';
-import { renderMd, renderMdStreaming } from './chat-render.js';
+import { activeChatTab, scheduleChatPersist } from './chat-state.js';
+import { renderMd, renderMdStreaming, renderChatMessages } from './chat-render.js';
+import { showToast } from './toast.js';
 import { escapeHtml } from '../core/format.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -27,6 +28,14 @@ const INJECT_TOGGLE_ID  = 'chqa-inject-toggle';
 const INJECT_PANEL_ID   = 'chqa-inject-panel';
 const INJECT_INPUT_ID   = 'chqa-inject-input';
 const INJECT_BADGE_ID   = 'chqa-inject-badge';
+
+const INSERT_EDITOR_ID       = 'chqa-insert-editor';
+const INSERT_TEXTAREA_ID     = 'chqa-insert-textarea';
+const INSERT_ROLE_USER_ID    = 'chqa-insert-role-user';
+const INSERT_ROLE_ASST_ID    = 'chqa-insert-role-asst';
+const INSERT_CONFIRM_ID      = 'chqa-insert-confirm';
+const INSERT_CANCEL_ID       = 'chqa-insert-cancel';
+const INSERT_WRITE_BTN_ID    = 'chqa-write-scene-btn';
 
 const MAX_TRANSCRIPT_CHARS  = 120_000;
 const MAX_QA_HISTORY_TURNS  = 6;   // sliding window — older turns pruned first
@@ -81,6 +90,17 @@ export function initChatHistoryQA() {
     document.getElementById(SEND_BTN_ID)?.addEventListener('click', handleSend);
     document.getElementById(STOP_BTN_ID)?.addEventListener('click', handleStop);
     document.getElementById(INJECT_TOGGLE_ID)?.addEventListener('click', toggleInjectionPanel);
+    document.getElementById(INSERT_WRITE_BTN_ID)?.addEventListener('click', () => openInsertEditor(''));
+    document.getElementById(INSERT_CONFIRM_ID)?.addEventListener('click', submitInsert);
+    document.getElementById(INSERT_CANCEL_ID)?.addEventListener('click', closeInsertEditor);
+
+    const insertTextarea = document.getElementById(INSERT_TEXTAREA_ID);
+    if (insertTextarea) {
+        insertTextarea.addEventListener('input', () => autoResize(insertTextarea));
+        insertTextarea.addEventListener('keydown', e => {
+            if (e.key === 'Escape') { e.preventDefault(); closeInsertEditor(); }
+        });
+    }
 
     const input = document.getElementById(INPUT_ID);
     if (input) {
@@ -216,9 +236,30 @@ function buildEntryEl(entry) {
     bodyEl.className = 'chqa-answer-body';
     setAnswerBodyContent(bodyEl, entry);
     aEl.appendChild(bodyEl);
-    div.appendChild(aEl);
 
+    if (!entry.streaming && !entry.error && entry.answer) {
+        aEl.appendChild(buildInsertActionBar(entry.answer));
+    }
+
+    div.appendChild(aEl);
     return div;
+}
+
+function buildInsertActionBar(answerText) {
+    const bar = document.createElement('div');
+    bar.className = 'chqa-answer-actions';
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chqa-insert-btn';
+    btn.title = 'Insert this into the conversation history';
+    btn.setAttribute('aria-label', 'Insert into conversation history');
+    btn.innerHTML =
+        '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>' +
+        '<span>Insert into history</span>';
+    btn.addEventListener('click', () => openInsertEditor(answerText));
+    bar.appendChild(btn);
+    return bar;
 }
 
 function setAnswerBodyContent(bodyEl, entry) {
@@ -250,6 +291,10 @@ function updateEntryDOM(entryId, answer, done, error) {
     } else if (done && answer) {
         // eslint-disable-next-line no-unsanitized/property -- local LLM output, rendered via marked+DOMPurify
         bodyEl.innerHTML = renderMd(answer);
+        // Add insert action bar once streaming is complete
+        if (!aEl.querySelector('.chqa-answer-actions')) {
+            aEl.appendChild(buildInsertActionBar(answer));
+        }
     } else if (answer) {
         // eslint-disable-next-line no-unsanitized/property -- local LLM output, rendered via marked+DOMPurify
         bodyEl.innerHTML = renderMdStreaming(answer);
@@ -324,6 +369,71 @@ function consumeInjection() {
     document.getElementById(INJECT_PANEL_ID)?.classList.add('chqa-hidden');
     document.getElementById(INJECT_TOGGLE_ID)?.setAttribute('aria-expanded', 'false');
     return text;
+}
+
+// ── History insertion editor ──────────────────────────────────────────────────
+
+function openInsertEditor(prefillText) {
+    const editor   = document.getElementById(INSERT_EDITOR_ID);
+    const textarea = document.getElementById(INSERT_TEXTAREA_ID);
+    const roleAsst = document.getElementById(INSERT_ROLE_ASST_ID);
+    if (!editor || !textarea) return;
+
+    textarea.value = prefillText ?? '';
+    if (roleAsst) roleAsst.checked = true;   // default: assistant
+    editor.classList.remove('chqa-hidden');
+    editor.setAttribute('aria-hidden', 'false');
+
+    // Give the textarea time to appear before focusing
+    requestAnimationFrame(() => {
+        autoResize(textarea);
+        textarea.focus();
+        textarea.setSelectionRange(0, 0);
+    });
+}
+
+function closeInsertEditor() {
+    const editor = document.getElementById(INSERT_EDITOR_ID);
+    if (!editor) return;
+    editor.classList.add('chqa-hidden');
+    editor.setAttribute('aria-hidden', 'true');
+    const textarea = document.getElementById(INSERT_TEXTAREA_ID);
+    if (textarea) textarea.value = '';
+}
+
+function submitInsert() {
+    const tab      = activeChatTab();
+    const textarea = document.getElementById(INSERT_TEXTAREA_ID);
+    const roleUser = document.getElementById(INSERT_ROLE_USER_ID);
+    if (!tab || !textarea) return;
+
+    const content = textarea.value.trim();
+    if (!content) {
+        showToast('Nothing to insert', 'error', 'Write the scene content first.');
+        return;
+    }
+
+    const role = roleUser?.checked ? 'user' : 'assistant';
+    const newMsg = {
+        role,
+        content,
+        timestamp_ms: Date.now(),
+        compaction_marker: false,
+        input_tokens: null,
+        output_tokens: null,
+    };
+
+    tab.messages = [...tab.messages, newMsg];
+    tab.updated_at = Date.now();
+    renderChatMessages();
+    scheduleChatPersist();
+
+    closeInsertEditor();
+    showToast(
+        'Inserted into history',
+        'success',
+        `Added as ${role === 'user' ? 'User' : 'Assistant'} turn at end of conversation.`,
+    );
 }
 
 // ── Status bar ────────────────────────────────────────────────────────────────
