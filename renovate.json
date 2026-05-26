@@ -1,3 +1,12 @@
 {
-  "extends": ["github>nmorgowicz-org/docker-compose-config//renovate"]
+  "extends": ["github>nmorgowicz-org/docker-compose-config//renovate"],
+  "ignorePaths": ["**/node_modules/**", "**/bower_components/**"],
+  "packageRules": [
+    {
+      "description": "Playwright updates require manual review - version bumps can break tests",
+      "matchPackageNames": ["@playwright/test", "playwright", "playwright-core"],
+      "automerge": false,
+      "labels": ["dependencies", "manual-review"]
+    }
+  ]
 }

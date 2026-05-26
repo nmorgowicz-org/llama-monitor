@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, ready_for_review]
+  workflow_dispatch:
+    # Allows manual triggering from the Actions tab
 
 permissions:
   contents: read
@@ -49,6 +51,7 @@ jobs:
 
   check:
     needs: paths-filter
+    timeout-minutes: 30
     if: >-
       always() &&
       github.event.pull_request.draft == false &&
@@ -112,6 +115,7 @@ jobs:
 
   lint:
     needs: paths-filter
+    timeout-minutes: 10
     if: >-
       always() &&
       !startsWith(github.event.pull_request.head.ref, 'release-please--') &&
@@ -136,6 +140,7 @@ jobs:
 
   ui:
     needs: [paths-filter, check]
+    timeout-minutes: 60
     if: >-
       always() &&
       needs.check.result != 'failure' &&
@@ -178,7 +183,15 @@ jobs:
         working-directory: tests/ui
         run: npm ci
 
+      - name: Cache Playwright Chromium
+        id: pw-cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ hashFiles('tests/ui/package-lock.json') }}
+
       - name: Install Playwright Chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
         working-directory: tests/ui
         run: npx playwright install chromium
 
@@ -220,6 +233,7 @@ jobs:
 
   release-smoke:
     needs: [paths-filter, check]
+    timeout-minutes: 60
     if: >-
       always() &&
       needs.check.result != 'failure' &&
