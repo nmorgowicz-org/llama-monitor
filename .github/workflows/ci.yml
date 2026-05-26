@@ -191,8 +191,6 @@ jobs:
       - name: Install Playwright Chromium
         if: steps.pw-cache.outputs.cache-hit != 'true'
         working-directory: tests/ui
-        env:
-          UV_USE_IO_URING: "0"
         run: npx playwright install chromium
 
       - name: Start UI smoke server
