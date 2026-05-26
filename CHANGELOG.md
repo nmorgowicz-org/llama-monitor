@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.3](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.22.2...v0.22.3) (2026-05-26)
+
+
+### Bug Fixes
+
+* **agent:** add startup grace period to suppress health-check noise during install ([10f64b7](https://github.com/nmorgowicz-org/llama-monitor/commit/10f64b7266ab5fc6f86b776d6758c5d9d059397b))
+* **chat:** sort sidebar tabs by last message timestamp instead of updated_at ([10f64b7](https://github.com/nmorgowicz-org/llama-monitor/commit/10f64b7266ab5fc6f86b776d6758c5d9d059397b))
+* **chat:** stop backfillCtxPct from silently bumping updated_at on tab persist ([10f64b7](https://github.com/nmorgowicz-org/llama-monitor/commit/10f64b7266ab5fc6f86b776d6758c5d9d059397b))
+* **ui:** add dashboard edge padding and prevent horizontal overflow ([10f64b7](https://github.com/nmorgowicz-org/llama-monitor/commit/10f64b7266ab5fc6f86b776d6758c5d9d059397b))
+* **ui:** hide redundant grade chip when remote agent is fully connected ([10f64b7](https://github.com/nmorgowicz-org/llama-monitor/commit/10f64b7266ab5fc6f86b776d6758c5d9d059397b))
+* **ui:** restore endpoint-status hover popover with bridge pseudo-element ([10f64b7](https://github.com/nmorgowicz-org/llama-monitor/commit/10f64b7266ab5fc6f86b776d6758c5d9d059397b))
+
 ## [0.22.2](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.22.1...v0.22.2) (2026-05-25)
 
 
