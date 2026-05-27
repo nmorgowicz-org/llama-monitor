@@ -8256,12 +8256,12 @@
 
 /* ── Tier: snug ───────────────────────────────────────────────────────────── */
 
-/* Rightmost: hide Focus label, remove Persona button (accessible via Behavior) */
+/* Rightmost: hide Focus + History labels, remove Persona button (accessible via Behavior) */
 body.shell-width-snug #chat-focus-mode-btn .chat-header-label {
   display: none;
 }
 
-body.shell-width-snug #chat-persona-btn {
+body.shell-width-snug #chat-history-qa-btn .chat-header-label {
   display: none;
 }
 
@@ -8293,11 +8293,6 @@ body.shell-width-tight .chat-header-btn {
 
 /* Icon-only mode: hide all button labels at tight width */
 body.shell-width-tight .chat-header-label {
-  display: none;
-}
-
-/* Persona button redundant at tight width (accessible via Behavior panel) */
-body.shell-width-tight #chat-persona-btn {
   display: none;
 }
 

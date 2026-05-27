@@ -11,6 +11,7 @@ pub const CSS_CARDS_HARDWARE: &str = include_str!("../../static/css/cards-hardwa
 pub const CSS_CARDS_INFERENCE: &str = include_str!("../../static/css/cards-inference.css");
 pub const CSS_CHAT_GUIDED_GENERATION: &str =
     include_str!("../../static/css/chat-guided-generation.css");
+pub const CSS_CHAT_HISTORY_QA: &str = include_str!("../../static/css/chat-history-qa.css");
 pub const CSS_CHAT: &str = include_str!("../../static/css/chat.css");
 pub const CSS_COMMAND_PALETTE: &str = include_str!("../../static/css/command-palette.css");
 pub const CSS_COMPONENTS: &str = include_str!("../../static/css/components.css");
@@ -34,6 +35,8 @@ pub const FEATURES_ATTACH_DETACH_JS: &str =
 pub const FEATURES_AUTH_JS: &str = include_str!("../../static/js/features/auth.js");
 pub const FEATURES_CHAT_FOCUS_MODE_JS: &str =
     include_str!("../../static/js/features/chat-focus-mode.js");
+pub const FEATURES_CHAT_HISTORY_QA_JS: &str =
+    include_str!("../../static/js/features/chat-history-qa.js");
 pub const FEATURES_CHAT_NOTES_JS: &str = include_str!("../../static/js/features/chat-notes.js");
 pub const FEATURES_CHAT_PARAMS_JS: &str = include_str!("../../static/js/features/chat-params.js");
 pub const FEATURES_CHAT_QUICK_GUIDE_JS: &str =

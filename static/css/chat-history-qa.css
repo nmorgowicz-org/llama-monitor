@@ -1,0 +1,1054 @@
+/* ==========================================================================
+   Chat History Q&A Panel
+   Slide-in panel for asking natural language questions about chat history.
+   All panel-specific styles use the .chqa- prefix.
+   Base .slide-panel shell (position, dimensions, backdrop, animation) is in
+   layout.css — only panel-content styles live here.
+   ========================================================================== */
+
+/* ── Thread area ─────────────────────────────────────────────────────────── */
+
+.chqa-thread {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px;
+  gap: 10px;
+  scroll-behavior: smooth;
+}
+
+.chqa-thread::-webkit-scrollbar { width: 3px; }
+.chqa-thread::-webkit-scrollbar-track { background: transparent; }
+.chqa-thread::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 2px;
+}
+.chqa-thread::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.5);
+}
+
+/* ── Empty state ─────────────────────────────────────────────────────────── */
+
+.chqa-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+  padding: 24px 12px 32px;
+  min-height: 160px;
+}
+
+.chqa-empty-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 40% 35%, rgba(99, 102, 241, 0.22), transparent 60%),
+    rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-primary-light, #818cf8);
+  flex-shrink: 0;
+}
+
+.chqa-empty-title {
+  font-size: var(--text-sm, 0.875rem);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.chqa-empty-desc {
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--color-text-muted);
+  margin: 0;
+  line-height: 1.55;
+  max-width: 240px;
+}
+
+/* ── Suggestion chips ────────────────────────────────────────────────────── */
+
+.chqa-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  max-width: 288px;
+  margin-top: 4px;
+}
+
+.chqa-suggestion-btn {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: var(--color-text-secondary);
+  font-family: var(--font-body);
+  font-size: var(--text-xs, 0.75rem);
+  padding: 8px 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  line-height: 1.45;
+}
+
+.chqa-suggestion-btn:hover {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.28);
+  color: var(--color-text-primary);
+}
+
+.chqa-suggestion-btn:focus-visible {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.64);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+}
+
+/* ── Q&A entries ─────────────────────────────────────────────────────────── */
+
+.chqa-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* User question bubble — right-aligned, indigo tint */
+.chqa-question {
+  align-self: flex-end;
+  max-width: 90%;
+  background:
+    radial-gradient(circle at 20% 30%, rgba(99, 102, 241, 0.18), transparent 60%),
+    linear-gradient(135deg, rgba(99, 102, 241, 0.16), rgba(99, 102, 241, 0.08));
+  border: 1px solid rgba(99, 102, 241, 0.28);
+  border-radius: 14px 14px 4px 14px;
+  padding: 9px 13px;
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--color-text-primary);
+  line-height: 1.5;
+  word-break: break-word;
+  box-shadow:
+    0 4px 12px rgba(99, 102, 241, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+/* AI answer bubble — left-aligned, neutral surface */
+.chqa-answer {
+  align-self: flex-start;
+  max-width: 100%;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 4px 14px 14px 14px;
+  padding: 11px 13px;
+  font-size: var(--text-sm, 0.875rem);
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  word-break: break-word;
+  transition: border-color 0.2s ease;
+}
+
+.chqa-answer.streaming {
+  border-color: rgba(99, 102, 241, 0.22);
+}
+
+/* ── Answer markdown body ─────────────────────────────────────────────────── */
+
+.chqa-answer-body p {
+  margin: 0 0 8px;
+}
+
+.chqa-answer-body p:last-child {
+  margin-bottom: 0;
+}
+
+.chqa-answer-body ul,
+.chqa-answer-body ol {
+  margin: 4px 0 8px 18px;
+  padding: 0;
+}
+
+.chqa-answer-body li {
+  margin-bottom: 3px;
+  line-height: 1.5;
+}
+
+.chqa-answer-body code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.chqa-answer-body pre {
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 7px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 6px 0;
+}
+
+.chqa-answer-body pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11.5px;
+}
+
+.chqa-answer-body h1,
+.chqa-answer-body h2,
+.chqa-answer-body h3 {
+  font-size: var(--text-sm, 0.875rem);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 10px 0 4px;
+}
+
+.chqa-answer-body strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.chqa-answer-body em {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.chqa-answer-body blockquote {
+  border-left: 2px solid rgba(99, 102, 241, 0.4);
+  margin: 6px 0;
+  padding-left: 10px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* Error state */
+.chqa-answer-error {
+  color: #f87171;
+  font-size: var(--text-xs, 0.75rem);
+  font-style: italic;
+}
+
+/* ── Streaming indicator ──────────────────────────────────────────────────── */
+
+.chqa-thinking-dots {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 3px 0;
+}
+
+.chqa-thinking-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(99, 102, 241, 0.65);
+  animation: chqa-dot-pulse 1.4s ease-in-out infinite;
+}
+
+.chqa-thinking-dots span:nth-child(2) { animation-delay: 0.22s; }
+.chqa-thinking-dots span:nth-child(3) { animation-delay: 0.44s; }
+
+@keyframes chqa-dot-pulse {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1.1); }
+}
+
+/* ── Header extras ───────────────────────────────────────────────────────── */
+
+.chqa-context-label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  padding: 2px 8px;
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chqa-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chqa-clear-btn,
+.chqa-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+}
+
+.chqa-clear-btn {
+  width: 26px;
+  height: 26px;
+}
+
+.chqa-close-btn {
+  width: 28px;
+  height: 28px;
+}
+
+.chqa-clear-btn:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.28);
+  color: #f87171;
+}
+
+.chqa-close-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--color-text-primary);
+}
+
+.chqa-clear-btn:focus-visible,
+.chqa-close-btn:focus-visible {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.64);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+}
+
+/* ── Footer / input area ─────────────────────────────────────────────────── */
+
+.chqa-footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.chqa-input-wrap {
+  display: flex;
+  align-items: flex-end;
+  gap: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  padding: 9px 9px 9px 13px;
+  transition: border-color 0.18s ease;
+}
+
+.chqa-input-wrap:focus-within {
+  border-color: rgba(99, 102, 241, 0.4);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.08);
+}
+
+.chqa-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-sm, 0.875rem);
+  line-height: 1.5;
+  min-height: 20px;
+  max-height: 120px;
+  overflow-y: auto;
+  caret-color: var(--color-primary-light, #818cf8);
+}
+
+.chqa-input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.8;
+}
+
+.chqa-input::-webkit-scrollbar { width: 2px; }
+.chqa-input::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 2px;
+}
+
+.chqa-input-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.chqa-send-btn,
+.chqa-stop-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease, opacity 0.16s ease;
+}
+
+.chqa-send-btn {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.9), rgba(79, 70, 229, 0.8));
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.28);
+}
+
+.chqa-send-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 1), rgba(79, 70, 229, 0.95));
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.38);
+  transform: translateY(-1px);
+}
+
+.chqa-send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.chqa-stop-btn {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  color: #f87171;
+}
+
+.chqa-stop-btn:hover {
+  background: rgba(239, 68, 68, 0.22);
+  border-color: rgba(239, 68, 68, 0.42);
+}
+
+.chqa-send-btn:focus-visible,
+.chqa-stop-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.24);
+}
+
+.chqa-disclaimer {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  text-align: center;
+  opacity: 0.55;
+}
+
+/* ── Stopped indicator ───────────────────────────────────────────────────── */
+
+.chqa-answer-stopped {
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--color-text-muted);
+  font-style: italic;
+  opacity: 0.65;
+}
+
+/* ── Answer action bar (Copy + Insert into history buttons) ──────────────── */
+
+.chqa-answer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.chqa-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  color: var(--color-text-muted);
+  font-family: var(--font-body);
+  font-size: 11px;
+  padding: 4px 9px;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  user-select: none;
+}
+
+.chqa-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--color-text-secondary);
+}
+
+.chqa-copy-btn:focus-visible {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.6);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+}
+
+.chqa-insert-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  color: var(--color-text-muted);
+  font-family: var(--font-body);
+  font-size: 11px;
+  padding: 4px 9px;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  user-select: none;
+}
+
+.chqa-insert-btn:hover {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.3);
+  color: var(--color-primary-light, #818cf8);
+}
+
+.chqa-insert-btn:focus-visible {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.6);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+}
+
+/* ── Utility row (inject toggle + write-scene side by side) ──────────────── */
+
+.chqa-utility-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.chqa-inject-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chqa-write-scene-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  font-family: var(--font-body);
+  font-size: 11px;
+  padding: 4px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  user-select: none;
+}
+
+.chqa-write-scene-btn:hover {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.24);
+  color: var(--color-text-secondary);
+}
+
+.chqa-write-scene-btn:focus-visible {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.64);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+}
+
+/* ── History insertion editor ────────────────────────────────────────────── */
+
+.chqa-insert-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(99, 102, 241, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 12px;
+  padding: 11px 13px;
+  animation: chqa-inject-slide-in 0.18s ease;
+}
+
+.chqa-insert-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chqa-insert-editor-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-primary-light, #818cf8);
+  user-select: none;
+}
+
+/* Role toggle */
+.chqa-insert-role-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.chqa-insert-role-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  user-select: none;
+}
+
+.chqa-insert-role-radio {
+  appearance: none;
+  width: 0;
+  height: 0;
+  position: absolute;
+  opacity: 0;
+}
+
+.chqa-insert-role-label:has(.chqa-insert-role-radio:checked) {
+  background: rgba(99, 102, 241, 0.14);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: var(--color-primary-light, #818cf8);
+}
+
+.chqa-insert-role-label:hover {
+  background: rgba(99, 102, 241, 0.07);
+  border-color: rgba(99, 102, 241, 0.2);
+  color: var(--color-text-secondary);
+}
+
+.chqa-insert-textarea {
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-sm, 0.875rem);
+  line-height: 1.55;
+  min-height: 72px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 9px 11px;
+  resize: none;
+  outline: none;
+  transition: border-color 0.16s ease;
+  caret-color: var(--color-primary-light, #818cf8);
+}
+
+.chqa-insert-textarea:focus {
+  border-color: rgba(99, 102, 241, 0.38);
+}
+
+.chqa-insert-textarea::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.65;
+}
+
+.chqa-insert-textarea::-webkit-scrollbar { width: 2px; }
+.chqa-insert-textarea::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 2px;
+}
+
+.chqa-insert-hint {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  opacity: 0.55;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.chqa-insert-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.chqa-insert-cancel-btn {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  color: var(--color-text-muted);
+  font-family: var(--font-body);
+  font-size: 12px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.chqa-insert-cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text-secondary);
+}
+
+.chqa-insert-confirm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.85), rgba(79, 70, 229, 0.75));
+  border: none;
+  border-radius: 7px;
+  color: #fff;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 13px;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(99, 102, 241, 0.24);
+  transition: background 0.14s ease, box-shadow 0.14s ease, transform 0.1s ease;
+}
+
+.chqa-insert-confirm-btn:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 1), rgba(79, 70, 229, 0.95));
+  box-shadow: 0 5px 14px rgba(99, 102, 241, 0.34);
+  transform: translateY(-1px);
+}
+
+.chqa-insert-cancel-btn:focus-visible,
+.chqa-insert-confirm-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.24);
+}
+
+/* ── Context injection panel ─────────────────────────────────────────────── */
+
+.chqa-inject-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  font-family: var(--font-body);
+  font-size: 11px;
+  padding: 4px 9px;
+  cursor: pointer;
+  align-self: flex-start;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  user-select: none;
+}
+
+.chqa-inject-toggle:hover {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.24);
+  color: var(--color-text-secondary);
+}
+
+.chqa-inject-toggle[aria-expanded="true"] {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.32);
+  color: var(--color-primary-light, #818cf8);
+}
+
+.chqa-inject-toggle:focus-visible {
+  outline: none;
+  border-color: rgba(99, 102, 241, 0.64);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+}
+
+.chqa-inject-badge {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary-light, #818cf8);
+  flex-shrink: 0;
+  font-size: 0;
+  line-height: 0;
+}
+
+.chqa-inject-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: rgba(99, 102, 241, 0.04);
+  border: 1px solid rgba(99, 102, 241, 0.16);
+  border-radius: 10px;
+  padding: 9px 11px;
+  animation: chqa-inject-slide-in 0.18s ease;
+}
+
+@keyframes chqa-inject-slide-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.chqa-inject-input {
+  background: none;
+  border: none;
+  outline: none;
+  resize: none;
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-xs, 0.75rem);
+  line-height: 1.55;
+  min-height: 56px;
+  max-height: 140px;
+  overflow-y: auto;
+  caret-color: var(--color-primary-light, #818cf8);
+}
+
+.chqa-inject-input::placeholder {
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+.chqa-inject-input::-webkit-scrollbar { width: 2px; }
+.chqa-inject-input::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 2px;
+}
+
+.chqa-inject-hint {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* ── Status bar ──────────────────────────────────────────────────────────── */
+
+.chqa-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 2px;
+}
+
+.chqa-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary-light, #818cf8);
+  flex-shrink: 0;
+  animation: chqa-status-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes chqa-status-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50%       { opacity: 1;   transform: scale(1.1);  }
+}
+
+.chqa-status-text {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ── Utility ─────────────────────────────────────────────────────────────── */
+
+.chqa-hidden {
+  display: none !important;
+}
+
+/* ── Light theme ─────────────────────────────────────────────────────────── */
+
+[data-theme="light"] .chqa-question {
+  background:
+    radial-gradient(circle at 20% 30%, rgba(99, 102, 241, 0.1), transparent 60%),
+    linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(99, 102, 241, 0.04));
+  border-color: rgba(99, 102, 241, 0.2);
+  color: #1e293b;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.06);
+}
+
+[data-theme="light"] .chqa-answer {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(0, 0, 0, 0.07);
+  color: #374151;
+}
+
+[data-theme="light"] .chqa-answer-body code {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .chqa-answer-body pre {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.07);
+}
+
+[data-theme="light"] .chqa-answer-body strong {
+  color: #1e293b;
+}
+
+[data-theme="light"] .chqa-suggestion-btn {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.07);
+  color: #374151;
+}
+
+[data-theme="light"] .chqa-suggestion-btn:hover {
+  background: rgba(99, 102, 241, 0.07);
+  border-color: rgba(99, 102, 241, 0.2);
+  color: #1e293b;
+}
+
+[data-theme="light"] .chqa-input-wrap {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .chqa-input {
+  color: #1e293b;
+}
+
+[data-theme="light"] .chqa-context-label {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #6b7280;
+}
+
+[data-theme="light"] .chqa-clear-btn,
+[data-theme="light"] .chqa-close-btn {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #6b7280;
+}
+
+[data-theme="light"] .chqa-close-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #1e293b;
+}
+
+[data-theme="light"] .chqa-empty-icon {
+  background:
+    radial-gradient(circle at 40% 35%, rgba(99, 102, 241, 0.12), transparent 60%),
+    rgba(0, 0, 0, 0.03);
+  border-color: rgba(99, 102, 241, 0.15);
+}
+
+[data-theme="light"] .chqa-footer {
+  border-top-color: rgba(0, 0, 0, 0.07);
+}
+
+[data-theme="light"] .chqa-answer-actions {
+  border-top-color: rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="light"] .chqa-answer-stopped {
+  color: #9ca3af;
+}
+
+[data-theme="light"] .chqa-copy-btn {
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #9ca3af;
+}
+
+[data-theme="light"] .chqa-copy-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.14);
+  color: #4b5563;
+}
+
+[data-theme="light"] .chqa-insert-btn {
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #9ca3af;
+}
+
+[data-theme="light"] .chqa-insert-btn:hover {
+  background: rgba(99, 102, 241, 0.07);
+  border-color: rgba(99, 102, 241, 0.22);
+  color: #4338ca;
+}
+
+[data-theme="light"] .chqa-write-scene-btn {
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #9ca3af;
+}
+
+[data-theme="light"] .chqa-write-scene-btn:hover {
+  background: rgba(99, 102, 241, 0.05);
+  border-color: rgba(99, 102, 241, 0.18);
+  color: #4b5563;
+}
+
+[data-theme="light"] .chqa-insert-editor {
+  background: rgba(99, 102, 241, 0.03);
+  border-color: rgba(99, 102, 241, 0.14);
+}
+
+[data-theme="light"] .chqa-insert-textarea {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.09);
+  color: #1e293b;
+}
+
+[data-theme="light"] .chqa-insert-textarea:focus {
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+[data-theme="light"] .chqa-insert-role-label {
+  border-color: rgba(0, 0, 0, 0.09);
+  color: #6b7280;
+}
+
+[data-theme="light"] .chqa-inject-toggle {
+  border-color: rgba(0, 0, 0, 0.09);
+  color: #6b7280;
+}
+
+[data-theme="light"] .chqa-inject-toggle:hover {
+  background: rgba(99, 102, 241, 0.05);
+  border-color: rgba(99, 102, 241, 0.18);
+  color: #4b5563;
+}
+
+[data-theme="light"] .chqa-inject-toggle[aria-expanded="true"] {
+  background: rgba(99, 102, 241, 0.07);
+  border-color: rgba(99, 102, 241, 0.24);
+  color: #4338ca;
+}
+
+[data-theme="light"] .chqa-inject-panel {
+  background: rgba(99, 102, 241, 0.03);
+  border-color: rgba(99, 102, 241, 0.12);
+}
+
+[data-theme="light"] .chqa-inject-input {
+  color: #1e293b;
+}
+
+[data-theme="light"] .chqa-status-text {
+  color: #9ca3af;
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .chqa-thinking-dots span {
+    animation: none !important;
+    opacity: 0.6;
+  }
+
+  .chqa-send-btn:hover:not(:disabled),
+  .chqa-insert-confirm-btn:hover {
+    transform: none !important;
+  }
+
+  .chqa-status-dot {
+    animation: none !important;
+    opacity: 0.7;
+  }
+
+  .chqa-inject-panel {
+    animation: none !important;
+  }
+}

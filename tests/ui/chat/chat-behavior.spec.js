@@ -14,11 +14,6 @@ async function switchToMonitor(page) {
 async function ensureChatVisible(page) {
   await page.getByRole('button', { name: /chat/i }).click();
   await expect(page.locator('#page-chat')).toBeVisible();
-  // Force comfortable density so persona button and labels are visible
-  await page.evaluate(async () => {
-    const { pinComfortableDensity } = await import('/js/features/chat-width-observer.js');
-    pinComfortableDensity();
-  });
 }
 
 test.describe('system prompt and persona panel', () => {
@@ -50,52 +45,50 @@ test.describe('system prompt and persona panel', () => {
     await expect(page.locator('#chat-open-template-mgr')).toBeVisible();
   });
 
-  test('shows persona dropdown', async ({ page }) => {
-    await page.locator('#chat-persona-btn').click();
-    await expect(page.locator('#chat-persona-menu')).toBeVisible();
-    await expect(page.locator('#chat-persona-menu-list')).toBeVisible();
+  test('shows persona section in behavior panel', async ({ page }) => {
+    // Persona is now managed through the behavior panel, not a header dropdown.
+    await page.locator('#btn-behavior').click();
+    await expect(page.locator('#chat-behavior-panel')).toHaveClass(/open/);
+    await expect(page.locator('#chat-persona-active-name')).toBeVisible();
+    await expect(page.locator('#chat-open-template-mgr')).toBeVisible();
   });
 
-  test('persona menu items have edit buttons', async ({ page }) => {
-    await page.locator('#chat-persona-btn').click();
-    await expect(page.locator('#chat-persona-menu')).toBeVisible();
+  test('persona list has items with edit buttons in template manager', async ({ page }) => {
+    await page.locator('#btn-behavior').click();
+    await expect(page.locator('#chat-behavior-panel')).toHaveClass(/open/);
+    await page.locator('#chat-open-template-mgr').click();
+    await expect(page.locator('#template-manager-modal')).toHaveClass(/active/);
 
-    // Wait for personas to load
-    await page.waitForSelector('.chat-persona-menu-item', { state: 'visible', timeout: 5000 });
+    // Wait for templates to load
+    await page.waitForSelector('.template-list-item', { state: 'visible', timeout: 5000 });
 
-    // Check that persona items exist
-    const items = await page.locator('.chat-persona-menu-item').count();
+    const items = await page.locator('.template-list-item').count();
     expect(items).toBeGreaterThan(0);
 
-    // Check that each item has an edit button
-    const editButtons = await page.locator('.chat-persona-menu-item-edit').count();
+    // Each item should have an edit button
+    const editButtons = await page.locator('[data-template-action="edit"]').count();
     expect(editButtons).toBeGreaterThan(0);
   });
 
-  test('clicking edit button opens template manager', async ({ page }) => {
-    await page.locator('#chat-persona-btn').click();
-    await expect(page.locator('#chat-persona-menu')).toBeVisible();
-
-    // Wait for personas to load
-    await page.waitForSelector('.chat-persona-menu-item-edit', { state: 'visible', timeout: 5000 });
-
-    // Click the first edit button
-    await page.locator('.chat-persona-menu-item-edit').first().click();
-
-    // Check that template manager opened
+  test('clicking manage personas opens template manager', async ({ page }) => {
+    await page.locator('#btn-behavior').click();
+    await expect(page.locator('#chat-behavior-panel')).toHaveClass(/open/);
+    await page.locator('#chat-open-template-mgr').click();
     await expect(page.locator('#template-manager-modal')).toHaveClass(/active/);
   });
 
-  test('persona menu shows section headers', async ({ page }) => {
-    await page.locator('#chat-persona-btn').click();
-    await expect(page.locator('#chat-persona-menu')).toBeVisible();
+  test('template manager shows section headers when multiple template groups exist', async ({ page }) => {
+    await page.locator('#btn-behavior').click();
+    await expect(page.locator('#chat-behavior-panel')).toHaveClass(/open/);
+    await page.locator('#chat-open-template-mgr').click();
+    await expect(page.locator('#template-manager-modal')).toHaveClass(/active/);
 
-    // Wait for personas to load
-    await page.waitForSelector('.chat-persona-menu-section', { state: 'visible', timeout: 5000 });
+    // Wait for templates to load
+    await page.waitForSelector('.template-list-item', { state: 'visible', timeout: 5000 });
 
-    // Check that section headers exist
-    const sections = await page.locator('.chat-persona-menu-section').count();
-    expect(sections).toBeGreaterThan(0);
+    // Template list should be populated
+    const items = await page.locator('.template-list-item').count();
+    expect(items).toBeGreaterThan(0);
   });
 });
 

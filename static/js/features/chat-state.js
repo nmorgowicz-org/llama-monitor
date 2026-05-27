@@ -22,6 +22,7 @@ const chatViewBindings = {
     refreshChatTelemetry: null,
     updateChatTabBadge: null,
     checkAutoCompact: null,
+    refreshChatHistoryQA: null,
 };
 
 export function registerChatViewBindings(bindings) {
@@ -147,6 +148,7 @@ export async function initChatTabs() {
             chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
             chatViewBindings.refreshChatTelemetry?.();
             chatViewBindings.updatePersonaMenuName?.();
+            chatViewBindings.refreshChatHistoryQA?.();
             refreshTopCockpit();
             return;
         }
@@ -164,6 +166,7 @@ export async function initChatTabs() {
         chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
         chatViewBindings.refreshChatTelemetry?.();
         chatViewBindings.updatePersonaMenuName?.();
+        chatViewBindings.refreshChatHistoryQA?.();
         refreshTopCockpit();
         showToast('Could not load chats', 'error', e?.message || 'Saved chats could not be loaded.');
         return;
@@ -182,6 +185,7 @@ export async function initChatTabs() {
     chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
     chatViewBindings.refreshChatTelemetry?.();
     chatViewBindings.updatePersonaMenuName?.();
+    chatViewBindings.refreshChatHistoryQA?.();
     refreshTopCockpit();
 
     if (typeof window.onChatTabsLoaded === 'function') {
@@ -262,6 +266,7 @@ export async function closeChatTab(id) {
     chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
     chatViewBindings.refreshChatTelemetry?.();
     chatViewBindings.updatePersonaMenuName?.();
+    chatViewBindings.refreshChatHistoryQA?.();
     refreshTopCockpit();
 
     try {
@@ -306,6 +311,7 @@ export function restoreTabFromTrash(id) {
     chatViewBindings.syncCompactSettingsUI?.(activeChatTab());
     chatViewBindings.refreshChatTelemetry?.();
     chatViewBindings.updatePersonaMenuName?.();
+    chatViewBindings.refreshChatHistoryQA?.();
     refreshTopCockpit();
     scheduleChatPersist(normalizeChatTab(trashEntry.tab));
 }
@@ -329,6 +335,7 @@ export async function switchChatTab(id) {
     chatViewBindings.updateCtxPressureBar?.(0);
     chatViewBindings.refreshChatTelemetry?.();
     chatViewBindings.updatePersonaMenuName?.();
+    chatViewBindings.refreshChatHistoryQA?.();
     refreshTopCockpit();
 
     const input = document.getElementById('chat-input');

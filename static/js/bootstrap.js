@@ -22,6 +22,7 @@ import { initShortcuts } from './features/shortcuts.js';
 import { initNav } from './features/nav.js';
 import { initChatWidthObserver } from './features/chat-width-observer.js';
 import { initChatFocusMode, toggleFocusMode } from './features/chat-focus-mode.js';
+import { initChatHistoryQA } from './features/chat-history-qa.js';
 import { initAnimate } from './features/animate.js';
 import { initSettings } from './features/settings.js';
 import { initUserMenu } from './features/user-menu.js';
@@ -126,6 +127,7 @@ async function initializeApp() {
     initNav();
     initChatWidthObserver();
     initChatFocusMode();
+    initChatHistoryQA();
     initAnimate();
     initSettings();
     initUserMenu();

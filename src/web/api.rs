@@ -4748,6 +4748,8 @@ fn api_chat_search(
         offset: usize,
         #[serde(default)]
         visibility: String,
+        /// Optional tab ID to restrict results to a single conversation.
+        tab_id: Option<String>,
     }
     fn default_limit() -> usize {
         20
@@ -4768,7 +4770,8 @@ fn api_chat_search(
 
                     let limit = p.limit.clamp(1, 100);
                     let visibilities = parse_visibility_param(&p.visibility);
-                    match store.search(&p.q, limit, p.offset, &visibilities) {
+                    let tab_id_ref = p.tab_id.as_deref();
+                    match store.search(&p.q, limit, p.offset, &visibilities, tab_id_ref) {
                         Ok(results) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                             Box::new(warp::reply::json(&results)),
                         ),

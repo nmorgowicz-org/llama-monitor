@@ -478,7 +478,11 @@ Agent 4
 
     #[test]
     fn test_load_save_roundtrip() {
-        let path = std::env::temp_dir().join("llama-monitor-gpu-env-test.json");
+        // Include PID to avoid collision with concurrent cargo test processes.
+        let path = std::env::temp_dir().join(format!(
+            "llama-monitor-gpu-env-test-{}.json",
+            std::process::id()
+        ));
         let env = GpuEnv {
             arch: "gfx1100".into(),
             devices: "0,1".into(),
