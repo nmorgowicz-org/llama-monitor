@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.22.5...v0.23.0) (2026-05-27)
+
+
+### Features
+
+* **api:** add optional tab_id scoping to FTS search endpoint ([8d635bc](https://github.com/nmorgowicz-org/llama-monitor/commit/8d635bc5ca3c6cc143c2bc5b3273149dbb90c5bf))
+* **chat:** copy button, tab sync, stopped state, and Escape dismiss on History Q&A panel ([8d635bc](https://github.com/nmorgowicz-org/llama-monitor/commit/8d635bc5ca3c6cc143c2bc5b3273149dbb90c5bf))
+* **chat:** dynamic context limits scaling from live context_capacity_tokens metrics ([8d635bc](https://github.com/nmorgowicz-org/llama-monitor/commit/8d635bc5ca3c6cc143c2bc5b3273149dbb90c5bf))
+* **chat:** History Q&A panel with multi-turn Q&A, AI keyword search, context injection, and history insertion ([8d635bc](https://github.com/nmorgowicz-org/llama-monitor/commit/8d635bc5ca3c6cc143c2bc5b3273149dbb90c5bf))
+
+
+### Bug Fixes
+
+* **test:** eliminate temp-path collisions in concurrent cargo test runs ([8d635bc](https://github.com/nmorgowicz-org/llama-monitor/commit/8d635bc5ca3c6cc143c2bc5b3273149dbb90c5bf))
+
 ## [0.22.5](https://github.com/nmorgowicz-org/llama-monitor/compare/v0.22.4...v0.22.5) (2026-05-27)
 
 
