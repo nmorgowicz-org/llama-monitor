@@ -1,20 +1,18 @@
-# Spawn Llama-Server V2 — UX, Architecture, and Implementation Reference
+# Spawn Llama-Server V2 — UX, Flows, Error Handling, and Guidelines
 
 - **Branch:** `feature/spawn-llama-server-v2`
-- **Date:** 2026-05-30
+- **Date:** 2026-05-29
 - **Author:** Iris (via Hermes)
 
-This is the single, self-contained reference for the Spawn Llama-Server V2 feature.
+This is the UX and implementation reference for the Spawn Llama-Server V2 feature.
 It includes:
-- UX mockups (ASCII)
-- Flows
+- ASCII mockups
+- User flows
 - Error handling
 - Security and performance guidelines
-- VRAM estimation
-- MoE tuning
-- Benchmark methodology
 
-Use this as the primary doc for future implementation agents.
+For core architecture, APIs, and implementation plan, see:
+- `docs/plans/20260529-spawn_llama_server_core.md`
 
 ---
 
