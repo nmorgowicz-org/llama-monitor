@@ -17,6 +17,7 @@ const STEP_LABELS = ['Profile', 'Model', 'Hardware', 'Summary', 'Spawn'];
 const wizardState = {
     currentStep: 0,
     profile: 'balanced',
+    mode: 'guided', // 'guided' | 'raw'
     model: {
         source: 'local',
         path: '',
@@ -103,6 +104,10 @@ function cacheDom() {
     dom.hfFileList = document.getElementById('spawn-hf-file-list');
 
     // Step 3
+    dom.modeToggle = document.getElementById('spawn-mode-toggle');
+    dom.modeGuidedBtn = document.getElementById('spawn-mode-guided');
+    dom.modeRawBtn = document.getElementById('spawn-mode-raw');
+    dom.rawCodeArea = document.getElementById('spawn-raw-script');
     dom.gpuLayersSelect = document.getElementById('spawn-gpu-layers');
     dom.gpuLayersManualWrap = document.getElementById('spawn-gpu-layers-manual-wrap');
     dom.gpuLayersManualInput = document.getElementById('spawn-gpu-layers-manual');
@@ -115,6 +120,7 @@ function cacheDom() {
     dom.cacheTypeVSelect = document.getElementById('spawn-cache-type-v');
     dom.nCpuMoeInput = document.getElementById('spawn-n-cpu-moe');
     dom.tensorSplitInput = document.getElementById('spawn-tensor-split');
+    dom.moeNote = document.getElementById('spawn-moe-note');
     dom.vramEstimateText = document.getElementById('spawn-vram-estimate-text');
     dom.vramPill = document.getElementById('spawn-vram-pill');
 
@@ -240,6 +246,154 @@ function bindEvents() {
 
     // Spawn Server
     dom.spawnServerBtn?.addEventListener('click', spawnServer);
+
+    // Mode toggle (Guided/Raw)
+    dom.modeGuidedBtn?.addEventListener('click', () => {
+        setMode('guided');
+    });
+    dom.modeRawBtn?.addEventListener('click', () => {
+        setMode('raw');
+    });
+
+    // Raw code area: parse common flags on change
+    dom.rawCodeArea?.addEventListener('input', onRawCodeChange);
+}
+
+// ── Mode Toggle (Guided / Raw) ────────────────────────────────────────────────
+
+function setMode(mode) {
+    wizardState.mode = mode;
+
+    const guided = dom.wizardGuidedSection;
+    const raw = dom.wizardRawSection;
+    const guidedBtn = dom.modeGuidedBtn;
+    const rawBtn = dom.modeRawBtn;
+
+    if (mode === 'guided') {
+        guided?.classList.remove('hidden');
+        raw?.classList.add('hidden');
+        guidedBtn?.classList.add('active');
+        rawBtn?.classList.remove('active');
+    } else {
+        guided?.classList.add('hidden');
+        raw?.classList.remove('hidden');
+        guidedBtn?.classList.remove('active');
+        rawBtn?.classList.add('active');
+        updateRawScript();
+    }
+}
+
+function updateRawScript() {
+    const el = dom.rawCodeArea;
+    if (!el) return;
+
+    const s = wizardState;
+    const hw = s.hardware;
+    const model = s.model;
+    const bin = 'llama-server';
+
+    const args = [];
+
+    if (model.source === 'hf' && model.hfRepo) {
+        args.push('-hf', model.hfRepo);
+        if (model.hfFile) {
+            args.push('--hf-file', model.hfFile);
+        }
+    } else if (model.path) {
+        args.push('-m', model.path);
+    }
+
+    if (hw.gpuLayers === 'auto') {
+        args.push('--gpu-layers', '9999');
+    } else if (hw.gpuLayers === 'all') {
+        args.push('--gpu-layers', '9999');
+    } else if (hw.gpuLayersManual != null) {
+        args.push('--gpu-layers', String(hw.gpuLayersManual));
+    }
+
+    if (hw.contextSize) {
+        args.push('--ctx-size', String(hw.contextSize));
+    }
+
+    if (hw.batchSize) {
+        args.push('--batch-size', String(hw.batchSize));
+    }
+
+    if (hw.ubatchSize) {
+        args.push('--ubatch-size', String(hw.ubatchSize));
+    }
+
+    if (hw.parallelSlots && hw.parallelSlots > 1) {
+        args.push('--parallel-slots', String(hw.parallelSlots));
+    }
+
+    if (hw.cacheTypeK) {
+        args.push('-ctk', hw.cacheTypeK);
+    }
+
+    if (hw.cacheTypeV) {
+        args.push('-ctv', hw.cacheTypeV);
+    }
+
+    if (hw.nCpuMoe != null && hw.nCpuMoe > 0) {
+        args.push('--n-cpu-moe', String(hw.nCpuMoe));
+    }
+
+    if (hw.tensorSplit) {
+        args.push('--tensor-split', hw.tensorSplit);
+    }
+
+    const code = bin + ' ' + args.join(' ');
+    el.textContent = code;
+}
+
+function onRawCodeChange() {
+    const el = dom.rawCodeArea;
+    if (!el) return;
+
+    const text = el.textContent || '';
+    const hw = wizardState.hardware;
+
+    const readFlag = (flag) => {
+        const idx = text.indexOf(flag + ' ');
+        if (idx === -1) return null;
+        const rest = text.slice(idx + flag.length).trim();
+        const token = rest.split(/\s+/)[0];
+        return token || null;
+    };
+
+    const val = readFlag('--ctx-size');
+    if (val != null) {
+        const n = Number(val);
+        if (!isNaN(n) && n > 0) hw.contextSize = n;
+    }
+
+    const gpu = readFlag('--gpu-layers');
+    if (gpu != null) {
+        const n = Number(gpu);
+        if (!isNaN(n)) {
+            hw.gpuLayersManual = n;
+            hw.gpuLayers = 'manual';
+        }
+    }
+
+    const bs = readFlag('--batch-size');
+    if (bs != null) {
+        const n = Number(bs);
+        if (!isNaN(n) && n > 0) hw.batchSize = n;
+    }
+
+    const us = readFlag('--ubatch-size');
+    if (us != null) {
+        const n = Number(us);
+        if (!isNaN(n) && n > 0) hw.ubatchSize = n;
+    }
+
+    const moe = readFlag('--n-cpu-moe');
+    if (moe != null) {
+        const n = Number(moe);
+        if (!isNaN(n) && n >= 0) hw.nCpuMoe = n;
+    }
 }
 
 // ── Step Management ───────────────────────────────────────────────────────────

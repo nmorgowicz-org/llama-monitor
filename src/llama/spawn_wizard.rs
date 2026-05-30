@@ -18,16 +18,16 @@ pub struct MoeTuningSuggestion {
 }
 
 /// Generate MoE tuning suggestion.
-#[allow(dead_code)]
 pub fn suggest_moe_tuning(
     model_size_bytes: u64,
     available_vram_bytes: u64,
     total_experts: u64,
 ) -> MoeTuningSuggestion {
-    if total_experts == 0 || available_vram_bytes == 0 {
+    // Conservative default when info is missing
+    if total_experts == 0 || available_vram_bytes == 0 || model_size_bytes == 0 {
         return MoeTuningSuggestion {
-            recommended_n_cpu_moe: 0,
-            note: "Insufficient information to suggest MoE tuning.".into(),
+            recommended_n_cpu_moe: 2,
+            note: "Limited information provided; using a conservative MoE setting. Adjust based on observed VRAM usage.".into(),
         };
     }
 
@@ -35,11 +35,7 @@ pub fn suggest_moe_tuning(
     // - If VRAM >= model_size * 1.2, keep all experts in VRAM (n_cpu_moe=0).
     // - If VRAM is between 0.6 and 1.2 of model_size, offload some.
     // - If VRAM is very low, offload more to CPU.
-    let ratio = if model_size_bytes > 0 {
-        available_vram_bytes as f64 / model_size_bytes as f64
-    } else {
-        0.0
-    };
+    let ratio = available_vram_bytes as f64 / model_size_bytes as f64;
 
     let recommended = if ratio >= 1.2 {
         0
@@ -55,7 +51,7 @@ pub fn suggest_moe_tuning(
 
     let note = format!(
         "Based on available VRAM, keeping {} experts in VRAM is recommended for a balance of speed and memory usage.",
-        total_experts - recommended as u64
+        total_experts.saturating_sub(recommended as u64)
     );
 
     MoeTuningSuggestion {
@@ -73,9 +69,9 @@ pub fn suggest_moe_tuning(
 /// - verdict: "good" / "moderate" / "poor"
 /// - hints: short suggestions
 ///
-/// This is a skeleton for now; actual HTTP calls will be wired into
-/// the API layer in Phase 2.
-#[allow(dead_code)]
+/// Parameters:
+/// - model_size_bytes, available_vram_bytes, total_experts are optional
+///   and used to generate MoE/VRAM-aware hints.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct BenchmarkResult {
     pub prompt_tokens_per_second: f64,
@@ -85,25 +81,74 @@ pub struct BenchmarkResult {
     pub hints: Vec<String>,
 }
 
-#[allow(dead_code)]
-pub fn evaluate_benchmark(prompt_tps: f64, gen_tps: f64, ttft_ms: f64) -> BenchmarkResult {
+pub fn run_benchmark(
+    prompt_tps: f64,
+    gen_tps: f64,
+    ttft_ms: f64,
+    model_size_bytes: Option<u64>,
+    available_vram_bytes: Option<u64>,
+    total_experts: u64,
+) -> BenchmarkResult {
     let mut hints: Vec<String> = Vec::new();
-    let verdict = if gen_tps >= 30.0 {
+
+    // Verdict logic:
+    // "good": gen_tps >= 30 and ttft_ms <= 800
+    // "moderate": gen_tps between 10-30 or ttft_ms between 800-2000
+    // "poor": gen_tps < 10 or ttft_ms > 2000
+    let verdict = if gen_tps >= 30.0 && ttft_ms <= 800.0 {
         "good"
-    } else if gen_tps >= 10.0 {
+    } else if (10.0..30.0).contains(&gen_tps) || (800.0..=2000.0).contains(&ttft_ms) {
         "moderate"
     } else {
         "poor"
     };
 
+    // Hints: generation throughput
     if gen_tps < 10.0 {
-        hints.push("Consider reducing context size or using KV cache quantization.".into());
+        hints.push(
+            "Consider increasing GPU layers or reducing context size.".to_string()
+        );
     }
+
+    // Hints: latency
     if ttft_ms > 2000.0 {
-        hints.push("High latency; check GPU utilization and VRAM usage.".into());
+        hints.push(
+            "High latency; reduce context size or enable flash attention.".to_string()
+        );
     }
+
+    // Hints: prompt throughput
     if prompt_tps < 500.0 {
-        hints.push("Prompt throughput is low; try increasing batch/ubatch size.".into());
+        hints.push(
+            "Slow prompt processing; increase batch size or use a faster backend.".to_string()
+        );
+    }
+
+    // MoE-specific hints
+    if total_experts > 0 {
+        let (model_size, vram) = match (model_size_bytes, available_vram_bytes) {
+            (Some(m), Some(v)) => (m, v),
+            _ => {
+                hints.push(
+                    "For MoE models, try increasing n_cpu_moe within available VRAM.".to_string()
+                );
+                return BenchmarkResult {
+                    prompt_tokens_per_second: prompt_tps,
+                    gen_tokens_per_second: gen_tps,
+                    time_to_first_token_ms: ttft_ms,
+                    verdict: verdict.to_string(),
+                    hints,
+                };
+            }
+        };
+
+        let suggestion = suggest_moe_tuning(model_size, vram, total_experts);
+        if suggestion.recommended_n_cpu_moe > 0 {
+            hints.push(format!(
+                "For MoE models, try increasing n_cpu_moe to {} within available VRAM.",
+                suggestion.recommended_n_cpu_moe
+            ));
+        }
     }
 
     BenchmarkResult {

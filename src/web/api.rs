@@ -2015,6 +2015,337 @@ fn api_llama_cpp_download(
         })
 }
 
+// ── Phase 2: POST /api/benchmark ─────────────────────────────────────────────
+
+fn api_benchmark(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "benchmark")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and_then(
+            move |auth: Option<String>,
+                  _body: serde_json::Value|
+                  {
+                let state = state.clone();
+                let cfg = app_config.clone();
+                async move {
+                    // Auth
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+
+                    // Ensure a server is running
+                    let running = match state.server_running.lock() {
+                        Ok(g) => *g,
+                        Err(_) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                Box::new(warp::reply::json(&serde_json::json!({
+                                    "error": "No llama-server is currently running."
+                                }))),
+                            );
+                        }
+                    };
+                    if !running {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({
+                                "error": "No llama-server is currently running."
+                            }))),
+                        );
+                    }
+
+                    // Build upstream URL
+                    let session = match state.get_active_session() {
+                        Some(s) => s,
+                        None => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                Box::new(warp::reply::json(&serde_json::json!({
+                                    "error": "No active session."
+                                }))),
+                            );
+                        }
+                    };
+                    let url = match &session.mode {
+                        crate::state::SessionMode::Spawn { port } => {
+                            format!("http://127.0.0.1:{port}/v1/chat/completions")
+                        }
+                        crate::state::SessionMode::Attach { endpoint, .. } => {
+                            format!("{endpoint}/v1/chat/completions")
+                        }
+                    };
+
+                    let prompt =
+                        "Explain in one sentence what llama.cpp is used for.";
+                    let max_tokens: u64 = 512;
+
+                    let payload = serde_json::json!({
+                        "model": "gpt-4",
+                        "prompt": prompt,
+                        "max_tokens": max_tokens,
+                        "temperature": 0.5,
+                    });
+
+                    let client = match reqwest::Client::builder()
+                        .timeout(Duration::from_secs(55))
+                        .build()
+                    {
+                        Ok(c) => c,
+                        Err(_) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                Box::new(warp::reply::json(&serde_json::json!({
+                                    "error": "Failed to create HTTP client."
+                                }))),
+                            );
+                        }
+                    };
+
+                    let result = tokio::time::timeout(
+                        Duration::from_secs(60),
+                        async {
+                            let start = std::time::Instant::now();
+                            let mut first_token_time = None;
+                            let mut buf = String::new();
+                            let mut generated_tokens = 0u64;
+                            let prompt_len = prompt.len() as f64;
+
+                            let resp = match client
+                                .post(&url)
+                                .header("Content-Type", "application/json")
+                                .json(&payload)
+                                .send()
+                                .await
+                            {
+                                Ok(r) => r,
+                                Err(_) => return None,
+                            };
+
+                            if !resp.status().is_success() {
+                                return None;
+                            }
+
+                            let mut stream = resp.bytes_stream();
+                            use futures_util::StreamExt;
+
+                            while let Some(Ok(chunk)) = stream.next().await {
+                                let s = match std::str::from_utf8(&chunk) {
+                                    Ok(s) => s.to_string(),
+                                    Err(_) => continue,
+                                };
+
+                                // Try to parse streaming tokens
+                                for line in s.lines() {
+                                    let trimmed = line.trim();
+                                    if let Some(data) = trimmed.strip_prefix("data: ") {
+                                        if data == "[DONE]" {
+                                            break;
+                                        }
+                                        if let Ok(v) =
+                                            serde_json::from_str::<serde_json::Value>(data)
+                                        {
+                                            // Attempt to read token count
+                                            if let Some(c) = v["usage"]["completion_tokens"]
+                                                .as_u64()
+                                            {
+                                                generated_tokens = c;
+                                            }
+                                            // Count tokens from content
+                                            if let Some(content) =
+                                                v["choices"][0]["delta"]["content"]
+                                                    .as_str()
+                                            {
+                                                if first_token_time.is_none() {
+                                                    first_token_time =
+                                                        Some(start.elapsed().as_millis() as f64);
+                                                }
+                                                generated_tokens =
+                                                    generated_tokens.saturating_add(
+                                                        content.chars().count() as u64 / 4,
+                                                    );
+                                            }
+                                        }
+                                    }
+                                }
+                                buf.push_str(&s);
+                            }
+
+                            let end = start.elapsed();
+                            let ttft_ms =
+                                first_token_time.unwrap_or(end.as_millis() as f64);
+                            let gen_dur_ms =
+                                end.as_millis() as f64 - ttft_ms;
+                            let gen_dur_s = gen_dur_ms.max(1.0) / 1000.0;
+
+                            // If we didn't get accurate token counts, approximate
+                            if generated_tokens == 0 {
+                                generated_tokens = buf.len() as u64 / 4;
+                            }
+
+                            let ttft_s = ttft_ms / 1000.0;
+                            let prompt_tps = if ttft_s > 0.0 {
+                                prompt_len / ttft_s
+                            } else {
+                                0.0
+                            };
+                            let gen_tps = if generated_tokens > 0 {
+                                (generated_tokens as f64) / gen_dur_s
+                            } else {
+                                0.0
+                            };
+
+                            Some((prompt_tps, gen_tps, ttft_ms))
+                        },
+                    )
+                    .await;
+
+                    match result {
+                        Ok(Some((prompt_tps, gen_tps, ttft_ms))) => {
+                            let benchmark =
+                                crate::llama::spawn_wizard::run_benchmark(
+                                    prompt_tps,
+                                    gen_tps,
+                                    ttft_ms,
+                                    None,
+                                    None,
+                                    0,
+                                );
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                Box::new(warp::reply::json(&serde_json::json!({
+                                    "prompt_tokens_per_second": (benchmark.prompt_tokens_per_second * 100.0).round() / 100.0,
+                                    "gen_tokens_per_second": (benchmark.gen_tokens_per_second * 100.0).round() / 100.0,
+                                    "time_to_first_token_ms": (benchmark.time_to_first_token_ms * 100.0).round() / 100.0,
+                                    "verdict": benchmark.verdict,
+                                    "hints": benchmark.hints,
+                                }))),
+                            )
+                        }
+                        _ => {
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                Box::new(warp::reply::json(&serde_json::json!({
+                                    "error": "Benchmark timed out or failed."
+                                }))),
+                            )
+                        }
+                    }
+                }
+            },
+        )
+}
+
+// ── Phase 2: POST /api/model-defaults ────────────────────────────────────────
+
+fn api_model_defaults(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "model-defaults")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and_then(
+            move |auth: Option<String>,
+                  body: serde_json::Value|
+                  {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+
+                    let name_or_repo = body["model_name_or_repo"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_string();
+                    let size_bytes = body["size_bytes"]
+                        .as_u64()
+                        .unwrap_or(0);
+                    let tags: Vec<String> = body["tags"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    if name_or_repo.is_empty() {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({
+                                "error": "Missing 'model_name_or_repo'."
+                            }))),
+                        );
+                    }
+
+                    let defaults = crate::llama::model_defaults::get_model_defaults(
+                        &name_or_repo,
+                        size_bytes,
+                        &tags,
+                    );
+
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({
+                            "temperature": defaults.temperature,
+                            "top_p": defaults.top_p,
+                            "top_k": defaults.top_k,
+                            "min_p": defaults.min_p,
+                            "repeat_penalty": defaults.repeat_penalty,
+                            "max_tokens": defaults.max_tokens,
+                        }))),
+                    )
+                }
+            },
+        )
+}
+
+// ── Phase 2: POST /api/moe-tune ──────────────────────────────────────────────
+
+fn api_moe_tune(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "moe-tune")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and_then(
+            move |auth: Option<String>,
+                  body: serde_json::Value|
+                  {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+
+                    let model_size_bytes = body["model_size_bytes"]
+                        .as_u64()
+                        .unwrap_or(0);
+                    let available_vram_bytes = body["available_vram_bytes"]
+                        .as_u64()
+                        .unwrap_or(0);
+                    let total_experts: u64 = body["total_experts"]
+                        .as_u64()
+                        .unwrap_or(8);
+
+                    let suggestion =
+                        crate::llama::spawn_wizard::suggest_moe_tuning(
+                            model_size_bytes,
+                            available_vram_bytes,
+                            total_experts,
+                        );
+
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({
+                            "recommended_n_cpu_moe": suggestion.recommended_n_cpu_moe,
+                            "note": suggestion.note,
+                        }))),
+                    )
+                }
+            },
+        )
+}
+
 pub fn api_routes(
     state: AppState,
     app_config: Arc<AppConfig>,
@@ -2107,7 +2438,7 @@ pub fn api_routes(
     let sensor_bridge_install = api_sensor_bridge_install(app_config.clone());
     let sensor_bridge_uninstall = api_sensor_bridge_uninstall(app_config.clone());
 
-    // Phase 0: Spawn Llama-Server v2 routes
+    // Phase 0/2: Spawn Llama-Server v2 routes
     let spawn_wizard_import =
         api_spawn_wizard_import_launch_file(state.clone(), app_config.clone());
     let chat_template_fetch = api_chat_template_fetch(state.clone(), app_config.clone());
@@ -2118,6 +2449,10 @@ pub fn api_routes(
     let models_download_cancel = api_models_download_cancel(state.clone(), app_config.clone());
     let llama_cpp_releases = api_llama_cpp_releases(state.clone(), app_config.clone());
     let llama_cpp_download = api_llama_cpp_download(state.clone(), app_config.clone());
+    let benchmark_route = api_benchmark(state.clone(), app_config.clone());
+    let model_defaults_route =
+        api_model_defaults(state.clone(), app_config.clone());
+    let moe_tune_route = api_moe_tune(state.clone(), app_config.clone());
 
     // Group routes to avoid compiler overflow on long .or() chains
     let server_routes = start.or(stop).or(kill_llama).or(attach).or(detach);
@@ -2211,7 +2546,7 @@ pub fn api_routes(
         .or(api_remote_agent_update(app_config.clone()))
         .or(api_remote_agent_stop(app_config.clone()));
 
-    // Phase 0: Spawn Llama-Server v2 route group
+    // Phase 0/2: Spawn Llama-Server v2 route group
     let phase0_routes = spawn_wizard_import
         .or(chat_template_fetch)
         .or(chat_template_upload)
@@ -2220,7 +2555,10 @@ pub fn api_routes(
         .or(models_download_status)
         .or(models_download_cancel)
         .or(llama_cpp_releases)
-        .or(llama_cpp_download);
+        .or(llama_cpp_download)
+        .or(benchmark_route)
+        .or(model_defaults_route)
+        .or(moe_tune_route);
 
     server_routes
         .or(preset_routes)
