@@ -50,16 +50,7 @@ pub fn get_model_defaults(name_or_repo: &str, _size_bytes: u64, tags: &[String])
 
     let mut d = ModelDefaults::default();
 
-    // Code models: lower temperature for deterministic output.
-    if is_code {
-        d.temperature = 0.2;
-        d.top_p = 0.9;
-        d.top_k = 20;
-        d.min_p = 0.05;
-        d.repeat_penalty = 1.1;
-    }
-
-    // Family-specific tweaks
+    // Family-specific tweaks (applied first)
     if lower.contains("llama") || lower.contains("meta-llama") {
         d.temperature = 0.7;
         d.top_p = 0.9;
@@ -90,6 +81,15 @@ pub fn get_model_defaults(name_or_repo: &str, _size_bytes: u64, tags: &[String])
         d.top_k = 40;
         d.min_p = 0.05;
         d.repeat_penalty = 1.0;
+    }
+
+    // Code models: lower temperature for deterministic output (applied after family tweaks).
+    if is_code {
+        d.temperature = 0.2;
+        d.top_p = 0.9;
+        d.top_k = 20;
+        d.min_p = 0.05;
+        d.repeat_penalty = 1.1;
     }
 
     // MoE: slightly higher max_tokens.
