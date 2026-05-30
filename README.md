@@ -62,7 +62,16 @@ Token-protected endpoints for API access, database administration, and remote ag
 **Monitoring reference**: [Dashboard Capabilities](docs/reference/dashboard.md)  
 **Remote telemetry setup**: [Remote Agent](docs/reference/remote-agent.md)  
 **Chat and guided generation**: [Chat](docs/reference/chat.md)  
-**TLS / ACME / mTLS**: [TLS Architecture](docs/reference/tls-architecture.md)
+**TLS / ACME / mTLS**: [TLS Architecture](docs/reference/tls-architecture.md)  
+**Spawn Llama-Server V2**: [Spawn Wizard](docs/reference/spawn-wizard.md)
+
+## Recent (Spawn Llama-Server V2)
+
+- Spawn Llama-Server V2 wizard: guided profile selection, model source (local, HF, third-party), hardware tuning, summary, and launch.
+- HuggingFace integration: search models, list GGUF files, start downloads with resume support.
+- Third-party model import: scan Ollama / LM Studio / common directories for existing GGUF files.
+- Model introspection: read model metadata via llama-server; cache results to avoid repeated scans.
+- Hardening: rate limiting on HF search and downloads, path traversal guards, keyboard accessibility, reduced-motion support.
 
 ## Supported Hardware
 

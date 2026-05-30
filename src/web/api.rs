@@ -2243,59 +2243,53 @@ fn api_model_defaults(
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json::<serde_json::Value>())
-        .and_then(
-            move |auth: Option<String>,
-                  body: serde_json::Value|
-                  {
-                let cfg = app_config.clone();
-                async move {
-                    if !check_api_token(&auth, &cfg) {
-                        return Ok(unauthorized_api_token());
-                    }
-
-                    let name_or_repo = body["model_name_or_repo"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_string();
-                    let size_bytes = body["size_bytes"]
-                        .as_u64()
-                        .unwrap_or(0);
-                    let tags: Vec<String> = body["tags"]
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| v.as_str().map(String::from))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-
-                    if name_or_repo.is_empty() {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                            Box::new(warp::reply::json(&serde_json::json!({
-                                "error": "Missing 'model_name_or_repo'."
-                            }))),
-                        );
-                    }
-
-                    let defaults = crate::llama::model_defaults::get_model_defaults(
-                        &name_or_repo,
-                        size_bytes,
-                        &tags,
-                    );
-
-                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({
-                            "temperature": defaults.temperature,
-                            "top_p": defaults.top_p,
-                            "top_k": defaults.top_k,
-                            "min_p": defaults.min_p,
-                            "repeat_penalty": defaults.repeat_penalty,
-                            "max_tokens": defaults.max_tokens,
-                        }))),
-                    )
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
                 }
-            },
-        )
+
+                let name_or_repo = body["model_name_or_repo"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+                let size_bytes = body["size_bytes"].as_u64().unwrap_or(0);
+                let tags: Vec<String> = body["tags"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                if name_or_repo.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "error": "Missing 'model_name_or_repo'."
+                        })),
+                    ));
+                }
+
+                let defaults = crate::llama::model_defaults::get_model_defaults(
+                    &name_or_repo,
+                    size_bytes,
+                    &tags,
+                );
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "temperature": defaults.temperature,
+                        "top_p": defaults.top_p,
+                        "top_k": defaults.top_k,
+                        "min_p": defaults.min_p,
+                        "repeat_penalty": defaults.repeat_penalty,
+                        "max_tokens": defaults.max_tokens,
+                    }),
+                )))
+            }
+        })
 }
 
 // ── Phase 2: POST /api/moe-tune ──────────────────────────────────────────────
@@ -2308,50 +2302,44 @@ fn api_moe_tune(
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::body::json::<serde_json::Value>())
-        .and_then(
-            move |auth: Option<String>,
-                  body: serde_json::Value|
-                  {
-                let cfg = app_config.clone();
-                async move {
-                    if !check_api_token(&auth, &cfg) {
-                        return Ok(unauthorized_api_token());
-                    }
-
-                    let model_size_bytes = body["model_size_bytes"]
-                        .as_u64()
-                        .unwrap_or(0);
-                    let available_vram_bytes = body["available_vram_bytes"]
-                        .as_u64()
-                        .unwrap_or(0);
-                    let total_experts: u64 = body["total_experts"]
-                        .as_u64()
-                        .unwrap_or(8);
-
-                    let suggestion =
-                        crate::llama::spawn_wizard::suggest_moe_tuning(
-                            model_size_bytes,
-                            available_vram_bytes,
-                            total_experts,
-                        );
-
-                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({
-                            "recommended_n_cpu_moe": suggestion.recommended_n_cpu_moe,
-                            "note": suggestion.note,
-                        }))),
-                    )
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
                 }
-            },
-        )
+
+                let model_size_bytes = body["model_size_bytes"].as_u64().unwrap_or(0);
+                let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
+                let total_experts: u64 = body["total_experts"].as_u64().unwrap_or(8);
+
+                let suggestion = crate::llama::spawn_wizard::suggest_moe_tuning(
+                    model_size_bytes,
+                    available_vram_bytes,
+                    total_experts,
+                );
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "recommended_n_cpu_moe": suggestion.recommended_n_cpu_moe,
+                        "note": suggestion.note,
+                    }),
+                )))
+            }
+        })
 }
 
-// ── P3.1: HF Search ──────────────────────────────────────────────────────────
+// ── P3.1: HF Search (with rate limiting) ─────────────────────────────────────
+// Rate limit: 10 requests per 60 seconds (global; per-instance).
 
 fn api_hf_search(
     _state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static HF_SEARCH_START: AtomicU64 = AtomicU64::new(0);
+    static HF_SEARCH_COUNT: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "hf" / "search")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
@@ -2361,6 +2349,32 @@ fn api_hf_search(
             async move {
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
+                }
+
+                let now = std::time::SystemTime::UNIX_EPOCH
+                    .elapsed()
+                    .unwrap_or_default()
+                    .as_secs();
+
+                let window_start = HF_SEARCH_START.load(Ordering::Relaxed);
+                let count = HF_SEARCH_COUNT.load(Ordering::Relaxed);
+
+                if now.saturating_sub(window_start) >= 60 {
+                    // New window
+                    HF_SEARCH_START.store(now, Ordering::Relaxed);
+                    HF_SEARCH_COUNT.store(1, Ordering::Relaxed);
+                } else if count >= 10 {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Rate limited: too many HF search requests. Try again in 60 seconds."
+                            })),
+                            StatusCode::TOO_MANY_REQUESTS,
+                        )),
+                    );
+                } else {
+                    HF_SEARCH_COUNT.fetch_add(1, Ordering::Relaxed);
                 }
 
                 let query = body["query"]
@@ -2414,44 +2428,45 @@ fn api_hf_files(
                     return Ok(unauthorized_api_token());
                 }
 
-                let repo_id = body["repo_id"]
-                    .as_str()
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
+                let repo_id = body["repo_id"].as_str().unwrap_or("").trim().to_string();
                 if repo_id.is_empty() {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
                             "ok": false,
                             "error": "Missing 'repo_id' field"
-                        }))),
-                    );
+                        })),
+                    ));
                 }
 
                 match crate::hf::hf_list_gguf_files(&repo_id).await {
-                    Ok(files) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({
+                    Ok(files) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
                             "ok": true,
                             "files": files
-                        }))),
-                    ),
-                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({
+                        })),
+                    )),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
                             "ok": false,
                             "error": e
-                        }))),
-                    ),
+                        })),
+                    )),
                 }
             }
         })
 }
 
-// ── P3.1: HF Download ────────────────────────────────────────────────────────
+// ── P3.1: HF Download (with concurrency + cooldown) ──────────────────────────
+// - Max 5 concurrent downloads.
+// - 10-second cooldown between download starts.
 
 fn api_hf_download(
     _state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static HF_DOWNLOAD_LAST_START: AtomicU64 = AtomicU64::new(0);
+
     warp::path!("api" / "hf" / "download")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
@@ -2463,27 +2478,38 @@ fn api_hf_download(
                     return Ok(unauthorized_api_token());
                 }
 
-                let repo_id = body["repo_id"]
-                    .as_str()
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
-                let file_path = body["file_path"]
-                    .as_str()
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
+                // Cooldown between starts: 10 seconds.
+                let now = std::time::SystemTime::UNIX_EPOCH
+                    .elapsed()
+                    .unwrap_or_default()
+                    .as_secs();
+                let last = HF_DOWNLOAD_LAST_START.load(Ordering::Relaxed);
+                if now.saturating_sub(last) < 10 {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Too soon; please wait 10 seconds between downloads."
+                            })),
+                            StatusCode::TOO_MANY_REQUESTS,
+                        ),
+                    ));
+                }
+                HF_DOWNLOAD_LAST_START.store(now, Ordering::Relaxed);
+
+                let repo_id = body["repo_id"].as_str().unwrap_or("").trim().to_string();
+                let file_path = body["file_path"].as_str().unwrap_or("").trim().to_string();
                 let target_path: Option<String> =
                     body["target_path"].as_str().map(|s| s.trim().to_string());
                 let resume: bool = body["resume"].as_bool().unwrap_or(false);
 
                 if repo_id.is_empty() || file_path.is_empty() {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
                             "ok": false,
                             "error": "Missing 'repo_id' or 'file_path'"
-                        }))),
-                    );
+                        })),
+                    ));
                 }
 
                 // Path traversal guard: reject "..", leading "/", leading "\\"
@@ -2491,28 +2517,30 @@ fn api_hf_download(
                     || file_path.starts_with('/')
                     || file_path.starts_with("\\")
                 {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
                             "ok": false,
                             "error": "Invalid file_path: path traversal not allowed"
-                        }))),
-                    );
+                        })),
+                    ));
                 }
 
                 // Determine target directory.
-                let models_dir = cfg.models_dir.clone()
+                let models_dir = cfg
+                    .models_dir
+                    .clone()
                     .unwrap_or_else(|| cfg.default_models_dir.clone());
 
                 // If target_path is provided, validate it is within models_dir.
                 let target_dir = if let Some(ref tp) = target_path {
                     // Reject path traversal in target_path.
                     if tp.contains("..") || tp.starts_with("\\") {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                            Box::new(warp::reply::json(&serde_json::json!({
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
                                 "ok": false,
                                 "error": "Invalid target_path: path traversal not allowed"
-                            }))),
-                        );
+                            })),
+                        ));
                     }
 
                     let candidate = models_dir.join(tp);
@@ -2553,12 +2581,12 @@ fn api_hf_download(
                             "download_id": download_id
                         }))),
                     ),
-                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
                             "ok": false,
                             "error": e
-                        }))),
-                    ),
+                        })),
+                    )),
                 }
             }
         })
@@ -2581,12 +2609,10 @@ fn api_third_party_models(
                     return Ok(unauthorized_api_token());
                 }
 
-                let include_subdirs: bool =
-                    body["include_subdirs"].as_bool().unwrap_or(true);
+                let include_subdirs: bool = body["include_subdirs"].as_bool().unwrap_or(true);
 
                 let dirs = crate::llama::spawn_wizard::get_common_model_dirs();
-                let ggufs =
-                    crate::llama::spawn_wizard::find_gguf_in_dirs(&dirs, include_subdirs);
+                let ggufs = crate::llama::spawn_wizard::find_gguf_in_dirs(&dirs, include_subdirs);
 
                 let models: Vec<serde_json::Value> = ggufs
                     .into_iter()
@@ -2599,12 +2625,12 @@ fn api_third_party_models(
                     })
                     .collect();
 
-                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                    Box::new(warp::reply::json(&serde_json::json!({
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
                         "ok": true,
                         "models": models
-                    }))),
-                )
+                    }),
+                )))
             }
         })
 }
@@ -2626,28 +2652,24 @@ fn api_model_introspect(
                     return Ok(unauthorized_api_token());
                 }
 
-                let model_path = body["model_path"]
-                    .as_str()
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
+                let model_path = body["model_path"].as_str().unwrap_or("").trim().to_string();
                 if model_path.is_empty() {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
                             "ok": false,
                             "error": "Missing 'model_path' field"
-                        }))),
-                    );
+                        })),
+                    ));
                 }
 
                 let llama_server_path = cfg.llama_server_path.clone();
                 if llama_server_path.as_os_str().is_empty() {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
                             "ok": false,
                             "error": "llama_server_path is not configured"
-                        }))),
-                    );
+                        })),
+                    ));
                 }
 
                 // Timeout: 30 seconds.
@@ -2663,30 +2685,30 @@ fn api_model_introspect(
                 let metadata = match result {
                     Ok(Ok(meta)) => meta,
                     Ok(Err(e)) => {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                            Box::new(warp::reply::json(&serde_json::json!({
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
                                 "ok": false,
                                 "error": e
-                            }))),
-                        );
+                            })),
+                        ));
                     }
                     Err(_) => {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                            Box::new(warp::reply::json(&serde_json::json!({
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
                                 "ok": false,
                                 "error": "Introspection timed out (30s)"
-                            }))),
-                        );
+                            })),
+                        ));
                     }
                 };
 
-                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                    Box::new(warp::reply::json(&serde_json::json!({
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
                         "ok": true,
                         "metadata": metadata,
                         "cached": metadata.cached
-                    }))),
-                )
+                    }),
+                )))
             }
         })
 }
@@ -2795,18 +2817,15 @@ pub fn api_routes(
     let llama_cpp_releases = api_llama_cpp_releases(state.clone(), app_config.clone());
     let llama_cpp_download = api_llama_cpp_download(state.clone(), app_config.clone());
     let benchmark_route = api_benchmark(state.clone(), app_config.clone());
-    let model_defaults_route =
-        api_model_defaults(state.clone(), app_config.clone());
+    let model_defaults_route = api_model_defaults(state.clone(), app_config.clone());
     let moe_tune_route = api_moe_tune(state.clone(), app_config.clone());
 
     // Phase 3: HF search, files, download, third-party, introspect
     let hf_search_route = api_hf_search(state.clone(), app_config.clone());
     let hf_files_route = api_hf_files(state.clone(), app_config.clone());
     let hf_download_route = api_hf_download(state.clone(), app_config.clone());
-    let third_party_models_route =
-        api_third_party_models(state.clone(), app_config.clone());
-    let model_introspect_route =
-        api_model_introspect(state.clone(), app_config.clone());
+    let third_party_models_route = api_third_party_models(state.clone(), app_config.clone());
+    let model_introspect_route = api_model_introspect(state.clone(), app_config.clone());
 
     // Group routes to avoid compiler overflow on long .or() chains
     let server_routes = start.or(stop).or(kill_llama).or(attach).or(detach);

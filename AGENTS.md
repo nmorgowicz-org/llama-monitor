@@ -1075,3 +1075,46 @@ You MUST:
   - (Recommended) A quick test that sends partial/legacy JSON to ensure robustness.
 
 If any item is unclear or not satisfied, the agent MUST either add the missing protection or explicitly document the gap and rationale in the PR description.
+
+## Phase 4: Spawn Llama-Server V2 (Polish and Hardening)
+
+Phase 4 is complete. Key additions and constraints:
+
+### New Endpoints
+
+- POST /api/hf/search: Search HuggingFace models.
+  - Requires api-token.
+  - Rate limited: 10 requests per 60 seconds (per instance).
+- POST /api/hf/files: List GGUF files for a repo.
+  - Requires api-token.
+- POST /api/hf/download: Start a model download from HF.
+  - Requires api-token.
+  - Rate limited: 10-second cooldown between starts.
+  - Path traversal checks enforced.
+- POST /api/third-party-models: Scan for GGUF models in third-party tool directories.
+  - Requires api-token.
+- POST /api/model/introspect: Introspect a local model via llama-server.
+  - Requires api-token.
+  - Caches results in ~/.config/llama-monitor/model-cache/<sha256>.json.
+
+### New Modules
+
+- src/hf/mod.rs: HuggingFace Hub integration.
+  - hf_search_models, hf_list_gguf_files, hf_download_file_stream, hf_start_download.
+- src/llama/spawn_wizard.rs: Spawn wizard coordination.
+  - Third-party model import (get_common_model_dirs, find_gguf_in_dirs).
+  - Model introspection (introspect_model) with caching.
+
+### Security Rules (Phase 4)
+
+- All new endpoints enforce api-token via check_api_token.
+- No == on tokens; use constant-time comparison.
+- Path traversal: reject "..", leading "/", leading "\"; canonicalize and confirm within models_dir.
+- No full HF token in logs or error messages.
+- Rate limiting enforced on HF search and HF download.
+
+### UI / Accessibility
+
+- Reduced-motion: disable animations when prefers-reduced-motion is set.
+- Keyboard navigation: Tab, Enter, Escape supported.
+- No innerHTML with untrusted data; use textContent.

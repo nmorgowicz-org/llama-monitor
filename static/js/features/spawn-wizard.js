@@ -55,9 +55,17 @@ let dom = {};
 
 export function initSpawnWizard() {
     cacheDom();
+    applyReducedMotion();
     bindEvents();
     restoreProfile();
     applyProfileVisibility();
+}
+
+function applyReducedMotion() {
+    const prefersReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    if (prefersReduced?.matches) {
+        document.documentElement.classList.add('reduce-motion');
+    }
 }
 
 export function openSpawnWizard() {
@@ -147,6 +155,14 @@ function bindEvents() {
         if (e.target === dom.overlay) closeSpawnWizard();
     });
 
+    // Keyboard: Escape closes wizard
+    document.addEventListener('keydown', (e) => {
+        if (!dom.overlay?.classList.contains('open')) return;
+        if (e.key === 'Escape') {
+            closeSpawnWizard();
+        }
+    });
+
     // Back/Next
     dom.backBtn?.addEventListener('click', () => {
         if (wizardState.currentStep > 0) showStep(wizardState.currentStep - 1);
@@ -155,8 +171,10 @@ function bindEvents() {
         if (wizardState.currentStep < STEP_LABELS.length - 1) showStep(wizardState.currentStep + 1);
     });
 
-    // Profile cards
+    // Profile cards (click + Enter)
     dom.profileCards?.forEach(card => {
+        card.setAttribute('tabindex', '0');
+        card.setAttribute('role', 'button');
         card.addEventListener('click', () => {
             const profile = card.dataset.profile;
             wizardState.profile = profile;
@@ -165,16 +183,30 @@ function bindEvents() {
             persistProfile();
             applyProfileVisibility();
         });
+        card.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                card.click();
+            }
+        });
     });
 
-    // Model source cards
+    // Model source cards (click + Enter)
     dom.modelSourceCards?.forEach(card => {
+        card.setAttribute('tabindex', '0');
+        card.setAttribute('role', 'button');
         card.addEventListener('click', () => {
             const source = card.dataset.source;
             wizardState.model.source = source;
             dom.modelSourceCards.forEach(c => c.classList.remove('selected'));
             card.classList.add('selected');
             updateModelInputVisibility();
+        });
+        card.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                card.click();
+            }
         });
     });
 
@@ -534,7 +566,14 @@ async function hfSearchModels(query) {
             headers,
             body: JSON.stringify({ query, limit: 20 }),
         });
-        if (!resp.ok) return [];
+        if (!resp.ok) {
+            if (resp.status === 429) {
+                showToast('Too many search requests. Please wait.', 'warning');
+            } else if (resp.status === 401 || resp.status === 403) {
+                showToast('Authentication required to search models.', 'error');
+            }
+            return [];
+        }
         const data = await resp.json();
         return (data.models || []).filter(Boolean);
     } catch {

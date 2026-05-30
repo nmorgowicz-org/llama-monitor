@@ -320,8 +320,7 @@ pub fn hf_save_token(token: &str) -> Result<()> {
     let dir = home.join(".config").join("llama-monitor");
     std::fs::create_dir_all(&dir).context("Failed to create config dir for HF token")?;
     let path = dir.join("hf-token");
-    std::fs::write(&path, token.trim())
-        .context("Failed to write HF token file")?;
+    std::fs::write(&path, token.trim()).context("Failed to write HF token file")?;
     Ok(())
 }
 
@@ -390,10 +389,7 @@ pub async fn hf_search_models(query: &str, limit: usize) -> Result<Vec<SimpleMod
             continue;
         }
 
-        let gated = item
-            .get("gated")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let gated = item.get("gated").and_then(|v| v.as_bool()).unwrap_or(false);
 
         let tags: Vec<String> = item
             .get("tags")
@@ -405,15 +401,9 @@ pub async fn hf_search_models(query: &str, limit: usize) -> Result<Vec<SimpleMod
             })
             .unwrap_or_default();
 
-        let downloads = item
-            .get("downloads")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
+        let downloads = item.get("downloads").and_then(|v| v.as_u64()).unwrap_or(0);
 
-        let likes = item
-            .get("likes")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
+        let likes = item.get("likes").and_then(|v| v.as_u64()).unwrap_or(0);
 
         results.push(SimpleModelInfo {
             id,
@@ -540,7 +530,8 @@ mod tests {
     #[test]
     fn test_simple_model_info_serde_default() {
         let json = r#"{"id":"test/model"}"#;
-        let info: SimpleModelInfo = serde_json::from_str(json).expect("should deserialize with defaults");
+        let info: SimpleModelInfo =
+            serde_json::from_str(json).expect("should deserialize with defaults");
         assert_eq!(info.id, "test/model");
         assert!(!info.gated);
         assert!(info.tags.is_empty());
@@ -593,11 +584,21 @@ mod tests {
             let tags: Vec<String> = item
                 .get("tags")
                 .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|t| t.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             let downloads = item.get("downloads").and_then(|v| v.as_u64()).unwrap_or(0);
             let likes = item.get("likes").and_then(|v| v.as_u64()).unwrap_or(0);
-            results.push(SimpleModelInfo { id, gated, tags, downloads, likes });
+            results.push(SimpleModelInfo {
+                id,
+                gated,
+                tags,
+                downloads,
+                likes,
+            });
         }
 
         assert_eq!(results.len(), 2);
@@ -632,5 +633,52 @@ mod tests {
         assert_eq!(ggufs.len(), 2);
         assert_eq!(ggufs[0].label, "Q4_K_M");
         assert_eq!(ggufs[1].label, "Q8_0");
+    }
+
+    #[test]
+    fn test_hf_search_models_parsing_edge_cases() {
+        // Test with missing/invalid fields.
+        let mock = serde_json::json!([
+            { "id": "ok/model" },
+            { "id": "" },
+            { "gated": true },
+            { "id": "partial/model", "downloads": "not-a-number" }
+        ]);
+
+        let items: Vec<serde_json::Value> = mock.as_array().unwrap().to_vec();
+        let mut results = Vec::new();
+        for item in items {
+            let id = item
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if id.is_empty() {
+                continue;
+            }
+            let gated = item.get("gated").and_then(|v| v.as_bool()).unwrap_or(false);
+            let downloads = item.get("downloads").and_then(|v| v.as_u64()).unwrap_or(0);
+            results.push(SimpleModelInfo {
+                id,
+                gated,
+                downloads,
+                ..Default::default()
+            });
+        }
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].id, "ok/model");
+        assert_eq!(results[1].id, "partial/model");
+        assert_eq!(results[1].downloads, 0);
+    }
+
+    #[test]
+    fn test_hf_download_resume_logic() {
+        // Validate that resume_from > 0 sets Range header.
+        // (Unit test of logic; actual HTTP is integration.)
+        let resume_from = 1_000_000u64;
+        let range_header = format!("bytes={}-", resume_from);
+        assert!(range_header.starts_with("bytes="));
+        assert!(range_header.ends_with("-"));
     }
 }

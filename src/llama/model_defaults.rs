@@ -32,11 +32,7 @@ impl Default for ModelDefaults {
 /// - name_or_repo: model name or HuggingFace repo path.
 /// - size_bytes: model file size (used for MoE sizing hints).
 /// - tags: optional tags like "moe", "vision", "code".
-pub fn get_model_defaults(
-    name_or_repo: &str,
-    _size_bytes: u64,
-    tags: &[String],
-) -> ModelDefaults {
+pub fn get_model_defaults(name_or_repo: &str, _size_bytes: u64, tags: &[String]) -> ModelDefaults {
     let lower = name_or_repo.to_ascii_lowercase();
     let is_moe = tags.iter().any(|t| t.eq_ignore_ascii_case("moe"))
         || lower.contains("moe")

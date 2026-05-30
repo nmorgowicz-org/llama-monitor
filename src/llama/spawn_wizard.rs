@@ -110,22 +110,18 @@ pub fn run_benchmark(
 
     // Hints: generation throughput
     if gen_tps < 10.0 {
-        hints.push(
-            "Consider increasing GPU layers or reducing context size.".to_string()
-        );
+        hints.push("Consider increasing GPU layers or reducing context size.".to_string());
     }
 
     // Hints: latency
     if ttft_ms > 2000.0 {
-        hints.push(
-            "High latency; reduce context size or enable flash attention.".to_string()
-        );
+        hints.push("High latency; reduce context size or enable flash attention.".to_string());
     }
 
     // Hints: prompt throughput
     if prompt_tps < 500.0 {
         hints.push(
-            "Slow prompt processing; increase batch size or use a faster backend.".to_string()
+            "Slow prompt processing; increase batch size or use a faster backend.".to_string(),
         );
     }
 
@@ -135,7 +131,7 @@ pub fn run_benchmark(
             (Some(m), Some(v)) => (m, v),
             _ => {
                 hints.push(
-                    "For MoE models, try increasing n_cpu_moe within available VRAM.".to_string()
+                    "For MoE models, try increasing n_cpu_moe within available VRAM.".to_string(),
                 );
                 return BenchmarkResult {
                     prompt_tokens_per_second: prompt_tps,
@@ -279,9 +275,9 @@ pub fn find_gguf_in_dirs(dirs: &[PathBuf], include_subdirs: bool) -> Vec<PathBuf
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_file()
-                        && path.extension().is_some_and(|ext| {
-                            ext.eq_ignore_ascii_case("gguf")
-                        })
+                        && path
+                            .extension()
+                            .is_some_and(|ext| ext.eq_ignore_ascii_case("gguf"))
                     {
                         results.push(path);
                     }
@@ -308,9 +304,9 @@ fn walk_gguf(dir: &Path, depth: usize, max_depth: usize, out: &mut Vec<PathBuf>)
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_file()
-            && path.extension().is_some_and(|ext| {
-                ext.eq_ignore_ascii_case("gguf")
-            })
+            && path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("gguf"))
         {
             out.push(path);
         } else if path.is_dir() {
@@ -446,9 +442,11 @@ fn extract_int_after(prefix: &str, line: &str) -> Option<u32> {
 }
 
 fn model_cache_dir() -> Result<PathBuf, String> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| "Home directory not found".to_string())?;
-    let dir = home.join(".config").join("llama-monitor").join("model-cache");
+    let home = dirs::home_dir().ok_or_else(|| "Home directory not found".to_string())?;
+    let dir = home
+        .join(".config")
+        .join("llama-monitor")
+        .join("model-cache");
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("Failed to create model-cache dir: {}", e))?;
     Ok(dir)
@@ -469,10 +467,10 @@ fn load_model_cache(model_path: &str) -> Result<ModelMetadata, String> {
     if !path.exists() {
         return Err("No cache".to_string());
     }
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read cache: {}", e))?;
-    let meta: ModelMetadata = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse cache: {}", e))?;
+    let content =
+        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read cache: {}", e))?;
+    let meta: ModelMetadata =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse cache: {}", e))?;
     Ok(meta)
 }
 
@@ -480,8 +478,7 @@ fn save_model_cache(model_path: &str, meta: &ModelMetadata) -> Result<(), String
     let path = model_cache_path(model_path)?;
     let json = serde_json::to_string_pretty(meta)
         .map_err(|e| format!("Failed to serialize cache: {}", e))?;
-    std::fs::write(&path, &json)
-        .map_err(|e| format!("Failed to write cache: {}", e))?;
+    std::fs::write(&path, &json).map_err(|e| format!("Failed to write cache: {}", e))?;
     Ok(())
 }
 
@@ -511,8 +508,16 @@ mod tests {
 
         let ggufs = find_gguf_in_dirs(&[root.to_path_buf()], true);
         assert_eq!(ggufs.len(), 2);
-        assert!(ggufs.iter().any(|p| p.file_name().map_or(false, |n| n == "model.gguf")));
-        assert!(ggufs.iter().any(|p| p.file_name().map_or(false, |n| n == "model2.gguf")));
+        assert!(
+            ggufs
+                .iter()
+                .any(|p| p.file_name().map_or(false, |n| n == "model.gguf"))
+        );
+        assert!(
+            ggufs
+                .iter()
+                .any(|p| p.file_name().map_or(false, |n| n == "model2.gguf"))
+        );
     }
 
     #[test]
