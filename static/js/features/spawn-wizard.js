@@ -811,7 +811,7 @@ async function estimateVram() {
 
     try {
         const headers = window.authHeaders ? window.authHeaders() : {};
-        const resp = await fetch('/api/estimate-vram', {
+        const resp = await fetch('/api/vram/estimate', {
             method: 'POST',
             headers: { ...headers, 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),

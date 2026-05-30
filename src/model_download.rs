@@ -93,7 +93,10 @@ pub fn start_download(
 
     tokio::spawn(async move {
         let token = hf_token.as_deref();
-        let result = hf::hf_download_file_stream(&repo_id, &file_path, token, &local_path, 0).await;
+        let resume_from = local_path.metadata().ok().map(|m| m.len()).unwrap_or(0);
+        let result =
+            hf::hf_download_file_stream(&repo_id, &file_path, token, &local_path, resume_from)
+                .await;
 
         let mut t = task.lock().unwrap();
         match result {

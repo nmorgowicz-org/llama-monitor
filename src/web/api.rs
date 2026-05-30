@@ -1691,7 +1691,9 @@ fn api_models_download_start(
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
-                if !check_api_token(&auth, &cfg) {
+                if !check_db_admin_token(&auth, &cfg)
+                    && !check_api_token(&auth, &cfg)
+                {
                     return Ok(unauthorized_api_token());
                 }
 
@@ -1896,7 +1898,9 @@ fn api_llama_cpp_download(
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
-                if !check_api_token(&auth, &cfg) {
+                if !check_db_admin_token(&auth, &cfg)
+                    && !check_api_token(&auth, &cfg)
+                {
                     return Ok(unauthorized_api_token());
                 }
 
@@ -2015,6 +2019,62 @@ fn api_llama_cpp_download(
         })
 }
 
+// 10) GET /api/llama-cpp/download/:id/status
+fn api_llama_cpp_download_status(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "llama-cpp" / "download" / String / "status")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |download_id: String, auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let _ = download_id; // Currently synchronous; treat as completed.
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "download_id": download_id,
+                        "status": "completed",
+                        "message": "Download completed."
+                    }),
+                )))
+            }
+        })
+}
+
+// 11) POST /api/llama-cpp/download/:id/cancel
+fn api_llama_cpp_download_cancel(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "llama-cpp" / "download" / String / "cancel")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |download_id: String, auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let _ = download_id;
+                // Current implementation is synchronous; cancel is no-op after completion.
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "download_id": download_id,
+                        "message": "Download already completed; nothing to cancel."
+                    }),
+                )))
+            }
+        })
+}
+
 // ── Phase 2: POST /api/benchmark ─────────────────────────────────────────────
 
 fn api_benchmark(
@@ -2081,7 +2141,6 @@ fn api_benchmark(
                     let max_tokens: u64 = 512;
 
                     let payload = serde_json::json!({
-                        "model": "gpt-4",
                         "prompt": prompt,
                         "max_tokens": max_tokens,
                         "temperature": 0.5,
@@ -2816,6 +2875,10 @@ pub fn api_routes(
     let models_download_cancel = api_models_download_cancel(state.clone(), app_config.clone());
     let llama_cpp_releases = api_llama_cpp_releases(state.clone(), app_config.clone());
     let llama_cpp_download = api_llama_cpp_download(state.clone(), app_config.clone());
+    let llama_cpp_download_status =
+        api_llama_cpp_download_status(state.clone(), app_config.clone());
+    let llama_cpp_download_cancel =
+        api_llama_cpp_download_cancel(state.clone(), app_config.clone());
     let benchmark_route = api_benchmark(state.clone(), app_config.clone());
     let model_defaults_route = api_model_defaults(state.clone(), app_config.clone());
     let moe_tune_route = api_moe_tune(state.clone(), app_config.clone());
@@ -2929,6 +2992,8 @@ pub fn api_routes(
         .or(models_download_cancel)
         .or(llama_cpp_releases)
         .or(llama_cpp_download)
+        .or(llama_cpp_download_status)
+        .or(llama_cpp_download_cancel)
         .or(benchmark_route)
         .or(model_defaults_route)
         .or(moe_tune_route)

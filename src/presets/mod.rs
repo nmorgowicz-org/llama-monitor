@@ -91,6 +91,8 @@ pub struct ModelPreset {
     pub max_tokens: Option<u64>,
     #[serde(default)]
     pub api_key: Option<String>,
+    #[serde(default)]
+    pub benchmark_mode: bool,
 }
 
 pub fn next_id() -> String {
@@ -236,6 +238,7 @@ pub fn default_presets() -> Vec<ModelPreset> {
             cache_type_v: None,
             max_tokens: None,
             api_key: None,
+            benchmark_mode: false,
         },
         ModelPreset {
             id: "default-2".into(),
@@ -282,6 +285,7 @@ pub fn default_presets() -> Vec<ModelPreset> {
             cache_type_v: None,
             max_tokens: None,
             api_key: None,
+            benchmark_mode: false,
         },
         ModelPreset {
             id: "default-3".into(),
@@ -328,6 +332,7 @@ pub fn default_presets() -> Vec<ModelPreset> {
             cache_type_v: None,
             max_tokens: None,
             api_key: None,
+            benchmark_mode: false,
         },
         ModelPreset {
             id: "default-4".into(),
@@ -374,6 +379,7 @@ pub fn default_presets() -> Vec<ModelPreset> {
             cache_type_v: None,
             max_tokens: None,
             api_key: None,
+            benchmark_mode: false,
         },
     ]
 }

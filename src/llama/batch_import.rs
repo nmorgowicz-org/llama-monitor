@@ -364,6 +364,7 @@ fn build_preset_from_args(_binary_path: &str, args: &[String]) -> ModelPreset {
         cache_type_v: None,
         max_tokens: None,
         api_key: None,
+        benchmark_mode: false,
     }
 }
 
