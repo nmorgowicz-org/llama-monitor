@@ -400,6 +400,11 @@ What is missing (to be implemented):
     - Respect 429 responses and `RateLimit` headers.
     - Implement backoff.
     - Cache results where possible.
+  - MoE detection:
+    - Check model metadata for "moe" or "mixture_of_experts".
+    - If detected:
+      - Show: "This is a Mixture-of-Experts (MoE) model."
+      - Enable MoE tuning UI.
 
 ### A4. Model download: incremental, resumable, safe
 
@@ -439,23 +444,42 @@ What is missing (to be implemented):
     - Speculative decoding flags.
     - Multimodal (mmproj) size.
     - MoE expert offload settings.
+    - `available_vram_bytes` (from existing GPU monitoring).
   - Logic:
-    - `weights_memory` ≈ `model_size_bytes` (approx).
-    - `kv_cache_memory` ≈ f(context_size, kv_quant, parallel_slots).
-    - `speculative_overhead` ≈ small factor if enabled.
-    - `mmproj_memory` ≈ file size if present.
+    - `weights_memory` = `model_size_bytes`.
+    - `kv_cache_memory` = 2 * num_layers * num_heads * head_dim * kv_bytes_per_elem * context_size * parallel_slots.
+      - kv_bytes_per_elem:
+        - F16: 2.0
+        - F32: 4.0
+        - Q8_0: 1.0
+        - Q4_K: 0.5
+        - Q3_K: 0.375
+        - IQ4_XS: 0.5
+        - IQ2_XS: 0.25
+    - `speculative_overhead`:
+      - If draft model: `draft_model_size_bytes` + `kv_per_token * draft_max * parallel_slots`.
+      - If ngram-mod: `kv_per_token * draft_max * parallel_slots`.
+    - `mmproj_memory` = `mmproj_size_bytes * 1.02`.
     - MoE:
-      - Experts in VRAM vs RAM:
-        - `n_cpu_moe` experts stored in system memory (slower).
+      - `moe_gpu_memory` = `model_size_bytes * (moe_experts_total - n_cpu_moe) / moe_experts_total`.
+      - `moe_cpu_memory` = `model_size_bytes * n_cpu_moe / moe_experts_total`.
+      - Use `moe_gpu_memory` in VRAM estimate.
   - Output:
     - `estimated_vram_needed`.
     - `estimated_ram_needed`.
     - Recommendation:
-      - "Fit", "Tight", "Risk", "Won't fit".
+      - "Fit" (>= 1.2x available).
+      - "Tight" (1.0-1.2x).
+      - "Risk" (0.85-1.0x).
+      - "Won't fit" (< 0.85x).
   - API:
     - `POST /api/estimate-vram`:
       - Body: estimation input.
       - Response: structured estimate + human-readable note.
+  - Integration:
+    - Use existing GPU monitoring (`src/gpu/*`) for `available_vram_bytes`.
+    - If GPU query fails:
+      - Show: "Could not read GPU details; VRAM estimate is approximate."
 
 ### A6. Batch-file import: robust, cross-platform
 
@@ -523,6 +547,13 @@ What is missing (to be implemented):
     - File upload.
     - HuggingFace URL (direct file).
     - GitHub Gist / repo raw URL.
+  - Validation:
+    - Check for common markers: {{system}}, {{user}}, {{assistant}}, {{bos}}, {{eos}}.
+    - If present: "Template looks valid."
+    - If not: "No common template markers detected. It may still be valid, but check your template before using it."
+  - Auth failures:
+    - If 401/403:
+      - Show: "This file requires authentication. Ensure the repository is public or your HuggingFace/GitHub token is configured."
   - New API:
     - `POST /api/chat-template/fetch`:
       - Body: `{ source_type, source }`
@@ -547,8 +578,16 @@ What is missing (to be implemented):
         - Measures:
           - Time to first token.
           - Generation tokens/sec.
-          - Total tokens.
+          - Prompt tokens/sec.
+          - Total latency.
         - Uses existing metrics endpoints + timing.
+      - Methodology:
+        - Use a short, deterministic prompt (e.g., "Explain the difference between VRAM and system RAM in 50 words.").
+        - Limit: max_tokens <= 2048, timeout <= 60s.
+        - Interpret results:
+          - "Good": TTFT < 500ms, gen TPS > 30.
+          - "Moderate": TTFT 500-1500ms, gen TPS 10-30.
+          - "Poor": TTFT > 1500ms, gen TPS < 10.
   - Frontend:
     - "Run Health Check" button.
     - Results panel:
@@ -567,14 +606,24 @@ What is missing (to be implemented):
 - **Rationale:**
   - MoE models need expert offload tuning.
 - **Design:**
+  - MoE detection:
+    - Check model metadata for "moe" or "mixture_of_experts".
+    - If detected:
+      - Show: "This is a Mixture-of-Experts (MoE) model."
+      - Enable MoE tuning UI.
   - In spawn wizard:
-    - If model is detected as MoE (via name pattern or metadata):
+    - If model is detected as MoE:
       - Show:
         - "Experts to offload to CPU (--n-cpu-moe)"
         - Slider or input.
         - Guidance:
           - "Higher = more VRAM, faster. Lower = more CPU, slower."
-  - Integrate with VRAM estimator to show impact.
+  - Integration with VRAM estimator:
+    - Show live VRAM vs latency guidance.
+    - If n-cpu-moe is too low:
+      - Show: "Risk of OOM. Needs ~X GB VRAM; you have Y GB."
+    - If n-cpu-moe is too high:
+      - Show: "Most experts on CPU; expect slower generation."
 
 ### A11. Automated llama.cpp binary download
 
@@ -587,6 +636,19 @@ What is missing (to be implemented):
     - Query GitHub releases for llama.cpp.
     - Select assets based on platform, arch, backend.
     - Download and extract binaries.
+  - Backend detection:
+    - Use existing GPU monitoring (`src/gpu/*`).
+    - If NVIDIA GPU: recommend CUDA 13 (or CUDA 12 if drivers are older).
+    - If AMD GPU: recommend ROCm.
+    - If Intel GPU: recommend Vulkan or SYCL.
+    - If no GPU: recommend CPU.
+    - On macOS: recommend Metal.
+  - Companion DLLs:
+    - For Windows CUDA:
+      - Download both:
+        - Main binary.
+        - Companion `cudart-llama-*.zip`.
+      - Extract both to the same directory.
   - Workflow:
     - Detect:
       - OS (macOS/Windows/Linux).
@@ -597,10 +659,6 @@ What is missing (to be implemented):
       - Option: allow user to pick a specific tag.
     - Choose assets:
       - Use naming patterns (see "Release Asset Patterns" below).
-      - For Windows CUDA:
-        - Download both:
-          - Main binary.
-          - Companion `cudart-llama-*.zip`.
     - Extract:
       - `.zip` (Windows).
       - `.tar.gz` (macOS/Linux).
@@ -1365,41 +1423,101 @@ Style:
 
 ## API Design (New / Changed Endpoints)
 
+All new endpoints:
+- Use existing auth_guard.
+- Enforce rate limiting (200 req/s + burst 500).
+- Return structured errors:
+  - 400: { "error": "bad_request", "message": "..." }
+  - 401: { "error": "unauthorized", "message": "..." }
+  - 403: { "error": "forbidden", "message": "..." }
+  - 404: { "error": "not_found", "message": "..." }
+  - 429: { "error": "rate_limited", "message": "..." }
+  - 500: { "error": "internal_error", "message": "..." }
+
 - `POST /api/import-launch-file`
-  - Import and parse a launch file into a preset.
+  - Auth: api-token or session cookie.
+  - Rate limit: 20 req/min.
+  - Body: `{ content: string, os: "windows" | "macos" | "linux" }`
+  - Response: `{ preset: ModelPreset, warnings: [string] }`
 
 - `POST /api/chat-template/fetch`
-  - Fetch chat template from URL (HF/GitHub/Gist).
+  - Auth: api-token or session cookie.
+  - Rate limit: 10 req/min.
+  - Body: `{ source_type: "hf" | "github" | "gist", source: string }`
+  - Response: `{ template: string, source_url: string }`
+  - Errors:
+    - 400: invalid URL.
+    - 401: gated model (no token).
+    - 403: forbidden (private repo).
+    - 404: not found.
+    - 429: rate limited.
 
 - `POST /api/chat-template/upload`
-  - Upload a `.jinja` template file.
+  - Auth: api-token or session cookie.
+  - Rate limit: 10 req/min.
+  - Multipart with file.
+  - Response: `{ template_id, template }`
 
 - `POST /api/models/download`
-  - Start a model download from HF.
+  - Auth: api-token or session cookie.
+  - Rate limit: 5 req/min.
+  - Body: `{ repo_id, file_path, target_dir }`
+  - Response: `{ download_id }`
+  - Errors:
+    - 400: invalid repo_id or file_path.
+    - 401: gated model (no token).
+    - 403: forbidden.
+    - 404: not found.
+    - 429: rate limited.
 
 - `GET /api/models/download/:id/status`
-  - Get download progress.
+  - Auth: api-token or session cookie.
+  - Rate limit: 200 req/s.
+  - Response: `{ progress, bytes_downloaded, total, speed, eta, status }`
 
 - `POST /api/models/download/:id/cancel`
-  - Cancel a download.
+  - Auth: api-token or session cookie.
+  - Rate limit: 10 req/min.
 
 - `POST /api/estimate-vram`
-  - Estimate VRAM usage for a configuration.
+  - Auth: api-token or session cookie.
+  - Rate limit: 20 req/min.
+  - Body: estimation input.
+  - Response: structured estimate + human-readable note.
 
 - `POST /api/benchmark`
-  - Run a short benchmark on a running llama-server.
+  - Auth: api-token or session cookie.
+  - Rate limit: 2 req/min.
+  - Body: `{ prompt: string, max_tokens: usize, temperature: f32 }`
+  - Response: `{ ttft_ms, gen_tps, prompt_tps, verdict, suggestions: [string] }`
+  - Errors:
+    - 400: invalid prompt or max_tokens.
+    - 404: llama-server not running.
+    - 500: benchmark failed.
 
 - `GET /api/llama-cpp/releases`
-  - List recent llama.cpp releases.
+  - Auth: api-token or session cookie.
+  - Rate limit: 10 req/min.
+  - Response: `[ LlamaCppRelease ]`
 
 - `POST /api/llama-cpp/download`
-  - Start a llama.cpp binary download.
+  - Auth: api-token or session cookie.
+  - Rate limit: 2 req/min.
+  - Body: `{ release_tag, backend, arch }`
+  - Response: `{ download_id }`
+  - Errors:
+    - 400: invalid release_tag, backend, or arch.
+    - 404: not found.
+    - 429: rate limited.
 
 - `GET /api/llama-cpp/download/:id/status`
-  - Get download progress.
+  - Auth: api-token or session cookie.
+  - Rate limit: 200 req/s.
+  - Response: `{ progress, status, message }`
 
 - `POST /api/llama-cpp/download/:id/cancel`
-  - Cancel a download.
+  - Auth: api-token or session cookie.
+  - Rate limit: 10 req/min.
 
 - Extend:
   - `POST /api/start` and `POST /api/sessions/spawn`:
@@ -1528,6 +1646,46 @@ All with `#[serde(default)]` and safe defaults.
   - Auto-detect hardware and suggest a baseline config.
 - Export:
   - Allow exporting a preset as a launch script for the current OS.
+
+---
+
+## Security Guidelines
+
+- Token handling:
+  - HF token:
+    - Store in encrypted config file (AES-256-GCM).
+    - Load from env first, then from config.
+    - Never log or expose in API responses.
+  - API tokens:
+    - Use constant-time comparison.
+    - Rotate via dedicated endpoints.
+- Network requests:
+  - Enforce TLS for external endpoints.
+  - Limit redirect depth (<= 5).
+  - Block private ranges unless explicitly permitted.
+- File operations:
+  - Normalize all user-supplied paths.
+  - Restrict /api/browse to allowed roots.
+  - Use temp files for downloads, then move.
+- Secrets management:
+  - Use existing encrypt_value/decrypt_value for all new secrets.
+  - Keep encryption key in env or encrypted file.
+
+## Performance Guidelines
+
+- Large models:
+  - Provide VRAM estimates before spawning.
+  - Warn when estimated usage > 90% of available VRAM.
+- Slow networks:
+  - Use resumable downloads for large files.
+  - Respect 429 and RateLimit headers.
+- Low-end hardware:
+  - Limit llama-monitor's own resource usage.
+  - Suggest smaller quantizations when VRAM is low.
+- Optimization:
+  - Lazy-load heavy components.
+  - Cache model list in memory and on disk.
+  - Use Arc and shared state instead of duplicating large configs.
 
 ---
 
