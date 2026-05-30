@@ -50,6 +50,11 @@ pub struct ServerConfig {
     pub threads: Option<u32>,
     #[serde(default)]
     pub threads_batch: Option<u32>,
+    // Priority
+    #[serde(default)]
+    pub prio: Option<i32>,
+    #[serde(default)]
+    pub prio_batch: Option<i32>,
     // Rope scaling
     #[serde(default)]
     pub rope_scaling: String,
@@ -66,6 +71,76 @@ pub struct ServerConfig {
     pub draft_max: Option<u32>,
     #[serde(default)]
     pub spec_ngram_size: Option<u32>,
+    // Spec V2: full spec-type and per-type knobs
+    #[serde(default)]
+    pub spec_type: Option<String>,
+    #[serde(default)]
+    pub spec_default: bool,
+    #[serde(default)]
+    pub spec_draft_n_max: Option<u32>,
+    #[serde(default)]
+    pub spec_draft_n_min: Option<u32>,
+    #[serde(default)]
+    pub spec_draft_p_split: Option<f32>,
+    #[serde(default)]
+    pub spec_draft_p_min: Option<f32>,
+    #[serde(default)]
+    pub spec_draft_ngl: Option<i32>,
+    #[serde(default)]
+    pub spec_draft_device: Option<String>,
+    #[serde(default)]
+    pub spec_draft_cpu_moe: bool,
+    #[serde(default)]
+    pub spec_draft_n_cpu_moe: Option<i32>,
+    #[serde(default)]
+    pub spec_draft_type_k: Option<String>,
+    #[serde(default)]
+    pub spec_draft_type_v: Option<String>,
+    // ngram-mod knobs
+    #[serde(default)]
+    pub spec_ngram_mod_n_min: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_mod_n_max: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_mod_n_match: Option<u32>,
+    // ngram-simple knobs
+    #[serde(default)]
+    pub spec_ngram_simple_size_n: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_simple_size_m: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_simple_min_hits: Option<u32>,
+    // ngram-map-k knobs
+    #[serde(default)]
+    pub spec_ngram_map_k_size_n: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_map_k_size_m: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_map_k_min_hits: Option<u32>,
+    // ngram-map-k4v knobs
+    #[serde(default)]
+    pub spec_ngram_map_k4v_size_n: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_map_k4v_size_m: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_map_k4v_min_hits: Option<u32>,
+    // KV cache
+    #[serde(default)]
+    pub kv_unified: Option<bool>,
+    #[serde(default)]
+    pub cache_idle_slots: Option<bool>,
+    // Fit
+    #[serde(default)]
+    pub fit_enabled: Option<bool>,
+    #[serde(default)]
+    pub fit_ctx: Option<u32>,
+    #[serde(default)]
+    pub fit_target: Option<String>,
+    #[serde(default)]
+    pub fit_print: Option<bool>,
+    // Misc
+    #[serde(default)]
+    pub ignore_eos: bool,
     // Advanced
     #[serde(default)]
     pub seed: Option<i64>,
@@ -219,6 +294,14 @@ pub async fn start_server(
         cmd.arg("-tb").arg(tb.to_string());
     }
 
+    // Priority
+    if let Some(p) = config.prio {
+        cmd.arg("--prio").arg(p.to_string());
+    }
+    if let Some(pb) = config.prio_batch {
+        cmd.arg("--prio-batch").arg(pb.to_string());
+    }
+
     // Rope scaling: explicit config takes priority, else auto-YaRN for large contexts
     if !config.rope_scaling.is_empty() {
         cmd.arg("--rope-scaling").arg(&config.rope_scaling);
@@ -241,17 +324,115 @@ pub async fn start_server(
     }
 
     // Speculative decoding
-    if config.ngram_spec {
-        cmd.arg("--spec-type").arg("ngram-mod");
-        cmd.arg("--spec-ngram-size-n")
-            .arg(config.spec_ngram_size.unwrap_or(24).to_string());
-        cmd.arg("--draft-min")
-            .arg(config.draft_min.unwrap_or(8).to_string());
-        cmd.arg("--draft-max")
-            .arg(config.draft_max.unwrap_or(24).to_string());
+    // Backward compat: if old ngram_spec is true and no spec_type set, default to ngram-mod
+    let spec_type_effective = if config.spec_type.is_some() {
+        config.spec_type.clone()
+    } else if config.ngram_spec {
+        Some("ngram-mod".to_string())
+    } else {
+        None
+    };
+
+    if let Some(ref st) = spec_type_effective {
+        cmd.arg("--spec-type").arg(st);
     }
+
+    if config.spec_default {
+        cmd.arg("--spec-default");
+    }
+
+    // Draft model
     if !config.draft_model.is_empty() {
         cmd.arg("-md").arg(&config.draft_model);
+    }
+
+    // Draft tuning
+    if let Some(v) = config.spec_draft_n_max {
+        cmd.arg("--spec-draft-n-max").arg(v.to_string());
+    }
+    if let Some(v) = config.spec_draft_n_min {
+        cmd.arg("--spec-draft-n-min").arg(v.to_string());
+    }
+    if let Some(v) = config.spec_draft_p_split {
+        cmd.arg("--spec-draft-p-split").arg(format!("{:.4}", v));
+    }
+    if let Some(v) = config.spec_draft_p_min {
+        cmd.arg("--spec-draft-p-min").arg(format!("{:.4}", v));
+    }
+    if let Some(v) = config.spec_draft_ngl {
+        cmd.arg("--spec-draft-ngl").arg(v.to_string());
+    }
+    if let Some(ref v) = config.spec_draft_device {
+        cmd.arg("--spec-draft-device").arg(v);
+    }
+    if config.spec_draft_cpu_moe {
+        cmd.arg("--spec-draft-cpu-moe");
+    }
+    if let Some(v) = config.spec_draft_n_cpu_moe {
+        cmd.arg("--spec-draft-n-cpu-moe").arg(v.to_string());
+    }
+    if let Some(ref v) = config.spec_draft_type_k {
+        cmd.arg("--spec-draft-type-k").arg(v);
+    }
+    if let Some(ref v) = config.spec_draft_type_v {
+        cmd.arg("--spec-draft-type-v").arg(v);
+    }
+
+    // ngram-mod knobs
+    if let Some(v) = config.spec_ngram_mod_n_min {
+        cmd.arg("--spec-ngram-mod-n-min").arg(v.to_string());
+    }
+    if let Some(v) = config.spec_ngram_mod_n_max {
+        cmd.arg("--spec-ngram-mod-n-max").arg(v.to_string());
+    }
+    if let Some(v) = config.spec_ngram_mod_n_match {
+        cmd.arg("--spec-ngram-mod-n-match").arg(v.to_string());
+    }
+
+    // ngram-simple knobs
+    if let Some(v) = config.spec_ngram_simple_size_n {
+        cmd.arg("--spec-ngram-simple-size-n").arg(v.to_string());
+    }
+    if let Some(v) = config.spec_ngram_simple_size_m {
+        cmd.arg("--spec-ngram-simple-size-m").arg(v.to_string());
+    }
+    if let Some(v) = config.spec_ngram_simple_min_hits {
+        cmd.arg("--spec-ngram-simple-min-hits").arg(v.to_string());
+    }
+
+    // ngram-map-k knobs
+    if let Some(v) = config.spec_ngram_map_k_size_n {
+        cmd.arg("--spec-ngram-map-k-size-n").arg(v.to_string());
+    }
+    if let Some(v) = config.spec_ngram_map_k_size_m {
+        cmd.arg("--spec-ngram-map-k-size-m").arg(v.to_string());
+    }
+    if let Some(v) = config.spec_ngram_map_k_min_hits {
+        cmd.arg("--spec-ngram-map-k-min-hits").arg(v.to_string());
+    }
+
+    // ngram-map-k4v knobs
+    if let Some(v) = config.spec_ngram_map_k4v_size_n {
+        cmd.arg("--spec-ngram-map-k4v-size-n").arg(v.to_string());
+    }
+    if let Some(v) = config.spec_ngram_map_k4v_size_m {
+        cmd.arg("--spec-ngram-map-k4v-size-m").arg(v.to_string());
+    }
+    if let Some(v) = config.spec_ngram_map_k4v_min_hits {
+        cmd.arg("--spec-ngram-map-k4v-min-hits").arg(v.to_string());
+    }
+
+    // Legacy draft_min/draft_max (backward compat)
+    if config.ngram_spec {
+        if let Some(v) = config.spec_ngram_size {
+            cmd.arg("--spec-ngram-size-n").arg(v.to_string());
+        }
+        if let Some(v) = config.draft_min {
+            cmd.arg("--draft-min").arg(v.to_string());
+        }
+        if let Some(v) = config.draft_max {
+            cmd.arg("--draft-max").arg(v.to_string());
+        }
     }
 
     // Slots
@@ -326,6 +507,49 @@ pub async fn start_server(
         && !ak.is_empty()
     {
         cmd.arg("--api-key").arg(ak);
+    }
+
+    // KV cache
+    if let Some(v) = config.kv_unified {
+        if v {
+            cmd.arg("--kv-unified");
+        } else {
+            cmd.arg("--no-kv-unified");
+        }
+    }
+    if let Some(v) = config.cache_idle_slots {
+        if v {
+            cmd.arg("--cache-idle-slots");
+        } else {
+            cmd.arg("--no-cache-idle-slots");
+        }
+    }
+
+    // Fit
+    if let Some(v) = config.fit_enabled {
+        if v {
+            cmd.arg("--fit").arg("on");
+        } else {
+            cmd.arg("--fit").arg("off");
+        }
+    }
+    if let Some(v) = config.fit_ctx {
+        cmd.arg("--fit-ctx").arg(v.to_string());
+    }
+    if let Some(ref v) = config.fit_target {
+        cmd.arg("--fit-target").arg(v);
+    }
+    if let Some(v) = config.fit_print {
+        if v {
+            cmd.arg("--fit-print").arg("on");
+        } else {
+            cmd.arg("--fit-print").arg("off");
+        }
+    }
+
+    // Misc
+    if config.ignore_eos {
+        cmd.arg("--ignore-eos");
     }
 
     // Extra args (arbitrary flags)

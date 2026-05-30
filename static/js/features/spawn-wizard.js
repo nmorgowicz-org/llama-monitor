@@ -131,6 +131,11 @@ function cacheDom() {
     dom.moeNote = document.getElementById('spawn-moe-note');
     dom.vramEstimateText = document.getElementById('spawn-vram-estimate-text');
     dom.vramPill = document.getElementById('spawn-vram-pill');
+    dom.specTypeSelect = document.getElementById('spawn-spec-type');
+    dom.draftModelWrap = document.getElementById('spawn-draft-model-wrap');
+    dom.draftModelInput = document.getElementById('spawn-draft-model');
+    dom.kvUnifiedCheck = document.getElementById('spawn-kv-unified');
+    dom.ignoreEosCheck = document.getElementById('spawn-ignore-eos');
 
     // Step 4
     dom.summaryList = document.getElementById('spawn-summary-list');
@@ -256,6 +261,10 @@ function bindEvents() {
         dom.cacheTypeVSelect,
         dom.nCpuMoeInput,
         dom.tensorSplitInput,
+        dom.specTypeSelect,
+        dom.draftModelInput,
+        dom.kvUnifiedCheck,
+        dom.ignoreEosCheck,
     ].forEach(el => {
         el?.addEventListener('input', onHardwareChange);
         el?.addEventListener('change', onHardwareChange);
@@ -267,6 +276,14 @@ function bindEvents() {
         wizardState.hardware.gpuLayers = v;
         if (dom.gpuLayersManualWrap) {
             dom.gpuLayersManualWrap.style.display = v === 'manual' ? '' : 'none';
+        }
+    });
+
+    // Speculative decoding type
+    dom.specTypeSelect?.addEventListener('change', () => {
+        const v = dom.specTypeSelect.value;
+        if (dom.draftModelWrap) {
+            dom.draftModelWrap.style.display = v === 'draft-model' ? '' : 'none';
         }
     });
 
@@ -373,6 +390,26 @@ function updateRawScript() {
 
     if (hw.tensorSplit) {
         args.push('--tensor-split', hw.tensorSplit);
+    }
+
+    // Speculative decoding
+    const specType = dom.specTypeSelect?.value || '';
+    if (specType) {
+        args.push('--spec-type', specType);
+    }
+    if (specType === 'draft-model') {
+        const draftPath = (dom.draftModelInput?.value || '').trim();
+        if (draftPath) {
+            args.push('-md', draftPath);
+        }
+    }
+
+    // Runtime toggles
+    if (dom.kvUnifiedCheck?.checked) {
+        args.push('--kv-unified', '1');
+    }
+    if (dom.ignoreEosCheck?.checked) {
+        args.push('--ignore-eos');
     }
 
     const code = bin + ' ' + args.join(' ');
@@ -896,6 +933,28 @@ function renderSummary() {
             : (v.estimated ? formatBytes(v.estimated) : '—') },
     ];
 
+    // Add performance/runtime summary lines
+    const specType = dom.specTypeSelect?.value || '';
+    if (specType) {
+        const specLabels = {
+            'ngram-mod': 'N-gram (fast)',
+            'draft-model': 'Draft model',
+        };
+        rows.push({
+            label: 'Speculative decoding',
+            value: (specLabels[specType] || specType) +
+                (specType === 'draft-model' && dom.draftModelInput?.value
+                    ? ' (' + dom.draftModelInput.value.split('/').pop() + ')'
+                    : ''),
+        });
+    }
+    if (dom.kvUnifiedCheck?.checked) {
+        rows.push({ label: 'KV cache unified', value: 'Yes' });
+    }
+    if (dom.ignoreEosCheck?.checked) {
+        rows.push({ label: 'Ignore EOS', value: 'Yes' });
+    }
+
     rows.forEach(r => {
         const row = document.createElement('div');
         row.className = 'summary-row';
@@ -982,6 +1041,11 @@ function buildPresetPayload() {
         ctv: h.cacheTypeV || null,
         n_cpu_moe: h.nCpuMoe,
         tensor_split: h.tensorSplit || null,
+        // New performance/runtime fields
+        spec_type: (dom.specTypeSelect?.value || ''),
+        draft_model: (dom.draftModelInput?.value || '').trim() || null,
+        kv_unified: dom.kvUnifiedCheck?.checked || null,
+        ignore_eos: dom.ignoreEosCheck?.checked || null,
     };
 }
 
@@ -1125,6 +1189,11 @@ function buildSpawnPayload() {
         ctv: h.cacheTypeV || null,
         n_cpu_moe: h.nCpuMoe,
         tensor_split: h.tensorSplit || null,
+        // New performance/runtime fields
+        spec_type: (dom.specTypeSelect?.value || ''),
+        draft_model: (dom.draftModelInput?.value || '').trim() || null,
+        kv_unified: dom.kvUnifiedCheck?.checked || null,
+        ignore_eos: dom.ignoreEosCheck?.checked || null,
         profile: wizardState.profile,
     };
 }

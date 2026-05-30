@@ -2172,6 +2172,78 @@
                                 <div class="field-hint">For multi-GPU load distribution.</div>
                             </div>
                         </div>
+
+                        <!-- Performance (Spec + Fit) -->
+                        <div class="wizard-section-title" style="margin-top:14px;">Performance</div>
+                        <div class="hardware-grid">
+                            <div class="hardware-field">
+                                <label for="spawn-spec-type">Speculative decoding</label>
+                                <select id="spawn-spec-type">
+                                    <option value="">None</option>
+                                    <option value="ngram-mod">N-gram (fast)</option>
+                                    <option value="draft-model">Draft model</option>
+                                </select>
+                                <div class="field-hint">
+                                    N-gram: fast, no extra model. Draft model: best speed, requires a small model.
+                                </div>
+                            </div>
+                            <div class="hardware-field" id="spawn-draft-model-wrap" style="display:none;">
+                                <label for="spawn-draft-model">Draft model path</label>
+                                <input type="text" id="spawn-draft-model" placeholder="/path/to/draft-model.gguf">
+                            </div>
+                        </div>
+
+                        <!-- Advanced runtime toggles -->
+                        <details class="wizard-advanced-details">
+                            <summary>Advanced runtime options</summary>
+                            <div class="modal-row modal-checks" style="margin-top:6px;">
+                                <label class="chk" title="Use a single unified KV cache (can save memory on some setups).">
+                                    <input type="checkbox" id="spawn-kv-unified">
+                                    KV cache unified
+                                </label>
+                                <label class="chk" title="Allow generation past EOS tokens (useful for some roleplay models).">
+                                    <input type="checkbox" id="spawn-ignore-eos">
+                                    Ignore EOS
+                                </label>
+                            </div>
+                        </details>
+                    </div>
+                            <div class="hardware-field">
+                                <label for="spawn-ubatch-size">Ubatch size</label>
+                                <input type="number" id="spawn-ubatch-size" min="1" value="512">
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-parallel-slots">Parallel slots</label>
+                                <input type="number" id="spawn-parallel-slots" min="1" value="1">
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-cache-type-k">KV cache K type</label>
+                                <select id="spawn-cache-type-k">
+                                    <option value="">Default</option>
+                                    <option value="q8_0">q8_0</option>
+                                    <option value="q4_0">q4_0</option>
+                                </select>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-cache-type-v">KV cache V type</label>
+                                <select id="spawn-cache-type-v">
+                                    <option value="">Default</option>
+                                    <option value="f16">f16</option>
+                                    <option value="q8_0">q8_0</option>
+                                    <option value="q4_0">q4_0</option>
+                                </select>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-n-cpu-moe">MoE CPU experts (n_cpu_moe)</label>
+                                <input type="number" id="spawn-n-cpu-moe" min="0" placeholder="Auto">
+                                <div class="field-hint">Higher = more VRAM, faster. Lower = more CPU, slower.</div>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-tensor-split">Tensor split</label>
+                                <input type="text" id="spawn-tensor-split" placeholder="e.g. 1,1">
+                                <div class="field-hint">For multi-GPU load distribution.</div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- VRAM status -->

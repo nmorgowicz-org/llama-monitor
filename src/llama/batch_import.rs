@@ -192,6 +192,44 @@ fn build_preset_from_args(_binary_path: &str, args: &[String]) -> ModelPreset {
     let mut min_p: Option<f64> = None;
     let mut repeat_penalty: Option<f64> = None;
     let mut n_cpu_moe: Option<i32> = None;
+    // Spec V2
+    let mut spec_type: Option<String> = None;
+    let mut spec_default = false;
+    let draft_model = String::new();
+    let mut spec_draft_n_max: Option<u32> = None;
+    let mut spec_draft_n_min: Option<u32> = None;
+    let mut spec_draft_p_split: Option<f32> = None;
+    let mut spec_draft_p_min: Option<f32> = None;
+    let mut spec_draft_ngl: Option<i32> = None;
+    let mut spec_draft_device: Option<String> = None;
+    let mut spec_draft_cpu_moe = false;
+    let mut spec_draft_n_cpu_moe: Option<i32> = None;
+    let mut spec_draft_type_k: Option<String> = None;
+    let mut spec_draft_type_v: Option<String> = None;
+    let mut spec_ngram_mod_n_min: Option<u32> = None;
+    let mut spec_ngram_mod_n_max: Option<u32> = None;
+    let mut spec_ngram_mod_n_match: Option<u32> = None;
+    let mut spec_ngram_simple_size_n: Option<u32> = None;
+    let mut spec_ngram_simple_size_m: Option<u32> = None;
+    let mut spec_ngram_simple_min_hits: Option<u32> = None;
+    let mut spec_ngram_map_k_size_n: Option<u32> = None;
+    let mut spec_ngram_map_k_size_m: Option<u32> = None;
+    let mut spec_ngram_map_k_min_hits: Option<u32> = None;
+    let mut spec_ngram_map_k4v_size_n: Option<u32> = None;
+    let mut spec_ngram_map_k4v_size_m: Option<u32> = None;
+    let mut spec_ngram_map_k4v_min_hits: Option<u32> = None;
+    // KV cache
+    let mut kv_unified: Option<bool> = None;
+    let mut cache_idle_slots: Option<bool> = None;
+    // Fit
+    let mut fit_enabled: Option<bool> = None;
+    let mut fit_ctx: Option<u32> = None;
+    let mut fit_target: Option<String> = None;
+    let mut fit_print: Option<bool> = None;
+    // Misc
+    let mut ignore_eos = false;
+    let mut prio: Option<i32> = None;
+    let mut prio_batch: Option<i32> = None;
     let mut extra_args = String::new();
 
     let mut i = 0;
@@ -230,7 +268,227 @@ fn build_preset_from_args(_binary_path: &str, args: &[String]) -> ModelPreset {
             }
             "--spec-type" => {
                 if i + 1 < args.len() {
-                    ngram_spec = args[i + 1].contains("ngram");
+                    let v = args[i + 1].clone();
+                    spec_type = Some(v.clone());
+                    ngram_spec = v.contains("ngram");
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-default" => {
+                spec_default = true;
+                i += 1;
+                continue;
+            }
+            "--spec-draft-n-max" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_draft_n_max = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-draft-n-min" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_draft_n_min = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-draft-p-split" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<f32>().map(|v| { spec_draft_p_split = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-draft-p-min" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<f32>().map(|v| { spec_draft_p_min = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-draft-ngl" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<i32>().map(|v| { spec_draft_ngl = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-draft-device" => {
+                if i + 1 < args.len() {
+                    spec_draft_device = Some(args[i + 1].clone());
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-draft-cpu-moe" => {
+                spec_draft_cpu_moe = true;
+                i += 1;
+                continue;
+            }
+            "--spec-draft-n-cpu-moe" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<i32>().map(|v| { spec_draft_n_cpu_moe = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-draft-type-k" => {
+                if i + 1 < args.len() {
+                    spec_draft_type_k = Some(args[i + 1].clone());
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-draft-type-v" => {
+                if i + 1 < args.len() {
+                    spec_draft_type_v = Some(args[i + 1].clone());
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-ngram-mod-n-min" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_mod_n_min = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-ngram-mod-n-max" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_mod_n_max = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-ngram-mod-n-match" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_mod_n_match = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-ngram-simple-size-n" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_simple_size_n = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-ngram-simple-size-m" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_simple_size_m = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-ngram-simple-min-hits" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_simple_min_hits = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-ngram-map-k-size-n" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_map_k_size_n = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-ngram-map-k-size-m" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_map_k_size_m = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-ngram-map-k-min-hits" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_map_k_min_hits = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-ngram-map-k4v-size-n" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_map_k4v_size_n = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-ngram-map-k4v-size-m" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_map_k4v_size_m = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--spec-ngram-map-k4v-min-hits" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_map_k4v_min_hits = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--kv-unified" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<bool>().map(|v| { kv_unified = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--cache-idle-slots" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<bool>().map(|v| { cache_idle_slots = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--fit-enabled" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<bool>().map(|v| { fit_enabled = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--fit-ctx" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<u32>().map(|v| { fit_ctx = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--fit-target" => {
+                if i + 1 < args.len() {
+                    fit_target = Some(args[i + 1].clone());
+                    i += 2;
+                    continue;
+                }
+            }
+            "--fit-print" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<bool>().map(|v| { fit_print = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--ignore-eos" => {
+                ignore_eos = true;
+                i += 1;
+                continue;
+            }
+            "--prio" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<i32>().map(|v| { prio = Some(v); });
+                    i += 2;
+                    continue;
+                }
+            }
+            "--prio-batch" => {
+                if i + 1 < args.len() {
+                    let _ = args[i + 1].parse::<i32>().map(|v| { prio_batch = Some(v); });
                     i += 2;
                     continue;
                 }
@@ -345,13 +603,46 @@ fn build_preset_from_args(_binary_path: &str, args: &[String]) -> ModelPreset {
         main_gpu: None,
         threads: None,
         threads_batch: None,
+        prio: None,
+        prio_batch: None,
         rope_scaling: String::new(),
         rope_freq_base: None,
         rope_freq_scale: None,
-        draft_model: String::new(),
+        draft_model,
         draft_min: None,
         draft_max: None,
         spec_ngram_size: None,
+        spec_type,
+        spec_default,
+        spec_draft_n_max,
+        spec_draft_n_min,
+        spec_draft_p_split,
+        spec_draft_p_min,
+        spec_draft_ngl,
+        spec_draft_device,
+        spec_draft_cpu_moe,
+        spec_draft_n_cpu_moe,
+        spec_draft_type_k,
+        spec_draft_type_v,
+        spec_ngram_mod_n_min,
+        spec_ngram_mod_n_max,
+        spec_ngram_mod_n_match,
+        spec_ngram_simple_size_n,
+        spec_ngram_simple_size_m,
+        spec_ngram_simple_min_hits,
+        spec_ngram_map_k_size_n,
+        spec_ngram_map_k_size_m,
+        spec_ngram_map_k_min_hits,
+        spec_ngram_map_k4v_size_n,
+        spec_ngram_map_k4v_size_m,
+        spec_ngram_map_k4v_min_hits,
+        kv_unified,
+        cache_idle_slots,
+        fit_enabled,
+        fit_ctx,
+        fit_target,
+        fit_print,
+        ignore_eos,
         seed: None,
         system_prompt_file: String::new(),
         extra_args: extra_args.trim().to_string(),

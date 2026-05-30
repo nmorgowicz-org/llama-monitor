@@ -48,6 +48,11 @@ pub struct ModelPreset {
     pub threads: Option<u32>,
     #[serde(default)]
     pub threads_batch: Option<u32>,
+    // Priority
+    #[serde(default)]
+    pub prio: Option<i32>,
+    #[serde(default)]
+    pub prio_batch: Option<i32>,
     // Rope scaling (override auto-YaRN)
     #[serde(default)]
     pub rope_scaling: String,
@@ -64,6 +69,76 @@ pub struct ModelPreset {
     pub draft_max: Option<u32>,
     #[serde(default)]
     pub spec_ngram_size: Option<u32>,
+    // Spec V2: full spec-type and per-type knobs
+    #[serde(default)]
+    pub spec_type: Option<String>,
+    #[serde(default)]
+    pub spec_default: bool,
+    #[serde(default)]
+    pub spec_draft_n_max: Option<u32>,
+    #[serde(default)]
+    pub spec_draft_n_min: Option<u32>,
+    #[serde(default)]
+    pub spec_draft_p_split: Option<f32>,
+    #[serde(default)]
+    pub spec_draft_p_min: Option<f32>,
+    #[serde(default)]
+    pub spec_draft_ngl: Option<i32>,
+    #[serde(default)]
+    pub spec_draft_device: Option<String>,
+    #[serde(default)]
+    pub spec_draft_cpu_moe: bool,
+    #[serde(default)]
+    pub spec_draft_n_cpu_moe: Option<i32>,
+    #[serde(default)]
+    pub spec_draft_type_k: Option<String>,
+    #[serde(default)]
+    pub spec_draft_type_v: Option<String>,
+    // ngram-mod knobs
+    #[serde(default)]
+    pub spec_ngram_mod_n_min: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_mod_n_max: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_mod_n_match: Option<u32>,
+    // ngram-simple knobs
+    #[serde(default)]
+    pub spec_ngram_simple_size_n: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_simple_size_m: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_simple_min_hits: Option<u32>,
+    // ngram-map-k knobs
+    #[serde(default)]
+    pub spec_ngram_map_k_size_n: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_map_k_size_m: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_map_k_min_hits: Option<u32>,
+    // ngram-map-k4v knobs
+    #[serde(default)]
+    pub spec_ngram_map_k4v_size_n: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_map_k4v_size_m: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_map_k4v_min_hits: Option<u32>,
+    // KV cache
+    #[serde(default)]
+    pub kv_unified: Option<bool>,
+    #[serde(default)]
+    pub cache_idle_slots: Option<bool>,
+    // Fit
+    #[serde(default)]
+    pub fit_enabled: Option<bool>,
+    #[serde(default)]
+    pub fit_ctx: Option<u32>,
+    #[serde(default)]
+    pub fit_target: Option<String>,
+    #[serde(default)]
+    pub fit_print: Option<bool>,
+    // Misc
+    #[serde(default)]
+    pub ignore_eos: bool,
     // Advanced
     #[serde(default)]
     pub seed: Option<i64>,
@@ -226,6 +301,39 @@ pub fn default_presets() -> Vec<ModelPreset> {
             draft_min: None,
             draft_max: None,
             spec_ngram_size: None,
+            spec_type: None,
+            spec_default: false,
+            spec_draft_n_max: None,
+            spec_draft_n_min: None,
+            spec_draft_p_split: None,
+            spec_draft_p_min: None,
+            spec_draft_ngl: None,
+            spec_draft_device: None,
+            spec_draft_cpu_moe: false,
+            spec_draft_n_cpu_moe: None,
+            spec_draft_type_k: None,
+            spec_draft_type_v: None,
+            spec_ngram_mod_n_min: None,
+            spec_ngram_mod_n_max: None,
+            spec_ngram_mod_n_match: None,
+            spec_ngram_simple_size_n: None,
+            spec_ngram_simple_size_m: None,
+            spec_ngram_simple_min_hits: None,
+            spec_ngram_map_k_size_n: None,
+            spec_ngram_map_k_size_m: None,
+            spec_ngram_map_k_min_hits: None,
+            spec_ngram_map_k4v_size_n: None,
+            spec_ngram_map_k4v_size_m: None,
+            spec_ngram_map_k4v_min_hits: None,
+            kv_unified: None,
+            cache_idle_slots: None,
+            fit_enabled: None,
+            fit_ctx: None,
+            fit_target: None,
+            fit_print: None,
+            ignore_eos: false,
+            prio: None,
+            prio_batch: None,
             seed: None,
             system_prompt_file: String::new(),
             extra_args: String::new(),
@@ -273,6 +381,39 @@ pub fn default_presets() -> Vec<ModelPreset> {
             draft_min: None,
             draft_max: None,
             spec_ngram_size: None,
+            spec_type: None,
+            spec_default: false,
+            spec_draft_n_max: None,
+            spec_draft_n_min: None,
+            spec_draft_p_split: None,
+            spec_draft_p_min: None,
+            spec_draft_ngl: None,
+            spec_draft_device: None,
+            spec_draft_cpu_moe: false,
+            spec_draft_n_cpu_moe: None,
+            spec_draft_type_k: None,
+            spec_draft_type_v: None,
+            spec_ngram_mod_n_min: None,
+            spec_ngram_mod_n_max: None,
+            spec_ngram_mod_n_match: None,
+            spec_ngram_simple_size_n: None,
+            spec_ngram_simple_size_m: None,
+            spec_ngram_simple_min_hits: None,
+            spec_ngram_map_k_size_n: None,
+            spec_ngram_map_k_size_m: None,
+            spec_ngram_map_k_min_hits: None,
+            spec_ngram_map_k4v_size_n: None,
+            spec_ngram_map_k4v_size_m: None,
+            spec_ngram_map_k4v_min_hits: None,
+            kv_unified: None,
+            cache_idle_slots: None,
+            fit_enabled: None,
+            fit_ctx: None,
+            fit_target: None,
+            fit_print: None,
+            ignore_eos: false,
+            prio: None,
+            prio_batch: None,
             seed: None,
             system_prompt_file: String::new(),
             extra_args: String::new(),
@@ -320,6 +461,39 @@ pub fn default_presets() -> Vec<ModelPreset> {
             draft_min: None,
             draft_max: None,
             spec_ngram_size: None,
+            spec_type: None,
+            spec_default: false,
+            spec_draft_n_max: None,
+            spec_draft_n_min: None,
+            spec_draft_p_split: None,
+            spec_draft_p_min: None,
+            spec_draft_ngl: None,
+            spec_draft_device: None,
+            spec_draft_cpu_moe: false,
+            spec_draft_n_cpu_moe: None,
+            spec_draft_type_k: None,
+            spec_draft_type_v: None,
+            spec_ngram_mod_n_min: None,
+            spec_ngram_mod_n_max: None,
+            spec_ngram_mod_n_match: None,
+            spec_ngram_simple_size_n: None,
+            spec_ngram_simple_size_m: None,
+            spec_ngram_simple_min_hits: None,
+            spec_ngram_map_k_size_n: None,
+            spec_ngram_map_k_size_m: None,
+            spec_ngram_map_k_min_hits: None,
+            spec_ngram_map_k4v_size_n: None,
+            spec_ngram_map_k4v_size_m: None,
+            spec_ngram_map_k4v_min_hits: None,
+            kv_unified: None,
+            cache_idle_slots: None,
+            fit_enabled: None,
+            fit_ctx: None,
+            fit_target: None,
+            fit_print: None,
+            ignore_eos: false,
+            prio: None,
+            prio_batch: None,
             seed: None,
             system_prompt_file: String::new(),
             extra_args: String::new(),
@@ -367,6 +541,39 @@ pub fn default_presets() -> Vec<ModelPreset> {
             draft_min: None,
             draft_max: None,
             spec_ngram_size: None,
+            spec_type: None,
+            spec_default: false,
+            spec_draft_n_max: None,
+            spec_draft_n_min: None,
+            spec_draft_p_split: None,
+            spec_draft_p_min: None,
+            spec_draft_ngl: None,
+            spec_draft_device: None,
+            spec_draft_cpu_moe: false,
+            spec_draft_n_cpu_moe: None,
+            spec_draft_type_k: None,
+            spec_draft_type_v: None,
+            spec_ngram_mod_n_min: None,
+            spec_ngram_mod_n_max: None,
+            spec_ngram_mod_n_match: None,
+            spec_ngram_simple_size_n: None,
+            spec_ngram_simple_size_m: None,
+            spec_ngram_simple_min_hits: None,
+            spec_ngram_map_k_size_n: None,
+            spec_ngram_map_k_size_m: None,
+            spec_ngram_map_k_min_hits: None,
+            spec_ngram_map_k4v_size_n: None,
+            spec_ngram_map_k4v_size_m: None,
+            spec_ngram_map_k4v_min_hits: None,
+            kv_unified: None,
+            cache_idle_slots: None,
+            fit_enabled: None,
+            fit_ctx: None,
+            fit_target: None,
+            fit_print: None,
+            ignore_eos: false,
+            prio: None,
+            prio_batch: None,
             seed: None,
             system_prompt_file: String::new(),
             extra_args: String::new(),
