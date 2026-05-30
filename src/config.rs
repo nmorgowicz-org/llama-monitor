@@ -448,6 +448,12 @@ pub struct AppConfig {
     // Arc<RwLock> so all Arc<AppConfig> clones share the same backing store.
     live_api_token_store: std::sync::Arc<std::sync::RwLock<Option<String>>>,
     live_db_admin_token_store: std::sync::Arc<std::sync::RwLock<Option<String>>>,
+
+    // Spawn V2: additional directories
+    pub binaries_dir: PathBuf,
+    pub default_models_dir: PathBuf,
+    pub scripts_dir: PathBuf,
+    pub certs_dir: PathBuf,
 }
 
 impl AppConfig {
@@ -499,6 +505,12 @@ impl AppConfig {
             live_db_admin_token_store: std::sync::Arc::new(std::sync::RwLock::new(
                 ensure_db_admin_token(&config_dir),
             )),
+
+            // Spawn V2: additional directories (backward-compatible defaults)
+            binaries_dir: config_dir.join("binaries"),
+            default_models_dir: config_dir.join("models"),
+            scripts_dir: config_dir.join("scripts"),
+            certs_dir: config_dir.join("certs"),
         }
     }
 
@@ -554,6 +566,12 @@ impl AppConfig {
             tls_config: TLSConfig::default(),
             live_api_token_store: std::sync::Arc::new(std::sync::RwLock::new(api_token)),
             live_db_admin_token_store: std::sync::Arc::new(std::sync::RwLock::new(db_admin_token)),
+
+            // Spawn V2: additional directories (test defaults)
+            binaries_dir: std::path::PathBuf::from("/tmp/llama-monitor-test/binaries"),
+            default_models_dir: std::path::PathBuf::from("/tmp/llama-monitor-test/models"),
+            scripts_dir: std::path::PathBuf::from("/tmp/llama-monitor-test/scripts"),
+            certs_dir: std::path::PathBuf::from("/tmp/llama-monitor-test/certs"),
         }
     }
 }

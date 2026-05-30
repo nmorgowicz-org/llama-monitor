@@ -1394,6 +1394,627 @@ fn api_analyze_context_notes(
         })
 }
 
+// ========================
+// Phase 0: Spawn Llama-Server v2 endpoints
+// ========================
+
+// 1) POST /api/spawn-wizard/import-launch-file
+fn api_spawn_wizard_import_launch_file(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "spawn-wizard" / "import-launch-file")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let file = body["file"].as_str().unwrap_or("").to_string();
+
+                if file.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Missing 'file' field in request body"
+                        })),
+                    ));
+                }
+
+                match crate::llama::batch_import::import_launch_file(&file) {
+                    Ok(result) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": true,
+                            "preset": result.preset,
+                            "warnings": result.warnings
+                        })),
+                    )),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": e
+                        })),
+                    )),
+                }
+            }
+        })
+}
+
+// 2) POST /api/chat-template/fetch
+fn api_chat_template_fetch(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "fetch")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let source_type = body["source_type"].as_str().unwrap_or("").to_string();
+                let source = body["source"].as_str().unwrap_or("").to_string();
+
+                if source_type != "url" {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Unsupported source_type; only 'url' is supported"
+                        })),
+                    ));
+                }
+
+                if source.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Missing 'source' URL"
+                        })),
+                    ));
+                }
+
+                let client = match reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Failed to create HTTP client: {}", e)
+                            })),
+                        ));
+                    }
+                };
+
+                match client.get(&source).send().await {
+                    Ok(resp) if resp.status().is_success() => match resp.text().await {
+                        Ok(text) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": true,
+                                "template": text,
+                                "source_url": source
+                            })),
+                        )),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Failed to read response body: {}", e)
+                            })),
+                        )),
+                    },
+                    Ok(resp) => {
+                        let status = resp.status();
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("HTTP {} while fetching template", status.as_u16())
+                            })),
+                        ))
+                    }
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("Failed to fetch URL: {}", e)
+                        })),
+                    )),
+                }
+            }
+        })
+}
+
+// 3) POST /api/chat-template/upload
+fn api_chat_template_upload(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "upload")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let template = body["template"].as_str().unwrap_or("").to_string();
+
+                if template.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Missing 'template' field in request body"
+                        })),
+                    ));
+                }
+
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis();
+                let template_id = format!("temp-{}", ts);
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "template_id": template_id
+                    }),
+                )))
+            }
+        })
+}
+
+// 4) POST /api/vram/estimate
+fn api_vram_estimate(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "vram" / "estimate")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                // Extract fields
+                let model = body["model"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+                let context_length = body["context_length"]
+                    .as_u64()
+                    .unwrap_or(4096);
+                let layers_on_gpu = body["layers_on_gpu"]
+                    .as_i64()
+                    .map(|v| v as i32);
+
+                if model.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Missing 'model' field"
+                        }))),
+                    );
+                }
+
+                // Attempt to get model size from filesystem if it's a local path
+                let model_size_bytes = match std::fs::metadata(&model) {
+                    Ok(m) => m.len(),
+                    Err(_) => 0,
+                };
+
+                // Use defaults for parameters not provided by caller
+                let kv_quant = body["kv_quant"]
+                    .as_str()
+                    .unwrap_or("q8_0")
+                    .to_string();
+                let batch_size = body["batch_size"]
+                    .as_u64()
+                    .unwrap_or(2048) as u32;
+                let ubatch_size = body["ubatch_size"]
+                    .as_u64()
+                    .unwrap_or(2048) as u32;
+                let speculative_decoding = body["speculative_decoding"]
+                    .as_bool()
+                    .unwrap_or(false);
+                let mmproj_size_bytes = body["mmproj_size_bytes"]
+                    .as_u64()
+                    .unwrap_or(0);
+                let available_vram_bytes = body["available_vram_bytes"]
+                    .as_u64()
+                    .unwrap_or(0);
+
+                // If model_size_bytes is 0, we can't meaningfully estimate
+                if model_size_bytes == 0 {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Could not determine model file size. Provide a local path or 'model_size_bytes' explicitly."
+                        }))),
+                    );
+                }
+
+                let n_cpu_moe = layers_on_gpu; // repurpose layers_on_gpu as n_cpu_moe hint
+                let estimate = crate::llama::vram_estimator::estimate_vram(
+                    model_size_bytes,
+                    context_length,
+                    &kv_quant,
+                    batch_size,
+                    ubatch_size,
+                    speculative_decoding,
+                    mmproj_size_bytes,
+                    n_cpu_moe,
+                    available_vram_bytes,
+                );
+
+                let estimated_vram_mb =
+                    (estimate.estimated_vram_bytes as f64) / (1024.0 * 1024.0);
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(&serde_json::json!({
+                        "ok": true,
+                        "estimated_vram_mb": estimated_vram_mb,
+                        "estimated_vram_bytes": estimate.estimated_vram_bytes,
+                        "estimated_ram_bytes": estimate.estimated_ram_bytes,
+                        "recommendation": serde_json::to_value(&estimate.recommendation).unwrap_or(serde_json::Value::Null),
+                        "note": estimate.note
+                    }))),
+                )
+            }
+        })
+}
+
+// 5) POST /api/models/download/start
+fn api_models_download_start(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "download" / "start")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let model = body["model"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+                let source = body["source"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+
+                if model.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Missing 'model' field"
+                        }))),
+                    );
+                }
+
+                // For now, only "hf" is implemented via crate::model_download::start_download.
+                // For "url" and "local", return unsupported.
+                if source != "hf" {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("Unsupported source '{}'; only 'hf' is currently supported", source)
+                        }))),
+                    );
+                }
+
+                // Interpret model as "repo_id/file_path" or just "repo_id".
+                let (repo_id, file_path) = if model.contains('/') {
+                    // Use as-is: repo_id is everything before last segment, file_path is last segment.
+                    // For HF-style IDs like "org/model/file.gguf", split at first '/'.
+                    let parts: Vec<&str> = model.splitn(2, '/').collect();
+                    (parts[0].to_string(), parts.get(1).unwrap_or(&"").to_string())
+                } else {
+                    (model.clone(), "model.gguf".to_string())
+                };
+
+                let target_dir = cfg.models_dir.clone().unwrap_or_else(|| cfg.default_models_dir.clone());
+
+                // HF token is read from environment by the hf module; no field in AppConfig.
+                let hf_token: Option<String> = None;
+
+                match crate::model_download::start_download(
+                    &repo_id,
+                    &file_path,
+                    &target_dir,
+                    hf_token,
+                ) {
+                    Ok(download_id) => {
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({
+                                "ok": true,
+                                "download_id": download_id
+                            }))),
+                        )
+                    }
+                    Err(e) => {
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Failed to start download: {}", e)
+                            }))),
+                        )
+                    }
+                }
+            }
+        })
+}
+
+// 6) GET /api/models/download/:id/status
+fn api_models_download_status(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "download" / String / "status")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |id: String, auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                match crate::model_download::get_download_status(&id) {
+                    Some(status) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": true,
+                            "status": status
+                        })),
+                    )),
+                    None => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Download not found"
+                            })),
+                            warp::http::StatusCode::NOT_FOUND,
+                        ),
+                    )),
+                }
+            }
+        })
+}
+
+// 7) POST /api/models/download/:id/cancel
+fn api_models_download_cancel(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "download" / String / "cancel")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |id: String, auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let ok = crate::model_download::cancel_download(&id);
+                if ok {
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({
+                            "ok": true
+                        }),
+                    )))
+                } else {
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({
+                            "ok": false,
+                            "error": "Download not found or already finished"
+                        }),
+                    )))
+                }
+            }
+        })
+}
+
+// 8) GET /api/llama-cpp/releases
+fn api_llama_cpp_releases(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "llama-cpp" / "releases")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let client = match reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(20))
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Failed to create HTTP client: {}", e)
+                            })),
+                        ));
+                    }
+                };
+
+                match crate::llama::llama_cpp_downloader::list_releases(&client).await {
+                    Ok(releases) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": true,
+                            "releases": releases
+                        })),
+                    )),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("Failed to list releases: {}", e)
+                        })),
+                    )),
+                }
+            }
+        })
+}
+
+// 9) POST /api/llama-cpp/download
+fn api_llama_cpp_download(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "llama-cpp" / "download")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let release_tag = body["release_tag"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+                let backend = body["backend"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+                let arch = body["arch"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+
+                if release_tag.is_empty() || backend.is_empty() || arch.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Missing fields: 'release_tag', 'backend', and 'arch' are required"
+                        }))),
+                    );
+                }
+
+                let client = match reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(120))
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Failed to create HTTP client: {}", e)
+                            }))),
+                        );
+                    }
+                };
+
+                // Find the release by tag
+                let releases = match crate::llama::llama_cpp_downloader::list_releases(&client).await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Failed to list releases: {}", e)
+                            }))),
+                        );
+                    }
+                };
+
+                let release = match releases.iter().find(|r| r.tag_name == release_tag) {
+                    Some(r) => r.clone(),
+                    None => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Release '{}' not found", release_tag)
+                            }))),
+                        );
+                    }
+                };
+
+                let assets = crate::llama::llama_cpp_downloader::select_assets(
+                    &release,
+                    &backend,
+                    &arch,
+                );
+
+                if assets.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("No assets matched backend='{}' arch='{}' for this release", backend, arch)
+                        }))),
+                    );
+                }
+
+                let binaries_dir = cfg.binaries_dir.clone();
+                match crate::llama::llama_cpp_downloader::download_and_extract(
+                    &client,
+                    &release,
+                    &assets,
+                    &binaries_dir,
+                )
+                .await
+                {
+                    Ok(()) => {
+                        let download_id = format!(
+                            "lc-{}",
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()
+                        );
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({
+                                "ok": true,
+                                "download_id": download_id,
+                                "status": "completed"
+                            }))),
+                        )
+                    }
+                    Err(e) => {
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Download failed: {}", e)
+                            }))),
+                        )
+                    }
+                }
+            }
+        })
+}
+
 pub fn api_routes(
     state: AppState,
     app_config: Arc<AppConfig>,
@@ -1485,6 +2106,18 @@ pub fn api_routes(
     let sensor_bridge_status = api_sensor_bridge_status(app_config.clone());
     let sensor_bridge_install = api_sensor_bridge_install(app_config.clone());
     let sensor_bridge_uninstall = api_sensor_bridge_uninstall(app_config.clone());
+
+    // Phase 0: Spawn Llama-Server v2 routes
+    let spawn_wizard_import =
+        api_spawn_wizard_import_launch_file(state.clone(), app_config.clone());
+    let chat_template_fetch = api_chat_template_fetch(state.clone(), app_config.clone());
+    let chat_template_upload = api_chat_template_upload(state.clone(), app_config.clone());
+    let vram_estimate = api_vram_estimate(state.clone(), app_config.clone());
+    let models_download_start = api_models_download_start(state.clone(), app_config.clone());
+    let models_download_status = api_models_download_status(state.clone(), app_config.clone());
+    let models_download_cancel = api_models_download_cancel(state.clone(), app_config.clone());
+    let llama_cpp_releases = api_llama_cpp_releases(state.clone(), app_config.clone());
+    let llama_cpp_download = api_llama_cpp_download(state.clone(), app_config.clone());
 
     // Group routes to avoid compiler overflow on long .or() chains
     let server_routes = start.or(stop).or(kill_llama).or(attach).or(detach);
@@ -1578,6 +2211,17 @@ pub fn api_routes(
         .or(api_remote_agent_update(app_config.clone()))
         .or(api_remote_agent_stop(app_config.clone()));
 
+    // Phase 0: Spawn Llama-Server v2 route group
+    let phase0_routes = spawn_wizard_import
+        .or(chat_template_fetch)
+        .or(chat_template_upload)
+        .or(vram_estimate)
+        .or(models_download_start)
+        .or(models_download_status)
+        .or(models_download_cancel)
+        .or(llama_cpp_releases)
+        .or(llama_cpp_download);
+
     server_routes
         .or(preset_routes)
         .or(template_routes)
@@ -1590,6 +2234,7 @@ pub fn api_routes(
         .or(agent_routes)
         .or(bridge_routes)
         .or(tls_routes)
+        .or(phase0_routes)
         .or(api_self_update(app_config.clone()))
 }
 
@@ -6206,6 +6851,17 @@ fn api_spawn_session_with_preset(
                     seed: preset.seed,
                     system_prompt_file: preset.system_prompt_file.clone(),
                     extra_args: preset.extra_args.clone(),
+                    // Spawn V2 extended fields
+                    hf_repo: preset.hf_repo.clone(),
+                    chat_template_file: preset.chat_template_file.clone(),
+                    mmproj: preset.mmproj.clone(),
+                    grammar: preset.grammar.clone(),
+                    json_schema: preset.json_schema.clone(),
+                    cache_type_k: preset.cache_type_k.clone(),
+                    cache_type_v: preset.cache_type_v.clone(),
+                    max_tokens: preset.max_tokens,
+                    api_key: preset.api_key.clone(),
+                    benchmark_mode: false,
                 };
 
                 match crate::llama::server::start_server(&state, config, &app_config).await {

@@ -47,6 +47,10 @@ tokio-rustls = "0.26"
 rustls = "0.23"
 rustls-pemfile = "2"
     warp-helmet = "1.0"
+    hf-hub = "0.5"
+    zip = "4"
+    tar = "0.4"
+    flate2 = "1"
     tray-icon = { version = "0.24", optional = true }
     winit = { version = "0.31.0-beta.2", default-features = false, features = ["x11", "wayland"], optional = true }
     wry = { version = "0.55", default-features = false, features = ["os-webview"], optional = true }

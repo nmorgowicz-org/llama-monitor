@@ -73,6 +73,28 @@ pub struct ServerConfig {
     pub system_prompt_file: String,
     #[serde(default)]
     pub extra_args: String,
+
+    // Spawn V2: extended fields
+    #[serde(default)]
+    pub hf_repo: Option<String>,
+    #[serde(default)]
+    pub chat_template_file: Option<String>,
+    #[serde(default)]
+    pub mmproj: Option<String>,
+    #[serde(default)]
+    pub grammar: Option<String>,
+    #[serde(default)]
+    pub json_schema: Option<String>,
+    #[serde(default)]
+    pub cache_type_k: Option<String>,
+    #[serde(default)]
+    pub cache_type_v: Option<String>,
+    #[serde(default)]
+    pub max_tokens: Option<u64>,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub benchmark_mode: bool,
 }
 
 pub async fn start_server(
@@ -80,21 +102,40 @@ pub async fn start_server(
     config: ServerConfig,
     app_config: &AppConfig,
 ) -> Result<()> {
-    // Validate model path before starting
-    if config.model_path.is_empty() {
-        anyhow::bail!("Model path is empty. Edit the preset and set a model path.");
-    }
-    if !std::path::Path::new(&config.model_path).exists() {
-        anyhow::bail!("Model file not found: {}", config.model_path);
+    // Spawn V2: model source selection: either -m (local path) or -hf (HF repo), but not both.
+    let use_hf = config.hf_repo.as_ref().is_some_and(|r| !r.is_empty());
+    let has_model_path = !config.model_path.is_empty();
+
+    if use_hf && has_model_path {
+        anyhow::bail!("Cannot use both model_path and hf_repo. Choose one.");
     }
 
-    // Validate server binary (skip PATH lookup for bare names like "llama-server")
-    let server_path = &app_config.llama_server_path;
-    if server_path.components().count() > 1 && !server_path.exists() {
-        anyhow::bail!(
-            "llama-server binary not found: {}. Set it in Configuration.",
-            server_path.display()
-        );
+    if use_hf {
+        // Validate server binary (skip PATH lookup for bare names like "llama-server")
+        let server_path = &app_config.llama_server_path;
+        if server_path.components().count() > 1 && !server_path.exists() {
+            anyhow::bail!(
+                "llama-server binary not found: {}. Set it in Configuration.",
+                server_path.display()
+            );
+        }
+        // HF repo is used; no local file check.
+    } else if has_model_path {
+        // Validate model path before starting
+        if !std::path::Path::new(&config.model_path).exists() {
+            anyhow::bail!("Model file not found: {}", config.model_path);
+        }
+
+        // Validate server binary (skip PATH lookup for bare names like "llama-server")
+        let server_path = &app_config.llama_server_path;
+        if server_path.components().count() > 1 && !server_path.exists() {
+            anyhow::bail!(
+                "llama-server binary not found: {}. Set it in Configuration.",
+                server_path.display()
+            );
+        }
+    } else {
+        anyhow::bail!("No model source specified. Provide model_path or hf_repo.");
     }
 
     // Clear old logs
@@ -123,8 +164,15 @@ pub async fn start_server(
         }
     }
 
-    // Build args — model & core
-    cmd.arg("-m").arg(&config.model_path);
+    // Build args — model source
+    if use_hf {
+        if let Some(ref repo) = config.hf_repo {
+            cmd.arg("-hf").arg(repo);
+        }
+    } else {
+        cmd.arg("-m").arg(&config.model_path);
+    }
+
     cmd.arg("-ngl")
         .arg(config.gpu_layers.unwrap_or(99).to_string());
     cmd.arg("-ctk").arg(&config.ctk);
@@ -238,6 +286,46 @@ pub async fn start_server(
     if !config.system_prompt_file.is_empty() {
         cmd.arg("--system-prompt-file")
             .arg(&config.system_prompt_file);
+    }
+
+    // Spawn V2: chat template file
+    if let Some(ref ct) = config.chat_template_file
+        && !ct.is_empty()
+    {
+        cmd.arg("--chat-template-file").arg(ct);
+    }
+
+    // Spawn V2: multimodal projector
+    if let Some(ref mp) = config.mmproj
+        && !mp.is_empty()
+    {
+        cmd.arg("--mmproj").arg(mp);
+    }
+
+    // Spawn V2: grammar
+    if let Some(ref g) = config.grammar
+        && !g.is_empty()
+    {
+        cmd.arg("--grammar").arg(g);
+    }
+
+    // Spawn V2: JSON schema
+    if let Some(ref js) = config.json_schema
+        && !js.is_empty()
+    {
+        cmd.arg("--json-schema").arg(js);
+    }
+
+    // Spawn V2: max_tokens / n-predict
+    if let Some(mt) = config.max_tokens {
+        cmd.arg("-n").arg(mt.to_string());
+    }
+
+    // Spawn V2: API key
+    if let Some(ref ak) = config.api_key
+        && !ak.is_empty()
+    {
+        cmd.arg("--api-key").arg(ak);
     }
 
     // Extra args (arbitrary flags)

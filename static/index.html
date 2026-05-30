@@ -20,6 +20,7 @@
     <link rel="stylesheet" href="/css/components.css">
     <link rel="stylesheet" href="/css/command-palette.css">
     <link rel="stylesheet" href="/css/modal-premium.css">
+    <link rel="stylesheet" href="/css/spawn-wizard.css">
     <link rel="stylesheet" href="/css/chat.css">
     <link rel="stylesheet" href="/css/chat-guided-generation.css">
     <link rel="stylesheet" href="/css/chat-history-qa.css">
@@ -1928,6 +1929,344 @@
             <button type="button" class="btn btn-agent-done" id="btn-agent-setup-done" style="display:none;">
                 Done
             </button>
+        </div>
+    </div>
+</div>
+
+<!-- Spawn Llama-Server V2 Wizard -->
+<div class="modal-overlay" id="spawn-wizard-overlay">
+    <div class="spawn-wizard-modal">
+        <!-- Header -->
+        <div class="wizard-header">
+            <div class="wizard-header-left">
+                <span class="wizard-header-title">Spawn Llama-Server</span>
+                <span class="wizard-header-subtitle" id="wizard-step-label">Profile</span>
+            </div>
+            <div class="wizard-steps">
+                <span class="step-badge active" data-step="0">
+                    <span class="step-num">1</span> Profile
+                </span>
+                <span class="step-badge" data-step="1">
+                    <span class="step-num">2</span> Model
+                </span>
+                <span class="step-badge" data-step="2">
+                    <span class="step-num">3</span> Hardware
+                </span>
+                <span class="step-badge" data-step="3">
+                    <span class="step-num">4</span> Summary
+                </span>
+                <span class="step-badge" data-step="4">
+                    <span class="step-num">5</span> Spawn
+                </span>
+            </div>
+            <button type="button" class="wizard-close" id="spawn-wizard-close" aria-label="Close">&times;</button>
+        </div>
+
+        <!-- Body -->
+        <div class="wizard-body">
+
+            <!-- Step 1: Profile -->
+            <div class="wizard-step active" id="wizard-step-0">
+                <div class="wizard-main">
+                    <div>
+                        <div class="wizard-section-title">Choose your setup profile</div>
+                        <div class="wizard-section-desc">
+                            This controls how much detail and control you’ll see in the next steps.
+                        </div>
+                    </div>
+                    <div class="profile-cards">
+                        <div class="profile-card" data-profile="quick">
+                            <div class="profile-card-radio">⚡</div>
+                            <div class="profile-card-body">
+                                <div class="profile-card-name">Quick</div>
+                                <div class="profile-card-desc">
+                                    Fully auto-tuned. Best for most users — we pick safe defaults based on your hardware.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="profile-card selected" data-profile="balanced">
+                            <div class="profile-card-radio">⚖️</div>
+                            <div class="profile-card-body">
+                                <div class="profile-card-name">Balanced</div>
+                                <div class="profile-card-desc">
+                                    Guided tuning with sensible defaults. Recommended for most setups.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="profile-card" data-profile="advanced">
+                            <div class="profile-card-radio">🛠️</div>
+                            <div class="profile-card-body">
+                                <div class="profile-card-name">Advanced</div>
+                                <div class="profile-card-desc">
+                                    Full control over all parameters, including MoE tuning, KV cache quant, and multi-GPU.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="wizard-sidebar">
+                    <div class="wizard-sidebar-title">Need to know</div>
+                    <ul>
+                        <li>Quick hides advanced fields.</li>
+                        <li>Balanced shows core settings.</li>
+                        <li>Advanced exposes everything.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Step 2: Model -->
+            <div class="wizard-step" id="wizard-step-1">
+                <div class="wizard-main">
+                    <div>
+                        <div class="wizard-section-title">Select your model</div>
+                        <div class="wizard-section-desc">
+                            Choose where your GGUF model comes from.
+                        </div>
+                    </div>
+                    <div class="model-source-cards">
+                        <!-- Local -->
+                        <div class="model-source-card selected" data-source="local">
+                            <div class="model-source-icon">📁</div>
+                            <div class="model-source-body">
+                                <div class="model-source-name">Select local model</div>
+                                <div class="model-source-desc">
+                                    Browse your filesystem for an existing GGUF file.
+                                </div>
+                            </div>
+                        </div>
+                        <!-- HuggingFace -->
+                        <div class="model-source-card" data-source="hf">
+                            <div class="model-source-icon">🤗</div>
+                            <div class="model-source-body">
+                                <div class="model-source-name">Use HuggingFace repo</div>
+                                <div class="model-source-desc">
+                                    Enter a HF repo ID (e.g. user/repo) and we’ll list available GGUF files.
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Import -->
+                        <div class="model-source-card" data-source="import">
+                            <div class="model-source-icon">📥</div>
+                            <div class="model-source-body">
+                                <div class="model-source-name">Import from another tool</div>
+                                <div class="model-source-desc">
+                                    Already using Ollama or LM Studio? We can use your existing models.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Local model input -->
+                    <div class="model-input-area visible" id="model-input-local">
+                        <div class="model-input-row">
+                            <input type="text" id="spawn-model-path" placeholder="Model path (e.g. /models/my-model.gguf)">
+                            <button type="button" class="btn-wizard-secondary" id="spawn-browse-model-btn">Browse</button>
+                        </div>
+                    </div>
+
+                    <!-- HF repo input -->
+                    <div class="model-input-area" id="model-input-hf">
+                        <div class="model-input-row">
+                            <input type="text" id="spawn-hf-repo" placeholder="Repo ID (e.g. bartowski/Llama-3.3-70B-Instruct-Q4_K_M-GGUF)">
+                        </div>
+                        <div class="hf-file-list" id="spawn-hf-file-list"></div>
+                    </div>
+
+                    <!-- Import input -->
+                    <div class="model-input-area" id="model-input-import">
+                        <div class="model-input-row">
+                            <input type="text" id="spawn-import-path" placeholder="Model path (e.g. /path/to/ollama_models/...)">
+                            <button type="button" class="btn-wizard-secondary" id="spawn-import-browse-btn">Browse</button>
+                        </div>
+                    </div>
+
+                    <!-- Selected model display -->
+                    <div class="selected-model" id="spawn-selected-model">
+                        <span class="selected-model-icon">🧠</span>
+                        <div class="selected-model-info">
+                            <div class="selected-model-name" id="spawn-selected-model-name"></div>
+                            <div class="selected-model-meta" id="spawn-selected-model-meta"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="wizard-sidebar">
+                    <div class="wizard-sidebar-title">Tips</div>
+                    <ul>
+                        <li>Use GGUF files only.</li>
+                        <li>HF repo: we’ll list GGUF files.</li>
+                        <li>Import: browse common tool dirs.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Step 3: Hardware -->
+            <div class="wizard-step" id="wizard-step-2">
+                <div class="wizard-main">
+                    <div>
+                        <div class="wizard-section-title">Configure hardware</div>
+                        <div class="wizard-section-desc">
+                            Fine-tune how your model uses GPU and memory.
+                        </div>
+                    </div>
+
+                    <div class="hardware-grid">
+                        <div class="hardware-field">
+                            <label for="spawn-gpu-layers">GPU layers</label>
+                            <select id="spawn-gpu-layers">
+                                <option value="auto">Auto (recommended)</option>
+                                <option value="all">All layers on GPU</option>
+                                <option value="manual">Manual</option>
+                            </select>
+                        </div>
+                        <div class="hardware-field" id="spawn-gpu-layers-manual-wrap" style="display:none;">
+                            <label for="spawn-gpu-layers-manual">Layers count</label>
+                            <input type="number" id="spawn-gpu-layers-manual" min="0" placeholder="e.g. 32">
+                        </div>
+                        <div class="hardware-field">
+                            <label for="spawn-context-size">Context size</label>
+                            <input type="number" id="spawn-context-size" min="512" step="512" value="8192">
+                        </div>
+                        <div class="hardware-field">
+                            <label for="spawn-batch-size">Batch size</label>
+                            <input type="number" id="spawn-batch-size" min="1" value="2048">
+                        </div>
+                    </div>
+
+                    <!-- Advanced-only fields -->
+                    <div class="advanced-only" id="spawn-advanced-fields">
+                        <div class="wizard-section-title">Advanced options</div>
+                        <div class="hardware-grid">
+                            <div class="hardware-field">
+                                <label for="spawn-ubatch-size">Ubatch size</label>
+                                <input type="number" id="spawn-ubatch-size" min="1" value="512">
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-parallel-slots">Parallel slots</label>
+                                <input type="number" id="spawn-parallel-slots" min="1" value="1">
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-cache-type-k">KV cache K type</label>
+                                <select id="spawn-cache-type-k">
+                                    <option value="">Default</option>
+                                    <option value="q8_0">q8_0</option>
+                                    <option value="q4_0">q4_0</option>
+                                </select>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-cache-type-v">KV cache V type</label>
+                                <select id="spawn-cache-type-v">
+                                    <option value="">Default</option>
+                                    <option value="f16">f16</option>
+                                    <option value="q8_0">q8_0</option>
+                                    <option value="q4_0">q4_0</option>
+                                </select>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-n-cpu-moe">MoE CPU experts (n_cpu_moe)</label>
+                                <input type="number" id="spawn-n-cpu-moe" min="0" placeholder="Auto">
+                                <div class="field-hint">Higher = more VRAM, faster. Lower = more CPU, slower.</div>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-tensor-split">Tensor split</label>
+                                <input type="text" id="spawn-tensor-split" placeholder="e.g. 1,1">
+                                <div class="field-hint">For multi-GPU load distribution.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- VRAM status -->
+                    <div class="hardware-summary" id="spawn-hardware-summary">
+                        <div class="hardware-summary-row">
+                            <span>VRAM estimate</span>
+                            <span id="spawn-vram-estimate-text">Calculating...</span>
+                        </div>
+                        <div class="hardware-summary-row">
+                            <span>Status</span>
+                            <span id="spawn-vram-pill"></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="wizard-sidebar">
+                    <div class="wizard-sidebar-title">Guidance</div>
+                    <ul>
+                        <li>Auto GPU layers is usually best.</li>
+                        <li>Reduce context if VRAM is tight.</li>
+                        <li>MoE tuning helps large models.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Step 4: Summary -->
+            <div class="wizard-step" id="wizard-step-3">
+                <div class="wizard-main">
+                    <div>
+                        <div class="wizard-section-title">Review your configuration</div>
+                        <div class="wizard-section-desc">
+                            Confirm settings before spawning.
+                        </div>
+                    </div>
+                    <div class="summary-list" id="spawn-summary-list"></div>
+                    <div class="summary-warnings" id="spawn-summary-warnings" style="display:none;"></div>
+                    <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+                        <button type="button" class="btn-wizard-secondary" id="spawn-save-preset-btn">
+                            Save as Preset
+                        </button>
+                        <button type="button" class="btn-wizard-tertiary" id="spawn-health-check-btn" style="display:none;">
+                            Run Health Check
+                        </button>
+                    </div>
+                </div>
+                <div class="wizard-sidebar">
+                    <div class="wizard-sidebar-title">Checks</div>
+                    <ul>
+                        <li>Verify model path.</li>
+                        <li>Confirm VRAM estimate.</li>
+                        <li>Run Health Check if server is ready.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Step 5: Spawn -->
+            <div class="wizard-step" id="wizard-step-4">
+                <div class="wizard-main">
+                    <div>
+                        <div class="wizard-section-title">Spawn your server</div>
+                        <div class="wizard-section-desc">
+                            This will start llama-server with your selected configuration.
+                        </div>
+                    </div>
+                    <button type="button" class="btn-wizard-primary" id="spawn-server-btn">
+                        Spawn Server
+                    </button>
+                    <div class="spawn-status-area" id="spawn-status-area">
+                        <div class="spawn-status-text" id="spawn-status-text">Ready to spawn.</div>
+                        <div class="spawn-progress-bar">
+                            <div class="spawn-progress-fill" id="spawn-progress-fill"></div>
+                        </div>
+                        <div class="spawn-error-text" id="spawn-error-text"></div>
+                        <div class="spawn-success-text" id="spawn-success-text"></div>
+                    </div>
+                </div>
+                <div class="wizard-sidebar">
+                    <div class="wizard-sidebar-title">What happens next</div>
+                    <ul>
+                        <li>We’ll start llama-server.</li>
+                        <li>Status updates appear in real time.</li>
+                        <li>On success, you’re taken to the dashboard.</li>
+                    </ul>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Footer -->
+        <div class="wizard-footer">
+            <div class="wizard-footer-left">
+                <button type="button" class="btn-wizard-secondary" id="wizard-back-btn">Back</button>
+            </div>
+            <div class="wizard-footer-right">
+                <button type="button" class="btn-wizard-primary" id="wizard-next-btn">Next</button>
+            </div>
         </div>
     </div>
 </div>

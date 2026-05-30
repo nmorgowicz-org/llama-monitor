@@ -20,6 +20,7 @@ pub const CSS_LOGS: &str = include_str!("../../static/css/logs.css");
 pub const CSS_MODAL_PREMIUM: &str = include_str!("../../static/css/modal-premium.css");
 pub const CSS_SETTINGS_MODAL: &str = include_str!("../../static/css/settings-modal.css");
 pub const CSS_SETUP_VIEW: &str = include_str!("../../static/css/setup-view.css");
+pub const CSS_SPAWN_WIZARD: &str = include_str!("../../static/css/spawn-wizard.css");
 pub const CSS_TOKENS: &str = include_str!("../../static/css/tokens.css");
 pub const ICON_SVG: &str = include_str!("../../static/icon.svg");
 pub const INDEX_HTML: &str = include_str!("../../static/index.html");
@@ -78,6 +79,7 @@ pub const FEATURES_SESSIONS_JS: &str = include_str!("../../static/js/features/se
 pub const FEATURES_SETTINGS_JS: &str = include_str!("../../static/js/features/settings.js");
 pub const FEATURES_SETUP_VIEW_JS: &str = include_str!("../../static/js/features/setup-view.js");
 pub const FEATURES_SHORTCUTS_JS: &str = include_str!("../../static/js/features/shortcuts.js");
+pub const FEATURES_SPAWN_WIZARD_JS: &str = include_str!("../../static/js/features/spawn-wizard.js");
 pub const FEATURES_TELEMETRY_GRADE_JS: &str =
     include_str!("../../static/js/features/telemetry-grade.js");
 pub const FEATURES_TOAST_JS: &str = include_str!("../../static/js/features/toast.js");

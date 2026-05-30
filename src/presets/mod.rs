@@ -71,9 +71,29 @@ pub struct ModelPreset {
     pub system_prompt_file: String,
     #[serde(default)]
     pub extra_args: String,
+
+    // Spawn V2: extended fields
+    #[serde(default)]
+    pub hf_repo: Option<String>,
+    #[serde(default)]
+    pub chat_template_file: Option<String>,
+    #[serde(default)]
+    pub mmproj: Option<String>,
+    #[serde(default)]
+    pub grammar: Option<String>,
+    #[serde(default)]
+    pub json_schema: Option<String>,
+    #[serde(default)]
+    pub cache_type_k: Option<String>,
+    #[serde(default)]
+    pub cache_type_v: Option<String>,
+    #[serde(default)]
+    pub max_tokens: Option<u64>,
+    #[serde(default)]
+    pub api_key: Option<String>,
 }
 
-fn next_id() -> String {
+pub fn next_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -207,6 +227,15 @@ pub fn default_presets() -> Vec<ModelPreset> {
             seed: None,
             system_prompt_file: String::new(),
             extra_args: String::new(),
+            hf_repo: None,
+            chat_template_file: None,
+            mmproj: None,
+            grammar: None,
+            json_schema: None,
+            cache_type_k: None,
+            cache_type_v: None,
+            max_tokens: None,
+            api_key: None,
         },
         ModelPreset {
             id: "default-2".into(),
@@ -244,6 +273,15 @@ pub fn default_presets() -> Vec<ModelPreset> {
             seed: None,
             system_prompt_file: String::new(),
             extra_args: String::new(),
+            hf_repo: None,
+            chat_template_file: None,
+            mmproj: None,
+            grammar: None,
+            json_schema: None,
+            cache_type_k: None,
+            cache_type_v: None,
+            max_tokens: None,
+            api_key: None,
         },
         ModelPreset {
             id: "default-3".into(),
@@ -281,6 +319,15 @@ pub fn default_presets() -> Vec<ModelPreset> {
             seed: None,
             system_prompt_file: String::new(),
             extra_args: String::new(),
+            hf_repo: None,
+            chat_template_file: None,
+            mmproj: None,
+            grammar: None,
+            json_schema: None,
+            cache_type_k: None,
+            cache_type_v: None,
+            max_tokens: None,
+            api_key: None,
         },
         ModelPreset {
             id: "default-4".into(),
@@ -318,6 +365,15 @@ pub fn default_presets() -> Vec<ModelPreset> {
             seed: None,
             system_prompt_file: String::new(),
             extra_args: String::new(),
+            hf_repo: None,
+            chat_template_file: None,
+            mmproj: None,
+            grammar: None,
+            json_schema: None,
+            cache_type_k: None,
+            cache_type_v: None,
+            max_tokens: None,
+            api_key: None,
         },
     ]
 }

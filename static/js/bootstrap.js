@@ -39,6 +39,7 @@ import { initAuthGate, logoutCurrentUser } from './features/auth.js';
 import { deriveTelemetryGrade, gradeLabel, gradeStatusClass, gradeActionCopy } from './features/telemetry-grade.js';
 import { initReplyPlanUpdates } from './features/chat-reply-plan.js';
 import { initCommandPalette } from './features/workspace-command-palette.js';
+import { initSpawnWizard } from './features/spawn-wizard.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
@@ -148,6 +149,9 @@ async function initializeApp() {
 
     // Phase 11: Command palette
     initCommandPalette();
+
+    // Phase 12: Spawn wizard
+    initSpawnWizard();
 
     // Initialize chat tabs only after token bootstrap and feature init complete.
     await initChatTabs();
