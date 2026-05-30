@@ -1424,26 +1424,95 @@ Style:
 ## API Design (New / Changed Endpoints)
 
 All new endpoints:
-- Use existing auth_guard.
-- Enforce rate limiting (200 req/s + burst 500).
-- Return structured errors:
-  - 400: { "error": "bad_request", "message": "..." }
-  - 401: { "error": "unauthorized", "message": "..." }
-  - 403: { "error": "forbidden", "message": "..." }
-  - 404: { "error": "not_found", "message": "..." }
-  - 429: { "error": "rate_limited", "message": "..." }
-  - 500: { "error": "internal_error", "message": "..." }
+
+- Auth:
+  - Use existing auth_guard.
+  - Bearer token: Authorization: Bearer <token>.
+  - Session cookie: llama_monitor_session (Secure, HttpOnly, SameSite=Lax).
+  - Public endpoints: /api/health (and any explicitly marked).
+  - All others: auth-required (api-token or session cookie).
+  - api-token: no expiry unless rotated.
+  - Session cookie: max-age + invalidation on logout.
+
+- Rate limiting:
+  - Global: 200 req/s + burst 500 (token bucket).
+  - Per-endpoint limits apply first; global is a ceiling.
+  - Scope: per IP and per auth token.
+  - On exceed:
+    - 429 with { "error": "rate_limited", "message": "..." } and Retry-After header.
+
+- Error envelope:
+  - Standard shape:
+    - { "error": "short_code", "code": "MACHINE_CODE", "message": "Human-readable.", "request_id": "..." }
+  - No stack traces in responses.
+  - Always include request_id for debugging.
+
+- SSRF / external fetch:
+  - Allowed domains:
+    - HuggingFace: huggingface.co, *.hf.sh, huggingface.co/api.
+    - GitHub: github.com, raw.githubusercontent.com.
+    - Gist: gist.githubusercontent.com.
+  - Block internal/metadata IPs: 10/8, 172.16/12, 192.168/16, 169.254/16, 127/8.
+  - Limits:
+    - Max redirect: 5.
+    - Timeout: 15s for fetch, 300s for large downloads.
+    - Max response size: 50MB for templates; model downloads via streaming.
+
+- Path traversal / filesystem:
+  - Normalize paths (canonicalize).
+  - Enforce roots:
+    - Models: under models_dir.
+    - Scripts: under scripts_dir.
+  - Reject:
+    - “..” escapes.
+    - Absolute paths outside allowed roots.
+    - Control characters.
+
+- Prompt injection / content trust:
+  - Treat templates as untrusted.
+  - Keep templates logically separated from system prompts.
+  - Limit size (e.g., 1MB); disallow non-text/binary content.
+
+- Observability:
+  - Log request IDs.
+  - Log rate limit events.
+  - Never log full secrets or full prompt content.
+
+Return structured errors:
+  - 400: { "error": "bad_request", "code": "invalid_params", "message": "..." }
+  - 401: { "error": "unauthorized", "code": "missing_token", "message": "..." }
+  - 403: { "error": "forbidden", "code": "forbidden", "message": "..." }
+  - 404: { "error": "not_found", "code": "not_found", "message": "..." }
+  - 429: { "error": "rate_limited", "code": "rate_limited", "message": "..." }
+  - 500: { "error": "internal_error", "code": "internal_error", "message": "..." }
 
 - `POST /api/import-launch-file`
   - Auth: api-token or session cookie.
   - Rate limit: 20 req/min.
   - Body: `{ content: string, os: "windows" | "macos" | "linux" }`
+    - content = full script text.
+    - Supported: batch, PowerShell, bash, zsh.
   - Response: `{ preset: ModelPreset, warnings: [string] }`
+  - Validation:
+    - Max size: 50KB.
+    - Sanitize paths, env vars, and commands.
+    - Handle conflicting/unsafe flags (e.g., --host 0.0.0.0).
+  - Warnings:
+    - Non-blocking; free-text.
+  - Errors:
+    - 400: invalid content or os.
+    - 413: content too large.
 
 - `POST /api/chat-template/fetch`
   - Auth: api-token or session cookie.
   - Rate limit: 10 req/min.
   - Body: `{ source_type: "hf" | "github" | "gist", source: string }`
+    - For hf: source = "org/model" or full repo URL.
+      - Prefer: chat_template.jinja, tokenizer_config.json.
+    - For github: source = raw URL or repo+branch+path.
+    - For gist: source = gist ID + filename.
+  - Auth for gated models:
+    - Use HF_TOKEN from config if needed.
   - Response: `{ template: string, source_url: string }`
   - Errors:
     - 400: invalid URL.
@@ -1455,13 +1524,27 @@ All new endpoints:
 - `POST /api/chat-template/upload`
   - Auth: api-token or session cookie.
   - Rate limit: 10 req/min.
-  - Multipart with file.
+  - Multipart: field name = "file".
+  - Allowed: .jinja, .txt, .json, .yaml.
+  - Max size: 1MB.
+  - template_id: generated UUID.
+  - Persistence:
+    - Stored in app config or templates_dir.
+    - Per-user or global (clarify in implementation).
   - Response: `{ template_id, template }`
 
 - `POST /api/models/download`
   - Auth: api-token or session cookie.
   - Rate limit: 5 req/min.
   - Body: `{ repo_id, file_path, target_dir }`
+    - repo_id format: "org/model" only.
+    - file_path: relative to repo root; only .gguf files allowed.
+    - target_dir: must be under allowed models_dir.
+  - Auth for gated models:
+    - Use HF_TOKEN from config if needed.
+  - Concurrency:
+    - Max 3 parallel downloads.
+    - Dedup by repo_id+file_path.
   - Response: `{ download_id }`
   - Errors:
     - 400: invalid repo_id or file_path.
@@ -1473,17 +1556,41 @@ All new endpoints:
 - `GET /api/models/download/:id/status`
   - Auth: api-token or session cookie.
   - Rate limit: 200 req/s.
-  - Response: `{ progress, bytes_downloaded, total, speed, eta, status }`
+  - Response:
+    - `{ progress, bytes_downloaded, total, speed, eta, status }`
+    - eta = seconds (numeric).
+    - status values: pending, downloading, completed, failed, cancelled.
+    - On failure: include "error" field.
+  - Errors:
+    - 404: if ID invalid.
 
 - `POST /api/models/download/:id/cancel`
   - Auth: api-token or session cookie.
   - Rate limit: 10 req/min.
+  - Behavior:
+    - Idempotent: re-cancelling is allowed.
+    - Authz: same token/session can cancel its own downloads.
+    - If already completed/failed: return 400 with "already_completed" or "already_failed".
 
 - `POST /api/estimate-vram`
   - Auth: api-token or session cookie.
   - Rate limit: 20 req/min.
-  - Body: estimation input.
-  - Response: structured estimate + human-readable note.
+  - Input:
+    - model_path or model_id,
+    - context_size,
+    - kv_quant,
+    - parallel_slots,
+    - speculative flags,
+    - n_cpu_moe (if MoE),
+    - mmproj_size.
+  - Output:
+    - estimated_vram_bytes,
+    - estimated_ram_bytes,
+    - verdict (Fit/Tight/Risk/Won't fit),
+    - short guidance string.
+  - Behavior:
+    - Read-only, no side effects.
+    - Uses existing GPU monitoring for available_vram.
 
 - `POST /api/benchmark`
   - Auth: api-token or session cookie.
