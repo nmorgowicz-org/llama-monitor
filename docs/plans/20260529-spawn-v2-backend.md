@@ -24,30 +24,40 @@ Key existing capabilities:
 
 - **Spawning llama-server:**
   - `src/llama/server.rs`:
-    - `ServerConfig` struct: all parameters.
-    - `start_server()`: builds command, sets env, spawns child, streams logs.
+    - `ServerConfig` struct: comprehensive parameter set (model_path, context_size, gpu_layers, batch sizes, speculative decoding, MoE, rope scaling, etc.).
+    - `start_server()`: builds command from `ServerConfig`, sets environment (NVIDIA/ROCm), spawns child, streams logs.
+    - Always sets: `--host 0.0.0.0`, `--jinja`, `--metrics`, `--no-warmup`, `--webui-mcp-proxy`.
+    - Auto-applies YaRN rope scaling when context is very large.
   - `src/web/api.rs`:
-    - `POST /api/start`: direct start from config.
-    - `POST /api/sessions/spawn`: spawn with preset via session.
+    - `POST /api/start`: direct start from config; requires api-token.
+    - `POST /api/sessions/spawn`: spawn with preset via session; requires db-admin-token; rate-limited (15s cooldown).
 - **Presets:**
   - `src/presets/mod.rs`:
-    - `ModelPreset` struct.
-    - `load_presets`/`save_presets`, `default_presets`.
+    - `ModelPreset` struct mirrors `ServerConfig` almost 1:1.
+    - `load_presets`/`save_presets` from `presets.json`; `default_presets` for initial config.
+    - Editable via API (currently api-token only).
 - **Model discovery:**
   - `src/models/mod.rs`:
-    - `scan_models_dir`: scans for `.gguf`.
+    - `scan_models_dir`: scans for `.gguf` in configured models_dir.
   - `/api/models`, `/api/models/refresh`.
 - **File browser:**
   - `/api/browse?path=...&filter=gguf`
-  - `static/js/features/file-browser.js`.
+  - `static/js/features/file-browser.js`: modal file browser for model/executable selection.
 - **GPU/VRAM monitoring:**
   - `src/gpu/*`:
-    - `nvidia-smi`, `rocm-smi`, Apple unified memory, Windows WMI.
+    - NVIDIA: `nvidia-smi` (temp, load, power, VRAM used/total, clocks).
+    - ROCm: `rocm-smi` (similar).
+    - Apple: `mactop` (GPU temp/util/power; system memory for VRAM).
+    - Windows WMI: only GPU name + total VRAM; no runtime metrics.
+  - Exposed via `/metrics/gpu`, `/metrics`, and WebSocket.
 - **Metrics:**
-  - `src/llama/metrics.rs`, `src/llama/poller.rs`.
+  - `src/llama/metrics.rs`, `src/llama/poller.rs`:
+    - Poll llama-server `/health` and `/metrics` for KV cache usage, tokens, TPS, etc.
+    - Useful for tuning guidance and VRAM estimation feedback.
 - **Download infrastructure:**
   - `src/agent.rs`:
-    - `download_asset_locally`, etc. (for app/agent updates).
+    - `download_asset_locally` and related functions for app/agent updates.
+    - Can be extended or used as a pattern for model/binary downloads.
 
 What is missing (to be implemented):
 
@@ -65,6 +75,8 @@ What is missing (to be implemented):
 - No tuning guidance based on llama-server metrics.
 - No model-specific generation defaults.
 - No model introspection (see A17 below).
+- No `-hf` (HF repo-based model load) or multimodal (`--mmproj`) support in spawn flow.
+- No explicit safety/limits flags (max tokens, etc.) exposed in wizard.
 
 ---
 
@@ -92,23 +104,45 @@ What is missing (to be implemented):
 ### A2. Extend ServerConfig and ModelPreset
 
 - **Rationale:**
-  - New capabilities (chat-template-file, MoE tuning, benchmark flags) must be first-class.
-- **Changes:**
-  - `ServerConfig`:
-    - Add:
-      - `chat_template_file: Option<String>`
-      - `n_cpu_moe: Option<usize>` (already present; ensure exposed).
-      - `benchmark_mode: bool` (internal flag).
-      - `mmproj: Option<String>` (for multimodal models).
-      - `grammar: Option<String>` (for structured output).
-      - `json_schema: Option<String>` (for JSON mode).
-      - `cont_batching: bool` (continual batching).
-      - `cache_type_k: Option<String>` (KV cache quantization for K).
-      - `cache_type_v: Option<String>` (KV cache quantization for V).
-  - `ModelPreset`:
-    - Mirror new fields.
+  - New capabilities (HF-based model loading, chat-template-file, MoE tuning, multimodal, KV cache quantization, speculative decoding, safety/limits) must be first-class and wizard-integrated.
+- **Current state (for reference):**
+  - `ServerConfig` already includes:
+    - model_path, context_size, gpu_layers, batch_size, ubatch_size, no_mmap, port, ngram_spec, parallel_slots
+    - temperature, top_p, top_k, min_p, repeat_penalty
+    - n_cpu_moe, mlock, flash_attn, split_mode, main_gpu
+    - threads, threads_batch
+    - rope_scaling, rope_freq_base, rope_freq_scale
+    - draft_model, draft_min, draft_max, spec_ngram_size
+    - seed, system_prompt_file, extra_args
+  - `ModelPreset` mirrors this almost 1:1.
+- **Required new fields (must be added to both ServerConfig and ModelPreset):**
+  - hf_repo: Option<String>
+    - For -hf user/repo[:quant]; alternative to model_path for HF-based loading.
+  - chat_template_file: Option<String>
+    - For --chat-template-file (custom chat template).
+  - mmproj: Option<String>
+    - For --mmproj (multimodal projector).
+  - grammar: Option<String>
+    - For grammar-based structured output.
+  - json_schema: Option<String>
+    - For JSON mode / schema-based output.
+  - cache_type_k: Option<String>
+    - For -ctk / --cache-type-k (KV cache quantization K).
+  - cache_type_v: Option<String>
+    - For -ctv / --cache-type-v (KV cache quantization V).
+  - max_tokens: Option<u64>
+    - For -n / --n-predict; safety/limits.
+  - api_key: Option<String>
+    - For --api-key; protects llama-server when exposed.
+- **Internal-only fields (ServerConfig only; not exposed in presets):**
+  - benchmark_mode: bool
+    - Internal flag to run a controlled benchmark via /api/benchmark.
+- **Implementation rules:**
   - Ensure `#[serde(default)]` on all new fields.
-  - All new fields must be added to `start_server()` in `src/llama/server.rs` with appropriate flags.
+  - All new fields must be wired into `start_server()` with corresponding llama-server flags.
+  - For hf_repo:
+    - If set and model_path is not explicitly provided, construct -hf flag instead of -m.
+    - Do not allow both -m and -hf simultaneously; treat as error.
 
 ### A3. HuggingFace integration via hf-hub crate
 
@@ -117,19 +151,35 @@ What is missing (to be implemented):
   - Handles auth, rate limits, gated models, and repo operations.
 - **Design:**
   - Use `hf-hub` crate (by Hugging Face):
-    - `HFClient` for async operations.
-    - `HFClientSync` for blocking operations.
-  - Functions:
-    - `hf_list_repo_files(repo_id: &str)`
-    - `hf_get_file_info(repo_id: &str, path: &str)`
-    - `hf_get_model_info(repo_id: &str)`
+    - Prefer `HFClient` (async) for all new code.
+    - `HFClientSync` only if needed in non-async contexts.
+  - Core operations:
+    - `hf_get_model_info(repo_id)`:
+      - Use `HFClient::model(repo_id).info()` to get `ModelInfo`.
+      - Extract:
+        - `gated` (None/false = open; "auto"/"manual" = gated).
+        - `tags` (to detect GGUF, MoE, etc.).
+        - `gguf` metadata (if present).
+    - `hf_list_repo_files(repo_id)`:
+      - Use `repo.list_tree().recursive(true).expand(true)` to get `RepoTreeEntry`.
+      - Filter for `.gguf` files.
+      - Use file size + name to present options in wizard.
+    - `hf_get_file_info(repo_id, path)`:
+      - Use `repo.get_file_metadata().filepath(path)` for size, ETag, Xet hash.
+    - Download:
+      - For large GGUF files, use `download_file_stream()` with:
+        - Custom file writer.
+        - Progress reporting.
+        - Manual resume via `.range(current_size..)` on restart.
+      - Do not rely solely on `download_file()` for multi-GB models (no built-in resume across restarts).
   - Auth:
     - Read `HUGGING_FACE_HUB_TOKEN` from env.
     - Allow user to input their own token via UI.
     - Store in config file (e.g., `~/.config/llama-monitor/hf-token`).
     - Use a read-only or fine-grained token for security.
+    - Never log the full token.
   - Gated models:
-    - Detect gating from model metadata.
+    - Detect gating from model metadata (`ModelInfo.gated`).
     - If 401/403 on metadata or download:
       - Show: "This model is gated. Please visit it on HuggingFace, request access, then provide your HF_TOKEN."
     - Do not attempt to auto-request access.
@@ -261,13 +311,29 @@ What is missing (to be implemented):
 - **Design:**
   - Guided mode:
     - Sections:
-      - Model & paths.
-      - GPU & memory.
-      - Context & batching.
-      - Generation parameters.
-      - Speculative decoding.
-      - MoE tuning.
-      - Advanced / custom args.
+      - Model & paths:
+        - model_path or hf_repo
+        - mmproj (for multimodal)
+        - chat_template_file
+      - GPU & memory:
+        - gpu_layers (auto / all / manual)
+        - split_mode, tensor_split, main_gpu (if multi-GPU)
+        - mlock, no_mmap
+      - Context & batching:
+        - context_size
+        - batch_size, ubatch_size
+        - parallel_slots
+        - cache_type_k, cache_type_v
+      - Generation parameters:
+        - temperature, top_p, top_k, min_p, repeat_penalty
+        - max_tokens (safety/limits)
+      - Speculative decoding:
+        - speculative_mode (none / ngram-mod / draft-model)
+        - draft_model
+      - MoE tuning:
+        - n_cpu_moe / cpu_moe toggle
+      - Advanced / custom args:
+        - extra_args (plain text)
     - Each field:
       - Short description.
       - Optional tooltip with deeper info.
@@ -711,33 +777,57 @@ All with `#[serde(default)]` and safe defaults.
 
 ## Security Requirements
 
-These are specific to this feature and must be followed:
+These are specific to this feature and must be followed. They extend the AGENTS.md security rules.
 
-- **Token handling:**
-  - HF token must be:
+- **Token handling (HF and API tokens):**
+  - HF token:
     - Stored in a config file (e.g., `~/.config/llama-monitor/hf-token`).
-    - Masked in logs and error messages.
-    - Not logged in full.
-  - Use a read-only or fine-grained token for security.
+    - Masked in logs and error messages; never logged in full.
+    - Use a read-only or fine-grained token for security.
+  - API tokens:
+    - All new endpoints must enforce api-token or db-admin-token via constant-time comparison (use existing helpers).
+    - No new == on tokens.
+
+- **Auth levels (concrete rules):**
+  - api-token:
+    - All new endpoints that read user data (settings, presets, templates, chat, config, models list, browse).
+  - db-admin-token:
+    - Any endpoint that:
+      - Spawns or restarts llama-server (including new spawn-v2 endpoints).
+      - Changes llama_server_path or llama_server_cwd.
+      - Downloads or replaces llama-server binaries.
+      - Downloads models into models_dir.
+      - Modifies presets in ways that affect command-line arguments or paths.
+      - Performs destructive or high-impact operations (delete backups, restore DB, etc.).
+  - Existing behavior:
+    - `POST /api/sessions/spawn` already requires db-admin-token; all new spawn-v2 endpoints must do the same.
+  - Never rely solely on the global auth_guard (which accepts api-token) for elevated operations.
 
 - **Binary trust:**
   - Only trust releases from official repo (`ggerganov/llama.cpp`).
   - Verify asset signatures if available.
   - Never auto-execute without user confirmation.
+  - Binaries must be stored in a standardized directory (e.g., `config_dir/binaries/`); never arbitrary paths.
 
 - **Model download integrity:**
-  - Large model downloads must verify SHA256 against HF metadata.
+  - Large model downloads must verify SHA256 against HF metadata where available.
   - Partial/corrupted downloads must be detectable and resumable.
+  - Target directory must be constrained to `models_dir` (or a designated subdirectory).
 
 - **File browser path traversal:**
   - The browse endpoint must enforce allow-listed roots.
   - Third-party model import (Ollama, LM Studio) must not expose arbitrary filesystem paths.
+  - Reject "..", leading "/", and leading "\\" when expecting filenames.
 
-- **API auth:**
-  - All new endpoints must be audited against AGENTS.md rules:
-    - Read user data → api-token.
-    - Destructive/elevated → db-admin-token.
-    - No silent data loss.
+- **Command injection and extra_args:**
+  - Never use a shell to execute llama-server.
+  - extra_args:
+    - Split by whitespace; do not interpret shell metacharacters.
+    - Treat as untrusted; do not allow flags that change user, mount, or run arbitrary scripts.
+  - If presets are editable via API:
+    - Either:
+      - Require db-admin-token, or
+      - Strictly validate model paths and args to prevent arbitrary executables/commands.
 
 - **Secrets:**
   - No full tokens, passwords, or keys in logs.

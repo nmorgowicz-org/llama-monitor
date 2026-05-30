@@ -7,6 +7,9 @@
 This is the research and tuning reference for the Spawn Llama-Server V2 feature.
 It is NOT for linear reading; it is for agents and developers to consult as needed.
 
+For a concise, self-contained reference (optimized for fresh AI agents), see:
+- `docs/plans/20260529-spawn-v2-reference.md`
+
 For the high-level overview and phased plan, see:
 - `docs/plans/20260529-spawn-v2-overview.md`
 
@@ -15,6 +18,15 @@ For backend architecture, APIs, and data models, see:
 
 For frontend architecture and wizard UI, see:
 - `docs/plans/20260529-spawn-v2-frontend.md`
+
+How to use this doc:
+- Use this as:
+  - A lookup for llama.cpp tuning decisions.
+  - A reference for third-party compatibility (Ollama, LM Studio, etc.).
+  - A source for VRAM estimation formulas and MoE tuning guidance.
+- Do NOT:
+  - Use this as the primary spec for implementation.
+  - Implement features based solely on this doc without reading backend/frontend docs.
 
 ---
 
