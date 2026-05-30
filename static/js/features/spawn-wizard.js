@@ -519,7 +519,85 @@ function updateSelectedModelDisplay() {
     }
 }
 
-// ── HF File Listing (Phase 1: basic) ─────────────────────────────────────────
+// ── HF Search (Phase 3) ──────────────────────────────────────────────────────
+
+let hfSearchDebounce = null;
+
+async function hfSearchModels(query) {
+    if (!query || query.length < 2) return [];
+    try {
+        const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+        const resp = await fetch('/api/hf/search', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ query, limit: 20 }),
+        });
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        return (data.models || []).filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
+async function hfListFiles(repoId) {
+    if (!repoId) return [];
+    try {
+        const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+        const resp = await fetch('/api/hf/files', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ repo_id: repoId }),
+        });
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        return (data.files || []).filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
+async function hfStartDownload(repoId, filePath) {
+    try {
+        const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+        const resp = await fetch('/api/hf/download', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ repo_id: repoId, file_path: filePath, resume: false }),
+        });
+        if (!resp.ok) {
+            const text = await resp.text().catch(() => 'Download failed');
+            throw new Error(text || 'Download failed');
+        }
+        const data = await resp.json();
+        return data.download_id || null;
+    } catch (err) {
+        showToast('HF download failed: ' + (err.message || String(err)), 'error');
+        return null;
+    }
+}
+
+async function pollDownloadStatus(downloadId) {
+    try {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const resp = await fetch(`/api/models/download/${encodeURIComponent(downloadId)}/status`, {
+            headers,
+        });
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        return data.status || null;
+    } catch {
+        return null;
+    }
+}
+
+// ── HF File Listing (Phase 3: updated) ───────────────────────────────────────
 
 async function fetchHfFiles(repo) {
     if (!dom.hfFileList) return;
@@ -527,36 +605,38 @@ async function fetchHfFiles(repo) {
     dom.hfFileList.classList.remove('visible');
 
     try {
-        const headers = window.authHeaders ? window.authHeaders() : {};
-        const resp = await fetch(`/api/models/download/list-gguf?repo=${encodeURIComponent(repo)}`, {
-            headers,
-        });
-
-        if (!resp.ok) {
-            // If endpoint not implemented yet, silently hide list.
-            return;
-        }
-
-        const data = await resp.json();
-        const files = data.files || data || [];
+        const files = await hfListFiles(repo);
         if (!Array.isArray(files) || files.length === 0) return;
+
+        // Get available VRAM for quant recommendation hints.
+        const vramGb = (wizardState.vram.available || 0);
 
         files.forEach(file => {
             const item = document.createElement('div');
             item.className = 'hf-file-item';
-            item.dataset.filename = file.filename || file.name || '';
+            item.dataset.filename = file.path || file.name || '';
             item.dataset.size = file.size || '';
 
             const nameSpan = document.createElement('span');
             nameSpan.className = 'hf-file-name';
-            nameSpan.textContent = file.filename || file.name || '';
+            nameSpan.textContent = file.path || file.name || '';
 
-            const sizeSpan = document.createElement('span');
-            sizeSpan.className = 'hf-file-size';
-            sizeSpan.textContent = file.size ? formatBytes(file.size) : '';
+            const metaSpan = document.createElement('span');
+            metaSpan.className = 'hf-file-size';
+
+            const parts = [];
+            if (file.size) parts.push(formatBytes(file.size));
+            if (file.label) parts.push(file.label);
+            if (vramGb > 0) {
+                const recommended = getRecommendedQuant(vramGb);
+                if (file.label && file.label === recommended) {
+                    parts.push('Recommended');
+                }
+            }
+            metaSpan.textContent = parts.join(' · ');
 
             item.appendChild(nameSpan);
-            item.appendChild(sizeSpan);
+            item.appendChild(metaSpan);
 
             item.addEventListener('click', () => {
                 dom.hfFileList.querySelectorAll('.hf-file-item.selected')
@@ -572,7 +652,54 @@ async function fetchHfFiles(repo) {
 
         dom.hfFileList.classList.add('visible');
     } catch {
-        // Ignore for now; Phase 3 will refine.
+        // Silently hide list on error.
+    }
+}
+
+function getRecommendedQuant(vramGb) {
+    if (vramGb < 8) return 'Q4_K_M';
+    if (vramGb <= 16) return 'Q5_K_M';
+    return 'Q8_0';
+}
+
+// ── Third-Party Model Import (Phase 3) ────────────────────────────────────────
+
+async function fetchThirdPartyModels() {
+    try {
+        const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+        const resp = await fetch('/api/third-party-models', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ include_subdirs: true }),
+        });
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        return (data.models || []).filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
+// ── Model Introspection (Phase 3) ─────────────────────────────────────────────
+
+async function introspectModel(modelPath) {
+    if (!modelPath) return null;
+    try {
+        const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+        const resp = await fetch('/api/model/introspect', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ model_path: modelPath }),
+        });
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        return data.metadata || null;
+    } catch {
+        return null;
     }
 }
 

@@ -5,6 +5,10 @@
 //! - hf_list_repo_files
 //! - hf_get_file_info
 //! - hf_download_file_stream
+//! - hf_search_models
+//! - hf_list_gguf_files
+//! - hf_start_download
+//! - hf_token management
 
 #![allow(dead_code)]
 
@@ -14,6 +18,26 @@ use hf_hub::{Repo, RepoType};
 use std::path::Path;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+
+/// Simple model info for search results.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct SimpleModelInfo {
+    pub id: String,
+    pub gated: bool,
+    pub tags: Vec<String>,
+    pub downloads: u64,
+    pub likes: u64,
+}
+
+/// A GGUF file in a HF repo.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct HfGgufFile {
+    pub path: String,
+    pub size: u64,
+    pub label: String,
+}
 
 /// High-level model info from HF.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -261,6 +285,233 @@ pub async fn hf_download_file_stream(
     Ok(downloaded)
 }
 
+/// Load HF token from environment or config file.
+///
+/// Priority:
+/// 1) HUGGING_FACE_HUB_TOKEN env var
+/// 2) ~/.config/llama-monitor/hf-token file
+///
+/// Token is never logged in full.
+pub fn hf_load_token() -> Option<String> {
+    // Env var first.
+    if let Ok(v) = std::env::var("HUGGING_FACE_HUB_TOKEN")
+        && !v.trim().is_empty()
+    {
+        return Some(v);
+    }
+
+    // Fallback: config file.
+    if let Some(home) = dirs::home_dir() {
+        let path = home.join(".config").join("llama-monitor").join("hf-token");
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let trimmed = content.trim().to_string();
+            if !trimmed.is_empty() {
+                return Some(trimmed);
+            }
+        }
+    }
+
+    None
+}
+
+/// Save HF token to config file.
+pub fn hf_save_token(token: &str) -> Result<()> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
+    let dir = home.join(".config").join("llama-monitor");
+    std::fs::create_dir_all(&dir).context("Failed to create config dir for HF token")?;
+    let path = dir.join("hf-token");
+    std::fs::write(&path, token.trim())
+        .context("Failed to write HF token file")?;
+    Ok(())
+}
+
+/// Mask a token for safe logging: first4...last4.
+fn mask_token(token: &str) -> String {
+    let t = token.trim();
+    if t.len() <= 8 {
+        "****".to_string()
+    } else {
+        format!("{}****{}", &t[..4], &t[t.len() - 4..])
+    }
+}
+
+/// Search models on HuggingFace Hub.
+///
+/// Uses HF Hub REST API with GGUF tag filter.
+pub async fn hf_search_models(query: &str, limit: usize) -> Result<Vec<SimpleModelInfo>, String> {
+    let limit = limit.clamp(1, 100);
+
+    let token = hf_load_token();
+    let client = reqwest::Client::new();
+
+    let mut url = reqwest::Url::parse("https://huggingface.co/api/models")
+        .map_err(|e| format!("Invalid HF API URL: {e}"))?;
+
+    {
+        let mut params = url.query_pairs_mut();
+        params.append_pair("search", query);
+        params.append_pair("limit", &limit.to_string());
+        params.append_pair("sort", "downloads");
+        params.append_pair("direction", "-1");
+        params.append_pair("filter", "gguf");
+    }
+
+    let mut req = client.get(url);
+
+    if let Some(ref tok) = token {
+        req = req.bearer_auth(tok);
+    }
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("HF search request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!(
+            "HF search failed with status {} (model may be gated or search unavailable)",
+            resp.status()
+        ));
+    }
+
+    let items: Vec<serde_json::Value> = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse HF search response: {e}"))?;
+
+    let mut results = Vec::new();
+    for item in items {
+        let id = item
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if id.is_empty() {
+            continue;
+        }
+
+        let gated = item
+            .get("gated")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let tags: Vec<String> = item
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| t.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let downloads = item
+            .get("downloads")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        let likes = item
+            .get("likes")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+
+        results.push(SimpleModelInfo {
+            id,
+            gated,
+            tags,
+            downloads,
+            likes,
+        });
+    }
+
+    Ok(results)
+}
+
+/// List GGUF files for a given HF repo.
+///
+/// Uses the repo info (siblings) to filter .gguf files, and enriches
+/// with size and a human-readable quant label.
+pub async fn hf_list_gguf_files(repo_id: &str) -> Result<Vec<HfGgufFile>, String> {
+    let api = ApiBuilder::new()
+        .with_token(hf_load_token())
+        .build()
+        .map_err(|e| format!("Failed to build HF API client: {e}"))?;
+
+    let repo = Repo::new(repo_id.to_string(), RepoType::Model);
+    let model = api.repo(repo);
+
+    let info = model
+        .info()
+        .map_err(|e| format!("Failed to list repo files: {e}"))?;
+
+    let mut result = Vec::new();
+
+    for sibling in &info.siblings {
+        let name = sibling.rfilename.as_str();
+        if !name.to_ascii_lowercase().ends_with(".gguf") {
+            continue;
+        }
+
+        // Try to infer a label from filename.
+        let label = infer_quant_label(name);
+
+        result.push(HfGgufFile {
+            path: name.to_string(),
+            size: 0, // hf-hub 0.5 does not expose size directly
+            label,
+        });
+    }
+
+    Ok(result)
+}
+
+/// Infer a human-readable quant label from a GGUF filename.
+fn infer_quant_label(filename: &str) -> String {
+    let lower = filename.to_ascii_lowercase();
+    if lower.contains("q8_0") {
+        "Q8_0"
+    } else if lower.contains("q6_k") {
+        "Q6_K"
+    } else if lower.contains("q5_k_m") {
+        "Q5_K_M"
+    } else if lower.contains("q5_k_s") {
+        "Q5_K_S"
+    } else if lower.contains("q4_k_m") {
+        "Q4_K_M"
+    } else if lower.contains("q4_k_s") {
+        "Q4_K_S"
+    } else if lower.contains("q3_k_m") {
+        "Q3_K_M"
+    } else if lower.contains("q3_k_s") {
+        "Q3_K_S"
+    } else if lower.contains("q2_k") {
+        "Q2_K"
+    } else if lower.contains("iq4_x") {
+        "IQ4_X"
+    } else if lower.contains("bf16") || lower.contains("f16") {
+        "BF16/F16"
+    } else if lower.contains("f32") {
+        "F32"
+    } else {
+        "Unknown"
+    }
+    .to_string()
+}
+
+/// Start a download via the existing model_download module.
+///
+/// Integrates with /api/models/download and /api/models/download/:id/status.
+pub fn hf_start_download(
+    repo_id: &str,
+    file_path: &str,
+    target_path: &Path,
+    _resume: bool, // resume flag reserved for future; currently uses existing behavior
+) -> Result<String, String> {
+    // Use existing model_download::start_download.
+    crate::model_download::start_download(repo_id, file_path, target_path, hf_load_token())
+        .map_err(|e| format!("Failed to start download: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,5 +521,116 @@ mod tests {
         // This is a minimal smoke test; it will fail if network is unavailable.
         // In CI, treat as best-effort.
         let _ = hf_get_model_info("gpt2");
+    }
+
+    #[test]
+    fn test_infer_quant_label() {
+        assert_eq!(infer_quant_label("model-Q4_K_M.gguf"), "Q4_K_M");
+        assert_eq!(infer_quant_label("model-Q8_0.gguf"), "Q8_0");
+        assert_eq!(infer_quant_label("model-bf16.gguf"), "BF16/F16");
+        assert_eq!(infer_quant_label("model-random.gguf"), "Unknown");
+    }
+
+    #[test]
+    fn test_mask_token() {
+        assert_eq!(mask_token("1234567890"), "1234****7890");
+        assert_eq!(mask_token("1234"), "****");
+    }
+
+    #[test]
+    fn test_simple_model_info_serde_default() {
+        let json = r#"{"id":"test/model"}"#;
+        let info: SimpleModelInfo = serde_json::from_str(json).expect("should deserialize with defaults");
+        assert_eq!(info.id, "test/model");
+        assert!(!info.gated);
+        assert!(info.tags.is_empty());
+        assert_eq!(info.downloads, 0);
+        assert_eq!(info.likes, 0);
+    }
+
+    #[test]
+    fn test_hf_gguf_file_serde_default() {
+        let json = r#"{"path":"file.gguf"}"#;
+        let f: HfGgufFile = serde_json::from_str(json).expect("should deserialize with defaults");
+        assert_eq!(f.path, "file.gguf");
+        assert_eq!(f.size, 0);
+        assert!(f.label.is_empty());
+    }
+
+    #[test]
+    fn test_hf_search_models_parsing_mock() {
+        // Validate parsing logic with a synthetic JSON payload.
+        let mock_response = serde_json::json!([
+            {
+                "id": "org/model1",
+                "gated": false,
+                "tags": ["gguf", "llama"],
+                "downloads": 1234,
+                "likes": 56
+            },
+            {
+                "id": "org/gated-model",
+                "gated": true,
+                "tags": ["gguf"],
+                "downloads": 999,
+                "likes": 10
+            }
+        ]);
+
+        let items: Vec<serde_json::Value> = mock_response.as_array().unwrap().to_vec();
+
+        let mut results = Vec::new();
+        for item in items {
+            let id = item
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if id.is_empty() {
+                continue;
+            }
+            let gated = item.get("gated").and_then(|v| v.as_bool()).unwrap_or(false);
+            let tags: Vec<String> = item
+                .get("tags")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let downloads = item.get("downloads").and_then(|v| v.as_u64()).unwrap_or(0);
+            let likes = item.get("likes").and_then(|v| v.as_u64()).unwrap_or(0);
+            results.push(SimpleModelInfo { id, gated, tags, downloads, likes });
+        }
+
+        assert_eq!(results.len(), 2);
+        assert!(!results[0].gated);
+        assert!(results[1].gated);
+        assert_eq!(results[0].downloads, 1234);
+        assert!(results[0].tags.contains(&"gguf".to_string()));
+    }
+
+    #[test]
+    fn test_hf_list_gguf_files_filtering() {
+        // Simulate filtering logic.
+        let siblings = vec![
+            "model-Q4_K_M.gguf",
+            "tokenizer.model",
+            "model-Q8_0.gguf",
+            "README.md",
+        ];
+
+        let mut ggufs = Vec::new();
+        for name in &siblings {
+            if name.to_ascii_lowercase().ends_with(".gguf") {
+                let label = infer_quant_label(name);
+                ggufs.push(HfGgufFile {
+                    path: name.to_string(),
+                    size: 0,
+                    label,
+                });
+            }
+        }
+
+        assert_eq!(ggufs.len(), 2);
+        assert_eq!(ggufs[0].label, "Q4_K_M");
+        assert_eq!(ggufs[1].label, "Q8_0");
     }
 }
