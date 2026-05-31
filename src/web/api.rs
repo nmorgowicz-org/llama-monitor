@@ -2825,7 +2825,9 @@ fn api_hf_community_picks(
 }
 
 // ── GET /api/hf/quantizers ────────────────────────────────────────────────────
-// Returns the curated list of known GGUF quantizers for the wizard quick-picks.
+// Returns the active quantizer list for the wizard quick-picks.
+// If hf-quantizers.json exists in config_dir, that list is returned (is_custom=true).
+// Otherwise the built-in defaults are returned (is_custom=false).
 
 fn api_hf_quantizers(
     _state: AppState,
@@ -2840,12 +2842,59 @@ fn api_hf_quantizers(
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
                 }
-                let quantizers = crate::hf::known_gguf_quantizers();
+                if let Some(user_list) = crate::hf::load_user_quantizers(&cfg.config_dir) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({ "ok": true, "quantizers": user_list, "is_custom": true }),
+                    )));
+                }
+                let defaults: Vec<crate::hf::UserQuantizer> = crate::hf::known_gguf_quantizers()
+                    .iter().map(Into::into).collect();
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                    &serde_json::json!({ "ok": true, "quantizers": quantizers }),
+                    &serde_json::json!({ "ok": true, "quantizers": defaults, "is_custom": false }),
                 )))
             }
         })
+}
+
+// ── PUT /api/hf/quantizers ────────────────────────────────────────────────────
+// Saves a user-customized quantizer list to hf-quantizers.json.
+// Send an empty array to reset to defaults (deletes the file).
+
+fn api_hf_quantizers_put(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "quantizers")
+        .and(warp::put())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<Vec<crate::hf::UserQuantizer>>())
+        .and_then(
+            move |auth: Option<String>, body: Vec<crate::hf::UserQuantizer>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    // Empty list = reset to defaults (remove user file)
+                    if body.is_empty() {
+                        let _ = std::fs::remove_file(cfg.config_dir.join("hf-quantizers.json"));
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({ "ok": true, "reset": true })),
+                        ));
+                    }
+                    match crate::hf::save_user_quantizers(&cfg.config_dir, &body) {
+                        Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({ "ok": true })),
+                        )),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(
+                                &serde_json::json!({ "ok": false, "error": format!("{e}") }),
+                            ),
+                        )),
+                    }
+                }
+            },
+        )
 }
 
 // ── POST /api/hf/author-models ────────────────────────────────────────────────
@@ -3291,6 +3340,7 @@ pub fn api_routes(
     let hf_files_route = api_hf_files(state.clone(), app_config.clone());
     let hf_download_route = api_hf_download(state.clone(), app_config.clone());
     let hf_quantizers_route = api_hf_quantizers(state.clone(), app_config.clone());
+    let hf_quantizers_put_route = api_hf_quantizers_put(state.clone(), app_config.clone());
     let hf_author_models_route = api_hf_author_models(state.clone(), app_config.clone());
     let hf_community_picks_route = api_hf_community_picks(state.clone(), app_config.clone());
     let third_party_models_route = api_third_party_models(state.clone(), app_config.clone());
@@ -3411,6 +3461,7 @@ pub fn api_routes(
         .or(hf_files_route)
         .or(hf_download_route)
         .or(hf_quantizers_route)
+        .or(hf_quantizers_put_route)
         .or(hf_author_models_route)
         .or(hf_community_picks_route)
         .or(third_party_models_route)

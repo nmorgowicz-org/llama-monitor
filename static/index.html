@@ -2116,6 +2116,22 @@
                             <div class="hf-quickpicks" id="hf-quickpicks">
                                 <!-- populated by JS from /api/hf/quantizers -->
                             </div>
+                            <button type="button" class="hf-qp-edit-btn" id="hf-qp-edit-btn" title="Customize quantizer list" aria-expanded="false">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                            </button>
+                        </div>
+                        <!-- Quantizer editor (shown when gear is clicked) -->
+                        <div class="hf-qp-editor" id="hf-qp-editor" style="display:none;" aria-label="Customize quantizer authors">
+                            <div class="hf-qp-editor-list" id="hf-qp-editor-list"></div>
+                            <div class="hf-qp-editor-add">
+                                <input type="text" class="hf-qp-editor-input" id="hf-qp-editor-username" placeholder="HuggingFace username" autocomplete="off" spellcheck="false">
+                                <input type="text" class="hf-qp-editor-input hf-qp-editor-input-sm" id="hf-qp-editor-displayname" placeholder="Display name (optional)">
+                                <button type="button" class="btn-sm btn-preset" id="hf-qp-editor-add-btn">Add</button>
+                            </div>
+                            <div class="hf-qp-editor-actions">
+                                <button type="button" class="btn-sm btn-preset-reset" id="hf-qp-editor-reset-btn">Reset to Defaults</button>
+                                <button type="button" class="btn-sm btn-preset" id="hf-qp-editor-save-btn" style="background:rgba(99,102,241,0.15);border-color:rgba(99,102,241,0.35);color:#a5b4fc;">Save</button>
+                            </div>
                         </div>
                         <!-- Repo ID / search field -->
                         <div class="model-input-row">
@@ -2773,17 +2789,27 @@
 
 <!-- Models Modal -->
 <div class="modal-overlay" id="models-modal">
-    <div class="modal" style="width:760px;">
+    <div class="modal" style="width:860px;max-height:82vh;display:flex;flex-direction:column;">
         <div class="modal-header">
-            <h2>Models</h2>
+            <div>
+                <h2>Local Models</h2>
+                <p class="modal-subtitle" id="models-summary">Scanning…</p>
+            </div>
             <button type="button" class="modal-close" id="models-modal-close" aria-label="Close">&times;</button>
         </div>
-        <div class="modal-body">
+        <div class="modal-body" style="flex:1;min-height:0;overflow-y:auto;padding-top:0;">
             <div class="models-toolbar">
-                <button type="button" class="btn btn-secondary" id="models-refresh-btn">Refresh</button>
-                <span class="models-summary" id="models-summary">Loading models...</span>
+                <button type="button" class="btn btn-secondary" id="models-refresh-btn">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                    Refresh
+                </button>
+                <span class="models-no-dir-hint" id="models-no-dir-hint" style="display:none;">
+                    No models directory configured — set one in
+                    <button type="button" class="models-settings-link" id="models-open-settings-link">Settings → Server</button>
+                    or add model paths to a preset.
+                </span>
             </div>
-            <div class="models-list" id="models-list"></div>
+            <div class="models-grid" id="models-list"></div>
         </div>
         <div class="modal-buttons">
             <button type="button" class="btn btn-modal-cancel" id="models-modal-cancel">Close</button>

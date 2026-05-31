@@ -240,6 +240,49 @@ pub struct KnownQuantizer {
     pub note: Option<String>,
 }
 
+/// User-editable version of KnownQuantizer (all owned strings, round-trips through JSON).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UserQuantizer {
+    pub username: String,
+    pub display_name: String,
+    pub description: String,
+    pub quant_style: String, // "standard" | "imatrix" | "ud"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+impl From<&KnownQuantizer> for UserQuantizer {
+    fn from(q: &KnownQuantizer) -> Self {
+        UserQuantizer {
+            username: q.username.clone(),
+            display_name: q.display_name.clone(),
+            description: q.description.clone(),
+            quant_style: q.quant_style.to_string(),
+            note: q.note.clone(),
+        }
+    }
+}
+
+/// Load user-customized quantizers from `config_dir/hf-quantizers.json`.
+/// Returns None if the file does not exist (caller should fall back to defaults).
+pub fn load_user_quantizers(config_dir: &std::path::Path) -> Option<Vec<UserQuantizer>> {
+    let path = config_dir.join("hf-quantizers.json");
+    let text = std::fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// Persist user-customized quantizers to `config_dir/hf-quantizers.json`.
+pub fn save_user_quantizers(
+    config_dir: &std::path::Path,
+    quantizers: &[UserQuantizer],
+) -> Result<()> {
+    let path = config_dir.join("hf-quantizers.json");
+    let json =
+        serde_json::to_string_pretty(quantizers).context("Failed to serialize quantizers")?;
+    std::fs::write(&path, json).context("Failed to write hf-quantizers.json")?;
+    Ok(())
+}
+
 pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
     vec![
         KnownQuantizer {

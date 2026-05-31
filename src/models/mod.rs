@@ -10,6 +10,12 @@ pub struct DiscoveredModel {
     pub quant_type: Option<String>,
     pub model_name: Option<String>,
     pub is_split: bool,
+    /// Inferred parameter count in billions (e.g. 7.0, 70.0).
+    pub param_b: Option<f32>,
+    /// Rough VRAM estimate in GB based on param_b + quant type.
+    pub vram_est_gb: Option<f32>,
+    /// "standard" | "imatrix" | "ud" — for badge coloring.
+    pub quant_style: Option<&'static str>,
 }
 
 /// Scan a directory for .gguf model files.
@@ -41,6 +47,11 @@ pub fn scan_models_dir(dir: &Path) -> Result<Vec<DiscoveredModel>> {
 
         let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
         let (model_name, quant_type) = parse_gguf_filename(&filename);
+        let param_b = model_name.as_deref().and_then(infer_param_b);
+        let quant_style = quant_type.as_deref().map(infer_quant_style);
+        let vram_est_gb = param_b
+            .zip(quant_type.as_deref())
+            .map(|(pb, qt)| estimate_vram_gb(pb, qt));
 
         models.push(DiscoveredModel {
             path: path.clone(),
@@ -50,6 +61,9 @@ pub fn scan_models_dir(dir: &Path) -> Result<Vec<DiscoveredModel>> {
             quant_type,
             model_name,
             is_split,
+            param_b,
+            vram_est_gb,
+            quant_style,
         });
     }
 
@@ -135,6 +149,67 @@ fn strip_split_suffix(stem: &str) -> &str {
         }
     }
     stem
+}
+
+/// Extract parameter count in billions from a model name string.
+/// Matches patterns like "70B", "7B", "72b", "13.5B", "30B-A3B" (active params ignored).
+fn infer_param_b(model_name: &str) -> Option<f32> {
+    // Walk left-to-right finding the first "<number>B" token (case-insensitive).
+    // Stop at the first match — avoids "A3B" (active params) in MoE names.
+    let upper = model_name.to_uppercase();
+    let bytes = upper.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'B' && i > 0 {
+            // Collect digits (and '.') immediately before the 'B'
+            let mut j = i;
+            while j > 0 && (bytes[j - 1].is_ascii_digit() || bytes[j - 1] == b'.') {
+                j -= 1;
+            }
+            if j < i {
+                if let Ok(v) = std::str::from_utf8(&bytes[j..i])
+                    .unwrap_or("")
+                    .parse::<f32>()
+                {
+                    if v >= 0.5 && v <= 2000.0 {
+                        return Some(v);
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Map a quant type string to its style: "standard" | "imatrix" | "ud".
+fn infer_quant_style(quant_type: &str) -> &'static str {
+    let u = quant_type.to_uppercase();
+    if u.starts_with("UD-") || u.contains("UD_") {
+        "ud"
+    } else if u.starts_with("I1-") || u.starts_with("IQ") || u.contains("-I1-") {
+        "imatrix"
+    } else {
+        "standard"
+    }
+}
+
+/// Rough VRAM estimate in GB: model weights + ~1 GB overhead.
+/// Uses bits-per-weight lookup for the given quant type.
+fn estimate_vram_gb(param_b: f32, quant_type: &str) -> f32 {
+    let bpw: f32 = match quant_type.to_uppercase().as_str() {
+        q if q.contains("Q2") => 2.5,
+        q if q.contains("Q3") => 3.5,
+        q if q.contains("Q4") => 4.5,
+        q if q.contains("Q5") => 5.5,
+        q if q.contains("Q6") => 6.5,
+        q if q.contains("Q8") => 8.5,
+        q if q.contains("F16") || q.contains("BF16") => 16.0,
+        q if q.contains("F32") => 32.0,
+        _ => 4.5, // default Q4 equivalent
+    };
+    let weights_gb = param_b * 1e9 * bpw / 8.0 / 1_073_741_824.0;
+    (weights_gb + 1.0).ceil() // +1 GB overhead, round up
 }
 
 fn format_size(bytes: u64) -> String {

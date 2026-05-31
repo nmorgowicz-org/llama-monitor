@@ -168,6 +168,7 @@ export function initSpawnWizard() {
   applyReducedMotion();
   bindEvents();
   bindHfSortSelect();
+  bindQuantizerEditor();
   restoreProfile();
   applyProfileVisibility();
   renderHfDiscoverPills();          // static — no network call needed
@@ -175,7 +176,7 @@ export function initSpawnWizard() {
   loadCommunityPicks();             // load community-picks.json if present
 
   document.getElementById('btn-open-spawn-wizard')
-    ?.addEventListener('click', openSpawnWizard);
+    ?.addEventListener('click', () => openSpawnWizard());
 }
 
 function applyReducedMotion() {
@@ -184,11 +185,25 @@ function applyReducedMotion() {
   }
 }
 
-export function openSpawnWizard() {
+export function openSpawnWizard(opts = {}) {
   if (!dom.overlay) return;
   dom.overlay.classList.add('open');
-  updateModelInputVisibility();
-  showStep(0);
+
+  if (opts.localPath) {
+    // Pre-load a local model path and jump straight to step 2 (model).
+    wizardState.model.source = 'local';
+    wizardState.model.path = opts.localPath;
+    if (dom.modelPathInput) dom.modelPathInput.value = opts.localPath;
+    // Select the "local" source card visually.
+    dom.modelSourceCards?.forEach(c => {
+      c.classList.toggle('selected', c.dataset.source === 'local');
+    });
+    updateModelInputVisibility();
+    showStep(1); // step 1 = Model (0-indexed)
+  } else {
+    updateModelInputVisibility();
+    showStep(0);
+  }
 }
 
 export function closeSpawnWizard() {
@@ -1087,6 +1102,114 @@ async function loadHfQuickPicks() {
       });
       dom.hfQuickpicks.appendChild(btn);
     }
+  } catch {}
+}
+
+// ── Quantizer editor ──────────────────────────────────────────────────────────
+
+let quantizerEditorList = []; // live copy while editor is open
+
+function bindQuantizerEditor() {
+  const editBtn = document.getElementById('hf-qp-edit-btn');
+  const editor  = document.getElementById('hf-qp-editor');
+  if (!editBtn || !editor) return;
+
+  editBtn.addEventListener('click', () => {
+    const open = editBtn.getAttribute('aria-expanded') === 'true';
+    editBtn.setAttribute('aria-expanded', String(!open));
+    editor.style.display = open ? 'none' : '';
+    if (!open) openQuantizerEditor();
+  });
+
+  document.getElementById('hf-qp-editor-add-btn')?.addEventListener('click', () => {
+    const usernameEl = document.getElementById('hf-qp-editor-username');
+    const displayEl  = document.getElementById('hf-qp-editor-displayname');
+    const username = usernameEl?.value.trim();
+    if (!username) return;
+    const display_name = displayEl?.value.trim() || username;
+    quantizerEditorList.push({ username, display_name, description: '', quant_style: 'standard', note: null });
+    renderEditorList();
+    if (usernameEl) usernameEl.value = '';
+    if (displayEl)  displayEl.value = '';
+  });
+
+  document.getElementById('hf-qp-editor-save-btn')?.addEventListener('click', saveQuantizerEdits);
+  document.getElementById('hf-qp-editor-reset-btn')?.addEventListener('click', resetQuantizersToDefaults);
+}
+
+async function openQuantizerEditor() {
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const resp = await fetch('/api/hf/quantizers', { headers });
+    const data = await resp.json();
+    if (data.ok && data.quantizers) {
+      quantizerEditorList = data.quantizers.map(q => ({ ...q }));
+      renderEditorList();
+    }
+  } catch {}
+}
+
+function renderEditorList() {
+  const container = document.getElementById('hf-qp-editor-list');
+  if (!container) return;
+  container.innerHTML = '';
+  for (let i = 0; i < quantizerEditorList.length; i++) {
+    const q = quantizerEditorList[i];
+    const row = document.createElement('div');
+    row.className = 'hf-qp-editor-row';
+
+    const styleClass = q.quant_style === 'imatrix' ? 'hf-qp-imatrix'
+                     : q.quant_style === 'ud'       ? 'hf-qp-ud' : '';
+    const label = document.createElement('span');
+    label.className = `hf-qp-editor-name ${styleClass}`;
+    label.textContent = q.display_name || q.username;
+    label.title = q.username + (q.description ? '\n' + q.description : '');
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'hf-qp-editor-remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = `Remove ${q.username}`;
+    removeBtn.addEventListener('click', () => {
+      quantizerEditorList.splice(i, 1);
+      renderEditorList();
+    });
+
+    row.appendChild(label);
+    row.appendChild(removeBtn);
+    container.appendChild(row);
+  }
+}
+
+async function saveQuantizerEdits() {
+  const headers = window.authHeaders
+    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+    : { 'Content-Type': 'application/json' };
+  try {
+    const resp = await fetch('/api/hf/quantizers', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(quantizerEditorList),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      // Close editor and reload quick-picks
+      document.getElementById('hf-qp-edit-btn')?.setAttribute('aria-expanded', 'false');
+      document.getElementById('hf-qp-editor')?.style && (document.getElementById('hf-qp-editor').style.display = 'none');
+      loadHfQuickPicks();
+    }
+  } catch {}
+}
+
+async function resetQuantizersToDefaults() {
+  const headers = window.authHeaders
+    ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+    : { 'Content-Type': 'application/json' };
+  try {
+    await fetch('/api/hf/quantizers', { method: 'PUT', headers, body: '[]' });
+    // Reload defaults into editor
+    await openQuantizerEditor();
+    loadHfQuickPicks();
   } catch {}
 }
 
