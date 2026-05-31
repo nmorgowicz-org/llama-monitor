@@ -973,7 +973,13 @@ function renderCommunityPicksList(cat) {
   const models = cat?.models || [];
 
   if (!models.length) {
-    list.innerHTML = '<div class="hf-cp-empty">No models in this category yet.</div>';
+    const emptyDiv = document.createElement('div');
+    emptyDiv.className = 'hf-cp-empty';
+    const strong = document.createElement('strong');
+    strong.textContent = 'No picks in this category yet';
+    emptyDiv.appendChild(strong);
+    emptyDiv.appendChild(document.createTextNode('Run the Hermes community-picks cron to populate it.'));
+    list.appendChild(emptyDiv);
     return;
   }
 
@@ -988,17 +994,38 @@ function renderCommunityPicksList(cat) {
       ? (m.param_b >= 1000 ? (m.param_b / 1000).toFixed(1) + 'T' : m.param_b + 'B')
       : '';
 
-    item.innerHTML = `
-      <div class="hf-cp-item-main">
-        <div class="hf-cp-name">${escHtml(m.display_name || m.hf_repo)}</div>
-        ${m.why ? `<div class="hf-cp-why">${escHtml(m.why)}</div>` : ''}
-      </div>
-      <div class="hf-cp-meta">
-        ${sizeLabel ? `<span class="hf-cp-badge hf-cp-badge-size">${escHtml(sizeLabel)}</span>` : ''}
-        ${m.quant_rec ? `<span class="hf-cp-badge hf-cp-badge-quant">${escHtml(m.quant_rec)}</span>` : ''}
-        ${m.is_moe ? `<span class="hf-cp-badge hf-cp-badge-moe">MoE</span>` : ''}
-        ${m.mention_count > 0 ? `<span class="hf-cp-mentions">${m.mention_count} mentions</span>` : ''}
-      </div>`;
+    const mainDiv = document.createElement('div');
+    mainDiv.className = 'hf-cp-item-main';
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'hf-cp-name';
+    nameDiv.textContent = m.display_name || m.hf_repo;
+    mainDiv.appendChild(nameDiv);
+    if (m.why) {
+      const whyDiv = document.createElement('div');
+      whyDiv.className = 'hf-cp-why';
+      whyDiv.textContent = m.why;
+      mainDiv.appendChild(whyDiv);
+    }
+    item.appendChild(mainDiv);
+
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'hf-cp-meta';
+    const mkBadge = (cls, text) => {
+      const s = document.createElement('span');
+      s.className = `hf-cp-badge ${cls}`;
+      s.textContent = text;
+      return s;
+    };
+    if (sizeLabel)       metaDiv.appendChild(mkBadge('hf-cp-badge-size', sizeLabel));
+    if (m.quant_rec)     metaDiv.appendChild(mkBadge('hf-cp-badge-quant', m.quant_rec));
+    if (m.is_moe)        metaDiv.appendChild(mkBadge('hf-cp-badge-moe', 'MoE'));
+    if (m.mention_count > 0) {
+      const mentions = document.createElement('span');
+      mentions.className = 'hf-cp-mentions';
+      mentions.textContent = `${m.mention_count} mentions`;
+      metaDiv.appendChild(mentions);
+    }
+    item.appendChild(metaDiv);
 
     const loadPick = () => {
       // Deactivate discover/quantizer pills
@@ -1167,7 +1194,10 @@ async function showHfSearchResults({ query, author, sort, limit }) {
       container.appendChild(row);
     });
   } catch (err) {
-    container.innerHTML = '<div class="hf-search-empty">Error: ' + (err.message || String(err)) + '</div>';
+    const errEl = document.createElement('div');
+    errEl.className = 'hf-search-empty';
+    errEl.textContent = 'Error: ' + (err.message || String(err));
+    container.appendChild(errEl);
   }
 }
 
@@ -1683,6 +1713,8 @@ function renderScenarioCards(modelBytes, arch, availVram) {
 
     const selectable = ctx > 0;
 
+    // All values are internal constants — no user input reaches this template.
+    // eslint-disable-next-line no-unsanitized/property
     card.innerHTML = `
       <div class="vsc-label">${s.label}</div>
       <div class="vsc-ctx">${selectable ? formatCtx(ctx) : '—'}</div>

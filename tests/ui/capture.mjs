@@ -121,6 +121,9 @@ Scenarios:
     panels           Chat config panels (behavior, model, style, debug)
     dashboard        Server tab, GPU section
 
+  Spawn Wizard
+    spawn-wizard     Wizard step 1 profiles, step 2 HF discover/community picks/quant advisor, step 3 VRAM
+
   Validation
     sparkline        Sparkline validation screenshots
     gifs             Inference/GPU animated GIF capture
@@ -140,16 +143,25 @@ Examples:
   SCREENSHOT_PORT=8893 node tests/ui/capture.mjs --scenario sidebar
   SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
   SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario settings --close-up
+  SCREENSHOT_PORT=8896 node tests/ui/capture.mjs --scenario spawn-wizard --no-attach
 `);
 }
 
 function seedConfig() {
-    const filesToCopy = ['ui-settings.json', 'presets.json', 'gpu-env.json'];
+    const filesToCopy = ['ui-settings.json', 'presets.json', 'gpu-env.json', 'community-picks.json'];
     for (const filename of filesToCopy) {
         const source = join(REAL_APP_CONFIG_DIR, filename);
         const destination = join(TEMP_APP_CONFIG_DIR, filename);
         if (fs.existsSync(source)) {
             fs.copyFileSync(source, destination);
+        }
+    }
+    // If no community-picks.json exists in real config, use the bundled example fixture.
+    const cpDest = join(TEMP_APP_CONFIG_DIR, 'community-picks.json');
+    if (!fs.existsSync(cpDest)) {
+        const cpExample = join(ROOT_DIR, 'docs/reference/community-picks-example.json');
+        if (fs.existsSync(cpExample)) {
+            fs.copyFileSync(cpExample, cpDest);
         }
     }
 }
@@ -2352,6 +2364,170 @@ async function scenarioSmoke({ page, baseUrl }, options) {
     console.log('[SMOKE] PASS: no critical console errors on startup.');
 }
 
+// ── Spawn Wizard ────────────────────────────────────────────────────────────────
+// Step 1 profile selection, step 2 HF source with discover pills / community
+// picks / quant advisor, step 3 VRAM panel. Does not require a remote attach.
+
+async function scenarioSpawnWizard(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+
+    // Navigate past setup without attaching — wizard doesn't need a running server.
+    // Skip the attach step by going directly to monitor if no-attach, else attach.
+    if (!options.noAttach) {
+        try {
+            await attachToServer(page);
+        } catch {
+            console.log('[CAPTURE] Attach failed; continuing wizard capture without live server.');
+        }
+    } else {
+        await waitForMonitor(page);
+    }
+
+    // Open spawn wizard via the "Spawn server" button
+    await page.evaluate(() => {
+        document.getElementById('btn-spawn-server')?.click();
+    });
+    await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 10000 });
+    await sleep(800);
+
+    // ── Step 1: profile + use-case selection ──────────────────────────────────
+    await captureShot(page, 'spawn-wizard-step1-profiles.png', { fullPage: true });
+
+    // Select "Power User" profile (or first available) and "General" use-case
+    await page.evaluate(() => {
+        const profileCard = document.querySelector('.profile-card[data-profile="power"]')
+            || document.querySelector('.profile-card');
+        if (profileCard) profileCard.click();
+    });
+    await sleep(300);
+    await page.evaluate(() => {
+        const usecaseCard = document.querySelector('.usecase-card[data-usecase="general"]')
+            || document.querySelector('.usecase-card');
+        if (usecaseCard) usecaseCard.click();
+    });
+    await sleep(300);
+
+    // Advance to step 2
+    await page.evaluate(() => { document.getElementById('wizard-next-btn')?.click(); });
+    await page.waitForFunction(() => {
+        return document.getElementById('wizard-step-1')?.classList.contains('active');
+    }, { timeout: 5000 }).catch(() => {});
+    await sleep(600);
+
+    // ── Step 2: model source — click HF card ─────────────────────────────────
+    await page.evaluate(() => {
+        document.querySelector('.model-source-card[data-source="hf"]')?.click();
+    });
+    await sleep(500);
+
+    // Capture base HF panel: discover pills + quantizer row visible, no search yet
+    await captureShot(page, 'spawn-wizard-step2-hf-base.png', { fullPage: true });
+
+    // ── Discover pill: Trending ───────────────────────────────────────────────
+    const trendingPill = await page.$('.hf-discover-pill[data-cat-id="trending"]');
+    if (trendingPill) {
+        await trendingPill.click();
+        // Wait for search results to appear
+        await page.waitForFunction(() => {
+            const r = document.getElementById('hf-search-results');
+            return r && r.style.display !== 'none' && !r.querySelector('.hf-search-loading');
+        }, { timeout: 20000 }).catch(() => {});
+        await sleep(600);
+        await captureShot(page, 'spawn-wizard-step2-discover-trending.png', { fullPage: true });
+    } else {
+        console.log('[CAPTURE] Trending pill not found; skipping discover-trending shot');
+    }
+
+    // ── Discover pill: Qwen3 ─────────────────────────────────────────────────
+    const qwen3Pill = await page.$('.hf-discover-pill[data-cat-id="qwen3"]');
+    if (qwen3Pill) {
+        await qwen3Pill.click();
+        await page.waitForFunction(() => {
+            const r = document.getElementById('hf-search-results');
+            return r && r.style.display !== 'none' && !r.querySelector('.hf-search-loading');
+        }, { timeout: 20000 }).catch(() => {});
+        await sleep(600);
+        await captureShot(page, 'spawn-wizard-step2-discover-qwen3.png', { fullPage: true });
+    } else {
+        console.log('[CAPTURE] Qwen3 pill not found; skipping discover-qwen3 shot');
+    }
+
+    // ── Quantizer quick-pick: bartowski ──────────────────────────────────────
+    const bartowskiBtn = await page.$('.hf-qp-btn[data-author="bartowski"]');
+    if (bartowskiBtn) {
+        await bartowskiBtn.click();
+        await page.waitForFunction(() => {
+            const r = document.getElementById('hf-search-results');
+            return r && r.style.display !== 'none' && !r.querySelector('.hf-search-loading');
+        }, { timeout: 20000 }).catch(() => {});
+        await sleep(600);
+        await captureShot(page, 'spawn-wizard-step2-quantizer-bartowski.png', { fullPage: true });
+    } else {
+        console.log('[CAPTURE] bartowski quick-pick not found; skipping quantizer shot');
+    }
+
+    // ── Community picks panel ─────────────────────────────────────────────────
+    // Clear search results first, then open community picks
+    await page.evaluate(() => {
+        const r = document.getElementById('hf-search-results');
+        if (r) { r.style.display = 'none'; r.innerHTML = ''; }
+        // Deactivate all pills
+        document.querySelectorAll('.hf-discover-pill, .hf-qp-btn')
+            .forEach(p => p.classList.remove('active'));
+    });
+    await sleep(300);
+
+    const cpToggle = await page.$('#hf-cp-toggle');
+    if (cpToggle) {
+        await cpToggle.click();
+        await page.waitForFunction(() => {
+            const toggle = document.getElementById('hf-cp-toggle');
+            return toggle?.getAttribute('aria-expanded') === 'true';
+        }, { timeout: 3000 }).catch(() => {});
+        await sleep(500);
+        await captureShot(page, 'spawn-wizard-step2-community-picks.png', { fullPage: true });
+
+        // Switch to second tab (MoE/Offload) if available
+        await page.evaluate(() => {
+            const tabs = document.querySelectorAll('.hf-cp-tab');
+            if (tabs.length > 1) tabs[1].click();
+        });
+        await sleep(300);
+        await captureShot(page, 'spawn-wizard-step2-community-picks-moe.png', { fullPage: true });
+    } else {
+        console.log('[CAPTURE] Community picks toggle not found; panel may not have loaded');
+    }
+
+    // ── Quant advisor: select a model from community picks ───────────────────
+    // Click first community pick item to load files + quant advisor
+    const firstCpItem = await page.$('.hf-cp-item');
+    if (firstCpItem) {
+        await firstCpItem.click();
+        // Wait for file list to appear
+        await page.waitForFunction(() => {
+            const fl = document.getElementById('spawn-hf-file-list');
+            return fl && fl.classList.contains('visible') && fl.children.length > 0;
+        }, { timeout: 20000 }).catch(() => {});
+        await sleep(800);
+        await captureShot(page, 'spawn-wizard-step2-quant-advisor.png', { fullPage: true });
+    } else {
+        console.log('[CAPTURE] No community pick item to click for quant advisor shot');
+    }
+
+    // ── Step 3: hardware / VRAM panel ────────────────────────────────────────
+    await page.evaluate(() => { document.getElementById('wizard-next-btn')?.click(); });
+    await page.waitForFunction(() => {
+        return document.getElementById('wizard-step-2')?.classList.contains('active');
+    }, { timeout: 5000 }).catch(() => {});
+    await sleep(1000);
+    await captureShot(page, 'spawn-wizard-step3-vram.png', { fullPage: true });
+
+    // Close wizard
+    await page.keyboard.press('Escape');
+    await sleep(400);
+}
+
 const SCENARIOS = {
     // Core
     welcome: scenarioWelcome,
@@ -2365,6 +2541,8 @@ const SCENARIOS = {
     filebrowser: scenarioFilebrowser,
     panels: scenarioPanels,
     dashboard: scenarioDashboard,
+    // Spawn wizard
+    'spawn-wizard': scenarioSpawnWizard,
     // Validation
     sparkline: scenarioSparkline,
     gifs: scenarioGifs,
