@@ -4,6 +4,12 @@
  * This is the single entrypoint for repo-owned visual capture automation.
  * Prefer adding new scenarios here instead of creating new one-off scripts.
  *
+ * Output directories:
+ *   docs/screenshots/artifacts/  — ALL capture output lands here (auto-created).
+ *   docs/screenshots/            — ONLY files referenced by README / docs live here.
+ *                                  Do NOT copy from artifacts/ manually; promote
+ *                                  individual files by hand after reviewing them.
+ *
  * Quick examples:
  *   node tests/ui/capture.mjs --list-scenarios
  *   node tests/ui/capture.mjs --scenario welcome
