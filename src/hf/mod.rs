@@ -150,7 +150,6 @@ impl QuantProvider {
             "mradermacher" => QuantProvider::Mradermacher,
             "unsloth" => QuantProvider::Unsloth,
             "lmstudio-community" | "lmstudio" => QuantProvider::Lmstudio,
-            "thebloke" => QuantProvider::TheBlokeRetired,
             "davidau" | "davidau-hf" => QuantProvider::Community,
             "mudler" => QuantProvider::Community,
             "jackrong" => QuantProvider::Community,
@@ -333,11 +332,11 @@ pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
             note: None,
         },
         KnownQuantizer {
-            username: "TheBloke".into(),
-            display_name: "TheBloke (legacy)".into(),
-            description: "Retired but prolific. Legacy GGUF quants for older models — extremely well-tested.".into(),
+            username: "llmfan46".into(),
+            display_name: "llmfan46".into(),
+            description: "Community GGUF releases, wide model coverage.".into(),
             quant_style: "standard",
-            note: Some("Retired; no new quants. Legacy models still widely used.".into()),
+            note: None,
         },
         // Community finetune quantizers of interest
         KnownQuantizer {

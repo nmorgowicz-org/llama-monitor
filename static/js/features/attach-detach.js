@@ -5,6 +5,7 @@ import { sessionState } from '../core/app-state.js';
 import { updateActiveSessionInfo } from './sessions.js';
 import { showToast } from './toast.js';
 import { hideConnectingState, saveLastSessionData, showConnectingState, switchView, restorePreviousPosition } from './setup-view.js';
+import { setTuneConfig, showTunePanel, hideTunePanel } from './tune-panel.js';
 import { hideDisconnectedBanner } from './chat-transport.js';
 import { monitorState } from '../core/app-state.js';
 
@@ -80,10 +81,10 @@ export async function doStart() {
         showToast('Start failed: ' + (data.error || 'unknown'), 'error');
         hideConnectingState();
     } else {
+        setTuneConfig(config);
         switchView('monitor');
         hideConnectingState();
-        
-        // Restore previous position after view switch
+        showTunePanel();
         setTimeout(() => restorePreviousPosition(), 600);
     }
 }
@@ -204,8 +205,7 @@ export async function doAttach() {
         monitorState.speedMax = { prompt: 0, generation: 0 };
         hideDisconnectedBanner();
         switchView('monitor');
-
-        // Restore previous position after view switch
+        showTunePanel();
         setTimeout(() => restorePreviousPosition(), 600);
     }
 
@@ -255,6 +255,7 @@ export async function doDetach() {
             if (historicBadge) historicBadge.style.display = 'inline-block';
 
             monitorState.speedMax = { prompt: 0, generation: 0 };
+            hideTunePanel();
             switchView('setup');
         }
 

@@ -22,6 +22,7 @@ pub const CSS_SETTINGS_MODAL: &str = include_str!("../../static/css/settings-mod
 pub const CSS_SETUP_VIEW: &str = include_str!("../../static/css/setup-view.css");
 pub const CSS_SPAWN_WIZARD: &str = include_str!("../../static/css/spawn-wizard.css");
 pub const CSS_TOKENS: &str = include_str!("../../static/css/tokens.css");
+pub const CSS_TUNE_PANEL: &str = include_str!("../../static/css/tune-panel.css");
 pub const ICON_SVG: &str = include_str!("../../static/icon.svg");
 pub const INDEX_HTML: &str = include_str!("../../static/index.html");
 pub const BOOTSTRAP_JS: &str = include_str!("../../static/js/bootstrap.js");
@@ -83,6 +84,7 @@ pub const FEATURES_SPAWN_WIZARD_JS: &str = include_str!("../../static/js/feature
 pub const FEATURES_TELEMETRY_GRADE_JS: &str =
     include_str!("../../static/js/features/telemetry-grade.js");
 pub const FEATURES_TOAST_JS: &str = include_str!("../../static/js/features/toast.js");
+pub const FEATURES_TUNE_PANEL_JS: &str = include_str!("../../static/js/features/tune-panel.js");
 pub const FEATURES_UPDATES_JS: &str = include_str!("../../static/js/features/updates.js");
 pub const FEATURES_USER_MENU_JS: &str = include_str!("../../static/js/features/user-menu.js");
 pub const FEATURES_WORKSPACE_COMMAND_PALETTE_JS: &str =

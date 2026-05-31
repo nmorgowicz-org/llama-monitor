@@ -40,6 +40,7 @@ import { deriveTelemetryGrade, gradeLabel, gradeStatusClass, gradeActionCopy } f
 import { initReplyPlanUpdates } from './features/chat-reply-plan.js';
 import { initCommandPalette } from './features/workspace-command-palette.js';
 import { initSpawnWizard } from './features/spawn-wizard.js';
+import { initTunePanel } from './features/tune-panel.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
@@ -152,6 +153,7 @@ async function initializeApp() {
 
     // Phase 12: Spawn wizard
     initSpawnWizard();
+    initTunePanel();
 
     // Initialize chat tabs only after token bootstrap and feature init complete.
     await initChatTabs();

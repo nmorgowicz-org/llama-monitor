@@ -65,6 +65,20 @@ pub fn suggest_moe_tuning(
     }
 }
 
+/// A single actionable tuning suggestion returned with benchmark results.
+/// The frontend uses `param` + `value` to patch the running config and respawn.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BenchmarkSuggestion {
+    /// Short label shown on the Apply button card, e.g. "Enable flash attention".
+    pub label: String,
+    /// One-line explanation of why this helps.
+    pub description: String,
+    /// The config field name that should be changed, e.g. "flash_attn".
+    pub param: String,
+    /// The value to set, serialized as JSON (string, number, or bool).
+    pub value: serde_json::Value,
+}
+
 /// Run a short benchmark on the running llama-server.
 ///
 /// Returns a simple report with:
@@ -72,7 +86,8 @@ pub fn suggest_moe_tuning(
 /// - gen_tokens_per_second
 /// - time_to_first_token_ms
 /// - verdict: "good" / "moderate" / "poor"
-/// - hints: short suggestions
+/// - hints: short human-readable strings
+/// - suggestions: structured actionable tuning steps
 ///
 /// Parameters:
 /// - model_size_bytes, available_vram_bytes, total_experts are optional
@@ -84,6 +99,7 @@ pub struct BenchmarkResult {
     pub time_to_first_token_ms: f64,
     pub verdict: String,
     pub hints: Vec<String>,
+    pub suggestions: Vec<BenchmarkSuggestion>,
 }
 
 pub fn classify_benchmark_result(
@@ -95,37 +111,57 @@ pub fn classify_benchmark_result(
     total_experts: u64,
 ) -> BenchmarkResult {
     let mut hints: Vec<String> = Vec::new();
+    let mut suggestions: Vec<BenchmarkSuggestion> = Vec::new();
 
-    // Verdict logic:
-    // "good": gen_tps >= 30 and ttft_ms <= 800
-    // "moderate": gen_tps between 10-30 or ttft_ms between 800-2000
-    // "poor": gen_tps < 10 or ttft_ms > 2000
-    let verdict = if gen_tps >= 30.0 && ttft_ms <= 800.0 {
+    // Homelab-calibrated thresholds — not datacenter numbers.
+    // A mid-range consumer GPU doing 8–15 t/s on a 13B model is working well.
+    let verdict = if gen_tps >= 15.0 && ttft_ms <= 1500.0 {
         "good"
-    } else if (10.0..30.0).contains(&gen_tps) || (800.0..=2000.0).contains(&ttft_ms) {
+    } else if gen_tps >= 4.0 || ttft_ms <= 3000.0 {
         "moderate"
     } else {
         "poor"
     };
 
-    // Hints: generation throughput
-    if gen_tps < 10.0 {
-        hints.push("Consider increasing GPU layers or reducing context size.".to_string());
+    if gen_tps < 4.0 {
+        hints.push("Very slow generation — try reducing GPU layers or context size.".to_string());
     }
 
-    // Hints: latency
-    if ttft_ms > 2000.0 {
-        hints.push("High latency; reduce context size or enable flash attention.".to_string());
+    // Only suggest flash attention when TTFT is noticeably high (> 1.5 s)
+    if ttft_ms > 1500.0 {
+        hints.push("Slow first-token response; try enabling flash attention.".to_string());
+        suggestions.push(BenchmarkSuggestion {
+            label: "Enable flash attention".to_string(),
+            description: "Cuts time-to-first-token and reduces VRAM pressure at large context."
+                .to_string(),
+            param: "flash_attn".to_string(),
+            value: serde_json::json!("on"),
+        });
     }
 
-    // Hints: prompt throughput
-    if prompt_tps < 500.0 {
-        hints.push(
-            "Slow prompt processing; increase batch size or use a faster backend.".to_string(),
-        );
+    // Only suggest context reduction when gen_tps is very low — don't penalise users
+    // who intentionally configured a large context for their use case.
+    if gen_tps < 5.0 {
+        suggestions.push(BenchmarkSuggestion {
+            label: "Try a smaller context window".to_string(),
+            description: "If you don't need very long context, reducing to 8 192 tokens can noticeably speed things up.".to_string(),
+            param: "context_size".to_string(),
+            value: serde_json::json!(8192),
+        });
     }
 
-    // MoE-specific hints
+    // Prompt throughput — homelab threshold is lower than server-class hardware
+    if prompt_tps < 300.0 {
+        hints.push("Slow prompt processing — a larger batch size may help.".to_string());
+        suggestions.push(BenchmarkSuggestion {
+            label: "Increase batch size to 4 096".to_string(),
+            description: "Helps the GPU process incoming prompt tokens more efficiently."
+                .to_string(),
+            param: "batch_size".to_string(),
+            value: serde_json::json!(4096),
+        });
+    }
+
     if total_experts > 0 {
         let (model_size, vram) = match (model_size_bytes, available_vram_bytes) {
             (Some(m), Some(v)) => (m, v),
@@ -139,16 +175,23 @@ pub fn classify_benchmark_result(
                     time_to_first_token_ms: ttft_ms,
                     verdict: verdict.to_string(),
                     hints,
+                    suggestions,
                 };
             }
         };
 
-        let suggestion = suggest_moe_tuning(model_size, vram, total_experts);
-        if suggestion.recommended_n_cpu_moe > 0 {
+        let moe = suggest_moe_tuning(model_size, vram, total_experts);
+        if moe.recommended_n_cpu_moe > 0 {
             hints.push(format!(
                 "For MoE models, try increasing n_cpu_moe to {} within available VRAM.",
-                suggestion.recommended_n_cpu_moe
+                moe.recommended_n_cpu_moe
             ));
+            suggestions.push(BenchmarkSuggestion {
+                label: format!("Offload {} MoE experts to CPU", moe.recommended_n_cpu_moe),
+                description: moe.note.clone(),
+                param: "n_cpu_moe".to_string(),
+                value: serde_json::json!(moe.recommended_n_cpu_moe),
+            });
         }
     }
 
@@ -158,6 +201,7 @@ pub fn classify_benchmark_result(
         time_to_first_token_ms: ttft_ms,
         verdict: verdict.to_string(),
         hints,
+        suggestions,
     }
 }
 

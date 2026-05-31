@@ -1,0 +1,416 @@
+/* ── Tune / Benchmark Panel ──────────────────────────────────────────────────
+ * Sits between the control bar and inference metrics on the monitor view.
+ * Three states managed by JS: idle → running → results.
+ */
+
+.tune-panel {
+  position: relative;
+  margin: 0 0 18px;
+  border-radius: var(--radius-base);
+  border: 1px solid var(--border-subtle);
+  background: linear-gradient(180deg, rgba(99,102,241,0.06) 0%, rgba(255,255,255,0.02) 100%);
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+/* Left-edge accent line */
+.tune-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: linear-gradient(180deg, #6366f1 0%, #7c3aed 60%, transparent 100%);
+  border-radius: 2px 0 0 2px;
+}
+
+/* ── Idle ────────────────────────────────────────────────────────────────── */
+
+.tune-idle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px 13px 20px;
+}
+
+.tune-idle-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tune-idle-icon {
+  flex-shrink: 0;
+  color: var(--color-primary-light);
+  opacity: 0.85;
+}
+
+.tune-idle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.tune-idle-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  line-height: 1.2;
+}
+
+.tune-idle-desc {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tune-run-btn {
+  flex-shrink: 0;
+  padding: 6px 16px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  font-family: var(--font-body);
+  color: #fff;
+  background: linear-gradient(135deg, #6366f1 0%, #7c3aed 100%);
+  box-shadow: 0 2px 8px rgba(99,102,241,0.35);
+  transition: filter 0.15s, transform 0.1s, box-shadow 0.15s;
+  letter-spacing: 0.01em;
+}
+
+.tune-run-btn:hover {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(99,102,241,0.45);
+}
+
+.tune-run-btn:active {
+  transform: translateY(0);
+  filter: brightness(0.95);
+}
+
+.tune-run-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ── Running ─────────────────────────────────────────────────────────────── */
+
+.tune-running {
+  padding: 14px 20px 16px;
+}
+
+.tune-running-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+@keyframes tune-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.7); }
+}
+
+.tune-running-pulse {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-primary-light);
+  animation: tune-pulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.tune-running-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.tune-running-hint {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.tune-progress-track {
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.07);
+  overflow: hidden;
+  position: relative;
+}
+
+@keyframes tune-sweep {
+  0%   { left: -40%; width: 40%; }
+  50%  { left: 30%;  width: 50%; }
+  100% { left: 110%; width: 40%; }
+}
+
+.tune-progress-fill {
+  position: absolute;
+  top: 0; bottom: 0;
+  border-radius: 4px;
+  background: linear-gradient(90deg, transparent 0%, #6366f1 40%, #818cf8 70%, transparent 100%);
+  animation: tune-sweep 2s ease-in-out infinite;
+}
+
+/* ── Results ─────────────────────────────────────────────────────────────── */
+
+.tune-results {
+  padding: 14px 16px 14px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Scorecard row: grade chip + metrics + re-run */
+.tune-scorecard {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+/* Grade wrap: chip + label stacked */
+.tune-grade-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.tune-grade-label {
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+/* Grade chip — large letter in a rounded square */
+.tune-grade-chip {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.75rem;
+  font-weight: 800;
+  font-family: var(--font-body);
+  color: #fff;
+  flex-shrink: 0;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+  letter-spacing: -0.02em;
+}
+
+.tune-grade-s { background: linear-gradient(135deg, #10b981 0%, #059669 100%); }
+.tune-grade-a { background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); }
+.tune-grade-b { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
+.tune-grade-c { background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); }
+.tune-grade-d { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
+
+/* Metrics row */
+.tune-metrics-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.tune-metric {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 52px;
+}
+
+.tune-metric-val {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.tune-metric-lbl {
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.tune-metric-sep {
+  width: 1px;
+  height: 28px;
+  background: var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.tune-rerun-btn {
+  margin-left: auto;
+  padding: 5px 13px;
+  border-radius: 8px;
+  border: 1px solid var(--border-emphasis);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tune-rerun-btn:hover {
+  background: rgba(99,102,241,0.12);
+  color: var(--color-primary-light);
+  border-color: rgba(99,102,241,0.35);
+}
+
+.tune-rerun-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Suggestion cards ────────────────────────────────────────────────────── */
+
+.tune-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tune-suggestion-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255,255,255,0.02);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.tune-suggestion-card:hover {
+  border-color: rgba(99,102,241,0.25);
+  background: rgba(99,102,241,0.04);
+}
+
+.tune-suggestion-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tune-suggestion-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tune-suggestion-desc {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tune-suggestion-apply {
+  flex-shrink: 0;
+  padding: 5px 13px;
+  border-radius: 7px;
+  border: 1px solid rgba(99,102,241,0.4);
+  background: rgba(99,102,241,0.1);
+  color: var(--color-primary-light);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+
+.tune-suggestion-apply:hover {
+  background: rgba(99,102,241,0.22);
+  border-color: rgba(99,102,241,0.65);
+  transform: translateX(1px);
+}
+
+.tune-suggestion-apply:active {
+  transform: translateX(0);
+}
+
+.tune-suggestion-apply:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* "Already well-tuned" / no suggestions message */
+.tune-no-suggestions {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: 4px 0 2px;
+  font-style: italic;
+}
+
+/* ── Restarting overlay inside tune-results ──────────────────────────────── */
+
+.tune-restarting-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(15,17,21,0.75);
+  backdrop-filter: blur(4px);
+  border-radius: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 520px) {
+  .tune-idle {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .tune-run-btn {
+    align-self: flex-end;
+  }
+  .tune-scorecard {
+    flex-wrap: wrap;
+  }
+  .tune-rerun-btn {
+    margin-left: 0;
+    width: 100%;
+  }
+}
