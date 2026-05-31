@@ -1068,10 +1068,8 @@ const HF_DISCOVER_CATEGORIES = [
   { id: 'qwen3',     label: 'Qwen3',         params: { query: 'qwen3',      sort: 'downloads', limit: 30 } },
   { id: 'llama3',    label: 'Llama 3.x',     params: { query: 'llama-3',    sort: 'downloads', limit: 30 } },
   { id: 'mistral',   label: 'Mistral / MoE', params: { query: 'mistral',    sort: 'downloads', limit: 30 } },
-  { id: 'deepseek',  label: 'DeepSeek',      params: { query: 'deepseek',   sort: 'downloads', limit: 30 } },
   { id: 'gemma',     label: 'Gemma',         params: { query: 'gemma',      sort: 'downloads', limit: 30 } },
-  { id: 'phi4',      label: 'Phi-4',         params: { query: 'phi-4',      sort: 'downloads', limit: 30 } },
-  { id: 'command',   label: 'Command R',     params: { query: 'command-r',  sort: 'downloads', limit: 30 } },
+  { id: 'heretic',   label: 'Heretic',       params: { query: 'heretic',    sort: 'downloads', limit: 30 } },
 ];
 
 function renderHfDiscoverPills() {
