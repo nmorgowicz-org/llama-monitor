@@ -1,6 +1,10 @@
 # Build artifacts
 /target/
 /llama-monitor.app/
+
+# llama-server binary (downloaded by the app — not source code)
+/llama-server
+/llama-server.exe
 Cargo.lock
 debug/
 release/

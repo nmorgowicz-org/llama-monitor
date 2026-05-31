@@ -1313,6 +1313,32 @@
   background: rgba(99, 102, 241, 0.16);
 }
 
+.setup-btn-full {
+  width: 100%;
+}
+
+.setup-card-quick-start {
+  width: 100%;
+}
+
+.setup-card-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  margin: 10px 0 8px;
+  opacity: 0.6;
+}
+
+.setup-card-divider::before,
+.setup-card-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
 .setup-card-footer {
   text-align: center;
   padding-top: var(--gap-xs);

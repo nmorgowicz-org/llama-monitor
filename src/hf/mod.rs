@@ -195,6 +195,8 @@ pub struct SimpleModelInfo {
     pub likes: u64,
     /// ISO 8601 creation timestamp from HF.
     pub created_at: String,
+    /// ISO 8601 last-modified timestamp from HF (more useful than created_at for quant repos).
+    pub last_modified: String,
     /// Author/org username (the part before "/" in the repo id).
     pub author: String,
     /// Inferred from author username.
@@ -354,8 +356,8 @@ pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
             note: None,
         },
         KnownQuantizer {
-            username: "JackRong".into(),
-            display_name: "JackRong".into(),
+            username: "Jackrong".into(),
+            display_name: "Jackrong".into(),
             description: "GGUF releases, often larger models.".into(),
             quant_style: "standard",
             note: None,
@@ -662,6 +664,11 @@ fn parse_model_item(item: serde_json::Value) -> Option<SimpleModelInfo> {
         likes: item.get("likes").and_then(|v| v.as_u64()).unwrap_or(0),
         created_at: item
             .get("createdAt")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        last_modified: item
+            .get("lastModified")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string(),
@@ -1128,7 +1135,7 @@ mod tests {
         assert!(usernames.contains(&"unsloth"));
         assert!(usernames.contains(&"DavidAU"));
         assert!(usernames.contains(&"mudler"));
-        assert!(usernames.contains(&"JackRong"));
+        assert!(usernames.contains(&"Jackrong"));
         assert!(usernames.contains(&"llmfan46"));
     }
 

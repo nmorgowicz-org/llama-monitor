@@ -27,6 +27,8 @@
     <link rel="stylesheet" href="/css/setup-view.css">
     <link rel="stylesheet" href="/css/settings-modal.css">
     <link rel="stylesheet" href="/css/logs.css">
+    <link rel="stylesheet" href="/css/spawn-wizard.css">
+    <link rel="stylesheet" href="/css/tune-panel.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
@@ -250,12 +252,19 @@
                             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M8 21V7a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v14"/><path d="M12 11h.01"/></svg>
                         </div>
                         <h2 class="setup-card-title">Spawn Local Server</h2>
-                        <p class="setup-card-desc">Start a llama.cpp server from a model preset</p>
-                        <div class="setup-card-form">
-                            <select class="setup-select" id="setup-preset-select"></select>
-                            <button class="setup-btn setup-btn-secondary" id="setup-start-btn">
-                                <span class="btn-icon">▶</span> Start Server
-                            </button>
+                        <p class="setup-card-desc">Download a model and start a local llama.cpp server — guided step by step.</p>
+                        <button class="setup-btn setup-btn-primary setup-btn-full" id="setup-spawn-wizard-btn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                            New Server Wizard
+                        </button>
+                        <div class="setup-card-quick-start" id="setup-card-quick-start" style="display:none;">
+                            <div class="setup-card-divider">or quick start from preset</div>
+                            <div class="setup-card-form">
+                                <select class="setup-select" id="setup-preset-select"></select>
+                                <button class="setup-btn setup-btn-secondary" id="setup-start-btn">
+                                    <span class="btn-icon">▶</span> Start
+                                </button>
+                            </div>
                         </div>
                         <div class="setup-card-footer">
                             <a class="setup-link" id="setup-manage-presets-link">Manage presets →</a>
@@ -2260,6 +2269,48 @@
                 <span class="step-badge" data-step="4" title="Step 5: Spawn"><span class="step-num">5</span></span>
             </div>
             <button type="button" class="wizard-close" id="spawn-wizard-close" aria-label="Close">&times;</button>
+        </div>
+
+        <!-- Binary prerequisite banner — shown when llama-server binary is missing -->
+        <div class="wizard-prereq" id="wizard-binary-prereq" style="display:none;">
+            <div class="wizard-prereq-icon" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+            <div class="wizard-prereq-body">
+                <div class="wizard-prereq-title">llama.cpp binary not found</div>
+                <!-- idle -->
+                <div id="wizard-prereq-idle">
+                    <div class="wizard-prereq-desc">
+                        The <code>llama-server</code> binary is required to spawn models locally.
+                        We can download and install the latest build for your platform.
+                    </div>
+                    <div class="wizard-prereq-path-row" id="wizard-prereq-path-row" style="display:none;">
+                        Configured path: <code id="wizard-prereq-path"></code>
+                    </div>
+                    <div class="wizard-prereq-actions">
+                        <button type="button" class="btn-wizard-primary" id="wizard-prereq-download-btn">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:5px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Download llama.cpp for my platform
+                        </button>
+                        <button type="button" class="btn-wizard-tertiary" id="wizard-prereq-settings-btn">
+                            Configure binary path in Settings →
+                        </button>
+                    </div>
+                </div>
+                <!-- in-progress -->
+                <div id="wizard-prereq-progress" style="display:none;">
+                    <div class="wizard-prereq-desc">Downloading llama.cpp — this may take a minute…</div>
+                    <div class="hf-dlp-bar-wrap" style="margin:8px 0 6px;">
+                        <div class="hf-dlp-bar wizard-prereq-bar-fill" id="wizard-prereq-bar" style="width:5%;transition:width 2s ease;"></div>
+                    </div>
+                    <div class="wizard-prereq-elapsed" id="wizard-prereq-elapsed"></div>
+                </div>
+                <!-- success -->
+                <div id="wizard-prereq-success" style="display:none;" class="wizard-prereq-success-row">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                    <span id="wizard-prereq-success-text">llama.cpp installed and ready.</span>
+                </div>
+            </div>
         </div>
 
         <!-- Body -->

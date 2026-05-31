@@ -350,17 +350,10 @@ export function initAttachDetach() {
     const btnStop = document.getElementById('btn-stop');
     if (btnStop) btnStop.addEventListener('click', doStop);
 
-    // Bind logs empty state button
+    // Bind logs empty state button — opens wizard
     const btnSpawnFromLogs = document.getElementById('btn-spawn-server');
     if (btnSpawnFromLogs) btnSpawnFromLogs.addEventListener('click', () => {
-        // Copy preset from setup view to monitor view (same pattern as doStartFromSetup)
-        const setupSelect = document.getElementById('setup-preset-select');
-        const monitorSelect = document.getElementById('preset-select');
-        if (setupSelect && monitorSelect) {
-            monitorSelect.value = setupSelect.value;
-        }
-        showConnectingState();
-        doStart();
+        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
     });
 
     // Initialize button states

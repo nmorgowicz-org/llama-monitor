@@ -218,6 +218,9 @@ export function openSpawnWizard(opts = {}) {
   if (!dom.overlay) return;
   dom.overlay.classList.add('open');
 
+  // Check binary prereq every time wizard opens
+  _checkBinaryPrereq();
+
   if (opts.localPath) {
     // Pre-load a local model path and jump straight to step 2 (model).
     wizardState.model.source = 'local';
@@ -344,6 +347,19 @@ function cacheDom() {
   dom.progressFill   = document.getElementById('spawn-progress-fill');
   dom.errorText      = document.getElementById('spawn-error-text');
   dom.successText    = document.getElementById('spawn-success-text');
+
+  // Binary prereq banner
+  dom.binaryPrereq        = document.getElementById('wizard-binary-prereq');
+  dom.prereqIdle          = document.getElementById('wizard-prereq-idle');
+  dom.prereqProgress      = document.getElementById('wizard-prereq-progress');
+  dom.prereqSuccess       = document.getElementById('wizard-prereq-success');
+  dom.prereqDownloadBtn   = document.getElementById('wizard-prereq-download-btn');
+  dom.prereqSettingsBtn   = document.getElementById('wizard-prereq-settings-btn');
+  dom.prereqPathRow       = document.getElementById('wizard-prereq-path-row');
+  dom.prereqPath          = document.getElementById('wizard-prereq-path');
+  dom.prereqBar           = document.getElementById('wizard-prereq-bar');
+  dom.prereqElapsed       = document.getElementById('wizard-prereq-elapsed');
+  dom.prereqSuccessText   = document.getElementById('wizard-prereq-success-text');
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────
@@ -463,6 +479,18 @@ function bindEvents() {
   dom.modeGuidedBtn?.addEventListener('click', () => setMode('guided'));
   dom.modeRawBtn?.addEventListener('click', () => setMode('raw'));
   dom.rawCodeArea?.addEventListener('input', onRawCodeChange);
+
+  // Binary prereq buttons
+  dom.prereqDownloadBtn?.addEventListener('click', _downloadBinaryForWizard);
+  dom.prereqSettingsBtn?.addEventListener('click', () => {
+    closeSpawnWizard();
+    setTimeout(() => {
+      window.openSettingsModal?.();
+      setTimeout(() => {
+        document.querySelector('.settings-tab[data-tab="session"]')?.click();
+      }, 80);
+    }, 100);
+  });
 }
 
 // ── Validation ────────────────────────────────────────────────────────────────
@@ -1451,6 +1479,16 @@ async function showHfSearchResults({ query, author, sort, limit }) {
         meta.appendChild(dl);
       }
 
+      // Age badge — prefer last_modified, fall back to created_at
+      const ageStr = _hfRelativeAge(m.last_modified || m.created_at || '');
+      if (ageStr) {
+        const age = document.createElement('span');
+        age.className = 'hf-sr-age';
+        age.textContent = ageStr;
+        age.title = m.last_modified || m.created_at || '';
+        meta.appendChild(age);
+      }
+
       // Provider/type badges
       if (m.has_imatrix) {
         const b = document.createElement('span');
@@ -1477,8 +1515,20 @@ async function showHfSearchResults({ query, author, sort, limit }) {
         meta.appendChild(b);
       }
 
+      // Model card external link — opens HF page in new tab without selecting the repo
+      const cardLink = document.createElement('a');
+      cardLink.className = 'hf-sr-card-link';
+      cardLink.href = `https://huggingface.co/${m.id}`;
+      cardLink.target = '_blank';
+      cardLink.rel = 'noopener noreferrer';
+      cardLink.title = 'View model card on HuggingFace';
+      cardLink.setAttribute('aria-label', `Open model card for ${m.id}`);
+      cardLink.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
+      cardLink.addEventListener('click', e => e.stopPropagation()); // don't trigger row select
+
       row.appendChild(nameEl);
       row.appendChild(meta);
+      row.appendChild(cardLink);
 
       const selectRepo = () => {
         wizardState.model.hfRepo = m.id;
@@ -2399,6 +2449,10 @@ async function runHealthCheck() {
 
 async function spawnServer() {
   if (wizardState.spawn.inFlight) return;
+  if (!_binaryReady) {
+    showErrorText('llama.cpp binary not found. Download it using the banner above.');
+    return;
+  }
   wizardState.spawn.inFlight = true; wizardState.spawn.error = '';
   if (!dom.spawnServerBtn) return;
   dom.spawnServerBtn.disabled = true;
@@ -2469,3 +2523,216 @@ function showErrorText(t) { if (dom.errorText) dom.errorText.textContent = t || 
 function showSuccessText(t) { if (dom.successText) dom.successText.textContent = t || ''; }
 function clearStatusMessages() { if (dom.errorText) dom.errorText.textContent = ''; if (dom.successText) dom.successText.textContent = ''; }
 function resetSpawnStatus() { wizardState.spawn = { inFlight:false, error:'' }; setStatusText('Ready to spawn.'); setProgress(0); clearStatusMessages(); }
+
+/** Convert an ISO 8601 timestamp to a human-readable relative age, e.g. "3d ago", "2mo ago". */
+function _hfRelativeAge(iso) {
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (isNaN(ms) || ms < 0) return '';
+  const mins  = Math.floor(ms / 60_000);
+  const hours = Math.floor(ms / 3_600_000);
+  const days  = Math.floor(ms / 86_400_000);
+  const weeks = Math.floor(days / 7);
+  const months = Math.floor(days / 30);
+  const years  = Math.floor(days / 365);
+  if (mins  <  60)  return `${mins}m ago`;
+  if (hours < 24)   return `${hours}h ago`;
+  if (days  <  7)   return `${days}d ago`;
+  if (weeks <  5)   return `${weeks}w ago`;
+  if (months < 12)  return `${months}mo ago`;
+  return `${years}y ago`;
+}
+
+// ── Binary prerequisite check & download ─────────────────────────────────────
+
+let _binaryReady  = false;
+let _platformInfo = null;   // cached result of /api/llama-binary/platform-info
+let _selectedBackend = null;
+
+async function _checkBinaryPrereq() {
+  if (!dom.binaryPrereq) return;
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+
+    // Fetch platform info and current version in parallel
+    const [vResp, pResp] = await Promise.all([
+      fetch('/api/llama-binary/version', { headers }),
+      fetch('/api/llama-binary/platform-info', { headers }),
+    ]);
+
+    const vData = vResp.ok ? await vResp.json() : {};
+    _platformInfo = pResp.ok ? await pResp.json() : null;
+
+    if (_selectedBackend === null && _platformInfo) {
+      _selectedBackend = _platformInfo.auto_backend;
+    }
+
+    if (vData.build) {
+      _binaryReady = true;
+      if (dom.binaryPrereq.style.display !== 'none') {
+        _showPrereqState('success');
+        if (dom.prereqSuccessText) {
+          const label = _platformInfo ? _platformInfo.label : 'llama.cpp';
+          dom.prereqSuccessText.textContent = `${label} b${vData.build} installed and ready.`;
+        }
+        setTimeout(() => { if (dom.binaryPrereq) dom.binaryPrereq.style.display = 'none'; }, 3000);
+      }
+      _updateSpawnBtnForPrereq();
+    } else {
+      _binaryReady = false;
+      _showPrereqState('idle');
+      dom.binaryPrereq.style.display = '';
+      _renderPrereqIdle(vData, _platformInfo);
+      _updateSpawnBtnForPrereq();
+    }
+  } catch {
+    // Network error — don't block the wizard
+  }
+}
+
+function _renderPrereqIdle(vData, platform) {
+  // Update download button label with platform detail
+  if (dom.prereqDownloadBtn && platform) {
+    const label = platform.label || 'llama.cpp';
+    dom.prereqDownloadBtn.textContent = `Download ${label}`;
+  }
+
+  // Show configured path if present but binary missing
+  if (dom.prereqPath && dom.prereqPathRow) {
+    const path = vData.path || '';
+    dom.prereqPath.textContent = path || '(not configured — will use app default)';
+    dom.prereqPathRow.style.display = '';
+  }
+
+  // For multi-backend platforms (Windows, Linux), inject a backend selector
+  const existingPicker = document.getElementById('wizard-prereq-backend-picker');
+  if (existingPicker) existingPicker.remove();
+
+  if (platform && platform.multi_backend && platform.backends && platform.backends.length > 1) {
+    const picker = document.createElement('div');
+    picker.id = 'wizard-prereq-backend-picker';
+    picker.className = 'wizard-prereq-backend-picker';
+
+    const pickerLabel = document.createElement('div');
+    pickerLabel.className = 'wizard-prereq-backend-label';
+    pickerLabel.textContent = 'Select your GPU / backend:';
+    picker.appendChild(pickerLabel);
+
+    const select = document.createElement('select');
+    select.className = 'wizard-prereq-backend-select';
+    platform.backends.forEach(b => {
+      const opt = document.createElement('option');
+      opt.value = b.id;
+      opt.textContent = b.label;
+      if (b.id === _selectedBackend) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.addEventListener('change', () => {
+      _selectedBackend = select.value;
+      // Update the note shown below the selector
+      const selected = platform.backends.find(b => b.id === _selectedBackend);
+      if (noteEl) noteEl.textContent = selected ? selected.note : '';
+      // Update download button label
+      if (dom.prereqDownloadBtn) {
+        dom.prereqDownloadBtn.textContent = `Download llama.cpp (${select.options[select.selectedIndex].text.split(' —')[0]})`;
+      }
+    });
+    picker.appendChild(select);
+
+    // Note line below selector
+    const noteEl = document.createElement('div');
+    noteEl.className = 'wizard-prereq-backend-note';
+    const currentBackend = platform.backends.find(b => b.id === _selectedBackend);
+    noteEl.textContent = currentBackend ? currentBackend.note : '';
+    picker.appendChild(noteEl);
+
+    // Insert before the actions div
+    const actions = dom.prereqIdle.querySelector('.wizard-prereq-actions');
+    if (actions) dom.prereqIdle.insertBefore(picker, actions);
+
+    // Update initial download button label for Windows
+    if (dom.prereqDownloadBtn && currentBackend) {
+      dom.prereqDownloadBtn.textContent = `Download llama.cpp (${currentBackend.label.split(' —')[0]})`;
+    }
+  }
+}
+
+function _showPrereqState(state) {
+  if (dom.prereqIdle)     dom.prereqIdle.style.display     = state === 'idle'     ? '' : 'none';
+  if (dom.prereqProgress) dom.prereqProgress.style.display = state === 'progress' ? '' : 'none';
+  if (dom.prereqSuccess)  dom.prereqSuccess.style.display  = state === 'success'  ? '' : 'none';
+}
+
+function _updateSpawnBtnForPrereq() {
+  if (!dom.spawnServerBtn) return;
+  if (!_binaryReady) {
+    dom.spawnServerBtn.disabled = true;
+    dom.spawnServerBtn.title = 'llama.cpp binary required — download it above first';
+  } else {
+    dom.spawnServerBtn.disabled = false;
+    dom.spawnServerBtn.title = '';
+  }
+}
+
+async function _downloadBinaryForWizard() {
+  if (!dom.binaryPrereq || !dom.prereqDownloadBtn) return;
+  _showPrereqState('progress');
+  if (dom.prereqDownloadBtn) dom.prereqDownloadBtn.disabled = true;
+
+  const backend = _selectedBackend || (_platformInfo && _platformInfo.auto_backend) || null;
+  const platformLabel = _platformInfo ? _platformInfo.label : 'llama.cpp';
+
+  // Update progress description with what we're downloading
+  const descEl = dom.prereqProgress?.querySelector('.wizard-prereq-desc');
+  if (descEl) {
+    descEl.textContent = backend && _platformInfo && _platformInfo.multi_backend
+      ? `Downloading llama.cpp ${backend.toUpperCase()} build — this may take a minute…`
+      : `Downloading ${platformLabel} build — this may take a minute…`;
+  }
+
+  const startTime = Date.now();
+  let elapsedTimer = setInterval(() => {
+    const s = Math.floor((Date.now() - startTime) / 1000);
+    if (dom.prereqElapsed) dom.prereqElapsed.textContent = `${s}s elapsed…`;
+    if (dom.prereqBar) {
+      const pct = Math.min(90, 5 + Math.floor(s * 1.2));
+      dom.prereqBar.style.width = pct + '%';
+    }
+  }, 1000);
+
+  try {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+    const body = backend ? { backend } : {};
+    const resp = await fetch('/api/llama-binary/update', {
+      method: 'POST', headers, body: JSON.stringify(body)
+    });
+    clearInterval(elapsedTimer);
+    if (dom.prereqBar) dom.prereqBar.style.width = '100%';
+
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => `HTTP ${resp.status}`);
+      throw new Error(txt);
+    }
+    const data = await resp.json();
+    if (data.ok === false) throw new Error(data.error || 'Download failed');
+
+    _binaryReady = true;
+    _showPrereqState('success');
+    if (dom.prereqSuccessText) {
+      // data.version is the tag like "b5678"; data.backend is what was installed
+      const ver  = data.version || 'installed';
+      const back = data.backend ? ` · ${data.backend.toUpperCase()}` : '';
+      dom.prereqSuccessText.textContent = `llama.cpp ${ver}${back} downloaded and ready.`;
+    }
+    _updateSpawnBtnForPrereq();
+    setTimeout(() => { if (dom.binaryPrereq) dom.binaryPrereq.style.display = 'none'; }, 4000);
+  } catch (err) {
+    clearInterval(elapsedTimer);
+    _showPrereqState('idle');
+    _renderPrereqIdle({}, _platformInfo);
+    if (dom.prereqDownloadBtn) dom.prereqDownloadBtn.disabled = false;
+    showToast('Binary download failed', 'error', (err.message || 'Unknown error').split('\n')[0]);
+  }
+}

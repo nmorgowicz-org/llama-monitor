@@ -380,8 +380,10 @@ export function initSessions() {
     const sessionForm = document.getElementById('session-form');
     if (sessionForm) sessionForm.addEventListener('submit', saveSession);
 
-    // Bind nav new session button
-    document.getElementById('nav-new-session-btn')?.addEventListener('click', openSessionModal);
+    // Bind nav new session button — opens spawn wizard
+    document.getElementById('nav-new-session-btn')?.addEventListener('click', () => {
+        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
+    });
 
     // Bind setup view link
     document.getElementById('setup-browse-sessions-link')?.addEventListener('click', (e) => {

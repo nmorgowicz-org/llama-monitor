@@ -351,6 +351,13 @@ export function syncSetupPresetSelect() {
         setupSelect.appendChild(clone);
     });
     setupSelect.value = mainSelect.value;
+
+    // Show/hide the quick-start area depending on whether any real presets exist
+    const quickStart = document.getElementById('setup-card-quick-start');
+    if (quickStart) {
+        const hasPresets = options.length > 0 && [...options].some(o => o.value !== '');
+        quickStart.style.display = hasPresets ? '' : 'none';
+    }
 }
 
 // ── Initialization ────────────────────────────────────────────────────────────

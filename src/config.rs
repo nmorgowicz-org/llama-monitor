@@ -458,13 +458,21 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn from_args(args: AppArgs) -> Self {
-        let default_server_path = PathBuf::from("llama-server");
         let default_server_cwd = PathBuf::from(".");
 
         let config_dir = args.config_dir.unwrap_or_else(|| {
             let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
             home.join(".config").join("llama-monitor")
         });
+
+        // Default binary location: ~/.config/llama-monitor/bin/llama-server
+        // Subdirectory keeps binaries separate from JSON config files.
+        let binary_name = if cfg!(windows) {
+            "llama-server.exe"
+        } else {
+            "llama-server"
+        };
+        let default_server_path = config_dir.join("bin").join(binary_name);
 
         let presets_file = args
             .presets_file

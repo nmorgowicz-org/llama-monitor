@@ -3512,6 +3512,7 @@ pub fn api_routes(
 
     let llama_binary_routes = api_llama_binary_version(app_config.clone())
         .or(api_llama_binary_latest(app_config.clone()))
+        .or(api_llama_binary_platform_info(app_config.clone()))
         .or(api_llama_binary_update(app_config.clone()));
 
     server_routes
@@ -9176,6 +9177,138 @@ fn api_llama_binary_latest(
         })
 }
 
+/// GET /api/llama-binary/platform-info — returns platform/backend info for the download UI
+fn api_llama_binary_platform_info(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "llama-binary" / "platform-info")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let os   = std::env::consts::OS;
+                let arch = std::env::consts::ARCH;
+
+                // Human-readable arch label
+                let arch_label = match arch {
+                    "aarch64" => "ARM64 (Apple Silicon)",
+                    "x86_64"  => "x86-64",
+                    other     => other,
+                };
+
+                // The backend this machine will auto-select on download
+                let auto_backend = match os {
+                    "macos"   => "metal",
+                    "linux"   => "cpu",
+                    _         => "avx2",  // Windows default
+                };
+
+                // Human-readable label shown before the download button
+                let label = match (os, arch) {
+                    ("macos", "aarch64") => "Apple Silicon Metal".to_string(),
+                    ("macos", _)         => "macOS Metal (x86-64)".to_string(),
+                    ("linux", "aarch64") => "Linux ARM64 (CPU)".to_string(),
+                    ("linux", _)         => "Linux x86-64 (CPU)".to_string(),
+                    ("windows", _)       => "Windows CPU (AVX2)".to_string(),
+                    _                    => format!("{} / {}", os, arch),
+                };
+
+                // For multi-backend platforms, expose all selectable backends.
+                // Windows has the most variety; Linux has a few; macOS is Metal-only.
+                let backends: Vec<serde_json::Value> = match os {
+                    "windows" => vec![
+                        serde_json::json!({
+                            "id": "avx2",
+                            "label": "CPU (AVX2) — no GPU driver needed",
+                            "note": "Universal fallback. Works on any CPU that supports AVX2 (2013+).",
+                            "recommended": false
+                        }),
+                        serde_json::json!({
+                            "id": "vulkan",
+                            "label": "Vulkan — AMD / Intel / NVIDIA",
+                            "note": "Best for AMD Radeon or Intel Arc. Also works on NVIDIA without CUDA.",
+                            "recommended": false
+                        }),
+                        serde_json::json!({
+                            "id": "cuda12",
+                            "label": "CUDA 12.x — NVIDIA RTX 20/30/40 series",
+                            "note": "Requires CUDA 12.x runtime. Typical for GTX 10xx through RTX 40xx.",
+                            "recommended": false
+                        }),
+                        serde_json::json!({
+                            "id": "cuda13",
+                            "label": "CUDA 13.x — NVIDIA RTX 50 series (Blackwell)",
+                            "note": "Requires CUDA 13.x runtime. For RTX 5070, 5080, 5090.",
+                            "recommended": false
+                        }),
+                        serde_json::json!({
+                            "id": "sycl",
+                            "label": "SYCL / oneAPI — Intel Arc & Xe GPUs",
+                            "note": "Requires Intel oneAPI runtime. For Arc A-series and Xe-HPC.",
+                            "recommended": false
+                        }),
+                    ],
+                    "linux" => vec![
+                        serde_json::json!({
+                            "id": "cpu",
+                            "label": "CPU — universal",
+                            "note": "No GPU driver required.",
+                            "recommended": false
+                        }),
+                        serde_json::json!({
+                            "id": "cuda12",
+                            "label": "CUDA 12.x — NVIDIA GPU",
+                            "note": "Requires NVIDIA CUDA 12.x runtime.",
+                            "recommended": false
+                        }),
+                        serde_json::json!({
+                            "id": "vulkan",
+                            "label": "Vulkan — AMD / Intel / NVIDIA",
+                            "note": "GPU acceleration via Vulkan driver.",
+                            "recommended": false
+                        }),
+                        serde_json::json!({
+                            "id": "rocm",
+                            "label": "ROCm — AMD GPU",
+                            "note": "Requires AMD ROCm runtime.",
+                            "recommended": false
+                        }),
+                    ],
+                    // macOS: Metal only — no choice needed
+                    _ => vec![
+                        serde_json::json!({
+                            "id": "metal",
+                            "label": if arch == "aarch64" {
+                                "Metal — Apple Silicon (recommended)"
+                            } else {
+                                "Metal — Intel Mac"
+                            },
+                            "note": "Uses the GPU via Metal. Built in to macOS.",
+                            "recommended": true
+                        }),
+                    ],
+                };
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "os":           os,
+                        "arch":         arch,
+                        "arch_label":   arch_label,
+                        "auto_backend": auto_backend,
+                        "label":        label,
+                        "backends":     backends,
+                        "multi_backend": os == "windows" || os == "linux",
+                    }),
+                )))
+            }
+        })
+}
+
 /// POST /api/llama-binary/update — downloads latest release and overwrites llama-server binary
 fn api_llama_binary_update(
     app_config: Arc<AppConfig>,
@@ -9196,11 +9329,21 @@ fn api_llama_binary_update(
                 let os = std::env::consts::OS;
                 let arch = std::env::consts::ARCH;
 
-                let backend = match os {
+                // Caller may override the backend (e.g. "cuda13" on Windows).
+                // Fall back to the platform default if not provided.
+                let default_backend = match os {
                     "macos" => "metal",
                     "linux" => "cpu",
                     _ => "avx2",
                 };
+                let backend_owned: String = _body
+                    .get("backend")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or(default_backend)
+                    .to_string();
+                let backend = backend_owned.as_str();
+
                 let arch_str = match arch {
                     "aarch64" => "arm64",
                     "x86_64" => "x86_64",
@@ -9293,63 +9436,75 @@ fn api_llama_binary_update(
                     ));
                 }
 
-                // Walk extracted dir to find llama-server binary
-                let binary_name = if os == "windows" {
-                    "llama-server.exe"
-                } else {
-                    "llama-server"
-                };
+                let binary_name = if os == "windows" { "llama-server.exe" } else { "llama-server" };
+                let dest_dir = dest_path.parent().unwrap_or(&dest_path);
 
-                fn find_binary(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
-                    let entries = std::fs::read_dir(dir).ok()?;
-                    for entry in entries.filter_map(|e| e.ok()) {
-                        let path = entry.path();
-                        if path.is_dir() {
-                            if let Some(found) = find_binary(&path, name) {
-                                return Some(found);
-                            }
-                        } else if path.file_name().and_then(|n| n.to_str()) == Some(name) {
-                            return Some(path);
-                        }
-                    }
-                    None
+                // Ensure destination directory exists (e.g. ~/.config/llama-monitor/bin/)
+                if let Err(e) = std::fs::create_dir_all(dest_dir) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("Failed to create bin dir {}: {}", dest_dir.display(), e)
+                        })),
+                    ));
                 }
 
-                let found = find_binary(tmp_dir.path(), binary_name);
-
-                let found_path = match found {
-                    Some(p) => p,
-                    None => {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": format!(
-                                    "Could not find '{}' in extracted archive",
-                                    binary_name
-                                )
-                            })),
-                        ));
+                // Copy ALL files from the extracted archive into dest_dir so that
+                // CUDA / Vulkan / SYCL builds have their shared libraries alongside
+                // the binary (ggml-cuda.dll, cublas64_12.dll, etc.).
+                fn copy_all_files(
+                    src: &std::path::Path,
+                    dest: &std::path::Path,
+                ) -> std::io::Result<()> {
+                    for entry in std::fs::read_dir(src)?.filter_map(|e| e.ok()) {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            copy_all_files(&path, dest)?;
+                        } else if let Some(fname) = path.file_name() {
+                            let _ = std::fs::copy(&path, dest.join(fname));
+                        }
                     }
-                };
+                    Ok(())
+                }
 
-                // Set executable bit on unix
+                if let Err(e) = copy_all_files(tmp_dir.path(), dest_dir) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("Failed to copy release files to {}: {}", dest_dir.display(), e)
+                        })),
+                    ));
+                }
+
+                // Locate the binary in dest_dir now that everything is copied
+                let found_path = dest_dir.join(binary_name);
+                if !found_path.exists() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!(
+                                "Could not find '{}' in extracted archive",
+                                binary_name
+                            )
+                        })),
+                    ));
+                }
+
+                // Set executable bit on all extracted files (unix)
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    if let Err(e) = std::fs::set_permissions(
-                        &found_path,
-                        std::fs::Permissions::from_mode(0o755),
-                    ) {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": format!("Failed to set executable bit: {}", e)
-                            })),
-                        ));
+                    if let Ok(entries) = std::fs::read_dir(dest_dir) {
+                        for entry in entries.filter_map(|e| e.ok()) {
+                            let _ = std::fs::set_permissions(
+                                entry.path(),
+                                std::fs::Permissions::from_mode(0o755),
+                            );
+                        }
                     }
                 }
 
-                // Compute SHA256 of the binary before moving it, so users can
+                // Compute SHA256 of the llama-server binary so users can
                 // verify integrity out-of-band (e.g. `sha256sum llama-server`).
                 let sha256_hex = std::fs::read(&found_path).ok().map(|bytes| {
                     use sha2::Digest;
@@ -9362,24 +9517,12 @@ fn api_llama_binary_update(
                         .collect::<String>()
                 });
 
-                // Copy binary to destination path
-                if let Err(e) = std::fs::copy(&found_path, &dest_path) {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": format!(
-                                "Failed to copy binary to {}: {}",
-                                dest_path.display(),
-                                e
-                            )
-                        })),
-                    ));
-                }
-
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
                         "ok": true,
                         "version": tag,
+                        "backend": backend,
+                        "arch": arch_str,
                         "sha256": sha256_hex,
                     }),
                 )))
