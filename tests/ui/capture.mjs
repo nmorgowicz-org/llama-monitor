@@ -1556,6 +1556,13 @@ async function scenarioDashboard(ctx, options) {
     await switchTab(page, 'server');
     // Wait for agent first poll (2s interval) + some render time.
     await sleep(3500);
+    // Scroll to top, capture the control bar + inference section viewport.
+    await page.evaluate(() => {
+        const pg = document.querySelector('.page.active');
+        if (pg) pg.scrollTop = 0;
+    });
+    await sleep(300);
+    await captureShot(page, 'dashboard-inference-section.png');
     await captureShot(page, 'settings-server-tab.png', { fullPage: true });
 
     // Wait up to 6s for hardware data to arrive (remote agent dependent).
@@ -2427,22 +2434,16 @@ async function scenarioSpawnWizard(ctx, options) {
     const { page, baseUrl } = ctx;
     await gotoApp(page, baseUrl);
 
-    // Navigate past setup without attaching — wizard doesn't need a running server.
-    // Skip the attach step by going directly to monitor if no-attach, else attach.
-    if (!options.noAttach) {
-        try {
-            await attachToServer(page);
-        } catch {
-            console.log('[CAPTURE] Attach failed; continuing wizard capture without live server.');
-        }
-    } else {
-        await waitForMonitor(page);
+    // Attach to reach the monitor view — the Spawn New Server button lives in the control bar.
+    try {
+        await attachToServer(page);
+    } catch {
+        console.log('[CAPTURE] Attach failed; continuing wizard capture without live server.');
     }
 
-    // Open spawn wizard via its exported function (not yet wired to a nav button).
-    await page.evaluate(async () => {
-        const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
-        openSpawnWizard();
+    // Open spawn wizard via the new control bar button.
+    await page.evaluate(() => {
+        document.getElementById('btn-open-spawn-wizard')?.click();
     });
     await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 10000 });
     await sleep(800);
