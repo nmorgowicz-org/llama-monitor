@@ -2508,10 +2508,14 @@ fn api_benchmark(
                         "Explain in one sentence what llama.cpp is used for.";
                     let max_tokens: u64 = 512;
 
+                    // Use messages format (required by spec); disable thinking mode so
+                    // Qwen3 internal reasoning tokens don't inflate TTFT artificially.
                     let payload = serde_json::json!({
-                        "prompt": prompt,
+                        "messages": [{"role": "user", "content": prompt}],
                         "max_tokens": max_tokens,
                         "temperature": 0.5,
+                        "stream": true,
+                        "chat_template_kwargs": {"enable_thinking": false},
                     });
 
                     let client = match reqwest::Client::builder()
@@ -2535,7 +2539,7 @@ fn api_benchmark(
                             let mut first_token_time = None;
                             let mut buf = String::new();
                             let mut generated_tokens = 0u64;
-                            let prompt_len = prompt.len() as f64;
+                            let mut prompt_tokens_reported = 0u64;
 
                             let resp = match client
                                 .post(&url)
@@ -2571,25 +2575,26 @@ fn api_benchmark(
                                         if let Ok(v) =
                                             serde_json::from_str::<serde_json::Value>(data)
                                         {
-                                            // Attempt to read token count
-                                            if let Some(c) = v["usage"]["completion_tokens"]
-                                                .as_u64()
-                                            {
+                                            // Prefer server-reported token counts from usage field
+                                            if let Some(c) = v["usage"]["completion_tokens"].as_u64() {
                                                 generated_tokens = c;
                                             }
-                                            // Count tokens from content
+                                            if let Some(p) = v["usage"]["prompt_tokens"].as_u64() {
+                                                prompt_tokens_reported = p;
+                                            }
+                                            // Track first visible content token for TTFT
                                             if let Some(content) =
-                                                v["choices"][0]["delta"]["content"]
-                                                    .as_str()
+                                                v["choices"][0]["delta"]["content"].as_str()
                                             {
-                                                if first_token_time.is_none() {
+                                                if first_token_time.is_none() && !content.is_empty() {
                                                     first_token_time =
                                                         Some(start.elapsed().as_millis() as f64);
                                                 }
-                                                generated_tokens =
-                                                    generated_tokens.saturating_add(
-                                                        content.chars().count() as u64 / 4,
-                                                    );
+                                                // Each content-bearing chunk ≈ 1 token
+                                                if v["usage"]["completion_tokens"].is_null() {
+                                                    generated_tokens =
+                                                        generated_tokens.saturating_add(1);
+                                                }
                                             }
                                         }
                                     }
@@ -2604,14 +2609,21 @@ fn api_benchmark(
                                 end.as_millis() as f64 - ttft_ms;
                             let gen_dur_s = gen_dur_ms.max(1.0) / 1000.0;
 
-                            // If we didn't get accurate token counts, approximate
+                            // Fallback: estimate from raw buffer if server didn't report counts
                             if generated_tokens == 0 {
-                                generated_tokens = buf.len() as u64 / 4;
+                                generated_tokens = (buf.len() as u64 / 4).max(1);
                             }
 
+                            // prompt_tps: tokens prefilled per second during TTFT window.
+                            // Use server-reported prompt_tokens; fall back to ~¼ char estimate.
                             let ttft_s = ttft_ms / 1000.0;
+                            let effective_prompt_tokens = if prompt_tokens_reported > 0 {
+                                prompt_tokens_reported as f64
+                            } else {
+                                (prompt.len() as f64 / 4.0).max(1.0)
+                            };
                             let prompt_tps = if ttft_s > 0.0 {
-                                prompt_len / ttft_s
+                                effective_prompt_tokens / ttft_s
                             } else {
                                 0.0
                             };
