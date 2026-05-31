@@ -2640,12 +2640,12 @@
                         </div>
                         <div class="hardware-field hardware-field-ctx">
                             <label for="spawn-context-size">Context size</label>
-                            <input type="number" id="spawn-context-size" min="512" step="512" value="8192">
+                            <input type="number" id="spawn-context-size" min="512" step="512" value="8192" title="Or type any value — model max is typically 128k–256k+">
                             <div class="ctx-quick-picks" id="ctx-quick-picks">
                                 <button type="button" class="ctx-pick" data-ctx="65536"  title="65k — Roleplay / RP with lorebooks">65k <span class="ctx-pick-tag">RP</span></button>
                                 <button type="button" class="ctx-pick" data-ctx="131072" title="131k — Minimum for agentic work">131k <span class="ctx-pick-tag">Agent</span></button>
-                                <button type="button" class="ctx-pick" data-ctx="163840" title="160k — Extended agentic context">160k</button>
-                                <button type="button" class="ctx-pick" data-ctx="204800" title="200k — Maximum context, large VRAM required">200k</button>
+                                <button type="button" class="ctx-pick" data-ctx="204800" title="200k — Large agentic context">200k</button>
+                                <button type="button" class="ctx-pick" data-ctx="262144" title="256k — Full model max context; VRAM-intensive, use KV q4_0 to fit">256k <span class="ctx-pick-tag">Max</span></button>
                             </div>
                         </div>
                         <div class="hardware-field">

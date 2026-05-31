@@ -2169,9 +2169,19 @@ function bindCtxQuickPicks() {
       if (dom.contextSizeInput) dom.contextSizeInput.value = ctx;
       wizardState.hardware.contextSize = ctx;
       updateCtxQuickPickActive();
-      showCtxFitWarning(ctx, wizardState.useCase);
+      showCtxFitWarning(ctx, wizardState.useCase, true); // manual — no warning
       updateVramDisplay();
     });
+  });
+
+  // Manual input: clear active chip highlight, suppress warning for intentional values
+  dom.contextSizeInput?.addEventListener('change', () => {
+    const ctx = parseInt(dom.contextSizeInput.value, 10);
+    if (!ctx) return;
+    wizardState.hardware.contextSize = ctx;
+    updateCtxQuickPickActive();
+    showCtxFitWarning(ctx, wizardState.useCase, true);
+    updateVramDisplay();
   });
 }
 
@@ -2183,11 +2193,15 @@ function updateCtxQuickPickActive() {
 }
 
 // Minimum-context guidance: warn when auto-size lands below the target for the use case.
+// Never warn when the user has manually typed or picked a high value — that's intentional.
 const CTX_TARGETS = { agentic: 131072, general: 32768, roleplay: 65536 };
 
-function showCtxFitWarning(ctx, useCase) {
+function showCtxFitWarning(ctx, useCase, manualSet = false) {
   const el = document.getElementById('ctx-fit-warning');
   if (!el) return;
+
+  // If user explicitly chose this value (chip click or manual type), no warning
+  if (manualSet) { el.style.display = 'none'; return; }
 
   const target = CTX_TARGETS[useCase] ?? 0;
   if (!target || ctx >= target) { el.style.display = 'none'; return; }
@@ -2197,11 +2211,12 @@ function showCtxFitWarning(ctx, useCase) {
 
   let msg = '';
   if (useCase === 'agentic') {
-    msg = `<strong>Can't reach ${need} for agentic work</strong> — got ${got} at q8_0 KV. `
-        + `Try a smaller quantization (Q4_K_M or IQ3_XXS) or a 27B model which needs much less KV memory.`;
+    msg = `<strong>Can't reach ${need} for agentic work</strong> — auto-sized to ${got} at q8_0 KV. `
+        + `Try Q4_K_M or IQ3_XXS to shrink weights, or switch to a 27B model. `
+        + `You can also override by typing a custom value or picking 200k/256k above.`;
   } else if (useCase === 'roleplay') {
-    msg = `<strong>Below ${need} RP target</strong> — got ${got}. `
-        + `Switch KV cache to q4_0 to cut memory in half, or use a smaller quant.`;
+    msg = `<strong>Below ${need} RP target</strong> — auto-sized to ${got}. `
+        + `Switch KV cache to q4_0 to halve KV memory, or use a smaller quant.`;
   } else {
     msg = `Auto-size returned ${got} (target ${need}). Consider a smaller quantization.`;
   }
