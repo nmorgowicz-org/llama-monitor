@@ -186,10 +186,22 @@ export function initSpawnWizard() {
   });
   document.getElementById('hf-dlp-cancel-btn')?.addEventListener('click', _cancelHfDownload);
   document.getElementById('hf-dlp-open-settings')?.addEventListener('click', () => {
-    window.openSettingsModal?.();
+    closeSpawnWizard();
     setTimeout(() => {
-      document.querySelector('.settings-tab[data-tab="models"]')?.click();
-    }, 80);
+      window.openSettingsModal?.();
+      setTimeout(() => {
+        document.querySelector('.settings-tab[data-tab="models"]')?.click();
+      }, 80);
+    }, 100);
+  });
+
+  // Refresh download destination when settings change (e.g., models dir updated)
+  window.addEventListener('settings-applied', () => {
+    const panel = document.getElementById('hf-download-panel');
+    if (panel && panel.style.display !== 'none') {
+      const fname = (wizardState.model?.hfFile || '').split('/').pop();
+      if (fname) showHfDownloadPanel(fname);
+    }
   });
 }
 

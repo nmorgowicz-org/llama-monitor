@@ -565,6 +565,10 @@ pub async fn hf_search_models(params: &HfSearchParams) -> Result<Vec<SimpleModel
         let mut p = url.query_pairs_mut();
         if !params.query.is_empty() {
             p.append_pair("search", &params.query);
+        } else if let Some(ref author) = params.author {
+            // HF's "author" param is case-sensitive; include author in search
+            // so "davidau" still matches "DavidAU" models.
+            p.append_pair("search", author);
         }
         if let Some(ref author) = params.author {
             p.append_pair("author", author);
