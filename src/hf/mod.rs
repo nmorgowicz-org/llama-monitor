@@ -230,7 +230,6 @@ pub struct HfGgufFile {
 /// High-level model info from HF (for the model info endpoint).
 #[derive(Debug, Clone, serde::Serialize)]
 #[allow(dead_code)]
-#[allow(dead_code)]
 pub struct HfModelInfo {
     pub repo_id: String,
     pub gated: bool,
@@ -240,7 +239,6 @@ pub struct HfModelInfo {
 
 /// A single file in an HF repo.
 #[derive(Debug, Clone, serde::Serialize)]
-#[allow(dead_code)]
 #[allow(dead_code)]
 pub struct HfFileInfo {
     pub r#type: String,
@@ -369,7 +367,6 @@ pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
 
 /// Get basic model info for a repo (async, uses configured HF token).
 #[allow(dead_code)]
-#[allow(dead_code)]
 pub async fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
     let token = hf_load_token();
     let url = format!("https://huggingface.co/api/models/{repo_id}");
@@ -413,7 +410,6 @@ pub async fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
 
 /// List repo files; filters for GGUF if gguf_only=true.
 #[allow(dead_code)]
-#[allow(dead_code)]
 pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileInfo>> {
     let api = ApiBuilder::new()
         .with_token(hf_load_token())
@@ -438,7 +434,6 @@ pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileIn
 
 /// Get info for a single file in a repo.
 #[allow(dead_code)]
-#[allow(dead_code)]
 pub fn hf_get_file_info(repo_id: &str, path: &str) -> Result<HfFileInfo> {
     let api = ApiBuilder::new()
         .with_token(hf_load_token())
@@ -462,7 +457,6 @@ pub fn hf_get_file_info(repo_id: &str, path: &str) -> Result<HfFileInfo> {
 
 /// Stream-download a file from HF with optional resume.
 /// Returns total bytes written.
-#[allow(dead_code)]
 #[allow(dead_code)]
 pub async fn hf_download_file_stream(
     repo_id: &str,
@@ -987,7 +981,6 @@ pub fn hf_save_token(token: &str) -> Result<()> {
 }
 
 /// Mask a token for safe logging: first4****last4.
-#[allow(dead_code)]
 #[allow(dead_code)]
 pub fn mask_token(token: &str) -> String {
     let t = token.trim();

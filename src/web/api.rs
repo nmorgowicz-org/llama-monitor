@@ -9086,12 +9086,12 @@ fn api_llama_binary_latest(
                 // Check cache
                 {
                     let guard = LATEST_CACHE.lock().await;
-                    if let Some((ts, ref cached)) = *guard {
-                        if ts.elapsed() < std::time::Duration::from_secs(30 * 60) {
-                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                                warp::reply::json(cached),
-                            ));
-                        }
+                    if let Some((ts, ref cached)) = *guard
+                        && ts.elapsed() < std::time::Duration::from_secs(30 * 60)
+                    {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(cached),
+                        ));
                     }
                 }
 
