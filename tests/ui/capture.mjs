@@ -2384,9 +2384,10 @@ async function scenarioSpawnWizard(ctx, options) {
         await waitForMonitor(page);
     }
 
-    // Open spawn wizard via the "Spawn server" button
-    await page.evaluate(() => {
-        document.getElementById('btn-spawn-server')?.click();
+    // Open spawn wizard via its exported function (not yet wired to a nav button).
+    await page.evaluate(async () => {
+        const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+        openSpawnWizard();
     });
     await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 10000 });
     await sleep(800);
