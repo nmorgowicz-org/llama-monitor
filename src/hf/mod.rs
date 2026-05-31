@@ -1072,12 +1072,13 @@ mod tests {
             QuantProvider::Unsloth
         ));
         assert!(matches!(
-            QuantProvider::from_username("davidau"),
+            QuantProvider::from_username("DavidAU"),
             QuantProvider::Community
         ));
+        // llmfan46 replaced TheBloke in the known quantizers list
         assert!(matches!(
-            QuantProvider::from_username("TheBloke"),
-            QuantProvider::TheBlokeRetired
+            QuantProvider::from_username("llmfan46"),
+            QuantProvider::Community
         ));
     }
 
@@ -1125,9 +1126,10 @@ mod tests {
         assert!(usernames.contains(&"bartowski"));
         assert!(usernames.contains(&"mradermacher"));
         assert!(usernames.contains(&"unsloth"));
-        assert!(usernames.contains(&"davidau"));
+        assert!(usernames.contains(&"DavidAU"));
         assert!(usernames.contains(&"mudler"));
-        assert!(usernames.contains(&"jackrong"));
+        assert!(usernames.contains(&"JackRong"));
+        assert!(usernames.contains(&"llmfan46"));
     }
 
     #[test]

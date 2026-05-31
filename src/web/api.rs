@@ -10009,4 +10009,217 @@ mod tests {
             Some("example")
         );
     }
+
+    // ── Route smoke tests ──────────────────────────────────────────────────────
+    // Each test sends a properly-formed request (correct method + Content-Type)
+    // without an API token and asserts 401, not 404.
+    //
+    // A 404 means the route was accidentally deleted from api_routes().
+    // A 401 means the route exists and auth is working correctly.
+    //
+    // These tests exist specifically to catch the regression from commit ac643ab
+    // where a worktree-agent silently deleted 27 handler functions.
+
+    fn make_all_routes()
+    -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+        // Both api_token AND db_admin_token must be set so that handlers using
+        // "check_db_admin_token OR check_api_token" still reject unauthenticated requests.
+        let paths = crate::state::AppPaths {
+            presets_path: PathBuf::new(),
+            templates_path: PathBuf::new(),
+            models_dir: None,
+            gpu_env_path: PathBuf::new(),
+            ui_settings_path: PathBuf::new(),
+            sessions_path: PathBuf::new(),
+        };
+        let cs = Arc::new(
+            crate::chat_storage::ChatStorage::open(&PathBuf::from(":memory:"))
+                .expect("in-memory chat storage"),
+        );
+        let state = crate::state::AppState::new(
+            vec![],
+            paths,
+            crate::gpu::env::GpuEnv::default(),
+            crate::state::UiSettings::default(),
+            cs,
+            crate::config::TLSConfig::default(),
+        );
+        let app_config = Arc::new(crate::config::AppConfig::for_test(
+            Some("test-token".to_string()),
+            Some("db-admin-token".to_string()),
+        ));
+        let auth = AuthManager::new(None, None, &crate::config::TlsMode::None);
+        super::api_routes(state, app_config, auth, "127.0.0.1".to_string())
+    }
+
+    macro_rules! route_smoke_tests {
+        // $body: None for GET/DELETE (no body), Some("...json...") for POST/PUT
+        ( $( ($test_name:ident, $method:expr, $path:expr, $body:expr) ),* $(,)? ) => {
+            $(
+                #[tokio::test]
+                async fn $test_name() {
+                    let routes = make_all_routes();
+                    let req = warp::test::request()
+                        .method($method)
+                        .path($path);
+                    let body_str: Option<&str> = $body;
+                    let resp = if let Some(b) = body_str {
+                        req.header("Content-Type", "application/json")
+                           .body(b)
+                           .reply(&routes)
+                           .await
+                    } else {
+                        req.reply(&routes).await
+                    };
+                    assert_ne!(
+                        resp.status(), 404,
+                        "Route {} {} returned 404 — it may have been deleted from api_routes()",
+                        $method, $path
+                    );
+                    assert_eq!(
+                        resp.status(), 401,
+                        "Route {} {} should require auth (expected 401, got {})",
+                        $method, $path, resp.status()
+                    );
+                }
+            )*
+        };
+    }
+
+    route_smoke_tests![
+        // Spawn wizard import
+        (
+            route_spawn_wizard_import,
+            "POST",
+            "/api/spawn-wizard/import-launch-file",
+            Some("{}")
+        ),
+        // Chat template
+        (
+            route_chat_template_fetch,
+            "POST",
+            "/api/chat-template/fetch",
+            Some("{}")
+        ),
+        (
+            route_chat_template_upload,
+            "POST",
+            "/api/chat-template/upload",
+            Some("{}")
+        ),
+        // VRAM estimation
+        (
+            route_vram_estimate,
+            "POST",
+            "/api/vram/estimate",
+            Some("{}")
+        ),
+        (
+            route_vram_estimate_breakdown,
+            "POST",
+            "/api/vram-estimate",
+            Some("{}")
+        ),
+        (
+            route_vram_quant_compare,
+            "POST",
+            "/api/vram/quant-compare",
+            Some("{}")
+        ),
+        (
+            route_vram_auto_size,
+            "POST",
+            "/api/vram/auto-size",
+            Some("{}")
+        ),
+        // Model download
+        (
+            route_models_download_start,
+            "POST",
+            "/api/models/download/start",
+            Some("{}")
+        ),
+        (
+            route_models_download_status,
+            "GET",
+            "/api/models/download/test-id/status",
+            None
+        ),
+        (
+            route_models_download_cancel,
+            "POST",
+            "/api/models/download/test-id/cancel",
+            Some("{}")
+        ),
+        // Benchmarking
+        (route_benchmark, "POST", "/api/benchmark", Some("{}")),
+        // Model metadata
+        (
+            route_model_defaults,
+            "POST",
+            "/api/model-defaults",
+            Some("{}")
+        ),
+        (
+            route_model_introspect,
+            "POST",
+            "/api/model/introspect",
+            Some("{}")
+        ),
+        (
+            route_third_party_models,
+            "POST",
+            "/api/third-party-models",
+            Some("{}")
+        ),
+        // MoE tuning
+        (route_moe_tune, "POST", "/api/moe-tune", Some("{}")),
+        // HuggingFace
+        (route_hf_search, "POST", "/api/hf/search", Some("{}")),
+        (route_hf_files, "POST", "/api/hf/files", Some("{}")),
+        (
+            route_hf_community_picks,
+            "GET",
+            "/api/hf/community-picks",
+            None
+        ),
+        (route_hf_quantizers_get, "GET", "/api/hf/quantizers", None),
+        // hf_quantizers_put expects Vec<UserQuantizer> — send empty array, not {}
+        (
+            route_hf_quantizers_put,
+            "PUT",
+            "/api/hf/quantizers",
+            Some("[]")
+        ),
+        (route_hf_download_dir, "GET", "/api/hf/download-dir", None),
+        (route_hf_token_get, "GET", "/api/hf/token", None),
+        (route_hf_token_put, "PUT", "/api/hf/token", Some("{}")),
+        (route_hf_token_delete, "DELETE", "/api/hf/token", None),
+        (
+            route_hf_author_models,
+            "POST",
+            "/api/hf/author-models",
+            Some("{}")
+        ),
+        (route_hf_download, "POST", "/api/hf/download", Some("{}")),
+        // llama-server binary updater
+        (
+            route_llama_binary_version,
+            "GET",
+            "/api/llama-binary/version",
+            None
+        ),
+        (
+            route_llama_binary_latest,
+            "GET",
+            "/api/llama-binary/latest",
+            None
+        ),
+        (
+            route_llama_binary_update,
+            "POST",
+            "/api/llama-binary/update",
+            Some("{}")
+        ),
+    ];
 }
