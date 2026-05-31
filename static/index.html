@@ -2496,48 +2496,6 @@
                         </div>
                         <!-- File list (shown when a repo ID is selected) -->
                         <div class="hf-file-list" id="spawn-hf-file-list"></div>
-                        <!-- Download panel (shown after a file is selected) -->
-                        <div class="hf-download-panel" id="hf-download-panel" style="display:none;">
-                            <!-- Idle: ready to download -->
-                            <div id="hf-dlp-idle">
-                                <div class="hf-dlp-dest-row">
-                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                                    <span class="hf-dlp-dest-label">Save to:</span>
-                                    <span class="hf-dlp-dest-path" id="hf-dlp-dest-path" title="This is where the downloaded file will be saved">—</span>
-                                </div>
-                                <div id="hf-dlp-no-dir-warn" style="display:none;" class="hf-dlp-warn">
-                                    No models folder configured.
-                                    <button type="button" class="hf-dlp-warn-link" id="hf-dlp-open-settings">Set one in Settings → Models</button>
-                                    or the file will go to the app default folder.
-                                </div>
-                                <div class="hf-dlp-actions">
-                                    <button type="button" class="btn-wizard-primary" id="hf-dlp-download-btn" title="Download the file to your models folder now, then continue as a local model">
-                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:5px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                                        Download to models folder
-                                    </button>
-                                    <button type="button" class="btn-wizard-tertiary" id="hf-dlp-use-hf-btn" title="Skip downloading — llama-server will stream the file from HuggingFace at startup and cache it in ~/.cache/huggingface/hub/">
-                                        Use from HF cache instead
-                                    </button>
-                                </div>
-                            </div>
-                            <!-- In-progress -->
-                            <div id="hf-dlp-progress" style="display:none;">
-                                <div class="hf-dlp-progress-label">
-                                    <span id="hf-dlp-progress-file"></span>
-                                    <span id="hf-dlp-progress-pct"></span>
-                                </div>
-                                <div class="hf-dlp-bar-wrap">
-                                    <div class="hf-dlp-bar" id="hf-dlp-bar" style="width:0%"></div>
-                                </div>
-                                <div class="hf-dlp-stats" id="hf-dlp-stats"></div>
-                                <button type="button" class="btn-wizard-secondary" id="hf-dlp-cancel-btn">Cancel download</button>
-                            </div>
-                            <!-- Complete -->
-                            <div id="hf-dlp-complete" style="display:none;" class="hf-dlp-complete-box">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                                Downloaded — model ready. Click Next to continue.
-                            </div>
-                        </div>
                         <!-- Community picks (from ~/.config/llama-monitor/community-picks.json) -->
                         <div class="hf-community-picks" id="hf-community-picks" style="display:none;">
                             <button type="button" class="hf-cp-toggle" id="hf-cp-toggle" aria-expanded="false">
@@ -2573,7 +2531,7 @@
                     <div class="quant-advisor" id="quant-advisor" style="display:none;">
                         <div class="quant-advisor-header">
                             <span class="quant-advisor-title">Quant advisor</span>
-                            <span class="quant-advisor-subtitle" id="quant-advisor-subtitle">Choose a quantization for download</span>
+                            <span class="quant-advisor-subtitle" id="quant-advisor-subtitle">Compare quants — select one, then continue to configure hardware &amp; download</span>
                         </div>
                         <div class="quant-advisor-table" id="quant-advisor-table">
                             <!-- populated by JS -->
@@ -2611,6 +2569,18 @@
                         <div class="wizard-section-title">Configure hardware</div>
                         <div class="wizard-section-desc">
                             Fine-tune how your model uses GPU and memory.
+                        </div>
+                    </div>
+
+                    <!-- Model context: repo name + quant swap (populated by JS) -->
+                    <div class="hw-model-header" id="hw-model-header" style="display:none;">
+                        <div class="hw-model-info">
+                            <span class="hw-model-repo" id="hw-model-repo"></span>
+                            <span class="hw-model-file" id="hw-model-file"></span>
+                        </div>
+                        <div class="hw-quant-row" id="hw-quant-row" style="display:none;">
+                            <label for="hw-quant-select" class="hw-quant-label">Quantization</label>
+                            <select id="hw-quant-select" class="hw-quant-select" title="Swap quantization to compare VRAM impact"></select>
                         </div>
                     </div>
 
@@ -2703,21 +2673,51 @@
                             <label for="spawn-cache-type-k">KV cache</label>
                             <div class="kv-cache-row">
                                 <select id="spawn-cache-type-k" title="K cache quantization">
-                                    <option value="">Default (f16)</option>
-                                    <option value="q8_0">q8_0 — Agentic (half size, negligible loss)</option>
-                                    <option value="q4_0">q4_0 — Roleplay (quarter size, fine for RP)</option>
+                                    <option value="">f16 (full precision)</option>
+                                    <option value="q8_0" selected>q8_0 — recommended</option>
+                                    <option value="q4_0">q4_0 — max context / RP</option>
                                 </select>
                                 <select id="spawn-cache-type-v" title="V cache quantization">
-                                    <option value="">Default (f16)</option>
-                                    <option value="q8_0">q8_0</option>
+                                    <option value="">f16</option>
+                                    <option value="q8_0" selected>q8_0</option>
                                     <option value="q4_0">q4_0</option>
                                 </select>
                             </div>
-                            <div class="field-hint">K = q8_0 for agentic · q4_0 for RP. Both selects are K then V.</div>
+                            <div class="field-hint">q8_0 = half the KV VRAM with negligible quality loss. q4_0 = max context for RP.</div>
                         </div>
                         <div class="hardware-field">
-                            <label for="spawn-batch-size">Batch size</label>
-                            <input type="number" id="spawn-batch-size" min="1" value="2048">
+                            <label for="spawn-ubatch-size">Ubatch size</label>
+                            <input type="number" id="spawn-ubatch-size" min="64" max="4096" step="64" value="512" title="Micro-batch size for prompt processing">
+                            <div class="field-hint">512 = default · 1024–2048 = faster prompt processing at a small VRAM cost.</div>
+                        </div>
+                    </div>
+
+                    <!-- mmproj / multimodal section (shown if mmproj files detected in repo) -->
+                    <div class="hw-mmproj-section" id="hw-mmproj-section" style="display:none;">
+                        <div class="hw-section-divider">Multimodal — Vision Projector</div>
+                        <div class="hw-mmproj-content">
+                            <label class="hw-toggle-label">
+                                <input type="checkbox" id="hw-use-mmproj">
+                                Load mmproj for image/video input
+                            </label>
+                            <select id="hw-mmproj-select" class="hw-mmproj-select" style="display:none;" title="Vision projector file to load alongside the model"></select>
+                            <div class="field-hint">Adds ~0.5–1.5 GB VRAM. Required for multimodal inference. Leave unchecked for text-only use.</div>
+                        </div>
+                    </div>
+
+                    <!-- MTP section (shown for models with MTP heads) -->
+                    <div class="hw-mtp-section" id="hw-mtp-section" style="display:none;">
+                        <div class="hw-section-divider">Multi-Token Prediction (MTP)</div>
+                        <div class="hw-mtp-content">
+                            <label class="hw-toggle-label">
+                                <input type="checkbox" id="hw-use-mtp" checked>
+                                Enable MTP acceleration
+                            </label>
+                            <div class="hw-mtp-depth-row" id="hw-mtp-depth-row">
+                                <label for="hw-mtp-depth" class="hw-mtp-depth-label">Draft tokens/step</label>
+                                <input type="number" id="hw-mtp-depth" min="1" max="4" value="2" class="hw-mtp-depth-input" title="--spec-draft-n-max: how many tokens to predict ahead each step">
+                                <div class="field-hint">Sets <code>--spec-draft-n-max</code> and uses <code>--spec-type draft-mtp,ngram-mod</code>. Also forces <code>--parallel 1</code>. Value 2 ≈ +15–25% generation speed at +1.5% VRAM per MTP head. The model has these heads built-in.</div>
+                            </div>
                         </div>
                     </div>
 
@@ -2730,8 +2730,9 @@
                         <div class="wizard-section-title">Advanced options</div>
                         <div class="hardware-grid">
                             <div class="hardware-field">
-                                <label for="spawn-ubatch-size">Ubatch size</label>
-                                <input type="number" id="spawn-ubatch-size" min="1" value="512">
+                                <label for="spawn-batch-size">Batch size</label>
+                                <input type="number" id="spawn-batch-size" min="1" value="2048">
+                                <div class="field-hint">Prompt batch size. 2048 is a good default.</div>
                             </div>
                             <div class="hardware-field">
                                 <label for="spawn-parallel-slots">Parallel slots</label>
@@ -2787,6 +2788,49 @@
                         </details>
                     </div>
 
+                    <!-- Download panel (moved here — shown when entering hardware step for HF models) -->
+                    <div class="hf-download-panel" id="hf-download-panel" style="display:none;">
+                        <!-- Idle: ready to download -->
+                        <div id="hf-dlp-idle">
+                            <div class="hf-dlp-dest-row">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                <span class="hf-dlp-dest-label">Save to:</span>
+                                <span class="hf-dlp-dest-path" id="hf-dlp-dest-path" title="This is where the downloaded file will be saved">—</span>
+                            </div>
+                            <div id="hf-dlp-no-dir-warn" style="display:none;" class="hf-dlp-warn">
+                                No models folder configured.
+                                <button type="button" class="hf-dlp-warn-link" id="hf-dlp-open-settings">Set one in Settings → Models</button>
+                                or the file will go to the app default folder.
+                            </div>
+                            <div class="hf-dlp-actions">
+                                <button type="button" class="btn-wizard-primary" id="hf-dlp-download-btn" title="Download the file to your models folder now, then continue as a local model">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:5px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    Download to models folder
+                                </button>
+                                <button type="button" class="btn-wizard-tertiary" id="hf-dlp-use-hf-btn" title="Skip downloading — llama-server will stream the file from HuggingFace at startup and cache it in ~/.cache/huggingface/hub/">
+                                    Stream from HuggingFace instead
+                                </button>
+                            </div>
+                        </div>
+                        <!-- In-progress -->
+                        <div id="hf-dlp-progress" style="display:none;">
+                            <div class="hf-dlp-progress-label">
+                                <span id="hf-dlp-progress-file"></span>
+                                <span id="hf-dlp-progress-pct"></span>
+                            </div>
+                            <div class="hf-dlp-bar-wrap">
+                                <div class="hf-dlp-bar" id="hf-dlp-bar" style="width:0%"></div>
+                            </div>
+                            <div class="hf-dlp-stats" id="hf-dlp-stats"></div>
+                            <button type="button" class="btn-wizard-secondary" id="hf-dlp-cancel-btn">Cancel download</button>
+                        </div>
+                        <!-- Complete -->
+                        <div id="hf-dlp-complete" style="display:none;" class="hf-dlp-complete-box">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                            Downloaded — model ready. Click Next to continue.
+                        </div>
+                    </div>
+
                     <!-- VRAM status -->
                     <div class="hardware-summary" id="spawn-hardware-summary">
                         <div class="hardware-summary-row">
@@ -2802,9 +2846,11 @@
                 <div class="wizard-sidebar">
                     <div class="wizard-sidebar-title">Guidance</div>
                     <ul>
-                        <li>Auto GPU layers is usually best.</li>
-                        <li>Reduce context if VRAM is tight.</li>
-                        <li>MoE tuning helps large models.</li>
+                        <li><strong>Quant swap:</strong> Try different sizes above to see VRAM impact before downloading.</li>
+                        <li><strong>KV q8_0</strong> is the best default — half the KV memory with negligible quality loss.</li>
+                        <li><strong>Ubatch 1024+</strong> speeds up prompt processing if you have spare VRAM headroom.</li>
+                        <li><strong>Auto GPU layers</strong> is almost always the right choice.</li>
+                        <li>MoE models: use the Expert offload slider if weights don't fit.</li>
                     </ul>
                 </div>
             </div>
@@ -2815,9 +2861,38 @@
                     <div>
                         <div class="wizard-section-title">Review your configuration</div>
                         <div class="wizard-section-desc">
-                            Confirm settings before spawning.
+                            Adjust sampling defaults, then confirm settings before spawning.
                         </div>
                     </div>
+
+                    <!-- Sampling defaults (pre-populated by use-case; user can adjust) -->
+                    <div class="sampling-params-section">
+                        <div class="hw-section-divider">Sampling defaults</div>
+                        <div class="sampling-params-grid">
+                            <div class="sampling-field">
+                                <label for="spawn-temperature">Temperature</label>
+                                <input type="number" id="spawn-temperature" min="0" max="2" step="0.05" placeholder="server default">
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-top-p">Top-P</label>
+                                <input type="number" id="spawn-top-p" min="0" max="1" step="0.05" placeholder="server default">
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-min-p">Min-P</label>
+                                <input type="number" id="spawn-min-p" min="0" max="1" step="0.01" placeholder="server default">
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-repeat-penalty">Repeat penalty</label>
+                                <input type="number" id="spawn-repeat-penalty" min="0.5" max="2" step="0.05" placeholder="server default">
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-seed">Seed</label>
+                                <input type="number" id="spawn-seed" min="-1" placeholder="-1 (random)">
+                            </div>
+                        </div>
+                        <div class="field-hint" style="margin-top:4px;">Defaults applied to all requests that don't override them. Values come from your selected use-case profile. Leave blank for llama-server built-in defaults.</div>
+                    </div>
+
                     <div class="summary-list" id="spawn-summary-list"></div>
                     <div class="summary-warnings" id="spawn-summary-warnings" style="display:none;"></div>
                     <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
@@ -2830,11 +2905,12 @@
                     </div>
                 </div>
                 <div class="wizard-sidebar">
-                    <div class="wizard-sidebar-title">Checks</div>
+                    <div class="wizard-sidebar-title">Sampling guide</div>
                     <ul>
-                        <li>Verify model path.</li>
-                        <li>Confirm VRAM estimate.</li>
-                        <li>Run Health Check if server is ready.</li>
+                        <li><strong>Agentic</strong>: temp 0.3, top-p 0.95 — predictable, focused</li>
+                        <li><strong>General chat</strong>: temp 0.7, top-p 0.9 — balanced</li>
+                        <li><strong>Roleplay</strong>: temp 1.0, min-p 0.05 — creative</li>
+                        <li>These are per-server defaults. Individual API requests can override them.</li>
                     </ul>
                 </div>
             </div>

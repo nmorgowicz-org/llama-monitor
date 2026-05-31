@@ -137,6 +137,8 @@ const wizardState = {
     paramB: 0,           // estimated parameter count (from HF metadata if available)
     modelBytes: 0,       // file size in bytes once known
     nCtxTrain: 0,        // training context length from GGUF metadata (0 = unknown)
+    quantFiles: [],      // GGUF files from HF repo for hardware-step quant swap
+    mmprojFiles: [],     // mmproj files found in HF repo
   },
   // Architecture from introspection (or heuristic)
   arch: {
@@ -155,6 +157,16 @@ const wizardState = {
     tensorSplit: '',
     fitCtx: 1024,
     kvUnified: false, ignoreEos: false,
+    // MTP
+    mtpEnabled: true,
+    mtpDraftNMax: 2,
+    // Sampling (null = use llama-server default)
+    temperature: null,
+    topP: null,
+    topK: null,
+    minP: null,
+    repeatPenalty: null,
+    seed: null,
   },
   vram: { available: 0 },
   spawn: { inFlight: false, error: '' },
@@ -491,6 +503,27 @@ function bindEvents() {
   dom.modeRawBtn?.addEventListener('click', () => setMode('raw'));
   dom.rawCodeArea?.addEventListener('input', onRawCodeChange);
 
+  // Sampling fields in review step
+  _bindSamplingFields();
+
+  // Hardware step quant swap
+  document.getElementById('hw-quant-select')?.addEventListener('change', e => {
+    const fpath = e.target.value;
+    const qf = wizardState.model.quantFiles?.find(q => (q.path || q.name) === fpath);
+    if (qf) {
+      wizardState.model.hfFile = fpath;
+      if (qf.size) wizardState.model.modelBytes = Number(qf.size);
+      if (detectMtpFromName(fpath) && !wizardState.arch.mtpDepth) {
+        wizardState.arch.mtpDepth = 1;
+        renderMtpSection();
+      }
+      scheduleVramUpdate();
+      // Refresh the download panel if it's already visible
+      const panel = document.getElementById('hf-download-panel');
+      if (panel && panel.style.display !== 'none') showHfDownloadPanel(fpath);
+    }
+  });
+
   // Model card panel
   dom.cardPanelClose?.addEventListener('click', _closeCardPanel);
 
@@ -764,8 +797,19 @@ function showStep(index) {
   if (dom.nextBtn) dom.nextBtn.style.display = index === STEP_LABELS.length - 1 ? 'none' : '';
 
   if (index === 2) {
-    // Entering hardware step — refresh VRAM and fetch GPU info
-    fetchGpuVram().then(() => scheduleVramUpdate());
+    // Entering hardware step — refresh VRAM, then render model context + new sections
+    fetchGpuVram().then(() => {
+      scheduleVramUpdate();
+      renderHardwareModelHeader();
+    });
+    renderMmprojSection();
+    renderMtpSection();
+    // Trigger download panel now (moved from file-select to hardware step entry)
+    if (wizardState.model.source === 'hf' && wizardState.model.hfFile) {
+      showHfDownloadPanel(wizardState.model.hfFile);
+    } else {
+      hideHfDownloadPanel();
+    }
   }
   if (index === 3) {
     fetchGpuVram().then(() => estimateVramFull().then(() => renderSummary()));
@@ -959,11 +1003,13 @@ async function fetchGpuVram() {
     const resp = await fetch('/metrics/gpu', { headers });
     if (!resp.ok) return;
     const data = await resp.json();
-    // Look for total VRAM across all GPUs (or unified memory)
+    // /metrics/gpu returns BTreeMap<String, GpuMetrics> (object keyed by GPU name on Mac/Linux)
+    // or an array or { gpus: [...] } depending on endpoint version
     let totalVram = 0;
-    const gpus = Array.isArray(data) ? data : (data.gpus || [data]);
+    const gpus = Array.isArray(data) ? data : (data.gpus ? data.gpus : Object.values(data));
     for (const g of gpus) {
-      const t = g.vram_total_mb || g.total_mb || g.total_memory_mb || 0;
+      // Rust GpuMetrics struct uses `vram_total` field (value in MB); also check legacy names
+      const t = g.vram_total_mb || g.total_mb || g.total_memory_mb || g.vram_total || 0;
       totalVram += t * 1024 * 1024;
     }
     if (totalVram > 0) {
@@ -1631,6 +1677,16 @@ async function fetchHfFiles(repo) {
     const data = await resp.json();
     const files = (data.files || []).filter(Boolean);
 
+    // Store file lists so hardware step can offer quant swap + mmproj
+    wizardState.model.quantFiles = [];
+    wizardState.model.mmprojFiles = [];
+    files.forEach(f => {
+      const fp = f.path || f.name || '';
+      if (!fp) return;
+      if (f.is_mmproj) wizardState.model.mmprojFiles.push(f);
+      else wizardState.model.quantFiles.push(f);
+    });
+
     dom.hfFileList.innerHTML = '';
     if (!files.length) { dom.hfFileList.innerHTML = '<div class="hf-file-empty">No GGUF files found in this repo.</div>'; return; }
 
@@ -1718,7 +1774,6 @@ async function fetchHfFiles(repo) {
         clearValidationError();
         if (wizardState.model.paramB > 0) triggerQuantAdvisor();
         scheduleVramUpdate();
-        showHfDownloadPanel(fname);
       };
       item.addEventListener('click', selectFile);
       item.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectFile(); } });
@@ -2127,6 +2182,147 @@ function renderScenarioCards(modelBytes, arch, availVram) {
   }
 }
 
+// ── Hardware step: model header + quant swap ─────────────────────────────────
+
+function renderHardwareModelHeader() {
+  const header = document.getElementById('hw-model-header');
+  if (!header) return;
+  const { source, path, hfRepo, hfFile, quantFiles } = wizardState.model;
+  if (!hfRepo && !path) { header.style.display = 'none'; return; }
+  header.style.display = '';
+
+  const repoEl = document.getElementById('hw-model-repo');
+  if (repoEl) repoEl.textContent = hfRepo || path.split(/[/\\]/).pop() || path;
+
+  const quantRow = document.getElementById('hw-quant-row');
+  const quantSelect = document.getElementById('hw-quant-select');
+  const vramGb = cachedVram / 1e9;
+
+  if (quantSelect && quantFiles && quantFiles.length > 1) {
+    quantSelect.innerHTML = '';
+    quantFiles.forEach(qf => {
+      const fpath = qf.path || qf.name || '';
+      const fname = fpath.split('/').pop();
+      if (!fname) return;
+      const opt = document.createElement('option');
+      opt.value = fpath;
+      const sizeStr = qf.size ? ` · ${formatBytes(qf.size)}` : '';
+      const isRec = qf.label && vramGb > 0 && qf.label === getRecommendedQuant(vramGb);
+      opt.textContent = fname + sizeStr + (isRec ? ' ★' : '');
+      if (fpath === hfFile) opt.selected = true;
+      quantSelect.appendChild(opt);
+    });
+    if (quantRow) quantRow.style.display = '';
+  } else {
+    if (quantRow) quantRow.style.display = 'none';
+    const fileEl = document.getElementById('hw-model-file');
+    if (fileEl) fileEl.textContent = hfFile ? hfFile.split('/').pop() : (path.split(/[/\\]/).pop() || '');
+  }
+}
+
+// ── Hardware step: mmproj section ────────────────────────────────────────────
+
+function renderMmprojSection() {
+  const section = document.getElementById('hw-mmproj-section');
+  if (!section) return;
+  const files = wizardState.model.mmprojFiles || [];
+  if (!files.length) { section.style.display = 'none'; return; }
+  section.style.display = '';
+
+  const select = document.getElementById('hw-mmproj-select');
+  if (select && !select.dataset.populated) {
+    select.dataset.populated = '1';
+    select.innerHTML = '';
+    const noneOpt = document.createElement('option');
+    noneOpt.value = ''; noneOpt.textContent = '(none — text-only inference)';
+    select.appendChild(noneOpt);
+    files.forEach(f => {
+      const fpath = f.path || f.name || '';
+      const fname = fpath.split('/').pop();
+      const opt = document.createElement('option');
+      opt.value = fpath;
+      const sizeStr = f.size ? ` · ${formatBytes(f.size)}` : '';
+      opt.textContent = fname + sizeStr;
+      if (fpath === wizardState.model.mmprojHfFile) opt.selected = true;
+      select.appendChild(opt);
+    });
+    select.addEventListener('change', () => {
+      const fpath = select.value;
+      wizardState.model.mmprojHfFile = fpath;
+      const f = files.find(x => (x.path || x.name) === fpath);
+      wizardState.arch.mmprojBytes = f?.size ? Number(f.size) : 0;
+      scheduleVramUpdate();
+    });
+  }
+
+  const checkbox = document.getElementById('hw-use-mmproj');
+  if (checkbox && !checkbox.dataset.bound) {
+    checkbox.dataset.bound = '1';
+    checkbox.addEventListener('change', () => {
+      const show = checkbox.checked;
+      if (select) select.style.display = show ? '' : 'none';
+      if (!show) {
+        wizardState.model.mmprojHfFile = '';
+        wizardState.arch.mmprojBytes = 0;
+      } else if (select?.value) {
+        const f = files.find(x => (x.path || x.name) === select.value);
+        wizardState.arch.mmprojBytes = f?.size ? Number(f.size) : 0;
+      }
+      scheduleVramUpdate();
+    });
+  }
+  if (checkbox) {
+    checkbox.checked = !!wizardState.model.mmprojHfFile;
+    if (select) select.style.display = checkbox.checked ? '' : 'none';
+  }
+}
+
+// ── Hardware step: MTP section ───────────────────────────────────────────────
+
+function renderMtpSection() {
+  const section = document.getElementById('hw-mtp-section');
+  if (!section) return;
+  const hasMtp = wizardState.arch.mtpDepth > 0 ||
+    detectMtpFromName(wizardState.model.hfFile || wizardState.model.path || '');
+  if (!hasMtp) { section.style.display = 'none'; return; }
+  section.style.display = '';
+
+  const checkbox = document.getElementById('hw-use-mtp');
+  // The user-facing control is spec-draft-n-max (draft tokens per step), not "depth"
+  // arch.mtpDepth = number of MTP heads built into the model (VRAM estimation only)
+  const draftNMaxInput = document.getElementById('hw-mtp-depth');
+
+  if (draftNMaxInput) {
+    if (!draftNMaxInput.dataset.bound) {
+      draftNMaxInput.dataset.bound = '1';
+      draftNMaxInput.addEventListener('input', () => {
+        const v = parseInt(draftNMaxInput.value, 10);
+        if (v >= 0 && v <= 4) {
+          wizardState.hardware.mtpDraftNMax = v;
+        }
+      });
+    }
+    draftNMaxInput.value = wizardState.hardware.mtpDraftNMax;
+  }
+
+  if (checkbox) {
+    if (!checkbox.dataset.bound) {
+      checkbox.dataset.bound = '1';
+      checkbox.addEventListener('change', () => {
+        wizardState.hardware.mtpEnabled = checkbox.checked;
+        // MTP requires parallel=1 — update state
+        if (checkbox.checked) wizardState.hardware.parallelSlots = 1;
+        const depthRow = document.getElementById('hw-mtp-depth-row');
+        if (depthRow) depthRow.style.display = checkbox.checked ? '' : 'none';
+        scheduleVramUpdate();
+      });
+    }
+    checkbox.checked = wizardState.hardware.mtpEnabled;
+    const depthRow = document.getElementById('hw-mtp-depth-row');
+    if (depthRow) depthRow.style.display = checkbox.checked ? '' : 'none';
+  }
+}
+
 function updateLegacyVramPill(total, avail) {
   if (dom.vramEstimateText) {
     dom.vramEstimateText.textContent = avail > 0
@@ -2326,11 +2522,34 @@ function showCtxFitWarning(ctx, useCase, manualSet = false) {
   el.style.display = '';
 }
 
+// Use-case sampling defaults (temperature, top-p, min-p, repeat-penalty)
+const SAMPLING_DEFAULTS = {
+  agentic:  { temperature: 0.3,  topP: 0.95, minP: 0.02, topK: null, repeatPenalty: 1.05, seed: null },
+  general:  { temperature: 0.7,  topP: 0.9,  minP: 0.05, topK: null, repeatPenalty: 1.05, seed: null },
+  roleplay: { temperature: 1.0,  topP: 0.95, minP: 0.05, topK: null, repeatPenalty: 1.05, seed: null },
+};
+
+function applyUseCaseSamplingDefaults() {
+  const def = SAMPLING_DEFAULTS[wizardState.useCase] || SAMPLING_DEFAULTS.general;
+  const h = wizardState.hardware;
+  // Only apply defaults if user hasn't already set explicit values
+  if (h.temperature == null) h.temperature = def.temperature;
+  if (h.topP == null) h.topP = def.topP;
+  if (h.minP == null) h.minP = def.minP;
+  if (h.topK == null && def.topK != null) h.topK = def.topK;
+  if (h.repeatPenalty == null) h.repeatPenalty = def.repeatPenalty;
+}
+
 // ── Summary (Step 4) ──────────────────────────────────────────────────────────
 
 function renderSummary() {
   if (!dom.summaryList) return;
   dom.summaryList.innerHTML = '';
+
+  // Apply use-case sampling defaults before rendering
+  applyUseCaseSamplingDefaults();
+  // Sync sampling fields in the review step form
+  _syncSamplingFields();
 
   const m = wizardState.model, hw = wizardState.hardware;
   const arch = getEffectiveArch();
@@ -2358,7 +2577,10 @@ function renderSummary() {
   if (hw.nCpuMoe > 0 && arch.nExperts > 0) rows.push({ label: 'MoE CPU offload', value: `${hw.nCpuMoe} of ${arch.nExperts} experts` });
   if (hw.tensorSplit) rows.push({ label: 'Tensor split', value: hw.tensorSplit });
   if (arch.mmprojBytes > 0) rows.push({ label: 'mmproj', value: formatGB(arch.mmprojBytes) });
-  if (arch.mtpDepth > 0) rows.push({ label: 'MTP depth', value: String(arch.mtpDepth) });
+  if (arch.mtpDepth > 0) {
+    const mtpActive = hw.mtpEnabled;
+    rows.push({ label: 'MTP', value: mtpActive ? `enabled · draft ${hw.mtpDraftNMax || 2} tokens/step · --parallel 1` : 'disabled' });
+  }
 
   const specType = dom.specTypeSelect?.value || '';
   if (specType) {
@@ -2396,6 +2618,52 @@ function renderSummary() {
     }
   }
   if (dom.healthCheckBtn) dom.healthCheckBtn.style.display = '';
+
+  // Add "edit hardware" shortcut
+  const editRow = document.createElement('div');
+  editRow.className = 'summary-edit-row';
+  const editBtn = document.createElement('button');
+  editBtn.type = 'button';
+  editBtn.className = 'btn-wizard-tertiary';
+  editBtn.textContent = '← Adjust hardware settings';
+  editBtn.addEventListener('click', () => showStep(2));
+  editRow.appendChild(editBtn);
+  dom.summaryList.appendChild(editRow);
+}
+
+// ── Sampling field sync (Review step) ────────────────────────────────────────
+
+function _syncSamplingFields() {
+  const h = wizardState.hardware;
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val != null) el.value = val;
+    else if (el) el.value = '';
+  };
+  setVal('spawn-temperature', h.temperature);
+  setVal('spawn-seed', h.seed);
+  setVal('spawn-top-p', h.topP);
+  setVal('spawn-min-p', h.minP);
+  setVal('spawn-repeat-penalty', h.repeatPenalty);
+}
+
+function _bindSamplingFields() {
+  const bind = (id, key, isInt = false) => {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.bound) return;
+    el.dataset.bound = '1';
+    el.addEventListener('input', () => {
+      const raw = el.value.trim();
+      if (raw === '') { wizardState.hardware[key] = null; return; }
+      const v = isInt ? parseInt(raw, 10) : parseFloat(raw);
+      if (!isNaN(v)) wizardState.hardware[key] = v;
+    });
+  };
+  bind('spawn-temperature', 'temperature');
+  bind('spawn-seed', 'seed', true);
+  bind('spawn-top-p', 'topP');
+  bind('spawn-min-p', 'minP');
+  bind('spawn-repeat-penalty', 'repeatPenalty');
 }
 
 // ── Save as preset ────────────────────────────────────────────────────────────
@@ -2502,7 +2770,14 @@ async function spawnServer() {
 
 function buildSpawnPayload() {
   const h = wizardState.hardware, m = wizardState.model;
+  const arch = getEffectiveArch();
   const gpuLayers = h.gpuLayers === 'manual' ? (h.gpuLayersManual ?? -1) : (h.gpuLayers === 'all' ? -1 : null);
+
+  // MTP: when enabled, use draft-mtp spec type and force parallel=1
+  const mtpActive = arch.mtpDepth > 0 && h.mtpEnabled;
+  const specType = mtpActive ? 'draft-mtp,ngram-mod' : (dom.specTypeSelect?.value || '');
+  const parallelSlots = mtpActive ? 1 : h.parallelSlots;
+
   return {
     model_path: m.source !== 'hf' ? (m.path || null) : null,
     hf_repo: m.source === 'hf' ? (m.hfRepo || null) : null,
@@ -2511,17 +2786,25 @@ function buildSpawnPayload() {
     context_size: h.contextSize,
     batch_size: h.batchSize,
     ubatch_size: h.ubatchSize,
-    parallel_slots: h.parallelSlots,
+    parallel_slots: parallelSlots,
     ctk: h.cacheTypeK || null,
     ctv: h.cacheTypeV || null,
     n_cpu_moe: h.nCpuMoe || null,
     tensor_split: h.tensorSplit || null,
-    spec_type: dom.specTypeSelect?.value || '',
+    spec_type: specType,
+    spec_draft_n_max: mtpActive ? (h.mtpDraftNMax || 2) : undefined,
     draft_model: (dom.draftModelInput?.value || '').trim() || null,
     kv_unified: h.kvUnified || null,
     ignore_eos: h.ignoreEos || null,
     fit: h.fitCtx ? 'on' : null,
     fit_ctx: h.fitCtx || null,
+    // Sampling defaults (null = use llama-server built-in defaults)
+    temperature: h.temperature != null ? h.temperature : null,
+    top_p: h.topP != null ? h.topP : null,
+    top_k: h.topK != null ? h.topK : null,
+    min_p: h.minP != null ? h.minP : null,
+    repeat_penalty: h.repeatPenalty != null ? h.repeatPenalty : null,
+    seed: h.seed != null ? h.seed : null,
     profile: wizardState.profile,
     use_case: wizardState.useCase,
   };
