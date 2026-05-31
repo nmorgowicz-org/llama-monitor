@@ -41,6 +41,7 @@ import { initReplyPlanUpdates } from './features/chat-reply-plan.js';
 import { initCommandPalette } from './features/workspace-command-palette.js';
 import { initSpawnWizard } from './features/spawn-wizard.js';
 import { initTunePanel } from './features/tune-panel.js';
+import { initLlamaUpdater } from './features/llama-updater.js';
 
 // Verify module loading works — if this fails, the page is broken.
 console.log('[bootstrap] Module entrypoint loaded');
@@ -151,9 +152,10 @@ async function initializeApp() {
     // Phase 11: Command palette
     initCommandPalette();
 
-    // Phase 12: Spawn wizard
+    // Phase 12: Spawn wizard, tune panel, binary updater
     initSpawnWizard();
     initTunePanel();
+    initLlamaUpdater();
 
     // Initialize chat tabs only after token bootstrap and feature init complete.
     await initChatTabs();

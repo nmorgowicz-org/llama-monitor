@@ -94,7 +94,8 @@ fn is_apple_silicon() -> bool {
             || stdout.contains("M1")
             || stdout.contains("M2")
             || stdout.contains("M3")
-            || stdout.contains("M4");
+            || stdout.contains("M4")
+            || stdout.contains("M5");
     }
 
     // Fallback: check if mactop is available

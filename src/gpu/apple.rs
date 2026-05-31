@@ -105,7 +105,7 @@ impl GpuBackend for AppleBackend {
         };
 
         let mut map = BTreeMap::new();
-        map.insert("GPU0 Apple M1 Pro".to_string(), metrics);
+        map.insert(format!("GPU0 {}", detect_chip_name()), metrics);
         Ok(map)
     }
 
@@ -117,4 +117,15 @@ impl GpuBackend for AppleBackend {
     fn name(&self) -> &str {
         "apple"
     }
+}
+
+fn detect_chip_name() -> String {
+    std::process::Command::new("sysctl")
+        .args(["-n", "machdep.cpu.brand_string"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Apple Silicon".to_string())
 }
