@@ -86,7 +86,7 @@ pub struct BenchmarkResult {
     pub hints: Vec<String>,
 }
 
-pub fn run_benchmark(
+pub fn classify_benchmark_result(
     prompt_tps: f64,
     gen_tps: f64,
     ttft_ms: f64,
@@ -452,10 +452,28 @@ pub async fn introspect_model(
                 .arg(&mp)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped());
-            let child = match cmd.spawn() {
+            let mut child = match cmd.spawn() {
                 Ok(c) => c,
                 Err(e) => return Err(format!("Failed to run llama-server: {e}")),
             };
+            // Poll with a 20-second deadline so a hung binary doesn't block the thread pool.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => break,
+                    Ok(None) if std::time::Instant::now() >= deadline => {
+                        let _ = child.kill();
+                        return Err(
+                            "Introspection subprocess timed out after 20 seconds".to_string()
+                        );
+                    }
+                    Ok(None) => std::thread::sleep(std::time::Duration::from_millis(200)),
+                    Err(e) => {
+                        let _ = child.kill();
+                        return Err(format!("Wait error: {e}"));
+                    }
+                }
+            }
             let out = match child.wait_with_output() {
                 Ok(o) => o,
                 Err(e) => return Err(format!("Failed to wait for llama-server: {e}")),
@@ -625,6 +643,16 @@ fn model_cache_path(model_path: &str) -> Result<PathBuf, String> {
     let dir = model_cache_dir()?;
     let mut hasher = Sha256::new();
     hasher.update(model_path.as_bytes());
+    // Mix in mtime + size so a replaced-in-place file doesn't return stale metadata.
+    if let Ok(meta) = std::fs::metadata(model_path) {
+        hasher.update(meta.len().to_le_bytes());
+        if let Ok(mtime) = meta.modified().and_then(|t| {
+            t.duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| std::io::Error::other("mtime"))
+        }) {
+            hasher.update(mtime.as_secs().to_le_bytes());
+        }
+    }
     let hash = hasher.finalize();
     let hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
     Ok(dir.join(format!("{}.json", &hex[..16])))

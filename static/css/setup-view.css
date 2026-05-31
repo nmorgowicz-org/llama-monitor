@@ -1317,6 +1317,10 @@
   text-align: center;
   padding-top: var(--gap-xs);
   border-top: 1px solid rgba(255, 255, 255, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
 }
 
 .setup-link {
@@ -1329,6 +1333,54 @@
 
 .setup-link:hover {
   color: var(--color-primary-light);
+}
+
+/* Quick-launch toggle in spawn card footer */
+.setup-quick-launch {
+  width: 100%;
+}
+
+.setup-quick-launch-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 auto;
+}
+
+.setup-quick-launch-toggle:hover {
+  color: var(--color-primary-light);
+}
+
+.setup-ql-arrow {
+  font-size: 9px;
+  transition: transform 0.15s;
+}
+
+.setup-quick-launch-body {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.setup-select-sm {
+  max-width: 160px !important;
+  font-size: 11px !important;
+  padding: 4px 8px !important;
+}
+
+.setup-btn-sm {
+  padding: 6px 14px !important;
+  font-size: 12px !important;
 }
 
 /* Quick stats */

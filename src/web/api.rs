@@ -1414,7 +1414,7 @@ fn api_spawn_wizard_import_launch_file(
     warp::path!("api" / "spawn-wizard" / "import-launch-file")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -1471,10 +1471,22 @@ fn is_private_host(host: &str) -> bool {
                     || v4.is_documentation()
                     || v4.is_unspecified()
             }
-            std::net::IpAddr::V6(v6) => v6.is_loopback() || v6.is_unspecified(),
+            std::net::IpAddr::V6(v6) => {
+                let s = v6.segments();
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    // ULA: fc00::/7 (fc00:: – fdff::)
+                    || (s[0] & 0xfe00) == 0xfc00
+                    // Link-local: fe80::/10
+                    || (s[0] & 0xffc0) == 0xfe80
+            }
         };
     }
-    // Block common internal hostnames
+    // Block common internal hostnames.
+    // Note: DNS rebinding (evil.com → 192.168.x.x at resolution time) is not
+    // mitigated by hostname checks alone. This guard covers direct IP literals
+    // and well-known internal names; for a hardened deployment add a DNS resolver
+    // check or restrict to an allowlist of known-good domains.
     let lower = host.to_ascii_lowercase();
     lower.ends_with(".local")
         || lower.ends_with(".internal")
@@ -1490,7 +1502,7 @@ fn api_chat_template_fetch(
     warp::path!("api" / "chat-template" / "fetch")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -1609,7 +1621,7 @@ fn api_chat_template_upload(
     warp::path!("api" / "chat-template" / "upload")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -1668,7 +1680,7 @@ fn api_vram_estimate_breakdown(
     warp::path!("api" / "vram-estimate")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -1762,7 +1774,7 @@ fn api_vram_estimate(
     warp::path!("api" / "vram" / "estimate")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -1841,7 +1853,7 @@ fn api_models_download_start(
     warp::path!("api" / "models" / "download" / "start")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             let state = state.clone();
@@ -2049,7 +2061,7 @@ fn api_llama_cpp_download(
     warp::path!("api" / "llama-cpp" / "download")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -2241,7 +2253,7 @@ fn api_vram_quant_compare(
     warp::path!("api" / "vram" / "quant-compare")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -2299,7 +2311,7 @@ fn api_vram_auto_size(
     warp::path!("api" / "vram" / "auto-size")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -2440,7 +2452,7 @@ fn api_benchmark(
     warp::path!("api" / "benchmark")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::safe_json_body::<serde_json::Value>())
         .and_then(
             move |auth: Option<String>,
                   _body: serde_json::Value|
@@ -2617,7 +2629,7 @@ fn api_benchmark(
                     match result {
                         Ok(Some((prompt_tps, gen_tps, ttft_ms))) => {
                             let benchmark =
-                                crate::llama::spawn_wizard::run_benchmark(
+                                crate::llama::spawn_wizard::classify_benchmark_result(
                                     prompt_tps,
                                     gen_tps,
                                     ttft_ms,
@@ -2657,7 +2669,7 @@ fn api_model_defaults(
     warp::path!("api" / "model-defaults")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -2716,7 +2728,7 @@ fn api_moe_tune(
     warp::path!("api" / "moe-tune")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -2982,7 +2994,10 @@ fn api_hf_quantizers_put(
     warp::path!("api" / "hf" / "quantizers")
         .and(warp::put())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<Vec<crate::hf::UserQuantizer>>())
+        .and(
+            warp::body::content_length_limit(256 * 1024)
+                .and(warp::body::json::<Vec<crate::hf::UserQuantizer>>()),
+        )
         .and_then(
             move |auth: Option<String>, body: Vec<crate::hf::UserQuantizer>| {
                 let cfg = app_config.clone();
@@ -3335,7 +3350,7 @@ fn api_third_party_models(
     warp::path!("api" / "third-party-models")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -3378,7 +3393,7 @@ fn api_model_introspect(
     warp::path!("api" / "model" / "introspect")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {

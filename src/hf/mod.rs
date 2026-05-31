@@ -9,8 +9,6 @@
 //! - Streaming download with resume support
 //! - HF token management
 
-#![allow(dead_code)]
-
 use anyhow::{Context, Result};
 use hf_hub::api::sync::ApiBuilder;
 use hf_hub::{Repo, RepoType};
@@ -55,6 +53,7 @@ impl HfSort {
 /// How the GGUF file was quantized / what calibration was used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 pub enum QuantFileType {
     #[default]
     Standard, // standard llama.cpp quants (Q4_K_M, Q5_K_M, Q8_0, …)
@@ -96,6 +95,7 @@ impl QuantFileType {
 /// Who made the quantization.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
+#[allow(dead_code)]
 pub enum QuantProvider {
     Bartowski,       // bartowski — standard Q4_K_M/Q5_K_M/Q8_0, extremely reliable
     Mradermacher,    // mradermacher — imatrix specialist, i1-* naming
@@ -160,6 +160,7 @@ impl QuantProvider {
 }
 
 /// Detect quant file type from GGUF filename patterns.
+#[allow(dead_code)]
 pub fn detect_quant_type(filename: &str) -> QuantFileType {
     let lower = filename.to_ascii_lowercase();
     // Unsloth UD: "UD-" anywhere or "-UD-" — e.g. "Qwen3.6-27B-UD-Q4_K_S.gguf"
@@ -228,6 +229,7 @@ pub struct HfGgufFile {
 /// High-level model info from HF (for the model info endpoint).
 #[derive(Debug, Clone, serde::Serialize)]
 #[allow(dead_code)]
+#[allow(dead_code)]
 pub struct HfModelInfo {
     pub repo_id: String,
     pub gated: bool,
@@ -237,6 +239,7 @@ pub struct HfModelInfo {
 
 /// A single file in an HF repo.
 #[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)]
 #[allow(dead_code)]
 pub struct HfFileInfo {
     pub r#type: String,
@@ -365,6 +368,7 @@ pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
 
 /// Get basic model info for a repo (async, uses configured HF token).
 #[allow(dead_code)]
+#[allow(dead_code)]
 pub async fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
     let token = hf_load_token();
     let url = format!("https://huggingface.co/api/models/{repo_id}");
@@ -408,6 +412,7 @@ pub async fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
 
 /// List repo files; filters for GGUF if gguf_only=true.
 #[allow(dead_code)]
+#[allow(dead_code)]
 pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileInfo>> {
     let api = ApiBuilder::new()
         .with_token(hf_load_token())
@@ -432,6 +437,7 @@ pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileIn
 
 /// Get info for a single file in a repo.
 #[allow(dead_code)]
+#[allow(dead_code)]
 pub fn hf_get_file_info(repo_id: &str, path: &str) -> Result<HfFileInfo> {
     let api = ApiBuilder::new()
         .with_token(hf_load_token())
@@ -455,6 +461,7 @@ pub fn hf_get_file_info(repo_id: &str, path: &str) -> Result<HfFileInfo> {
 
 /// Stream-download a file from HF with optional resume.
 /// Returns total bytes written.
+#[allow(dead_code)]
 #[allow(dead_code)]
 pub async fn hf_download_file_stream(
     repo_id: &str,
@@ -845,6 +852,7 @@ fn sort_rank_quant_label(label: &str) -> u8 {
 }
 
 /// Infer a human-readable quant label from a GGUF filename.
+#[allow(dead_code)]
 pub fn infer_quant_label(filename: &str) -> String {
     let lower = filename.to_ascii_lowercase();
 
@@ -977,6 +985,7 @@ pub fn hf_save_token(token: &str) -> Result<()> {
 }
 
 /// Mask a token for safe logging: first4****last4.
+#[allow(dead_code)]
 #[allow(dead_code)]
 pub fn mask_token(token: &str) -> String {
     let t = token.trim();

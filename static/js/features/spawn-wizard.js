@@ -12,6 +12,7 @@
 
 import { openDeferredFileBrowser } from './file-browser-launcher.js';
 import { showToast } from './toast.js';
+import { switchView } from './setup-view.js';
 
 // ── VRAM math (client-side, for instant slider feedback) ──────────────────────
 
@@ -2300,7 +2301,13 @@ async function spawnServer() {
     await new Promise(r => setTimeout(r, 1500));
     setProgress(100); setStatusText('Server started.');
     showSuccessText('Server is running.'); showToast('Server started', 'success');
-    setTimeout(() => closeSpawnWizard(), 1200);
+    setTimeout(() => {
+      closeSpawnWizard();
+      // If we're still on the setup/welcome screen, transition to the monitor view.
+      if (document.body.classList.contains('setup-active')) {
+        switchView('monitor');
+      }
+    }, 1200);
   } catch (err) {
     const msg = (err.message || String(err)).split('\n')[0].trim();
     showErrorText(msg || 'Failed to start server.'); setStatusText('Spawn failed.'); wizardState.spawn.error = msg;

@@ -324,6 +324,25 @@ export function initAttachDetach() {
     const setupAttach = document.getElementById('setup-attach-btn');
     if (setupAttach) setupAttach.addEventListener('click', doAttachFromSetup);
 
+    // Setup wizard button — opens the spawn wizard overlay from the welcome screen
+    const setupWizardBtn = document.getElementById('setup-spawn-wizard-btn');
+    if (setupWizardBtn) setupWizardBtn.addEventListener('click', () => {
+        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
+    });
+
+    // Quick-launch toggle on the setup card
+    const qlToggle = document.getElementById('setup-quick-launch-toggle');
+    const qlBody = document.getElementById('setup-quick-launch-body');
+    if (qlToggle && qlBody) {
+        qlToggle.addEventListener('click', () => {
+            const open = qlBody.style.display !== 'none';
+            qlBody.style.display = open ? 'none' : '';
+            qlToggle.setAttribute('aria-expanded', String(!open));
+            const arrow = qlToggle.querySelector('.setup-ql-arrow');
+            if (arrow) arrow.textContent = open ? '▾' : '▴';
+        });
+    }
+
     const setupStart = document.getElementById('setup-start-btn');
     if (setupStart) setupStart.addEventListener('click', doStartFromSetup);
 

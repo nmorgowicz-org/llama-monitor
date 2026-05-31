@@ -62,6 +62,20 @@ impl DownloadManager {
             tasks: HashMap::new(),
         }
     }
+
+    /// Evict completed/failed/cancelled tasks older than 1 hour.
+    /// Called on every new download start so the map doesn't grow unbounded.
+    fn evict_stale(&mut self) {
+        let cutoff = std::time::Instant::now() - std::time::Duration::from_secs(3600);
+        self.tasks.retain(|_, task| {
+            if let Ok(t) = task.lock() {
+                let terminal = matches!(t.status.as_str(), "completed" | "failed" | "cancelled");
+                !(terminal && t.start_time < cutoff)
+            } else {
+                false
+            }
+        });
+    }
 }
 
 static MODEL_DOWNLOAD_MANAGER: std::sync::LazyLock<Mutex<DownloadManager>> =
@@ -107,6 +121,7 @@ pub fn start_download(
         let mut mgr = MODEL_DOWNLOAD_MANAGER
             .lock()
             .expect("MODEL_DOWNLOAD_MANAGER lock poisoned");
+        mgr.evict_stale();
         mgr.tasks.insert(download_id.clone(), task.clone());
     }
 
