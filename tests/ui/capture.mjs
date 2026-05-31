@@ -2481,15 +2481,19 @@ async function scenarioSpawnWizard(ctx, options) {
     // Capture base HF panel: discover pills + quantizer row visible, no search yet
     await captureShot(page, 'spawn-wizard-step2-hf-base.png', { fullPage: true });
 
+    // Helper: wait for HF search results to show actual model cards (not empty/error).
+    const waitForResults = () => page.waitForFunction(() => {
+        const r = document.getElementById('hf-search-results');
+        return r && r.style.display !== 'none'
+            && !r.querySelector('.hf-search-loading')
+            && r.querySelector('.hf-search-result') !== null;
+    }, { timeout: 20000 }).catch(() => {});
+
     // ── Discover pill: Trending ───────────────────────────────────────────────
     const trendingPill = await page.$('.hf-discover-pill[data-cat-id="trending"]');
     if (trendingPill) {
         await trendingPill.click();
-        // Wait for search results to appear
-        await page.waitForFunction(() => {
-            const r = document.getElementById('hf-search-results');
-            return r && r.style.display !== 'none' && !r.querySelector('.hf-search-loading');
-        }, { timeout: 20000 }).catch(() => {});
+        await waitForResults();
         await sleep(600);
         await captureShot(page, 'spawn-wizard-step2-discover-trending.png', { fullPage: true });
     } else {
@@ -2500,11 +2504,14 @@ async function scenarioSpawnWizard(ctx, options) {
     const qwen3Pill = await page.$('.hf-discover-pill[data-cat-id="qwen3"]');
     if (qwen3Pill) {
         await qwen3Pill.click();
-        await page.waitForFunction(() => {
-            const r = document.getElementById('hf-search-results');
-            return r && r.style.display !== 'none' && !r.querySelector('.hf-search-loading');
-        }, { timeout: 20000 }).catch(() => {});
+        await waitForResults();
         await sleep(600);
+        // Scroll discover pills area into view for a cleaner shot.
+        await page.evaluate(() => {
+            const body = document.querySelector('.wizard-body');
+            if (body) body.scrollTop = 200;
+        });
+        await sleep(200);
         await captureShot(page, 'spawn-wizard-step2-discover-qwen3.png', { fullPage: true });
     } else {
         console.log('[CAPTURE] Qwen3 pill not found; skipping discover-qwen3 shot');
@@ -2514,10 +2521,7 @@ async function scenarioSpawnWizard(ctx, options) {
     const bartowskiBtn = await page.$('.hf-qp-btn[data-author="bartowski"]');
     if (bartowskiBtn) {
         await bartowskiBtn.click();
-        await page.waitForFunction(() => {
-            const r = document.getElementById('hf-search-results');
-            return r && r.style.display !== 'none' && !r.querySelector('.hf-search-loading');
-        }, { timeout: 20000 }).catch(() => {});
+        await waitForResults();
         await sleep(600);
         await captureShot(page, 'spawn-wizard-step2-quantizer-bartowski.png', { fullPage: true });
     } else {
@@ -2543,6 +2547,12 @@ async function scenarioSpawnWizard(ctx, options) {
             return toggle?.getAttribute('aria-expanded') === 'true';
         }, { timeout: 3000 }).catch(() => {});
         await sleep(500);
+        // Scroll wizard body down so community picks section fills the viewport.
+        await page.evaluate(() => {
+            const body = document.querySelector('.wizard-body');
+            if (body) body.scrollTop = 500;
+        });
+        await sleep(300);
         await captureShot(page, 'spawn-wizard-step2-community-picks.png', { fullPage: true });
 
         // Switch to second tab (MoE/Offload) if available
@@ -2556,28 +2566,59 @@ async function scenarioSpawnWizard(ctx, options) {
         console.log('[CAPTURE] Community picks toggle not found; panel may not have loaded');
     }
 
-    // ── Quant advisor: select a model from community picks ───────────────────
-    // Click first community pick item to load files + quant advisor
-    const firstCpItem = await page.$('.hf-cp-item');
-    if (firstCpItem) {
-        await firstCpItem.click();
-        // Wait for file list to appear
+    // ── Quant advisor: load a known small repo directly for a reliable shot ──
+    // Use a small, always-available bartowski repo so file list populates fast.
+    await page.evaluate(() => {
+        const cp = document.getElementById('hf-community-picks');
+        if (cp) cp.style.display = 'none';  // Collapse community picks for clean view
+        const body = document.querySelector('.wizard-body');
+        if (body) body.scrollTop = 0;
+    });
+    await sleep(200);
+    const repoInput = await page.$('#spawn-hf-repo');
+    if (repoInput) {
+        await repoInput.click({ clickCount: 3 });
+        await repoInput.type('bartowski/Llama-3.2-1B-Instruct-GGUF', { delay: 20 });
+        await page.keyboard.press('Enter');
+        // Wait for file list with actual file items (not just empty/error state)
         await page.waitForFunction(() => {
             const fl = document.getElementById('spawn-hf-file-list');
-            return fl && fl.classList.contains('visible') && fl.children.length > 0;
+            return fl && fl.classList.contains('visible')
+                && fl.querySelector('.hf-file-item') !== null;
         }, { timeout: 20000 }).catch(() => {});
-        await sleep(800);
+        await sleep(600);
         await captureShot(page, 'spawn-wizard-step2-quant-advisor.png', { fullPage: true });
+
+        // Select the first Q4_K_M file (or any file) so Next is enabled for step 3.
+        await page.evaluate(() => {
+            const q4 = [...document.querySelectorAll('.hf-file-item')]
+                .find(el => el.textContent.includes('Q4_K_M') || el.textContent.includes('Q4'));
+            (q4 || document.querySelector('.hf-file-item'))?.click();
+        });
+        await sleep(400);
     } else {
-        console.log('[CAPTURE] No community pick item to click for quant advisor shot');
+        console.log('[CAPTURE] HF repo input not found; skipping quant advisor shot');
     }
 
     // ── Step 3: hardware / VRAM panel ────────────────────────────────────────
     await page.evaluate(() => { document.getElementById('wizard-next-btn')?.click(); });
     await page.waitForFunction(() => {
         return document.getElementById('wizard-step-2')?.classList.contains('active');
-    }, { timeout: 5000 }).catch(() => {});
-    await sleep(1000);
+    }, { timeout: 8000 }).catch(() => {
+        console.log('[CAPTURE] Step 3 not reached via Next; forcing step navigation.');
+        return page.evaluate(() => {
+            // Force step 2 (Hardware) active for screenshot purposes
+            document.querySelectorAll('.wizard-step').forEach((s, i) => {
+                s.classList.toggle('active', i === 2);
+            });
+            document.querySelectorAll('.step-badge[data-step]').forEach(b => {
+                const s = parseInt(b.dataset.step, 10);
+                b.classList.toggle('active', s === 2);
+                b.classList.toggle('completed', s < 2);
+            });
+        });
+    });
+    await sleep(1200);
     await captureShot(page, 'spawn-wizard-step3-vram.png', { fullPage: true });
 
     // Close wizard

@@ -172,30 +172,34 @@
   flex-wrap: wrap;
 }
 
+.wizard-step-sep {
+  width: 16px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
+}
+
 .step-badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 9px;
+  justify-content: center;
+  padding: 0;
   border-radius: 999px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--color-text-muted);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: transparent;
+  border: none;
   transition: all 180ms ease;
   white-space: nowrap;
+  cursor: default;
 }
 
 .step-badge .step-num {
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
   display: grid;
   place-items: center;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 800;
   color: var(--color-text-muted);
   background: rgba(255, 255, 255, 0.05);

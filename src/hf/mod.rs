@@ -37,7 +37,7 @@ impl HfSort {
             HfSort::Downloads => "downloads",
             HfSort::Likes => "likes",
             HfSort::CreatedAt => "createdAt",
-            HfSort::Trending => "trending",
+            HfSort::Trending => "trendingScore",
         }
     }
 }

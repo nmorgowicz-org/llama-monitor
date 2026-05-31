@@ -2699,8 +2699,16 @@ fn api_hf_search(
                 let author = body["author"].as_str().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
                 let limit: u64 = body["limit"].as_u64().unwrap_or(20).min(100);
 
-                // Allow empty query when author is set (browse mode)
-                if query.is_empty() && author.is_none() {
+                let sort = match body["sort"].as_str().unwrap_or("downloads") {
+                    "likes"     => crate::hf::HfSort::Likes,
+                    "newest"    | "createdAt" => crate::hf::HfSort::CreatedAt,
+                    "trending"  => crate::hf::HfSort::Trending,
+                    _           => crate::hf::HfSort::Downloads,
+                };
+
+                // Allow empty query when author is set (browse mode) or when sorting by
+                // trending/trendingScore (global trending list needs no query term).
+                if query.is_empty() && author.is_none() && sort != crate::hf::HfSort::Trending {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                         Box::new(warp::reply::json(&serde_json::json!({
                             "ok": false,
@@ -2708,13 +2716,6 @@ fn api_hf_search(
                         }))),
                     );
                 }
-
-                let sort = match body["sort"].as_str().unwrap_or("downloads") {
-                    "likes"     => crate::hf::HfSort::Likes,
-                    "newest"    | "createdAt" => crate::hf::HfSort::CreatedAt,
-                    "trending"  => crate::hf::HfSort::Trending,
-                    _           => crate::hf::HfSort::Downloads,
-                };
 
                 let params = crate::hf::HfSearchParams { query, author, sort, limit: limit as usize };
 
