@@ -151,12 +151,71 @@ impl ModelArch {
     /// Used when the model hasn't been introspected yet (pre-download advisor).
     pub fn from_name_and_params(name: &str, param_b: f64) -> Self {
         let lower = name.to_ascii_lowercase();
-        if lower.contains("gemma-3") || lower.contains("gemma3")
-            || lower.contains("gemma-4") || lower.contains("gemma4")
-        {
-            return Self::gemma3_heuristic(param_b);
+
+        let is_gemma = lower.contains("gemma-3") || lower.contains("gemma3")
+            || lower.contains("gemma-4") || lower.contains("gemma4");
+
+        // Detect MoE from "NB-AMB" / "NB_AMB" suffix (e.g. 35B-A3B, 26B-A4B, 122B-A10B)
+        let moe_info = Self::parse_moe_suffix(name);
+
+        // Detect MTP from filename keyword
+        let mtp_depth = if lower.contains("mtp") || lower.contains("multi-token") { 1u32 } else { 0 };
+
+        let mut arch = if is_gemma {
+            Self::gemma3_heuristic(param_b)
+        } else {
+            Self::standard_heuristic(param_b)
+        };
+
+        arch.mtp_depth = mtp_depth;
+
+        if let Some((total_b, active_b)) = moe_info {
+            // Rough expert count: typical modern MoE models have many experts
+            // with few active per token. We can estimate the ratio.
+            let _active_frac = active_b / total_b;
+            // Conservative estimate for n_experts — introspection will refine.
+            arch.n_experts = if total_b > 100.0 { 128 }
+                else if total_b > 50.0 { 64 }
+                else if total_b > 20.0 { 64 }  // Qwen3-35B-A3B style
+                else { 8 };                      // Mixtral style
+            arch.n_experts_used = active_b.round() as u32;
         }
-        Self::standard_heuristic(param_b)
+
+        arch
+    }
+
+    /// Parse "NB-AMB" or "NB_AMB" MoE suffix, returning (total_params_b, active_params_b).
+    fn parse_moe_suffix(name: &str) -> Option<(f64, f64)> {
+        // Match patterns like "35B-A3B", "26B-A4B", "122B-A10B"
+        let re_src = name.to_ascii_lowercase();
+        // Find "-a<N>b" pattern preceded by a param count
+        let bytes = re_src.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            // Look for "-a" or "_a"
+            if i + 2 < bytes.len() && (bytes[i] == b'-' || bytes[i] == b'_') && bytes[i+1] == b'a' {
+                // Try to parse a number after "a"
+                let start = i + 2;
+                let end = bytes[start..].iter().position(|&b| b == b'b').map(|p| start + p);
+                if let Some(end_idx) = end {
+                    let active_str = &re_src[start..end_idx];
+                    if let Ok(active) = active_str.parse::<f64>() {
+                        // Now find the total before this marker
+                        let before = &re_src[..i];
+                        // Find last number + "b" before this point
+                        let total_match = before.rmatch_indices('b').find_map(|(bi, _)| {
+                            let num_start = before[..bi].rfind(|c: char| !c.is_ascii_digit() && c != '.').map(|p| p + 1).unwrap_or(0);
+                            before[num_start..bi].parse::<f64>().ok().map(|v| v)
+                        });
+                        if let Some(total) = total_match {
+                            return Some((total, active));
+                        }
+                    }
+                }
+            }
+            i += 1;
+        }
+        None
     }
 
     /// Standard full-attention architecture heuristic.
@@ -1099,5 +1158,84 @@ mod tests {
 
         let est2 = estimate_vram(40u64 << 30, 4096, "q8_0", 512, 512, false, 0, None, 16u64 << 30);
         assert!(matches!(est2.recommendation, VramRecommendation::WontFit));
+    }
+
+    // ── Specific model filename parsing tests ─────────────────────────────────
+
+    #[test]
+    fn gemma4_31b_dense_gets_alternating_attention() {
+        let arch = ModelArch::from_name_and_params(
+            "Gemma-4-Gembrain-31B-it-uncensored-heretic.i1-Q4_K_S.gguf", 31.0
+        );
+        assert!(arch.has_local_attn(), "Gemma-4 should use local attention");
+        assert_eq!(arch.head_dim, 256, "Gemma uses 256 head_dim");
+        assert_eq!(arch.mtp_depth, 0, "31B dense Gemma has no MTP in name");
+    }
+
+    #[test]
+    fn gemma4_26b_a4b_gets_moe_and_alternating_attention() {
+        let arch = ModelArch::from_name_and_params(
+            "gemma-4-26B-A4B-it-heretic-ara.Q5_K_XL.gguf", 26.0
+        );
+        assert!(arch.has_local_attn(), "Gemma-4 MoE should use local attention");
+        assert!(arch.is_moe(), "A4B suffix should trigger MoE detection");
+        assert_eq!(arch.n_experts_used, 4, "4B active should map to n_experts_used=4");
+    }
+
+    #[test]
+    fn qwen3_27b_mtp_gets_mtp_depth() {
+        let arch = ModelArch::from_name_and_params(
+            "Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-Q4_K_S.gguf", 27.0
+        );
+        assert_eq!(arch.mtp_depth, 1, "MTP in filename should set mtp_depth=1");
+        assert!(!arch.is_moe(), "27B dense should not be MoE");
+    }
+
+    #[test]
+    fn qwen3_35b_a3b_gets_moe() {
+        let arch = ModelArch::from_name_and_params(
+            "Qwen3.6-35B-A3B-uncensored-heretic-Q4_K_M.gguf", 35.0
+        );
+        assert!(arch.is_moe(), "35B-A3B should trigger MoE detection");
+        assert_eq!(arch.n_experts_used, 3, "A3B → 3 active experts");
+        assert!(arch.n_experts >= 8, "Should estimate at least 8 total experts");
+    }
+
+    #[test]
+    fn qwopus_122b_a10b_large_moe_iq3s() {
+        let arch = ModelArch::from_name_and_params(
+            "Qwopus3.5-122B-A10B-Kimi-K2.6-distill-abliterated.i1-IQ3_S.gguf", 122.0
+        );
+        assert!(arch.is_moe(), "122B-A10B should be MoE");
+        // Should have many experts (128 for 122B+ MoE)
+        assert!(arch.n_experts >= 64, "Large MoE should have ≥64 experts in heuristic");
+
+        // On 32GB VRAM, IQ3_S at 122B needs heavy CPU offload
+        let model_bytes = estimate_model_size_bytes(122.0, "iq3_s");
+        let vram_32gb = 32u64 * 1024 * 1024 * 1024;
+
+        // Verify that with n_cpu_moe auto-sizing, it fits on 32GB
+        let result = auto_size(model_bytes, &arch, vram_32gb, UseCase::General, 1, 1024);
+        // Should recommend substantial CPU offload
+        assert!(result.n_cpu_moe.unwrap_or(0) > 0, "Large 122B MoE should need CPU offload on 32GB");
+    }
+
+    #[test]
+    fn gemma_alternating_attention_kv_much_less_than_dense() {
+        // Verify the Gemma alternating attention dramatically reduces KV for long context
+        let arch_gemma = ModelArch::gemma3_heuristic(27.0);
+        let arch_dense = ModelArch {
+            n_layers: 62, n_kv_heads: 16, head_dim: 256, ..Default::default()
+        };
+        let ctx = 128_000u64;
+        let kv_gemma = kv_cache_bytes(&arch_gemma, ctx, 1, "f16", "f16");
+        let kv_dense = kv_cache_bytes(&arch_dense, ctx, 1, "f16", "f16");
+
+        // Gemma at 128K should use < 25GB; naively dense would be > 100GB
+        assert!(kv_gemma < 25 * 1024 * 1024 * 1024,
+            "Gemma 128K KV should be < 25GB with alternating attention, got {}GB",
+            kv_gemma / 1024 / 1024 / 1024);
+        assert!(kv_dense > kv_gemma * 3,
+            "Dense naive calculation should be > 3× Gemma's actual KV");
     }
 }

@@ -581,11 +581,34 @@ function onModelPathChanged() {
 
   const path = wizardState.model.path;
   if (path) {
-    // Try to infer param count from filename
-    const inferredParams = inferParamBFromName(path);
+    const name = path.split(/[/\\]/).pop() || path;
+
+    // Infer total param count
+    const inferredParams = inferParamBFromName(name);
     if (inferredParams > 0) wizardState.model.paramB = inferredParams;
 
-    // Try to get model file size via introspection (for local files)
+    // Detect MoE from "NB-AMB" suffix (e.g. 35B-A3B, 26B-A4B, 122B-A10B)
+    const moeInfo = parseMoeSuffix(name);
+    if (moeInfo && !wizardState.arch.nExperts) {
+      // We don't know exact expert count without introspection, but we know it's MoE
+      // Set a flag so the MoE panel shows up; introspection will fill exact count
+      wizardState.arch._isMoePending = true;
+      // Rough expert count: assume Qwen3/Gemma4 style ~128 experts for large MoE
+      // Will be overridden by introspection
+      const totalB = moeInfo.total, activeB = moeInfo.active;
+      if (totalB > 20) {
+        // Likely many experts (128+)
+        wizardState.arch.nExperts = totalB > 100 ? 128 : (totalB > 30 ? 64 : 8);
+        wizardState.arch.nExpertsUsed = Math.round(activeB);
+      }
+    }
+
+    // Detect MTP from filename
+    if (detectMtpFromName(name) && !wizardState.arch.mtpDepth) {
+      wizardState.arch.mtpDepth = 1; // conservative default; introspection will refine
+    }
+
+    // Try introspection (will refine all arch values)
     tryIntrospectModel(path);
   }
 
@@ -595,10 +618,43 @@ function onModelPathChanged() {
 }
 
 function inferParamBFromName(name) {
-  // Match patterns like "27B", "7b", "70B", "235b", "3.5b", "0.5b"
-  const m = name.match(/(\d+(?:\.\d+)?)\s*[Bb]/);
-  if (!m) return 0;
-  return parseFloat(m[1]);
+  // Match patterns like "27B", "7b", "70B", "235b", "3.5b", "122B"
+  // Prefer the first large number (total params) not the "active" suffix
+  const matches = [...name.matchAll(/(\d+(?:\.\d+)?)\s*[Bb]/gi)];
+  if (!matches.length) return 0;
+  // If there's a pattern like "35B-A3B" or "122B-A10B", take the larger (total) param count
+  const values = matches.map(m => parseFloat(m[1]));
+  return Math.max(...values);
+}
+
+/// Parse MoE "AXB" active-parameter suffix from a filename.
+/// "35B-A3B" → { total: 35, active: 3 }
+/// "26B-A4B" → { total: 26, active: 4 }
+function parseMoeSuffix(name) {
+  // Match "NB-AMB" or "NB_AMB" patterns (N total, M active)
+  const m = name.match(/(\d+(?:\.\d+)?)[Bb][-_][Aa](\d+(?:\.\d+)?)[Bb]/i);
+  if (!m) return null;
+  return { total: parseFloat(m[1]), active: parseFloat(m[2]) };
+}
+
+/// Detect if a filename indicates MTP (multi-token prediction) heads.
+function detectMtpFromName(name) {
+  const lower = name.toLowerCase();
+  return lower.includes('mtp') || lower.includes('multi-token') || lower.includes('multitokenprediction');
+}
+
+/// Detect mmproj filename for a model, given its path.
+/// Looks for a file matching common mmproj naming patterns in the same directory.
+function inferMmprojPath(modelPath) {
+  if (!modelPath) return null;
+  const dir = modelPath.replace(/[/\\][^/\\]+$/, '');
+  const basename = modelPath.split(/[/\\]/).pop() || '';
+
+  // Common pattern: strip quant suffix and add mmproj variants
+  // e.g. "Qwen3.6-27B-...-Q4_K_S.gguf" → "Qwen3.6-27B-UD-mmproj-BF16.gguf"
+  // We can't auto-locate without a dir scan, but we can suggest the pattern.
+  const stem = basename.replace(/-?(Q\d|IQ\d|F16|BF16|q\d)[^.]*\.gguf$/i, '');
+  return { dir, stem };
 }
 
 // ── Introspection ─────────────────────────────────────────────────────────────
@@ -967,13 +1023,23 @@ function getEffectiveArch() {
 
 function buildHeuristicArch(name, paramB) {
   const lower = (name || '').toLowerCase();
-  const isGemma = lower.includes('gemma-3') || lower.includes('gemma3') || lower.includes('gemma-4') || lower.includes('gemma4');
+  // Gemma-4 MoE (e.g. Gemma-4-26B-A4B) is both Gemma alternating attention AND MoE
+  const isGemma = lower.includes('gemma-3') || lower.includes('gemma3') ||
+                  lower.includes('gemma-4') || lower.includes('gemma4');
 
   if (isGemma) {
-    // Gemma alternating local/global attention
     const n = paramB < 5 ? [34, 4, 256] : paramB < 14 ? [52, 8, 256] : [62, 16, 256];
     const globalL = Math.round(n[0] / 6);
-    return { nLayers: n[0], nKvHeads: n[1], headDim: n[2], nGlobalAttnLayers: globalL, localAttnWindow: 512, localKvHeads: 1, nExperts: 0, expertFraction: 0.65, mtpDepth: wizardState.arch.mtpDepth, mmprojBytes: wizardState.arch.mmprojBytes };
+    return {
+      nLayers: n[0], nKvHeads: n[1], headDim: n[2],
+      nGlobalAttnLayers: globalL, localAttnWindow: 512, localKvHeads: 1,
+      // Inherit MoE state if already detected (e.g. Gemma-4-26B-A4B)
+      nExperts: wizardState.arch.nExperts || 0,
+      nExpertsUsed: wizardState.arch.nExpertsUsed || 0,
+      expertFraction: 0.65,
+      mtpDepth: wizardState.arch.mtpDepth || 0,
+      mmprojBytes: wizardState.arch.mmprojBytes || 0,
+    };
   }
 
   // Standard heuristic
