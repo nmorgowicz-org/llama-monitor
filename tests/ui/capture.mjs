@@ -57,6 +57,10 @@ const SCREENSHOT_TAB_PREFIX = '[screenshot]';
 
 const DEFAULT_VIEWPORT = { width: 1440, height: 900, deviceScaleFactor: 1 };
 const DEFAULT_PORT = parseInt(process.env.SCREENSHOT_PORT || '8892', 10);
+// Set RUNNING_PORT to connect to an already-running llama-monitor (e.g. your production instance
+// with a remote agent connected). When set, no binary is spawned and no temp config is seeded.
+// Example: RUNNING_PORT=8080 node tests/ui/capture.mjs --scenario dashboard
+const RUNNING_PORT = process.env.RUNNING_PORT ? parseInt(process.env.RUNNING_PORT, 10) : null;
 const REMOTE_SERVER = process.env.REMOTE_SERVER || 'http://192.168.2.16:8001';
 const BINARY_PATH = join(ROOT_DIR, 'target/release/llama-monitor');
 const CAPTURE_FORM_AUTH = process.env.SCREENSHOT_FORM_AUTH || 'admin:secret123';
@@ -150,11 +154,19 @@ Examples:
   SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
   SCREENSHOT_PORT=8894 node tests/ui/capture.mjs --scenario settings --close-up
   SCREENSHOT_PORT=8896 node tests/ui/capture.mjs --scenario spawn-wizard --no-attach
+  RUNNING_PORT=8080 node tests/ui/capture.mjs --scenario dashboard
+  RUNNING_PORT=8080 node tests/ui/capture.mjs --scenario gifs --gpu-only
+
+Note: RUNNING_PORT connects to an already-running llama-monitor (e.g. your production instance
+with a remote agent reporting GPU data). No binary is spawned; no temp config is seeded.
 `);
 }
 
 function seedConfig() {
-    const filesToCopy = ['ui-settings.json', 'presets.json', 'gpu-env.json', 'community-picks.json'];
+    // Copy encryption-key first so encrypted values in ui-settings.json (e.g. remote_agent_token)
+    // can be decrypted — without it the ephemeral instance generates a new key and auth fails.
+    // Copy ssh-known-hosts.json so the agent SSH host key check passes (prevents enrollment block).
+    const filesToCopy = ['encryption-key', 'ssh-known-hosts.json', 'ui-settings.json', 'presets.json', 'gpu-env.json', 'community-picks.json'];
     for (const filename of filesToCopy) {
         const source = join(REAL_APP_CONFIG_DIR, filename);
         const destination = join(TEMP_APP_CONFIG_DIR, filename);
@@ -162,6 +174,16 @@ function seedConfig() {
             fs.copyFileSync(source, destination);
         }
     }
+
+    // Copy the certs/ directory (including remote-cas/) so the remote agent https_client starts
+    // with the correct trust anchors. Without this it's built once at startup without the CA cert
+    // and the mTLS agent connection always fails in that session.
+    const sourceCerts = join(REAL_APP_CONFIG_DIR, 'certs');
+    const destCerts = join(TEMP_APP_CONFIG_DIR, 'certs');
+    if (fs.existsSync(sourceCerts)) {
+        fs.cpSync(sourceCerts, destCerts, { recursive: true });
+    }
+
     // If no community-picks.json exists in real config, use the bundled example fixture.
     const cpDest = join(TEMP_APP_CONFIG_DIR, 'community-picks.json');
     if (!fs.existsSync(cpDest)) {
@@ -1532,14 +1554,36 @@ async function scenarioDashboard(ctx, options) {
     await attachToServer(page);
 
     await switchTab(page, 'server');
-    await sleep(1000);
+    // Wait for agent first poll (2s interval) + some render time.
+    await sleep(3500);
     await captureShot(page, 'settings-server-tab.png', { fullPage: true });
-    await page.evaluate(() => {
-        const gpu = document.getElementById('gpu-section') || document.getElementById('system-section');
-        gpu?.scrollIntoView({ behavior: 'instant', block: 'start' });
-    });
-    await sleep(500);
-    await captureShot(page, 'dashboard-gpu-section.png', { fullPage: true });
+
+    // Wait up to 6s for hardware data to arrive (remote agent dependent).
+    const gpuVisible = await page.evaluate(() => new Promise(resolve => {
+        const check = () => {
+            const gpu = document.getElementById('gpu-section');
+            const sys = document.getElementById('system-section');
+            if ((gpu && gpu.style.display !== 'none') || (sys && sys.style.display !== 'none')) {
+                resolve(true);
+            }
+        };
+        check();
+        const obs = new MutationObserver(check);
+        obs.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['style'] });
+        setTimeout(() => { obs.disconnect(); resolve(false); }, 6000);
+    }));
+
+    if (gpuVisible) {
+        await page.evaluate(() => {
+            const gpu = document.getElementById('gpu-section') || document.getElementById('system-section');
+            const page = gpu?.closest('.page') || document.querySelector('.page.active');
+            if (page) page.scrollTop = gpu.offsetTop - 8;
+        });
+        await sleep(600);
+    } else {
+        console.log('[CAPTURE] Hardware section not visible; capturing at current scroll position.');
+    }
+    await captureShot(page, 'dashboard-gpu-section.png');
 }
 
 // Validation pass for sparkline layouts and clipped section captures.
@@ -1579,9 +1623,14 @@ async function scenarioGifs(ctx, options) {
     if (!options.inferenceOnly) {
         console.log('[CAPTURE] Capturing GPU/system metrics GIF...');
         await switchTab(page, 'server');
+        // Wait for agent hardware data if we haven't already (gpuOnly path skips inference wait).
+        if (options.gpuOnly) await sleep(3500);
         await page.evaluate(() => {
             const target = document.getElementById('gpu-section') || document.getElementById('system-section');
-            target?.scrollIntoView({ behavior: 'instant', block: 'start' });
+            if (target) {
+                const pg = target.closest('.page') || document.querySelector('.page.active');
+                if (pg) pg.scrollTop = target.offsetTop - 8;
+            }
         });
         await sleep(1200);
         await captureFrames(page, 'gpu', totalFrames, fps);
@@ -2575,19 +2624,26 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
         throw new Error(`Unknown scenario "${scenarioName}". Use --list-scenarios.`);
     }
 
-    seedConfig();
-    const port = await findAvailablePort();
-    console.log(`[CAPTURE] Spawning llama-monitor on port ${port} for scenario "${scenarioName}"...`);
-
     let server = null;
     let browser = null;
+    let baseUrl;
+
+    if (RUNNING_PORT) {
+        baseUrl = `http://127.0.0.1:${RUNNING_PORT}`;
+        console.log(`[CAPTURE] Using running llama-monitor at ${baseUrl} for scenario "${scenarioName}"...`);
+    } else {
+        seedConfig();
+        const port = await findAvailablePort();
+        console.log(`[CAPTURE] Spawning llama-monitor on port ${port} for scenario "${scenarioName}"...`);
+        server = await spawnLlamaMonitor(port);
+        baseUrl = server.url;
+    }
 
     try {
-        server = await spawnLlamaMonitor(port);
         const launched = await launchBrowser(options.viewport);
         browser = launched.browser;
         const page = launched.page;
-        await scenario({ page, baseUrl: server.url, browser }, options);
+        await scenario({ page, baseUrl, browser }, options);
         console.log(`[CAPTURE] Scenario "${scenarioName}" complete.`);
     } catch (err) {
         console.error(err.stack || err.message);
@@ -2595,8 +2651,8 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
     } finally {
         cleanupFrames();
         if (browser) await browser.close();
-        await cleanupServer(server);
-        cleanupTempHome();
+        if (server) await cleanupServer(server);
+        if (!RUNNING_PORT) cleanupTempHome();
     }
 }
 

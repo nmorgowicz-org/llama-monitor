@@ -173,6 +173,9 @@ export function initSpawnWizard() {
   renderHfDiscoverPills();          // static — no network call needed
   loadHfQuickPicks();               // pre-load author quick-picks in background
   loadCommunityPicks();             // load community-picks.json if present
+
+  document.getElementById('btn-open-spawn-wizard')
+    ?.addEventListener('click', openSpawnWizard);
 }
 
 function applyReducedMotion() {

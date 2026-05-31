@@ -49,7 +49,6 @@
 }
 
 .dashboard-header-actions,
-.control-bar,
 .preset-actions {
   display: flex;
   align-items: center;
@@ -57,8 +56,13 @@
   flex-wrap: wrap;
 }
 
+/* Two-zone control bar layout */
 .control-bar {
-  padding: 18px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 14px 18px;
+  flex-wrap: nowrap;
   background:
     radial-gradient(circle at top right, var(--surface-card-ambient-a), transparent 20%),
     radial-gradient(circle at bottom left, var(--surface-card-ambient-b), transparent 26%),
@@ -70,6 +74,62 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
   position: relative;
   overflow: hidden;
+}
+
+.control-bar-zone {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-md);
+  flex-wrap: wrap;
+}
+
+.control-bar-spawn-zone { flex-shrink: 0; }
+
+.control-bar-quick-zone { flex: 1; }
+
+.control-bar-divider {
+  width: 1px;
+  align-self: stretch;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 18px;
+  flex-shrink: 0;
+  min-height: 28px;
+}
+
+.btn-spawn-wizard {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 15px;
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  border: 1px solid rgba(99, 102, 241, 0.45);
+  border-radius: var(--radius-btn);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: 620;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.14s ease;
+  box-shadow: 0 2px 10px rgba(79, 70, 229, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  white-space: nowrap;
+  position: relative;
+  z-index: 1;
+}
+
+.btn-spawn-wizard:hover {
+  background: linear-gradient(135deg, #7c3aed 0%, #6366f1 100%);
+  box-shadow: 0 4px 18px rgba(99, 102, 241, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  transform: translateY(-1px);
+}
+
+.btn-spawn-wizard:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 7px rgba(79, 70, 229, 0.3);
+}
+
+.btn-spawn-wizard svg {
+  flex-shrink: 0;
+  opacity: 0.9;
 }
 
 .dashboard-header::before,
