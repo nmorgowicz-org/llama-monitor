@@ -330,19 +330,6 @@ export function initAttachDetach() {
         import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
     });
 
-    // Quick-launch toggle on the setup card
-    const qlToggle = document.getElementById('setup-quick-launch-toggle');
-    const qlBody = document.getElementById('setup-quick-launch-body');
-    if (qlToggle && qlBody) {
-        qlToggle.addEventListener('click', () => {
-            const open = qlBody.style.display !== 'none';
-            qlBody.style.display = open ? 'none' : '';
-            qlToggle.setAttribute('aria-expanded', String(!open));
-            const arrow = qlToggle.querySelector('.setup-ql-arrow');
-            if (arrow) arrow.textContent = open ? '▾' : '▴';
-        });
-    }
-
     const setupStart = document.getElementById('setup-start-btn');
     if (setupStart) setupStart.addEventListener('click', doStartFromSetup);
 

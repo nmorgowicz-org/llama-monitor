@@ -245,30 +245,33 @@
                     </div>
                     <div class="setup-card setup-card-spawn">
                         <div class="setup-card-icon">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>
+                            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+                                <path d="M2 17l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                <path d="M2 12l10 5 10-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
                         </div>
-                        <h2 class="setup-card-title">Spawn Local Server</h2>
-                        <p class="setup-card-desc">Browse models, configure hardware settings, and launch</p>
-                        <div class="setup-card-form">
-                            <button class="setup-btn setup-btn-primary" id="setup-spawn-wizard-btn" type="button">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:6px;vertical-align:-2px"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>
-                                Spawn New Server
+                        <div class="setup-card-text">
+                            <h2 class="setup-card-title">Spawn Local Server</h2>
+                            <p class="setup-card-desc">Browse models, configure GPU layers &amp; context, and launch</p>
+                        </div>
+                        <button class="setup-btn setup-btn-spawn" id="setup-spawn-wizard-btn" type="button">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>
+                            Spawn New Server
+                        </button>
+                        <div class="setup-ql-divider">
+                            <span class="setup-ql-divider-line"></span>
+                            <span class="setup-ql-divider-label">or quick launch</span>
+                            <span class="setup-ql-divider-line"></span>
+                        </div>
+                        <div class="setup-ql-row">
+                            <select class="setup-select setup-ql-select" id="setup-preset-select"></select>
+                            <button class="setup-btn setup-btn-ghost" id="setup-start-btn" type="button">
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>
+                                Launch
                             </button>
                         </div>
-                        <div class="setup-card-footer">
-                            <div class="setup-quick-launch" id="setup-quick-launch">
-                                <button class="setup-quick-launch-toggle" id="setup-quick-launch-toggle" type="button" aria-expanded="false">
-                                    Quick launch from saved config <span class="setup-ql-arrow">▾</span>
-                                </button>
-                                <div class="setup-quick-launch-body" id="setup-quick-launch-body" style="display:none;">
-                                    <select class="setup-select setup-select-sm" id="setup-preset-select"></select>
-                                    <button class="setup-btn setup-btn-secondary setup-btn-sm" id="setup-start-btn" type="button">
-                                        <span class="btn-icon">▶</span> Start
-                                    </button>
-                                </div>
-                            </div>
-                            <a class="setup-link" id="setup-manage-presets-link">Manage saved configs →</a>
-                        </div>
+                        <a class="setup-link setup-manage-link" id="setup-manage-presets-link">Manage saved configs →</a>
                     </div>
                 </div>
                 <div class="setup-stats" id="setup-stats" style="display:none;">

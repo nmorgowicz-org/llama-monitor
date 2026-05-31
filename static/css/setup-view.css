@@ -1335,52 +1335,158 @@
   color: var(--color-primary-light);
 }
 
-/* Quick-launch toggle in spawn card footer */
-.setup-quick-launch {
-  width: 100%;
+/* ── Spawn card overhaul ───────────────────────────────────────────────────── */
+
+/* Premium accent: top highlight line + soft inner glow for the spawn card */
+.setup-card-spawn {
+  position: relative;
+  gap: var(--gap-sm);
+  padding-top: 28px;
 }
 
-.setup-quick-launch-toggle {
-  background: none;
-  border: none;
-  padding: 0;
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
+.setup-card-spawn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 16px;
+  right: 16px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.5) 30%, rgba(129, 140, 248, 0.7) 50%, rgba(99, 102, 241, 0.5) 70%, transparent);
+  border-radius: 1px;
+}
+
+.setup-card-spawn:hover {
+  border-color: rgba(99, 102, 241, 0.35) !important;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), 0 0 40px rgba(99, 102, 241, 0.1),
+              inset 0 1px 0 rgba(99, 102, 241, 0.08) !important;
+}
+
+/* Stacked text block (title + desc) */
+.setup-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: center;
+}
+
+/* Spawn primary button — full-width with richer gradient */
+.setup-btn-spawn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 20px;
+  border-radius: 11px;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  letter-spacing: 0.2px;
   cursor: pointer;
-  transition: color 0.2s ease;
+  border: none;
+  outline: none;
+  background: linear-gradient(135deg, #6366f1 0%, #7c3aed 50%, #818cf8 100%);
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.setup-btn-spawn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+.setup-btn-spawn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 28px rgba(99, 102, 241, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  filter: brightness(1.08);
+}
+
+.setup-btn-spawn:active {
+  transform: scale(0.98) translateY(0);
+}
+
+/* "or quick launch" divider */
+.setup-ql-divider {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin: 0 auto;
+  gap: 10px;
+  width: 100%;
+  padding: 0 2px;
 }
 
-.setup-quick-launch-toggle:hover {
+.setup-ql-divider-line {
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.setup-ql-divider-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.2);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  white-space: nowrap;
+}
+
+/* Quick-launch row: select + ghost launch button */
+.setup-ql-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  align-items: center;
+}
+
+.setup-ql-select {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px !important;
+  padding: 8px 30px 8px 10px !important;
+  background: rgba(255, 255, 255, 0.03) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Ghost "Launch" button next to the quick-launch select */
+.setup-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 8px 14px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-secondary, rgba(255,255,255,0.65));
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  outline: none;
+  white-space: nowrap;
+}
+
+.setup-btn-ghost:hover {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.35);
   color: var(--color-primary-light);
 }
 
-.setup-ql-arrow {
-  font-size: 9px;
-  transition: transform 0.15s;
+/* Manage configs link — sits at the very bottom, ultra-muted */
+.setup-manage-link {
+  font-size: 10.5px !important;
+  color: rgba(255, 255, 255, 0.18) !important;
+  letter-spacing: 0.3px;
+  margin-top: 2px;
 }
 
-.setup-quick-launch-body {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-top: 8px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-
-.setup-select-sm {
-  max-width: 160px !important;
-  font-size: 11px !important;
-  padding: 4px 8px !important;
-}
-
-.setup-btn-sm {
-  padding: 6px 14px !important;
-  font-size: 12px !important;
+.setup-manage-link:hover {
+  color: rgba(255, 255, 255, 0.5) !important;
 }
 
 /* Quick stats */
