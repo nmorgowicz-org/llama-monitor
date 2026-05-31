@@ -1089,7 +1089,8 @@ function renderHfDiscoverPills() {
       pill.classList.add('active');
       wizardState.hfBrowseAuthor = null;
       if (dom.hfRepoInput) dom.hfRepoInput.value = '';
-      showHfSearchResults(cat.params);
+      const sort = dom.hfSortSelect?.value || cat.params.sort;
+      showHfSearchResults({ ...cat.params, sort });
     });
     container.appendChild(pill);
   }
@@ -1536,6 +1537,13 @@ function bindHfSortSelect() {
       browseHfAuthor(author);
     } else if (query && !query.includes('/')) {
       showHfSearchResults({ query, sort, limit: 20 });
+    } else {
+      // Re-fire the active discover pill with the new sort
+      const activePill = document.querySelector('#hf-discover-pills .hf-discover-pill.active');
+      if (activePill) {
+        const cat = HF_DISCOVER_CATEGORIES.find(c => c.id === activePill.dataset.catId);
+        if (cat) showHfSearchResults({ ...cat.params, sort });
+      }
     }
   });
 }
