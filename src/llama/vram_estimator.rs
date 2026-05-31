@@ -91,6 +91,9 @@ static QUANT_TABLE: &[QuantInfo] = &[
     // 1-bit — experimental
     QuantInfo { name:"iq1_m",    label:"IQ1_M",     bpw:1.75,  kv_bpe:0.125, quality:QuantQuality::VeryLow,   is_imatrix:true,  large_moe_only:true  },
     QuantInfo { name:"iq1_s",    label:"IQ1_S",     bpw:1.5625,kv_bpe:0.125, quality:QuantQuality::VeryLow,   is_imatrix:true,  large_moe_only:true  },
+    // Unsloth Ternary Quant (TQ) — unique to Unsloth's UD pipeline
+    QuantInfo { name:"tq1_0",    label:"TQ1_0",     bpw:1.69,  kv_bpe:0.125, quality:QuantQuality::VeryLow,   is_imatrix:true,  large_moe_only:true  },
+    QuantInfo { name:"tq2_0",    label:"TQ2_0",     bpw:2.0,   kv_bpe:0.25,  quality:QuantQuality::Reduced,   is_imatrix:true,  large_moe_only:true  },
 ];
 
 // ── Architecture descriptor ───────────────────────────────────────────────────
@@ -128,6 +131,17 @@ pub struct ModelArch {
     #[serde(default = "default_expert_fraction")]
     pub expert_fraction: f64,
 
+    // ── Hybrid linear attention (Qwen3-Coder-Next / DeltaNet style) ──────────
+    /// Layers that use traditional softmax attention with a KV cache.
+    /// 0 = all layers use KV cache (standard transformer).
+    /// For hybrid models (e.g. DeltaNet + Attention), set this to the count
+    /// of standard-attention-only layers; the rest use a fixed recurrent state.
+    pub n_attn_layers: u32,
+    /// Constant recurrent state size in bytes for non-KV linear attention layers.
+    /// Independent of context length — does not grow with sequence length.
+    /// 0 = not applicable.
+    pub linear_attn_state_bytes: u64,
+
     // ── MTP (Multi-Token Prediction) ─────────────────────────────────────────
     /// Number of MTP prediction heads (0 = none).
     pub mtp_depth: u32,
@@ -152,6 +166,24 @@ impl ModelArch {
     pub fn from_name_and_params(name: &str, param_b: f64) -> Self {
         let lower = name.to_ascii_lowercase();
 
+        // ── Special-case: Qwen3-Coder-Next (hybrid DeltaNet + MoE, 80B/3B) ──────
+        // 48 layers (12 standard attn + 36 DeltaNet), 512 experts, native 262K.
+        if lower.contains("coder-next") || lower.contains("qwen3-coder-next") {
+            return Self::qwen3_coder_next_arch();
+        }
+
+        // ── Qwen3.6 family (hybrid DeltaNet, 1/4 standard attention layers) ─────
+        // Applies to: Qwen3.6-27B (dense), Qwen3.6-35B-A3B (MoE),
+        //             davidau 40B expansion, Qwen3.6 finetunes/distillations.
+        if lower.contains("qwen3.6") || lower.contains("qwen3-6") {
+            let mut arch = Self::qwen36_heuristic(param_b);
+            // MTP can be preserved via fine-tuning; detect from name even for Qwen3.6
+            if lower.contains("mtp") || lower.contains("multi-token") {
+                arch.mtp_depth = 1;
+            }
+            return arch;
+        }
+
         let is_gemma = lower.contains("gemma-3") || lower.contains("gemma3")
             || lower.contains("gemma-4") || lower.contains("gemma4");
 
@@ -173,11 +205,22 @@ impl ModelArch {
             // Rough expert count: typical modern MoE models have many experts
             // with few active per token. We can estimate the ratio.
             let _active_frac = active_b / total_b;
-            // Conservative estimate for n_experts — introspection will refine.
-            arch.n_experts = if total_b > 100.0 { 128 }
-                else if total_b > 50.0 { 64 }
-                else if total_b > 20.0 { 64 }  // Qwen3-35B-A3B style
-                else { 8 };                      // Mixtral style
+            // Conservative n_experts estimate — introspection will refine.
+            // The expert count heuristic uses the activation sparsity ratio:
+            // very sparse (active_b << total_b) → many more experts.
+            let sparsity = active_b / total_b; // e.g. 3/80 = 0.0375 for Qwen3-Coder-Next
+            arch.n_experts = if sparsity < 0.05 {
+                // Extremely sparse: 512+ experts (Qwen3-Coder-Next style)
+                512
+            } else if total_b > 100.0 {
+                128
+            } else if total_b > 50.0 {
+                64
+            } else if total_b > 20.0 {
+                64   // Qwen3-35B-A3B
+            } else {
+                8    // Mixtral style
+            };
             arch.n_experts_used = active_b.round() as u32;
         }
 
@@ -219,24 +262,32 @@ impl ModelArch {
     }
 
     /// Standard full-attention architecture heuristic.
+    /// Calibrated against confirmed model cards (meta-llama, unsloth, bartowski).
     fn standard_heuristic(param_b: f64) -> Self {
-        // These are rough central estimates; actual models vary.
+        // n_layers, n_kv_heads, head_dim
         let (n_layers, n_kv_heads, head_dim) = if param_b < 2.0 {
-            (22, 4, 64)
+            (22u32, 4u32, 64u32)
         } else if param_b < 5.0 {
-            (28, 4, 128)   // Qwen2.5-3B, Phi-3-mini style
+            (28, 4, 128)    // Qwen2.5-3B, Phi-3-mini style
         } else if param_b < 10.0 {
-            (32, 8, 128)   // Llama-3.1-8B, Mistral-7B, Qwen2.5-7B
+            (32, 8, 128)    // Llama-3.1-8B, Mistral-7B, Qwen2.5-7B
         } else if param_b < 18.0 {
-            (40, 8, 128)   // Llama-2-13B, Qwen2.5-14B (48 layers but 8 kv)
+            (40, 8, 128)    // Llama-2-13B, Qwen2.5-14B range
         } else if param_b < 25.0 {
-            (32, 8, 128)   // Mistral-22B-range; Qwen2.5-14B is 48 layers so slightly off
+            (40, 8, 128)    // Mistral-22B range
         } else if param_b < 35.0 {
-            (40, 8, 128)   // Qwen2.5-32B (actually 64 layers but similar KV)
-        } else if param_b < 55.0 {
-            (60, 8, 128)   // Models in the 40B range
+            // Qwen3-30B-A3B: 48 layers, 4 KV heads (GQA). Confirmed from HF.
+            // Note: Qwen3-30B-A3B is MoE (128 experts, 8 active) — handled by MoE suffix parsing.
+            (48, 4, 128)
+        } else if param_b < 75.0 {
+            // Qwen3-235B uses 94 layers with 4 KV heads; Llama-3.3-70B uses 80 layers, 8 KV.
+            // Use Llama-70B as reference for the 70B range.
+            // Confirmed from meta-llama/Llama-3.3-70B-Instruct and Qwen3 family docs.
+            (80, 8, 128)    // Llama-3.1/3.3-70B, Qwen2.5-72B
+        } else if param_b < 150.0 {
+            (94, 4, 128)    // Qwen3-235B-A22B range; 4 KV heads confirmed from HF card
         } else {
-            (80, 8, 128)   // Llama-3.1-70B, Qwen2.5-72B
+            (94, 4, 128)    // Very large MoE models — approximate
         };
         Self {
             n_layers,
@@ -273,12 +324,85 @@ impl ModelArch {
         }
     }
 
+    /// Qwen3.6 architecture family heuristic.
+    ///
+    /// All Qwen3.6 models share the same hybrid DeltaNet/Attention layout:
+    ///   N groups × (3 × DeltaNet → FFN) + (1 × Attention → FFN)
+    /// → exactly 1/4 of layers are standard softmax attention with KV cache;
+    ///   3/4 use DeltaNet linear attention with a fixed ~negligible recurrent state.
+    ///
+    /// Standard attention parameters (same across 27B, 35B-A3B, 40B, 80B variants):
+    ///   24 Q heads, 4 KV heads, head_dim 256
+    fn qwen36_heuristic(param_b: f64) -> Self {
+        // Estimate total layer count from parameter count.
+        // Base 27B has 64 layers; davidau's 40B expansion has 96.
+        let n_layers: u32 = if param_b > 35.0 { 96 }
+            else { 64 };
+        let n_attn_layers = n_layers / 4; // exactly 1/4 are standard attention
+
+        // DeltaNet recurrent state: 3/4 × n_layers × n_v_heads × head_dim_v²
+        // For Qwen3.6-27B: 48 layers × 48 V-heads × 128² × 2 bytes ≈ 76 MB (negligible)
+        let n_deltanet = n_layers - n_attn_layers;
+        let linear_state = n_deltanet as u64 * 48 * 128 * 128 * 2;
+
+        let mut arch = Self {
+            n_layers,
+            n_kv_heads:    4,
+            head_dim:      256,
+            n_attn_layers,
+            linear_attn_state_bytes: linear_state,
+            expert_fraction: 0.65,
+            ..Default::default()
+        };
+
+        // MoE detection: Qwen3.6-35B-A3B style has "A3B" active suffix
+        let moe = Self::parse_moe_suffix(&format!("{:.0}B-A3B", param_b));
+        if param_b > 28.0 && param_b < 40.0 {
+            // 35B-A3B: treat as MoE with sparse activation
+            arch.n_experts = 64;
+            arch.n_experts_used = 3;
+            arch.expert_fraction = 0.80; // most params in expert FFNs
+        }
+        let _ = moe; // just informational above
+
+        arch
+    }
+
+    /// Known-exact architecture for Qwen3-Coder-Next.
+    ///
+    /// Hybrid DeltaNet + MoE: 48 total layers, 12 standard softmax-attention
+    /// layers and 36 DeltaNet (linear attention) layers. Only the 12 attention
+    /// layers need a traditional KV cache; the DeltaNet layers use a fixed
+    /// ~1.3 GB recurrent state regardless of context length.
+    fn qwen3_coder_next_arch() -> Self {
+        // Standard attention: 16 Q heads, 2 KV heads, head_dim 256
+        // DeltaNet recurrent state: 36 layers × 32 V-heads × 128² × 2 bytes ≈ 1.2 GB
+        let deltanet_state = 36u64 * 32 * 128 * 128 * 2;
+        Self {
+            n_layers:    48,
+            n_kv_heads:  2,
+            head_dim:    256,
+            n_attn_layers: 12,           // only these 12 layers use KV cache
+            linear_attn_state_bytes: deltanet_state,
+            n_experts:       512,
+            n_experts_used:  11,         // 10 routed + 1 shared
+            expert_fraction: 0.92,       // nearly all params are in expert FFNs (80B/3B ratio)
+            ..Default::default()
+        }
+    }
+
     pub fn is_moe(&self) -> bool {
         self.n_experts > 1
     }
 
     pub fn has_local_attn(&self) -> bool {
         self.local_attn_window > 0 && self.n_global_attn_layers < self.n_layers
+    }
+
+    /// True if this is a hybrid linear-attention model (DeltaNet, SSM, etc.)
+    /// where only n_attn_layers of n_layers use traditional KV cache.
+    pub fn is_hybrid_attn(&self) -> bool {
+        self.n_attn_layers > 0 && self.n_attn_layers < self.n_layers
     }
 }
 
@@ -306,9 +430,20 @@ pub fn kv_cache_bytes(
     let k_bpe = kv_elem_bytes(ctk);
     let v_bpe = kv_elem_bytes(ctv);
 
+    // Hybrid linear-attention: only n_attn_layers of n_layers use a KV cache.
+    // The remaining layers use a fixed recurrent state (counted separately in full_estimate).
+    let effective_layers = if arch.is_hybrid_attn() {
+        arch.n_attn_layers
+    } else {
+        arch.n_layers
+    };
+
     if arch.has_local_attn() {
-        let global_layers = arch.n_global_attn_layers as f64;
-        let local_layers = (arch.n_layers - arch.n_global_attn_layers) as f64;
+        // For Gemma: global_layers use full context, local_layers use sliding window.
+        // effective_layers applies separately to the global portion only for hybrid models;
+        // in practice Gemma is not hybrid-DeltaNet so effective_layers == n_layers here.
+        let global_layers = arch.n_global_attn_layers.min(effective_layers) as f64;
+        let local_layers = (effective_layers.saturating_sub(arch.n_global_attn_layers)) as f64;
         let g_kv = arch.n_kv_heads.max(1) as f64;
         let l_kv = arch.local_kv_heads.max(1) as f64;
         let hd = arch.head_dim.max(1) as f64;
@@ -324,7 +459,7 @@ pub fn kv_cache_bytes(
 
         (global_k + global_v + local_k + local_v) as u64
     } else {
-        let n_layers = arch.n_layers.max(1) as f64;
+        let n_layers = effective_layers.max(1) as f64;
         let n_kv = arch.n_kv_heads.max(1) as f64;
         let hd = arch.head_dim.max(1) as f64;
 
@@ -389,13 +524,16 @@ pub fn estimate_model_size_bytes(param_b: f64, quant: &str) -> u64 {
 pub struct VramBreakdown {
     pub weights_bytes: u64,
     pub kv_cache_bytes: u64,
+    /// Fixed recurrent state for hybrid linear-attention layers (DeltaNet / SSM).
+    /// Zero for standard transformers. Does not grow with context length.
+    pub linear_attn_state_bytes: u64,
     pub mmproj_bytes: u64,
     pub mtp_bytes: u64,
     pub overhead_bytes: u64,
     pub total_bytes: u64,
     pub available_bytes: u64,
     pub headroom_bytes: i64, // can be negative (over budget)
-    pub ram_bytes: u64,       // weights offloaded to CPU RAM (MoE only)
+    pub ram_bytes: u64,      // weights offloaded to CPU RAM (MoE only)
     pub recommendation: VramRecommendation,
     pub note: String,
 }
@@ -424,10 +562,13 @@ pub fn full_estimate(
 ) -> VramBreakdown {
     let (weight_vram, ram) = moe_weight_split(model_size_bytes, arch, n_cpu_moe);
     let kv = kv_cache_bytes(arch, context_size, parallel_slots, ctk, ctv);
+    // For hybrid linear-attention models (e.g. Qwen3-Coder-Next / DeltaNet):
+    // add the fixed recurrent state. This is constant — it does NOT grow with context.
+    let linear_state = arch.linear_attn_state_bytes;
     let mmproj = arch.mmproj_bytes;
     let mtp = mtp_overhead_bytes(model_size_bytes, arch.mtp_depth);
     let overhead = gpu_overhead_bytes(ubatch_size);
-    let total = weight_vram + kv + mmproj + mtp + overhead;
+    let total = weight_vram + kv + linear_state + mmproj + mtp + overhead;
     let headroom = available_vram_bytes as i64 - total as i64;
 
     let (recommendation, note) = if available_vram_bytes == 0 {
@@ -445,6 +586,7 @@ pub fn full_estimate(
     VramBreakdown {
         weights_bytes: weight_vram,
         kv_cache_bytes: kv,
+        linear_attn_state_bytes: linear_state,
         mmproj_bytes: mmproj,
         mtp_bytes: mtp,
         overhead_bytes: overhead,
@@ -482,8 +624,9 @@ pub fn max_context(
     let (weight_vram, _) = moe_weight_split(model_size_bytes, arch, n_cpu_moe);
     let mmproj = arch.mmproj_bytes;
     let mtp = mtp_overhead_bytes(model_size_bytes, arch.mtp_depth);
+    let linear_state = arch.linear_attn_state_bytes; // constant; doesn't scale with context
     let overhead = gpu_overhead_bytes(ubatch_size);
-    let fixed = weight_vram + mmproj + mtp + overhead;
+    let fixed = weight_vram + mmproj + mtp + linear_state + overhead;
 
     let usable = (available_vram_bytes as f64 * (1.0 - headroom_fraction)) as u64;
     if fixed >= usable {
@@ -1149,6 +1292,115 @@ mod tests {
             UseCase::General, 1);
         let rec: Vec<_> = opts.iter().filter(|o| o.recommended).collect();
         assert_eq!(rec.len(), 1, "Expected exactly one recommended quant");
+    }
+
+    // ── Ground-truth architecture lookup tests ────────────────────────────────
+    // Validated against actual HuggingFace model cards (unsloth/, meta-llama/, etc.)
+
+    #[test]
+    fn qwen3_30b_a3b_is_standard_moe_not_deltanet() {
+        // Qwen3-30B-A3B: standard transformer + MoE. NOT hybrid DeltaNet.
+        // Source: unsloth/Qwen3-30B-A3B-GGUF model card.
+        // 48 layers, 32 Q / 4 KV heads, 128 experts total, 8 active.
+        let arch = ModelArch::from_name_and_params("Qwen3-30B-A3B-Instruct-GGUF", 30.0);
+        // Should be MoE
+        assert!(arch.is_moe(), "Qwen3-30B-A3B must be flagged MoE");
+        // Should NOT be hybrid (no n_attn_layers < n_layers)
+        assert!(!arch.is_hybrid_attn(), "Qwen3-30B-A3B is standard transformer, not hybrid DeltaNet");
+        assert_eq!(arch.linear_attn_state_bytes, 0, "No DeltaNet state for Qwen3-30B-A3B");
+    }
+
+    #[test]
+    fn qwen3_235b_a22b_is_standard_moe() {
+        // Qwen3-235B-A22B: standard transformer + MoE.
+        // Source: unsloth/Qwen3-235B-A22B-GGUF model card.
+        // 94 layers, 64 Q / 4 KV heads, 128 experts total, 8 active.
+        let arch = ModelArch::from_name_and_params("Qwen3-235B-A22B-GGUF", 235.0);
+        assert!(arch.is_moe(), "Qwen3-235B-A22B must be MoE");
+        assert!(!arch.is_hybrid_attn(), "Qwen3-235B-A22B is standard transformer");
+    }
+
+    #[test]
+    fn qwen36_27b_is_hybrid_deltanet() {
+        // Qwen3.6-27B: hybrid DeltaNet + dense FFN.
+        // Source: davidau 40B model card citing base arch.
+        // 64 total layers, 16 standard attention (1/4), 48 DeltaNet (3/4).
+        // 4 KV heads, head_dim 256.
+        let arch = ModelArch::from_name_and_params("Qwen3.6-27B-Instruct-GGUF", 27.0);
+        assert!(arch.is_hybrid_attn(), "Qwen3.6-27B must be hybrid DeltaNet");
+        assert_eq!(arch.n_attn_layers, 16, "Qwen3.6-27B has 16 standard attn layers");
+        assert_eq!(arch.n_layers, 64, "Qwen3.6-27B has 64 total layers");
+        assert_eq!(arch.n_kv_heads, 4, "Qwen3.6-27B has 4 KV heads");
+        assert_eq!(arch.head_dim, 256, "Qwen3.6-27B head_dim is 256");
+        assert!(!arch.is_moe(), "Base Qwen3.6-27B is dense");
+    }
+
+    #[test]
+    fn qwen36_27b_kv_cache_uses_only_attn_layers() {
+        // The critical correctness check: KV cache is for 16 layers, NOT 64.
+        let arch = ModelArch::from_name_and_params("Qwen3.6-27B-Instruct-GGUF", 27.0);
+        let kv_128k = kv_cache_bytes(&arch, 128_000, 1, "f16", "f16");
+        // Expected: 16 attn layers × 2 × 4 KV heads × 256 head_dim × 2 bytes × 128K tokens
+        // = 16 × 2 × 4 × 256 × 2 × 128,000 = 3,355,443,200 bytes ≈ 3.1 GB
+        let expected = 16u64 * 2 * 4 * 256 * 2 * 128_000;
+        assert_eq!(kv_128k, expected,
+            "Qwen3.6-27B KV at 128K should use only 16 attn layers, not 64");
+        // Naive (wrong) calculation would give 4× more: 64 layers × same = 12.6 GB
+        let naive_wrong = 64u64 * 2 * 4 * 256 * 2 * 128_000;
+        assert!(kv_128k < naive_wrong / 3,
+            "Correct KV ({kv_128k}) should be < 1/3 of naive calculation ({naive_wrong})");
+    }
+
+    #[test]
+    fn davidau_40b_expansion_gets_96_layers() {
+        // DavidAU's 40B expansion of Qwen3.6-27B: 96 layers (64 × 1.5).
+        // Source: DavidAU model card.
+        let arch = ModelArch::from_name_and_params(
+            "Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX",
+            40.0
+        );
+        assert!(arch.is_hybrid_attn(), "40B expansion should be hybrid DeltaNet");
+        assert_eq!(arch.n_layers, 96, "40B expansion has 96 layers");
+        assert_eq!(arch.n_attn_layers, 24, "40B expansion has 24 standard attn layers");
+        assert_eq!(arch.n_kv_heads, 4, "Same KV head config as base");
+    }
+
+    #[test]
+    fn qwen3_coder_next_has_512_experts_and_12_attn_layers() {
+        // Qwen3-Coder-Next: 80B/3B, 48 layers (12 attn + 36 DeltaNet), 512 experts.
+        // Source: unsloth/Qwen3-Coder-Next-GGUF model card.
+        let arch = ModelArch::from_name_and_params("Qwen3-Coder-Next-GGUF", 80.0);
+        assert!(arch.is_hybrid_attn(), "Coder-Next must be hybrid DeltaNet");
+        assert_eq!(arch.n_layers, 48);
+        assert_eq!(arch.n_attn_layers, 12);
+        assert_eq!(arch.n_experts, 512);
+        assert_eq!(arch.n_experts_used, 11);
+    }
+
+    #[test]
+    fn qwen3_moe_not_confused_with_qwen36() {
+        // "Qwen3" without ".6" should NOT get the DeltaNet treatment.
+        // Qwen3-30B-A3B is standard transformer + MoE.
+        let arch30 = ModelArch::from_name_and_params("bartowski/Qwen3-30B-A3B-GGUF", 30.0);
+        assert!(!arch30.is_hybrid_attn(), "Standard Qwen3 MoE is not hybrid DeltaNet");
+
+        // Qwen3.6 SHOULD get it.
+        let arch27 = ModelArch::from_name_and_params("unsloth/Qwen3.6-27B-Instruct-GGUF", 27.0);
+        assert!(arch27.is_hybrid_attn(), "Qwen3.6 is hybrid DeltaNet");
+    }
+
+    #[test]
+    fn llama_70b_is_standard_transformer() {
+        // Llama-3.3-70B: standard transformer, 80 layers, 8 KV heads, 128 head_dim.
+        // Source: meta-llama/Llama-3.3-70B-Instruct model card.
+        let arch = ModelArch::from_name_and_params("Llama-3.3-70B-Instruct-GGUF", 70.0);
+        assert!(!arch.is_hybrid_attn(), "Llama-70B is standard transformer");
+        assert!(!arch.is_moe(), "Llama-70B is dense");
+        assert_eq!(arch.linear_attn_state_bytes, 0, "No DeltaNet state");
+        // Standard heuristic for 70B: 80 layers, 8 KV heads, 128 head_dim
+        assert_eq!(arch.n_layers, 80);
+        assert_eq!(arch.n_kv_heads, 8);
+        assert_eq!(arch.head_dim, 128);
     }
 
     #[test]

@@ -366,13 +366,16 @@ impl ModelMetadata {
             n_layers:       self.n_layers.unwrap_or(heuristic.n_layers),
             n_kv_heads:     self.n_kv_heads.unwrap_or(heuristic.n_kv_heads),
             head_dim:       head_dim.unwrap_or(heuristic.head_dim),
-            n_global_attn_layers: heuristic.n_global_attn_layers,
-            local_attn_window:    heuristic.local_attn_window,
-            local_kv_heads:       heuristic.local_kv_heads,
-            n_experts:      self.n_experts.unwrap_or(0),
-            n_experts_used: self.n_experts_used.unwrap_or(0),
-            expert_fraction: crate::llama::vram_estimator::ModelArch::default().expert_fraction,
-            mtp_depth:      self.mtp_depth.unwrap_or(0),
+            n_global_attn_layers:    heuristic.n_global_attn_layers,
+            local_attn_window:       heuristic.local_attn_window,
+            local_kv_heads:          heuristic.local_kv_heads,
+            // Hybrid linear attention: preserve from heuristic; introspection will refine
+            n_attn_layers:           heuristic.n_attn_layers,
+            linear_attn_state_bytes: heuristic.linear_attn_state_bytes,
+            n_experts:      self.n_experts.unwrap_or(heuristic.n_experts),
+            n_experts_used: self.n_experts_used.unwrap_or(heuristic.n_experts_used),
+            expert_fraction: heuristic.expert_fraction,
+            mtp_depth:      self.mtp_depth.unwrap_or(heuristic.mtp_depth),
             mmproj_bytes:   0, // filled in separately when mmproj path is known
             param_b,
         }

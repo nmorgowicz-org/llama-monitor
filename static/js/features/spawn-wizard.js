@@ -33,6 +33,9 @@ function kvBpe(quant) { return KV_BPE[quant] ?? 1.0; }
 function kvBytes(arch, ctx, slots, ctk, ctv) {
   const s = Math.max(slots, 1);
   const k = kvBpe(ctk), v = kvBpe(ctv);
+  // For hybrid DeltaNet models: only nAttnLayers use KV cache (not all nLayers).
+  const effectiveLayers = (arch.nAttnLayers && arch.nAttnLayers < arch.nLayers)
+    ? arch.nAttnLayers : arch.nLayers;
   if (arch.localAttnWindow > 0 && arch.nGlobalAttnLayers < arch.nLayers) {
     const globalL = arch.nGlobalAttnLayers;
     const localL  = arch.nLayers - globalL;
@@ -43,7 +46,7 @@ function kvBytes(arch, ctx, slots, ctk, ctv) {
     return (globalL * gkv * hd * gCtx * (k + v)) +
            (localL  * lkv * hd * lCtx * (k + v));
   }
-  return arch.nLayers * arch.nKvHeads * arch.headDim * ctx * s * (k + v);
+  return effectiveLayers * arch.nKvHeads * arch.headDim * ctx * s * (k + v);
 }
 
 function moeWeightSplit(modelBytes, arch, nCpuMoe) {
@@ -60,10 +63,11 @@ function gpuOverheadBytes(ubatch) { return (300 + Math.max(0, (ubatch - 512)) * 
 function maxContext(modelBytes, arch, ctk, ctv, slots, ubatch, nCpuMoe, availVram, fitGran, headroom) {
   if (!availVram) return 0;
   const { vram: wv } = moeWeightSplit(modelBytes, arch, nCpuMoe);
-  const mmproj = arch.mmprojBytes || 0;
-  const mtp    = mtpBytes(modelBytes, arch.mtpDepth || 0);
-  const oh     = gpuOverheadBytes(ubatch);
-  const fixed  = wv + mmproj + mtp + oh;
+  const mmproj      = arch.mmprojBytes || 0;
+  const mtp         = mtpBytes(modelBytes, arch.mtpDepth || 0);
+  const linearState = arch.linearAttnStateBytes || 0; // constant; doesn't scale with context
+  const oh          = gpuOverheadBytes(ubatch);
+  const fixed       = wv + mmproj + mtp + linearState + oh;
   const usable = availVram * (1 - headroom);
   if (fixed >= usable) return 0;
   const kvBudget = usable - fixed;
@@ -1245,6 +1249,43 @@ function getEffectiveArch() {
 
 function buildHeuristicArch(name, paramB) {
   const lower = (name || '').toLowerCase();
+
+  // ── Qwen3-Coder-Next: hybrid DeltaNet + MoE ──────────────────────────────
+  if (lower.includes('coder-next') || lower.includes('qwen3-coder-next')) {
+    // 48 layers (12 attn + 36 DeltaNet), 512 experts / 11 active, head_dim 256
+    return {
+      nLayers: 48, nKvHeads: 2, headDim: 256,
+      nAttnLayers: 12, // only these 12 use KV cache
+      linearAttnStateBytes: 36 * 32 * 128 * 128 * 2, // ~38 MB (negligible)
+      nGlobalAttnLayers: 0, localAttnWindow: 0, localKvHeads: 1,
+      nExperts: 512, nExpertsUsed: 11, expertFraction: 0.92,
+      mtpDepth: wizardState.arch.mtpDepth || 0,
+      mmprojBytes: wizardState.arch.mmprojBytes || 0,
+    };
+  }
+
+  // ── Qwen3.6 family: hybrid DeltaNet, 1/4 attn layers ─────────────────────
+  // Covers: Qwen3.6-27B (dense), Qwen3.6-35B-A3B (MoE), davidau 40B expansion,
+  // and all finetunes/distillations that mention Qwen3.6 in the name.
+  if (lower.includes('qwen3.6') || lower.includes('qwen3-6')) {
+    const nLayers = paramB > 35 ? 96 : 64;
+    const nAttnLayers = Math.floor(nLayers / 4); // exactly 1:3 attn:deltanet ratio
+    const nDeltanet = nLayers - nAttnLayers;
+    const linearState = nDeltanet * 48 * 128 * 128 * 2; // ~76 MB for 27B
+    const isMoe = parseMoeSuffix(name) !== null || lower.includes('a3b');
+    return {
+      nLayers, nKvHeads: 4, headDim: 256,
+      nAttnLayers, linearAttnStateBytes: linearState,
+      nGlobalAttnLayers: 0, localAttnWindow: 0, localKvHeads: 1,
+      nExperts: isMoe ? 64 : 0,
+      nExpertsUsed: isMoe ? 3 : 0,
+      expertFraction: isMoe ? 0.80 : 0.65,
+      mtpDepth: wizardState.arch.mtpDepth || (detectMtpFromName(name) ? 1 : 0),
+      mmprojBytes: wizardState.arch.mmprojBytes || 0,
+      paramB,
+    };
+  }
+
   // Gemma-4 MoE (e.g. Gemma-4-26B-A4B) is both Gemma alternating attention AND MoE
   const isGemma = lower.includes('gemma-3') || lower.includes('gemma3') ||
                   lower.includes('gemma-4') || lower.includes('gemma4');
@@ -1341,11 +1382,12 @@ function updateVramDisplay() {
   const cpuRatio = nExperts > 0 ? Math.min(nCpuMoe, nExperts) / nExperts : 0;
   const ramBytes = Math.round(modelBytes * expertFrac * cpuRatio);
   const weightVram = modelBytes - ramBytes;
-  const kv = kvBytes(arch, hw.contextSize, hw.parallelSlots, hw.cacheTypeK, hw.cacheTypeV);
-  const mmproj = arch.mmprojBytes || 0;
-  const mtp = mtpBytes(modelBytes, arch.mtpDepth || 0);
-  const oh = gpuOverheadBytes(hw.ubatchSize);
-  const total = weightVram + kv + mmproj + mtp + oh;
+  const kv          = kvBytes(arch, hw.contextSize, hw.parallelSlots, hw.cacheTypeK, hw.cacheTypeV);
+  const mmproj      = arch.mmprojBytes || 0;
+  const mtp         = mtpBytes(modelBytes, arch.mtpDepth || 0);
+  const linearState = arch.linearAttnStateBytes || 0;
+  const oh          = gpuOverheadBytes(hw.ubatchSize);
+  const total       = weightVram + kv + linearState + mmproj + mtp + oh;
   const free = availVram - total;
 
   // Update total label

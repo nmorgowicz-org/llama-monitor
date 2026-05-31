@@ -2279,12 +2279,17 @@ fn build_arch_from_body(
         n_layers,
         n_kv_heads,
         head_dim,
-        n_global_attn_layers: heuristic.n_global_attn_layers,
-        local_attn_window:    heuristic.local_attn_window,
-        local_kv_heads:       heuristic.local_kv_heads,
-        n_experts:            n_experts,
-        n_experts_used:       n_exp_used,
-        expert_fraction:      expert_frac,
+        n_global_attn_layers:    heuristic.n_global_attn_layers,
+        local_attn_window:       heuristic.local_attn_window,
+        local_kv_heads:          heuristic.local_kv_heads,
+        // Hybrid DeltaNet: override from body if provided, otherwise preserve heuristic
+        n_attn_layers:           body["n_attn_layers"].as_u64()
+            .map(|v| v as u32).unwrap_or(heuristic.n_attn_layers),
+        linear_attn_state_bytes: body["linear_attn_state_bytes"].as_u64()
+            .unwrap_or(heuristic.linear_attn_state_bytes),
+        n_experts:               n_experts,
+        n_experts_used:          n_exp_used,
+        expert_fraction:         expert_frac,
         mtp_depth,
         mmproj_bytes,
         param_b,
