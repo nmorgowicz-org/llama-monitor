@@ -1347,6 +1347,145 @@
   border-color: rgba(185, 28, 28, 0.2);
 }
 
+/* ── HF quick-pick author buttons ─────────────────────────────────────────── */
+
+.hf-quickpick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.hf-quickpick-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.hf-quickpicks { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.hf-qp-btn {
+  padding: 3px 10px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-muted, #94a3b8);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.hf-qp-btn:hover {
+  border-color: rgba(99,102,241,0.4);
+  background: rgba(99,102,241,0.08);
+  color: #a5b4fc;
+}
+.hf-qp-btn.active {
+  border-color: rgba(99,102,241,0.7);
+  background: rgba(99,102,241,0.15);
+  color: #c7d2fe;
+}
+.hf-qp-btn.hf-qp-imatrix { border-color: rgba(16,185,129,0.2); }
+.hf-qp-btn.hf-qp-imatrix:hover,
+.hf-qp-btn.hf-qp-imatrix.active { border-color:rgba(16,185,129,0.6); background:rgba(16,185,129,0.1); color:#6ee7b7; }
+.hf-qp-btn.hf-qp-ud { border-color: rgba(245,158,11,0.2); }
+.hf-qp-btn.hf-qp-ud:hover,
+.hf-qp-btn.hf-qp-ud.active { border-color:rgba(245,158,11,0.5); background:rgba(245,158,11,0.1); color:#fcd34d; }
+
+.hf-sort-select {
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-muted, #94a3b8);
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ── HF search results ─────────────────────────────────────────────────────── */
+
+.hf-search-results {
+  max-height: 240px;
+  overflow-y: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: rgba(15,23,42,0.5);
+  margin-top: 4px;
+}
+.hf-search-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  transition: background 0.12s;
+}
+.hf-search-result:last-child { border-bottom: none; }
+.hf-search-result:hover { background: rgba(99,102,241,0.08); }
+.hf-sr-name {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text, #e2e8f0);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hf-sr-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+}
+.hf-sr-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.hf-sr-badge-imatrix { background:rgba(16,185,129,0.15); color:#6ee7b7; }
+.hf-sr-badge-ud      { background:rgba(245,158,11,0.15);  color:#fcd34d; }
+.hf-sr-badge-gated   { background:rgba(239,68,68,0.12);   color:#fca5a5; }
+.hf-sr-badge-moe     { background:rgba(124,58,237,0.15);  color:#c4b5fd; }
+.hf-search-empty,
+.hf-search-loading {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-muted, #94a3b8);
+  font-style: italic;
+  text-align: center;
+}
+
+/* ── File type badges in GGUF list ────────────────────────────────────────── */
+
+.hf-file-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+.hf-file-badge-imatrix { background:rgba(16,185,129,0.15); color:#6ee7b7; }
+.hf-file-badge-ud      { background:rgba(245,158,11,0.15);  color:#fcd34d; }
+.hf-file-badge-mmproj  { background:rgba(6,182,212,0.15);   color:#67e8f9; }
+
+[data-theme="light"] .hf-qp-btn { border-color:rgba(17,24,39,0.12); background:rgba(0,0,0,0.03); color:#475569; }
+[data-theme="light"] .hf-sort-select { border-color:rgba(17,24,39,0.12); background:#fff; color:#374151; }
+[data-theme="light"] .hf-search-results { border-color:rgba(17,24,39,0.1); background:rgba(255,255,255,0.9); }
+[data-theme="light"] .hf-sr-name { color:#1e293b; }
+[data-theme="light"] .hf-search-result:hover { background:rgba(99,102,241,0.05); }
+
 /* ── HF file list states ───────────────────────────────────────────────────── */
 
 .hf-file-loading,

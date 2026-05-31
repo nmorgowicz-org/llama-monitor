@@ -2098,9 +2098,29 @@
 
                     <!-- HF repo input -->
                     <div class="model-input-area" id="model-input-hf">
-                        <div class="model-input-row">
-                            <input type="text" id="spawn-hf-repo" placeholder="Repo ID (e.g. bartowski/Llama-3.3-70B-Instruct-Q4_K_M-GGUF)">
+                        <!-- Quick-pick author buttons -->
+                        <div class="hf-quickpick-row" id="hf-quickpick-row">
+                            <span class="hf-quickpick-label">Browse by:</span>
+                            <div class="hf-quickpicks" id="hf-quickpicks">
+                                <!-- populated by JS from /api/hf/quantizers -->
+                            </div>
                         </div>
+                        <!-- Repo ID / search field -->
+                        <div class="model-input-row">
+                            <input type="text" id="spawn-hf-repo"
+                                placeholder="Repo ID or keyword (e.g. bartowski/Llama-3.3-70B or Qwen3 27B)">
+                            <select id="spawn-hf-sort" class="hf-sort-select" title="Sort order">
+                                <option value="downloads">Most downloaded</option>
+                                <option value="newest">Newest</option>
+                                <option value="trending">Trending</option>
+                                <option value="likes">Most liked</option>
+                            </select>
+                        </div>
+                        <!-- Search results (shown when query isn't a repo ID) -->
+                        <div class="hf-search-results" id="hf-search-results" style="display:none;">
+                            <!-- populated by JS -->
+                        </div>
+                        <!-- File list (shown when a repo ID is selected) -->
                         <div class="hf-file-list" id="spawn-hf-file-list"></div>
                     </div>
 

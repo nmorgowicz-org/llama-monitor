@@ -2659,23 +2659,30 @@ fn api_hf_search(
                     );
                 }
 
-                let query = body["query"]
-                    .as_str()
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
-                if query.is_empty() {
+                let query = body["query"].as_str().unwrap_or("").trim().to_string();
+                let author = body["author"].as_str().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+                let limit: u64 = body["limit"].as_u64().unwrap_or(20).min(100);
+
+                // Allow empty query when author is set (browse mode)
+                if query.is_empty() && author.is_none() {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                         Box::new(warp::reply::json(&serde_json::json!({
                             "ok": false,
-                            "error": "Missing 'query' field"
+                            "error": "Provide 'query' or 'author' (or both)"
                         }))),
                     );
                 }
 
-                let limit: u64 = body["limit"].as_u64().unwrap_or(20).min(100);
+                let sort = match body["sort"].as_str().unwrap_or("downloads") {
+                    "likes"     => crate::hf::HfSort::Likes,
+                    "newest"    | "createdAt" => crate::hf::HfSort::CreatedAt,
+                    "trending"  => crate::hf::HfSort::Trending,
+                    _           => crate::hf::HfSort::Downloads,
+                };
 
-                match crate::hf::hf_search_models(&query, limit as usize).await {
+                let params = crate::hf::HfSearchParams { query, author, sort, limit: limit as usize };
+
+                match crate::hf::hf_search_models(&params).await {
                     Ok(models) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                         Box::new(warp::reply::json(&serde_json::json!({
                             "ok": true,
@@ -2732,6 +2739,82 @@ fn api_hf_files(
                             "ok": false,
                             "error": e
                         })),
+                    )),
+                }
+            }
+        })
+}
+
+// ── GET /api/hf/quantizers ────────────────────────────────────────────────────
+// Returns the curated list of known GGUF quantizers for the wizard quick-picks.
+
+fn api_hf_quantizers(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "quantizers")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let quantizers = crate::hf::known_gguf_quantizers();
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({ "ok": true, "quantizers": quantizers }),
+                )))
+            }
+        })
+}
+
+// ── POST /api/hf/author-models ────────────────────────────────────────────────
+// Browse all GGUF models by a specific HF author/org.
+
+fn api_hf_author_models(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "author-models")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let author = body["author"].as_str().unwrap_or("").trim().to_string();
+                if author.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Missing 'author' field"
+                        })),
+                    ));
+                }
+
+                let limit: usize = body["limit"].as_u64().unwrap_or(50).min(100) as usize;
+                let sort = match body["sort"].as_str().unwrap_or("downloads") {
+                    "likes"    => crate::hf::HfSort::Likes,
+                    "newest"   | "createdAt" => crate::hf::HfSort::CreatedAt,
+                    "trending" => crate::hf::HfSort::Trending,
+                    _          => crate::hf::HfSort::Downloads,
+                };
+
+                match crate::hf::hf_browse_author(&author, sort, limit).await {
+                    Ok(models) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": true,
+                            "author": author,
+                            "models": models
+                        })),
+                    )),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": e })),
                     )),
                 }
             }
@@ -3125,9 +3208,11 @@ pub fn api_routes(
     let moe_tune_route = api_moe_tune(state.clone(), app_config.clone());
 
     // Phase 3: HF search, files, download, third-party, introspect
-    let hf_search_route = api_hf_search(state.clone(), app_config.clone());
-    let hf_files_route = api_hf_files(state.clone(), app_config.clone());
-    let hf_download_route = api_hf_download(state.clone(), app_config.clone());
+    let hf_search_route        = api_hf_search(state.clone(), app_config.clone());
+    let hf_files_route         = api_hf_files(state.clone(), app_config.clone());
+    let hf_download_route      = api_hf_download(state.clone(), app_config.clone());
+    let hf_quantizers_route    = api_hf_quantizers(state.clone(), app_config.clone());
+    let hf_author_models_route = api_hf_author_models(state.clone(), app_config.clone());
     let third_party_models_route = api_third_party_models(state.clone(), app_config.clone());
     let model_introspect_route = api_model_introspect(state.clone(), app_config.clone());
 
@@ -3245,6 +3330,8 @@ pub fn api_routes(
         .or(hf_search_route)
         .or(hf_files_route)
         .or(hf_download_route)
+        .or(hf_quantizers_route)
+        .or(hf_author_models_route)
         .or(third_party_models_route)
         .or(model_introspect_route)
         .or(vram_quant_compare_route)

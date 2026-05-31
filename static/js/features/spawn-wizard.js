@@ -163,8 +163,10 @@ export function initSpawnWizard() {
   cacheDom();
   applyReducedMotion();
   bindEvents();
+  bindHfSortSelect();
   restoreProfile();
   applyProfileVisibility();
+  loadHfQuickPicks(); // pre-load author quick-picks in background
 }
 
 function applyReducedMotion() {
@@ -207,8 +209,11 @@ function cacheDom() {
   dom.modelInputHf     = document.getElementById('model-input-hf');
   dom.modelInputImport = document.getElementById('model-input-import');
   dom.modelPathInput   = document.getElementById('spawn-model-path');
-  dom.hfRepoInput      = document.getElementById('spawn-hf-repo');
-  dom.importPathInput  = document.getElementById('spawn-import-path');
+  dom.hfRepoInput       = document.getElementById('spawn-hf-repo');
+  dom.hfSortSelect      = document.getElementById('spawn-hf-sort');
+  dom.hfQuickpicks      = document.getElementById('hf-quickpicks');
+  dom.hfSearchResults   = document.getElementById('hf-search-results');
+  dom.importPathInput   = document.getElementById('spawn-import-path');
   dom.browseModelBtn   = document.getElementById('spawn-browse-model-btn');
   dom.importBrowseBtn  = document.getElementById('spawn-import-browse-btn');
   dom.selectedModel     = document.getElementById('spawn-selected-model');
@@ -856,16 +861,188 @@ function renderQuantAdvisor(quants, availVram) {
   dom.quantAdvisor.style.display = '';
 }
 
+// ── HF quick-picks ────────────────────────────────────────────────────────────
+
+async function loadHfQuickPicks() {
+  if (!dom.hfQuickpicks) return;
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const resp = await fetch('/api/hf/quantizers', { headers });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (!data.ok || !data.quantizers) return;
+
+    dom.hfQuickpicks.innerHTML = '';
+    for (const q of data.quantizers) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'hf-qp-btn';
+      if (q.quant_style === 'imatrix') btn.classList.add('hf-qp-imatrix');
+      if (q.quant_style === 'ud')      btn.classList.add('hf-qp-ud');
+      btn.textContent = q.display_name;
+      btn.title = q.description + (q.note ? `\n\n${q.note}` : '');
+      btn.dataset.author = q.username;
+      btn.addEventListener('click', () => {
+        dom.hfQuickpicks?.querySelectorAll('.hf-qp-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        // Clear the repo input and show author models
+        if (dom.hfRepoInput) dom.hfRepoInput.value = '';
+        browseHfAuthor(q.username);
+      });
+      dom.hfQuickpicks.appendChild(btn);
+    }
+  } catch {}
+}
+
+async function browseHfAuthor(author) {
+  const sort = dom.hfSortSelect?.value || 'downloads';
+  wizardState.hfBrowseAuthor = author;
+  await showHfSearchResults({ author, sort, limit: 40 });
+}
+
+/// Show HF model search / author browse results.
+async function showHfSearchResults({ query, author, sort, limit }) {
+  const container = dom.hfSearchResults;
+  if (!container) return;
+
+  container.innerHTML = '<div class="hf-search-loading">Searching HuggingFace…</div>';
+  container.style.display = '';
+
+  // Hide file list when showing search results
+  if (dom.hfFileList) { dom.hfFileList.innerHTML = ''; dom.hfFileList.classList.remove('visible'); }
+
+  try {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+
+    const body = {
+      query: query || '',
+      author: author || undefined,
+      sort: sort || 'downloads',
+      limit: limit || 20,
+    };
+
+    const resp = await fetch('/api/hf/search', { method: 'POST', headers, body: JSON.stringify(body) });
+    if (!resp.ok) { container.innerHTML = '<div class="hf-search-empty">Search failed.</div>'; return; }
+    const data = await resp.json();
+    const models = data.models || [];
+
+    container.innerHTML = '';
+    if (!models.length) {
+      container.innerHTML = '<div class="hf-search-empty">No models found.</div>';
+      return;
+    }
+
+    models.forEach(m => {
+      const row = document.createElement('div');
+      row.className = 'hf-search-result';
+      row.setAttribute('tabindex', '0');
+      row.setAttribute('role', 'button');
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'hf-sr-name';
+      nameEl.textContent = m.id || '';
+
+      const meta = document.createElement('span');
+      meta.className = 'hf-sr-meta';
+
+      // Downloads badge
+      if (m.downloads > 0) {
+        const dl = document.createElement('span');
+        dl.textContent = m.downloads >= 1000 ? `${(m.downloads/1000).toFixed(0)}k↓` : `${m.downloads}↓`;
+        meta.appendChild(dl);
+      }
+
+      // Provider/type badges
+      if (m.has_imatrix) {
+        const b = document.createElement('span');
+        b.className = 'hf-sr-badge hf-sr-badge-imatrix';
+        b.textContent = 'imatrix';
+        meta.appendChild(b);
+      } else if ((m.quant_provider || '').toLowerCase() === 'unsloth') {
+        const b = document.createElement('span');
+        b.className = 'hf-sr-badge hf-sr-badge-ud';
+        b.textContent = 'UD';
+        meta.appendChild(b);
+      }
+      if (m.gated) {
+        const b = document.createElement('span');
+        b.className = 'hf-sr-badge hf-sr-badge-gated';
+        b.textContent = 'gated';
+        meta.appendChild(b);
+      }
+      const lowerTags = (m.tags || []).map(t => t.toLowerCase());
+      if (lowerTags.some(t => t.includes('moe'))) {
+        const b = document.createElement('span');
+        b.className = 'hf-sr-badge hf-sr-badge-moe';
+        b.textContent = 'MoE';
+        meta.appendChild(b);
+      }
+
+      row.appendChild(nameEl);
+      row.appendChild(meta);
+
+      const selectRepo = () => {
+        wizardState.model.hfRepo = m.id;
+        if (dom.hfRepoInput) dom.hfRepoInput.value = m.id;
+        if (m.param_b > 0) wizardState.model.paramB = m.param_b;
+        // Hide search results, load files
+        container.style.display = 'none';
+        // Clear quick-pick active state
+        dom.hfQuickpicks?.querySelectorAll('.hf-qp-btn').forEach(b => b.classList.remove('active'));
+        fetchHfFiles(m.id);
+        if (m.param_b > 0) triggerQuantAdvisor();
+        clearValidationError();
+      };
+      row.addEventListener('click', selectRepo);
+      row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectRepo(); } });
+
+      container.appendChild(row);
+    });
+  } catch (err) {
+    container.innerHTML = '<div class="hf-search-empty">Error: ' + (err.message || String(err)) + '</div>';
+  }
+}
+
 // ── HF file listing ───────────────────────────────────────────────────────────
 
 function triggerHfFileFetch() {
-  const repo = dom.hfRepoInput?.value.trim();
-  if (!repo) return;
-  wizardState.model.hfRepo = repo;
-  // Try to extract param count from repo name
-  const inferredP = inferParamBFromName(repo);
-  if (inferredP > 0) wizardState.model.paramB = inferredP;
-  fetchHfFiles(repo);
+  const input = dom.hfRepoInput?.value.trim();
+  if (!input) return;
+
+  // Detect: "user/repo" = direct repo ID → load files
+  //         anything else = keyword search
+  const isRepoId = input.includes('/') && !input.includes(' ');
+
+  if (isRepoId) {
+    wizardState.model.hfRepo = input;
+    // Hide search results if open
+    if (dom.hfSearchResults) dom.hfSearchResults.style.display = 'none';
+    // Clear quick-pick active
+    dom.hfQuickpicks?.querySelectorAll('.hf-qp-btn').forEach(b => b.classList.remove('active'));
+    const inferredP = inferParamBFromName(input);
+    if (inferredP > 0) wizardState.model.paramB = inferredP;
+    fetchHfFiles(input);
+  } else {
+    // Keyword search across all GGUF models
+    const sort = dom.hfSortSelect?.value || 'downloads';
+    showHfSearchResults({ query: input, sort, limit: 20 });
+  }
+}
+
+// Sort select triggers a re-search
+function bindHfSortSelect() {
+  dom.hfSortSelect?.addEventListener('change', () => {
+    const author = wizardState.hfBrowseAuthor;
+    const query  = dom.hfRepoInput?.value.trim() || '';
+    const sort   = dom.hfSortSelect.value;
+    if (author) {
+      browseHfAuthor(author);
+    } else if (query && !query.includes('/')) {
+      showHfSearchResults({ query, sort, limit: 20 });
+    }
+  });
 }
 
 async function fetchHfFiles(repo) {
@@ -913,20 +1090,65 @@ async function fetchHfFiles(repo) {
       }
       metaSpan.textContent = parts.join(' · ');
 
+      // Quant type and mmproj badges
+      const qt = file.quant_type || '';
+      if (qt === 'imatrix' || file.is_imatrix) {
+        const b = document.createElement('span');
+        b.className = 'hf-file-badge hf-file-badge-imatrix';
+        b.textContent = 'imatrix';
+        b.title = 'Importance-matrix calibrated — better quality at same bpw (mradermacher style)';
+        nameSpan.appendChild(b);
+      } else if (qt === 'unsloth_dynamic') {
+        const b = document.createElement('span');
+        b.className = 'hf-file-badge hf-file-badge-ud';
+        b.textContent = 'UD';
+        b.title = 'Unsloth Dynamic — mixed bits per layer, excellent quality/size tradeoff';
+        nameSpan.appendChild(b);
+      }
+      if (file.is_mmproj) {
+        const b = document.createElement('span');
+        b.className = 'hf-file-badge hf-file-badge-mmproj';
+        b.textContent = 'mmproj';
+        b.title = 'Vision projector — load alongside the main model for multimodal inference';
+        nameSpan.appendChild(b);
+      }
+
       item.appendChild(nameSpan);
       item.appendChild(metaSpan);
 
       const selectFile = () => {
-        dom.hfFileList.querySelectorAll('.hf-file-item.selected').forEach(el => el.classList.remove('selected'));
+        if (file.is_mmproj) {
+          // Selecting an mmproj file — store as companion, don't change main model
+          wizardState.model.mmprojPath = fname;
+          wizardState.model.mmprojHfFile = fname;
+          // Estimate mmproj size for VRAM
+          if (file.size) wizardState.arch.mmprojBytes = Number(file.size);
+          showToast('mmproj selected', 'success', fname.split('/').pop());
+          dom.hfFileList.querySelectorAll('.hf-file-item.selected[data-mmproj]').forEach(el => el.classList.remove('selected'));
+          item.classList.add('selected');
+          item.dataset.mmproj = '1';
+          scheduleVramUpdate();
+          return;
+        }
+
+        dom.hfFileList.querySelectorAll('.hf-file-item.selected:not([data-mmproj])').forEach(el => el.classList.remove('selected'));
         item.classList.add('selected');
         wizardState.model.hfFile = fname;
         wizardState.model.path = ''; // not a local path
         if (file.size) wizardState.model.modelBytes = Number(file.size);
+
         // Infer param count from filename if not yet known
         if (!wizardState.model.paramB) wizardState.model.paramB = inferParamBFromName(fname) || inferParamBFromName(repo);
+
+        // Detect MTP from filename
+        if (detectMtpFromName(fname) && !wizardState.arch.mtpDepth) {
+          wizardState.arch.mtpDepth = 1;
+        }
+
         updateSelectedModelDisplay();
         clearValidationError();
         if (wizardState.model.paramB > 0) triggerQuantAdvisor();
+        scheduleVramUpdate();
       };
       item.addEventListener('click', selectFile);
       item.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectFile(); } });
