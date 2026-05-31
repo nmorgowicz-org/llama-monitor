@@ -15,8 +15,16 @@ use anyhow::{Context, Result};
 use hf_hub::api::sync::ApiBuilder;
 use hf_hub::{Repo, RepoType};
 use std::path::Path;
+use std::sync::LazyLock;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
+
+static HF_HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+});
 
 // ── Search sort options ───────────────────────────────────────────────────────
 
@@ -56,7 +64,9 @@ pub enum QuantFileType {
     Unknown,
 }
 
+#[allow(dead_code)]
 impl QuantFileType {
+    #[allow(dead_code)]
     pub fn label(self) -> &'static str {
         match self {
             QuantFileType::Standard => "Standard",
@@ -67,6 +77,7 @@ impl QuantFileType {
         }
     }
 
+    #[allow(dead_code)]
     pub fn description(self) -> &'static str {
         match self {
             QuantFileType::Standard => "Standard llama.cpp quantization",
@@ -96,7 +107,9 @@ pub enum QuantProvider {
     Official,        // first-party / model author's own quants
 }
 
+#[allow(dead_code)]
 impl QuantProvider {
+    #[allow(dead_code)]
     pub fn label(&self) -> &'static str {
         match self {
             QuantProvider::Bartowski => "bartowski",
@@ -109,6 +122,7 @@ impl QuantProvider {
         }
     }
 
+    #[allow(dead_code)]
     pub fn description(&self) -> &'static str {
         match self {
             QuantProvider::Bartowski => {
@@ -213,6 +227,7 @@ pub struct HfGgufFile {
 
 /// High-level model info from HF (for the model info endpoint).
 #[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)]
 pub struct HfModelInfo {
     pub repo_id: String,
     pub gated: bool,
@@ -222,6 +237,7 @@ pub struct HfModelInfo {
 
 /// A single file in an HF repo.
 #[derive(Debug, Clone, serde::Serialize)]
+#[allow(dead_code)]
 pub struct HfFileInfo {
     pub r#type: String,
     pub path: String,
@@ -348,11 +364,11 @@ pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
 // ── Core API functions ────────────────────────────────────────────────────────
 
 /// Get basic model info for a repo (async, uses configured HF token).
+#[allow(dead_code)]
 pub async fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
     let token = hf_load_token();
-    let client = reqwest::Client::new();
     let url = format!("https://huggingface.co/api/models/{repo_id}");
-    let mut req = client.get(&url);
+    let mut req = HF_HTTP_CLIENT.get(&url);
     if let Some(ref tok) = token {
         req = req.bearer_auth(tok);
     }
@@ -391,6 +407,7 @@ pub async fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
 }
 
 /// List repo files; filters for GGUF if gguf_only=true.
+#[allow(dead_code)]
 pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileInfo>> {
     let api = ApiBuilder::new()
         .with_token(hf_load_token())
@@ -414,6 +431,7 @@ pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileIn
 }
 
 /// Get info for a single file in a repo.
+#[allow(dead_code)]
 pub fn hf_get_file_info(repo_id: &str, path: &str) -> Result<HfFileInfo> {
     let api = ApiBuilder::new()
         .with_token(hf_load_token())
@@ -437,6 +455,7 @@ pub fn hf_get_file_info(repo_id: &str, path: &str) -> Result<HfFileInfo> {
 
 /// Stream-download a file from HF with optional resume.
 /// Returns total bytes written.
+#[allow(dead_code)]
 pub async fn hf_download_file_stream(
     repo_id: &str,
     path: &str,
@@ -455,8 +474,7 @@ pub async fn hf_download_file_stream(
         anyhow::bail!("Failed to resolve HF URL for {path}");
     }
 
-    let client = reqwest::Client::new();
-    let mut req = client.get(&url);
+    let mut req = HF_HTTP_CLIENT.get(&url);
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
@@ -539,7 +557,6 @@ pub struct HfSearchParams {
 pub async fn hf_search_models(params: &HfSearchParams) -> Result<Vec<SimpleModelInfo>, String> {
     let limit = params.limit.clamp(1, 100);
     let token = hf_load_token();
-    let client = reqwest::Client::new();
 
     let mut url = reqwest::Url::parse("https://huggingface.co/api/models")
         .map_err(|e| format!("Invalid HF API URL: {e}"))?;
@@ -559,7 +576,7 @@ pub async fn hf_search_models(params: &HfSearchParams) -> Result<Vec<SimpleModel
         p.append_pair("filter", "gguf");
     }
 
-    let mut req = client.get(url);
+    let mut req = HF_HTTP_CLIENT.get(url);
     if let Some(ref tok) = token {
         req = req.bearer_auth(tok);
     }
@@ -735,9 +752,8 @@ async fn fetch_file_sizes(
     repo_id: &str,
     token: Option<&str>,
 ) -> Result<std::collections::HashMap<String, u64>> {
-    let client = reqwest::Client::new();
     let url = format!("https://huggingface.co/api/models/{repo_id}/tree/main");
-    let mut req = client.get(&url);
+    let mut req = HF_HTTP_CLIENT.get(&url);
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
@@ -930,6 +946,7 @@ pub fn infer_quant_label(filename: &str) -> String {
 // ── Token management ──────────────────────────────────────────────────────────
 
 /// Load HF token: 1) HUGGING_FACE_HUB_TOKEN env var  2) ~/.config/llama-monitor/hf-token.
+/// If the file is encrypted, decrypt_value handles it; otherwise treated as plaintext.
 pub fn hf_load_token() -> Option<String> {
     if let Ok(v) = std::env::var("HUGGING_FACE_HUB_TOKEN")
         && !v.trim().is_empty()
@@ -940,21 +957,23 @@ pub fn hf_load_token() -> Option<String> {
         let path = home.join(".config").join("llama-monitor").join("hf-token");
         std::fs::read_to_string(&path)
             .ok()
-            .map(|s| s.trim().to_string())
+            .map(|s| crate::config::decrypt_value(s.trim()))
             .filter(|s| !s.is_empty())
     })
 }
 
-/// Save HF token to ~/.config/llama-monitor/hf-token.
+/// Save HF token to ~/.config/llama-monitor/hf-token (encrypted if key available).
 pub fn hf_save_token(token: &str) -> Result<()> {
     let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
     let dir = home.join(".config").join("llama-monitor");
     std::fs::create_dir_all(&dir).context("Failed to create config dir")?;
-    std::fs::write(dir.join("hf-token"), token.trim()).context("Failed to write HF token")?;
+    let stored = crate::config::encrypt_value(token.trim());
+    std::fs::write(dir.join("hf-token"), &stored).context("Failed to write HF token")?;
     Ok(())
 }
 
 /// Mask a token for safe logging: first4****last4.
+#[allow(dead_code)]
 pub fn mask_token(token: &str) -> String {
     let t = token.trim();
     if t.len() <= 8 {

@@ -2480,3 +2480,22 @@
   font-weight: 500;
 }
 .hf-dlp-complete-box svg { color: #4ade80; }
+
+/* ── Light theme: HF download panel ───────────────────────────────────────── */
+
+[data-theme="light"] .hf-download-panel {
+  background: rgba(99,102,241,0.04);
+  border-color: rgba(99,102,241,0.18);
+}
+[data-theme="light"] .hf-dlp-dest-row { color: #475569; }
+[data-theme="light"] .hf-dlp-dest-path { color: #1e293b; }
+[data-theme="light"] .hf-dlp-warn {
+  background: rgba(234,179,8,0.08);
+  border-color: rgba(234,179,8,0.25);
+  color: #b8860b;
+}
+[data-theme="light"] .hf-dlp-progress-label { color: #475569; }
+[data-theme="light"] .hf-dlp-bar-wrap { background: rgba(0,0,0,0.06); }
+[data-theme="light"] .hf-dlp-stats { color: #64748b; }
+[data-theme="light"] .hf-dlp-complete-box { color: #15803d; }
+[data-theme="light"] .hf-dlp-complete-box svg { color: #16a34a; }

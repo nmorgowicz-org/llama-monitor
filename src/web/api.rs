@@ -5,10 +5,18 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use once_cell::sync::Lazy;
 use sha2::{Digest, Sha256};
 use warp::Filter;
 use warp::http::StatusCode;
 use warp::reject::Reject;
+
+static HF_REPO_RE: Lazy<regex::Regex> =
+    Lazy::new(|| regex::Regex::new(r"^[a-zA-Z0-9_-]+/[a-zA-Z0-9._-]+$").unwrap());
+
+fn validate_hf_repo_id(repo_id: &str) -> bool {
+    HF_REPO_RE.is_match(repo_id)
+}
 
 #[derive(Debug)]
 pub(crate) struct ApiError {
@@ -1652,7 +1660,101 @@ fn api_chat_template_upload(
         })
 }
 
-// 4) POST /api/vram/estimate
+// 4) POST /api/vram-estimate (architecture-aware breakdown)
+fn api_vram_estimate_breakdown(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "vram-estimate")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let model_path = body["model_path"].as_str().unwrap_or("").to_string();
+                let n_ctx = body["n_ctx"].as_u64().unwrap_or(4096);
+                let _gpu_layers = body["gpu_layers"].as_i64().unwrap_or(-1);
+                let parallel_slots = body["parallel_slots"].as_u64().unwrap_or(1) as u32;
+                let ubatch_size = body["ubatch_size"].as_u64().unwrap_or(2048) as u32;
+                let ctk = body["ctk"].as_str().unwrap_or("q8_0").to_string();
+                let ctv = body["ctv"].as_str().unwrap_or("q8_0").to_string();
+                let n_cpu_moe = body["n_cpu_moe"].as_i64().map(|v| v as i32).unwrap_or(0);
+                let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
+
+                if model_path.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        Box::new(warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "model_path is required"
+                        }))),
+                    );
+                }
+
+                let model_size_bytes = match std::fs::metadata(&model_path) {
+                    Ok(m) => m.len(),
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                            Box::new(warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Cannot stat model file: {e}")
+                            }))),
+                        );
+                    }
+                };
+
+                let arch = match crate::llama::gguf_meta::read_gguf_metadata(
+                    std::path::Path::new(&model_path),
+                ) {
+                    Ok(meta) => {
+                        let mm = meta.to_model_metadata();
+                        let param_b = meta.param_b().unwrap_or(0.0);
+                        mm.to_arch(&model_path, param_b)
+                    }
+                    Err(_) => crate::llama::vram_estimator::ModelArch::from_name_and_params(
+                        &model_path,
+                        (model_size_bytes as f64) / 1e9 / 4.85,
+                    ),
+                };
+
+                let breakdown = crate::llama::vram_estimator::full_estimate(
+                    model_size_bytes,
+                    &arch,
+                    n_ctx,
+                    &ctk,
+                    &ctv,
+                    parallel_slots,
+                    ubatch_size,
+                    n_cpu_moe,
+                    available_vram_bytes,
+                );
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Box::new(warp::reply::json(&serde_json::json!({
+                        "ok": true,
+                        "weights_bytes": breakdown.weights_bytes,
+                        "kv_cache_bytes": breakdown.kv_cache_bytes,
+                        "linear_attn_state_bytes": breakdown.linear_attn_state_bytes,
+                        "mmproj_bytes": breakdown.mmproj_bytes,
+                        "mtp_bytes": breakdown.mtp_bytes,
+                        "overhead_bytes": breakdown.overhead_bytes,
+                        "total_bytes": breakdown.total_bytes,
+                        "available_bytes": breakdown.available_bytes,
+                        "headroom_bytes": breakdown.headroom_bytes,
+                        "ram_bytes": breakdown.ram_bytes,
+                        "recommendation": serde_json::to_value(&breakdown.recommendation).unwrap_or(serde_json::Value::Null),
+                        "note": breakdown.note
+                    }))),
+                )
+            }
+        })
+}
+
+// 4b) POST /api/vram/estimate (legacy)
 fn api_vram_estimate(
     _state: AppState,
     app_config: Arc<AppConfig>,
@@ -2656,7 +2758,7 @@ fn api_hf_search(
     warp::path!("api" / "hf" / "search")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::hf_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -2748,7 +2850,7 @@ fn api_hf_files(
     warp::path!("api" / "hf" / "files")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::hf_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -2763,6 +2865,17 @@ fn api_hf_files(
                             "ok": false,
                             "error": "Missing 'repo_id' field"
                         })),
+                    ));
+                }
+                if !validate_hf_repo_id(&repo_id) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Invalid repo_id format. Expected: owner/repo"
+                            })),
+                            StatusCode::BAD_REQUEST,
+                        ),
                     ));
                 }
 
@@ -2959,7 +3072,7 @@ fn api_hf_token_put(
     warp::path!("api" / "hf" / "token")
         .and(warp::put())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::hf_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -3023,7 +3136,7 @@ fn api_hf_author_models(
     warp::path!("api" / "hf" / "author-models")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::hf_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -3079,7 +3192,7 @@ fn api_hf_download(
     warp::path!("api" / "hf" / "download")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json::<serde_json::Value>())
+        .and(super::hf_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             let state = state.clone();
@@ -3119,6 +3232,17 @@ fn api_hf_download(
                             "ok": false,
                             "error": "Missing 'repo_id' or 'file_path'"
                         })),
+                    ));
+                }
+                if !validate_hf_repo_id(&repo_id) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Invalid repo_id format. Expected: owner/repo"
+                            })),
+                            StatusCode::BAD_REQUEST,
+                        ),
                     ));
                 }
 
@@ -3439,6 +3563,7 @@ pub fn api_routes(
     let chat_template_fetch = api_chat_template_fetch(state.clone(), app_config.clone());
     let chat_template_upload = api_chat_template_upload(state.clone(), app_config.clone());
     let vram_estimate = api_vram_estimate(state.clone(), app_config.clone());
+    let vram_estimate_breakdown = api_vram_estimate_breakdown(state.clone(), app_config.clone());
     let models_download_start = api_models_download_start(state.clone(), app_config.clone());
     let models_download_status = api_models_download_status(state.clone(), app_config.clone());
     let models_download_cancel = api_models_download_cancel(state.clone(), app_config.clone());
@@ -3568,6 +3693,7 @@ pub fn api_routes(
         .or(chat_template_fetch)
         .or(chat_template_upload)
         .or(vram_estimate)
+        .or(vram_estimate_breakdown)
         .or(models_download_start)
         .or(models_download_status)
         .or(models_download_cancel)

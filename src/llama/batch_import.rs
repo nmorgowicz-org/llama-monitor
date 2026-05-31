@@ -22,7 +22,6 @@ pub fn import_launch_file(file: &str) -> Result<ImportResult, String> {
     let os = if ext == "bat" || ext == "cmd" || cfg!(target_os = "windows") {
         "windows"
     } else {
-        // Default to unix-style; caller can override via OS hint if needed.
         "linux"
     };
 
@@ -41,7 +40,7 @@ pub fn parse_launch_script(content: &str, os: &str) -> Result<ImportResult, Stri
         return Err("Could not detect llama-server binary path in script".into());
     }
 
-    let preset = build_preset_from_args(&binary_path, &args);
+    let preset = build_preset_from_args(&args);
     Ok(ImportResult { preset, warnings })
 }
 
@@ -120,6 +119,7 @@ fn parse_unix_script(content: &str) -> (String, Vec<String>, Vec<String>) {
     let normalized = content.replace("\\\n", " ").replace("\\\r\n", " ");
 
     let lines: Vec<&str> = normalized.lines().collect();
+
     let command_line: &str = lines
         .iter()
         .find(|l| {
@@ -146,7 +146,74 @@ fn parse_unix_script(content: &str) -> (String, Vec<String>, Vec<String>) {
         warnings.push("Binary path may not be llama-server; verify manually.".to_string());
     }
 
+    for line in &lines {
+        let line = line.trim();
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        if let Some(env) = parse_gpu_env_hint(line) {
+            warnings.push(env);
+        }
+    }
+
     (binary_path, args, warnings)
+}
+
+fn parse_gpu_env_hint(line: &str) -> Option<String> {
+    let line = line.trim();
+    if line.starts_with('#') {
+        return None;
+    }
+    if let Some((var, val)) = extract_env_var(line) {
+        match var {
+            "CUDA_VISIBLE_DEVICES" => {
+                return Some(format!(
+                    "CUDA_VISIBLE_DEVICES={val} — only these GPU(s) will be used"
+                ));
+            }
+            "HSA_OVERRIDE_GFX_VERSION" => {
+                return Some(format!(
+                    "HSA_OVERRIDE_GFX_VERSION={val} — ROCm GPU override in effect"
+                ));
+            }
+            "ROCR_VISIBLE_DEVICES" => {
+                return Some(format!(
+                    "ROCR_VISIBLE_DEVICES={val} — ROCm device selection"
+                ));
+            }
+            "GGML_CUDA_FORCE_MMQ"
+            | "GGML_CUDA_FA_DISABLE"
+            | "GGML_HIP_BLAS_HANDLE"
+            | "ZES_ENABLE_SYSMAN"
+            | "SYCL_DEVICE_FILTER" => {
+                return Some(format!("GPU env: {var}={val}"));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn extract_env_var(line: &str) -> Option<(&str, &str)> {
+    let line = line.trim();
+    if line.starts_with('#') || line.starts_with("//") {
+        return None;
+    }
+    let rest = if let Some(s) = line.strip_prefix("export ") {
+        s
+    } else if line.starts_with("set ") {
+        return None;
+    } else {
+        line
+    };
+    let rest = rest.trim();
+    let (var, val) = rest.split_once('=')?;
+    let var = var.trim();
+    let val = val.trim().trim_matches('"').trim_matches('\'');
+    if var.is_empty() || val.is_empty() || !var.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return None;
+    }
+    Some((var, val))
 }
 
 fn shlex_like_split(line: &str) -> Vec<String> {
@@ -180,7 +247,7 @@ fn shlex_like_split(line: &str) -> Vec<String> {
     tokens
 }
 
-fn build_preset_from_args(_binary_path: &str, args: &[String]) -> ModelPreset {
+fn build_preset_from_args(args: &[String]) -> ModelPreset {
     let mut model_path = String::new();
     let mut context_size: u64 = 4096;
     let mut gpu_layers: Option<i32> = None;
@@ -192,7 +259,6 @@ fn build_preset_from_args(_binary_path: &str, args: &[String]) -> ModelPreset {
     let mut min_p: Option<f64> = None;
     let mut repeat_penalty: Option<f64> = None;
     let mut n_cpu_moe: Option<i32> = None;
-    // Spec V2
     let mut spec_type: Option<String> = None;
     let mut spec_default = false;
     let draft_model = String::new();
@@ -218,15 +284,12 @@ fn build_preset_from_args(_binary_path: &str, args: &[String]) -> ModelPreset {
     let mut spec_ngram_map_k4v_size_n: Option<u32> = None;
     let mut spec_ngram_map_k4v_size_m: Option<u32> = None;
     let mut spec_ngram_map_k4v_min_hits: Option<u32> = None;
-    // KV cache
     let mut kv_unified: Option<bool> = None;
     let mut cache_idle_slots: Option<bool> = None;
-    // Fit
     let mut fit_enabled: Option<bool> = None;
     let mut fit_ctx: Option<u32> = None;
     let mut fit_target: Option<String> = None;
     let mut fit_print: Option<bool> = None;
-    // Misc
     let mut ignore_eos = false;
     let mut prio: Option<i32> = None;
     let mut prio_batch: Option<i32> = None;
@@ -598,7 +661,6 @@ fn build_preset_from_args(_binary_path: &str, args: &[String]) -> ModelPreset {
                 }
             }
             _ => {
-                // Unknown or unrecognized flags go into extra_args.
                 if i + 1 < args.len() && args[i + 1].chars().next().is_some_and(|c| c != '-') {
                     extra_args.push_str(arg);
                     extra_args.push(' ');

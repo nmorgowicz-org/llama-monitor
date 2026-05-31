@@ -74,13 +74,12 @@ pub fn start_download(
     target_dir: &Path,
     hf_token: Option<String>,
 ) -> Result<String> {
-    let download_id = format!(
-        "md-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-    );
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let rand_part: u32 = rand::random();
+    let download_id = format!("md-{}-{:x}", ts, rand_part);
 
     let repo_id = repo_id.to_string();
     let file_path = file_path.to_string();
@@ -105,7 +104,9 @@ pub fn start_download(
     }));
 
     {
-        let mut mgr = MODEL_DOWNLOAD_MANAGER.lock().unwrap();
+        let mut mgr = MODEL_DOWNLOAD_MANAGER
+            .lock()
+            .expect("MODEL_DOWNLOAD_MANAGER lock poisoned");
         mgr.tasks.insert(download_id.clone(), task.clone());
     }
 
@@ -161,7 +162,10 @@ async fn run_download(
     let resume_from = local_path.metadata().ok().map(|m| m.len()).unwrap_or(0);
 
     // Build the HTTP request.
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
     let mut req = client.get(&url);
     if let Some(ref tok) = hf_token {
         req = req.bearer_auth(tok);
@@ -253,24 +257,33 @@ async fn run_download(
         }
     }
 
-    let mut t = task.lock().unwrap();
+    let mut t = task.lock().expect("DownloadTask lock poisoned");
     t.status = "completed".into();
     t.message = "Download completed.".into();
 }
 
 fn set_failed(task: &Arc<Mutex<DownloadTask>>, msg: String) {
-    let mut t = task.lock().unwrap();
+    let mut t = task.lock().expect("DownloadTask lock poisoned");
     // Don't overwrite a cancel that raced us here.
     if t.status != "cancelled" {
         t.status = "failed".into();
         t.message = msg;
     }
+
+    // Rename partial file to .part so it is not mistaken for a complete download.
+    let path = &t.local_path;
+    if path.exists() {
+        let part_path = path.with_extension("part");
+        let _ = std::fs::rename(path, &part_path);
+    }
 }
 
 pub fn get_download_status(download_id: &str) -> Option<DownloadStatus> {
-    let mgr = MODEL_DOWNLOAD_MANAGER.lock().unwrap();
+    let mgr = MODEL_DOWNLOAD_MANAGER
+        .lock()
+        .expect("MODEL_DOWNLOAD_MANAGER lock poisoned");
     let task = mgr.tasks.get(download_id)?;
-    let t = task.lock().unwrap();
+    let t = task.lock().expect("DownloadTask lock poisoned");
 
     let bytes = t.bytes_downloaded.load(Ordering::Relaxed);
     let total = t.total_bytes.load(Ordering::Relaxed);
@@ -303,9 +316,11 @@ pub fn get_download_status(download_id: &str) -> Option<DownloadStatus> {
 /// Mark a download as cancelled and signal the streaming loop to stop.
 /// Returns false if the download is not found or already finished.
 pub fn cancel_download(download_id: &str) -> bool {
-    let mgr = MODEL_DOWNLOAD_MANAGER.lock().unwrap();
+    let mgr = MODEL_DOWNLOAD_MANAGER
+        .lock()
+        .expect("MODEL_DOWNLOAD_MANAGER lock poisoned");
     if let Some(task) = mgr.tasks.get(download_id) {
-        let mut t = task.lock().unwrap();
+        let mut t = task.lock().expect("DownloadTask lock poisoned");
         if t.status == "running" {
             t.status = "cancelled".into();
             t.message = "Cancelled by user.".into();

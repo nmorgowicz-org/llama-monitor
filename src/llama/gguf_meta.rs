@@ -16,19 +16,59 @@ use std::path::Path;
 
 const GGUF_MAGIC: &[u8; 4] = b"GGUF";
 
-const TYPE_UINT8: u32 = 0;
-const TYPE_INT8: u32 = 1;
-const TYPE_UINT16: u32 = 2;
-const TYPE_INT16: u32 = 3;
-const TYPE_UINT32: u32 = 4;
-const TYPE_INT32: u32 = 5;
-const TYPE_FLOAT32: u32 = 6;
-const TYPE_BOOL: u32 = 7;
-const TYPE_STRING: u32 = 8;
-const TYPE_ARRAY: u32 = 9;
-const TYPE_UINT64: u32 = 10;
-const TYPE_INT64: u32 = 11;
-const TYPE_FLOAT64: u32 = 12;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+enum GgufType {
+    Uint8 = 0,
+    Int8 = 1,
+    Uint16 = 2,
+    Int16 = 3,
+    Uint32 = 4,
+    Int32 = 5,
+    Float32 = 6,
+    Bool = 7,
+    String = 8,
+    Array = 9,
+    Uint64 = 10,
+    Int64 = 11,
+    Float64 = 12,
+}
+
+impl GgufType {
+    fn from_u32(v: u32) -> Option<Self> {
+        match v {
+            0 => Some(Self::Uint8),
+            1 => Some(Self::Int8),
+            2 => Some(Self::Uint16),
+            3 => Some(Self::Int16),
+            4 => Some(Self::Uint32),
+            5 => Some(Self::Int32),
+            6 => Some(Self::Float32),
+            7 => Some(Self::Bool),
+            8 => Some(Self::String),
+            9 => Some(Self::Array),
+            10 => Some(Self::Uint64),
+            11 => Some(Self::Int64),
+            12 => Some(Self::Float64),
+            _ => None,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn as_u32(self) -> u32 {
+        self as u32
+    }
+
+    fn fixed_size(self) -> Option<u64> {
+        match self {
+            Self::Uint8 | Self::Int8 | Self::Bool => Some(1),
+            Self::Uint16 | Self::Int16 => Some(2),
+            Self::Uint32 | Self::Int32 | Self::Float32 => Some(4),
+            Self::Uint64 | Self::Int64 | Self::Float64 => Some(8),
+            Self::String | Self::Array => None,
+        }
+    }
+}
 
 // ── Public output type ────────────────────────────────────────────────────────
 
@@ -292,35 +332,35 @@ fn read_str<R: Read>(r: &mut R, version: u32) -> Result<String, String> {
 /// Read a single GGUF value of the given type, returning a `KvValue`.
 /// Fixed-size non-architecture types are consumed and discarded (returned as `Other`).
 fn read_value<R: Read + Seek>(r: &mut R, vtype: u32, version: u32) -> Result<KvValue, String> {
-    match vtype {
-        TYPE_UINT8 => Ok(KvValue::U32(read_u8(r)? as u32)),
-        TYPE_INT8 => Ok(KvValue::I32(read_u8(r)? as i8 as i32)),
-        TYPE_UINT16 => Ok(KvValue::U32(read_u16(r)? as u32)),
-        TYPE_INT16 => Ok(KvValue::I32(read_u16(r)? as i16 as i32)),
-        TYPE_UINT32 => Ok(KvValue::U32(read_u32(r)?)),
-        TYPE_INT32 => Ok(KvValue::I32(read_u32(r)? as i32)),
-        TYPE_FLOAT32 => {
+    match GgufType::from_u32(vtype) {
+        Some(GgufType::Uint8) => Ok(KvValue::U32(read_u8(r)? as u32)),
+        Some(GgufType::Int8) => Ok(KvValue::I32(read_u8(r)? as i8 as i32)),
+        Some(GgufType::Uint16) => Ok(KvValue::U32(read_u16(r)? as u32)),
+        Some(GgufType::Int16) => Ok(KvValue::I32(read_u16(r)? as i16 as i32)),
+        Some(GgufType::Uint32) => Ok(KvValue::U32(read_u32(r)?)),
+        Some(GgufType::Int32) => Ok(KvValue::I32(read_u32(r)? as i32)),
+        Some(GgufType::Float32) => {
             r.seek(SeekFrom::Current(4))
                 .map_err(|e| format!("seek f32: {e}"))?;
             Ok(KvValue::Other)
         }
-        TYPE_BOOL => {
+        Some(GgufType::Bool) => {
             let _ = read_u8(r)?;
             Ok(KvValue::Other)
         }
-        TYPE_STRING => Ok(KvValue::Str(read_str(r, version)?)),
-        TYPE_UINT64 => Ok(KvValue::U64(read_u64(r)?)),
-        TYPE_INT64 => Ok(KvValue::I64(read_u64(r)? as i64)),
-        TYPE_FLOAT64 => {
+        Some(GgufType::String) => Ok(KvValue::Str(read_str(r, version)?)),
+        Some(GgufType::Uint64) => Ok(KvValue::U64(read_u64(r)?)),
+        Some(GgufType::Int64) => Ok(KvValue::I64(read_u64(r)? as i64)),
+        Some(GgufType::Float64) => {
             r.seek(SeekFrom::Current(8))
                 .map_err(|e| format!("seek f64: {e}"))?;
             Ok(KvValue::Other)
         }
-        TYPE_ARRAY => {
+        Some(GgufType::Array) => {
             skip_array(r, version)?;
             Ok(KvValue::Other)
         }
-        other => Err(format!("Unknown GGUF value type {other}")),
+        None => Err(format!("Unknown GGUF value type {vtype}")),
     }
 }
 
@@ -334,13 +374,7 @@ fn skip_array<R: Read + Seek>(r: &mut R, version: u32) -> Result<(), String> {
     };
 
     // For fixed-size element types, a single seek is much faster than iterating.
-    let fixed_size: Option<u64> = match elem_type {
-        TYPE_UINT8 | TYPE_INT8 | TYPE_BOOL => Some(1),
-        TYPE_UINT16 | TYPE_INT16 => Some(2),
-        TYPE_UINT32 | TYPE_INT32 | TYPE_FLOAT32 => Some(4),
-        TYPE_UINT64 | TYPE_INT64 | TYPE_FLOAT64 => Some(8),
-        _ => None,
-    };
+    let fixed_size: Option<u64> = GgufType::from_u32(elem_type).and_then(GgufType::fixed_size);
 
     if let Some(stride) = fixed_size {
         let total = n.saturating_mul(stride);
@@ -357,26 +391,26 @@ fn skip_array<R: Read + Seek>(r: &mut R, version: u32) -> Result<(), String> {
 
 /// Skip a single value of `vtype` without returning it.
 fn skip_value_type<R: Read + Seek>(r: &mut R, vtype: u32, version: u32) -> Result<(), String> {
-    match vtype {
-        TYPE_UINT8 | TYPE_INT8 | TYPE_BOOL => {
+    match GgufType::from_u32(vtype) {
+        Some(GgufType::Uint8 | GgufType::Int8 | GgufType::Bool) => {
             let _ = read_u8(r)?;
         }
-        TYPE_UINT16 | TYPE_INT16 => {
+        Some(GgufType::Uint16 | GgufType::Int16) => {
             let _ = read_u16(r)?;
         }
-        TYPE_UINT32 | TYPE_INT32 | TYPE_FLOAT32 => {
+        Some(GgufType::Uint32 | GgufType::Int32 | GgufType::Float32) => {
             r.seek(SeekFrom::Current(4))
                 .map_err(|e| format!("skip: {e}"))?;
         }
-        TYPE_UINT64 | TYPE_INT64 | TYPE_FLOAT64 => {
+        Some(GgufType::Uint64 | GgufType::Int64 | GgufType::Float64) => {
             r.seek(SeekFrom::Current(8))
                 .map_err(|e| format!("skip: {e}"))?;
         }
-        TYPE_STRING => {
+        Some(GgufType::String) => {
             let _ = read_str(r, version)?;
         }
-        TYPE_ARRAY => skip_array(r, version)?,
-        other => return Err(format!("Unknown type to skip: {other}")),
+        Some(GgufType::Array) => skip_array(r, version)?,
+        None => return Err(format!("Unknown type to skip: {vtype}")),
     }
     Ok(())
 }
@@ -390,28 +424,25 @@ mod tests {
     /// Build a minimal GGUF v3 byte stream in memory for testing.
     fn make_gguf(kv: &[(&str, KvEntry)]) -> Vec<u8> {
         let mut out = Vec::new();
-        // Magic + version
         out.extend_from_slice(b"GGUF");
-        out.extend_from_slice(&3u32.to_le_bytes()); // version 3
-        out.extend_from_slice(&0u64.to_le_bytes()); // tensor_count = 0
+        out.extend_from_slice(&3u32.to_le_bytes());
+        out.extend_from_slice(&0u64.to_le_bytes());
         out.extend_from_slice(&(kv.len() as u64).to_le_bytes());
 
         for (key, entry) in kv {
-            // key string (u64 len + bytes)
             out.extend_from_slice(&(key.len() as u64).to_le_bytes());
             out.extend_from_slice(key.as_bytes());
-            // value type + value
             match entry {
                 KvEntry::U32(v) => {
-                    out.extend_from_slice(&TYPE_UINT32.to_le_bytes());
+                    out.extend_from_slice(&GgufType::Uint32.as_u32().to_le_bytes());
                     out.extend_from_slice(&v.to_le_bytes());
                 }
                 KvEntry::U64(v) => {
-                    out.extend_from_slice(&TYPE_UINT64.to_le_bytes());
+                    out.extend_from_slice(&GgufType::Uint64.as_u32().to_le_bytes());
                     out.extend_from_slice(&v.to_le_bytes());
                 }
                 KvEntry::Str(s) => {
-                    out.extend_from_slice(&TYPE_STRING.to_le_bytes());
+                    out.extend_from_slice(&GgufType::String.as_u32().to_le_bytes());
                     out.extend_from_slice(&(s.len() as u64).to_le_bytes());
                     out.extend_from_slice(s.as_bytes());
                 }
@@ -427,69 +458,9 @@ mod tests {
     }
 
     fn read_from_bytes(bytes: &[u8]) -> Result<GgufMetadata, String> {
-        use std::io::Cursor;
-        struct RwCursor(Cursor<Vec<u8>>);
-        impl Read for RwCursor {
-            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-                self.0.read(buf)
-            }
-        }
-        impl Seek for RwCursor {
-            fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-                self.0.seek(pos)
-            }
-        }
-
-        let mut r = RwCursor(Cursor::new(bytes.to_vec()));
-        // Re-implement entry point over a Cursor for testing
-        let mut magic = [0u8; 4];
-        r.read_exact(&mut magic).unwrap();
-        assert_eq!(&magic, b"GGUF");
-        let version = read_u32(&mut r)?;
-        let (_tc, kv_count) = (read_u64(&mut r)?, read_u64(&mut r)?);
-
-        let mut kv: HashMap<String, KvValue> = HashMap::new();
-        for _ in 0..kv_count {
-            let key = read_str(&mut r, version)?;
-            let vtype = read_u32(&mut r)?;
-            let value = read_value(&mut r, vtype, version)?;
-            kv.insert(key, value);
-        }
-
-        let arch: Option<String> = kv
-            .get("general.architecture")
-            .and_then(KvValue::as_str)
-            .map(|s| s.to_ascii_lowercase());
-        let mut meta = GgufMetadata::default();
-        meta.architecture = arch.clone();
-        meta.param_count = kv.get("general.parameter_count").and_then(KvValue::as_u64);
-        if let Some(a) = arch.as_deref() {
-            meta.block_count = kv
-                .get(&format!("{a}.block_count"))
-                .and_then(KvValue::as_u32);
-            meta.head_count = kv
-                .get(&format!("{a}.attention.head_count"))
-                .and_then(KvValue::as_u32);
-            meta.head_count_kv = kv
-                .get(&format!("{a}.attention.head_count_kv"))
-                .and_then(KvValue::as_u32);
-            meta.key_length = kv
-                .get(&format!("{a}.attention.key_length"))
-                .and_then(KvValue::as_u32);
-            meta.context_length = kv
-                .get(&format!("{a}.context_length"))
-                .and_then(KvValue::as_u32);
-            meta.embedding_length = kv
-                .get(&format!("{a}.embedding_length"))
-                .and_then(KvValue::as_u32);
-            meta.expert_count = kv
-                .get(&format!("{a}.expert_count"))
-                .and_then(KvValue::as_u32);
-            meta.expert_used_count = kv
-                .get(&format!("{a}.expert_used_count"))
-                .and_then(KvValue::as_u32);
-        }
-        Ok(meta)
+        let tmp = tempfile::NamedTempFile::new().map_err(|e| format!("tempfile: {e}"))?;
+        std::fs::write(tmp.path(), bytes).map_err(|e| format!("write: {e}"))?;
+        read_gguf_metadata(tmp.path())
     }
 
     #[test]
@@ -545,19 +516,14 @@ mod tests {
     #[test]
     fn rejects_non_gguf_file() {
         let mut bytes = make_gguf(&[]);
-        bytes[0] = b'X'; // corrupt magic
-        // Can't use read_from_bytes since magic check is in the outer fn; test via tempfile
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(tmp.path(), &bytes).unwrap();
-        let result = read_gguf_metadata(tmp.path());
+        bytes[0] = b'X';
+        let result = read_from_bytes(&bytes);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not a GGUF"));
     }
 
     #[test]
     fn gguf_arch_drives_hybrid_heuristic_for_renamed_model() {
-        // Simulate "Pantheon-Reasoning-27B" whose GGUF says qwen3_6.
-        // to_arch() must select hybrid-DeltaNet heuristic, not standard_heuristic.
         let bytes = make_gguf(&[
             ("general.architecture", KvEntry::Str("qwen3_6".into())),
             ("qwen3_6.block_count", KvEntry::U32(64)),

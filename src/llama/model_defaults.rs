@@ -50,8 +50,34 @@ pub fn get_model_defaults(name_or_repo: &str, _size_bytes: u64, tags: &[String])
 
     let mut d = ModelDefaults::default();
 
+    // Qwen3.6 family: Unsloth-recommended defaults.
+    // https://docs.unsloth.ai/docs/quick-connects/qwen-3-6
+    if (lower.contains("qwen3.6") || lower.contains("qwen36"))
+        && (lower.contains("27b") || lower.contains("35b") || lower.contains("a3b"))
+    {
+        d.temperature = 0.7;
+        d.top_p = 0.8;
+        d.top_k = 20;
+        d.min_p = 0.0;
+        d.repeat_penalty = 1.5;
+    }
+    // Gemma 4 family: Unsloth-recommended defaults.
+    // https://docs.unsloth.ai/docs/quick-connects/gemma-4
+    else if (lower.contains("gemma-4") || lower.contains("gemma4"))
+        && (lower.contains("2b")
+            || lower.contains("4b")
+            || lower.contains("15b")
+            || lower.contains("26b")
+            || lower.contains("31b"))
+    {
+        d.temperature = 1.0;
+        d.top_p = 0.95;
+        d.top_k = 64;
+        d.min_p = 0.0;
+        d.repeat_penalty = 1.0;
+    }
     // Family-specific tweaks (applied first)
-    if lower.contains("llama") || lower.contains("meta-llama") {
+    else if lower.contains("llama") || lower.contains("meta-llama") {
         d.temperature = 0.7;
         d.top_p = 0.9;
         d.top_k = 40;
@@ -83,13 +109,10 @@ pub fn get_model_defaults(name_or_repo: &str, _size_bytes: u64, tags: &[String])
         d.repeat_penalty = 1.0;
     }
 
-    // Code models: lower temperature for deterministic output (applied after family tweaks).
-    if is_code {
-        d.temperature = 0.2;
-        d.top_p = 0.9;
-        d.top_k = 20;
-        d.min_p = 0.05;
-        d.repeat_penalty = 1.1;
+    // Code models: modestly lower temperature (after family tweaks),
+    // but no longer overriding to 0.2 for all code models.
+    if is_code && d.temperature > 0.4 {
+        d.temperature = 0.3;
     }
 
     // MoE: slightly higher max_tokens.
@@ -121,6 +144,62 @@ mod tests {
             &["code".into()],
         );
         assert!(d.temperature <= 0.4);
+        assert!(d.temperature > 0.2);
+    }
+
+    #[test]
+    fn qwen36_27b_uses_unsloth_defaults() {
+        // Source: https://docs.unsloth.ai/docs/quick-connects/qwen-3-6
+        let d = get_model_defaults("Qwen3.6-27B-Instruct-Q8_0.gguf", 20_000_000_000, &[]);
+        assert_eq!(d.temperature, 0.7);
+        assert_eq!(d.top_p, 0.8);
+        assert_eq!(d.top_k, 20);
+        assert_eq!(d.min_p, 0.0);
+        assert_eq!(d.repeat_penalty, 1.5);
+    }
+
+    #[test]
+    fn qwen36_35b_a3b_uses_unsloth_defaults() {
+        // Source: https://docs.unsloth.ai/docs/quick-connects/qwen-3-6
+        let d = get_model_defaults("Qwen3.6-35B-A3B-Instruct-Q8_0.gguf", 25_000_000_000, &[]);
+        assert_eq!(d.temperature, 0.7);
+        assert_eq!(d.top_p, 0.8);
+        assert_eq!(d.top_k, 20);
+        assert_eq!(d.min_p, 0.0);
+        assert_eq!(d.repeat_penalty, 1.5);
+    }
+
+    #[test]
+    fn gemma4_e2b_uses_unsloth_defaults() {
+        // Source: https://docs.unsloth.ai/docs/quick-connects/gemma-4
+        let d = get_model_defaults("gemma-4-2b-it-Q8_0.gguf", 2_000_000_000, &[]);
+        assert_eq!(d.temperature, 1.0);
+        assert_eq!(d.top_p, 0.95);
+        assert_eq!(d.top_k, 64);
+        assert_eq!(d.min_p, 0.0);
+        assert_eq!(d.repeat_penalty, 1.0);
+    }
+
+    #[test]
+    fn gemma4_31b_uses_unsloth_defaults() {
+        // Source: https://docs.unsloth.ai/docs/quick-connects/gemma-4
+        let d = get_model_defaults("gemma-4-31b-it-Q8_0.gguf", 20_000_000_000, &[]);
+        assert_eq!(d.temperature, 1.0);
+        assert_eq!(d.top_p, 0.95);
+        assert_eq!(d.top_k, 64);
+        assert_eq!(d.min_p, 0.0);
+        assert_eq!(d.repeat_penalty, 1.0);
+    }
+
+    #[test]
+    fn gemma4_26b_a4b_uses_unsloth_defaults() {
+        // Source: https://docs.unsloth.ai/docs/quick-connects/gemma-4
+        let d = get_model_defaults("gemma-4-26b-a4b-it-Q8_0.gguf", 18_000_000_000, &[]);
+        assert_eq!(d.temperature, 1.0);
+        assert_eq!(d.top_p, 0.95);
+        assert_eq!(d.top_k, 64);
+        assert_eq!(d.min_p, 0.0);
+        assert_eq!(d.repeat_penalty, 1.0);
     }
 
     #[test]

@@ -280,6 +280,17 @@ pub fn safe_json_body<T: serde::de::DeserializeOwned>()
         })
 }
 
+/// Like safe_json_body but with a 256 KB limit, used for HF endpoints.
+pub fn hf_json_body<T: serde::de::DeserializeOwned>()
+-> impl Filter<Extract = (T,), Error = warp::Rejection> + Clone {
+    warp::body::content_length_limit(256 * 1024)
+        .and(warp::body::bytes())
+        .and_then(move |body: bytes::Bytes| async move {
+            let body = body.as_ref();
+            serde_json::from_slice::<T>(body).map_err(|_| warp::reject::custom(JsonParseError))
+        })
+}
+
 use base64::Engine;
 use once_cell::sync::Lazy;
 static BASE64: Lazy<base64::engine::GeneralPurpose> =

@@ -1260,21 +1260,35 @@ fn find_min_cpu_moe_to_fit_weights(
     available_vram_bytes: u64,
     ubatch_size: u32,
 ) -> i32 {
-    // We need at least 20% headroom after weights for KV cache.
     let target = (available_vram_bytes * 80 / 100).saturating_sub(
         gpu_overhead_bytes(ubatch_size)
             + arch.mmproj_bytes
             + mtp_overhead_bytes(model_size_bytes, arch.mtp_depth),
     );
-    let mut n_cpu = 0i32;
-    while n_cpu < arch.n_experts as i32 {
-        let (vram, _) = moe_weight_split(model_size_bytes, arch, n_cpu);
-        if vram <= target {
-            break;
-        }
-        n_cpu += 1;
+
+    let max_cpu = arch.n_experts as i32;
+
+    // Binary search: find the smallest n_cpu_moe where vram fits.
+    let mut lo: i32 = 0;
+    let mut hi: i32 = max_cpu;
+
+    // If even with all experts on CPU it doesn't fit, return max.
+    let (vram_all_cpu, _) = moe_weight_split(model_size_bytes, arch, hi);
+    if vram_all_cpu > target {
+        return hi;
     }
-    n_cpu
+
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let (vram, _) = moe_weight_split(model_size_bytes, arch, mid);
+        if vram <= target {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+
+    lo
 }
 
 #[allow(clippy::too_many_arguments)]
