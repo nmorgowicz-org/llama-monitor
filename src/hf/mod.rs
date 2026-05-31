@@ -620,7 +620,7 @@ fn infer_param_b_from_name(name: &str) -> f64 {
                 None
             }
         })
-        .filter(|&v| v >= 0.5 && v <= 2000.0)
+        .filter(|&v| (0.5..=2000.0).contains(&v))
         .collect();
     matches.into_iter().fold(0.0_f64, f64::max)
 }

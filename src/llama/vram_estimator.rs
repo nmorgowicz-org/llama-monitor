@@ -1,13 +1,13 @@
-/// Architecture-aware VRAM estimator for llama-server configurations.
-///
-/// Handles:
-/// - Standard full-attention (Llama, Mistral, Qwen, …)
-/// - Sliding-window / alternating-attention (Gemma 3/4)
-/// - MoE expert offloading (Mixtral, Qwen-MoE, DeepSeek, …)
-/// - Multi-Token Prediction heads (DeepSeek-R1 style)
-/// - Vision projector (mmproj) VRAM
-/// - Pre-download quant comparison table
-/// - Auto-size recommendation for a given use case
+//! Architecture-aware VRAM estimator for llama-server configurations.
+//!
+//! Handles:
+//! - Standard full-attention (Llama, Mistral, Qwen, …)
+//! - Sliding-window / alternating-attention (Gemma 3/4)
+//! - MoE expert offloading (Mixtral, Qwen-MoE, DeepSeek, …)
+//! - Multi-Token Prediction heads (DeepSeek-R1 style)
+//! - Vision projector (mmproj) VRAM
+//! - Pre-download quant comparison table
+//! - Auto-size recommendation for a given use case
 
 // ── Quant table ───────────────────────────────────────────────────────────────
 
@@ -43,8 +43,9 @@ pub enum QuantQuality {
 }
 
 /// All supported quantization levels, from best to most compressed.
+#[allow(dead_code)]
 pub fn all_quants() -> &'static [QuantInfo] {
-    &QUANT_TABLE
+    QUANT_TABLE
 }
 
 /// Look up a quant by name (case-insensitive).
@@ -488,9 +489,7 @@ impl ModelArch {
                 512 // extremely sparse (Qwen3-Coder-Next style)
             } else if total_b > 100.0 {
                 128
-            } else if total_b > 50.0 {
-                64
-            } else if total_b > 20.0 {
+            } else if total_b > 50.0 || total_b > 20.0 {
                 64
             } else {
                 8 // Mixtral style
@@ -529,7 +528,7 @@ impl ModelArch {
                                 .rfind(|c: char| !c.is_ascii_digit() && c != '.')
                                 .map(|p| p + 1)
                                 .unwrap_or(0);
-                            before[num_start..bi].parse::<f64>().ok().map(|v| v)
+                            before[num_start..bi].parse::<f64>().ok()
                         });
                         if let Some(total) = total_match {
                             return Some((total, active));
@@ -552,10 +551,8 @@ impl ModelArch {
             (28, 4, 128) // Qwen2.5-3B, Phi-3-mini style
         } else if param_b < 10.0 {
             (32, 8, 128) // Llama-3.1-8B, Mistral-7B, Qwen2.5-7B
-        } else if param_b < 18.0 {
-            (40, 8, 128) // Llama-2-13B, Qwen2.5-14B range
         } else if param_b < 25.0 {
-            (40, 8, 128) // Mistral-22B range
+            (40, 8, 128) // Llama-2-13B, Qwen2.5-14B, Mistral-22B range
         } else if param_b < 35.0 {
             // Qwen3-30B-A3B: 48 layers, 4 KV heads (GQA). Confirmed from HF.
             // Note: Qwen3-30B-A3B is MoE (128 experts, 8 active) — handled by MoE suffix parsing.
@@ -565,10 +562,8 @@ impl ModelArch {
             // Use Llama-70B as reference for the 70B range.
             // Confirmed from meta-llama/Llama-3.3-70B-Instruct and Qwen3 family docs.
             (80, 8, 128) // Llama-3.1/3.3-70B, Qwen2.5-72B
-        } else if param_b < 150.0 {
-            (94, 4, 128) // Qwen3-235B-A22B range; 4 KV heads confirmed from HF card
         } else {
-            (94, 4, 128) // Very large MoE models — approximate
+            (94, 4, 128) // Qwen3-235B-A22B+; 4 KV heads confirmed from HF card
         };
         Self {
             n_layers,
@@ -1054,23 +1049,18 @@ fn binary_search_context(
 
 // ── Use-case type ──────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UseCase {
     /// Tool-calling agents, RAG pipelines: needs coherent long-context output.
     /// Minimum q8_0 KV recommended.
     Agentic,
     /// Everyday chat, summarization, coding assistance.
+    #[default]
     General,
     /// Creative writing, roleplay: context beats coherence precision.
     /// q4_0 KV acceptable.
     Roleplay,
-}
-
-impl Default for UseCase {
-    fn default() -> Self {
-        UseCase::General
-    }
 }
 
 impl UseCase {
@@ -1287,6 +1277,7 @@ fn find_min_cpu_moe_to_fit_weights(
     n_cpu
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_scenarios(
     model_size_bytes: u64,
     arch: &ModelArch,
@@ -1295,7 +1286,7 @@ fn build_scenarios(
     ubatch: u32,
     n_cpu_moe: i32,
     fit_gran: u64,
-    use_case: UseCase,
+    _use_case: UseCase,
     recommended_kv: &str,
 ) -> Vec<ContextScenario> {
     let mut scenarios = Vec::new();
@@ -1330,7 +1321,7 @@ fn build_scenarios(
             n_cpu_moe,
             available_vram_bytes,
         );
-        let warn = if use_case == UseCase::Agentic && kv_elem_bytes(kk) < 1.0 {
+        let warn = if _use_case == UseCase::Agentic && kv_elem_bytes(kk) < 1.0 {
             Some("⚠ Below q8_0 — not recommended for agents".into())
         } else {
             None
@@ -1433,7 +1424,7 @@ pub fn quant_comparison_table(
     param_b: f64,
     arch: &ModelArch,
     available_vram_bytes: u64,
-    use_case: UseCase,
+    _use_case: UseCase,
     parallel_slots: u32,
 ) -> Vec<QuantOption> {
     // Quants we show in the advisor (sorted from highest to lowest quality)

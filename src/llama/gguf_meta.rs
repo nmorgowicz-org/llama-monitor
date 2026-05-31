@@ -80,6 +80,7 @@ pub struct GgufMetadata {
 
 impl GgufMetadata {
     /// Approximate parameter count in billions, derived from `param_count`.
+    #[allow(dead_code)]
     pub fn param_b(&self) -> Option<f64> {
         self.param_count.map(|p| p as f64 / 1e9)
     }
@@ -164,9 +165,11 @@ pub fn read_gguf_metadata(path: &Path) -> Result<GgufMetadata, String> {
         .and_then(KvValue::as_str)
         .map(|s| s.to_ascii_lowercase());
 
-    let mut meta = GgufMetadata::default();
-    meta.architecture = arch.clone();
-    meta.param_count = kv.get("general.parameter_count").and_then(KvValue::as_u64);
+    let mut meta = GgufMetadata {
+        architecture: arch.clone(),
+        param_count: kv.get("general.parameter_count").and_then(KvValue::as_u64),
+        ..Default::default()
+    };
 
     if let Some(a) = arch.as_deref() {
         macro_rules! get_u32 {

@@ -2317,7 +2317,7 @@ fn build_arch_from_body(
         linear_attn_state_bytes: body["linear_attn_state_bytes"]
             .as_u64()
             .unwrap_or(heuristic.linear_attn_state_bytes),
-        n_experts: n_experts,
+        n_experts,
         n_experts_used: n_exp_used,
         expert_fraction: expert_frac,
         global_head_dim: heuristic.global_head_dim,

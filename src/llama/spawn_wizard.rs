@@ -355,6 +355,7 @@ pub struct ModelMetadata {
 impl ModelMetadata {
     /// Convert to a `ModelArch` suitable for VRAM estimation.
     /// Falls back to heuristics when fields are absent.
+    #[allow(dead_code)]
     pub fn to_arch(
         &self,
         model_name: &str,
@@ -366,7 +367,7 @@ impl ModelMetadata {
         let head_dim = self.head_dim.or_else(|| {
             let embd = self.n_embd?;
             let heads = self.n_head?;
-            if heads > 0 { Some(embd / heads) } else { None }
+            embd.checked_div(heads)
         });
 
         // Prefer GGUF architecture string over filename when choosing the heuristic.
@@ -478,6 +479,7 @@ pub async fn introspect_model(
 ///
 /// This ensures renamed finetunes get the right hybrid/sliding-window heuristic
 /// regardless of what the user calls the file.
+#[allow(dead_code)]
 fn gguf_arch_to_heuristic_name(gguf_arch: &str) -> &str {
     match gguf_arch {
         "qwen3_6" | "qwen3.6" => "qwen3.6-model",
@@ -579,12 +581,10 @@ fn parse_model_metadata(output: &str) -> ModelMetadata {
     }
 
     // Derive head_dim from n_embd / n_head if not directly available
-    if meta.head_dim.is_none() {
-        if let (Some(embd), Some(heads)) = (meta.n_embd, meta.n_head) {
-            if heads > 0 {
-                meta.head_dim = Some(embd / heads);
-            }
-        }
+    if meta.head_dim.is_none()
+        && let (Some(embd), Some(heads)) = (meta.n_embd, meta.n_head)
+    {
+        meta.head_dim = embd.checked_div(heads);
     }
 
     // n_kv_heads fallback: if n_gqa was parsed as n_kv_heads, convert:

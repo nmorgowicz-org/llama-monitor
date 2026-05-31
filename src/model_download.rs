@@ -121,6 +121,7 @@ pub fn start_download(
     Ok(download_id)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_download(
     task: Arc<Mutex<DownloadTask>>,
     repo_id: String,
@@ -184,11 +185,11 @@ async fn run_download(
     }
 
     // Ensure parent directory exists.
-    if let Some(parent) = local_path.parent() {
-        if let Err(e) = tokio::fs::create_dir_all(parent).await {
-            set_failed(&task, format!("Failed to create directory: {e}"));
-            return;
-        }
+    if let Some(parent) = local_path.parent()
+        && let Err(e) = tokio::fs::create_dir_all(parent).await
+    {
+        set_failed(&task, format!("Failed to create directory: {e}"));
+        return;
     }
 
     // Open file: truncate for a fresh download, append only when resuming.
