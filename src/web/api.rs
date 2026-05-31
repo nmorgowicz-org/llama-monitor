@@ -2846,6 +2846,115 @@ fn api_hf_download_dir(
         })
 }
 
+// ── GET /api/hf/card?repo=owner/model ─────────────────────────────────────────
+// Fetches the raw README.md for a HuggingFace repo and returns it as markdown text.
+// Uses the stored HF token if present (required for gated models).
+fn api_hf_card(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "card")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::query::<std::collections::HashMap<String, String>>())
+        .and_then(
+            move |auth: Option<String>, params: std::collections::HashMap<String, String>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+
+                    let repo = match params.get("repo") {
+                        Some(r) if !r.is_empty() => r.clone(),
+                        _ => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({
+                                        "error": "Missing required query param: repo"
+                                    })),
+                                    warp::http::StatusCode::BAD_REQUEST,
+                                ),
+                            ));
+                        }
+                    };
+
+                    // Basic path-traversal guard: repo must be "owner/name" with no dots or slashes beyond that
+                    let parts: Vec<&str> = repo.splitn(3, '/').collect();
+                    if parts.len() != 2 || parts.iter().any(|p| p.is_empty() || p.contains("..")) {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(
+                                    &serde_json::json!({ "error": "Invalid repo id" }),
+                                ),
+                                warp::http::StatusCode::BAD_REQUEST,
+                            ),
+                        ));
+                    }
+
+                    let url = format!("https://huggingface.co/{}/raw/main/README.md", repo);
+
+                    let mut builder = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(20))
+                        .user_agent("llama-monitor");
+
+                    let client = match builder.build() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({ "error": e.to_string() })),
+                            ));
+                        }
+                    };
+
+                    let mut req = client.get(&url);
+                    if let Some(token) = crate::hf::hf_load_token() {
+                        req = req.header("Authorization", format!("Bearer {}", token));
+                    }
+
+                    let resp = match req.send().await {
+                        Ok(r) => r,
+                        Err(e) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({ "error": e.to_string() })),
+                            ));
+                        }
+                    };
+
+                    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({ "markdown": "" })),
+                        ));
+                    }
+
+                    if !resp.status().is_success() {
+                        let status = resp.status().as_u16();
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "error": format!("HuggingFace returned HTTP {}", status)
+                            })),
+                        ));
+                    }
+
+                    // Cap at 256 KB — large READMEs still render, but we don't buffer unlimited data
+                    let bytes = match resp.bytes().await {
+                        Ok(b) => b,
+                        Err(e) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({ "error": e.to_string() })),
+                            ));
+                        }
+                    };
+                    let markdown =
+                        String::from_utf8_lossy(&bytes[..bytes.len().min(256 * 1024)]).into_owned();
+
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({ "markdown": markdown }),
+                    )))
+                }
+            },
+        )
+}
+
 // ── GET /api/hf/token ─────────────────────────────────────────────────────────
 // Returns whether an HF token is saved; never returns the token itself.
 fn api_hf_token_get(
@@ -3383,6 +3492,7 @@ pub fn api_routes(
     let hf_token_get_route = api_hf_token_get(app_config.clone());
     let hf_token_put_route = api_hf_token_put(app_config.clone());
     let hf_token_delete_route = api_hf_token_delete(app_config.clone());
+    let hf_card_route = api_hf_card(app_config.clone());
     let hf_author_models_route = api_hf_author_models(state.clone(), app_config.clone());
     let hf_community_picks_route = api_hf_community_picks(state.clone(), app_config.clone());
     let third_party_models_route = api_third_party_models(state.clone(), app_config.clone());
@@ -3493,6 +3603,7 @@ pub fn api_routes(
         .or(hf_token_get_route)
         .or(hf_token_put_route)
         .or(hf_token_delete_route)
+        .or(hf_card_route)
         .or(hf_author_models_route)
         .or(hf_community_picks_route)
         .or(third_party_models_route)
@@ -10356,6 +10467,8 @@ mod tests {
         (route_hf_token_get, "GET", "/api/hf/token", None),
         (route_hf_token_put, "PUT", "/api/hf/token", Some("{}")),
         (route_hf_token_delete, "DELETE", "/api/hf/token", None),
+        // hf/card requires ?repo= param — without it we expect 400, not 404
+        (route_hf_card, "GET", "/api/hf/card?repo=test%2Fmodel", None),
         (
             route_hf_author_models,
             "POST",

@@ -44,6 +44,7 @@
 }
 
 .spawn-wizard-modal {
+  position: relative;
   width: min(960px, 96vw);
   max-height: min(92vh, 940px);
   overflow: hidden;
@@ -2697,3 +2698,209 @@
   height: 100%;
   border-radius: 4px;
 }
+
+/* ── Model card panel ───────────────────────────────────────────────────────── */
+.wizard-card-panel {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-modal, #0f172a);
+  border-radius: inherit;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 10;
+  overflow: hidden;
+}
+
+.wizard-card-panel.open {
+  transform: translateX(0);
+}
+
+.wizard-card-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.wizard-card-panel-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wizard-card-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.wizard-card-panel-hf-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  opacity: 0.7;
+  transition: opacity 0.15s, color 0.15s;
+}
+.wizard-card-panel-hf-link:hover { opacity: 1; color: #a5b4fc; }
+
+.wizard-card-panel-close {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+.wizard-card-panel-close:hover { background: rgba(255,255,255,0.07); color: var(--color-text); }
+
+.wizard-card-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.1) transparent;
+}
+
+.wizard-card-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  padding: 40px 0;
+  justify-content: center;
+}
+
+.wizard-card-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(99,102,241,0.3);
+  border-top-color: #818cf8;
+  border-radius: 50%;
+  animation: wizard-spin 0.7s linear infinite;
+}
+@keyframes wizard-spin { to { transform: rotate(360deg); } }
+
+.wizard-card-error {
+  color: #fca5a5;
+  font-size: var(--text-sm);
+  padding: 20px 0;
+}
+
+.wizard-card-frontmatter {
+  margin-bottom: 16px;
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.wizard-card-frontmatter summary {
+  padding: 8px 12px;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+  background: rgba(255,255,255,0.03);
+}
+.wizard-card-frontmatter summary:hover { background: rgba(255,255,255,0.06); }
+.wizard-card-frontmatter pre {
+  margin: 0;
+  padding: 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0,0,0,0.2);
+}
+
+/* Markdown body styles inside the card panel */
+.wizard-card-content {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--color-text);
+}
+.wizard-card-content h1,
+.wizard-card-content h2,
+.wizard-card-content h3 {
+  font-weight: 700;
+  margin: 1.2em 0 0.4em;
+  color: var(--color-text);
+  line-height: 1.3;
+}
+.wizard-card-content h1 { font-size: 1.3em; border-bottom: 1px solid rgba(255,255,255,0.07); padding-bottom: 6px; }
+.wizard-card-content h2 { font-size: 1.1em; }
+.wizard-card-content h3 { font-size: 1em; }
+.wizard-card-content p  { margin: 0.6em 0; }
+.wizard-card-content ul,
+.wizard-card-content ol { padding-left: 1.4em; margin: 0.6em 0; }
+.wizard-card-content li { margin: 0.25em 0; }
+.wizard-card-content code {
+  font-family: var(--font-mono, 'Fira Code', monospace);
+  font-size: 11px;
+  background: rgba(99,102,241,0.12);
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: #a5b4fc;
+}
+.wizard-card-content pre {
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 0.8em 0;
+}
+.wizard-card-content pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #e2e8f0;
+  font-size: 12px;
+}
+.wizard-card-content blockquote {
+  border-left: 3px solid rgba(99,102,241,0.5);
+  margin: 0.6em 0;
+  padding: 4px 0 4px 12px;
+  color: var(--color-text-muted);
+}
+.wizard-card-content table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 0.8em 0;
+}
+.wizard-card-content th,
+.wizard-card-content td {
+  padding: 6px 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  text-align: left;
+}
+.wizard-card-content th { background: rgba(255,255,255,0.04); font-weight: 600; }
+.wizard-card-content a  { color: #818cf8; text-decoration: underline; text-underline-offset: 2px; }
+.wizard-card-content img { max-width: 100%; border-radius: 6px; }
+.wizard-card-content hr { border: none; border-top: 1px solid rgba(255,255,255,0.07); margin: 1em 0; }
+
+[data-theme="light"] .wizard-card-panel { background: #fff; }
+[data-theme="light"] .wizard-card-content code { background: rgba(99,102,241,0.08); color: #4f46e5; }
+[data-theme="light"] .wizard-card-content pre { background: #f8fafc; border-color: rgba(0,0,0,0.08); }
+[data-theme="light"] .wizard-card-content pre code { color: #1e293b; }
+[data-theme="light"] .wizard-card-content a { color: #4f46e5; }

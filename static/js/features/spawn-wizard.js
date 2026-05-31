@@ -360,6 +360,17 @@ function cacheDom() {
   dom.prereqBar           = document.getElementById('wizard-prereq-bar');
   dom.prereqElapsed       = document.getElementById('wizard-prereq-elapsed');
   dom.prereqSuccessText   = document.getElementById('wizard-prereq-success-text');
+
+  // Model card panel
+  dom.cardPanel           = document.getElementById('wizard-card-panel');
+  dom.cardPanelTitle      = document.getElementById('wizard-card-panel-title');
+  dom.cardPanelHfLink     = document.getElementById('wizard-card-panel-hf-link');
+  dom.cardPanelClose      = document.getElementById('wizard-card-panel-close');
+  dom.cardLoading         = document.getElementById('wizard-card-loading');
+  dom.cardError           = document.getElementById('wizard-card-error');
+  dom.cardFrontmatter     = document.getElementById('wizard-card-frontmatter');
+  dom.cardFrontmatterPre  = document.getElementById('wizard-card-frontmatter-content');
+  dom.cardContent         = document.getElementById('wizard-card-content');
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────
@@ -479,6 +490,9 @@ function bindEvents() {
   dom.modeGuidedBtn?.addEventListener('click', () => setMode('guided'));
   dom.modeRawBtn?.addEventListener('click', () => setMode('raw'));
   dom.rawCodeArea?.addEventListener('input', onRawCodeChange);
+
+  // Model card panel
+  dom.cardPanelClose?.addEventListener('click', _closeCardPanel);
 
   // Binary prereq buttons
   dom.prereqDownloadBtn?.addEventListener('click', _downloadBinaryForWizard);
@@ -1515,16 +1529,14 @@ async function showHfSearchResults({ query, author, sort, limit }) {
         meta.appendChild(b);
       }
 
-      // Model card external link — opens HF page in new tab without selecting the repo
-      const cardLink = document.createElement('a');
+      // Model card button — opens in-app panel without selecting the repo
+      const cardLink = document.createElement('button');
+      cardLink.type = 'button';
       cardLink.className = 'hf-sr-card-link';
-      cardLink.href = `https://huggingface.co/${m.id}`;
-      cardLink.target = '_blank';
-      cardLink.rel = 'noopener noreferrer';
-      cardLink.title = 'View model card on HuggingFace';
-      cardLink.setAttribute('aria-label', `Open model card for ${m.id}`);
-      cardLink.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
-      cardLink.addEventListener('click', e => e.stopPropagation()); // don't trigger row select
+      cardLink.title = 'View model card';
+      cardLink.setAttribute('aria-label', `View model card for ${m.id}`);
+      cardLink.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>';
+      cardLink.addEventListener('click', e => { e.stopPropagation(); openCardPanel(m.id); });
 
       row.appendChild(nameEl);
       row.appendChild(meta);
@@ -2523,6 +2535,83 @@ function showErrorText(t) { if (dom.errorText) dom.errorText.textContent = t || 
 function showSuccessText(t) { if (dom.successText) dom.successText.textContent = t || ''; }
 function clearStatusMessages() { if (dom.errorText) dom.errorText.textContent = ''; if (dom.successText) dom.successText.textContent = ''; }
 function resetSpawnStatus() { wizardState.spawn = { inFlight:false, error:'' }; setStatusText('Ready to spawn.'); setProgress(0); clearStatusMessages(); }
+
+// ── Model card panel ──────────────────────────────────────────────────────────
+
+async function openCardPanel(repoId) {
+  if (!dom.cardPanel) return;
+
+  // Show panel in loading state
+  dom.cardPanel.classList.add('open');
+  dom.cardPanel.setAttribute('aria-hidden', 'false');
+  if (dom.cardPanelTitle) dom.cardPanelTitle.textContent = repoId;
+  if (dom.cardPanelHfLink) {
+    dom.cardPanelHfLink.href = `https://huggingface.co/${repoId}`;
+    dom.cardPanelHfLink.textContent = '';
+    const svg = dom.cardPanelHfLink.querySelector('svg') || document.createElementNS('http://www.w3.org/2000/svg','svg');
+    dom.cardPanelHfLink.appendChild(svg);
+    dom.cardPanelHfLink.appendChild(document.createTextNode(' huggingface.co'));
+  }
+  if (dom.cardLoading)    { dom.cardLoading.style.display = ''; }
+  if (dom.cardError)      { dom.cardError.style.display = 'none'; dom.cardError.textContent = ''; }
+  if (dom.cardFrontmatter){ dom.cardFrontmatter.style.display = 'none'; }
+  if (dom.cardContent)    { dom.cardContent.style.display = 'none'; dom.cardContent.innerHTML = ''; }
+
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const resp = await fetch(`/api/hf/card?repo=${encodeURIComponent(repoId)}`, { headers });
+    const data = resp.ok ? await resp.json() : { error: `HTTP ${resp.status}` };
+
+    if (dom.cardLoading) dom.cardLoading.style.display = 'none';
+
+    if (data.error) {
+      if (dom.cardError) { dom.cardError.textContent = data.error; dom.cardError.style.display = ''; }
+      return;
+    }
+
+    const raw = data.markdown || '';
+
+    // Split off YAML front-matter (--- ... ---)
+    let frontmatter = '';
+    let body = raw;
+    const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+    if (fmMatch) {
+      frontmatter = fmMatch[1];
+      body = fmMatch[2];
+    }
+
+    if (frontmatter && dom.cardFrontmatter && dom.cardFrontmatterPre) {
+      dom.cardFrontmatterPre.textContent = frontmatter;
+      dom.cardFrontmatter.style.display = '';
+    }
+
+    if (dom.cardContent) {
+      dom.cardContent.textContent = '';
+      if (!body.trim()) {
+        const p = document.createElement('p');
+        p.style.cssText = 'color:var(--color-text-muted);font-size:var(--text-sm)';
+        p.textContent = 'No model card content found.';
+        dom.cardContent.appendChild(p);
+      } else if (window.marked && window.DOMPurify) {
+        // RETURN_DOM_FRAGMENT gives a sanitized DocumentFragment — no innerHTML needed
+        const frag = window.DOMPurify.sanitize(window.marked.parse(body), { RETURN_DOM_FRAGMENT: true });
+        dom.cardContent.appendChild(frag);
+      } else {
+        dom.cardContent.textContent = body;
+      }
+      dom.cardContent.style.display = '';
+    }
+  } catch (err) {
+    if (dom.cardLoading) dom.cardLoading.style.display = 'none';
+    if (dom.cardError) { dom.cardError.textContent = err.message || 'Failed to load model card.'; dom.cardError.style.display = ''; }
+  }
+}
+
+function _closeCardPanel() {
+  if (!dom.cardPanel) return;
+  dom.cardPanel.classList.remove('open');
+  dom.cardPanel.setAttribute('aria-hidden', 'true');
+}
 
 /** Convert an ISO 8601 timestamp to a human-readable relative age, e.g. "3d ago", "2mo ago". */
 function _hfRelativeAge(iso) {
