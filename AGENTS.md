@@ -1118,3 +1118,81 @@ Phase 4 is complete. Key additions and constraints:
 - Reduced-motion: disable animations when prefers-reduced-motion is set.
 - Keyboard navigation: Tab, Enter, Escape supported.
 - No innerHTML with untrusted data; use textContent.
+
+---
+
+## VRAM Estimator: Adding New Model Architectures
+
+When a new model family is released, the heuristics in `src/llama/vram_estimator.rs` need to be updated. This section documents how to gather accurate data and where to apply it.
+
+### Step 1: Fetch the model card
+
+Fetch these pages in order of accuracy:
+
+1. `https://huggingface.co/<base-org>/<base-model>` — the original non-GGUF model card (e.g. `Qwen/Qwen3.6-35B-A3B`). This usually has the architecture table.
+2. `https://huggingface.co/unsloth/<model>-GGUF` — Unsloth GGUF card; often has a cleaner layout summary.
+3. For Gemma models: search for kaitchup.substack.com architecture articles (e.g. "Gemma 4 31B architecture") — these have confirmed per-layer KV head counts.
+
+### Step 2: Extract these fields (all required)
+
+| Field | Where to find it |
+|-------|-----------------|
+| `num_hidden_layers` (total) | Architecture table / config.json |
+| Attention-only layers (for hybrid DeltaNet models) | Layer layout pattern, e.g. "10 × (3 DeltaNet → 1 Attention)" |
+| `num_key_value_heads` | Config / architecture section |
+| `head_dim` | Config (often called `head_dim` or computed as `hidden_size / num_attention_heads`) |
+| `sliding_window` / local window size | Config or architecture description |
+| Global vs local layer count | Alternating pattern (e.g. "5 local : 1 global") |
+| Global layer KV heads and head_dim | Architecture section (Gemma4 differs from local) |
+| `num_experts` total | MoE section |
+| Active experts per token | **IMPORTANT**: "A3B" / "A4B" / "A10B" in the model name means **active BILLIONS OF PARAMETERS**, not active experts. Look for "routed experts" + "shared experts" in the MoE config. |
+
+### Step 3: Apply the changes
+
+**For a new named model with exact confirmed values:** add a dedicated `_arch()` function (like `qwen36_35b_a3b_arch()`).
+
+**For a new model family:** add a new `_heuristic()` function and wire it into `from_name_and_params()`.
+
+The detection order in `from_name_and_params` matters — more specific patterns must come first. New family detection should be added before the general Gemma/standard path.
+
+**Field checklist for `ModelArch`:**
+
+```rust
+Self {
+    n_layers: <total layers>,
+    n_kv_heads: <KV heads for standard/global attn layers>,
+    head_dim: <head dim for standard/local layers>,
+    global_head_dim: <head dim for global layers if different; 0 otherwise>,  // Gemma4 uses 512
+    n_global_attn_layers: <count of full-context layers; 0 if no sliding window>,
+    local_attn_window: <local window token count; 0 if no sliding window>,
+    local_kv_heads: <KV heads for local sliding-window layers>,
+    n_attn_layers: <attn-only layers for hybrid DeltaNet; 0 for standard transformers>,
+    linear_attn_state_bytes: <DeltaNet recurrent state bytes; 0 for standard>,
+    n_experts: <total experts; 0 for dense>,
+    n_experts_used: <active experts per token; 0 for dense>,
+    expert_fraction: <fraction of params in expert FFNs; 0.65 default, ~0.85 for sparse MoE>,
+    ..Default::default()
+}
+```
+
+### Step 4: Add a ground-truth test
+
+Every new architecture function requires a `#[test]` that cites the source URL in a comment and asserts the exact values for the fields listed above. See `qwen36_27b_is_hybrid_deltanet`, `gemma4_31b_dense_gets_alternating_attention`, or `qwen35_122b_a10b_is_hybrid_deltanet` for the pattern.
+
+```rust
+#[test]
+fn new_model_arch_is_correct() {
+    // Source: https://huggingface.co/<org>/<model>
+    let arch = ModelArch::from_name_and_params("Model-Name-GGUF", <param_b>);
+    assert_eq!(arch.n_layers, <N>);
+    assert_eq!(arch.n_kv_heads, <N>);
+    // ... all relevant fields
+}
+```
+
+### Common pitfalls
+
+- **"A3B" / "A4B" / "A10B" suffixes** refer to active **parameter** counts, not active expert counts. Get the real expert count from the "routed + shared" spec in the model card.
+- **Hybrid DeltaNet models** (Qwen3.5, Qwen3.6): `n_attn_layers` must be set or KV cache will be calculated using total layers (4× too many), causing max-context to be severely underestimated.
+- **Gemma4 vs Gemma3**: Gemma4 uses `global_head_dim = 512` for global layers and a 1024-token sliding window; Gemma3 uses 512. They are different heuristics.
+- **Sliding window vs hybrid DeltaNet**: These are different mechanisms. Don't set `local_attn_window` on DeltaNet models — they use `n_attn_layers` + `linear_attn_state_bytes` instead.
