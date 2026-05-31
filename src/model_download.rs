@@ -30,8 +30,8 @@ pub struct DownloadStatus {
     pub status: String, // "running" | "completed" | "failed" | "cancelled"
     pub bytes_downloaded: u64,
     pub total_bytes: u64,
-    pub speed: f64,   // bytes/sec
-    pub eta: u64,     // seconds remaining
+    pub speed: f64, // bytes/sec
+    pub eta: u64,   // seconds remaining
     pub message: String,
 }
 
@@ -132,10 +132,7 @@ async fn run_download(
     cancel: Arc<Notify>,
 ) {
     // Resolve the HF download URL via hf-hub.
-    let api = match ApiBuilder::new()
-        .with_token(hf_token.clone())
-        .build()
-    {
+    let api = match ApiBuilder::new().with_token(hf_token.clone()).build() {
         Ok(a) => a,
         Err(e) => {
             set_failed(&task, format!("Failed to build HF API client: {e}"));
@@ -143,9 +140,14 @@ async fn run_download(
         }
     };
 
-    let url = api.repo(Repo::new(repo_id.clone(), RepoType::Model)).url(&file_path);
+    let url = api
+        .repo(Repo::new(repo_id.clone(), RepoType::Model))
+        .url(&file_path);
     if url.is_empty() {
-        set_failed(&task, format!("Could not resolve download URL for {repo_id}/{file_path}"));
+        set_failed(
+            &task,
+            format!("Could not resolve download URL for {repo_id}/{file_path}"),
+        );
         return;
     }
 
@@ -192,7 +194,12 @@ async fn run_download(
     // Open file: truncate for a fresh download, append only when resuming.
     let mut file = {
         let open_result = if resume_from > 0 {
-            File::options().create(true).write(true).append(true).open(&local_path).await
+            File::options()
+                .create(true)
+                .write(true)
+                .append(true)
+                .open(&local_path)
+                .await
         } else {
             File::create(&local_path).await
         };
@@ -263,9 +270,17 @@ pub fn get_download_status(download_id: &str) -> Option<DownloadStatus> {
     let total = t.total_bytes.load(Ordering::Relaxed);
     let elapsed = t.start_time.elapsed().as_secs_f64();
 
-    let speed = if elapsed > 0.0 { bytes as f64 / elapsed } else { 0.0 };
+    let speed = if elapsed > 0.0 {
+        bytes as f64 / elapsed
+    } else {
+        0.0
+    };
     let remaining = total.saturating_sub(bytes);
-    let eta = if speed > 0.0 { (remaining as f64 / speed) as u64 } else { 0 };
+    let eta = if speed > 0.0 {
+        (remaining as f64 / speed) as u64
+    } else {
+        0
+    };
 
     Some(DownloadStatus {
         download_id: download_id.to_string(),

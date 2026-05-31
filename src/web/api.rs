@@ -1630,7 +1630,10 @@ fn api_chat_template_upload(
                 // referenced by the spawn wizard via --chat-template-file.
                 let saved_path: Option<String> = (|| {
                     let home = dirs::home_dir()?;
-                    let dir = home.join(".config").join("llama-monitor").join("chat-templates");
+                    let dir = home
+                        .join(".config")
+                        .join("llama-monitor")
+                        .join("chat-templates");
                     std::fs::create_dir_all(&dir).ok()?;
                     let path = dir.join(format!("{template_id}.jinja"));
                     std::fs::write(&path, template.as_bytes()).ok()?;
@@ -2213,13 +2216,14 @@ fn api_vram_auto_size(
                 };
 
                 // Model size: explicit bytes > local file stat > param_b heuristic
-                let model_size_bytes = body["model_size_bytes"].as_u64()
-                    .unwrap_or_else(|| {
-                        let path = body["model_path"].as_str().unwrap_or("");
-                        if !path.is_empty() {
-                            std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
-                        } else { 0 }
-                    });
+                let model_size_bytes = body["model_size_bytes"].as_u64().unwrap_or_else(|| {
+                    let path = body["model_path"].as_str().unwrap_or("");
+                    if !path.is_empty() {
+                        std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+                    } else {
+                        0
+                    }
+                });
 
                 // We need *some* size info
                 if model_size_bytes == 0 && param_b <= 0.0 {
@@ -2264,32 +2268,59 @@ fn build_arch_from_body(
     model_name: &str,
     param_b: f64,
 ) -> crate::llama::vram_estimator::ModelArch {
-    let heuristic = crate::llama::vram_estimator::ModelArch::from_name_and_params(model_name, param_b);
+    let heuristic =
+        crate::llama::vram_estimator::ModelArch::from_name_and_params(model_name, param_b);
 
-    let n_layers    = body["n_layers"].as_u64().map(|v| v as u32).unwrap_or(heuristic.n_layers);
-    let n_kv_heads  = body["n_kv_heads"].as_u64().map(|v| v as u32).unwrap_or(heuristic.n_kv_heads);
-    let head_dim    = body["head_dim"].as_u64().map(|v| v as u32).unwrap_or(heuristic.head_dim);
-    let n_experts   = body["n_experts"].as_u64().map(|v| v as u32).unwrap_or(heuristic.n_experts);
-    let n_exp_used  = body["n_experts_used"].as_u64().map(|v| v as u32).unwrap_or(heuristic.n_experts_used);
-    let mtp_depth   = body["mtp_depth"].as_u64().map(|v| v as u32).unwrap_or(heuristic.mtp_depth);
-    let mmproj_bytes = body["mmproj_bytes"].as_u64().unwrap_or(heuristic.mmproj_bytes);
-    let expert_frac = body["expert_fraction"].as_f64().unwrap_or(heuristic.expert_fraction);
+    let n_layers = body["n_layers"]
+        .as_u64()
+        .map(|v| v as u32)
+        .unwrap_or(heuristic.n_layers);
+    let n_kv_heads = body["n_kv_heads"]
+        .as_u64()
+        .map(|v| v as u32)
+        .unwrap_or(heuristic.n_kv_heads);
+    let head_dim = body["head_dim"]
+        .as_u64()
+        .map(|v| v as u32)
+        .unwrap_or(heuristic.head_dim);
+    let n_experts = body["n_experts"]
+        .as_u64()
+        .map(|v| v as u32)
+        .unwrap_or(heuristic.n_experts);
+    let n_exp_used = body["n_experts_used"]
+        .as_u64()
+        .map(|v| v as u32)
+        .unwrap_or(heuristic.n_experts_used);
+    let mtp_depth = body["mtp_depth"]
+        .as_u64()
+        .map(|v| v as u32)
+        .unwrap_or(heuristic.mtp_depth);
+    let mmproj_bytes = body["mmproj_bytes"]
+        .as_u64()
+        .unwrap_or(heuristic.mmproj_bytes);
+    let expert_frac = body["expert_fraction"]
+        .as_f64()
+        .unwrap_or(heuristic.expert_fraction);
 
     crate::llama::vram_estimator::ModelArch {
         n_layers,
         n_kv_heads,
         head_dim,
-        n_global_attn_layers:    heuristic.n_global_attn_layers,
-        local_attn_window:       heuristic.local_attn_window,
-        local_kv_heads:          heuristic.local_kv_heads,
+        n_global_attn_layers: heuristic.n_global_attn_layers,
+        local_attn_window: heuristic.local_attn_window,
+        local_kv_heads: heuristic.local_kv_heads,
         // Hybrid DeltaNet: override from body if provided, otherwise preserve heuristic
-        n_attn_layers:           body["n_attn_layers"].as_u64()
-            .map(|v| v as u32).unwrap_or(heuristic.n_attn_layers),
-        linear_attn_state_bytes: body["linear_attn_state_bytes"].as_u64()
+        n_attn_layers: body["n_attn_layers"]
+            .as_u64()
+            .map(|v| v as u32)
+            .unwrap_or(heuristic.n_attn_layers),
+        linear_attn_state_bytes: body["linear_attn_state_bytes"]
+            .as_u64()
             .unwrap_or(heuristic.linear_attn_state_bytes),
-        n_experts:               n_experts,
-        n_experts_used:          n_exp_used,
-        expert_fraction:         expert_frac,
+        n_experts: n_experts,
+        n_experts_used: n_exp_used,
+        expert_fraction: expert_frac,
+        global_head_dim: heuristic.global_head_dim,
         mtp_depth,
         mmproj_bytes,
         param_b,
@@ -2804,10 +2835,10 @@ fn api_hf_author_models(
 
                 let limit: usize = body["limit"].as_u64().unwrap_or(50).min(100) as usize;
                 let sort = match body["sort"].as_str().unwrap_or("downloads") {
-                    "likes"    => crate::hf::HfSort::Likes,
-                    "newest"   | "createdAt" => crate::hf::HfSort::CreatedAt,
+                    "likes" => crate::hf::HfSort::Likes,
+                    "newest" | "createdAt" => crate::hf::HfSort::CreatedAt,
                     "trending" => crate::hf::HfSort::Trending,
-                    _          => crate::hf::HfSort::Downloads,
+                    _ => crate::hf::HfSort::Downloads,
                 };
 
                 match crate::hf::hf_browse_author(&author, sort, limit).await {
@@ -3213,10 +3244,10 @@ pub fn api_routes(
     let moe_tune_route = api_moe_tune(state.clone(), app_config.clone());
 
     // Phase 3: HF search, files, download, third-party, introspect
-    let hf_search_route        = api_hf_search(state.clone(), app_config.clone());
-    let hf_files_route         = api_hf_files(state.clone(), app_config.clone());
-    let hf_download_route      = api_hf_download(state.clone(), app_config.clone());
-    let hf_quantizers_route    = api_hf_quantizers(state.clone(), app_config.clone());
+    let hf_search_route = api_hf_search(state.clone(), app_config.clone());
+    let hf_files_route = api_hf_files(state.clone(), app_config.clone());
+    let hf_download_route = api_hf_download(state.clone(), app_config.clone());
+    let hf_quantizers_route = api_hf_quantizers(state.clone(), app_config.clone());
     let hf_author_models_route = api_hf_author_models(state.clone(), app_config.clone());
     let third_party_models_route = api_third_party_models(state.clone(), app_config.clone());
     let model_introspect_route = api_model_introspect(state.clone(), app_config.clone());

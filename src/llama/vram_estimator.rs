@@ -32,14 +32,14 @@ pub struct QuantInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QuantQuality {
-    Reference,   // F16 / F32 — bit-exact
-    Excellent,   // Q8_0
-    VeryGood,    // Q6_K, Q5_K_M/S, IQ4_XS
-    Good,        // Q4_K_M/S, IQ4_NL
-    Acceptable,  // Q4_0, Q3_K_L/M, IQ3_M/S
-    Fair,        // Q3_K_S, IQ3_XS/XXS (MoE-class)
-    Reduced,     // Q2_K, IQ2_*
-    VeryLow,     // IQ1_*
+    Reference,  // F16 / F32 — bit-exact
+    Excellent,  // Q8_0
+    VeryGood,   // Q6_K, Q5_K_M/S, IQ4_XS
+    Good,       // Q4_K_M/S, IQ4_NL
+    Acceptable, // Q4_0, Q3_K_L/M, IQ3_M/S
+    Fair,       // Q3_K_S, IQ3_XS/XXS (MoE-class)
+    Reduced,    // Q2_K, IQ2_*
+    VeryLow,    // IQ1_*
 }
 
 /// All supported quantization levels, from best to most compressed.
@@ -55,45 +55,285 @@ pub fn find_quant(name: &str) -> Option<&'static QuantInfo> {
 
 static QUANT_TABLE: &[QuantInfo] = &[
     // Reference
-    QuantInfo { name:"f32",      label:"F32",       bpw:32.0,  kv_bpe:4.0,   quality:QuantQuality::Reference, is_imatrix:false, large_moe_only:false },
-    QuantInfo { name:"f16",      label:"F16",       bpw:16.0,  kv_bpe:2.0,   quality:QuantQuality::Reference, is_imatrix:false, large_moe_only:false },
-    QuantInfo { name:"bf16",     label:"BF16",      bpw:16.0,  kv_bpe:2.0,   quality:QuantQuality::Reference, is_imatrix:false, large_moe_only:false },
+    QuantInfo {
+        name: "f32",
+        label: "F32",
+        bpw: 32.0,
+        kv_bpe: 4.0,
+        quality: QuantQuality::Reference,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
+    QuantInfo {
+        name: "f16",
+        label: "F16",
+        bpw: 16.0,
+        kv_bpe: 2.0,
+        quality: QuantQuality::Reference,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
+    QuantInfo {
+        name: "bf16",
+        label: "BF16",
+        bpw: 16.0,
+        kv_bpe: 2.0,
+        quality: QuantQuality::Reference,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
     // Lossless / near-lossless
-    QuantInfo { name:"q8_0",     label:"Q8_0",      bpw:8.5,   kv_bpe:1.0,   quality:QuantQuality::Excellent, is_imatrix:false, large_moe_only:false },
+    QuantInfo {
+        name: "q8_0",
+        label: "Q8_0",
+        bpw: 8.5,
+        kv_bpe: 1.0,
+        quality: QuantQuality::Excellent,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
     // High quality
-    QuantInfo { name:"q6_k",     label:"Q6_K",      bpw:6.5625,kv_bpe:0.75,  quality:QuantQuality::VeryGood,  is_imatrix:false, large_moe_only:false },
-    QuantInfo { name:"q5_k_m",   label:"Q5_K_M",    bpw:5.69,  kv_bpe:0.625, quality:QuantQuality::VeryGood,  is_imatrix:false, large_moe_only:false },
-    QuantInfo { name:"q5_k_s",   label:"Q5_K_S",    bpw:5.52,  kv_bpe:0.625, quality:QuantQuality::VeryGood,  is_imatrix:false, large_moe_only:false },
-    QuantInfo { name:"q5_0",     label:"Q5_0",      bpw:5.5,   kv_bpe:0.625, quality:QuantQuality::VeryGood,  is_imatrix:false, large_moe_only:false },
+    QuantInfo {
+        name: "q6_k",
+        label: "Q6_K",
+        bpw: 6.5625,
+        kv_bpe: 0.75,
+        quality: QuantQuality::VeryGood,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
+    QuantInfo {
+        name: "q5_k_m",
+        label: "Q5_K_M",
+        bpw: 5.69,
+        kv_bpe: 0.625,
+        quality: QuantQuality::VeryGood,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
+    QuantInfo {
+        name: "q5_k_s",
+        label: "Q5_K_S",
+        bpw: 5.52,
+        kv_bpe: 0.625,
+        quality: QuantQuality::VeryGood,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
+    QuantInfo {
+        name: "q5_0",
+        label: "Q5_0",
+        bpw: 5.5,
+        kv_bpe: 0.625,
+        quality: QuantQuality::VeryGood,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
     // Good quality
-    QuantInfo { name:"q4_k_m",   label:"Q4_K_M",    bpw:4.85,  kv_bpe:0.5,   quality:QuantQuality::Good,      is_imatrix:false, large_moe_only:false },
-    QuantInfo { name:"q4_k_s",   label:"Q4_K_S",    bpw:4.58,  kv_bpe:0.5,   quality:QuantQuality::Good,      is_imatrix:false, large_moe_only:false },
-    QuantInfo { name:"q4_0",     label:"Q4_0",      bpw:4.55,  kv_bpe:0.5,   quality:QuantQuality::Acceptable,is_imatrix:false, large_moe_only:false },
-    QuantInfo { name:"q4_1",     label:"Q4_1",      bpw:4.7,   kv_bpe:0.5,   quality:QuantQuality::Acceptable,is_imatrix:false, large_moe_only:false },
+    QuantInfo {
+        name: "q4_k_m",
+        label: "Q4_K_M",
+        bpw: 4.85,
+        kv_bpe: 0.5,
+        quality: QuantQuality::Good,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
+    QuantInfo {
+        name: "q4_k_s",
+        label: "Q4_K_S",
+        bpw: 4.58,
+        kv_bpe: 0.5,
+        quality: QuantQuality::Good,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
+    QuantInfo {
+        name: "q4_0",
+        label: "Q4_0",
+        bpw: 4.55,
+        kv_bpe: 0.5,
+        quality: QuantQuality::Acceptable,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
+    QuantInfo {
+        name: "q4_1",
+        label: "Q4_1",
+        bpw: 4.7,
+        kv_bpe: 0.5,
+        quality: QuantQuality::Acceptable,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
     // imatrix high
-    QuantInfo { name:"iq4_xs",   label:"IQ4_XS",    bpw:4.25,  kv_bpe:0.5,   quality:QuantQuality::VeryGood,  is_imatrix:true,  large_moe_only:false },
-    QuantInfo { name:"iq4_nl",   label:"IQ4_NL",    bpw:4.5,   kv_bpe:0.5,   quality:QuantQuality::Good,      is_imatrix:true,  large_moe_only:false },
+    QuantInfo {
+        name: "iq4_xs",
+        label: "IQ4_XS",
+        bpw: 4.25,
+        kv_bpe: 0.5,
+        quality: QuantQuality::VeryGood,
+        is_imatrix: true,
+        large_moe_only: false,
+    },
+    QuantInfo {
+        name: "iq4_nl",
+        label: "IQ4_NL",
+        bpw: 4.5,
+        kv_bpe: 0.5,
+        quality: QuantQuality::Good,
+        is_imatrix: true,
+        large_moe_only: false,
+    },
     // 3-bit range
-    QuantInfo { name:"q3_k_m",   label:"Q3_K_M",    bpw:3.875, kv_bpe:0.375, quality:QuantQuality::Acceptable,is_imatrix:false, large_moe_only:false },
-    QuantInfo { name:"q3_k_s",   label:"Q3_K_S",    bpw:3.4375,kv_bpe:0.375, quality:QuantQuality::Fair,      is_imatrix:false, large_moe_only:false },
-    QuantInfo { name:"q3_k_l",   label:"Q3_K_L",    bpw:4.0,   kv_bpe:0.375, quality:QuantQuality::Acceptable,is_imatrix:false, large_moe_only:false },
+    QuantInfo {
+        name: "q3_k_m",
+        label: "Q3_K_M",
+        bpw: 3.875,
+        kv_bpe: 0.375,
+        quality: QuantQuality::Acceptable,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
+    QuantInfo {
+        name: "q3_k_s",
+        label: "Q3_K_S",
+        bpw: 3.4375,
+        kv_bpe: 0.375,
+        quality: QuantQuality::Fair,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
+    QuantInfo {
+        name: "q3_k_l",
+        label: "Q3_K_L",
+        bpw: 4.0,
+        kv_bpe: 0.375,
+        quality: QuantQuality::Acceptable,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
     // imatrix 3-bit
-    QuantInfo { name:"iq3_m",    label:"IQ3_M",     bpw:3.6875,kv_bpe:0.375, quality:QuantQuality::Acceptable,is_imatrix:true,  large_moe_only:false },
-    QuantInfo { name:"iq3_s",    label:"IQ3_S",     bpw:3.5,   kv_bpe:0.375, quality:QuantQuality::Fair,      is_imatrix:true,  large_moe_only:false },
-    QuantInfo { name:"iq3_xs",   label:"IQ3_XS",    bpw:3.3125,kv_bpe:0.375, quality:QuantQuality::Fair,      is_imatrix:true,  large_moe_only:false },
-    QuantInfo { name:"iq3_xxs",  label:"IQ3_XXS",   bpw:3.0625,kv_bpe:0.375, quality:QuantQuality::Fair,      is_imatrix:true,  large_moe_only:false },
+    QuantInfo {
+        name: "iq3_m",
+        label: "IQ3_M",
+        bpw: 3.6875,
+        kv_bpe: 0.375,
+        quality: QuantQuality::Acceptable,
+        is_imatrix: true,
+        large_moe_only: false,
+    },
+    QuantInfo {
+        name: "iq3_s",
+        label: "IQ3_S",
+        bpw: 3.5,
+        kv_bpe: 0.375,
+        quality: QuantQuality::Fair,
+        is_imatrix: true,
+        large_moe_only: false,
+    },
+    QuantInfo {
+        name: "iq3_xs",
+        label: "IQ3_XS",
+        bpw: 3.3125,
+        kv_bpe: 0.375,
+        quality: QuantQuality::Fair,
+        is_imatrix: true,
+        large_moe_only: false,
+    },
+    QuantInfo {
+        name: "iq3_xxs",
+        label: "IQ3_XXS",
+        bpw: 3.0625,
+        kv_bpe: 0.375,
+        quality: QuantQuality::Fair,
+        is_imatrix: true,
+        large_moe_only: false,
+    },
     // 2-bit range — meaningful mainly for very large MoE with heavy CPU offload
-    QuantInfo { name:"q2_k",     label:"Q2_K",      bpw:2.625, kv_bpe:0.25,  quality:QuantQuality::Reduced,   is_imatrix:false, large_moe_only:false },
-    QuantInfo { name:"iq2_m",    label:"IQ2_M",     bpw:2.6875,kv_bpe:0.25,  quality:QuantQuality::Reduced,   is_imatrix:true,  large_moe_only:true  },
-    QuantInfo { name:"iq2_s",    label:"IQ2_S",     bpw:2.5,   kv_bpe:0.25,  quality:QuantQuality::Reduced,   is_imatrix:true,  large_moe_only:true  },
-    QuantInfo { name:"iq2_xs",   label:"IQ2_XS",    bpw:2.3125,kv_bpe:0.25,  quality:QuantQuality::Reduced,   is_imatrix:true,  large_moe_only:true  },
-    QuantInfo { name:"iq2_xxs",  label:"IQ2_XXS",   bpw:2.0625,kv_bpe:0.25,  quality:QuantQuality::Reduced,   is_imatrix:true,  large_moe_only:true  },
+    QuantInfo {
+        name: "q2_k",
+        label: "Q2_K",
+        bpw: 2.625,
+        kv_bpe: 0.25,
+        quality: QuantQuality::Reduced,
+        is_imatrix: false,
+        large_moe_only: false,
+    },
+    QuantInfo {
+        name: "iq2_m",
+        label: "IQ2_M",
+        bpw: 2.6875,
+        kv_bpe: 0.25,
+        quality: QuantQuality::Reduced,
+        is_imatrix: true,
+        large_moe_only: true,
+    },
+    QuantInfo {
+        name: "iq2_s",
+        label: "IQ2_S",
+        bpw: 2.5,
+        kv_bpe: 0.25,
+        quality: QuantQuality::Reduced,
+        is_imatrix: true,
+        large_moe_only: true,
+    },
+    QuantInfo {
+        name: "iq2_xs",
+        label: "IQ2_XS",
+        bpw: 2.3125,
+        kv_bpe: 0.25,
+        quality: QuantQuality::Reduced,
+        is_imatrix: true,
+        large_moe_only: true,
+    },
+    QuantInfo {
+        name: "iq2_xxs",
+        label: "IQ2_XXS",
+        bpw: 2.0625,
+        kv_bpe: 0.25,
+        quality: QuantQuality::Reduced,
+        is_imatrix: true,
+        large_moe_only: true,
+    },
     // 1-bit — experimental
-    QuantInfo { name:"iq1_m",    label:"IQ1_M",     bpw:1.75,  kv_bpe:0.125, quality:QuantQuality::VeryLow,   is_imatrix:true,  large_moe_only:true  },
-    QuantInfo { name:"iq1_s",    label:"IQ1_S",     bpw:1.5625,kv_bpe:0.125, quality:QuantQuality::VeryLow,   is_imatrix:true,  large_moe_only:true  },
+    QuantInfo {
+        name: "iq1_m",
+        label: "IQ1_M",
+        bpw: 1.75,
+        kv_bpe: 0.125,
+        quality: QuantQuality::VeryLow,
+        is_imatrix: true,
+        large_moe_only: true,
+    },
+    QuantInfo {
+        name: "iq1_s",
+        label: "IQ1_S",
+        bpw: 1.5625,
+        kv_bpe: 0.125,
+        quality: QuantQuality::VeryLow,
+        is_imatrix: true,
+        large_moe_only: true,
+    },
     // Unsloth Ternary Quant (TQ) — unique to Unsloth's UD pipeline
-    QuantInfo { name:"tq1_0",    label:"TQ1_0",     bpw:1.69,  kv_bpe:0.125, quality:QuantQuality::VeryLow,   is_imatrix:true,  large_moe_only:true  },
-    QuantInfo { name:"tq2_0",    label:"TQ2_0",     bpw:2.0,   kv_bpe:0.25,  quality:QuantQuality::Reduced,   is_imatrix:true,  large_moe_only:true  },
+    QuantInfo {
+        name: "tq1_0",
+        label: "TQ1_0",
+        bpw: 1.69,
+        kv_bpe: 0.125,
+        quality: QuantQuality::VeryLow,
+        is_imatrix: true,
+        large_moe_only: true,
+    },
+    QuantInfo {
+        name: "tq2_0",
+        label: "TQ2_0",
+        bpw: 2.0,
+        kv_bpe: 0.25,
+        quality: QuantQuality::Reduced,
+        is_imatrix: true,
+        large_moe_only: true,
+    },
 ];
 
 // ── Architecture descriptor ───────────────────────────────────────────────────
@@ -130,6 +370,12 @@ pub struct ModelArch {
     /// Typical range 0.55–0.75; default 0.65 when unknown.
     #[serde(default = "default_expert_fraction")]
     pub expert_fraction: f64,
+
+    // ── Sliding-window global head dimension (Gemma 4 style) ────────────────
+    /// Head dimension for global (full-context) attention layers.
+    /// When > 0, global layers use this dimension instead of `head_dim`.
+    /// Gemma 4 uses 512 for global layers vs 256 for local sliding-window layers.
+    pub global_head_dim: u32,
 
     // ── Hybrid linear attention (Qwen3-Coder-Next / DeltaNet style) ──────────
     /// Layers that use traditional softmax attention with a KV cache.
@@ -173,27 +419,62 @@ impl ModelArch {
         }
 
         // ── Qwen3.6 family (hybrid DeltaNet, 1/4 standard attention layers) ─────
-        // Applies to: Qwen3.6-27B (dense), Qwen3.6-35B-A3B (MoE),
-        //             davidau 40B expansion, Qwen3.6 finetunes/distillations.
+        // 27B (dense): 64 layers, 4 KV heads.
+        // 35B-A3B (MoE): 40 layers, 2 KV heads, 256 experts, 9 active.
+        //   "A3B" = 3B active PARAMETERS, not 3 experts.
+        // davidau 40B expansion: 96 layers, 4 KV heads.
         if lower.contains("qwen3.6") || lower.contains("qwen3-6") {
-            let mut arch = Self::qwen36_heuristic(param_b);
-            // MTP can be preserved via fine-tuning; detect from name even for Qwen3.6
+            let is_35b_a3b = lower.contains("35b-a3b") || lower.contains("35b_a3b");
+            let mut arch = if is_35b_a3b {
+                Self::qwen36_35b_a3b_arch()
+            } else {
+                Self::qwen36_heuristic(param_b)
+            };
             if lower.contains("mtp") || lower.contains("multi-token") {
                 arch.mtp_depth = 1;
             }
             return arch;
         }
 
-        let is_gemma = lower.contains("gemma-3") || lower.contains("gemma3")
-            || lower.contains("gemma-4") || lower.contains("gemma4");
+        // ── Qwen3.5 family (hybrid DeltaNet + MoE) ───────────────────────────────
+        // Same 3:1 DeltaNet:Attention ratio as Qwen3.6.
+        // 122B-A10B: 48 layers (12 attn + 36 DeltaNet), 256 experts, 9 active.
+        // "A10B" = 10B active PARAMETERS, not 10 experts.
+        if lower.contains("qwen3.5") || lower.contains("qwen3-5") {
+            let mut arch = Self::qwen35_heuristic(param_b);
+            if lower.contains("mtp") || lower.contains("multi-token") {
+                arch.mtp_depth = 1;
+            }
+            return arch;
+        }
 
-        // Detect MoE from "NB-AMB" / "NB_AMB" suffix (e.g. 35B-A3B, 26B-A4B, 122B-A10B)
+        // ── Gemma 4 family (separate from Gemma 3) ───────────────────────────────
+        // Different from Gemma 3: 1024-token sliding window (vs 512),
+        // global layers use 512 head_dim + fewer KV heads (4/2 vs 16/8 local).
+        // 31B dense: 60 layers, 10 global, 50 local.
+        // 26B-A4B MoE: 30 layers, 128 experts, 9 active.
+        let is_gemma4 = lower.contains("gemma-4") || lower.contains("gemma4");
+        if is_gemma4 {
+            let mut arch = Self::gemma4_heuristic(param_b);
+            if lower.contains("mtp") || lower.contains("multi-token") {
+                arch.mtp_depth = 1;
+            }
+            return arch;
+        }
+
+        let is_gemma3 = lower.contains("gemma-3") || lower.contains("gemma3");
+
+        // Detect MoE from "NB-AMB" / "NB_AMB" suffix (e.g. 26B-A4B, 122B-A10B)
         let moe_info = Self::parse_moe_suffix(name);
 
         // Detect MTP from filename keyword
-        let mtp_depth = if lower.contains("mtp") || lower.contains("multi-token") { 1u32 } else { 0 };
+        let mtp_depth = if lower.contains("mtp") || lower.contains("multi-token") {
+            1u32
+        } else {
+            0
+        };
 
-        let mut arch = if is_gemma {
+        let mut arch = if is_gemma3 {
             Self::gemma3_heuristic(param_b)
         } else {
             Self::standard_heuristic(param_b)
@@ -202,24 +483,17 @@ impl ModelArch {
         arch.mtp_depth = mtp_depth;
 
         if let Some((total_b, active_b)) = moe_info {
-            // Rough expert count: typical modern MoE models have many experts
-            // with few active per token. We can estimate the ratio.
-            let _active_frac = active_b / total_b;
-            // Conservative n_experts estimate — introspection will refine.
-            // The expert count heuristic uses the activation sparsity ratio:
-            // very sparse (active_b << total_b) → many more experts.
-            let sparsity = active_b / total_b; // e.g. 3/80 = 0.0375 for Qwen3-Coder-Next
+            let sparsity = active_b / total_b;
             arch.n_experts = if sparsity < 0.05 {
-                // Extremely sparse: 512+ experts (Qwen3-Coder-Next style)
-                512
+                512 // extremely sparse (Qwen3-Coder-Next style)
             } else if total_b > 100.0 {
                 128
             } else if total_b > 50.0 {
                 64
             } else if total_b > 20.0 {
-                64   // Qwen3-35B-A3B
+                64
             } else {
-                8    // Mixtral style
+                8 // Mixtral style
             };
             arch.n_experts_used = active_b.round() as u32;
         }
@@ -236,10 +510,14 @@ impl ModelArch {
         let mut i = 0;
         while i < bytes.len() {
             // Look for "-a" or "_a"
-            if i + 2 < bytes.len() && (bytes[i] == b'-' || bytes[i] == b'_') && bytes[i+1] == b'a' {
+            if i + 2 < bytes.len() && (bytes[i] == b'-' || bytes[i] == b'_') && bytes[i + 1] == b'a'
+            {
                 // Try to parse a number after "a"
                 let start = i + 2;
-                let end = bytes[start..].iter().position(|&b| b == b'b').map(|p| start + p);
+                let end = bytes[start..]
+                    .iter()
+                    .position(|&b| b == b'b')
+                    .map(|p| start + p);
                 if let Some(end_idx) = end {
                     let active_str = &re_src[start..end_idx];
                     if let Ok(active) = active_str.parse::<f64>() {
@@ -247,7 +525,10 @@ impl ModelArch {
                         let before = &re_src[..i];
                         // Find last number + "b" before this point
                         let total_match = before.rmatch_indices('b').find_map(|(bi, _)| {
-                            let num_start = before[..bi].rfind(|c: char| !c.is_ascii_digit() && c != '.').map(|p| p + 1).unwrap_or(0);
+                            let num_start = before[..bi]
+                                .rfind(|c: char| !c.is_ascii_digit() && c != '.')
+                                .map(|p| p + 1)
+                                .unwrap_or(0);
                             before[num_start..bi].parse::<f64>().ok().map(|v| v)
                         });
                         if let Some(total) = total_match {
@@ -268,13 +549,13 @@ impl ModelArch {
         let (n_layers, n_kv_heads, head_dim) = if param_b < 2.0 {
             (22u32, 4u32, 64u32)
         } else if param_b < 5.0 {
-            (28, 4, 128)    // Qwen2.5-3B, Phi-3-mini style
+            (28, 4, 128) // Qwen2.5-3B, Phi-3-mini style
         } else if param_b < 10.0 {
-            (32, 8, 128)    // Llama-3.1-8B, Mistral-7B, Qwen2.5-7B
+            (32, 8, 128) // Llama-3.1-8B, Mistral-7B, Qwen2.5-7B
         } else if param_b < 18.0 {
-            (40, 8, 128)    // Llama-2-13B, Qwen2.5-14B range
+            (40, 8, 128) // Llama-2-13B, Qwen2.5-14B range
         } else if param_b < 25.0 {
-            (40, 8, 128)    // Mistral-22B range
+            (40, 8, 128) // Mistral-22B range
         } else if param_b < 35.0 {
             // Qwen3-30B-A3B: 48 layers, 4 KV heads (GQA). Confirmed from HF.
             // Note: Qwen3-30B-A3B is MoE (128 experts, 8 active) — handled by MoE suffix parsing.
@@ -283,11 +564,11 @@ impl ModelArch {
             // Qwen3-235B uses 94 layers with 4 KV heads; Llama-3.3-70B uses 80 layers, 8 KV.
             // Use Llama-70B as reference for the 70B range.
             // Confirmed from meta-llama/Llama-3.3-70B-Instruct and Qwen3 family docs.
-            (80, 8, 128)    // Llama-3.1/3.3-70B, Qwen2.5-72B
+            (80, 8, 128) // Llama-3.1/3.3-70B, Qwen2.5-72B
         } else if param_b < 150.0 {
-            (94, 4, 128)    // Qwen3-235B-A22B range; 4 KV heads confirmed from HF card
+            (94, 4, 128) // Qwen3-235B-A22B range; 4 KV heads confirmed from HF card
         } else {
-            (94, 4, 128)    // Very large MoE models — approximate
+            (94, 4, 128) // Very large MoE models — approximate
         };
         Self {
             n_layers,
@@ -298,16 +579,15 @@ impl ModelArch {
         }
     }
 
-    /// Gemma-3/4 alternating local/global attention heuristic.
-    /// 1-in-6 layers use full global attention; rest use a 512-token sliding window
-    /// with a single KV head (MQA).
+    /// Gemma 3 alternating local/global attention heuristic.
+    /// 1-in-6 layers use full global attention; rest use a 512-token sliding window.
     fn gemma3_heuristic(param_b: f64) -> Self {
         let (n_layers, global_kv_heads, head_dim) = if param_b < 5.0 {
-            (34u32, 4u32, 256u32)   // Gemma-3-4B
+            (34u32, 4u32, 256u32) // Gemma-3-4B
         } else if param_b < 14.0 {
-            (52, 8, 256)            // Gemma-3-12B
+            (52, 8, 256) // Gemma-3-12B
         } else {
-            (62, 16, 256)           // Gemma-3-27B / Gemma-4-27B
+            (62, 16, 256) // Gemma-3-27B
         };
         let global_layers = (n_layers as f64 / 6.0).round() as u32;
         Self {
@@ -318,54 +598,123 @@ impl ModelArch {
             local_attn_window: 512,
             local_kv_heads: 1,
             expert_fraction: 0.65,
-            // Gemma4 MoE variants (26B-A4B) need to be handled by introspection;
-            // the heuristic assumes dense.
             ..Default::default()
         }
     }
 
-    /// Qwen3.6 architecture family heuristic.
+    /// Gemma 4 alternating local/global attention heuristic.
     ///
-    /// All Qwen3.6 models share the same hybrid DeltaNet/Attention layout:
-    ///   N groups × (3 × DeltaNet → FFN) + (1 × Attention → FFN)
-    /// → exactly 1/4 of layers are standard softmax attention with KV cache;
-    ///   3/4 use DeltaNet linear attention with a fixed ~negligible recurrent state.
+    /// Key differences from Gemma 3:
+    ///   - Sliding window: 1024 tokens (Gemma 3 used 512)
+    ///   - Global layers: fewer KV heads but wider head_dim (512 vs 256)
+    ///   - Different layer counts per size tier
     ///
-    /// Standard attention parameters (same across 27B, 35B-A3B, 40B, 80B variants):
-    ///   24 Q heads, 4 KV heads, head_dim 256
-    fn qwen36_heuristic(param_b: f64) -> Self {
-        // Estimate total layer count from parameter count.
-        // Base 27B has 64 layers; davidau's 40B expansion has 96.
-        let n_layers: u32 = if param_b > 35.0 { 96 }
-            else { 64 };
-        let n_attn_layers = n_layers / 4; // exactly 1/4 are standard attention
-
-        // DeltaNet recurrent state: 3/4 × n_layers × n_v_heads × head_dim_v²
-        // For Qwen3.6-27B: 48 layers × 48 V-heads × 128² × 2 bytes ≈ 76 MB (negligible)
-        let n_deltanet = n_layers - n_attn_layers;
-        let linear_state = n_deltanet as u64 * 48 * 128 * 128 * 2;
-
-        let mut arch = Self {
+    /// Confirmed from https://kaitchup.substack.com/p/gemma-4-31b-and-26b-a4b-architecture
+    ///   31B dense:  60 total, 10 global (4 KV heads, 512 dim) + 50 local (16 KV heads, 256 dim)
+    ///   26B-A4B:    30 total,  5 global (2 KV heads, 512 dim) + 25 local ( 8 KV heads, 256 dim)
+    fn gemma4_heuristic(param_b: f64) -> Self {
+        let (n_layers, global_kv_heads, local_kv_heads, n_experts, n_experts_used) =
+            if param_b < 10.0 {
+                // Small variants (E2B, E4B): architecture not publicly confirmed.
+                // Using conservative estimate; sliding window stays 512 for these.
+                (30u32, 4u32, 8u32, 0u32, 0u32)
+            } else if param_b < 30.0 {
+                // 26B-A4B MoE: 30 layers, 128 total experts, 8 routed + 1 shared = 9 active.
+                // "A4B" = 4B active PARAMETERS, not 4 experts.
+                (30, 2, 8, 128, 9)
+            } else {
+                // 31B dense (and 27B): 60 layers, dense (no MoE).
+                (60, 4, 16, 0, 0)
+            };
+        let global_layers = n_layers / 6; // 5 local : 1 global pattern
+        let local_attn_window = if param_b < 10.0 { 512 } else { 1024 };
+        Self {
             n_layers,
-            n_kv_heads:    4,
-            head_dim:      256,
+            n_kv_heads: global_kv_heads, // KV heads for global (full-context) layers
+            head_dim: 256,               // head_dim for local sliding-window layers
+            global_head_dim: 512,        // head_dim for global layers (Gemma4 uses wider)
+            n_global_attn_layers: global_layers,
+            local_attn_window,
+            local_kv_heads,
+            n_experts,
+            n_experts_used,
+            expert_fraction: 0.65,
+            ..Default::default()
+        }
+    }
+
+    /// Qwen3.6 architecture heuristic (27B dense and davidau 40B expansion).
+    ///
+    /// 3:1 DeltaNet:Attention ratio → exactly 1/4 of layers are standard softmax attention.
+    /// 27B: 64 total layers, 16 attn, 4 KV heads, head_dim 256.
+    /// Davidau 40B expansion: 96 total layers, 24 attn, same head config.
+    ///
+    /// Note: 35B-A3B is handled separately by `qwen36_35b_a3b_arch` — it has a
+    /// completely different layer count (40) and KV head count (2).
+    fn qwen36_heuristic(param_b: f64) -> Self {
+        let n_layers: u32 = if param_b > 35.0 { 96 } else { 64 };
+        let n_attn_layers = n_layers / 4;
+        let n_deltanet = n_layers - n_attn_layers;
+        // DeltaNet state: 48 V-heads × 128² × 2 bytes per layer (confirmed for 27B)
+        let linear_state = n_deltanet as u64 * 48 * 128 * 128 * 2;
+        Self {
+            n_layers,
+            n_kv_heads: 4,
+            head_dim: 256,
             n_attn_layers,
             linear_attn_state_bytes: linear_state,
             expert_fraction: 0.65,
             ..Default::default()
-        };
-
-        // MoE detection: Qwen3.6-35B-A3B style has "A3B" active suffix
-        let moe = Self::parse_moe_suffix(&format!("{:.0}B-A3B", param_b));
-        if param_b > 28.0 && param_b < 40.0 {
-            // 35B-A3B: treat as MoE with sparse activation
-            arch.n_experts = 64;
-            arch.n_experts_used = 3;
-            arch.expert_fraction = 0.80; // most params in expert FFNs
         }
-        let _ = moe; // just informational above
+    }
 
-        arch
+    /// Qwen3.6-35B-A3B exact architecture (confirmed from HuggingFace model card).
+    ///
+    /// 40 total layers: 10 × (Gated Attention → MoE) + 30 × (Gated DeltaNet → MoE).
+    /// Attention: 16 Q / 2 KV heads, head_dim 256.
+    /// DeltaNet: 32 V-heads, 16 QK-heads, head_dim 128.
+    /// MoE: 256 total experts, 8 routed + 1 shared = 9 active.
+    /// "A3B" = 3 billion active parameters — NOT 3 active experts.
+    fn qwen36_35b_a3b_arch() -> Self {
+        let n_deltanet = 30u32;
+        let linear_state = n_deltanet as u64 * 32 * 128 * 128 * 2; // 32 V-heads
+        Self {
+            n_layers: 40,
+            n_kv_heads: 2,
+            head_dim: 256,
+            n_attn_layers: 10,
+            linear_attn_state_bytes: linear_state,
+            n_experts: 256,
+            n_experts_used: 9,     // 8 routed + 1 shared
+            expert_fraction: 0.85, // most params live in expert FFNs
+            ..Default::default()
+        }
+    }
+
+    /// Qwen3.5 architecture heuristic (hybrid DeltaNet + MoE).
+    ///
+    /// Same 3:1 DeltaNet:Attention ratio as Qwen3.6.
+    /// Confirmed: 122B-A10B has 48 layers (12 attn + 36 DeltaNet),
+    ///   2 KV heads, head_dim 256, 256 total experts, 9 active (8+1).
+    /// "A10B" = 10 billion active parameters — NOT 10 active experts.
+    fn qwen35_heuristic(param_b: f64) -> Self {
+        let n_layers: u32 = if param_b > 80.0 { 48 } else { 40 };
+        let n_attn_layers = n_layers / 4;
+        let n_deltanet = n_layers - n_attn_layers;
+        // DeltaNet V-heads: 64 for 122B (confirmed), estimated 32 for smaller
+        let deltanet_v_heads: u64 = if param_b > 80.0 { 64 } else { 32 };
+        let linear_state = n_deltanet as u64 * deltanet_v_heads * 128 * 128 * 2;
+        Self {
+            n_layers,
+            n_kv_heads: 2,
+            head_dim: 256,
+            n_attn_layers,
+            linear_attn_state_bytes: linear_state,
+            n_experts: 256,
+            n_experts_used: 9, // 8 routed + 1 shared
+            expert_fraction: 0.85,
+            ..Default::default()
+        }
     }
 
     /// Known-exact architecture for Qwen3-Coder-Next.
@@ -379,14 +728,14 @@ impl ModelArch {
         // DeltaNet recurrent state: 36 layers × 32 V-heads × 128² × 2 bytes ≈ 1.2 GB
         let deltanet_state = 36u64 * 32 * 128 * 128 * 2;
         Self {
-            n_layers:    48,
-            n_kv_heads:  2,
-            head_dim:    256,
-            n_attn_layers: 12,           // only these 12 layers use KV cache
+            n_layers: 48,
+            n_kv_heads: 2,
+            head_dim: 256,
+            n_attn_layers: 12, // only these 12 layers use KV cache
             linear_attn_state_bytes: deltanet_state,
-            n_experts:       512,
-            n_experts_used:  11,         // 10 routed + 1 shared
-            expert_fraction: 0.92,       // nearly all params are in expert FFNs (80B/3B ratio)
+            n_experts: 512,
+            n_experts_used: 11,    // 10 routed + 1 shared
+            expert_fraction: 0.92, // nearly all params are in expert FFNs (80B/3B ratio)
             ..Default::default()
         }
     }
@@ -439,23 +788,27 @@ pub fn kv_cache_bytes(
     };
 
     if arch.has_local_attn() {
-        // For Gemma: global_layers use full context, local_layers use sliding window.
-        // effective_layers applies separately to the global portion only for hybrid models;
-        // in practice Gemma is not hybrid-DeltaNet so effective_layers == n_layers here.
         let global_layers = arch.n_global_attn_layers.min(effective_layers) as f64;
         let local_layers = (effective_layers.saturating_sub(arch.n_global_attn_layers)) as f64;
         let g_kv = arch.n_kv_heads.max(1) as f64;
         let l_kv = arch.local_kv_heads.max(1) as f64;
-        let hd = arch.head_dim.max(1) as f64;
+        // Gemma 4 uses wider heads for global layers (global_head_dim=512 vs head_dim=256 local).
+        let g_hd = if arch.global_head_dim > 0 {
+            arch.global_head_dim
+        } else {
+            arch.head_dim
+        };
+        let g_hd = g_hd.max(1) as f64;
+        let l_hd = arch.head_dim.max(1) as f64;
         let window = arch.local_attn_window as f64;
 
         // Global: full context × all slots
-        let global_k = global_layers * g_kv * hd * ctx * slots * k_bpe;
-        let global_v = global_layers * g_kv * hd * ctx * slots * v_bpe;
+        let global_k = global_layers * g_kv * g_hd * ctx * slots * k_bpe;
+        let global_v = global_layers * g_kv * g_hd * ctx * slots * v_bpe;
         // Local: sliding window (at most `window` tokens, regardless of ctx)
         let effective_local_ctx = ctx.min(window) * slots;
-        let local_k = local_layers * l_kv * hd * effective_local_ctx * k_bpe;
-        let local_v = local_layers * l_kv * hd * effective_local_ctx * v_bpe;
+        let local_k = local_layers * l_kv * l_hd * effective_local_ctx * k_bpe;
+        let local_v = local_layers * l_kv * l_hd * effective_local_ctx * v_bpe;
 
         (global_k + global_v + local_k + local_v) as u64
     } else {
@@ -473,11 +826,7 @@ pub fn kv_cache_bytes(
 
 /// Split model weights between VRAM and RAM for a given `--n-cpu-moe` value.
 /// Returns `(vram_bytes, ram_bytes)`.
-pub fn moe_weight_split(
-    model_size_bytes: u64,
-    arch: &ModelArch,
-    n_cpu_moe: i32,
-) -> (u64, u64) {
+pub fn moe_weight_split(model_size_bytes: u64, arch: &ModelArch, n_cpu_moe: i32) -> (u64, u64) {
     if !arch.is_moe() || n_cpu_moe <= 0 {
         return (model_size_bytes, 0);
     }
@@ -572,11 +921,20 @@ pub fn full_estimate(
     let headroom = available_vram_bytes as i64 - total as i64;
 
     let (recommendation, note) = if available_vram_bytes == 0 {
-        (VramRecommendation::Risk, "GPU VRAM unknown; estimate is best-effort.".into())
+        (
+            VramRecommendation::Risk,
+            "GPU VRAM unknown; estimate is best-effort.".into(),
+        )
     } else if total <= (available_vram_bytes * 82 / 100) {
-        (VramRecommendation::Fit, "Fits comfortably with >18% headroom.".into())
+        (
+            VramRecommendation::Fit,
+            "Fits comfortably with >18% headroom.".into(),
+        )
     } else if total <= available_vram_bytes {
-        (VramRecommendation::Tight, "Fits, but VRAM is nearly full. Reduce context or KV quant if you hit OOM.".into())
+        (
+            VramRecommendation::Tight,
+            "Fits, but VRAM is nearly full. Reduce context or KV quant if you hit OOM.".into(),
+        )
     } else if total <= (available_vram_bytes * 120 / 100) {
         (VramRecommendation::Risk, "Exceeds VRAM; expect CPU spill and slower generation. Lower context or use KV quantization.".into())
     } else {
@@ -655,7 +1013,13 @@ fn direct_max_context(
     kv_budget: u64,
 ) -> u64 {
     let slots = parallel_slots.max(1) as f64;
-    let n_layers = arch.n_layers.max(1) as f64;
+    // Hybrid DeltaNet models (Qwen3.6, Qwen3.5): only n_attn_layers grow the KV cache.
+    // Using n_layers here would underestimate max context by 4× for those models.
+    let n_layers = if arch.is_hybrid_attn() {
+        arch.n_attn_layers.max(1)
+    } else {
+        arch.n_layers.max(1)
+    } as f64;
     let n_kv = arch.n_kv_heads.max(1) as f64;
     let hd = arch.head_dim.max(1) as f64;
     let k_bpe = kv_elem_bytes(ctk);
@@ -679,7 +1043,11 @@ fn binary_search_context(
     while lo + 1 < hi {
         let mid = lo + (hi - lo) / 2;
         let cost = kv_cache_bytes(arch, mid, parallel_slots, ctk, ctv);
-        if cost <= kv_budget { lo = mid; } else { hi = mid; }
+        if cost <= kv_budget {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
     }
     lo
 }
@@ -699,7 +1067,11 @@ pub enum UseCase {
     Roleplay,
 }
 
-impl Default for UseCase { fn default() -> Self { UseCase::General } }
+impl Default for UseCase {
+    fn default() -> Self {
+        UseCase::General
+    }
+}
 
 impl UseCase {
     /// Minimum recommended KV cache key quantization for this use case.
@@ -790,14 +1162,28 @@ pub fn auto_size(
 
     // ── Step 3: Compute max context for recommended KV quant ─────────────────
     let ctx = max_context(
-        model_size_bytes, arch, &kv_k, &kv_v,
-        parallel_slots, ubatch, n_cpu_moe, available_vram_bytes,
-        fit_gran, 0.05,
+        model_size_bytes,
+        arch,
+        &kv_k,
+        &kv_v,
+        parallel_slots,
+        ubatch,
+        n_cpu_moe,
+        available_vram_bytes,
+        fit_gran,
+        0.05,
     );
 
     let breakdown = full_estimate(
-        model_size_bytes, arch, ctx, &kv_k, &kv_v,
-        parallel_slots, ubatch, n_cpu_moe, available_vram_bytes,
+        model_size_bytes,
+        arch,
+        ctx,
+        &kv_k,
+        &kv_v,
+        parallel_slots,
+        ubatch,
+        n_cpu_moe,
+        available_vram_bytes,
     );
 
     // ── Step 4: Warnings ──────────────────────────────────────────────────────
@@ -846,8 +1232,14 @@ pub fn auto_size(
 
     // ── Step 5: Alternative scenarios for the scenario cards ─────────────────
     let scenarios = build_scenarios(
-        model_size_bytes, arch, available_vram_bytes,
-        parallel_slots, ubatch, n_cpu_moe, fit_gran, use_case,
+        model_size_bytes,
+        arch,
+        available_vram_bytes,
+        parallel_slots,
+        ubatch,
+        n_cpu_moe,
+        fit_gran,
+        use_case,
         &kv_k,
     );
 
@@ -880,12 +1272,16 @@ fn find_min_cpu_moe_to_fit_weights(
 ) -> i32 {
     // We need at least 20% headroom after weights for KV cache.
     let target = (available_vram_bytes * 80 / 100).saturating_sub(
-        gpu_overhead_bytes(ubatch_size) + arch.mmproj_bytes + mtp_overhead_bytes(model_size_bytes, arch.mtp_depth)
+        gpu_overhead_bytes(ubatch_size)
+            + arch.mmproj_bytes
+            + mtp_overhead_bytes(model_size_bytes, arch.mtp_depth),
     );
     let mut n_cpu = 0i32;
     while n_cpu < arch.n_experts as i32 {
         let (vram, _) = moe_weight_split(model_size_bytes, arch, n_cpu);
-        if vram <= target { break; }
+        if vram <= target {
+            break;
+        }
         n_cpu += 1;
     }
     n_cpu
@@ -907,18 +1303,32 @@ fn build_scenarios(
     let kv_options: &[(&str, &str, &str)] = &[
         ("q8_0", "q8_0", "Max coherence (q8_0 KV)"),
         ("q4_0", "q4_0", "Max context (q4_0 KV)"),
-        ("f16",  "f16",  "Reference quality (f16 KV)"),
+        ("f16", "f16", "Reference quality (f16 KV)"),
     ];
 
     for (kk, kv, label) in kv_options {
         let ctx = max_context(
-            model_size_bytes, arch, kk, kv,
-            parallel_slots, ubatch, n_cpu_moe, available_vram_bytes,
-            fit_gran, 0.05,
+            model_size_bytes,
+            arch,
+            kk,
+            kv,
+            parallel_slots,
+            ubatch,
+            n_cpu_moe,
+            available_vram_bytes,
+            fit_gran,
+            0.05,
         );
         let bd = full_estimate(
-            model_size_bytes, arch, ctx, kk, kv,
-            parallel_slots, ubatch, n_cpu_moe, available_vram_bytes,
+            model_size_bytes,
+            arch,
+            ctx,
+            kk,
+            kv,
+            parallel_slots,
+            ubatch,
+            n_cpu_moe,
+            available_vram_bytes,
         );
         let warn = if use_case == UseCase::Agentic && kv_elem_bytes(kk) < 1.0 {
             Some("⚠ Below q8_0 — not recommended for agents".into())
@@ -943,13 +1353,27 @@ fn build_scenarios(
     if arch.is_moe() && arch.n_experts > 0 {
         let aggressive_cpu = ((arch.n_experts as f64 * 0.75) as i32).min(arch.n_experts as i32 - 1);
         let ctx = max_context(
-            model_size_bytes, arch, "q8_0", "q8_0",
-            parallel_slots, ubatch, aggressive_cpu, available_vram_bytes,
-            fit_gran, 0.05,
+            model_size_bytes,
+            arch,
+            "q8_0",
+            "q8_0",
+            parallel_slots,
+            ubatch,
+            aggressive_cpu,
+            available_vram_bytes,
+            fit_gran,
+            0.05,
         );
         let bd = full_estimate(
-            model_size_bytes, arch, ctx, "q8_0", "q8_0",
-            parallel_slots, ubatch, aggressive_cpu, available_vram_bytes,
+            model_size_bytes,
+            arch,
+            ctx,
+            "q8_0",
+            "q8_0",
+            parallel_slots,
+            ubatch,
+            aggressive_cpu,
+            available_vram_bytes,
         );
         scenarios.push(ContextScenario {
             label: format!("Extended ({}× CPU offload)", aggressive_cpu),
@@ -959,7 +1383,9 @@ fn build_scenarios(
             n_cpu_moe: Some(aggressive_cpu),
             vram_total_gb: bd.total_bytes as f64 / 1e9,
             recommended: false,
-            warning: Some(format!("{aggressive_cpu} experts on CPU — slower generation")),
+            warning: Some(format!(
+                "{aggressive_cpu} experts on CPU — slower generation"
+            )),
             note: format!("{} tokens", format_ctx(ctx)),
         });
     }
@@ -968,8 +1394,12 @@ fn build_scenarios(
 }
 
 fn format_ctx(ctx: u64) -> String {
-    if ctx >= 1_000_000 { return format!("{:.1}M", ctx as f64 / 1e6); }
-    if ctx >= 1_000 { return format!("{}K", ctx / 1000); }
+    if ctx >= 1_000_000 {
+        return format!("{:.1}M", ctx as f64 / 1e6);
+    }
+    if ctx >= 1_000 {
+        return format!("{}K", ctx / 1000);
+    }
     ctx.to_string()
 }
 
@@ -1008,13 +1438,8 @@ pub fn quant_comparison_table(
 ) -> Vec<QuantOption> {
     // Quants we show in the advisor (sorted from highest to lowest quality)
     let show_quants = [
-        "f16", "q8_0",
-        "q6_k", "q5_k_m", "q5_k_s",
-        "q4_k_m", "q4_k_s", "iq4_xs",
-        "q4_0",
-        "q3_k_m", "iq3_m", "iq3_xs",
-        "q2_k", "iq2_xxs", "iq2_xs",
-        "iq1_m",
+        "f16", "q8_0", "q6_k", "q5_k_m", "q5_k_s", "q4_k_m", "q4_k_s", "iq4_xs", "q4_0", "q3_k_m",
+        "iq3_m", "iq3_xs", "q2_k", "iq2_xxs", "iq2_xs", "iq1_m",
     ];
 
     let mut options: Vec<QuantOption> = Vec::new();
@@ -1036,33 +1461,64 @@ pub fn quant_comparison_table(
         let model_gb = model_bytes as f64 / 1e9;
         let fits = model_bytes + gpu_overhead_bytes(512) < available_vram_bytes;
 
-        let mut arch_for_q = arch.clone();
-        // Update mmproj_bytes from arch (already set)
-
-        let max_q8 = max_context(model_bytes, &arch_for_q, "q8_0", "q8_0",
-            parallel_slots, 512, 0, available_vram_bytes, 1024, 0.05);
-        let max_q4 = max_context(model_bytes, &arch_for_q, "q4_0", "q4_0",
-            parallel_slots, 512, 0, available_vram_bytes, 1024, 0.05);
+        let max_q8 = max_context(
+            model_bytes,
+            arch,
+            "q8_0",
+            "q8_0",
+            parallel_slots,
+            512,
+            0,
+            available_vram_bytes,
+            1024,
+            0.05,
+        );
+        let max_q4 = max_context(
+            model_bytes,
+            arch,
+            "q4_0",
+            "q4_0",
+            parallel_slots,
+            512,
+            0,
+            available_vram_bytes,
+            1024,
+            0.05,
+        );
 
         let mut notes = Vec::new();
-        if qi.is_imatrix { notes.push("Requires imatrix calibration for best quality".into()); }
-        if qi.large_moe_only { notes.push("Designed for large MoE models; poor for dense".into()); }
+        if qi.is_imatrix {
+            notes.push("Requires imatrix calibration for best quality".into());
+        }
+        if qi.large_moe_only {
+            notes.push("Designed for large MoE models; poor for dense".into());
+        }
         match qi.quality {
             QuantQuality::Reference => notes.push("Bit-accurate reference quality".into()),
-            QuantQuality::Excellent => notes.push("Near-lossless; essentially equivalent to F16 for most tasks".into()),
+            QuantQuality::Excellent => {
+                notes.push("Near-lossless; essentially equivalent to F16 for most tasks".into())
+            }
             QuantQuality::VeryGood => {}
             QuantQuality::Good => {}
-            QuantQuality::Acceptable => notes.push("Noticeable quality reduction on complex tasks".into()),
-            QuantQuality::Fair => notes.push("Significant quality loss; only for maximum context or large MoE".into()),
+            QuantQuality::Acceptable => {
+                notes.push("Noticeable quality reduction on complex tasks".into())
+            }
+            QuantQuality::Fair => {
+                notes.push("Significant quality loss; only for maximum context or large MoE".into())
+            }
             QuantQuality::Reduced | QuantQuality::VeryLow => {
-                notes.push("Heavy quality reduction; avoid for production use on dense models".into());
+                notes.push(
+                    "Heavy quality reduction; avoid for production use on dense models".into(),
+                );
             }
         }
 
         // Score for recommendation: balance of quality × context × fits
         let score = if fits {
             max_q8.min(128_000) * quality_weight(qi.quality)
-        } else { 0 };
+        } else {
+            0
+        };
         if score > best_score {
             best_score = score;
             best_quant = Some(q_name.to_string());
@@ -1087,7 +1543,9 @@ pub fn quant_comparison_table(
     // Mark recommended
     if let Some(ref best) = best_quant {
         for opt in &mut options {
-            if &opt.quant == best { opt.recommended = true; }
+            if &opt.quant == best {
+                opt.recommended = true;
+            }
         }
     }
 
@@ -1117,7 +1575,8 @@ fn quality_label(q: QuantQuality) -> String {
         QuantQuality::Fair => "Fair",
         QuantQuality::Reduced => "Reduced",
         QuantQuality::VeryLow => "Very Low",
-    }.into()
+    }
+    .into()
 }
 
 // ── Backward-compat wrapper kept for existing callers ─────────────────────────
@@ -1149,7 +1608,7 @@ pub fn estimate_vram(
     // Keep this so existing presets with no arch info still get a number.
     let kv_bytes_per_tok = {
         let bpe = kv_elem_bytes(kv_quant);
-        (bpe * 64.0) as u64  // 64 = rough bytes/token for an "average" 7-30B model
+        (bpe * 64.0) as u64 // 64 = rough bytes/token for an "average" 7-30B model
     };
     let effective_batch = batch_size.max(ubatch_size).max(1);
     let kv_est = context_size
@@ -1175,13 +1634,22 @@ pub fn estimate_vram(
     let (recommendation, note) = if available_vram_bytes == 0 {
         (VramRecommendation::Risk, "No VRAM info available.".into())
     } else if total <= available_vram_bytes * 82 / 100 {
-        (VramRecommendation::Fit, "Configuration fits with headroom.".into())
+        (
+            VramRecommendation::Fit,
+            "Configuration fits with headroom.".into(),
+        )
     } else if total <= available_vram_bytes {
-        (VramRecommendation::Tight, "Fits, but near the VRAM limit.".into())
+        (
+            VramRecommendation::Tight,
+            "Fits, but near the VRAM limit.".into(),
+        )
     } else if total <= available_vram_bytes * 150 / 100 {
         (VramRecommendation::Risk, "Likely exceeds VRAM.".into())
     } else {
-        (VramRecommendation::WontFit, "Significantly over VRAM budget.".into())
+        (
+            VramRecommendation::WontFit,
+            "Significantly over VRAM budget.".into(),
+        )
     };
 
     VramEstimate {
@@ -1228,29 +1696,52 @@ mod tests {
         let arch = qwen3_27b_arch();
         let model_bytes = estimate_model_size_bytes(27.0, "q4_k_m");
         // Using RTX 5090 32GB
-        let ctx = max_context(model_bytes, &arch, "q8_0", "q8_0", 1, 1024, 0,
-            32 * 1024 * 1024 * 1024, 1024, 0.05);
+        let ctx = max_context(
+            model_bytes,
+            &arch,
+            "q8_0",
+            "q8_0",
+            1,
+            1024,
+            0,
+            32 * 1024 * 1024 * 1024,
+            1024,
+            0.05,
+        );
         // Should be in the 180K–240K range
-        assert!(ctx >= 180_000 && ctx <= 260_000,
-            "Expected ~212K context, got {ctx}");
+        assert!(
+            ctx >= 180_000 && ctx <= 260_000,
+            "Expected ~212K context, got {ctx}"
+        );
     }
 
     #[test]
     fn gemma3_local_attn_substantially_smaller_kv() {
-        let dense = ModelArch { n_layers: 62, n_kv_heads: 16, head_dim: 256, ..Default::default() };
+        let dense = ModelArch {
+            n_layers: 62,
+            n_kv_heads: 16,
+            head_dim: 256,
+            ..Default::default()
+        };
         let gemma = ModelArch::gemma3_heuristic(27.0);
 
         let ctx = 128_000u64;
         let kv_dense = kv_cache_bytes(&dense, ctx, 1, "f16", "f16");
         let kv_gemma = kv_cache_bytes(&gemma, ctx, 1, "f16", "f16");
         // Gemma alternating attention should use substantially less KV
-        assert!(kv_gemma < kv_dense / 3,
-            "Gemma KV ({kv_gemma}) should be < 1/3 of naive dense ({kv_dense})");
+        assert!(
+            kv_gemma < kv_dense / 3,
+            "Gemma KV ({kv_gemma}) should be < 1/3 of naive dense ({kv_dense})"
+        );
     }
 
     #[test]
     fn moe_weight_split_proportional() {
-        let arch = ModelArch { n_experts: 8, expert_fraction: 0.65, ..Default::default() };
+        let arch = ModelArch {
+            n_experts: 8,
+            expert_fraction: 0.65,
+            ..Default::default()
+        };
         let model = 46_000_000_000u64; // Mixtral-8x7B ~46GB
         let (vram0, ram0) = moe_weight_split(model, &arch, 0);
         assert_eq!(vram0, model);
@@ -1277,19 +1768,32 @@ mod tests {
     fn auto_size_returns_reasonable_context() {
         let arch = qwen3_27b_arch();
         let model_bytes = estimate_model_size_bytes(27.0, "q4_k_m");
-        let result = auto_size(model_bytes, &arch, 32 * 1024 * 1024 * 1024,
-            UseCase::General, 1, 1024);
-        assert!(result.context_size >= 100_000,
-            "Expected ≥ 100K context on 32GB for 27B Q4_K_M");
+        let result = auto_size(
+            model_bytes,
+            &arch,
+            32 * 1024 * 1024 * 1024,
+            UseCase::General,
+            1,
+            1024,
+        );
+        assert!(
+            result.context_size >= 100_000,
+            "Expected ≥ 100K context on 32GB for 27B Q4_K_M"
+        );
         assert_eq!(result.kv_quant_k, "q8_0");
         assert!(!result.scenarios.is_empty());
     }
 
     #[test]
     fn quant_comparison_table_marks_one_recommended() {
-        let arch = ModelArch { n_layers: 32, n_kv_heads: 8, head_dim: 128, ..Default::default() };
-        let opts = quant_comparison_table(27.0, &arch, 32 * 1024 * 1024 * 1024,
-            UseCase::General, 1);
+        let arch = ModelArch {
+            n_layers: 32,
+            n_kv_heads: 8,
+            head_dim: 128,
+            ..Default::default()
+        };
+        let opts =
+            quant_comparison_table(27.0, &arch, 32 * 1024 * 1024 * 1024, UseCase::General, 1);
         let rec: Vec<_> = opts.iter().filter(|o| o.recommended).collect();
         assert_eq!(rec.len(), 1, "Expected exactly one recommended quant");
     }
@@ -1306,8 +1810,14 @@ mod tests {
         // Should be MoE
         assert!(arch.is_moe(), "Qwen3-30B-A3B must be flagged MoE");
         // Should NOT be hybrid (no n_attn_layers < n_layers)
-        assert!(!arch.is_hybrid_attn(), "Qwen3-30B-A3B is standard transformer, not hybrid DeltaNet");
-        assert_eq!(arch.linear_attn_state_bytes, 0, "No DeltaNet state for Qwen3-30B-A3B");
+        assert!(
+            !arch.is_hybrid_attn(),
+            "Qwen3-30B-A3B is standard transformer, not hybrid DeltaNet"
+        );
+        assert_eq!(
+            arch.linear_attn_state_bytes, 0,
+            "No DeltaNet state for Qwen3-30B-A3B"
+        );
     }
 
     #[test]
@@ -1317,7 +1827,10 @@ mod tests {
         // 94 layers, 64 Q / 4 KV heads, 128 experts total, 8 active.
         let arch = ModelArch::from_name_and_params("Qwen3-235B-A22B-GGUF", 235.0);
         assert!(arch.is_moe(), "Qwen3-235B-A22B must be MoE");
-        assert!(!arch.is_hybrid_attn(), "Qwen3-235B-A22B is standard transformer");
+        assert!(
+            !arch.is_hybrid_attn(),
+            "Qwen3-235B-A22B is standard transformer"
+        );
     }
 
     #[test]
@@ -1328,7 +1841,10 @@ mod tests {
         // 4 KV heads, head_dim 256.
         let arch = ModelArch::from_name_and_params("Qwen3.6-27B-Instruct-GGUF", 27.0);
         assert!(arch.is_hybrid_attn(), "Qwen3.6-27B must be hybrid DeltaNet");
-        assert_eq!(arch.n_attn_layers, 16, "Qwen3.6-27B has 16 standard attn layers");
+        assert_eq!(
+            arch.n_attn_layers, 16,
+            "Qwen3.6-27B has 16 standard attn layers"
+        );
         assert_eq!(arch.n_layers, 64, "Qwen3.6-27B has 64 total layers");
         assert_eq!(arch.n_kv_heads, 4, "Qwen3.6-27B has 4 KV heads");
         assert_eq!(arch.head_dim, 256, "Qwen3.6-27B head_dim is 256");
@@ -1343,12 +1859,16 @@ mod tests {
         // Expected: 16 attn layers × 2 × 4 KV heads × 256 head_dim × 2 bytes × 128K tokens
         // = 16 × 2 × 4 × 256 × 2 × 128,000 = 3,355,443,200 bytes ≈ 3.1 GB
         let expected = 16u64 * 2 * 4 * 256 * 2 * 128_000;
-        assert_eq!(kv_128k, expected,
-            "Qwen3.6-27B KV at 128K should use only 16 attn layers, not 64");
+        assert_eq!(
+            kv_128k, expected,
+            "Qwen3.6-27B KV at 128K should use only 16 attn layers, not 64"
+        );
         // Naive (wrong) calculation would give 4× more: 64 layers × same = 12.6 GB
         let naive_wrong = 64u64 * 2 * 4 * 256 * 2 * 128_000;
-        assert!(kv_128k < naive_wrong / 3,
-            "Correct KV ({kv_128k}) should be < 1/3 of naive calculation ({naive_wrong})");
+        assert!(
+            kv_128k < naive_wrong / 3,
+            "Correct KV ({kv_128k}) should be < 1/3 of naive calculation ({naive_wrong})"
+        );
     }
 
     #[test]
@@ -1357,11 +1877,17 @@ mod tests {
         // Source: DavidAU model card.
         let arch = ModelArch::from_name_and_params(
             "Qwen3.6-40B-Claude-4.6-Opus-Deckard-Heretic-Uncensored-Thinking-NEO-CODE-Di-IMatrix-MAX",
-            40.0
+            40.0,
         );
-        assert!(arch.is_hybrid_attn(), "40B expansion should be hybrid DeltaNet");
+        assert!(
+            arch.is_hybrid_attn(),
+            "40B expansion should be hybrid DeltaNet"
+        );
         assert_eq!(arch.n_layers, 96, "40B expansion has 96 layers");
-        assert_eq!(arch.n_attn_layers, 24, "40B expansion has 24 standard attn layers");
+        assert_eq!(
+            arch.n_attn_layers, 24,
+            "40B expansion has 24 standard attn layers"
+        );
         assert_eq!(arch.n_kv_heads, 4, "Same KV head config as base");
     }
 
@@ -1382,7 +1908,10 @@ mod tests {
         // "Qwen3" without ".6" should NOT get the DeltaNet treatment.
         // Qwen3-30B-A3B is standard transformer + MoE.
         let arch30 = ModelArch::from_name_and_params("bartowski/Qwen3-30B-A3B-GGUF", 30.0);
-        assert!(!arch30.is_hybrid_attn(), "Standard Qwen3 MoE is not hybrid DeltaNet");
+        assert!(
+            !arch30.is_hybrid_attn(),
+            "Standard Qwen3 MoE is not hybrid DeltaNet"
+        );
 
         // Qwen3.6 SHOULD get it.
         let arch27 = ModelArch::from_name_and_params("unsloth/Qwen3.6-27B-Instruct-GGUF", 27.0);
@@ -1405,10 +1934,30 @@ mod tests {
 
     #[test]
     fn vram_assertions_work() {
-        let est = estimate_vram(4u64 << 30, 4096, "q8_0", 512, 512, false, 0, None, 8u64 << 30);
+        let est = estimate_vram(
+            4u64 << 30,
+            4096,
+            "q8_0",
+            512,
+            512,
+            false,
+            0,
+            None,
+            8u64 << 30,
+        );
         assert!(matches!(est.recommendation, VramRecommendation::Fit));
 
-        let est2 = estimate_vram(40u64 << 30, 4096, "q8_0", 512, 512, false, 0, None, 16u64 << 30);
+        let est2 = estimate_vram(
+            40u64 << 30,
+            4096,
+            "q8_0",
+            512,
+            512,
+            false,
+            0,
+            None,
+            16u64 << 30,
+        );
         assert!(matches!(est2.recommendation, VramRecommendation::WontFit));
     }
 
@@ -1416,28 +1965,96 @@ mod tests {
 
     #[test]
     fn gemma4_31b_dense_gets_alternating_attention() {
+        // Source: https://kaitchup.substack.com/p/gemma-4-31b-and-26b-a4b-architecture
+        // 60 layers (10 global + 50 local), 1024-token sliding window.
+        // Global layers: 4 KV heads, 512 head_dim. Local layers: 16 KV heads, 256 head_dim.
         let arch = ModelArch::from_name_and_params(
-            "Gemma-4-Gembrain-31B-it-uncensored-heretic.i1-Q4_K_S.gguf", 31.0
+            "Gemma-4-Gembrain-31B-it-uncensored-heretic.i1-Q4_K_S.gguf",
+            31.0,
         );
         assert!(arch.has_local_attn(), "Gemma-4 should use local attention");
-        assert_eq!(arch.head_dim, 256, "Gemma uses 256 head_dim");
+        assert_eq!(arch.head_dim, 256, "Gemma4 local layers use 256 head_dim");
+        assert_eq!(
+            arch.global_head_dim, 512,
+            "Gemma4 global layers use 512 head_dim"
+        );
+        assert_eq!(
+            arch.local_attn_window, 1024,
+            "Gemma4 uses 1024-token sliding window"
+        );
+        assert_eq!(arch.n_layers, 60, "Gemma4-31B has 60 layers");
+        assert_eq!(
+            arch.n_global_attn_layers, 10,
+            "Gemma4-31B has 10 global attention layers"
+        );
+        assert_eq!(
+            arch.n_kv_heads, 4,
+            "Gemma4-31B global layers have 4 KV heads"
+        );
+        assert_eq!(
+            arch.local_kv_heads, 16,
+            "Gemma4-31B local layers have 16 KV heads"
+        );
         assert_eq!(arch.mtp_depth, 0, "31B dense Gemma has no MTP in name");
+        assert!(!arch.is_moe(), "31B dense Gemma is not MoE");
     }
 
     #[test]
     fn gemma4_26b_a4b_gets_moe_and_alternating_attention() {
-        let arch = ModelArch::from_name_and_params(
-            "gemma-4-26B-A4B-it-heretic-ara.Q5_K_XL.gguf", 26.0
+        // Source: same reference. 30 layers, 128 total experts, 9 active (8 routed + 1 shared).
+        // "A4B" = 4B active PARAMETERS — not 4 active experts.
+        let arch =
+            ModelArch::from_name_and_params("gemma-4-26B-A4B-it-heretic-ara.Q5_K_XL.gguf", 26.0);
+        assert!(
+            arch.has_local_attn(),
+            "Gemma-4 MoE should use local attention"
         );
-        assert!(arch.has_local_attn(), "Gemma-4 MoE should use local attention");
-        assert!(arch.is_moe(), "A4B suffix should trigger MoE detection");
-        assert_eq!(arch.n_experts_used, 4, "4B active should map to n_experts_used=4");
+        assert!(arch.is_moe(), "26B-A4B should be MoE");
+        assert_eq!(arch.n_experts, 128, "Gemma4-26B-A4B has 128 total experts");
+        assert_eq!(
+            arch.n_experts_used, 9,
+            "Gemma4-26B-A4B has 9 active experts (8 routed + 1 shared)"
+        );
+        assert_eq!(
+            arch.local_attn_window, 1024,
+            "Gemma4 uses 1024-token sliding window"
+        );
+        assert_eq!(arch.n_layers, 30, "Gemma4-26B-A4B has 30 layers");
+        assert_eq!(
+            arch.n_global_attn_layers, 5,
+            "Gemma4-26B-A4B has 5 global layers"
+        );
+        assert_eq!(
+            arch.n_kv_heads, 2,
+            "Gemma4-26B-A4B global layers have 2 KV heads"
+        );
+        assert_eq!(
+            arch.local_kv_heads, 8,
+            "Gemma4-26B-A4B local layers have 8 KV heads"
+        );
+    }
+
+    #[test]
+    fn gemma4_31b_kv_cache_uses_global_head_dim() {
+        // At 128K context: global layers scale linearly, local layers are window-capped.
+        // Global  (10 layers): 10 × 4 KV × 512 dim × 128K ctx × 2 (K+V) × 2 bytes (f16)
+        // Local   (50 layers): 50 × 16 KV × 256 dim × min(128K,1024) window × 2 × 2 bytes
+        let arch = ModelArch::from_name_and_params("Gemma-4-31B-it-GGUF", 31.0);
+        let kv = kv_cache_bytes(&arch, 128_000, 1, "f16", "f16");
+        let global = 10u64 * 4 * 512 * 128_000 * 2 * 2;
+        let local = 50u64 * 16 * 256 * 1_024 * 2 * 2;
+        assert_eq!(
+            kv,
+            global + local,
+            "Gemma4-31B KV must use global_head_dim=512 for global layers"
+        );
     }
 
     #[test]
     fn qwen3_27b_mtp_gets_mtp_depth() {
         let arch = ModelArch::from_name_and_params(
-            "Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-Q4_K_S.gguf", 27.0
+            "Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-Q4_K_S.gguf",
+            27.0,
         );
         assert_eq!(arch.mtp_depth, 1, "MTP in filename should set mtp_depth=1");
         assert!(!arch.is_moe(), "27B dense should not be MoE");
@@ -1445,22 +2062,63 @@ mod tests {
 
     #[test]
     fn qwen3_35b_a3b_gets_moe() {
-        let arch = ModelArch::from_name_and_params(
-            "Qwen3.6-35B-A3B-uncensored-heretic-Q4_K_M.gguf", 35.0
+        // Source: Qwen/Qwen3.6-35B-A3B HF model card.
+        // 40 layers (10 attn + 30 DeltaNet), 2 KV heads, 256 experts, 9 active.
+        // "A3B" = 3B active PARAMETERS — not 3 active experts.
+        let arch =
+            ModelArch::from_name_and_params("Qwen3.6-35B-A3B-uncensored-heretic-Q4_K_M.gguf", 35.0);
+        assert!(arch.is_moe(), "35B-A3B should be MoE");
+        assert!(arch.is_hybrid_attn(), "35B-A3B is hybrid DeltaNet");
+        assert_eq!(arch.n_layers, 40, "35B-A3B has 40 total layers");
+        assert_eq!(
+            arch.n_attn_layers, 10,
+            "35B-A3B has 10 standard attention layers"
         );
-        assert!(arch.is_moe(), "35B-A3B should trigger MoE detection");
-        assert_eq!(arch.n_experts_used, 3, "A3B → 3 active experts");
-        assert!(arch.n_experts >= 8, "Should estimate at least 8 total experts");
+        assert_eq!(arch.n_kv_heads, 2, "35B-A3B has 2 KV heads");
+        assert_eq!(arch.n_experts, 256, "35B-A3B has 256 total experts");
+        assert_eq!(
+            arch.n_experts_used, 9,
+            "35B-A3B has 9 active experts (8 routed + 1 shared)"
+        );
+    }
+
+    #[test]
+    fn qwen35_122b_a10b_is_hybrid_deltanet() {
+        // Source: unsloth/Qwen3.5-122B-A10B-MTP-GGUF model card.
+        // 48 layers (12 attn + 36 DeltaNet), 2 KV heads, 256 experts, 9 active.
+        // "A10B" = 10B active PARAMETERS — not 10 active experts.
+        let arch = ModelArch::from_name_and_params("Qwen3.5-122B-A10B-MTP-GGUF", 122.0);
+        assert!(
+            arch.is_hybrid_attn(),
+            "Qwen3.5-122B must be hybrid DeltaNet"
+        );
+        assert!(arch.is_moe(), "122B-A10B must be MoE");
+        assert_eq!(arch.n_layers, 48, "122B has 48 total layers");
+        assert_eq!(
+            arch.n_attn_layers, 12,
+            "122B has 12 standard attention layers"
+        );
+        assert_eq!(arch.n_kv_heads, 2, "122B has 2 KV heads");
+        assert_eq!(arch.n_experts, 256, "122B has 256 total experts");
+        assert_eq!(
+            arch.n_experts_used, 9,
+            "122B has 9 active experts (8 routed + 1 shared)"
+        );
+        assert_eq!(arch.mtp_depth, 1, "MTP in name sets mtp_depth=1");
     }
 
     #[test]
     fn qwopus_122b_a10b_large_moe_iq3s() {
         let arch = ModelArch::from_name_and_params(
-            "Qwopus3.5-122B-A10B-Kimi-K2.6-distill-abliterated.i1-IQ3_S.gguf", 122.0
+            "Qwopus3.5-122B-A10B-Kimi-K2.6-distill-abliterated.i1-IQ3_S.gguf",
+            122.0,
         );
         assert!(arch.is_moe(), "122B-A10B should be MoE");
         // Should have many experts (128 for 122B+ MoE)
-        assert!(arch.n_experts >= 64, "Large MoE should have ≥64 experts in heuristic");
+        assert!(
+            arch.n_experts >= 64,
+            "Large MoE should have ≥64 experts in heuristic"
+        );
 
         // On 32GB VRAM, IQ3_S at 122B needs heavy CPU offload
         let model_bytes = estimate_model_size_bytes(122.0, "iq3_s");
@@ -1469,7 +2127,10 @@ mod tests {
         // Verify that with n_cpu_moe auto-sizing, it fits on 32GB
         let result = auto_size(model_bytes, &arch, vram_32gb, UseCase::General, 1, 1024);
         // Should recommend substantial CPU offload
-        assert!(result.n_cpu_moe.unwrap_or(0) > 0, "Large 122B MoE should need CPU offload on 32GB");
+        assert!(
+            result.n_cpu_moe.unwrap_or(0) > 0,
+            "Large 122B MoE should need CPU offload on 32GB"
+        );
     }
 
     #[test]
@@ -1477,17 +2138,24 @@ mod tests {
         // Verify the Gemma alternating attention dramatically reduces KV for long context
         let arch_gemma = ModelArch::gemma3_heuristic(27.0);
         let arch_dense = ModelArch {
-            n_layers: 62, n_kv_heads: 16, head_dim: 256, ..Default::default()
+            n_layers: 62,
+            n_kv_heads: 16,
+            head_dim: 256,
+            ..Default::default()
         };
         let ctx = 128_000u64;
         let kv_gemma = kv_cache_bytes(&arch_gemma, ctx, 1, "f16", "f16");
         let kv_dense = kv_cache_bytes(&arch_dense, ctx, 1, "f16", "f16");
 
         // Gemma at 128K should use < 25GB; naively dense would be > 100GB
-        assert!(kv_gemma < 25 * 1024 * 1024 * 1024,
+        assert!(
+            kv_gemma < 25 * 1024 * 1024 * 1024,
             "Gemma 128K KV should be < 25GB with alternating attention, got {}GB",
-            kv_gemma / 1024 / 1024 / 1024);
-        assert!(kv_dense > kv_gemma * 3,
-            "Dense naive calculation should be > 3× Gemma's actual KV");
+            kv_gemma / 1024 / 1024 / 1024
+        );
+        assert!(
+            kv_dense > kv_gemma * 3,
+            "Dense naive calculation should be > 3× Gemma's actual KV"
+        );
     }
 }

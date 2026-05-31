@@ -349,34 +349,38 @@ pub struct ModelMetadata {
 impl ModelMetadata {
     /// Convert to a `ModelArch` suitable for VRAM estimation.
     /// Falls back to heuristics when fields are absent.
-    pub fn to_arch(&self, model_name: &str, param_b: f64) -> crate::llama::vram_estimator::ModelArch {
+    pub fn to_arch(
+        &self,
+        model_name: &str,
+        param_b: f64,
+    ) -> crate::llama::vram_estimator::ModelArch {
         use crate::llama::vram_estimator::ModelArch;
 
         // Compute head_dim from introspection or fall back to n_embd / n_head.
-        let head_dim = self.head_dim
-            .or_else(|| {
-                let embd = self.n_embd?;
-                let heads = self.n_head?;
-                if heads > 0 { Some(embd / heads) } else { None }
-            });
+        let head_dim = self.head_dim.or_else(|| {
+            let embd = self.n_embd?;
+            let heads = self.n_head?;
+            if heads > 0 { Some(embd / heads) } else { None }
+        });
 
         let heuristic = ModelArch::from_name_and_params(model_name, param_b);
 
         ModelArch {
-            n_layers:       self.n_layers.unwrap_or(heuristic.n_layers),
-            n_kv_heads:     self.n_kv_heads.unwrap_or(heuristic.n_kv_heads),
-            head_dim:       head_dim.unwrap_or(heuristic.head_dim),
-            n_global_attn_layers:    heuristic.n_global_attn_layers,
-            local_attn_window:       heuristic.local_attn_window,
-            local_kv_heads:          heuristic.local_kv_heads,
+            n_layers: self.n_layers.unwrap_or(heuristic.n_layers),
+            n_kv_heads: self.n_kv_heads.unwrap_or(heuristic.n_kv_heads),
+            head_dim: head_dim.unwrap_or(heuristic.head_dim),
+            n_global_attn_layers: heuristic.n_global_attn_layers,
+            local_attn_window: heuristic.local_attn_window,
+            local_kv_heads: heuristic.local_kv_heads,
             // Hybrid linear attention: preserve from heuristic; introspection will refine
-            n_attn_layers:           heuristic.n_attn_layers,
+            n_attn_layers: heuristic.n_attn_layers,
             linear_attn_state_bytes: heuristic.linear_attn_state_bytes,
-            n_experts:      self.n_experts.unwrap_or(heuristic.n_experts),
+            n_experts: self.n_experts.unwrap_or(heuristic.n_experts),
             n_experts_used: self.n_experts_used.unwrap_or(heuristic.n_experts_used),
             expert_fraction: heuristic.expert_fraction,
-            mtp_depth:      self.mtp_depth.unwrap_or(heuristic.mtp_depth),
-            mmproj_bytes:   0, // filled in separately when mmproj path is known
+            mtp_depth: self.mtp_depth.unwrap_or(heuristic.mtp_depth),
+            global_head_dim: heuristic.global_head_dim,
+            mmproj_bytes: 0, // filled in separately when mmproj path is known
             param_b,
         }
     }
@@ -456,20 +460,43 @@ fn parse_model_metadata(output: &str) -> ModelMetadata {
             };
         }
 
-        try_field!(n_layers,       "n_layer", "n_layers", "block_count");
-        try_field!(n_ctx_train,    "n_ctx_train", "context_length");
-        try_field!(n_embd,         "n_embd", "embedding_length");
-        try_field!(n_ff,           "n_ff", "feed_forward_length");
-        try_field!(n_head,         "n_head", "attention.head_count", "head_count");
-        try_field!(n_kv_heads,     "n_head_kv", "n_kv_heads", "attention.head_count_kv",
-                                   "head_count_kv", "n_gqa");
-        try_field!(head_dim,       "head_dim", "key_length", "attention.key_length");
-        try_field!(n_experts,      "n_expert", "n_experts", "expert_count",
-                                   "expert.count", "n_exp");
-        try_field!(n_experts_used, "n_expert_used", "n_experts_used", "expert.used_count",
-                                   "n_exp_used", "experts_used");
-        try_field!(mtp_depth,      "mtp_depth", "multi_token_prediction_depth",
-                                   "num_nextn_predict_layers", "next_n_token_count");
+        try_field!(n_layers, "n_layer", "n_layers", "block_count");
+        try_field!(n_ctx_train, "n_ctx_train", "context_length");
+        try_field!(n_embd, "n_embd", "embedding_length");
+        try_field!(n_ff, "n_ff", "feed_forward_length");
+        try_field!(n_head, "n_head", "attention.head_count", "head_count");
+        try_field!(
+            n_kv_heads,
+            "n_head_kv",
+            "n_kv_heads",
+            "attention.head_count_kv",
+            "head_count_kv",
+            "n_gqa"
+        );
+        try_field!(head_dim, "head_dim", "key_length", "attention.key_length");
+        try_field!(
+            n_experts,
+            "n_expert",
+            "n_experts",
+            "expert_count",
+            "expert.count",
+            "n_exp"
+        );
+        try_field!(
+            n_experts_used,
+            "n_expert_used",
+            "n_experts_used",
+            "expert.used_count",
+            "n_exp_used",
+            "experts_used"
+        );
+        try_field!(
+            mtp_depth,
+            "mtp_depth",
+            "multi_token_prediction_depth",
+            "num_nextn_predict_layers",
+            "next_n_token_count"
+        );
 
         // ── Multimodal detection ──────────────────────────────────────────────
         if lower.contains("mmproj")

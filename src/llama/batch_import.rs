@@ -282,35 +282,45 @@ fn build_preset_from_args(_binary_path: &str, args: &[String]) -> ModelPreset {
             }
             "--spec-draft-n-max" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_draft_n_max = Some(v); });
+                    let _ = args[i + 1].parse::<u32>().map(|v| {
+                        spec_draft_n_max = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--spec-draft-n-min" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_draft_n_min = Some(v); });
+                    let _ = args[i + 1].parse::<u32>().map(|v| {
+                        spec_draft_n_min = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--spec-draft-p-split" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<f32>().map(|v| { spec_draft_p_split = Some(v); });
+                    let _ = args[i + 1].parse::<f32>().map(|v| {
+                        spec_draft_p_split = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--spec-draft-p-min" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<f32>().map(|v| { spec_draft_p_min = Some(v); });
+                    let _ = args[i + 1].parse::<f32>().map(|v| {
+                        spec_draft_p_min = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--spec-draft-ngl" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<i32>().map(|v| { spec_draft_ngl = Some(v); });
+                    let _ = args[i + 1].parse::<i32>().map(|v| {
+                        spec_draft_ngl = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
@@ -329,7 +339,9 @@ fn build_preset_from_args(_binary_path: &str, args: &[String]) -> ModelPreset {
             }
             "--spec-draft-n-cpu-moe" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<i32>().map(|v| { spec_draft_n_cpu_moe = Some(v); });
+                    let _ = args[i + 1].parse::<i32>().map(|v| {
+                        spec_draft_n_cpu_moe = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
@@ -350,112 +362,144 @@ fn build_preset_from_args(_binary_path: &str, args: &[String]) -> ModelPreset {
             }
             "--spec-ngram-mod-n-min" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_mod_n_min = Some(v); });
+                    let _ = args[i + 1].parse::<u32>().map(|v| {
+                        spec_ngram_mod_n_min = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--spec-ngram-mod-n-max" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_mod_n_max = Some(v); });
+                    let _ = args[i + 1].parse::<u32>().map(|v| {
+                        spec_ngram_mod_n_max = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--spec-ngram-mod-n-match" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_mod_n_match = Some(v); });
+                    let _ = args[i + 1].parse::<u32>().map(|v| {
+                        spec_ngram_mod_n_match = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--spec-ngram-simple-size-n" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_simple_size_n = Some(v); });
+                    let _ = args[i + 1].parse::<u32>().map(|v| {
+                        spec_ngram_simple_size_n = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--spec-ngram-simple-size-m" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_simple_size_m = Some(v); });
+                    let _ = args[i + 1].parse::<u32>().map(|v| {
+                        spec_ngram_simple_size_m = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--spec-ngram-simple-min-hits" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_simple_min_hits = Some(v); });
+                    let _ = args[i + 1].parse::<u32>().map(|v| {
+                        spec_ngram_simple_min_hits = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--spec-ngram-map-k-size-n" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_map_k_size_n = Some(v); });
+                    let _ = args[i + 1].parse::<u32>().map(|v| {
+                        spec_ngram_map_k_size_n = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--spec-ngram-map-k-size-m" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_map_k_size_m = Some(v); });
+                    let _ = args[i + 1].parse::<u32>().map(|v| {
+                        spec_ngram_map_k_size_m = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--spec-ngram-map-k-min-hits" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_map_k_min_hits = Some(v); });
+                    let _ = args[i + 1].parse::<u32>().map(|v| {
+                        spec_ngram_map_k_min_hits = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--spec-ngram-map-k4v-size-n" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_map_k4v_size_n = Some(v); });
+                    let _ = args[i + 1].parse::<u32>().map(|v| {
+                        spec_ngram_map_k4v_size_n = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--spec-ngram-map-k4v-size-m" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_map_k4v_size_m = Some(v); });
+                    let _ = args[i + 1].parse::<u32>().map(|v| {
+                        spec_ngram_map_k4v_size_m = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--spec-ngram-map-k4v-min-hits" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<u32>().map(|v| { spec_ngram_map_k4v_min_hits = Some(v); });
+                    let _ = args[i + 1].parse::<u32>().map(|v| {
+                        spec_ngram_map_k4v_min_hits = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--kv-unified" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<bool>().map(|v| { kv_unified = Some(v); });
+                    let _ = args[i + 1].parse::<bool>().map(|v| {
+                        kv_unified = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--cache-idle-slots" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<bool>().map(|v| { cache_idle_slots = Some(v); });
+                    let _ = args[i + 1].parse::<bool>().map(|v| {
+                        cache_idle_slots = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--fit-enabled" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<bool>().map(|v| { fit_enabled = Some(v); });
+                    let _ = args[i + 1].parse::<bool>().map(|v| {
+                        fit_enabled = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--fit-ctx" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<u32>().map(|v| { fit_ctx = Some(v); });
+                    let _ = args[i + 1].parse::<u32>().map(|v| {
+                        fit_ctx = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
@@ -469,7 +513,9 @@ fn build_preset_from_args(_binary_path: &str, args: &[String]) -> ModelPreset {
             }
             "--fit-print" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<bool>().map(|v| { fit_print = Some(v); });
+                    let _ = args[i + 1].parse::<bool>().map(|v| {
+                        fit_print = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
@@ -481,14 +527,18 @@ fn build_preset_from_args(_binary_path: &str, args: &[String]) -> ModelPreset {
             }
             "--prio" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<i32>().map(|v| { prio = Some(v); });
+                    let _ = args[i + 1].parse::<i32>().map(|v| {
+                        prio = Some(v);
+                    });
                     i += 2;
                     continue;
                 }
             }
             "--prio-batch" => {
                 if i + 1 < args.len() {
-                    let _ = args[i + 1].parse::<i32>().map(|v| { prio_batch = Some(v); });
+                    let _ = args[i + 1].parse::<i32>().map(|v| {
+                        prio_batch = Some(v);
+                    });
                     i += 2;
                     continue;
                 }

@@ -25,19 +25,19 @@ use tokio::io::AsyncWriteExt;
 #[serde(rename_all = "camelCase")]
 pub enum HfSort {
     #[default]
-    Downloads,  // most downloaded (best signal for quality community quants)
-    Likes,      // most liked
-    CreatedAt,  // newest first
-    Trending,   // HF trending score
+    Downloads, // most downloaded (best signal for quality community quants)
+    Likes,     // most liked
+    CreatedAt, // newest first
+    Trending,  // HF trending score
 }
 
 impl HfSort {
     fn as_api_str(self) -> &'static str {
         match self {
             HfSort::Downloads => "downloads",
-            HfSort::Likes     => "likes",
+            HfSort::Likes => "likes",
             HfSort::CreatedAt => "createdAt",
-            HfSort::Trending  => "trending",
+            HfSort::Trending => "trending",
         }
     }
 }
@@ -49,7 +49,7 @@ impl HfSort {
 #[serde(rename_all = "snake_case")]
 pub enum QuantFileType {
     #[default]
-    Standard,       // standard llama.cpp quants (Q4_K_M, Q5_K_M, Q8_0, …)
+    Standard, // standard llama.cpp quants (Q4_K_M, Q5_K_M, Q8_0, …)
     Imatrix,        // importance-matrix calibrated (typically mradermacher's i1-* naming)
     UnslothDynamic, // Unsloth UD-* dynamic quants (mixed bpw per layer)
     BnB,            // bitsandbytes (rare in GGUF land but worth flagging)
@@ -59,21 +59,25 @@ pub enum QuantFileType {
 impl QuantFileType {
     pub fn label(self) -> &'static str {
         match self {
-            QuantFileType::Standard       => "Standard",
-            QuantFileType::Imatrix        => "imatrix",
+            QuantFileType::Standard => "Standard",
+            QuantFileType::Imatrix => "imatrix",
             QuantFileType::UnslothDynamic => "UD (Unsloth)",
-            QuantFileType::BnB            => "BnB",
-            QuantFileType::Unknown        => "Unknown",
+            QuantFileType::BnB => "BnB",
+            QuantFileType::Unknown => "Unknown",
         }
     }
 
     pub fn description(self) -> &'static str {
         match self {
             QuantFileType::Standard => "Standard llama.cpp quantization",
-            QuantFileType::Imatrix  => "Importance-matrix calibrated — generally better quality at same size",
-            QuantFileType::UnslothDynamic => "Unsloth dynamic quant — per-layer mixed bpw, excellent quality/size tradeoff",
-            QuantFileType::BnB      => "bitsandbytes quantization",
-            QuantFileType::Unknown  => "Unknown quantization type",
+            QuantFileType::Imatrix => {
+                "Importance-matrix calibrated — generally better quality at same size"
+            }
+            QuantFileType::UnslothDynamic => {
+                "Unsloth dynamic quant — per-layer mixed bpw, excellent quality/size tradeoff"
+            }
+            QuantFileType::BnB => "bitsandbytes quantization",
+            QuantFileType::Unknown => "Unknown quantization type",
         }
     }
 }
@@ -82,52 +86,60 @@ impl QuantFileType {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum QuantProvider {
-    Bartowski,      // bartowski — standard Q4_K_M/Q5_K_M/Q8_0, extremely reliable
-    Mradermacher,   // mradermacher — imatrix specialist, i1-* naming
-    Unsloth,        // Unsloth — UD dynamic quants, best quality/size
-    Lmstudio,       // LM Studio community quants
-    TheBlokeRetired,// TheBloke (retired, legacy quants still widely used)
+    Bartowski,       // bartowski — standard Q4_K_M/Q5_K_M/Q8_0, extremely reliable
+    Mradermacher,    // mradermacher — imatrix specialist, i1-* naming
+    Unsloth,         // Unsloth — UD dynamic quants, best quality/size
+    Lmstudio,        // LM Studio community quants
+    TheBlokeRetired, // TheBloke (retired, legacy quants still widely used)
     #[default]
-    Community,      // other community quantizer
-    Official,       // first-party / model author's own quants
+    Community, // other community quantizer
+    Official,        // first-party / model author's own quants
 }
 
 impl QuantProvider {
     pub fn label(&self) -> &'static str {
         match self {
-            QuantProvider::Bartowski       => "bartowski",
-            QuantProvider::Mradermacher    => "mradermacher",
-            QuantProvider::Unsloth         => "unsloth",
-            QuantProvider::Lmstudio        => "LM Studio",
+            QuantProvider::Bartowski => "bartowski",
+            QuantProvider::Mradermacher => "mradermacher",
+            QuantProvider::Unsloth => "unsloth",
+            QuantProvider::Lmstudio => "LM Studio",
             QuantProvider::TheBlokeRetired => "TheBloke",
-            QuantProvider::Community       => "community",
-            QuantProvider::Official        => "official",
+            QuantProvider::Community => "community",
+            QuantProvider::Official => "official",
         }
     }
 
     pub fn description(&self) -> &'static str {
         match self {
-            QuantProvider::Bartowski    => "Standard quants — Q4_K_M through Q8_0. Fast, reliable, no imatrix.",
-            QuantProvider::Mradermacher => "imatrix expert. i1-* files use importance calibration for better quality at same bpw.",
-            QuantProvider::Unsloth      => "UD dynamic quants — mixed bpw per layer. Excellent quality/size. Also fine-tunes.",
-            QuantProvider::Lmstudio     => "LM Studio community quants.",
-            QuantProvider::TheBlokeRetired => "TheBloke (retired). Legacy GGUF quants; well-tested but not the latest models.",
-            QuantProvider::Community    => "Community quantizer.",
-            QuantProvider::Official     => "Model author's own quantization.",
+            QuantProvider::Bartowski => {
+                "Standard quants — Q4_K_M through Q8_0. Fast, reliable, no imatrix."
+            }
+            QuantProvider::Mradermacher => {
+                "imatrix expert. i1-* files use importance calibration for better quality at same bpw."
+            }
+            QuantProvider::Unsloth => {
+                "UD dynamic quants — mixed bpw per layer. Excellent quality/size. Also fine-tunes."
+            }
+            QuantProvider::Lmstudio => "LM Studio community quants.",
+            QuantProvider::TheBlokeRetired => {
+                "TheBloke (retired). Legacy GGUF quants; well-tested but not the latest models."
+            }
+            QuantProvider::Community => "Community quantizer.",
+            QuantProvider::Official => "Model author's own quantization.",
         }
     }
 
     /// Infer provider from HF repo owner username.
     pub fn from_username(username: &str) -> Self {
         match username.to_ascii_lowercase().as_str() {
-            "bartowski"     => QuantProvider::Bartowski,
-            "mradermacher"  => QuantProvider::Mradermacher,
-            "unsloth"       => QuantProvider::Unsloth,
+            "bartowski" => QuantProvider::Bartowski,
+            "mradermacher" => QuantProvider::Mradermacher,
+            "unsloth" => QuantProvider::Unsloth,
             "lmstudio-community" | "lmstudio" => QuantProvider::Lmstudio,
-            "thebloke"      => QuantProvider::TheBlokeRetired,
-            "davidau"       | "davidau-hf" => QuantProvider::Community,
-            "mudler"        => QuantProvider::Community,
-            "jackrong"      => QuantProvider::Community,
+            "thebloke" => QuantProvider::TheBlokeRetired,
+            "davidau" | "davidau-hf" => QuantProvider::Community,
+            "mudler" => QuantProvider::Community,
+            "jackrong" => QuantProvider::Community,
             _ => QuantProvider::Community,
         }
     }
@@ -298,47 +310,85 @@ pub async fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
     let client = reqwest::Client::new();
     let url = format!("https://huggingface.co/api/models/{repo_id}");
     let mut req = client.get(&url);
-    if let Some(ref tok) = token { req = req.bearer_auth(tok); }
+    if let Some(ref tok) = token {
+        req = req.bearer_auth(tok);
+    }
 
     let resp = req.send().await.context("Failed to call HF models API")?;
     if !resp.status().is_success() {
-        return Ok(HfModelInfo { repo_id: repo_id.to_string(), gated: false, private: false, tags: Vec::new() });
+        return Ok(HfModelInfo {
+            repo_id: repo_id.to_string(),
+            gated: false,
+            private: false,
+            tags: Vec::new(),
+        });
     }
 
-    let body: serde_json::Value = resp.json().await.context("Failed to parse HF models API response")?;
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .context("Failed to parse HF models API response")?;
     Ok(HfModelInfo {
         repo_id: repo_id.to_string(),
-        gated:   body.get("gated").and_then(|v| v.as_bool()).unwrap_or(false),
-        private: body.get("private").and_then(|v| v.as_bool()).unwrap_or(false),
-        tags: body.get("tags").and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+        gated: body.get("gated").and_then(|v| v.as_bool()).unwrap_or(false),
+        private: body
+            .get("private")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        tags: body
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| t.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default(),
     })
 }
 
 /// List repo files; filters for GGUF if gguf_only=true.
 pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileInfo>> {
-    let api = ApiBuilder::new().with_token(hf_load_token()).build()
+    let api = ApiBuilder::new()
+        .with_token(hf_load_token())
+        .build()
         .context("Failed to build HF API client")?;
-    let info = api.repo(Repo::new(repo_id.to_string(), RepoType::Model)).info()
+    let info = api
+        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+        .info()
         .context("Failed to list repo files")?;
 
-    Ok(info.siblings.iter()
+    Ok(info
+        .siblings
+        .iter()
         .filter(|s| !gguf_only || s.rfilename.to_ascii_lowercase().ends_with(".gguf"))
-        .map(|s| HfFileInfo { r#type: "file".into(), path: s.rfilename.clone(), size: None })
+        .map(|s| HfFileInfo {
+            r#type: "file".into(),
+            path: s.rfilename.clone(),
+            size: None,
+        })
         .collect())
 }
 
 /// Get info for a single file in a repo.
 pub fn hf_get_file_info(repo_id: &str, path: &str) -> Result<HfFileInfo> {
-    let api = ApiBuilder::new().with_token(hf_load_token()).build()
+    let api = ApiBuilder::new()
+        .with_token(hf_load_token())
+        .build()
         .context("Failed to build HF API client")?;
-    let info = api.repo(Repo::new(repo_id.to_string(), RepoType::Model)).info()
+    let info = api
+        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+        .info()
         .context("Failed to list repo files")?;
 
-    info.siblings.iter()
+    info.siblings
+        .iter()
         .find(|s| s.rfilename == path)
-        .map(|s| HfFileInfo { r#type: "file".into(), path: s.rfilename.clone(), size: None })
+        .map(|s| HfFileInfo {
+            r#type: "file".into(),
+            path: s.rfilename.clone(),
+            size: None,
+        })
         .ok_or_else(|| anyhow::anyhow!("File not found: {path}"))
 }
 
@@ -351,39 +401,66 @@ pub async fn hf_download_file_stream(
     local_path: &Path,
     resume_from: u64,
 ) -> Result<u64> {
-    let api = ApiBuilder::new().with_token(token.map(String::from)).build()
+    let api = ApiBuilder::new()
+        .with_token(token.map(String::from))
+        .build()
         .context("Failed to build HF API client")?;
-    let url = api.repo(Repo::new(repo_id.to_string(), RepoType::Model)).url(path);
-    if url.is_empty() { anyhow::bail!("Failed to resolve HF URL for {path}"); }
+    let url = api
+        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+        .url(path);
+    if url.is_empty() {
+        anyhow::bail!("Failed to resolve HF URL for {path}");
+    }
 
     let client = reqwest::Client::new();
     let mut req = client.get(&url);
-    if let Some(t) = token { req = req.bearer_auth(t); }
-    if resume_from > 0 { req = req.header("Range", format!("bytes={}-", resume_from)); }
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
+    if resume_from > 0 {
+        req = req.header("Range", format!("bytes={}-", resume_from));
+    }
 
     let resp = req.send().await.context("Failed to start HF download")?;
     if !resp.status().is_success() && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-        anyhow::bail!("HF download failed: HTTP {} for {}/{}", resp.status(), repo_id, path);
+        anyhow::bail!(
+            "HF download failed: HTTP {} for {}/{}",
+            resp.status(),
+            repo_id,
+            path
+        );
     }
 
     if let Some(parent) = local_path.parent() {
-        tokio::fs::create_dir_all(parent).await.context("Failed to create download dir")?;
+        tokio::fs::create_dir_all(parent)
+            .await
+            .context("Failed to create download dir")?;
     }
 
     // No content-length: read all at once
     if resp.content_length().is_none() {
         let bytes = resp.bytes().await.context("Failed to read response body")?;
-        File::create(local_path).await.context("Failed to create file")?
-            .write_all(&bytes).await?;
+        File::create(local_path)
+            .await
+            .context("Failed to create file")?
+            .write_all(&bytes)
+            .await?;
         return Ok(bytes.len() as u64);
     }
 
     // Streaming with proper open mode (truncate on fresh, append on resume)
     let mut file = if resume_from > 0 {
-        File::options().create(true).write(true).append(true).open(local_path).await
+        File::options()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(local_path)
+            .await
             .context("Failed to open file for resume")?
     } else {
-        File::create(local_path).await.context("Failed to create file")?
+        File::create(local_path)
+            .await
+            .context("Failed to create file")?
     };
 
     use futures_util::StreamExt;
@@ -440,15 +517,21 @@ pub async fn hf_search_models(params: &HfSearchParams) -> Result<Vec<SimpleModel
     }
 
     let mut req = client.get(url);
-    if let Some(ref tok) = token { req = req.bearer_auth(tok); }
+    if let Some(ref tok) = token {
+        req = req.bearer_auth(tok);
+    }
 
-    let resp = req.send().await
+    let resp = req
+        .send()
+        .await
         .map_err(|e| format!("HF search request failed: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("HF search failed: HTTP {}", resp.status()));
     }
 
-    let items: Vec<serde_json::Value> = resp.json().await
+    let items: Vec<serde_json::Value> = resp
+        .json()
+        .await
         .map_err(|e| format!("Failed to parse HF response: {e}"))?;
 
     Ok(items.into_iter().filter_map(parse_model_item).collect())
@@ -471,13 +554,23 @@ pub async fn hf_browse_author(
 
 /// Parse a single model JSON object from the HF API into SimpleModelInfo.
 fn parse_model_item(item: serde_json::Value) -> Option<SimpleModelInfo> {
-    let id = item.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())?.to_string();
+    let id = item
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())?
+        .to_string();
 
     let author = id.split('/').next().unwrap_or("").to_string();
     let quant_provider = QuantProvider::from_username(&author);
 
-    let tags: Vec<String> = item.get("tags").and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+    let tags: Vec<String> = item
+        .get("tags")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|t| t.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
 
     let has_imatrix = tags.iter().any(|t| t == "imatrix")
@@ -485,7 +578,8 @@ fn parse_model_item(item: serde_json::Value) -> Option<SimpleModelInfo> {
         || id.to_ascii_lowercase().contains("-i1-")
         || matches!(quant_provider, QuantProvider::Mradermacher);
 
-    let base_model = item.get("cardData")
+    let base_model = item
+        .get("cardData")
         .and_then(|cd| cd.get("base_model"))
         .and_then(|v| v.as_str())
         .unwrap_or("")
@@ -496,11 +590,15 @@ fn parse_model_item(item: serde_json::Value) -> Option<SimpleModelInfo> {
 
     Some(SimpleModelInfo {
         id,
-        gated:    item.get("gated").and_then(|v| v.as_bool()).unwrap_or(false),
+        gated: item.get("gated").and_then(|v| v.as_bool()).unwrap_or(false),
         tags,
         downloads: item.get("downloads").and_then(|v| v.as_u64()).unwrap_or(0),
-        likes:    item.get("likes").and_then(|v| v.as_u64()).unwrap_or(0),
-        created_at: item.get("createdAt").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        likes: item.get("likes").and_then(|v| v.as_u64()).unwrap_or(0),
+        created_at: item
+            .get("createdAt")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
         author,
         quant_provider,
         has_imatrix,
@@ -512,11 +610,12 @@ fn parse_model_item(item: serde_json::Value) -> Option<SimpleModelInfo> {
 /// Infer parameter count in billions from a model name/repo id.
 fn infer_param_b_from_name(name: &str) -> f64 {
     // Match all NB patterns, take the largest (total params, not active)
-    let matches: Vec<f64> = name.split(|c: char| !c.is_alphanumeric() && c != '.')
+    let matches: Vec<f64> = name
+        .split(|c: char| !c.is_alphanumeric() && c != '.')
         .filter_map(|token| {
             let lower = token.to_ascii_lowercase();
             if lower.ends_with('b') {
-                lower[..lower.len()-1].parse::<f64>().ok()
+                lower[..lower.len() - 1].parse::<f64>().ok()
             } else {
                 None
             }
@@ -536,30 +635,38 @@ pub async fn hf_list_gguf_files(repo_id: &str) -> Result<Vec<HfGgufFile>, String
     let token = hf_load_token();
 
     // First try the HF tree API for real sizes
-    let sizes = fetch_file_sizes(repo_id, token.as_deref()).await.unwrap_or_default();
+    let sizes = fetch_file_sizes(repo_id, token.as_deref())
+        .await
+        .unwrap_or_default();
 
     // Then get the file list from hf-hub
-    let api = ApiBuilder::new().with_token(token).build()
+    let api = ApiBuilder::new()
+        .with_token(token)
+        .build()
         .map_err(|e| format!("Failed to build HF API client: {e}"))?;
-    let info = api.repo(Repo::new(repo_id.to_string(), RepoType::Model)).info()
+    let info = api
+        .repo(Repo::new(repo_id.to_string(), RepoType::Model))
+        .info()
         .map_err(|e| format!("Failed to list repo files: {e}"))?;
 
     // Infer provider from repo owner
     let repo_owner = repo_id.split('/').next().unwrap_or("");
     let _provider = QuantProvider::from_username(repo_owner);
 
-    let mut result: Vec<HfGgufFile> = info.siblings.iter()
+    let mut result: Vec<HfGgufFile> = info
+        .siblings
+        .iter()
         .map(|s| s.rfilename.as_str())
         .filter(|name| name.to_ascii_lowercase().ends_with(".gguf"))
         .map(|name| {
             let quant_type = detect_quant_type(name);
             let is_imatrix = matches!(quant_type, QuantFileType::Imatrix);
-            let is_mmproj  = name.to_ascii_lowercase().contains("mmproj")
+            let is_mmproj = name.to_ascii_lowercase().contains("mmproj")
                 || name.to_ascii_lowercase().contains("projector");
             HfGgufFile {
-                path:      name.to_string(),
-                size:      sizes.get(name).copied().unwrap_or(0),
-                label:     infer_quant_label(name),
+                path: name.to_string(),
+                size: sizes.get(name).copied().unwrap_or(0),
+                label: infer_quant_label(name),
                 quant_type,
                 is_imatrix,
                 is_mmproj,
@@ -570,7 +677,8 @@ pub async fn hf_list_gguf_files(repo_id: &str) -> Result<Vec<HfGgufFile>, String
     // Sort: mmproj last, then by quant quality (higher quality first), then by size desc
     result.sort_by(|a, b| {
         // mmproj files go at the end
-        a.is_mmproj.cmp(&b.is_mmproj)
+        a.is_mmproj
+            .cmp(&b.is_mmproj)
             .then_with(|| sort_rank_quant_label(&a.label).cmp(&sort_rank_quant_label(&b.label)))
             .then_with(|| b.size.cmp(&a.size))
     });
@@ -580,11 +688,16 @@ pub async fn hf_list_gguf_files(repo_id: &str) -> Result<Vec<HfGgufFile>, String
 
 /// Fetch file sizes from the HF tree API.
 /// Returns a map of filename → size in bytes.
-async fn fetch_file_sizes(repo_id: &str, token: Option<&str>) -> Result<std::collections::HashMap<String, u64>> {
+async fn fetch_file_sizes(
+    repo_id: &str,
+    token: Option<&str>,
+) -> Result<std::collections::HashMap<String, u64>> {
     let client = reqwest::Client::new();
     let url = format!("https://huggingface.co/api/models/{repo_id}/tree/main");
     let mut req = client.get(&url);
-    if let Some(t) = token { req = req.bearer_auth(t); }
+    if let Some(t) = token {
+        req = req.bearer_auth(t);
+    }
 
     let resp = req.send().await.context("Failed to fetch HF tree")?;
     if !resp.status().is_success() {
@@ -595,15 +708,26 @@ async fn fetch_file_sizes(repo_id: &str, token: Option<&str>) -> Result<std::col
     let mut map = std::collections::HashMap::new();
 
     for item in items {
-        let path = item.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        if !path.to_ascii_lowercase().ends_with(".gguf") { continue; }
+        let path = item
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if !path.to_ascii_lowercase().ends_with(".gguf") {
+            continue;
+        }
 
         // LFS files: size is in "lfs.size"; non-LFS: in "size"
-        let size = item.get("lfs").and_then(|lfs| lfs.get("size")).and_then(|v| v.as_u64())
+        let size = item
+            .get("lfs")
+            .and_then(|lfs| lfs.get("size"))
+            .and_then(|v| v.as_u64())
             .or_else(|| item.get("size").and_then(|v| v.as_u64()))
             .unwrap_or(0);
 
-        if size > 0 { map.insert(path, size); }
+        if size > 0 {
+            map.insert(path, size);
+        }
     }
 
     Ok(map)
@@ -612,20 +736,48 @@ async fn fetch_file_sizes(repo_id: &str, token: Option<&str>) -> Result<std::col
 /// Sort rank for quant labels (lower = higher quality / bigger file = shown first).
 fn sort_rank_quant_label(label: &str) -> u8 {
     let lower = label.to_ascii_lowercase();
-    if lower.contains("f32")                           { return 0; }
-    if lower.contains("f16") || lower.contains("bf16") { return 1; }
-    if lower.contains("q8")                            { return 2; }
-    if lower.contains("q6")                            { return 3; }
-    if lower.contains("q5_k_m") || lower.contains("q5km") { return 4; }
-    if lower.contains("q5")                            { return 5; }
-    if lower.contains("q4_k_m") || lower.contains("q4km") { return 6; }
-    if lower.contains("iq4")                           { return 7; }
-    if lower.contains("q4")                            { return 8; }
-    if lower.contains("q3")                            { return 10; }
-    if lower.contains("iq3")                           { return 11; }
-    if lower.contains("q2")                            { return 14; }
-    if lower.contains("iq2")                           { return 15; }
-    if lower.contains("iq1") || lower.contains("q1")   { return 18; }
+    if lower.contains("f32") {
+        return 0;
+    }
+    if lower.contains("f16") || lower.contains("bf16") {
+        return 1;
+    }
+    if lower.contains("q8") {
+        return 2;
+    }
+    if lower.contains("q6") {
+        return 3;
+    }
+    if lower.contains("q5_k_m") || lower.contains("q5km") {
+        return 4;
+    }
+    if lower.contains("q5") {
+        return 5;
+    }
+    if lower.contains("q4_k_m") || lower.contains("q4km") {
+        return 6;
+    }
+    if lower.contains("iq4") {
+        return 7;
+    }
+    if lower.contains("q4") {
+        return 8;
+    }
+    if lower.contains("q3") {
+        return 10;
+    }
+    if lower.contains("iq3") {
+        return 11;
+    }
+    if lower.contains("q2") {
+        return 14;
+    }
+    if lower.contains("iq2") {
+        return 15;
+    }
+    if lower.contains("iq1") || lower.contains("q1") {
+        return 18;
+    }
     19
 }
 
@@ -634,40 +786,100 @@ pub fn infer_quant_label(filename: &str) -> String {
     let lower = filename.to_ascii_lowercase();
 
     // IQ variants first (before plain Q matches)
-    if lower.contains("iq4_xs") || lower.contains("iq4xs") { return "IQ4_XS".into(); }
-    if lower.contains("iq4_nl") || lower.contains("iq4nl") { return "IQ4_NL".into(); }
-    if lower.contains("iq3_xxs") { return "IQ3_XXS".into(); }
-    if lower.contains("iq3_xs")  { return "IQ3_XS".into(); }
-    if lower.contains("iq3_s")   { return "IQ3_S".into(); }
-    if lower.contains("iq3_m")   { return "IQ3_M".into(); }
-    if lower.contains("iq2_xxs") { return "IQ2_XXS".into(); }
-    if lower.contains("iq2_xs")  { return "IQ2_XS".into(); }
-    if lower.contains("iq2_s")   { return "IQ2_S".into(); }
-    if lower.contains("iq2_m")   { return "IQ2_M".into(); }
-    if lower.contains("iq1_m")   { return "IQ1_M".into(); }
-    if lower.contains("iq1_s")   { return "IQ1_S".into(); }
+    if lower.contains("iq4_xs") || lower.contains("iq4xs") {
+        return "IQ4_XS".into();
+    }
+    if lower.contains("iq4_nl") || lower.contains("iq4nl") {
+        return "IQ4_NL".into();
+    }
+    if lower.contains("iq3_xxs") {
+        return "IQ3_XXS".into();
+    }
+    if lower.contains("iq3_xs") {
+        return "IQ3_XS".into();
+    }
+    if lower.contains("iq3_s") {
+        return "IQ3_S".into();
+    }
+    if lower.contains("iq3_m") {
+        return "IQ3_M".into();
+    }
+    if lower.contains("iq2_xxs") {
+        return "IQ2_XXS".into();
+    }
+    if lower.contains("iq2_xs") {
+        return "IQ2_XS".into();
+    }
+    if lower.contains("iq2_s") {
+        return "IQ2_S".into();
+    }
+    if lower.contains("iq2_m") {
+        return "IQ2_M".into();
+    }
+    if lower.contains("iq1_m") {
+        return "IQ1_M".into();
+    }
+    if lower.contains("iq1_s") {
+        return "IQ1_S".into();
+    }
 
     // Standard quants
-    if lower.contains("q8_0")    { return "Q8_0".into(); }
-    if lower.contains("q6_k")    { return "Q6_K".into(); }
-    if lower.contains("q5_k_xl") { return "Q5_K_XL".into(); } // Unsloth variant
-    if lower.contains("q5_k_m")  { return "Q5_K_M".into(); }
-    if lower.contains("q5_k_s")  { return "Q5_K_S".into(); }
-    if lower.contains("q5_0")    { return "Q5_0".into(); }
-    if lower.contains("q4_k_xl") { return "Q4_K_XL".into(); } // Unsloth variant
-    if lower.contains("q4_k_m")  { return "Q4_K_M".into(); }
-    if lower.contains("q4_k_s")  { return "Q4_K_S".into(); }
-    if lower.contains("q4_0")    { return "Q4_0".into(); }
-    if lower.contains("q3_k_l")  { return "Q3_K_L".into(); }
-    if lower.contains("q3_k_m")  { return "Q3_K_M".into(); }
-    if lower.contains("q3_k_s")  { return "Q3_K_S".into(); }
-    if lower.contains("q2_k")    { return "Q2_K".into(); }
-    if lower.contains("bf16")    { return "BF16".into(); }
-    if lower.contains("f16")     { return "F16".into(); }
-    if lower.contains("f32")     { return "F32".into(); }
+    if lower.contains("q8_0") {
+        return "Q8_0".into();
+    }
+    if lower.contains("q6_k") {
+        return "Q6_K".into();
+    }
+    if lower.contains("q5_k_xl") {
+        return "Q5_K_XL".into();
+    } // Unsloth variant
+    if lower.contains("q5_k_m") {
+        return "Q5_K_M".into();
+    }
+    if lower.contains("q5_k_s") {
+        return "Q5_K_S".into();
+    }
+    if lower.contains("q5_0") {
+        return "Q5_0".into();
+    }
+    if lower.contains("q4_k_xl") {
+        return "Q4_K_XL".into();
+    } // Unsloth variant
+    if lower.contains("q4_k_m") {
+        return "Q4_K_M".into();
+    }
+    if lower.contains("q4_k_s") {
+        return "Q4_K_S".into();
+    }
+    if lower.contains("q4_0") {
+        return "Q4_0".into();
+    }
+    if lower.contains("q3_k_l") {
+        return "Q3_K_L".into();
+    }
+    if lower.contains("q3_k_m") {
+        return "Q3_K_M".into();
+    }
+    if lower.contains("q3_k_s") {
+        return "Q3_K_S".into();
+    }
+    if lower.contains("q2_k") {
+        return "Q2_K".into();
+    }
+    if lower.contains("bf16") {
+        return "BF16".into();
+    }
+    if lower.contains("f16") {
+        return "F16".into();
+    }
+    if lower.contains("f32") {
+        return "F32".into();
+    }
 
     // Compact/APEX/etc. Unsloth special naming
-    if lower.contains("compact") || lower.contains("apex") { return "UD (custom)".into(); }
+    if lower.contains("compact") || lower.contains("apex") {
+        return "UD (custom)".into();
+    }
 
     "Unknown".into()
 }
@@ -676,12 +888,15 @@ pub fn infer_quant_label(filename: &str) -> String {
 
 /// Load HF token: 1) HUGGING_FACE_HUB_TOKEN env var  2) ~/.config/llama-monitor/hf-token.
 pub fn hf_load_token() -> Option<String> {
-    if let Ok(v) = std::env::var("HUGGING_FACE_HUB_TOKEN") && !v.trim().is_empty() {
+    if let Ok(v) = std::env::var("HUGGING_FACE_HUB_TOKEN")
+        && !v.trim().is_empty()
+    {
         return Some(v.trim().to_string());
     }
     dirs::home_dir().and_then(|home| {
         let path = home.join(".config").join("llama-monitor").join("hf-token");
-        std::fs::read_to_string(&path).ok()
+        std::fs::read_to_string(&path)
+            .ok()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
     })
@@ -699,8 +914,10 @@ pub fn hf_save_token(token: &str) -> Result<()> {
 /// Mask a token for safe logging: first4****last4.
 pub fn mask_token(token: &str) -> String {
     let t = token.trim();
-    if t.len() <= 8 { return "****".to_string(); }
-    format!("{}****{}", &t[..4], &t[t.len()-4..])
+    if t.len() <= 8 {
+        return "****".to_string();
+    }
+    format!("{}****{}", &t[..4], &t[t.len() - 4..])
 }
 
 // ── Start a managed download ──────────────────────────────────────────────────
@@ -742,23 +959,56 @@ mod tests {
     #[test]
     fn test_detect_quant_type() {
         // Mradermacher imatrix
-        assert_eq!(detect_quant_type("model.i1-Q4_K_M.gguf"), QuantFileType::Imatrix);
-        assert_eq!(detect_quant_type("model-i1-IQ3_S.gguf"), QuantFileType::Imatrix);
+        assert_eq!(
+            detect_quant_type("model.i1-Q4_K_M.gguf"),
+            QuantFileType::Imatrix
+        );
+        assert_eq!(
+            detect_quant_type("model-i1-IQ3_S.gguf"),
+            QuantFileType::Imatrix
+        );
         // Unsloth UD
-        assert_eq!(detect_quant_type("Qwen3.6-27B-UD-Q4_K_S.gguf"), QuantFileType::UnslothDynamic);
-        assert_eq!(detect_quant_type("model-UD-mmproj-BF16.gguf"), QuantFileType::UnslothDynamic);
+        assert_eq!(
+            detect_quant_type("Qwen3.6-27B-UD-Q4_K_S.gguf"),
+            QuantFileType::UnslothDynamic
+        );
+        assert_eq!(
+            detect_quant_type("model-UD-mmproj-BF16.gguf"),
+            QuantFileType::UnslothDynamic
+        );
         // Standard
-        assert_eq!(detect_quant_type("model-Q4_K_M.gguf"), QuantFileType::Standard);
-        assert_eq!(detect_quant_type("bartowski-model-Q5_K_M.gguf"), QuantFileType::Standard);
+        assert_eq!(
+            detect_quant_type("model-Q4_K_M.gguf"),
+            QuantFileType::Standard
+        );
+        assert_eq!(
+            detect_quant_type("bartowski-model-Q5_K_M.gguf"),
+            QuantFileType::Standard
+        );
     }
 
     #[test]
     fn test_quant_provider_from_username() {
-        assert!(matches!(QuantProvider::from_username("bartowski"), QuantProvider::Bartowski));
-        assert!(matches!(QuantProvider::from_username("mradermacher"), QuantProvider::Mradermacher));
-        assert!(matches!(QuantProvider::from_username("unsloth"), QuantProvider::Unsloth));
-        assert!(matches!(QuantProvider::from_username("davidau"), QuantProvider::Community));
-        assert!(matches!(QuantProvider::from_username("TheBloke"), QuantProvider::TheBlokeRetired));
+        assert!(matches!(
+            QuantProvider::from_username("bartowski"),
+            QuantProvider::Bartowski
+        ));
+        assert!(matches!(
+            QuantProvider::from_username("mradermacher"),
+            QuantProvider::Mradermacher
+        ));
+        assert!(matches!(
+            QuantProvider::from_username("unsloth"),
+            QuantProvider::Unsloth
+        ));
+        assert!(matches!(
+            QuantProvider::from_username("davidau"),
+            QuantProvider::Community
+        ));
+        assert!(matches!(
+            QuantProvider::from_username("TheBloke"),
+            QuantProvider::TheBlokeRetired
+        ));
     }
 
     #[test]
@@ -770,8 +1020,14 @@ mod tests {
     #[test]
     fn test_infer_param_b_from_name() {
         assert_eq!(infer_param_b_from_name("bartowski/Qwen3.6-27B-GGUF"), 27.0);
-        assert_eq!(infer_param_b_from_name("mradermacher/Qwen3.6-35B-A3B-Instruct-i1-GGUF"), 35.0);
-        assert_eq!(infer_param_b_from_name("unsloth/Llama-3.3-70B-Instruct-GGUF"), 70.0);
+        assert_eq!(
+            infer_param_b_from_name("mradermacher/Qwen3.6-35B-A3B-Instruct-i1-GGUF"),
+            35.0
+        );
+        assert_eq!(
+            infer_param_b_from_name("unsloth/Llama-3.3-70B-Instruct-GGUF"),
+            70.0
+        );
         // Should be > 0
         assert!(infer_param_b_from_name("some-27b-model") > 0.0);
     }
@@ -786,7 +1042,10 @@ mod tests {
             "likes": 50,
         });
         let info = parse_model_item(item).unwrap();
-        assert!(info.has_imatrix, "mradermacher repo should be flagged as imatrix");
+        assert!(
+            info.has_imatrix,
+            "mradermacher repo should be flagged as imatrix"
+        );
     }
 
     #[test]
