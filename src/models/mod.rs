@@ -166,15 +166,13 @@ fn infer_param_b(model_name: &str) -> Option<f32> {
             while j > 0 && (bytes[j - 1].is_ascii_digit() || bytes[j - 1] == b'.') {
                 j -= 1;
             }
-            if j < i {
-                if let Ok(v) = std::str::from_utf8(&bytes[j..i])
+            if j < i
+                && let Ok(v) = std::str::from_utf8(&bytes[j..i])
                     .unwrap_or("")
                     .parse::<f32>()
-                {
-                    if v >= 0.5 && v <= 2000.0 {
-                        return Some(v);
-                    }
-                }
+                && (0.5..=2000.0).contains(&v)
+            {
+                return Some(v);
             }
         }
         i += 1;

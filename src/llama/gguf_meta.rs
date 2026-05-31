@@ -386,7 +386,6 @@ fn skip_value_type<R: Read + Seek>(r: &mut R, vtype: u32, version: u32) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     /// Build a minimal GGUF v3 byte stream in memory for testing.
     fn make_gguf(kv: &[(&str, KvEntry)]) -> Vec<u8> {
