@@ -190,6 +190,23 @@ function _isAlreadyApplied(suggestion) {
   return String(current) === String(suggestion.value);
 }
 
+// Poll /api/sessions/active until status === "Running" or timeout expires.
+async function _waitForServerReady(timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  const headers = window.authHeaders ? window.authHeaders() : {};
+  while (Date.now() < deadline) {
+    try {
+      const r = await fetch('/api/sessions/active', { headers });
+      if (r.ok) {
+        const d = await r.json();
+        if (d.status === 'Running') return;
+      }
+    } catch { /* ignore transient errors */ }
+    await new Promise(r => setTimeout(r, 800));
+  }
+  // Timeout — proceed anyway; benchmark will catch a still-loading server
+}
+
 // ── Apply & retune ────────────────────────────────────────────────────────────
 
 async function _applyAndRetune(suggestion, cardEl) {
@@ -230,8 +247,9 @@ async function _applyAndRetune(suggestion, cardEl) {
       throw new Error(startData.error || `Start failed (HTTP ${startResp.status})`);
     }
 
-    // Wait for llama-server to initialise
-    await new Promise(r => setTimeout(r, 3500));
+    // Poll until the session reports Running (max 60 s for large model loads)
+    if (hint) hint.textContent = 'Waiting for server to become ready…';
+    await _waitForServerReady(60_000);
 
     // Restore hint text and re-benchmark
     if (hint) hint.textContent = 'Sending a test prompt and measuring throughput…';

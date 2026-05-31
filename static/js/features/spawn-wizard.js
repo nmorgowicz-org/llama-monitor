@@ -136,6 +136,7 @@ const wizardState = {
     hfFile: '',
     paramB: 0,           // estimated parameter count (from HF metadata if available)
     modelBytes: 0,       // file size in bytes once known
+    nCtxTrain: 0,        // training context length from GGUF metadata (0 = unknown)
   },
   // Architecture from introspection (or heuristic)
   arch: {
@@ -895,9 +896,10 @@ async function doIntrospect(path) {
       dom.moeOffloadSlider.max = wizardState.arch.nExperts;
     }
 
-    // Detect training context for display
+      // Store the model's training context ceiling for UX warnings
     if (m.n_ctx_train) {
-      // Suggest this as a nice upper bound
+      wizardState.model.nCtxTrain = m.n_ctx_train;
+      updateCtxTrainWarning();
     }
 
     scheduleVramUpdate();
@@ -2169,18 +2171,20 @@ function bindCtxQuickPicks() {
       if (dom.contextSizeInput) dom.contextSizeInput.value = ctx;
       wizardState.hardware.contextSize = ctx;
       updateCtxQuickPickActive();
-      showCtxFitWarning(ctx, wizardState.useCase, true); // manual — no warning
+      showCtxFitWarning(ctx, wizardState.useCase, true); // manual — no fit warning
+      updateCtxTrainWarning();
       updateVramDisplay();
     });
   });
 
-  // Manual input: clear active chip highlight, suppress warning for intentional values
+  // Manual input: update state, chip highlight, and both warning types
   dom.contextSizeInput?.addEventListener('change', () => {
     const ctx = parseInt(dom.contextSizeInput.value, 10);
     if (!ctx) return;
     wizardState.hardware.contextSize = ctx;
     updateCtxQuickPickActive();
     showCtxFitWarning(ctx, wizardState.useCase, true);
+    updateCtxTrainWarning();
     updateVramDisplay();
   });
 }
@@ -2190,6 +2194,27 @@ function updateCtxQuickPickActive() {
   document.querySelectorAll('.ctx-pick').forEach(btn => {
     btn.classList.toggle('active', parseInt(btn.dataset.ctx, 10) === current);
   });
+}
+
+// Warn when the selected context exceeds the model's training context length.
+// We still allow it — users may be using RoPE/YaRN extension — but we flag it clearly.
+function updateCtxTrainWarning() {
+  const el = document.getElementById('ctx-train-warning');
+  if (!el) return;
+  const nCtxTrain = wizardState.model.nCtxTrain;
+  const selected  = wizardState.hardware.contextSize;
+  if (!nCtxTrain || !selected || selected <= nCtxTrain) {
+    el.style.display = 'none';
+    return;
+  }
+  const fmtK = n => n >= 1024 ? `${Math.round(n / 1024)}k` : `${n}`;
+  const ratio = (selected / nCtxTrain).toFixed(1);
+  el.innerHTML = `<strong>Context (${fmtK(selected)}) exceeds this model's training window (${fmtK(nCtxTrain)})</strong>. `
+    + `Generation quality degrades beyond the training limit. `
+    + `To extend safely, enable RoPE scaling (YaRN) — the wizard can auto-set this, or add `
+    + `<code>--rope-scaling yarn --rope-freq-scale ${(1 / parseFloat(ratio)).toFixed(3)}</code> to Extra Args.`;
+  el.className = 'ctx-fit-warning';
+  el.style.display = '';
 }
 
 // Minimum-context guidance: warn when auto-size lands below the target for the use case.

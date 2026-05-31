@@ -98,6 +98,8 @@ export async function doStop() {
             headers: window.authHeaders ? window.authHeaders() : {},
         });
     await doKillLlamaInternal();
+    hideTunePanel();
+    if (btnStop) btnStop.disabled = false;
 }
 
 // ── Kill ───────────────────────────────────────────────────────────────────────
@@ -136,6 +138,7 @@ export async function doKillLlama() {
             }
         } else {
             showToast('llama-server killed', 'success');
+            hideTunePanel();
         }
     } catch (e) {
         showToast('Kill failed: ' + e.message, 'error');

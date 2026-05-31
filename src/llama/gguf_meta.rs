@@ -523,6 +523,69 @@ mod tests {
     }
 
     #[test]
+    fn parses_gguf_v1_format() {
+        // v1 uses u32 for string lengths and kv_count instead of u64
+        let mut out = Vec::new();
+        out.extend_from_slice(b"GGUF");
+        out.extend_from_slice(&1u32.to_le_bytes()); // version 1
+        out.extend_from_slice(&0u32.to_le_bytes()); // tensor_count (u32 in v1)
+        out.extend_from_slice(&2u32.to_le_bytes()); // kv_count (u32 in v1)
+
+        // KV entry: "general.architecture" = "llama" — string len is u32 in v1
+        let key = b"general.architecture";
+        out.extend_from_slice(&(key.len() as u32).to_le_bytes());
+        out.extend_from_slice(key);
+        out.extend_from_slice(&GgufType::String.as_u32().to_le_bytes());
+        let val = b"llama";
+        out.extend_from_slice(&(val.len() as u32).to_le_bytes()); // u32 string len in v1
+        out.extend_from_slice(val);
+
+        // KV entry: "llama.block_count" = 32
+        let key2 = b"llama.block_count";
+        out.extend_from_slice(&(key2.len() as u32).to_le_bytes());
+        out.extend_from_slice(key2);
+        out.extend_from_slice(&GgufType::Uint32.as_u32().to_le_bytes());
+        out.extend_from_slice(&32u32.to_le_bytes());
+
+        let meta = read_from_bytes(&out).unwrap();
+        assert_eq!(meta.architecture.as_deref(), Some("llama"));
+        assert_eq!(meta.block_count, Some(32));
+    }
+
+    #[test]
+    fn parses_mtp_depth_field() {
+        let bytes = make_gguf(&[
+            ("general.architecture", KvEntry::Str("deepseek2".into())),
+            ("deepseek2.block_count", KvEntry::U32(61)),
+            ("deepseek2.next_n_token_count", KvEntry::U32(1)),
+        ]);
+        let meta = read_from_bytes(&bytes).unwrap();
+        assert_eq!(meta.mtp_depth, Some(1));
+    }
+
+    #[test]
+    fn returns_error_on_truncated_file() {
+        let bytes = make_gguf(&[("general.architecture", KvEntry::Str("llama".into()))]);
+        // Truncate to 10 bytes — can't even read the header
+        let truncated = &bytes[..10];
+        let result = read_from_bytes(truncated);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn returns_error_on_unsupported_version() {
+        let mut bytes = make_gguf(&[]);
+        // Overwrite version field (bytes 4-7) with version 99
+        bytes[4] = 99;
+        bytes[5] = 0;
+        bytes[6] = 0;
+        bytes[7] = 0;
+        let result = read_from_bytes(&bytes);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unsupported GGUF version"));
+    }
+
+    #[test]
     fn gguf_arch_drives_hybrid_heuristic_for_renamed_model() {
         let bytes = make_gguf(&[
             ("general.architecture", KvEntry::Str("qwen3_6".into())),

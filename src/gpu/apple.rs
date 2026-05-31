@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use super::{GpuBackend, GpuMetrics};
 
@@ -119,13 +119,16 @@ impl GpuBackend for AppleBackend {
     }
 }
 
-fn detect_chip_name() -> String {
-    std::process::Command::new("sysctl")
-        .args(["-n", "machdep.cpu.brand_string"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "Apple Silicon".to_string())
+fn detect_chip_name() -> &'static str {
+    static CHIP_NAME: OnceLock<String> = OnceLock::new();
+    CHIP_NAME.get_or_init(|| {
+        std::process::Command::new("sysctl")
+            .args(["-n", "machdep.cpu.brand_string"])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "Apple Silicon".to_string())
+    })
 }

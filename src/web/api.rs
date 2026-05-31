@@ -8136,10 +8136,13 @@ fn api_spawn_session_with_preset(
                     rope_scaling: preset.rope_scaling.clone(),
                     rope_freq_base: preset.rope_freq_base,
                     rope_freq_scale: preset.rope_freq_scale,
-                    draft_model: preset.draft_model.clone(),
-                    draft_min: preset.draft_min,
-                    draft_max: preset.draft_max,
-                    spec_ngram_size: preset.spec_ngram_size,
+                    spec: crate::llama::server::SpecDecodeConfig {
+                        draft_model: preset.draft_model.clone(),
+                        draft_min: preset.draft_min,
+                        draft_max: preset.draft_max,
+                        spec_ngram_size: preset.spec_ngram_size,
+                        ..Default::default()
+                    },
                     seed: preset.seed,
                     system_prompt_file: preset.system_prompt_file.clone(),
                     extra_args: preset.extra_args.clone(),
@@ -9345,6 +9348,19 @@ fn api_llama_binary_update(
                     }
                 }
 
+                // Compute SHA256 of the binary before moving it, so users can
+                // verify integrity out-of-band (e.g. `sha256sum llama-server`).
+                let sha256_hex = std::fs::read(&found_path).ok().map(|bytes| {
+                    use sha2::Digest;
+                    let mut hasher = sha2::Sha256::new();
+                    hasher.update(&bytes);
+                    hasher
+                        .finalize()
+                        .iter()
+                        .map(|b| format!("{b:02x}"))
+                        .collect::<String>()
+                });
+
                 // Copy binary to destination path
                 if let Err(e) = std::fs::copy(&found_path, &dest_path) {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -9362,7 +9378,8 @@ fn api_llama_binary_update(
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
                         "ok": true,
-                        "version": tag
+                        "version": tag,
+                        "sha256": sha256_hex,
                     }),
                 )))
             }

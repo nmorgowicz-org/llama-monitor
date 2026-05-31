@@ -13,6 +13,8 @@ export function initLlamaUpdater() {
   if (!pill) return;
   pill.addEventListener('click', onPillClick);
   checkVersion();
+  // Re-check every 30 minutes — llama.cpp ships multiple builds per day
+  setInterval(checkVersion, 30 * 60 * 1000);
 }
 
 async function checkVersion() {
@@ -74,12 +76,19 @@ async function doUpdate() {
   const pill    = document.getElementById('llama-pill');
   const verSpan = document.getElementById('llama-pill-version');
 
-  if (verSpan) verSpan.textContent = 'Updating…';
   if (pill) {
     pill.classList.remove('llama-pill-update');
     pill.classList.add('llama-pill-busy');
     pill.disabled = true;
   }
+
+  // Show elapsed time so the user knows it's working (ZIP can be 40+ MB)
+  const startTime = Date.now();
+  const elapsedTimer = setInterval(() => {
+    const s = Math.round((Date.now() - startTime) / 1000);
+    if (verSpan) verSpan.textContent = `Downloading… ${s}s`;
+  }, 1000);
+  if (verSpan) verSpan.textContent = 'Downloading…';
 
   try {
     const headers = window.authHeaders
@@ -91,13 +100,15 @@ async function doUpdate() {
       headers,
       body: JSON.stringify({}),
     });
+    clearInterval(elapsedTimer);
     const data = await resp.json();
 
     if (!data.ok) throw new Error(data.error || 'Update failed');
 
     _currentBuild = _latestBuild;
     if (verSpan) verSpan.textContent = `llama.cpp · b${_currentBuild}`;
-    showToast(`Updated to b${_currentBuild}`, 'success', 'Restart the server to use the new binary.');
+    const sha = data.sha256 ? `SHA256: ${data.sha256}` : 'Restart the server to use the new binary.';
+    showToast(`Updated to b${_currentBuild}`, 'success', sha);
     if (pill) {
       pill.classList.remove('llama-pill-busy');
       pill.classList.add('llama-pill-idle');
@@ -105,6 +116,7 @@ async function doUpdate() {
       pill.title = 'llama-server binary version';
     }
   } catch (err) {
+    clearInterval(elapsedTimer);
     showToast('Update failed', 'error', err.message || String(err));
     if (verSpan) verSpan.textContent = `llama.cpp · b${_currentBuild ?? '?'}`;
     if (pill) {

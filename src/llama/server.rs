@@ -6,6 +6,76 @@ use crate::config::AppConfig;
 use crate::gpu::env::{build_nvidia_env, build_rocm_env};
 use crate::state::AppState;
 
+/// Speculative-decoding knobs, kept in a separate struct so ServerConfig
+/// stays readable. Flattened into the parent so JSON serialization is
+/// identical to before — saved presets and API payloads are unaffected.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct SpecDecodeConfig {
+    // Legacy / shared
+    #[serde(default)]
+    pub draft_model: String,
+    #[serde(default)]
+    pub draft_min: Option<u32>,
+    #[serde(default)]
+    pub draft_max: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_size: Option<u32>,
+    // Spec type selector
+    #[serde(default)]
+    pub spec_type: Option<String>,
+    #[serde(default)]
+    pub spec_default: bool,
+    // Draft model knobs
+    #[serde(default)]
+    pub spec_draft_n_max: Option<u32>,
+    #[serde(default)]
+    pub spec_draft_n_min: Option<u32>,
+    #[serde(default)]
+    pub spec_draft_p_split: Option<f32>,
+    #[serde(default)]
+    pub spec_draft_p_min: Option<f32>,
+    #[serde(default)]
+    pub spec_draft_ngl: Option<i32>,
+    #[serde(default)]
+    pub spec_draft_device: Option<String>,
+    #[serde(default)]
+    pub spec_draft_cpu_moe: bool,
+    #[serde(default)]
+    pub spec_draft_n_cpu_moe: Option<i32>,
+    #[serde(default)]
+    pub spec_draft_type_k: Option<String>,
+    #[serde(default)]
+    pub spec_draft_type_v: Option<String>,
+    // ngram-mod
+    #[serde(default)]
+    pub spec_ngram_mod_n_min: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_mod_n_max: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_mod_n_match: Option<u32>,
+    // ngram-simple
+    #[serde(default)]
+    pub spec_ngram_simple_size_n: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_simple_size_m: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_simple_min_hits: Option<u32>,
+    // ngram-map-k
+    #[serde(default)]
+    pub spec_ngram_map_k_size_n: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_map_k_size_m: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_map_k_min_hits: Option<u32>,
+    // ngram-map-k4v
+    #[serde(default)]
+    pub spec_ngram_map_k4v_size_n: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_map_k4v_size_m: Option<u32>,
+    #[serde(default)]
+    pub spec_ngram_map_k4v_min_hits: Option<u32>,
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ServerConfig {
     pub model_path: String,
@@ -62,68 +132,10 @@ pub struct ServerConfig {
     pub rope_freq_base: Option<f64>,
     #[serde(default)]
     pub rope_freq_scale: Option<f64>,
-    // Speculative decoding
-    #[serde(default)]
-    pub draft_model: String,
-    #[serde(default)]
-    pub draft_min: Option<u32>,
-    #[serde(default)]
-    pub draft_max: Option<u32>,
-    #[serde(default)]
-    pub spec_ngram_size: Option<u32>,
-    // Spec V2: full spec-type and per-type knobs
-    #[serde(default)]
-    pub spec_type: Option<String>,
-    #[serde(default)]
-    pub spec_default: bool,
-    #[serde(default)]
-    pub spec_draft_n_max: Option<u32>,
-    #[serde(default)]
-    pub spec_draft_n_min: Option<u32>,
-    #[serde(default)]
-    pub spec_draft_p_split: Option<f32>,
-    #[serde(default)]
-    pub spec_draft_p_min: Option<f32>,
-    #[serde(default)]
-    pub spec_draft_ngl: Option<i32>,
-    #[serde(default)]
-    pub spec_draft_device: Option<String>,
-    #[serde(default)]
-    pub spec_draft_cpu_moe: bool,
-    #[serde(default)]
-    pub spec_draft_n_cpu_moe: Option<i32>,
-    #[serde(default)]
-    pub spec_draft_type_k: Option<String>,
-    #[serde(default)]
-    pub spec_draft_type_v: Option<String>,
-    // ngram-mod knobs
-    #[serde(default)]
-    pub spec_ngram_mod_n_min: Option<u32>,
-    #[serde(default)]
-    pub spec_ngram_mod_n_max: Option<u32>,
-    #[serde(default)]
-    pub spec_ngram_mod_n_match: Option<u32>,
-    // ngram-simple knobs
-    #[serde(default)]
-    pub spec_ngram_simple_size_n: Option<u32>,
-    #[serde(default)]
-    pub spec_ngram_simple_size_m: Option<u32>,
-    #[serde(default)]
-    pub spec_ngram_simple_min_hits: Option<u32>,
-    // ngram-map-k knobs
-    #[serde(default)]
-    pub spec_ngram_map_k_size_n: Option<u32>,
-    #[serde(default)]
-    pub spec_ngram_map_k_size_m: Option<u32>,
-    #[serde(default)]
-    pub spec_ngram_map_k_min_hits: Option<u32>,
-    // ngram-map-k4v knobs
-    #[serde(default)]
-    pub spec_ngram_map_k4v_size_n: Option<u32>,
-    #[serde(default)]
-    pub spec_ngram_map_k4v_size_m: Option<u32>,
-    #[serde(default)]
-    pub spec_ngram_map_k4v_min_hits: Option<u32>,
+    // Speculative decoding — all fields flattened so JSON serialization stays flat
+    // (saved presets and API payloads use the same top-level keys).
+    #[serde(flatten, default)]
+    pub spec: SpecDecodeConfig,
     // KV cache
     #[serde(default)]
     pub kv_unified: Option<bool>,
@@ -323,10 +335,11 @@ pub async fn start_server(
         cmd.arg("--yarn-beta-slow").arg("1");
     }
 
-    // Speculative decoding
+    // Speculative decoding (all config in config.spec.*)
+    let s = &config.spec;
     // Backward compat: if old ngram_spec is true and no spec_type set, default to ngram-mod
-    let spec_type_effective = if config.spec_type.is_some() {
-        config.spec_type.clone()
+    let spec_type_effective = if s.spec_type.is_some() {
+        s.spec_type.clone()
     } else if config.ngram_spec {
         Some("ngram-mod".to_string())
     } else {
@@ -336,101 +349,88 @@ pub async fn start_server(
     if let Some(ref st) = spec_type_effective {
         cmd.arg("--spec-type").arg(st);
     }
-
-    if config.spec_default {
+    if s.spec_default {
         cmd.arg("--spec-default");
     }
-
-    // Draft model
-    if !config.draft_model.is_empty() {
-        cmd.arg("-md").arg(&config.draft_model);
+    if !s.draft_model.is_empty() {
+        cmd.arg("-md").arg(&s.draft_model);
     }
-
-    // Draft tuning
-    if let Some(v) = config.spec_draft_n_max {
+    if let Some(v) = s.spec_draft_n_max {
         cmd.arg("--spec-draft-n-max").arg(v.to_string());
     }
-    if let Some(v) = config.spec_draft_n_min {
+    if let Some(v) = s.spec_draft_n_min {
         cmd.arg("--spec-draft-n-min").arg(v.to_string());
     }
-    if let Some(v) = config.spec_draft_p_split {
+    if let Some(v) = s.spec_draft_p_split {
         cmd.arg("--spec-draft-p-split").arg(format!("{:.4}", v));
     }
-    if let Some(v) = config.spec_draft_p_min {
+    if let Some(v) = s.spec_draft_p_min {
         cmd.arg("--spec-draft-p-min").arg(format!("{:.4}", v));
     }
-    if let Some(v) = config.spec_draft_ngl {
+    if let Some(v) = s.spec_draft_ngl {
         cmd.arg("--spec-draft-ngl").arg(v.to_string());
     }
-    if let Some(ref v) = config.spec_draft_device {
+    if let Some(ref v) = s.spec_draft_device {
         cmd.arg("--spec-draft-device").arg(v);
     }
-    if config.spec_draft_cpu_moe {
+    if s.spec_draft_cpu_moe {
         cmd.arg("--spec-draft-cpu-moe");
     }
-    if let Some(v) = config.spec_draft_n_cpu_moe {
+    if let Some(v) = s.spec_draft_n_cpu_moe {
         cmd.arg("--spec-draft-n-cpu-moe").arg(v.to_string());
     }
-    if let Some(ref v) = config.spec_draft_type_k {
+    if let Some(ref v) = s.spec_draft_type_k {
         cmd.arg("--spec-draft-type-k").arg(v);
     }
-    if let Some(ref v) = config.spec_draft_type_v {
+    if let Some(ref v) = s.spec_draft_type_v {
         cmd.arg("--spec-draft-type-v").arg(v);
     }
-
-    // ngram-mod knobs
-    if let Some(v) = config.spec_ngram_mod_n_min {
+    if let Some(v) = s.spec_ngram_mod_n_min {
         cmd.arg("--spec-ngram-mod-n-min").arg(v.to_string());
     }
-    if let Some(v) = config.spec_ngram_mod_n_max {
+    if let Some(v) = s.spec_ngram_mod_n_max {
         cmd.arg("--spec-ngram-mod-n-max").arg(v.to_string());
     }
-    if let Some(v) = config.spec_ngram_mod_n_match {
+    if let Some(v) = s.spec_ngram_mod_n_match {
         cmd.arg("--spec-ngram-mod-n-match").arg(v.to_string());
     }
-
-    // ngram-simple knobs
-    if let Some(v) = config.spec_ngram_simple_size_n {
+    if let Some(v) = s.spec_ngram_simple_size_n {
         cmd.arg("--spec-ngram-simple-size-n").arg(v.to_string());
     }
-    if let Some(v) = config.spec_ngram_simple_size_m {
+    if let Some(v) = s.spec_ngram_simple_size_m {
         cmd.arg("--spec-ngram-simple-size-m").arg(v.to_string());
     }
-    if let Some(v) = config.spec_ngram_simple_min_hits {
+    if let Some(v) = s.spec_ngram_simple_min_hits {
         cmd.arg("--spec-ngram-simple-min-hits").arg(v.to_string());
     }
-
-    // ngram-map-k knobs
-    if let Some(v) = config.spec_ngram_map_k_size_n {
+    if let Some(v) = s.spec_ngram_map_k_size_n {
         cmd.arg("--spec-ngram-map-k-size-n").arg(v.to_string());
     }
-    if let Some(v) = config.spec_ngram_map_k_size_m {
+    if let Some(v) = s.spec_ngram_map_k_size_m {
         cmd.arg("--spec-ngram-map-k-size-m").arg(v.to_string());
     }
-    if let Some(v) = config.spec_ngram_map_k_min_hits {
+    if let Some(v) = s.spec_ngram_map_k_min_hits {
         cmd.arg("--spec-ngram-map-k-min-hits").arg(v.to_string());
     }
-
-    // ngram-map-k4v knobs
-    if let Some(v) = config.spec_ngram_map_k4v_size_n {
+    if let Some(v) = s.spec_ngram_map_k4v_size_n {
         cmd.arg("--spec-ngram-map-k4v-size-n").arg(v.to_string());
     }
-    if let Some(v) = config.spec_ngram_map_k4v_size_m {
+    if let Some(v) = s.spec_ngram_map_k4v_size_m {
         cmd.arg("--spec-ngram-map-k4v-size-m").arg(v.to_string());
     }
-    if let Some(v) = config.spec_ngram_map_k4v_min_hits {
+    if let Some(v) = s.spec_ngram_map_k4v_min_hits {
         cmd.arg("--spec-ngram-map-k4v-min-hits").arg(v.to_string());
     }
 
-    // Legacy draft_min/draft_max (backward compat)
+    // Legacy ngram_spec backward compat
     if config.ngram_spec {
-        if let Some(v) = config.spec_ngram_size {
+        if let Some(v) = s.spec_ngram_size {
             cmd.arg("--spec-ngram-size-n").arg(v.to_string());
         }
-        if let Some(v) = config.draft_min {
+        if let Some(v) = s.draft_min {
             cmd.arg("--draft-min").arg(v.to_string());
         }
-        if let Some(v) = config.draft_max {
+        if let Some(v) = s.draft_max {
             cmd.arg("--draft-max").arg(v.to_string());
         }
     }
