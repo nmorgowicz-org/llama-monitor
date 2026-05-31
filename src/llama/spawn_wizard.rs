@@ -399,22 +399,42 @@ impl ModelMetadata {
     }
 }
 
-/// Run llama-server --print-model-metadata and parse output.
+/// Introspect a local GGUF model file and return its architecture metadata.
 ///
-/// Caches results in config_dir/model-cache/<sha256_of_model_path>.json.
+/// **Primary path**: reads the GGUF binary header directly — no subprocess,
+/// no dependency on a specific llama.cpp version, works even before a binary
+/// is downloaded. Works on any GGUF file from any era.
+///
+/// **Fallback**: if the direct read fails (e.g. corrupt/partial file), falls
+/// back to `llama-server --print-model-metadata` text parsing.
+///
+/// Results are cached in `~/.config/llama-monitor/model-cache/<sha256>.json`.
 pub async fn introspect_model(
     model_path: &str,
     llama_server_path: &str,
 ) -> Result<ModelMetadata, String> {
     // Check cache first.
     if let Ok(cached) = load_model_cache(model_path) {
-        return Ok(ModelMetadata {
-            cached: true,
-            ..cached
-        });
+        return Ok(ModelMetadata { cached: true, ..cached });
     }
 
-    // Run llama-server --print-model-metadata.
+    // ── Primary: parse GGUF binary directly ──────────────────────────────────
+    let path = std::path::Path::new(model_path);
+    if path.exists() {
+        match crate::llama::gguf_meta::read_gguf_metadata(path) {
+            Ok(gguf) => {
+                let meta = gguf.to_model_metadata();
+                let _ = save_model_cache(model_path, &meta);
+                return Ok(meta);
+            }
+            Err(e) => {
+                // Log and fall through to subprocess
+                eprintln!("[llama-monitor] GGUF direct read failed for '{model_path}': {e}; falling back to llama-server");
+            }
+        }
+    }
+
+    // ── Fallback: llama-server --print-model-metadata ─────────────────────────
     let output = tokio::task::spawn_blocking({
         let lp = llama_server_path.to_string();
         let mp = model_path.to_string();
@@ -427,31 +447,23 @@ pub async fn introspect_model(
                 .stderr(std::process::Stdio::piped());
             let child = match cmd.spawn() {
                 Ok(c) => c,
-                Err(e) => {
-                    return Err(format!("Failed to run llama-server: {}", e));
-                }
+                Err(e) => return Err(format!("Failed to run llama-server: {e}")),
             };
             let out = match child.wait_with_output() {
                 Ok(o) => o,
-                Err(e) => {
-                    return Err(format!("Failed to wait for llama-server: {}", e));
-                }
+                Err(e) => return Err(format!("Failed to wait for llama-server: {e}")),
             };
             let stdout = String::from_utf8_lossy(&out.stdout).to_string();
             let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-            let combined = format!("{}{}", stdout, stderr);
-            Ok(combined)
+            Ok(format!("{stdout}{stderr}"))
         }
     })
     .await
-    .map_err(|e| format!("Introspection task failed: {}", e))?
-    .map_err(|e| format!("Introspection failed: {}", e))?;
+    .map_err(|e| format!("Introspection task failed: {e}"))?
+    .map_err(|e| format!("Introspection failed: {e}"))?;
 
     let meta = parse_model_metadata(&output);
-
-    // Cache result.
     let _ = save_model_cache(model_path, &meta);
-
     Ok(meta)
 }
 
