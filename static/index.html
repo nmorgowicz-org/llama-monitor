@@ -2150,6 +2150,12 @@
                         </div>
                         <!-- File list (shown when a repo ID is selected) -->
                         <div class="hf-file-list" id="spawn-hf-file-list"></div>
+                        <!-- Download destination callout (shown after a file is selected) -->
+                        <div class="hf-dl-hint" id="hf-dl-hint" style="display:none;">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                            <span id="hf-dl-hint-text">llama-server will download and cache this file at startup.</span>
+                            <button type="button" class="hf-dl-hint-btn" id="hf-dl-to-models-btn" title="Download the selected file to your local models folder first, then use it as a local model">Download to models folder</button>
+                        </div>
                         <!-- Community picks (from ~/.config/llama-monitor/community-picks.json) -->
                         <div class="hf-community-picks" id="hf-community-picks" style="display:none;">
                             <button type="button" class="hf-cp-toggle" id="hf-cp-toggle" aria-expanded="false">
@@ -2198,19 +2204,20 @@
                     </div>
                 </div>
                 <div class="wizard-sidebar">
-                    <div class="wizard-sidebar-title">Tips</div>
+                    <div class="wizard-sidebar-title">Choosing a model</div>
                     <ul>
-                        <li>Use GGUF files only.</li>
-                        <li>HF repo: we’ll list GGUF files.</li>
-                        <li>Import: browse common tool dirs.</li>
+                        <li><strong>New to this?</strong> Start with a 7–14B Q4_K_M — good quality and fits in most GPUs.</li>
+                        <li><strong>Local file</strong> — a <code>.gguf</code> already on your disk.</li>
+                        <li><strong>HuggingFace</strong> — search or paste a repo ID. llama-server streams the file from HF at startup (cached locally after).</li>
+                        <li><strong>Import</strong> — reuse a model from Ollama or LM Studio.</li>
                     </ul>
                     <div class="wizard-sidebar-title" style="margin-top:14px;">Quant guide</div>
                     <ul>
-                        <li><strong>Q4_K_M</strong> — best balance (recommended)</li>
-                        <li><strong>Q5_K_M/S</strong> — higher quality, less context</li>
-                        <li><strong>Q8_0</strong> — near-lossless, limited context</li>
-                        <li><strong>IQ4_XS</strong> — imatrix Q4, slightly smaller</li>
-                        <li><strong>IQ2_*</strong> — large MoE only (heavy quality loss)</li>
+                        <li title="Best starting point — good quality, fits 8 GB GPU for 7B models"><strong>Q4_K_M</strong> — best balance ✓ start here</li>
+                        <li title="Better output quality but uses more VRAM"><strong>Q5_K_M</strong> — higher quality, needs more VRAM</li>
+                        <li title="Near-lossless quality but largest size"><strong>Q8_0</strong> — near-lossless, largest</li>
+                        <li title="imatrix quantization — slightly smaller than standard Q4 with similar quality"><strong>IQ4_XS</strong> — imatrix, slightly smaller</li>
+                        <li title="Very aggressively compressed — only suitable for huge Mixture-of-Experts models"><strong>IQ2_*</strong> — large MoE only</li>
                     </ul>
                 </div>
             </div>
@@ -2804,9 +2811,8 @@
                     Refresh
                 </button>
                 <span class="models-no-dir-hint" id="models-no-dir-hint" style="display:none;">
-                    No models directory configured — set one in
-                    <button type="button" class="models-settings-link" id="models-open-settings-link">Settings → Server</button>
-                    or add model paths to a preset.
+                    No models directory configured.
+                    <button type="button" class="models-settings-link" id="models-open-settings-link">Set one in Settings → Models</button>
                 </span>
             </div>
             <div class="models-grid" id="models-list"></div>
@@ -2881,10 +2887,56 @@
                 </div>
                 <div class="settings-pane" id="settings-models">
                     <h3>Model Settings</h3>
-                    <div class="settings-card">
-                        <p class="settings-help">
-                            Model paths, context sizes, speculative decoding, and GPU layering are preset-level concerns. Edit them in Presets or Runtime Configuration rather than through global placeholder fields.
+
+                    <!-- Models Directory -->
+                    <div class="settings-card" style="margin-bottom:12px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            Local Models Folder
+                        </div>
+                        <p class="settings-help" style="margin-bottom:10px;">
+                            Point this to the folder where your <code>.gguf</code> model files live.
+                            Once set, you can browse and launch local models from the <strong>Models</strong> button
+                            without needing to type a path each time.
                         </p>
+                        <label class="modal-field" title="Directory to scan for .gguf model files. Saved in your app settings — no restart required.">
+                            Models directory
+                            <div style="display:flex;gap:6px;">
+                                <input type="text" id="settings-models-dir" placeholder="/path/to/your/models" style="flex:1;" autocomplete="off" spellcheck="false">
+                                <button type="button" class="btn-sm btn-preset" id="settings-models-dir-browse">Browse</button>
+                                <button type="button" class="btn-sm" id="settings-models-dir-clear" title="Clear models directory" style="padding:4px 8px;opacity:0.6;">✕</button>
+                            </div>
+                            <span class="modal-help" id="settings-models-dir-hint" style="display:none;color:var(--accent-green,#a3e635);margin-top:4px;"></span>
+                        </label>
+                    </div>
+
+                    <!-- HuggingFace Token -->
+                    <div class="settings-card">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            HuggingFace API Token
+                        </div>
+                        <p class="settings-help" style="margin-bottom:10px;">
+                            A <strong>read-only</strong> HuggingFace token lets the app browse models and download files
+                            without hitting the unauthenticated rate limit.
+                            Get one free at
+                            <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer"
+                               style="color:var(--accent-blue,#60a5fa);text-decoration:none;"
+                               title="Opens huggingface.co — create a token with Read access only">
+                                huggingface.co/settings/tokens ↗
+                            </a>
+                            (select <em>Read</em> access, you don't need write permissions).
+                        </p>
+                        <div id="settings-hf-token-status" style="font-size:12px;color:var(--color-text-muted);margin-bottom:8px;display:none;"></div>
+                        <label class="modal-field" title="Paste your HuggingFace token here. It will be saved to ~/.config/llama-monitor/hf-token and never sent anywhere except huggingface.co.">
+                            Token
+                            <div style="display:flex;gap:6px;">
+                                <div class="secret-input-wrap" style="flex:1;">
+                                    <input type="password" id="settings-hf-token" placeholder="hf_…" autocomplete="off" spellcheck="false">
+                                    <button type="button" class="secret-toggle" id="settings-hf-token-show" aria-label="Show/hide token">👁</button>
+                                </div>
+                                <button type="button" class="btn-sm btn-preset" id="settings-hf-token-save" style="background:rgba(99,102,241,0.15);border-color:rgba(99,102,241,0.35);color:#a5b4fc;">Save</button>
+                                <button type="button" class="btn-sm" id="settings-hf-token-remove" title="Remove saved token" style="padding:4px 8px;opacity:0.6;display:none;">✕</button>
+                            </div>
+                        </label>
                     </div>
                 </div>
               <div class="settings-pane" id="settings-appearance">

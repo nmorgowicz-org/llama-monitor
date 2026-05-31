@@ -83,7 +83,7 @@ export function collectSettings() {
         port: port,
         llama_server_path: document.getElementById('set-server-path').value,
         llama_server_cwd: document.getElementById('set-server-cwd').value,
-        models_dir: '',
+        models_dir: document.getElementById('settings-models-dir')?.value.trim() || '',
         server_endpoint: endpoint,
         remote_agent_url: document.getElementById('set-remote-agent-url')?.value.trim() || '',
         remote_agent_token: getSecretValue('set-remote-agent-token') || '',
@@ -178,6 +178,12 @@ export function applySettings(s) {
     if (s.llama_server_cwd !== undefined) {
         const serverCwdInput = document.getElementById('set-server-cwd');
         if (serverCwdInput) serverCwdInput.value = s.llama_server_cwd;
+    }
+
+    if (s.models_dir !== undefined) {
+        const el = document.getElementById('settings-models-dir');
+        if (el) el.value = s.models_dir;
+        _updateModelsDirHint(s.models_dir);
     }
 
     if (s.server_endpoint) {
@@ -329,6 +335,12 @@ export function openSettingsModal() {
 
     const dateFmtEl = document.getElementById('chat-date-format');
     if (dateFmtEl) dateFmtEl.value = settingsState.chat_date_format || 'MM/DD/YY';
+
+    // Refresh live-changing fields from server
+    (window.authFetch || fetch)('/api/settings', {
+        headers: window.authHeaders ? window.authHeaders() : {},
+    }).then(r => r.ok ? r.json() : null).then(s => { if (s) applySettings(s); }).catch(() => {});
+    _refreshHfTokenStatus();
 }
 
 export function closeSettingsModal() {
@@ -1149,7 +1161,124 @@ export function initSettings() {
     if (document.getElementById('settings-security')?.classList.contains('active')) {
         loadDashboardAuthConfig();
     }
+    _bindModelSettingsEvents();
 }
+
+// ── Models directory + HF token helpers ──────────────────────────────────────
+
+function _updateModelsDirHint(dir) {
+    const hint = document.getElementById('settings-models-dir-hint');
+    if (!hint) return;
+    if (dir) {
+        hint.textContent = `Scanning: ${dir}`;
+        hint.style.display = '';
+    } else {
+        hint.style.display = 'none';
+    }
+}
+
+function _bindModelSettingsEvents() {
+    // Models dir — browse button
+    document.getElementById('settings-models-dir-browse')?.addEventListener('click', async () => {
+        const { openDeferredFileBrowser } = await import('./file-browser-launcher.js');
+        openDeferredFileBrowser('settings-models-dir', 'dir');
+    });
+
+    // Models dir — clear button
+    document.getElementById('settings-models-dir-clear')?.addEventListener('click', () => {
+        const el = document.getElementById('settings-models-dir');
+        if (el) el.value = '';
+        _updateModelsDirHint('');
+        markSettingsDirty();
+    });
+
+    // Models dir — save on change
+    document.getElementById('settings-models-dir')?.addEventListener('change', () => {
+        const val = document.getElementById('settings-models-dir')?.value.trim() || '';
+        _updateModelsDirHint(val);
+        markSettingsDirty();
+    });
+
+    // HF token — show/hide toggle
+    document.getElementById('settings-hf-token-show')?.addEventListener('click', () => {
+        const input = document.getElementById('settings-hf-token');
+        if (input) input.type = input.type === 'password' ? 'text' : 'password';
+    });
+
+    // HF token — save button
+    document.getElementById('settings-hf-token-save')?.addEventListener('click', async () => {
+        const token = document.getElementById('settings-hf-token')?.value.trim() || '';
+        if (!token) return;
+        const btn = document.getElementById('settings-hf-token-save');
+        const origText = btn?.textContent;
+        if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+        try {
+            const res = await (window.authFetch || fetch)('/api/hf/token', {
+                method: 'PUT',
+                headers: window.authHeaders ? { ...window.authHeaders(), 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (data.ok) {
+                if (btn) { btn.textContent = '✓ Saved'; setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 1500); }
+                _refreshHfTokenStatus();
+                // Clear field after save
+                const inputEl = document.getElementById('settings-hf-token');
+                if (inputEl) inputEl.value = '';
+            } else {
+                if (btn) { btn.textContent = 'Failed'; setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000); }
+            }
+        } catch {
+            if (btn) { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = origText; btn.disabled = false; }, 2000); }
+        }
+    });
+
+    // HF token — remove button
+    document.getElementById('settings-hf-token-remove')?.addEventListener('click', async () => {
+        try {
+            await (window.authFetch || fetch)('/api/hf/token', {
+                method: 'DELETE',
+                headers: window.authHeaders ? window.authHeaders() : {},
+            });
+            _refreshHfTokenStatus();
+        } catch { /* ignore */ }
+    });
+
+    // Load HF token status when Models tab is activated
+    document.querySelectorAll('.settings-tab[data-tab="models"]').forEach(btn => {
+        btn.addEventListener('click', _refreshHfTokenStatus);
+    });
+
+    // Also load immediately if Models tab is already active
+    if (document.getElementById('settings-models')?.classList.contains('active')) {
+        _refreshHfTokenStatus();
+    }
+}
+
+async function _refreshHfTokenStatus() {
+    const statusEl = document.getElementById('settings-hf-token-status');
+    const removeBtn = document.getElementById('settings-hf-token-remove');
+    if (!statusEl) return;
+    try {
+        const res = await (window.authFetch || fetch)('/api/hf/token', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        statusEl.style.display = '';
+        if (data.set) {
+            statusEl.textContent = '✓ Token saved — authenticated HF requests active.';
+            statusEl.style.color = 'var(--accent-green,#a3e635)';
+            if (removeBtn) removeBtn.style.display = '';
+        } else {
+            statusEl.textContent = 'No token saved — rate limits apply to HF searches.';
+            statusEl.style.color = 'var(--color-text-muted)';
+            if (removeBtn) removeBtn.style.display = 'none';
+        }
+    } catch { /* ignore */ }
+}
+
+export { _refreshHfTokenStatus as refreshHfTokenStatus };
 
 // ── Token rotation confirmation helper ────────────────────────────────────────
 

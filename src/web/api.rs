@@ -1733,7 +1733,7 @@ fn api_vram_estimate(
 
 // 5) POST /api/models/download/start
 fn api_models_download_start(
-    _state: AppState,
+    state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "models" / "download" / "start")
@@ -1742,6 +1742,7 @@ fn api_models_download_start(
         .and(warp::body::json::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
+            let state = state.clone();
             async move {
                 if !check_db_admin_token(&auth, &cfg)
                     && !check_api_token(&auth, &cfg)
@@ -1788,7 +1789,8 @@ fn api_models_download_start(
                     (model.clone(), "model.gguf".to_string())
                 };
 
-                let target_dir = cfg.models_dir.clone().unwrap_or_else(|| cfg.default_models_dir.clone());
+                let target_dir = get_effective_models_dir(&state)
+                    .unwrap_or_else(|| cfg.default_models_dir.clone());
 
                 let hf_token = crate::hf::hf_load_token();
 
@@ -2897,6 +2899,90 @@ fn api_hf_quantizers_put(
         )
 }
 
+// ── GET /api/hf/token ─────────────────────────────────────────────────────────
+// Returns whether an HF token is saved; never returns the token itself.
+fn api_hf_token_get(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "token")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let set = crate::hf::hf_load_token().is_some();
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({ "set": set }),
+                )))
+            }
+        })
+}
+
+// ── PUT /api/hf/token ─────────────────────────────────────────────────────────
+// Saves an HF token to ~/.config/llama-monitor/hf-token.
+fn api_hf_token_put(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "token")
+        .and(warp::put())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let token = body["token"].as_str().unwrap_or("").trim().to_string();
+                if token.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({ "ok": false, "error": "token is required" }),
+                        ),
+                    ));
+                }
+                match crate::hf::hf_save_token(&token) {
+                    Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": true })),
+                    )),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({ "ok": false, "error": e.to_string() }),
+                        ),
+                    )),
+                }
+            }
+        })
+}
+
+// ── DELETE /api/hf/token ──────────────────────────────────────────────────────
+// Removes the saved HF token file.
+fn api_hf_token_delete(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "token")
+        .and(warp::delete())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let token_path = cfg.config_dir.join("hf-token");
+                if token_path.exists() {
+                    let _ = std::fs::remove_file(&token_path);
+                }
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({ "ok": true }),
+                )))
+            }
+        })
+}
+
 // ── POST /api/hf/author-models ────────────────────────────────────────────────
 // Browse all GGUF models by a specific HF author/org.
 
@@ -2954,7 +3040,7 @@ fn api_hf_author_models(
 // - 10-second cooldown between download starts.
 
 fn api_hf_download(
-    _state: AppState,
+    state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -2966,6 +3052,7 @@ fn api_hf_download(
         .and(warp::body::json::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
+            let state = state.clone();
             async move {
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
@@ -3019,9 +3106,7 @@ fn api_hf_download(
                 }
 
                 // Determine target directory.
-                let models_dir = cfg
-                    .models_dir
-                    .clone()
+                let models_dir = get_effective_models_dir(&state)
                     .unwrap_or_else(|| cfg.default_models_dir.clone());
 
                 // If target_path is provided, validate it is within models_dir.
@@ -3341,6 +3426,9 @@ pub fn api_routes(
     let hf_download_route = api_hf_download(state.clone(), app_config.clone());
     let hf_quantizers_route = api_hf_quantizers(state.clone(), app_config.clone());
     let hf_quantizers_put_route = api_hf_quantizers_put(state.clone(), app_config.clone());
+    let hf_token_get_route = api_hf_token_get(app_config.clone());
+    let hf_token_put_route = api_hf_token_put(app_config.clone());
+    let hf_token_delete_route = api_hf_token_delete(app_config.clone());
     let hf_author_models_route = api_hf_author_models(state.clone(), app_config.clone());
     let hf_community_picks_route = api_hf_community_picks(state.clone(), app_config.clone());
     let third_party_models_route = api_third_party_models(state.clone(), app_config.clone());
@@ -3462,6 +3550,9 @@ pub fn api_routes(
         .or(hf_download_route)
         .or(hf_quantizers_route)
         .or(hf_quantizers_put_route)
+        .or(hf_token_get_route)
+        .or(hf_token_put_route)
+        .or(hf_token_delete_route)
         .or(hf_author_models_route)
         .or(hf_community_picks_route)
         .or(third_party_models_route)
@@ -4924,6 +5015,18 @@ fn api_delete_template(
         })
 }
 
+/// Returns the effective models directory: CLI arg first, then UiSettings, then None.
+fn get_effective_models_dir(state: &AppState) -> Option<PathBuf> {
+    if let Some(ref d) = state.models_dir {
+        return Some(d.clone());
+    }
+    let s = state.ui_settings.lock().unwrap();
+    if !s.models_dir.is_empty() {
+        return Some(PathBuf::from(&s.models_dir));
+    }
+    None
+}
+
 fn api_get_models(
     state: AppState,
     app_config: Arc<AppConfig>,
@@ -4955,8 +5058,8 @@ fn api_refresh_models(
             if !check_api_token(&auth, &cfg) {
                 return futures_util::future::ready(Ok(unauthorized_api_token()));
             }
-            if let Some(ref dir) = state.models_dir {
-                match models::scan_models_dir(dir) {
+            if let Some(dir) = get_effective_models_dir(&state) {
+                match models::scan_models_dir(&dir) {
                     Ok(discovered) => {
                         let count = discovered.len();
                         *state.discovered_models.lock().unwrap() = discovered;
@@ -4972,7 +5075,7 @@ fn api_refresh_models(
                 }
             } else {
                 futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                    Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": "no models directory configured (use --models-dir)"}))),
+                    Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": "no models directory configured"}))),
                 ))
             }
         })

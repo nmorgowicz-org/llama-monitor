@@ -177,6 +177,9 @@ export function initSpawnWizard() {
 
   document.getElementById('btn-open-spawn-wizard')
     ?.addEventListener('click', () => openSpawnWizard());
+
+  // HF download-to-models-folder button
+  document.getElementById('hf-dl-to-models-btn')?.addEventListener('click', _handleHfDownloadToModels);
 }
 
 function applyReducedMotion() {
@@ -467,6 +470,52 @@ function showValidationError(msg) {
 
 function clearValidationError() {
   dom.overlay?.querySelectorAll('.wizard-validation-error').forEach(el => { el.style.display = 'none'; });
+}
+
+// ── HF download destination hint ─────────────────────────────────────────────
+
+function showHfDownloadHint(fname) {
+  const hint = document.getElementById('hf-dl-hint');
+  const txt = document.getElementById('hf-dl-hint-text');
+  if (!hint) return;
+  if (txt) {
+    txt.textContent = `llama-server will download "${fname}" at startup and cache it under ~/.cache/huggingface/hub/. Use "Download to models folder" if you want a permanent local copy.`;
+  }
+  hint.style.display = '';
+}
+
+function hideHfDownloadHint() {
+  const hint = document.getElementById('hf-dl-hint');
+  if (hint) hint.style.display = 'none';
+}
+
+async function _handleHfDownloadToModels() {
+  const { hfRepo, hfFile } = wizardState.model;
+  if (!hfRepo || !hfFile) { showValidationError('Select a GGUF file first.'); return; }
+  const btn = document.getElementById('hf-dl-to-models-btn');
+  const hint = document.getElementById('hf-dl-hint-text');
+  if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+  try {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+    const res = await fetch('/api/hf/download', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ repo_id: hfRepo, file_path: hfFile, resume: true }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Download to models folder'; }
+      showValidationError(data.error || 'Download failed to start.');
+      return;
+    }
+    if (hint) hint.textContent = 'Download started — check progress in the Models panel. File will appear in your models folder when complete.';
+    if (btn) { btn.disabled = false; btn.textContent = 'Download started ✓'; }
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Download to models folder'; }
+    showValidationError(err.message || 'Download request failed.');
+  }
 }
 
 // ── Mode toggle ───────────────────────────────────────────────────────────────
@@ -1471,6 +1520,7 @@ async function fetchHfFiles(repo) {
         clearValidationError();
         if (wizardState.model.paramB > 0) triggerQuantAdvisor();
         scheduleVramUpdate();
+        showHfDownloadHint(fname);
       };
       item.addEventListener('click', selectFile);
       item.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectFile(); } });

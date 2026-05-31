@@ -189,6 +189,17 @@ export function initModels() {
     document.getElementById('models-refresh-btn')?.addEventListener('click', refreshModels);
     document.getElementById('models-open-settings-link')?.addEventListener('click', () => {
         closeModelsModal();
+        // Open settings and activate the Models tab
         document.getElementById('settings-btn')?.click();
+        setTimeout(() => {
+            document.querySelector('.settings-tab[data-tab="models"]')?.click();
+        }, 80);
+    });
+
+    // Auto-refresh when models_dir is updated via settings
+    window.addEventListener('settings-applied', () => {
+        if (document.getElementById('models-modal')?.classList.contains('open')) {
+            loadModels();
+        }
     });
 }
