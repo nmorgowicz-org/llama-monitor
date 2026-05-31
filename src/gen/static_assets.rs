@@ -68,6 +68,8 @@ pub const FEATURES_FILE_BROWSER_LAUNCHER_JS: &str =
     include_str!("../../static/js/features/file-browser-launcher.js");
 pub const FEATURES_FILE_BROWSER_JS: &str = include_str!("../../static/js/features/file-browser.js");
 pub const FEATURES_LHM_JS: &str = include_str!("../../static/js/features/lhm.js");
+pub const FEATURES_LLAMA_UPDATER_JS: &str =
+    include_str!("../../static/js/features/llama-updater.js");
 pub const FEATURES_MODELS_JS: &str = include_str!("../../static/js/features/models.js");
 pub const FEATURES_NAV_JS: &str = include_str!("../../static/js/features/nav.js");
 pub const FEATURES_NETWORK_DETECTION_JS: &str =

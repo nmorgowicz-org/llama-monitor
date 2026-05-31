@@ -350,6 +350,7 @@ function cacheDom() {
 function bindEvents() {
   dom.closeBtn?.addEventListener('click', closeSpawnWizard);
   dom.overlay?.addEventListener('click', e => { if (e.target === dom.overlay) closeSpawnWizard(); });
+  bindCtxQuickPicks();
   document.addEventListener('keydown', e => {
     if (!dom.overlay?.classList.contains('open')) return;
     if (e.key === 'Escape') closeSpawnWizard();
@@ -2146,6 +2147,8 @@ async function triggerAutoSize() {
     if (dom.vramAutosizeNote) dom.vramAutosizeNote.textContent = note;
 
     updateVramDisplay();
+    updateCtxQuickPickActive();
+    showCtxFitWarning(r.context_size, wizardState.useCase);
 
     if (r.warnings?.length) showToast('Auto-size warnings', 'warning', r.warnings[0]);
     else showToast('Auto-sized', 'success', note);
@@ -2154,6 +2157,58 @@ async function triggerAutoSize() {
   } finally {
     btn.disabled = false; btn.textContent = origText;
   }
+}
+
+// ── Context quick-picks ───────────────────────────────────────────────────────
+
+function bindCtxQuickPicks() {
+  document.querySelectorAll('.ctx-pick').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ctx = parseInt(btn.dataset.ctx, 10);
+      if (!ctx) return;
+      if (dom.contextSizeInput) dom.contextSizeInput.value = ctx;
+      wizardState.hardware.contextSize = ctx;
+      updateCtxQuickPickActive();
+      showCtxFitWarning(ctx, wizardState.useCase);
+      updateVramDisplay();
+    });
+  });
+}
+
+function updateCtxQuickPickActive() {
+  const current = parseInt(dom.contextSizeInput?.value || '0', 10);
+  document.querySelectorAll('.ctx-pick').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.ctx, 10) === current);
+  });
+}
+
+// Minimum-context guidance: warn when auto-size lands below the target for the use case.
+const CTX_TARGETS = { agentic: 131072, general: 32768, roleplay: 65536 };
+
+function showCtxFitWarning(ctx, useCase) {
+  const el = document.getElementById('ctx-fit-warning');
+  if (!el) return;
+
+  const target = CTX_TARGETS[useCase] ?? 0;
+  if (!target || ctx >= target) { el.style.display = 'none'; return; }
+
+  const fmtCtx = c => c >= 1024 ? `${Math.round(c / 1024)}k` : `${c}`;
+  const got = fmtCtx(ctx), need = fmtCtx(target);
+
+  let msg = '';
+  if (useCase === 'agentic') {
+    msg = `<strong>Can't reach ${need} for agentic work</strong> — got ${got} at q8_0 KV. `
+        + `Try a smaller quantization (Q4_K_M or IQ3_XXS) or a 27B model which needs much less KV memory.`;
+  } else if (useCase === 'roleplay') {
+    msg = `<strong>Below ${need} RP target</strong> — got ${got}. `
+        + `Switch KV cache to q4_0 to cut memory in half, or use a smaller quant.`;
+  } else {
+    msg = `Auto-size returned ${got} (target ${need}). Consider a smaller quantization.`;
+  }
+
+  el.innerHTML = msg;
+  el.className = ctx < target * 0.5 ? 'ctx-fit-warning ctx-fit-error' : 'ctx-fit-warning';
+  el.style.display = '';
 }
 
 // ── Summary (Step 4) ──────────────────────────────────────────────────────────

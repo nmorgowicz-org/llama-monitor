@@ -6,7 +6,7 @@ use crate::config::AppConfig;
 use crate::gpu::env::{build_nvidia_env, build_rocm_env};
 use crate::state::AppState;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ServerConfig {
     pub model_path: String,
     pub context_size: u64,

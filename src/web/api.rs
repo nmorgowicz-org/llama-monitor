@@ -6211,6 +6211,7 @@ fn api_spawn_session_with_preset(
                     seed: preset.seed,
                     system_prompt_file: preset.system_prompt_file.clone(),
                     extra_args: preset.extra_args.clone(),
+                    ..Default::default()
                 };
 
                 match crate::llama::server::start_server(&state, config, &app_config).await {
