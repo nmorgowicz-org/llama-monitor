@@ -341,8 +341,8 @@ pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
         },
         // Community finetune quantizers of interest
         KnownQuantizer {
-            username: "davidau".into(),
-            display_name: "davidau".into(),
+            username: "DavidAU".into(),
+            display_name: "DavidAU".into(),
             description: "Fine-tune and merge specialist, often heretic/abliterated and uncensored variants.".into(),
             quant_style: "standard",
             note: None,
@@ -355,8 +355,8 @@ pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
             note: None,
         },
         KnownQuantizer {
-            username: "jackrong".into(),
-            display_name: "jackrong".into(),
+            username: "JackRong".into(),
+            display_name: "JackRong".into(),
             description: "GGUF releases, often larger models.".into(),
             quant_style: "standard",
             note: None,
@@ -572,10 +572,6 @@ pub async fn hf_search_models(params: &HfSearchParams) -> Result<Vec<SimpleModel
         let mut p = url.query_pairs_mut();
         if !params.query.is_empty() {
             p.append_pair("search", &params.query);
-        } else if let Some(ref author) = params.author {
-            // HF's "author" param is case-sensitive; include author in search
-            // so "davidau" still matches "DavidAU" models.
-            p.append_pair("search", author);
         }
         if let Some(ref author) = params.author {
             p.append_pair("author", author);
