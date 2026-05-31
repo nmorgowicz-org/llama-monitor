@@ -332,6 +332,12 @@ pub struct ModelMetadata {
     pub n_kv_heads: Option<u32>,
     /// Per-head dimension = n_embd / n_head.
     pub head_dim: Option<u32>,
+    // ── Architecture family ───────────────────────────────────────────────────
+    /// GGUF `general.architecture` value (e.g. "qwen3_6", "gemma4", "llama").
+    /// When present, overrides filename-based heuristic selection so that
+    /// renamed/finetuned models (e.g. "Pantheon-27B" from Qwen3.6 base) still
+    /// get the correct hybrid-DeltaNet / sliding-window treatment.
+    pub gguf_arch: Option<String>,
     // ── MoE ─────────────────────────────────────────────────────────────────
     /// Total experts per layer (from `n_experts` / `expert_count` / `n_exp`).
     pub n_experts: Option<u32>,
@@ -363,7 +369,14 @@ impl ModelMetadata {
             if heads > 0 { Some(embd / heads) } else { None }
         });
 
-        let heuristic = ModelArch::from_name_and_params(model_name, param_b);
+        // Prefer GGUF architecture string over filename when choosing the heuristic.
+        // This ensures that renamed finetunes (e.g. "Pantheon-27B" based on Qwen3.6)
+        // still get the correct hybrid-DeltaNet / sliding-window heuristic.
+        let heuristic_name = self.gguf_arch
+            .as_deref()
+            .map(gguf_arch_to_heuristic_name)
+            .unwrap_or(model_name);
+        let heuristic = ModelArch::from_name_and_params(heuristic_name, param_b);
 
         ModelArch {
             n_layers: self.n_layers.unwrap_or(heuristic.n_layers),
@@ -442,12 +455,49 @@ pub async fn introspect_model(
     Ok(meta)
 }
 
+/// Map a GGUF `general.architecture` value to a synthetic model name that
+/// `ModelArch::from_name_and_params` can pattern-match against.
+///
+/// This ensures renamed finetunes get the right hybrid/sliding-window heuristic
+/// regardless of what the user calls the file.
+fn gguf_arch_to_heuristic_name(gguf_arch: &str) -> &str {
+    match gguf_arch {
+        "qwen3_6" | "qwen3.6"                    => "qwen3.6-model",
+        "qwen3_5" | "qwen3.5"                    => "qwen3.5-model",
+        "qwen3_coder_next" | "qwen3-coder-next"  => "qwen3-coder-next",
+        "gemma4"  | "gemma-4"                    => "gemma4-model",
+        "gemma3"  | "gemma-3"                    => "gemma3-model",
+        // For all other architectures, pass through as-is — from_name_and_params
+        // will fall through to standard_heuristic which is correct for llama, mistral, etc.
+        other => other,
+    }
+}
+
 fn parse_model_metadata(output: &str) -> ModelMetadata {
     let mut meta = ModelMetadata::default();
 
     for line in output.lines() {
         let t = line.trim();
         let lower = t.to_ascii_lowercase();
+
+        // ── GGUF architecture family ──────────────────────────────────────────
+        // Parses "general.architecture: qwen3_6" or "general.architecture = qwen3_6"
+        if meta.gguf_arch.is_none() {
+            for prefix in &["general.architecture", "arch"] {
+                if lower.starts_with(prefix) {
+                    let rest = &t[prefix.len()..].trim_start();
+                    let value = rest
+                        .strip_prefix(':')
+                        .or_else(|| rest.strip_prefix('='))
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty());
+                    if let Some(v) = value {
+                        meta.gguf_arch = Some(v.to_ascii_lowercase());
+                        break;
+                    }
+                }
+            }
+        }
 
         // ── Core architecture ─────────────────────────────────────────────────
         macro_rules! try_field {
@@ -678,5 +728,39 @@ mod tests {
         assert_eq!(meta.n_ctx_train, None);
         assert!(!meta.mmproj_required);
         assert!(!meta.cached);
+    }
+
+    #[test]
+    fn test_parse_model_metadata_extracts_gguf_arch() {
+        let output = "
+            general.architecture: qwen3_6
+            n_layers: 64
+            n_head_kv: 4
+        ";
+        let meta = parse_model_metadata(output);
+        assert_eq!(meta.gguf_arch.as_deref(), Some("qwen3_6"));
+        assert_eq!(meta.n_layers, Some(64));
+    }
+
+    #[test]
+    fn test_gguf_arch_overrides_filename_for_renamed_finetune() {
+        // "Pantheon-Reasoning-27B" has no Qwen3.6 signals in the name,
+        // but its GGUF general.architecture = "qwen3_6" reveals the true family.
+        // to_arch() should pick the hybrid-DeltaNet heuristic, not standard_heuristic.
+        let meta = ModelMetadata {
+            gguf_arch: Some("qwen3_6".to_string()),
+            n_layers: Some(64),
+            n_kv_heads: Some(4),
+            ..Default::default()
+        };
+        let arch = meta.to_arch("Pantheon-Reasoning-27B-Q4_K_M.gguf", 27.0);
+        // Must be detected as hybrid DeltaNet (n_attn_layers < n_layers)
+        assert!(
+            arch.is_hybrid_attn(),
+            "gguf_arch=qwen3_6 must trigger hybrid-DeltaNet heuristic even for renamed models"
+        );
+        assert_eq!(arch.n_layers, 64, "n_layers from introspection");
+        assert_eq!(arch.n_kv_heads, 4, "n_kv_heads from introspection");
+        assert_eq!(arch.n_attn_layers, 16, "only 16 of 64 layers use KV cache");
     }
 }
