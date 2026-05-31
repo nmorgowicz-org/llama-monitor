@@ -2432,6 +2432,7 @@ fn api_benchmark(
                                     "time_to_first_token_ms": (benchmark.time_to_first_token_ms * 100.0).round() / 100.0,
                                     "verdict": benchmark.verdict,
                                     "hints": benchmark.hints,
+                                    "suggestions": benchmark.suggestions,
                                 }))),
                             )
                         }

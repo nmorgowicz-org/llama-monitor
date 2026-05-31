@@ -2208,11 +2208,18 @@ function updateCtxTrainWarning() {
     return;
   }
   const fmtK = n => n >= 1024 ? `${Math.round(n / 1024)}k` : `${n}`;
-  const ratio = (selected / nCtxTrain).toFixed(1);
-  el.innerHTML = `<strong>Context (${fmtK(selected)}) exceeds this model's training window (${fmtK(nCtxTrain)})</strong>. `
-    + `Generation quality degrades beyond the training limit. `
-    + `To extend safely, enable RoPE scaling (YaRN) — the wizard can auto-set this, or add `
-    + `<code>--rope-scaling yarn --rope-freq-scale ${(1 / parseFloat(ratio)).toFixed(3)}</code> to Extra Args.`;
+  const scale = (1 / (selected / nCtxTrain)).toFixed(3);
+  el.textContent = '';
+  const strong = document.createElement('strong');
+  strong.textContent = `Context (${fmtK(selected)}) exceeds this model's training window (${fmtK(nCtxTrain)})`;
+  const code = document.createElement('code');
+  code.textContent = `--rope-scaling yarn --rope-freq-scale ${scale}`;
+  el.appendChild(strong);
+  el.appendChild(document.createTextNode(
+    `. Generation quality degrades beyond the training limit. To extend safely, enable RoPE scaling (YaRN) — or add `
+  ));
+  el.appendChild(code);
+  el.appendChild(document.createTextNode(' to Extra Args.'));
   el.className = 'ctx-fit-warning';
   el.style.display = '';
 }
@@ -2234,19 +2241,25 @@ function showCtxFitWarning(ctx, useCase, manualSet = false) {
   const fmtCtx = c => c >= 1024 ? `${Math.round(c / 1024)}k` : `${c}`;
   const got = fmtCtx(ctx), need = fmtCtx(target);
 
-  let msg = '';
+  el.textContent = '';
+  const strong = document.createElement('strong');
   if (useCase === 'agentic') {
-    msg = `<strong>Can't reach ${need} for agentic work</strong> — auto-sized to ${got} at q8_0 KV. `
-        + `Try Q4_K_M or IQ3_XXS to shrink weights, or switch to a 27B model. `
-        + `You can also override by typing a custom value or picking 200k/256k above.`;
+    strong.textContent = `Can't reach ${need} for agentic work`;
+    el.appendChild(strong);
+    el.appendChild(document.createTextNode(
+      ` — auto-sized to ${got} at q8_0 KV. Try Q4_K_M or IQ3_XXS to shrink weights, or switch to a 27B model. You can also override by typing a custom value or picking 200k/256k above.`
+    ));
   } else if (useCase === 'roleplay') {
-    msg = `<strong>Below ${need} RP target</strong> — auto-sized to ${got}. `
-        + `Switch KV cache to q4_0 to halve KV memory, or use a smaller quant.`;
+    strong.textContent = `Below ${need} RP target`;
+    el.appendChild(strong);
+    el.appendChild(document.createTextNode(
+      ` — auto-sized to ${got}. Switch KV cache to q4_0 to halve KV memory, or use a smaller quant.`
+    ));
   } else {
-    msg = `Auto-size returned ${got} (target ${need}). Consider a smaller quantization.`;
+    el.appendChild(document.createTextNode(
+      `Auto-size returned ${got} (target ${need}). Consider a smaller quantization.`
+    ));
   }
-
-  el.innerHTML = msg;
   el.className = ctx < target * 0.5 ? 'ctx-fit-warning ctx-fit-error' : 'ctx-fit-warning';
   el.style.display = '';
 }
