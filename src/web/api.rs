@@ -2781,6 +2781,48 @@ fn api_hf_files(
         })
 }
 
+// ── GET /api/hf/community-picks ───────────────────────────────────────────────
+// Reads ~/.config/llama-monitor/community-picks.json if present.
+// Produced externally (e.g. by a Hermes cron scraping r/LocalLLaMA).
+
+fn api_hf_community_picks(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "community-picks")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let path = cfg.config_dir.join("community-picks.json");
+                let body = if path.exists() {
+                    match std::fs::read_to_string(&path) {
+                        Ok(s) => match serde_json::from_str::<serde_json::Value>(&s) {
+                            Ok(v) => serde_json::json!({ "ok": true, "data": v }),
+                            Err(e) => serde_json::json!({
+                                "ok": false,
+                                "error": format!("community-picks.json parse error: {e}")
+                            }),
+                        },
+                        Err(e) => serde_json::json!({
+                            "ok": false,
+                            "error": format!("community-picks.json read error: {e}")
+                        }),
+                    }
+                } else {
+                    serde_json::json!({ "ok": true, "data": null })
+                };
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &body,
+                )))
+            }
+        })
+}
+
 // ── GET /api/hf/quantizers ────────────────────────────────────────────────────
 // Returns the curated list of known GGUF quantizers for the wizard quick-picks.
 
@@ -3249,6 +3291,7 @@ pub fn api_routes(
     let hf_download_route = api_hf_download(state.clone(), app_config.clone());
     let hf_quantizers_route = api_hf_quantizers(state.clone(), app_config.clone());
     let hf_author_models_route = api_hf_author_models(state.clone(), app_config.clone());
+    let hf_community_picks_route = api_hf_community_picks(state.clone(), app_config.clone());
     let third_party_models_route = api_third_party_models(state.clone(), app_config.clone());
     let model_introspect_route = api_model_introspect(state.clone(), app_config.clone());
 
@@ -3368,6 +3411,7 @@ pub fn api_routes(
         .or(hf_download_route)
         .or(hf_quantizers_route)
         .or(hf_author_models_route)
+        .or(hf_community_picks_route)
         .or(third_party_models_route)
         .or(model_introspect_route)
         .or(vram_quant_compare_route)

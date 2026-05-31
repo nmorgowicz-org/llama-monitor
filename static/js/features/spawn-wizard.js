@@ -170,7 +170,9 @@ export function initSpawnWizard() {
   bindHfSortSelect();
   restoreProfile();
   applyProfileVisibility();
-  loadHfQuickPicks(); // pre-load author quick-picks in background
+  renderHfDiscoverPills();          // static — no network call needed
+  loadHfQuickPicks();               // pre-load author quick-picks in background
+  loadCommunityPicks();             // load community-picks.json if present
 }
 
 function applyReducedMotion() {
@@ -865,6 +867,164 @@ function renderQuantAdvisor(quants, availVram) {
   dom.quantAdvisor.style.display = '';
 }
 
+// ── HF discover categories ────────────────────────────────────────────────────
+// Static curated categories that map to queryable HF API searches.
+
+const HF_DISCOVER_CATEGORIES = [
+  { id: 'trending',  label: 'Trending',      params: { query: '',           sort: 'trending',  limit: 30 } },
+  { id: 'qwen3',     label: 'Qwen3',         params: { query: 'qwen3',      sort: 'downloads', limit: 30 } },
+  { id: 'llama3',    label: 'Llama 3.x',     params: { query: 'llama-3',    sort: 'downloads', limit: 30 } },
+  { id: 'mistral',   label: 'Mistral / MoE', params: { query: 'mistral',    sort: 'downloads', limit: 30 } },
+  { id: 'deepseek',  label: 'DeepSeek',      params: { query: 'deepseek',   sort: 'downloads', limit: 30 } },
+  { id: 'gemma',     label: 'Gemma',         params: { query: 'gemma',      sort: 'downloads', limit: 30 } },
+  { id: 'phi4',      label: 'Phi-4',         params: { query: 'phi-4',      sort: 'downloads', limit: 30 } },
+  { id: 'command',   label: 'Command R',     params: { query: 'command-r',  sort: 'downloads', limit: 30 } },
+];
+
+function renderHfDiscoverPills() {
+  const container = document.getElementById('hf-discover-pills');
+  if (!container) return;
+  container.innerHTML = '';
+  for (const cat of HF_DISCOVER_CATEGORIES) {
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'hf-discover-pill';
+    pill.textContent = cat.label;
+    pill.dataset.catId = cat.id;
+    pill.addEventListener('click', () => {
+      // Deactivate all discover + quantizer pills
+      container.querySelectorAll('.hf-discover-pill').forEach(p => p.classList.remove('active'));
+      dom.hfQuickpicks?.querySelectorAll('.hf-qp-btn').forEach(b => b.classList.remove('active'));
+      pill.classList.add('active');
+      wizardState.hfBrowseAuthor = null;
+      if (dom.hfRepoInput) dom.hfRepoInput.value = '';
+      showHfSearchResults(cat.params);
+    });
+    container.appendChild(pill);
+  }
+}
+
+// ── Community picks ───────────────────────────────────────────────────────────
+
+let communityPicksData = null;
+let communityPicksActiveCat = 0;
+
+async function loadCommunityPicks() {
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const resp = await fetch('/api/hf/community-picks', { headers });
+    if (!resp.ok) return;
+    const json = await resp.json();
+    if (!json.ok || !json.data) return;
+
+    communityPicksData = json.data;
+    const panel = document.getElementById('hf-community-picks');
+    if (!panel) return;
+
+    const cats = communityPicksData.categories || [];
+    const totalModels = cats.reduce((s, c) => s + (c.models?.length || 0), 0);
+    const meta = document.getElementById('hf-cp-toggle-meta');
+    if (meta) {
+      const gen = communityPicksData.generated_at
+        ? new Date(communityPicksData.generated_at).toLocaleDateString()
+        : '';
+      meta.textContent = `${totalModels} models${gen ? ' · ' + gen : ''}`;
+    }
+
+    panel.style.display = '';
+    renderCommunityPicksTabs(cats);
+    renderCommunityPicksList(cats[0]);
+
+    document.getElementById('hf-cp-toggle')?.addEventListener('click', () => {
+      const body = document.getElementById('hf-cp-body');
+      const toggle = document.getElementById('hf-cp-toggle');
+      if (!body || !toggle) return;
+      const open = toggle.getAttribute('aria-expanded') === 'true';
+      toggle.setAttribute('aria-expanded', String(!open));
+      body.style.display = open ? 'none' : '';
+    });
+  } catch {}
+}
+
+function renderCommunityPicksTabs(cats) {
+  const tabs = document.getElementById('hf-cp-tabs');
+  if (!tabs) return;
+  tabs.innerHTML = '';
+  cats.forEach((cat, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'hf-cp-tab' + (i === communityPicksActiveCat ? ' active' : '');
+    btn.textContent = cat.label;
+    btn.title = cat.description || '';
+    btn.addEventListener('click', () => {
+      communityPicksActiveCat = i;
+      tabs.querySelectorAll('.hf-cp-tab').forEach((t, j) =>
+        t.classList.toggle('active', j === i)
+      );
+      renderCommunityPicksList(cat);
+    });
+    tabs.appendChild(btn);
+  });
+}
+
+function renderCommunityPicksList(cat) {
+  const list = document.getElementById('hf-cp-list');
+  if (!list) return;
+  const models = cat?.models || [];
+
+  if (!models.length) {
+    list.innerHTML = '<div class="hf-cp-empty">No models in this category yet.</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  for (const m of models) {
+    const item = document.createElement('div');
+    item.className = 'hf-cp-item';
+    item.tabIndex = 0;
+    item.setAttribute('role', 'button');
+
+    const sizeLabel = m.param_b > 0
+      ? (m.param_b >= 1000 ? (m.param_b / 1000).toFixed(1) + 'T' : m.param_b + 'B')
+      : '';
+
+    item.innerHTML = `
+      <div class="hf-cp-item-main">
+        <div class="hf-cp-name">${escHtml(m.display_name || m.hf_repo)}</div>
+        ${m.why ? `<div class="hf-cp-why">${escHtml(m.why)}</div>` : ''}
+      </div>
+      <div class="hf-cp-meta">
+        ${sizeLabel ? `<span class="hf-cp-badge hf-cp-badge-size">${escHtml(sizeLabel)}</span>` : ''}
+        ${m.quant_rec ? `<span class="hf-cp-badge hf-cp-badge-quant">${escHtml(m.quant_rec)}</span>` : ''}
+        ${m.is_moe ? `<span class="hf-cp-badge hf-cp-badge-moe">MoE</span>` : ''}
+        ${m.mention_count > 0 ? `<span class="hf-cp-mentions">${m.mention_count} mentions</span>` : ''}
+      </div>`;
+
+    const loadPick = () => {
+      // Deactivate discover/quantizer pills
+      document.getElementById('hf-discover-pills')
+        ?.querySelectorAll('.hf-discover-pill').forEach(p => p.classList.remove('active'));
+      dom.hfQuickpicks?.querySelectorAll('.hf-qp-btn').forEach(b => b.classList.remove('active'));
+      // Pre-fill repo input and load files
+      if (dom.hfRepoInput) dom.hfRepoInput.value = m.hf_repo;
+      wizardState.model.hfRepo = m.hf_repo;
+      if (m.param_b > 0) wizardState.model.paramB = m.param_b;
+      if (dom.hfSearchResults) dom.hfSearchResults.style.display = 'none';
+      fetchHfFiles(m.hf_repo);
+      if (m.param_b > 0) triggerQuantAdvisor();
+      clearValidationError();
+    };
+    item.addEventListener('click', loadPick);
+    item.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); loadPick(); } });
+
+    list.appendChild(item);
+  }
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 // ── HF quick-picks ────────────────────────────────────────────────────────────
 
 async function loadHfQuickPicks() {
@@ -888,6 +1048,8 @@ async function loadHfQuickPicks() {
       btn.dataset.author = q.username;
       btn.addEventListener('click', () => {
         dom.hfQuickpicks?.querySelectorAll('.hf-qp-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('hf-discover-pills')
+          ?.querySelectorAll('.hf-discover-pill').forEach(p => p.classList.remove('active'));
         btn.classList.add('active');
         // Clear the repo input and show author models
         if (dom.hfRepoInput) dom.hfRepoInput.value = '';

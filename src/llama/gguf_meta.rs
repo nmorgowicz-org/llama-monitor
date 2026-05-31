@@ -7,27 +7,27 @@
 //!
 //! GGUF format reference: <https://github.com/ggml-org/ggml/blob/master/docs/gguf.md>
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
-use std::collections::HashMap;
 
 // ── Format constants ──────────────────────────────────────────────────────────
 
 const GGUF_MAGIC: &[u8; 4] = b"GGUF";
 
-const TYPE_UINT8:   u32 = 0;
-const TYPE_INT8:    u32 = 1;
-const TYPE_UINT16:  u32 = 2;
-const TYPE_INT16:   u32 = 3;
-const TYPE_UINT32:  u32 = 4;
-const TYPE_INT32:   u32 = 5;
+const TYPE_UINT8: u32 = 0;
+const TYPE_INT8: u32 = 1;
+const TYPE_UINT16: u32 = 2;
+const TYPE_INT16: u32 = 3;
+const TYPE_UINT32: u32 = 4;
+const TYPE_INT32: u32 = 5;
 const TYPE_FLOAT32: u32 = 6;
-const TYPE_BOOL:    u32 = 7;
-const TYPE_STRING:  u32 = 8;
-const TYPE_ARRAY:   u32 = 9;
-const TYPE_UINT64:  u32 = 10;
-const TYPE_INT64:   u32 = 11;
+const TYPE_BOOL: u32 = 7;
+const TYPE_STRING: u32 = 8;
+const TYPE_ARRAY: u32 = 9;
+const TYPE_UINT64: u32 = 10;
+const TYPE_INT64: u32 = 11;
 const TYPE_FLOAT64: u32 = 12;
 
 // ── Public output type ────────────────────────────────────────────────────────
@@ -90,17 +90,17 @@ impl GgufMetadata {
     /// Qwen3.6 base) get the correct hybrid-DeltaNet heuristic regardless of filename.
     pub fn to_model_metadata(&self) -> crate::llama::spawn_wizard::ModelMetadata {
         crate::llama::spawn_wizard::ModelMetadata {
-            n_layers:       self.block_count,
-            n_ctx_train:    self.context_length,
-            n_embd:         self.embedding_length,
-            n_ff:           self.feed_forward_length,
-            n_head:         self.head_count,
-            n_kv_heads:     self.head_count_kv,
-            head_dim:       self.key_length,
-            gguf_arch:      self.architecture.clone(),
-            n_experts:      self.expert_count,
+            n_layers: self.block_count,
+            n_ctx_train: self.context_length,
+            n_embd: self.embedding_length,
+            n_ff: self.feed_forward_length,
+            n_head: self.head_count,
+            n_kv_heads: self.head_count_kv,
+            head_dim: self.key_length,
+            gguf_arch: self.architecture.clone(),
+            n_experts: self.expert_count,
             n_experts_used: self.expert_used_count,
-            mtp_depth:      self.mtp_depth,
+            mtp_depth: self.mtp_depth,
             mmproj_required: false,
             cached: false,
         }
@@ -115,8 +115,7 @@ impl GgufMetadata {
 /// Returns a human-readable error string if the file cannot be opened,
 /// is not a valid GGUF file, or uses an unsupported version.
 pub fn read_gguf_metadata(path: &Path) -> Result<GgufMetadata, String> {
-    let file = File::open(path)
-        .map_err(|e| format!("Cannot open '{}': {e}", path.display()))?;
+    let file = File::open(path).map_err(|e| format!("Cannot open '{}': {e}", path.display()))?;
     let mut r = BufReader::with_capacity(64 * 1024, file);
 
     // Magic
@@ -160,13 +159,14 @@ pub fn read_gguf_metadata(path: &Path) -> Result<GgufMetadata, String> {
     }
 
     // ── Extract fields ────────────────────────────────────────────────────────
-    let arch: Option<String> = kv.get("general.architecture")
+    let arch: Option<String> = kv
+        .get("general.architecture")
         .and_then(KvValue::as_str)
         .map(|s| s.to_ascii_lowercase());
 
     let mut meta = GgufMetadata::default();
     meta.architecture = arch.clone();
-    meta.param_count  = kv.get("general.parameter_count").and_then(KvValue::as_u64);
+    meta.param_count = kv.get("general.parameter_count").and_then(KvValue::as_u64);
 
     if let Some(a) = arch.as_deref() {
         macro_rules! get_u32 {
@@ -180,22 +180,23 @@ pub fn read_gguf_metadata(path: &Path) -> Result<GgufMetadata, String> {
             };
         }
 
-        meta.block_count         = get_u32!("block_count");
-        meta.head_count          = get_u32!("attention.head_count");
-        meta.head_count_kv       = get_u32!("attention.head_count_kv");
-        meta.key_length          = get_u32!("attention.key_length");
-        meta.context_length      = get_u32!("context_length");
-        meta.embedding_length    = get_u32!("embedding_length");
+        meta.block_count = get_u32!("block_count");
+        meta.head_count = get_u32!("attention.head_count");
+        meta.head_count_kv = get_u32!("attention.head_count_kv");
+        meta.key_length = get_u32!("attention.key_length");
+        meta.context_length = get_u32!("context_length");
+        meta.embedding_length = get_u32!("embedding_length");
         meta.feed_forward_length = get_u32!("feed_forward_length");
-        meta.expert_count        = get_u32!("expert_count");
-        meta.expert_used_count   = get_u32!("expert_used_count");
+        meta.expert_count = get_u32!("expert_count");
+        meta.expert_used_count = get_u32!("expert_used_count");
 
         // MTP depth — key name varies across llama.cpp versions
         meta.mtp_depth = get_u32!(
             "next_n_token_count",
             "num_nextn_predict_layers",
             "multi_token_prediction_depth"
-        ).or_else(|| get_u32_bare!("general.next_n_token_count"));
+        )
+        .or_else(|| get_u32_bare!("general.next_n_token_count"));
     }
 
     Ok(meta)
@@ -235,7 +236,11 @@ impl KvValue {
     }
 
     fn as_str(&self) -> Option<&str> {
-        if let KvValue::Str(s) = self { Some(s) } else { None }
+        if let KvValue::Str(s) = self {
+            Some(s)
+        } else {
+            None
+        }
     }
 }
 
@@ -276,7 +281,8 @@ fn read_str<R: Read>(r: &mut R, version: u32) -> Result<String, String> {
         return Err(format!("String too long ({len} bytes) — likely corrupt"));
     }
     let mut buf = vec![0u8; len as usize];
-    r.read_exact(&mut buf).map_err(|e| format!("read str body: {e}"))?;
+    r.read_exact(&mut buf)
+        .map_err(|e| format!("read str body: {e}"))?;
     String::from_utf8(buf).map_err(|e| format!("string not UTF-8: {e}"))
 }
 
@@ -284,19 +290,33 @@ fn read_str<R: Read>(r: &mut R, version: u32) -> Result<String, String> {
 /// Fixed-size non-architecture types are consumed and discarded (returned as `Other`).
 fn read_value<R: Read + Seek>(r: &mut R, vtype: u32, version: u32) -> Result<KvValue, String> {
     match vtype {
-        TYPE_UINT8  => Ok(KvValue::U32(read_u8(r)? as u32)),
-        TYPE_INT8   => Ok(KvValue::I32(read_u8(r)? as i8 as i32)),
+        TYPE_UINT8 => Ok(KvValue::U32(read_u8(r)? as u32)),
+        TYPE_INT8 => Ok(KvValue::I32(read_u8(r)? as i8 as i32)),
         TYPE_UINT16 => Ok(KvValue::U32(read_u16(r)? as u32)),
-        TYPE_INT16  => Ok(KvValue::I32(read_u16(r)? as i16 as i32)),
+        TYPE_INT16 => Ok(KvValue::I32(read_u16(r)? as i16 as i32)),
         TYPE_UINT32 => Ok(KvValue::U32(read_u32(r)?)),
-        TYPE_INT32  => Ok(KvValue::I32(read_u32(r)? as i32)),
-        TYPE_FLOAT32 => { r.seek(SeekFrom::Current(4)).map_err(|e| format!("seek f32: {e}"))?; Ok(KvValue::Other) }
-        TYPE_BOOL   => { let _ = read_u8(r)?; Ok(KvValue::Other) }
+        TYPE_INT32 => Ok(KvValue::I32(read_u32(r)? as i32)),
+        TYPE_FLOAT32 => {
+            r.seek(SeekFrom::Current(4))
+                .map_err(|e| format!("seek f32: {e}"))?;
+            Ok(KvValue::Other)
+        }
+        TYPE_BOOL => {
+            let _ = read_u8(r)?;
+            Ok(KvValue::Other)
+        }
         TYPE_STRING => Ok(KvValue::Str(read_str(r, version)?)),
         TYPE_UINT64 => Ok(KvValue::U64(read_u64(r)?)),
-        TYPE_INT64  => Ok(KvValue::I64(read_u64(r)? as i64)),
-        TYPE_FLOAT64 => { r.seek(SeekFrom::Current(8)).map_err(|e| format!("seek f64: {e}"))?; Ok(KvValue::Other) }
-        TYPE_ARRAY  => { skip_array(r, version)?; Ok(KvValue::Other) }
+        TYPE_INT64 => Ok(KvValue::I64(read_u64(r)? as i64)),
+        TYPE_FLOAT64 => {
+            r.seek(SeekFrom::Current(8))
+                .map_err(|e| format!("seek f64: {e}"))?;
+            Ok(KvValue::Other)
+        }
+        TYPE_ARRAY => {
+            skip_array(r, version)?;
+            Ok(KvValue::Other)
+        }
         other => Err(format!("Unknown GGUF value type {other}")),
     }
 }
@@ -304,12 +324,16 @@ fn read_value<R: Read + Seek>(r: &mut R, vtype: u32, version: u32) -> Result<KvV
 /// Skip an array value: read the element type and count, then seek/read past all elements.
 fn skip_array<R: Read + Seek>(r: &mut R, version: u32) -> Result<(), String> {
     let elem_type = read_u32(r)?;
-    let n = if version == 1 { read_u32(r)? as u64 } else { read_u64(r)? };
+    let n = if version == 1 {
+        read_u32(r)? as u64
+    } else {
+        read_u64(r)?
+    };
 
     // For fixed-size element types, a single seek is much faster than iterating.
     let fixed_size: Option<u64> = match elem_type {
         TYPE_UINT8 | TYPE_INT8 | TYPE_BOOL => Some(1),
-        TYPE_UINT16 | TYPE_INT16           => Some(2),
+        TYPE_UINT16 | TYPE_INT16 => Some(2),
         TYPE_UINT32 | TYPE_INT32 | TYPE_FLOAT32 => Some(4),
         TYPE_UINT64 | TYPE_INT64 | TYPE_FLOAT64 => Some(8),
         _ => None,
@@ -331,16 +355,24 @@ fn skip_array<R: Read + Seek>(r: &mut R, version: u32) -> Result<(), String> {
 /// Skip a single value of `vtype` without returning it.
 fn skip_value_type<R: Read + Seek>(r: &mut R, vtype: u32, version: u32) -> Result<(), String> {
     match vtype {
-        TYPE_UINT8 | TYPE_INT8 | TYPE_BOOL => { let _ = read_u8(r)?; }
-        TYPE_UINT16 | TYPE_INT16           => { let _ = read_u16(r)?; }
+        TYPE_UINT8 | TYPE_INT8 | TYPE_BOOL => {
+            let _ = read_u8(r)?;
+        }
+        TYPE_UINT16 | TYPE_INT16 => {
+            let _ = read_u16(r)?;
+        }
         TYPE_UINT32 | TYPE_INT32 | TYPE_FLOAT32 => {
-            r.seek(SeekFrom::Current(4)).map_err(|e| format!("skip: {e}"))?;
+            r.seek(SeekFrom::Current(4))
+                .map_err(|e| format!("skip: {e}"))?;
         }
         TYPE_UINT64 | TYPE_INT64 | TYPE_FLOAT64 => {
-            r.seek(SeekFrom::Current(8)).map_err(|e| format!("skip: {e}"))?;
+            r.seek(SeekFrom::Current(8))
+                .map_err(|e| format!("skip: {e}"))?;
         }
-        TYPE_STRING => { let _ = read_str(r, version)?; }
-        TYPE_ARRAY  => skip_array(r, version)?,
+        TYPE_STRING => {
+            let _ = read_str(r, version)?;
+        }
+        TYPE_ARRAY => skip_array(r, version)?,
         other => return Err(format!("Unknown type to skip: {other}")),
     }
     Ok(())
@@ -386,16 +418,24 @@ mod tests {
         out
     }
 
-    enum KvEntry { U32(u32), U64(u64), Str(String) }
+    enum KvEntry {
+        U32(u32),
+        U64(u64),
+        Str(String),
+    }
 
     fn read_from_bytes(bytes: &[u8]) -> Result<GgufMetadata, String> {
         use std::io::Cursor;
         struct RwCursor(Cursor<Vec<u8>>);
         impl Read for RwCursor {
-            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> { self.0.read(buf) }
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                self.0.read(buf)
+            }
         }
         impl Seek for RwCursor {
-            fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> { self.0.seek(pos) }
+            fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+                self.0.seek(pos)
+            }
         }
 
         let mut r = RwCursor(Cursor::new(bytes.to_vec()));
@@ -414,21 +454,38 @@ mod tests {
             kv.insert(key, value);
         }
 
-        let arch: Option<String> = kv.get("general.architecture")
+        let arch: Option<String> = kv
+            .get("general.architecture")
             .and_then(KvValue::as_str)
             .map(|s| s.to_ascii_lowercase());
         let mut meta = GgufMetadata::default();
         meta.architecture = arch.clone();
         meta.param_count = kv.get("general.parameter_count").and_then(KvValue::as_u64);
         if let Some(a) = arch.as_deref() {
-            meta.block_count       = kv.get(&format!("{a}.block_count")).and_then(KvValue::as_u32);
-            meta.head_count        = kv.get(&format!("{a}.attention.head_count")).and_then(KvValue::as_u32);
-            meta.head_count_kv     = kv.get(&format!("{a}.attention.head_count_kv")).and_then(KvValue::as_u32);
-            meta.key_length        = kv.get(&format!("{a}.attention.key_length")).and_then(KvValue::as_u32);
-            meta.context_length    = kv.get(&format!("{a}.context_length")).and_then(KvValue::as_u32);
-            meta.embedding_length  = kv.get(&format!("{a}.embedding_length")).and_then(KvValue::as_u32);
-            meta.expert_count      = kv.get(&format!("{a}.expert_count")).and_then(KvValue::as_u32);
-            meta.expert_used_count = kv.get(&format!("{a}.expert_used_count")).and_then(KvValue::as_u32);
+            meta.block_count = kv
+                .get(&format!("{a}.block_count"))
+                .and_then(KvValue::as_u32);
+            meta.head_count = kv
+                .get(&format!("{a}.attention.head_count"))
+                .and_then(KvValue::as_u32);
+            meta.head_count_kv = kv
+                .get(&format!("{a}.attention.head_count_kv"))
+                .and_then(KvValue::as_u32);
+            meta.key_length = kv
+                .get(&format!("{a}.attention.key_length"))
+                .and_then(KvValue::as_u32);
+            meta.context_length = kv
+                .get(&format!("{a}.context_length"))
+                .and_then(KvValue::as_u32);
+            meta.embedding_length = kv
+                .get(&format!("{a}.embedding_length"))
+                .and_then(KvValue::as_u32);
+            meta.expert_count = kv
+                .get(&format!("{a}.expert_count"))
+                .and_then(KvValue::as_u32);
+            meta.expert_used_count = kv
+                .get(&format!("{a}.expert_used_count"))
+                .and_then(KvValue::as_u32);
         }
         Ok(meta)
     }
@@ -436,14 +493,14 @@ mod tests {
     #[test]
     fn parses_qwen36_metadata() {
         let bytes = make_gguf(&[
-            ("general.architecture",        KvEntry::Str("qwen3_6".into())),
-            ("general.parameter_count",     KvEntry::U64(27_000_000_000)),
-            ("qwen3_6.block_count",         KvEntry::U32(64)),
-            ("qwen3_6.attention.head_count",    KvEntry::U32(24)),
+            ("general.architecture", KvEntry::Str("qwen3_6".into())),
+            ("general.parameter_count", KvEntry::U64(27_000_000_000)),
+            ("qwen3_6.block_count", KvEntry::U32(64)),
+            ("qwen3_6.attention.head_count", KvEntry::U32(24)),
             ("qwen3_6.attention.head_count_kv", KvEntry::U32(4)),
-            ("qwen3_6.attention.key_length",    KvEntry::U32(256)),
-            ("qwen3_6.context_length",          KvEntry::U32(262144)),
-            ("qwen3_6.embedding_length",        KvEntry::U32(5120)),
+            ("qwen3_6.attention.key_length", KvEntry::U32(256)),
+            ("qwen3_6.context_length", KvEntry::U32(262144)),
+            ("qwen3_6.embedding_length", KvEntry::U32(5120)),
         ]);
         let meta = read_from_bytes(&bytes).unwrap();
         assert_eq!(meta.architecture.as_deref(), Some("qwen3_6"));
@@ -457,11 +514,11 @@ mod tests {
     #[test]
     fn parses_moe_expert_fields() {
         let bytes = make_gguf(&[
-            ("general.architecture",                KvEntry::Str("qwen3_6".into())),
-            ("qwen3_6.block_count",                 KvEntry::U32(40)),
-            ("qwen3_6.expert_count",                KvEntry::U32(256)),
-            ("qwen3_6.expert_used_count",           KvEntry::U32(9)),
-            ("qwen3_6.attention.head_count_kv",     KvEntry::U32(2)),
+            ("general.architecture", KvEntry::Str("qwen3_6".into())),
+            ("qwen3_6.block_count", KvEntry::U32(40)),
+            ("qwen3_6.expert_count", KvEntry::U32(256)),
+            ("qwen3_6.expert_used_count", KvEntry::U32(9)),
+            ("qwen3_6.attention.head_count_kv", KvEntry::U32(2)),
         ]);
         let meta = read_from_bytes(&bytes).unwrap();
         assert_eq!(meta.expert_count, Some(256));
@@ -472,8 +529,8 @@ mod tests {
     #[test]
     fn to_model_metadata_sets_gguf_arch() {
         let bytes = make_gguf(&[
-            ("general.architecture",        KvEntry::Str("qwen3_6".into())),
-            ("qwen3_6.block_count",         KvEntry::U32(64)),
+            ("general.architecture", KvEntry::Str("qwen3_6".into())),
+            ("qwen3_6.block_count", KvEntry::U32(64)),
             ("qwen3_6.attention.head_count_kv", KvEntry::U32(4)),
         ]);
         let gguf = read_from_bytes(&bytes).unwrap();
@@ -500,17 +557,21 @@ mod tests {
         // Simulate "Pantheon-Reasoning-27B" whose GGUF says qwen3_6.
         // to_arch() must select hybrid-DeltaNet heuristic, not standard_heuristic.
         let bytes = make_gguf(&[
-            ("general.architecture",            KvEntry::Str("qwen3_6".into())),
-            ("qwen3_6.block_count",             KvEntry::U32(64)),
+            ("general.architecture", KvEntry::Str("qwen3_6".into())),
+            ("qwen3_6.block_count", KvEntry::U32(64)),
             ("qwen3_6.attention.head_count_kv", KvEntry::U32(4)),
-            ("qwen3_6.attention.key_length",    KvEntry::U32(256)),
+            ("qwen3_6.attention.key_length", KvEntry::U32(256)),
         ]);
         let gguf = read_from_bytes(&bytes).unwrap();
         let mm = gguf.to_model_metadata();
         let arch = mm.to_arch("Pantheon-Reasoning-27B-Q4_K_M.gguf", 27.0);
-        assert!(arch.is_hybrid_attn(),
-            "gguf_arch=qwen3_6 must yield hybrid-DeltaNet arch");
-        assert_eq!(arch.n_attn_layers, 16,
-            "only 16 of 64 layers should have KV cache");
+        assert!(
+            arch.is_hybrid_attn(),
+            "gguf_arch=qwen3_6 must yield hybrid-DeltaNet arch"
+        );
+        assert_eq!(
+            arch.n_attn_layers, 16,
+            "only 16 of 64 layers should have KV cache"
+        );
     }
 }

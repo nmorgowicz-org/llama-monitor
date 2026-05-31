@@ -1347,6 +1347,166 @@
   border-color: rgba(185, 28, 28, 0.2);
 }
 
+/* ── HF discover category pills ───────────────────────────────────────────── */
+
+.hf-discover-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.hf-discover-pills { display: flex; flex-wrap: wrap; gap: 5px; }
+.hf-discover-pill {
+  padding: 3px 10px;
+  border-radius: 9999px;
+  border: 1px solid rgba(99,102,241,0.25);
+  background: rgba(99,102,241,0.07);
+  color: #a5b4fc;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.hf-discover-pill:hover {
+  border-color: rgba(99,102,241,0.55);
+  background: rgba(99,102,241,0.14);
+  color: #c7d2fe;
+}
+.hf-discover-pill.active {
+  border-color: rgba(99,102,241,0.8);
+  background: rgba(99,102,241,0.2);
+  color: #e0e7ff;
+}
+[data-theme="light"] .hf-discover-pill {
+  border-color: rgba(99,102,241,0.25);
+  background: rgba(99,102,241,0.05);
+  color: #4f46e5;
+}
+
+/* ── Community picks panel ─────────────────────────────────────────────────── */
+
+.hf-community-picks {
+  margin-top: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.07);
+  overflow: hidden;
+}
+.hf-cp-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.03);
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-muted, #94a3b8);
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.12s;
+}
+.hf-cp-toggle:hover { background: rgba(255,255,255,0.06); }
+.hf-cp-toggle-label { flex: 1; }
+.hf-cp-toggle-meta {
+  font-size: 10px;
+  color: var(--text-muted, #64748b);
+  font-style: italic;
+}
+.hf-cp-chevron { font-size: 10px; transition: transform 0.2s; }
+.hf-cp-toggle[aria-expanded="true"] .hf-cp-chevron { transform: rotate(90deg); }
+.hf-cp-body {
+  border-top: 1px solid rgba(255,255,255,0.06);
+  background: rgba(10,15,25,0.4);
+}
+.hf-cp-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding: 0 8px;
+  overflow-x: auto;
+}
+.hf-cp-tab {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted, #64748b);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.12s, border-color 0.12s;
+}
+.hf-cp-tab:hover { color: #94a3b8; }
+.hf-cp-tab.active {
+  color: #a5b4fc;
+  border-bottom-color: rgba(99,102,241,0.7);
+}
+.hf-cp-list { max-height: 220px; overflow-y: auto; }
+.hf-cp-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  transition: background 0.12s;
+}
+.hf-cp-item:last-child { border-bottom: none; }
+.hf-cp-item:hover { background: rgba(99,102,241,0.07); }
+.hf-cp-item-main { flex: 1; min-width: 0; }
+.hf-cp-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text, #e2e8f0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hf-cp-why {
+  font-size: 11px;
+  color: var(--text-muted, #64748b);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hf-cp-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-muted, #64748b);
+}
+.hf-cp-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.hf-cp-badge-size { background: rgba(99,102,241,0.12); color: #a5b4fc; }
+.hf-cp-badge-quant { background: rgba(16,185,129,0.1); color: #6ee7b7; }
+.hf-cp-badge-moe { background: rgba(124,58,237,0.12); color: #c4b5fd; }
+.hf-cp-mentions { font-size: 10px; color: var(--text-muted, #64748b); }
+.hf-cp-empty {
+  padding: 20px 12px;
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+  text-align: center;
+  font-style: italic;
+}
+.hf-cp-empty a { color: #a5b4fc; text-decoration: none; }
+.hf-cp-empty a:hover { text-decoration: underline; }
+[data-theme="light"] .hf-cp-toggle { background: rgba(0,0,0,0.02); color: #475569; }
+[data-theme="light"] .hf-cp-body { background: rgba(248,250,252,0.8); }
+[data-theme="light"] .hf-cp-name { color: #1e293b; }
+
 /* ── HF quick-pick author buttons ─────────────────────────────────────────── */
 
 .hf-quickpick-row {

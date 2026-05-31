@@ -1,0 +1,105 @@
+{
+  "schema_version": "1",
+  "generated_at": "2026-05-31T00:00:00Z",
+  "generated_by": "hermes-cron (example)",
+  "categories": [
+    {
+      "id": "roleplay_erp",
+      "label": "RP / ERP",
+      "description": "Community-recommended roleplay and ERP models (20B–70B, local-first)",
+      "models": [
+        {
+          "hf_repo": "bartowski/Llama-3.3-70B-Instruct-GGUF",
+          "display_name": "Llama 3.3 70B Instruct",
+          "param_b": 70.0,
+          "is_moe": false,
+          "why": "Top SillyTavern pick for long-form RP; great character voice at 70B",
+          "quant_rec": "Q4_K_M",
+          "mention_count": 18,
+          "source_subreddits": ["SillyTavernAI", "LocalLLaMA"],
+          "last_seen": "2026-05-28"
+        },
+        {
+          "hf_repo": "bartowski/Qwen3-30B-A3B-GGUF",
+          "display_name": "Qwen3 30B-A3B",
+          "param_b": 30.0,
+          "is_moe": true,
+          "why": "Fast MoE, surprisingly strong creative writing for its VRAM cost",
+          "quant_rec": "Q4_K_M",
+          "mention_count": 9,
+          "source_subreddits": ["LocalLLaMA"],
+          "last_seen": "2026-05-27"
+        },
+        {
+          "hf_repo": "bartowski/mistral-nemo-instruct-2407-GGUF",
+          "display_name": "Mistral Nemo 12B Instruct",
+          "param_b": 12.0,
+          "is_moe": false,
+          "why": "Budget pick; punches above its weight for ERP on limited VRAM",
+          "quant_rec": "Q5_K_M",
+          "mention_count": 6,
+          "source_subreddits": ["SillyTavernAI"],
+          "last_seen": "2026-05-25"
+        }
+      ]
+    },
+    {
+      "id": "moe_offload",
+      "label": "MoE / Offload",
+      "description": "Mixture-of-experts models viable with partial GPU offload (20B–130B total)",
+      "models": [
+        {
+          "hf_repo": "bartowski/Mixtral-8x7B-Instruct-v0.1-GGUF",
+          "display_name": "Mixtral 8x7B Instruct",
+          "param_b": 46.7,
+          "is_moe": true,
+          "why": "Classic MoE; runs well with ~13B active params, smooth CPU offload",
+          "quant_rec": "Q4_K_M",
+          "mention_count": 11,
+          "source_subreddits": ["LocalLLaMA"],
+          "last_seen": "2026-05-26"
+        },
+        {
+          "hf_repo": "unsloth/Qwen3.5-122B-A10B-MTP-GGUF",
+          "display_name": "Qwen3.5 122B-A10B MTP",
+          "param_b": 122.0,
+          "is_moe": true,
+          "why": "Flagship MoE; only 10B active — fits in 24GB with heavy offload",
+          "quant_rec": "IQ2_XS",
+          "mention_count": 5,
+          "source_subreddits": ["LocalLLaMA"],
+          "last_seen": "2026-05-29"
+        }
+      ]
+    },
+    {
+      "id": "agentic",
+      "label": "Agentic",
+      "description": "Models praised for tool use, function calling, multi-step reasoning",
+      "models": [
+        {
+          "hf_repo": "bartowski/Qwen3-32B-GGUF",
+          "display_name": "Qwen3 32B",
+          "param_b": 32.0,
+          "is_moe": false,
+          "why": "Standout function-calling at 32B; beats much larger models on benchmarks",
+          "quant_rec": "Q4_K_M",
+          "mention_count": 14,
+          "source_subreddits": ["LocalLLaMA"],
+          "last_seen": "2026-05-30"
+        },
+        {
+          "hf_repo": "bartowski/Llama-3.3-70B-Instruct-GGUF",
+          "display_name": "Llama 3.3 70B Instruct",
+          "param_b": 70.0,
+          "is_moe": false,
+          "why": "Reliable multi-step agent; strong at following complex system prompts",
+          "quant_rec": "Q4_K_M",
+          "mention_count": 10,
+          "source_subreddits": ["LocalLLaMA"],
+          "last_seen": "2026-05-28"
+        }
+      ]
+    }
+  ]
+}

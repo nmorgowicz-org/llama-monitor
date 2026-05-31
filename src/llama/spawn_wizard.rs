@@ -372,7 +372,8 @@ impl ModelMetadata {
         // Prefer GGUF architecture string over filename when choosing the heuristic.
         // This ensures that renamed finetunes (e.g. "Pantheon-27B" based on Qwen3.6)
         // still get the correct hybrid-DeltaNet / sliding-window heuristic.
-        let heuristic_name = self.gguf_arch
+        let heuristic_name = self
+            .gguf_arch
             .as_deref()
             .map(gguf_arch_to_heuristic_name)
             .unwrap_or(model_name);
@@ -415,7 +416,10 @@ pub async fn introspect_model(
 ) -> Result<ModelMetadata, String> {
     // Check cache first.
     if let Ok(cached) = load_model_cache(model_path) {
-        return Ok(ModelMetadata { cached: true, ..cached });
+        return Ok(ModelMetadata {
+            cached: true,
+            ..cached
+        });
     }
 
     // ── Primary: parse GGUF binary directly ──────────────────────────────────
@@ -429,7 +433,9 @@ pub async fn introspect_model(
             }
             Err(e) => {
                 // Log and fall through to subprocess
-                eprintln!("[llama-monitor] GGUF direct read failed for '{model_path}': {e}; falling back to llama-server");
+                eprintln!(
+                    "[llama-monitor] GGUF direct read failed for '{model_path}': {e}; falling back to llama-server"
+                );
             }
         }
     }
@@ -474,11 +480,11 @@ pub async fn introspect_model(
 /// regardless of what the user calls the file.
 fn gguf_arch_to_heuristic_name(gguf_arch: &str) -> &str {
     match gguf_arch {
-        "qwen3_6" | "qwen3.6"                    => "qwen3.6-model",
-        "qwen3_5" | "qwen3.5"                    => "qwen3.5-model",
-        "qwen3_coder_next" | "qwen3-coder-next"  => "qwen3-coder-next",
-        "gemma4"  | "gemma-4"                    => "gemma4-model",
-        "gemma3"  | "gemma-3"                    => "gemma3-model",
+        "qwen3_6" | "qwen3.6" => "qwen3.6-model",
+        "qwen3_5" | "qwen3.5" => "qwen3.5-model",
+        "qwen3_coder_next" | "qwen3-coder-next" => "qwen3-coder-next",
+        "gemma4" | "gemma-4" => "gemma4-model",
+        "gemma3" | "gemma-3" => "gemma3-model",
         // For all other architectures, pass through as-is — from_name_and_params
         // will fall through to standard_heuristic which is correct for llama, mistral, etc.
         other => other,

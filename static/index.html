@@ -2098,9 +2098,16 @@
 
                     <!-- HF repo input -->
                     <div class="model-input-area" id="model-input-hf">
+                        <!-- Discover: curated category shortcuts -->
+                        <div class="hf-discover-row" id="hf-discover-row">
+                            <span class="hf-quickpick-label">Discover:</span>
+                            <div class="hf-discover-pills" id="hf-discover-pills">
+                                <!-- populated by JS (static categories) -->
+                            </div>
+                        </div>
                         <!-- Quick-pick author buttons -->
                         <div class="hf-quickpick-row" id="hf-quickpick-row">
-                            <span class="hf-quickpick-label">Browse by:</span>
+                            <span class="hf-quickpick-label">Quantizer:</span>
                             <div class="hf-quickpicks" id="hf-quickpicks">
                                 <!-- populated by JS from /api/hf/quantizers -->
                             </div>
@@ -2122,6 +2129,18 @@
                         </div>
                         <!-- File list (shown when a repo ID is selected) -->
                         <div class="hf-file-list" id="spawn-hf-file-list"></div>
+                        <!-- Community picks (from ~/.config/llama-monitor/community-picks.json) -->
+                        <div class="hf-community-picks" id="hf-community-picks" style="display:none;">
+                            <button type="button" class="hf-cp-toggle" id="hf-cp-toggle" aria-expanded="false">
+                                <span class="hf-cp-toggle-label">Community picks</span>
+                                <span class="hf-cp-toggle-meta" id="hf-cp-toggle-meta"></span>
+                                <span class="hf-cp-chevron" id="hf-cp-chevron">▸</span>
+                            </button>
+                            <div class="hf-cp-body" id="hf-cp-body" style="display:none;">
+                                <div class="hf-cp-tabs" id="hf-cp-tabs"></div>
+                                <div class="hf-cp-list" id="hf-cp-list"></div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Import input -->
