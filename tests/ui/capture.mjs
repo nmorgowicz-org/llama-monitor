@@ -166,7 +166,8 @@ function seedConfig() {
     // Copy encryption-key first so encrypted values in ui-settings.json (e.g. remote_agent_token)
     // can be decrypted — without it the ephemeral instance generates a new key and auth fails.
     // Copy ssh-known-hosts.json so the agent SSH host key check passes (prevents enrollment block).
-    const filesToCopy = ['encryption-key', 'ssh-known-hosts.json', 'ui-settings.json', 'presets.json', 'gpu-env.json', 'community-picks.json'];
+    // Copy hf-token so HF API searches use auth (higher rate limits, better trending results).
+    const filesToCopy = ['encryption-key', 'ssh-known-hosts.json', 'hf-token', 'ui-settings.json', 'presets.json', 'gpu-env.json', 'community-picks.json'];
     for (const filename of filesToCopy) {
         const source = join(REAL_APP_CONFIG_DIR, filename);
         const destination = join(TEMP_APP_CONFIG_DIR, filename);
@@ -1465,6 +1466,25 @@ async function scenarioSettings(ctx, options) {
 // ── Chat Panels ─────────────────────────────────────────────────────────────────
 // Behavior, model params, style panels, debug prompt.
 
+// ── Models modal ─────────────────────────────────────────────────────────────
+// Seeds fake GGUF files so the models modal has real cards to show.
+
+// scenarioModels is called with a pre-seeded models dir passed via --models-dir
+// CLI flag. The runCli() path seeds fake .gguf files and passes the dir when
+// spawning the server — see the 'models' entry in SCENARIOS for the wrapper.
+async function scenarioModels(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    if (!options.noAttach) {
+        try { await attachToServer(page); } catch {}
+    }
+    // Open models modal via the global helper
+    await page.evaluate(() => window.openModelsModal?.());
+    await page.waitForSelector('#models-modal.open', { timeout: 8000 });
+    await sleep(1500);
+    await captureShot(page, 'panels-models-modal.png', { fullPage: true });
+}
+
 async function scenarioPanels(ctx, options) {
     const { page, baseUrl } = ctx;
     await gotoApp(page, baseUrl);
@@ -2638,6 +2658,7 @@ const SCENARIOS = {
     tls: scenarioTls,
     filebrowser: scenarioFilebrowser,
     panels: scenarioPanels,
+    models: scenarioModels,
     dashboard: scenarioDashboard,
     // Spawn wizard
     'spawn-wizard': scenarioSpawnWizard,
@@ -2676,8 +2697,26 @@ export async function runCli({ scenario: forcedScenario = null, argv = process.a
     } else {
         seedConfig();
         const port = await findAvailablePort();
+        const extraArgs = [];
+
+        // For the models scenario: seed fake .gguf files and pass --models-dir.
+        if (scenarioName === 'models') {
+            const modelsDir = join(TEMP_APP_CONFIG_DIR, 'models');
+            fs.mkdirSync(modelsDir, { recursive: true });
+            const fakeFiles = [
+                'Llama-3.3-70B-Instruct-Q4_K_M.gguf',
+                'Qwen3-30B-A3B-Q5_K_M.gguf',
+                'mistral-nemo-instruct-2407-Q4_K_M.gguf',
+                'gemma-3-12b-it-Q8_0.gguf',
+                'Devstral-Small-2-24B-UD-Q4_K_S.gguf',
+                'Meta-Llama-3.1-8B-Instruct-i1-Q4_K_M.gguf',
+            ];
+            for (const f of fakeFiles) fs.writeFileSync(join(modelsDir, f), '');
+            extraArgs.push('--models-dir', modelsDir);
+        }
+
         console.log(`[CAPTURE] Spawning llama-monitor on port ${port} for scenario "${scenarioName}"...`);
-        server = await spawnLlamaMonitor(port);
+        server = await spawnLlamaMonitor(port, extraArgs);
         baseUrl = server.url;
     }
 
