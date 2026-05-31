@@ -178,8 +178,19 @@ export function initSpawnWizard() {
   document.getElementById('btn-open-spawn-wizard')
     ?.addEventListener('click', () => openSpawnWizard());
 
-  // HF download-to-models-folder button
-  document.getElementById('hf-dl-to-models-btn')?.addEventListener('click', _handleHfDownloadToModels);
+  // HF download panel buttons
+  document.getElementById('hf-dlp-download-btn')?.addEventListener('click', _startHfDownload);
+  document.getElementById('hf-dlp-use-hf-btn')?.addEventListener('click', () => {
+    // Keep HF source, hide panel, let user continue with Next
+    hideHfDownloadPanel();
+  });
+  document.getElementById('hf-dlp-cancel-btn')?.addEventListener('click', _cancelHfDownload);
+  document.getElementById('hf-dlp-open-settings')?.addEventListener('click', () => {
+    window.openSettingsModal?.();
+    setTimeout(() => {
+      document.querySelector('.settings-tab[data-tab="models"]')?.click();
+    }, 80);
+  });
 }
 
 function applyReducedMotion() {
@@ -371,6 +382,7 @@ function bindEvents() {
       wizardState.model.source = card.dataset.source;
       dom.modelSourceCards.forEach(c => c.classList.remove('selected'));
       card.classList.add('selected');
+      if (card.dataset.source !== 'hf') hideHfDownloadPanel();
       updateModelInputVisibility();
       clearValidationError();
       if (card.dataset.source === 'import') loadThirdPartyModels();
@@ -472,28 +484,52 @@ function clearValidationError() {
   dom.overlay?.querySelectorAll('.wizard-validation-error').forEach(el => { el.style.display = 'none'; });
 }
 
-// ── HF download destination hint ─────────────────────────────────────────────
+// ── HF download panel ────────────────────────────────────────────────────────
 
-function showHfDownloadHint(fname) {
-  const hint = document.getElementById('hf-dl-hint');
-  const txt = document.getElementById('hf-dl-hint-text');
-  if (!hint) return;
-  if (txt) {
-    txt.textContent = `llama-server will download "${fname}" at startup and cache it under ~/.cache/huggingface/hub/. Use "Download to models folder" if you want a permanent local copy.`;
-  }
-  hint.style.display = '';
+let _dlPollTimer = null;
+let _dlCurrentId = null;
+
+function _dlPanel(id) { return document.getElementById(id); }
+
+async function showHfDownloadPanel(fname) {
+  const panel = _dlPanel('hf-download-panel');
+  if (!panel) return;
+  // Reset to idle state
+  _dlSetState('idle');
+  panel.style.display = '';
+
+  // Fetch effective models dir and show destination
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const res = await fetch('/api/hf/download-dir', { headers });
+    const data = res.ok ? await res.json() : null;
+    const dir = data?.dir || '~/.config/llama-monitor/models';
+    const configured = data?.configured ?? false;
+    const destPath = dir.replace(/\/$/, '') + '/' + fname.split('/').pop();
+    const destEl = _dlPanel('hf-dlp-dest-path');
+    if (destEl) { destEl.textContent = destPath; destEl.title = destPath; }
+    const warnEl = _dlPanel('hf-dlp-no-dir-warn');
+    if (warnEl) warnEl.style.display = configured ? 'none' : '';
+  } catch { /* ignore */ }
 }
 
-function hideHfDownloadHint() {
-  const hint = document.getElementById('hf-dl-hint');
-  if (hint) hint.style.display = 'none';
+function hideHfDownloadPanel() {
+  const panel = _dlPanel('hf-download-panel');
+  if (panel) panel.style.display = 'none';
+  _dlCancelPoll();
 }
 
-async function _handleHfDownloadToModels() {
+function _dlSetState(state) {
+  ['idle','progress','complete'].forEach(s => {
+    const el = _dlPanel(`hf-dlp-${s}`);
+    if (el) el.style.display = s === state ? '' : 'none';
+  });
+}
+
+async function _startHfDownload() {
   const { hfRepo, hfFile } = wizardState.model;
   if (!hfRepo || !hfFile) { showValidationError('Select a GGUF file first.'); return; }
-  const btn = document.getElementById('hf-dl-to-models-btn');
-  const hint = document.getElementById('hf-dl-hint-text');
+  const btn = _dlPanel('hf-dlp-download-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
   try {
     const headers = window.authHeaders
@@ -505,17 +541,94 @@ async function _handleHfDownloadToModels() {
       body: JSON.stringify({ repo_id: hfRepo, file_path: hfFile, resume: true }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.ok) {
-      if (btn) { btn.disabled = false; btn.textContent = 'Download to models folder'; }
-      showValidationError(data.error || 'Download failed to start.');
-      return;
-    }
-    if (hint) hint.textContent = 'Download started — check progress in the Models panel. File will appear in your models folder when complete.';
-    if (btn) { btn.disabled = false; btn.textContent = 'Download started ✓'; }
-  } catch (err) {
     if (btn) { btn.disabled = false; btn.textContent = 'Download to models folder'; }
+    if (!res.ok || !data.ok) { showValidationError(data.error || 'Download failed to start.'); return; }
+    _dlCurrentId = data.download_id;
+    // Show progress state
+    const fileEl = _dlPanel('hf-dlp-progress-file');
+    if (fileEl) fileEl.textContent = hfFile.split('/').pop();
+    _dlSetState('progress');
+    _dlPollStatus(data.download_id, data.local_path);
+  } catch (err) {
+    if (btn) { btn.disabled = false; }
     showValidationError(err.message || 'Download request failed.');
   }
+}
+
+function _dlPollStatus(downloadId, localPath) {
+  _dlCancelPoll();
+  const headers = window.authHeaders ? window.authHeaders() : {};
+  async function poll() {
+    try {
+      const res = await fetch(`/api/models/download/${downloadId}/status`, { headers });
+      if (!res.ok) return;
+      const data = await res.json();
+      const s = data.status;
+      if (!s) return;
+      const { status, bytes_downloaded = 0, total_bytes = 0, speed = 0, eta = 0 } = s;
+      // Update bar + stats
+      const pct = total_bytes > 0 ? Math.round(bytes_downloaded / total_bytes * 100) : 0;
+      const bar = _dlPanel('hf-dlp-bar');
+      if (bar) bar.style.width = pct + '%';
+      const pctEl = _dlPanel('hf-dlp-progress-pct');
+      if (pctEl) pctEl.textContent = total_bytes > 0 ? `${pct}%` : '';
+      const statsEl = _dlPanel('hf-dlp-stats');
+      if (statsEl) {
+        const mb = (bytes_downloaded / 1_048_576).toFixed(1);
+        const tot = total_bytes > 0 ? ` / ${(total_bytes / 1_048_576).toFixed(0)} MB` : '';
+        const spd = speed > 0 ? ` · ${(speed / 1_048_576).toFixed(1)} MB/s` : '';
+        const etaStr = eta > 0 ? ` · ETA ${eta < 60 ? eta + 's' : Math.round(eta/60) + 'm'}` : '';
+        statsEl.textContent = `${mb} MB${tot}${spd}${etaStr}`;
+      }
+
+      if (status === 'completed') {
+        _dlCancelPoll();
+        _dlSetState('complete');
+        clearValidationError();
+        // Switch wizard source to local with the downloaded path
+        const effectivePath = (data.status?.local_path) || localPath;
+        if (effectivePath) {
+          wizardState.model.source = 'local';
+          wizardState.model.path = effectivePath;
+          wizardState.model.hfRepo = '';
+          wizardState.model.hfFile = '';
+          if (dom.modelPathInput) dom.modelPathInput.value = effectivePath;
+          dom.modelSourceCards?.forEach(c => {
+            c.classList.toggle('selected', c.dataset.source === 'local');
+          });
+          updateModelInputVisibility();
+          updateSelectedModelDisplay();
+        }
+        return;
+      }
+      if (status === 'failed') {
+        _dlCancelPoll();
+        _dlSetState('idle');
+        showValidationError(s.message || 'Download failed.');
+        return;
+      }
+      if (status === 'cancelled') {
+        _dlCancelPoll();
+        _dlSetState('idle');
+        return;
+      }
+    } catch { /* network glitch — keep polling */ }
+    _dlPollTimer = setTimeout(poll, 1000);
+  }
+  _dlPollTimer = setTimeout(poll, 800);
+}
+
+function _dlCancelPoll() {
+  if (_dlPollTimer) { clearTimeout(_dlPollTimer); _dlPollTimer = null; }
+}
+
+async function _cancelHfDownload() {
+  if (!_dlCurrentId) return;
+  const headers = window.authHeaders ? window.authHeaders() : {};
+  await fetch(`/api/models/download/${_dlCurrentId}/cancel`, { method: 'POST', headers }).catch(() => {});
+  _dlCancelPoll();
+  _dlCurrentId = null;
+  _dlSetState('idle');
 }
 
 // ── Mode toggle ───────────────────────────────────────────────────────────────
@@ -1520,7 +1633,7 @@ async function fetchHfFiles(repo) {
         clearValidationError();
         if (wizardState.model.paramB > 0) triggerQuantAdvisor();
         scheduleVramUpdate();
-        showHfDownloadHint(fname);
+        showHfDownloadPanel(fname);
       };
       item.addEventListener('click', selectFile);
       item.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectFile(); } });

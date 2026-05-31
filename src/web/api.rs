@@ -2899,6 +2899,36 @@ fn api_hf_quantizers_put(
         )
 }
 
+// ── GET /api/hf/download-dir ─────────────────────────────────────────────────
+// Returns the directory where HF downloads will be saved (effective models dir).
+fn api_hf_download_dir(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "download-dir")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            let st = state.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let dir =
+                    get_effective_models_dir(&st).unwrap_or_else(|| cfg.default_models_dir.clone());
+                let configured = get_effective_models_dir(&st).is_some();
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "dir": dir.to_string_lossy(),
+                        "configured": configured
+                    }),
+                )))
+            }
+        })
+}
+
 // ── GET /api/hf/token ─────────────────────────────────────────────────────────
 // Returns whether an HF token is saved; never returns the token itself.
 fn api_hf_token_get(
@@ -3152,11 +3182,13 @@ fn api_hf_download(
                     models_dir
                 };
 
+                let local_path = target_dir.join(&file_path).to_string_lossy().into_owned();
                 match crate::hf::hf_start_download(&repo_id, &file_path, &target_dir, resume) {
                     Ok(download_id) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                         Box::new(warp::reply::json(&serde_json::json!({
                             "ok": true,
-                            "download_id": download_id
+                            "download_id": download_id,
+                            "local_path": local_path
                         }))),
                     ),
                     Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -3426,6 +3458,7 @@ pub fn api_routes(
     let hf_download_route = api_hf_download(state.clone(), app_config.clone());
     let hf_quantizers_route = api_hf_quantizers(state.clone(), app_config.clone());
     let hf_quantizers_put_route = api_hf_quantizers_put(state.clone(), app_config.clone());
+    let hf_download_dir_route = api_hf_download_dir(state.clone(), app_config.clone());
     let hf_token_get_route = api_hf_token_get(app_config.clone());
     let hf_token_put_route = api_hf_token_put(app_config.clone());
     let hf_token_delete_route = api_hf_token_delete(app_config.clone());
@@ -3550,6 +3583,7 @@ pub fn api_routes(
         .or(hf_download_route)
         .or(hf_quantizers_route)
         .or(hf_quantizers_put_route)
+        .or(hf_download_dir_route)
         .or(hf_token_get_route)
         .or(hf_token_put_route)
         .or(hf_token_delete_route)

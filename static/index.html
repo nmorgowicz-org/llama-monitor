@@ -2150,11 +2150,47 @@
                         </div>
                         <!-- File list (shown when a repo ID is selected) -->
                         <div class="hf-file-list" id="spawn-hf-file-list"></div>
-                        <!-- Download destination callout (shown after a file is selected) -->
-                        <div class="hf-dl-hint" id="hf-dl-hint" style="display:none;">
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                            <span id="hf-dl-hint-text">llama-server will download and cache this file at startup.</span>
-                            <button type="button" class="hf-dl-hint-btn" id="hf-dl-to-models-btn" title="Download the selected file to your local models folder first, then use it as a local model">Download to models folder</button>
+                        <!-- Download panel (shown after a file is selected) -->
+                        <div class="hf-download-panel" id="hf-download-panel" style="display:none;">
+                            <!-- Idle: ready to download -->
+                            <div id="hf-dlp-idle">
+                                <div class="hf-dlp-dest-row">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    <span class="hf-dlp-dest-label">Save to:</span>
+                                    <span class="hf-dlp-dest-path" id="hf-dlp-dest-path" title="This is where the downloaded file will be saved">—</span>
+                                </div>
+                                <div id="hf-dlp-no-dir-warn" style="display:none;" class="hf-dlp-warn">
+                                    No models folder configured.
+                                    <button type="button" class="hf-dlp-warn-link" id="hf-dlp-open-settings">Set one in Settings → Models</button>
+                                    or the file will go to the app default folder.
+                                </div>
+                                <div class="hf-dlp-actions">
+                                    <button type="button" class="btn-wizard-primary" id="hf-dlp-download-btn" title="Download the file to your models folder now, then continue as a local model">
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:5px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                        Download to models folder
+                                    </button>
+                                    <button type="button" class="btn-wizard-tertiary" id="hf-dlp-use-hf-btn" title="Skip downloading — llama-server will stream the file from HuggingFace at startup and cache it in ~/.cache/huggingface/hub/">
+                                        Use from HF cache instead
+                                    </button>
+                                </div>
+                            </div>
+                            <!-- In-progress -->
+                            <div id="hf-dlp-progress" style="display:none;">
+                                <div class="hf-dlp-progress-label">
+                                    <span id="hf-dlp-progress-file"></span>
+                                    <span id="hf-dlp-progress-pct"></span>
+                                </div>
+                                <div class="hf-dlp-bar-wrap">
+                                    <div class="hf-dlp-bar" id="hf-dlp-bar" style="width:0%"></div>
+                                </div>
+                                <div class="hf-dlp-stats" id="hf-dlp-stats"></div>
+                                <button type="button" class="btn-wizard-secondary" id="hf-dlp-cancel-btn">Cancel download</button>
+                            </div>
+                            <!-- Complete -->
+                            <div id="hf-dlp-complete" style="display:none;" class="hf-dlp-complete-box">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                                Downloaded — model ready. Click Next to continue.
+                            </div>
                         </div>
                         <!-- Community picks (from ~/.config/llama-monitor/community-picks.json) -->
                         <div class="hf-community-picks" id="hf-community-picks" style="display:none;">

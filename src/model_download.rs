@@ -33,6 +33,8 @@ pub struct DownloadStatus {
     pub speed: f64, // bytes/sec
     pub eta: u64,   // seconds remaining
     pub message: String,
+    /// Absolute filesystem path where the file is being saved.
+    pub local_path: String,
 }
 
 #[derive(Debug)]
@@ -40,6 +42,8 @@ struct DownloadTask {
     status: String,
     message: String,
     start_time: std::time::Instant,
+    /// Absolute path on disk where the file is/will be written.
+    local_path: std::path::PathBuf,
     /// Live bytes written; updated by the streaming loop without holding the Mutex.
     bytes_downloaded: Arc<AtomicU64>,
     /// Total expected bytes from Content-Length; set once response headers arrive.
@@ -94,6 +98,7 @@ pub fn start_download(
         status: "running".into(),
         message: "Starting download...".into(),
         start_time: std::time::Instant::now(),
+        local_path: local_path.clone(),
         bytes_downloaded: bytes_downloaded.clone(),
         total_bytes: total_bytes.clone(),
         cancel: cancel.clone(),
@@ -291,6 +296,7 @@ pub fn get_download_status(download_id: &str) -> Option<DownloadStatus> {
         speed,
         eta,
         message: t.message.clone(),
+        local_path: t.local_path.to_string_lossy().into_owned(),
     })
 }
 
