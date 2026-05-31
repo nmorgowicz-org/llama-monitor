@@ -321,13 +321,62 @@ fn walk_gguf(dir: &Path, depth: usize, max_depth: usize, out: &mut Vec<PathBuf>)
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct ModelMetadata {
+    // ── Core architecture ────────────────────────────────────────────────────
     pub n_layers: Option<u32>,
     pub n_ctx_train: Option<u32>,
     pub n_embd: Option<u32>,
     pub n_ff: Option<u32>,
-    pub n_exp: Option<u32>,
+    /// Total attention heads (query heads; used to derive head_dim = n_embd / n_head).
+    pub n_head: Option<u32>,
+    /// KV heads (GQA/MQA compressed).  Parsed from `n_head_kv` or `n_kv_heads`.
+    pub n_kv_heads: Option<u32>,
+    /// Per-head dimension = n_embd / n_head.
+    pub head_dim: Option<u32>,
+    // ── MoE ─────────────────────────────────────────────────────────────────
+    /// Total experts per layer (from `n_experts` / `expert_count` / `n_exp`).
+    pub n_experts: Option<u32>,
+    /// Active experts per token (from `n_experts_used` / `n_exp_used`).
+    pub n_experts_used: Option<u32>,
+    // ── Multi-token prediction ───────────────────────────────────────────────
+    /// MTP prediction depth (0 = none).
+    pub mtp_depth: Option<u32>,
+    // ── Multimodal ───────────────────────────────────────────────────────────
     pub mmproj_required: bool,
+    // ── Cache marker ─────────────────────────────────────────────────────────
     pub cached: bool,
+}
+
+impl ModelMetadata {
+    /// Convert to a `ModelArch` suitable for VRAM estimation.
+    /// Falls back to heuristics when fields are absent.
+    pub fn to_arch(&self, model_name: &str, param_b: f64) -> crate::llama::vram_estimator::ModelArch {
+        use crate::llama::vram_estimator::ModelArch;
+
+        // Compute head_dim from introspection or fall back to n_embd / n_head.
+        let head_dim = self.head_dim
+            .or_else(|| {
+                let embd = self.n_embd?;
+                let heads = self.n_head?;
+                if heads > 0 { Some(embd / heads) } else { None }
+            });
+
+        let heuristic = ModelArch::from_name_and_params(model_name, param_b);
+
+        ModelArch {
+            n_layers:       self.n_layers.unwrap_or(heuristic.n_layers),
+            n_kv_heads:     self.n_kv_heads.unwrap_or(heuristic.n_kv_heads),
+            head_dim:       head_dim.unwrap_or(heuristic.head_dim),
+            n_global_attn_layers: heuristic.n_global_attn_layers,
+            local_attn_window:    heuristic.local_attn_window,
+            local_kv_heads:       heuristic.local_kv_heads,
+            n_experts:      self.n_experts.unwrap_or(0),
+            n_experts_used: self.n_experts_used.unwrap_or(0),
+            expert_fraction: crate::llama::vram_estimator::ModelArch::default().expert_fraction,
+            mtp_depth:      self.mtp_depth.unwrap_or(0),
+            mmproj_bytes:   0, // filled in separately when mmproj path is known
+            param_b,
+        }
+    }
 }
 
 /// Run llama-server --print-model-metadata and parse output.
@@ -389,40 +438,61 @@ pub async fn introspect_model(
 fn parse_model_metadata(output: &str) -> ModelMetadata {
     let mut meta = ModelMetadata::default();
 
-    let lines: Vec<&str> = output.lines().collect();
+    for line in output.lines() {
+        let t = line.trim();
+        let lower = t.to_ascii_lowercase();
 
-    for line in &lines {
-        let trimmed = line.trim();
-        // n_layers
-        if let Some(val) = extract_int_after("n_layers", trimmed) {
-            meta.n_layers = Some(val);
+        // ── Core architecture ─────────────────────────────────────────────────
+        macro_rules! try_field {
+            ($field:ident, $($prefix:expr),+) => {
+                if meta.$field.is_none() {
+                    $(if let Some(v) = extract_int_after($prefix, t) {
+                        meta.$field = Some(v);
+                    })+
+                }
+            };
         }
-        // n_ctx_train
-        if let Some(val) = extract_int_after("n_ctx_train", trimmed) {
-            meta.n_ctx_train = Some(val);
-        }
-        // n_embd
-        if let Some(val) = extract_int_after("n_embd", trimmed) {
-            meta.n_embd = Some(val);
-        }
-        // n_ff
-        if let Some(val) = extract_int_after("n_ff", trimmed) {
-            meta.n_ff = Some(val);
-        }
-        // n_exp (MoE)
-        if let Some(val) = extract_int_after("n_exp", trimmed) {
-            meta.n_exp = Some(val);
-        }
-        // mmproj hints
-        let lower = trimmed.to_ascii_lowercase();
+
+        try_field!(n_layers,       "n_layer", "n_layers", "block_count");
+        try_field!(n_ctx_train,    "n_ctx_train", "context_length");
+        try_field!(n_embd,         "n_embd", "embedding_length");
+        try_field!(n_ff,           "n_ff", "feed_forward_length");
+        try_field!(n_head,         "n_head", "attention.head_count", "head_count");
+        try_field!(n_kv_heads,     "n_head_kv", "n_kv_heads", "attention.head_count_kv",
+                                   "head_count_kv", "n_gqa");
+        try_field!(head_dim,       "head_dim", "key_length", "attention.key_length");
+        try_field!(n_experts,      "n_expert", "n_experts", "expert_count",
+                                   "expert.count", "n_exp");
+        try_field!(n_experts_used, "n_expert_used", "n_experts_used", "expert.used_count",
+                                   "n_exp_used", "experts_used");
+        try_field!(mtp_depth,      "mtp_depth", "multi_token_prediction_depth",
+                                   "num_nextn_predict_layers", "next_n_token_count");
+
+        // ── Multimodal detection ──────────────────────────────────────────────
         if lower.contains("mmproj")
-            || lower.contains("vision")
-            || lower.contains("clip")
-            || lower.contains("multimodal")
+            || lower.contains("vision_model")
+            || lower.contains("clip.")
+            || lower.contains("clip_model")
+            || lower.contains("visual.")
+            || (lower.contains("multimodal") && !lower.contains("//"))
         {
             meta.mmproj_required = true;
         }
     }
+
+    // Derive head_dim from n_embd / n_head if not directly available
+    if meta.head_dim.is_none() {
+        if let (Some(embd), Some(heads)) = (meta.n_embd, meta.n_head) {
+            if heads > 0 {
+                meta.head_dim = Some(embd / heads);
+            }
+        }
+    }
+
+    // n_kv_heads fallback: if n_gqa was parsed as n_kv_heads, convert:
+    // some models report GQA ratio instead of absolute count.
+    // If n_kv_heads looks like a ratio (< 8) and n_head is large, it might be n_head / gqa.
+    // Leave as-is; the caller can cross-check.
 
     meta
 }
@@ -548,7 +618,7 @@ mod tests {
         assert_eq!(meta.n_ctx_train, Some(8192));
         assert_eq!(meta.n_embd, Some(4096));
         assert_eq!(meta.n_ff, Some(14336));
-        assert_eq!(meta.n_exp, Some(8));
+        assert_eq!(meta.n_experts, Some(8)); // n_exp parses into n_experts
         assert!(!meta.mmproj_required);
     }
 

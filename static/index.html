@@ -2003,6 +2003,32 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Use-case selector: affects KV quant recommendations and warnings -->
+                    <div class="wizard-section-title" style="margin-top:18px;">What are you running this for?</div>
+                    <div class="usecase-cards">
+                        <div class="usecase-card" data-usecase="agentic" tabindex="0" role="button">
+                            <span class="usecase-icon">🤖</span>
+                            <div class="usecase-body">
+                                <div class="usecase-name">Agentic / RAG</div>
+                                <div class="usecase-desc">Tool calling, multi-step agents, retrieval pipelines. Needs coherent long context — q8_0 KV minimum.</div>
+                            </div>
+                        </div>
+                        <div class="usecase-card selected" data-usecase="general" tabindex="0" role="button">
+                            <span class="usecase-icon">💬</span>
+                            <div class="usecase-body">
+                                <div class="usecase-name">General chat</div>
+                                <div class="usecase-desc">Everyday conversation, summarization, coding help. Balanced quality and context.</div>
+                            </div>
+                        </div>
+                        <div class="usecase-card" data-usecase="roleplay" tabindex="0" role="button">
+                            <span class="usecase-icon">🎭</span>
+                            <div class="usecase-body">
+                                <div class="usecase-name">Roleplay / creative</div>
+                                <div class="usecase-desc">Fiction, roleplay, long narrative sessions. Context beats precision — q4_0 KV accepted.</div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="wizard-sidebar">
                     <div class="wizard-sidebar-title">Need to know</div>
@@ -2010,6 +2036,12 @@
                         <li>Quick hides advanced fields.</li>
                         <li>Balanced shows core settings.</li>
                         <li>Advanced exposes everything.</li>
+                    </ul>
+                    <div class="wizard-sidebar-title" style="margin-top:14px;">Use case matters</div>
+                    <ul>
+                        <li><strong>Agentic:</strong> q8_0 KV minimum for coherent chains.</li>
+                        <li><strong>General:</strong> q8_0 KV recommended.</li>
+                        <li><strong>Roleplay:</strong> q4_0 KV fine for max context.</li>
                     </ul>
                 </div>
             </div>
@@ -2088,6 +2120,22 @@
                             <div class="selected-model-meta" id="spawn-selected-model-meta"></div>
                         </div>
                     </div>
+
+                    <!-- Quant advisor (shown after model + param count known) -->
+                    <div class="quant-advisor" id="quant-advisor" style="display:none;">
+                        <div class="quant-advisor-header">
+                            <span class="quant-advisor-title">Quant advisor</span>
+                            <span class="quant-advisor-subtitle" id="quant-advisor-subtitle">Choose a quantization for download</span>
+                        </div>
+                        <div class="quant-advisor-table" id="quant-advisor-table">
+                            <!-- populated by JS -->
+                        </div>
+                        <div class="quant-advisor-legend">
+                            <span class="legend-item"><span class="legend-dot legend-fit"></span>Fits in VRAM</span>
+                            <span class="legend-item"><span class="legend-dot legend-nofit"></span>Requires CPU offload</span>
+                            <span class="legend-item"><span class="legend-dot legend-rec"></span>Recommended</span>
+                        </div>
+                    </div>
                 </div>
                 <div class="wizard-sidebar">
                     <div class="wizard-sidebar-title">Tips</div>
@@ -2095,6 +2143,14 @@
                         <li>Use GGUF files only.</li>
                         <li>HF repo: we’ll list GGUF files.</li>
                         <li>Import: browse common tool dirs.</li>
+                    </ul>
+                    <div class="wizard-sidebar-title" style="margin-top:14px;">Quant guide</div>
+                    <ul>
+                        <li><strong>Q4_K_M</strong> — best balance (recommended)</li>
+                        <li><strong>Q5_K_M/S</strong> — higher quality, less context</li>
+                        <li><strong>Q8_0</strong> — near-lossless, limited context</li>
+                        <li><strong>IQ4_XS</strong> — imatrix Q4, slightly smaller</li>
+                        <li><strong>IQ2_*</strong> — large MoE only (heavy quality loss)</li>
                     </ul>
                 </div>
             </div>
@@ -2106,6 +2162,68 @@
                         <div class="wizard-section-title">Configure hardware</div>
                         <div class="wizard-section-desc">
                             Fine-tune how your model uses GPU and memory.
+                        </div>
+                    </div>
+
+                    <!-- ── Animated VRAM breakdown ───────────────────────────────── -->
+                    <div class="vram-panel" id="vram-panel">
+                        <div class="vram-panel-header">
+                            <span class="vram-panel-label">VRAM budget</span>
+                            <span class="vram-panel-total" id="vram-panel-total">— GB</span>
+                        </div>
+
+                        <!-- Stacked animated bar -->
+                        <div class="vram-bar" id="vram-bar" aria-label="VRAM breakdown bar">
+                            <div class="vram-segment seg-weights" id="vseg-weights" style="width:0%"
+                                 title="Model weights"></div>
+                            <div class="vram-segment seg-kv"      id="vseg-kv"      style="width:0%"
+                                 title="KV cache"></div>
+                            <div class="vram-segment seg-mmproj"  id="vseg-mmproj"  style="width:0%"
+                                 title="Vision projector (mmproj)"></div>
+                            <div class="vram-segment seg-mtp"     id="vseg-mtp"     style="width:0%"
+                                 title="MTP prediction heads"></div>
+                            <div class="vram-segment seg-overhead" id="vseg-overhead" style="width:0%"
+                                 title="GPU overhead"></div>
+                            <div class="vram-segment seg-free"    id="vseg-free"    style="width:0%"
+                                 title="Free headroom"></div>
+                        </div>
+
+                        <!-- Legend row -->
+                        <div class="vram-legend">
+                            <span class="vleg-item" id="vleg-weights"><span class="vleg-dot seg-weights"></span><span id="vleg-weights-label">Weights —</span></span>
+                            <span class="vleg-item" id="vleg-kv"><span class="vleg-dot seg-kv"></span><span id="vleg-kv-label">KV —</span></span>
+                            <span class="vleg-item vleg-mmproj" id="vleg-mmproj" style="display:none;"><span class="vleg-dot seg-mmproj"></span><span id="vleg-mmproj-label">mmproj —</span></span>
+                            <span class="vleg-item vleg-mtp" id="vleg-mtp" style="display:none;"><span class="vleg-dot seg-mtp"></span><span id="vleg-mtp-label">MTP —</span></span>
+                            <span class="vleg-item"><span class="vleg-dot seg-overhead"></span><span id="vleg-overhead-label">OH —</span></span>
+                            <span class="vleg-item"><span class="vleg-dot seg-free" id="vleg-free-dot"></span><span id="vleg-free-label">Free —</span></span>
+                        </div>
+
+                        <!-- Scenario cards -->
+                        <div class="vram-scenarios" id="vram-scenarios">
+                            <!-- populated by JS -->
+                        </div>
+
+                        <!-- MoE expert offload slider (hidden unless MoE model) -->
+                        <div class="moe-offload-panel" id="moe-offload-panel" style="display:none;">
+                            <div class="moe-offload-header">
+                                <span class="moe-offload-title">Expert offload</span>
+                                <span class="moe-offload-subtitle" id="moe-offload-subtitle">0 of N experts on CPU</span>
+                            </div>
+                            <input type="range" id="moe-offload-slider" class="moe-slider"
+                                   min="0" max="128" value="0" step="1">
+                            <div class="moe-offload-labels">
+                                <span>All on GPU (faster)</span>
+                                <span>All on CPU (more context)</span>
+                            </div>
+                            <div class="moe-offload-hint" id="moe-offload-hint"></div>
+                        </div>
+
+                        <!-- Auto-size button + note -->
+                        <div class="vram-autosize-row">
+                            <button type="button" class="btn-wizard-secondary" id="vram-autosize-btn">
+                                Auto-size for me
+                            </button>
+                            <span class="vram-autosize-note" id="vram-autosize-note"></span>
                         </div>
                     </div>
 

@@ -2123,6 +2123,174 @@ fn api_llama_cpp_download_cancel(
         })
 }
 
+// ── POST /api/vram/quant-compare ─────────────────────────────────────────────
+// Pre-download quant advisor: returns a comparison table of all quants for a
+// given model (identified by param count + optional name) and available VRAM.
+
+fn api_vram_quant_compare(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "vram" / "quant-compare")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let param_b = body["param_b"].as_f64().unwrap_or(0.0);
+                if param_b <= 0.0 {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "param_b must be a positive number (model parameter count in billions)"
+                        })),
+                    ));
+                }
+
+                let model_name = body["model_name"].as_str().unwrap_or("").to_string();
+                let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
+                let parallel_slots = body["parallel_slots"].as_u64().unwrap_or(1) as u32;
+
+                let use_case = match body["use_case"].as_str().unwrap_or("general") {
+                    "agentic" => crate::llama::vram_estimator::UseCase::Agentic,
+                    "roleplay" => crate::llama::vram_estimator::UseCase::Roleplay,
+                    _ => crate::llama::vram_estimator::UseCase::General,
+                };
+
+                // Optionally accept explicit arch fields to improve accuracy when
+                // called after introspection.
+                let arch = build_arch_from_body(&body, &model_name, param_b);
+
+                let table = crate::llama::vram_estimator::quant_comparison_table(
+                    param_b,
+                    &arch,
+                    available_vram_bytes,
+                    use_case,
+                    parallel_slots,
+                );
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({ "ok": true, "quants": table }),
+                )))
+            }
+        })
+}
+
+// ── POST /api/vram/auto-size ──────────────────────────────────────────────────
+// Given model metadata + available VRAM + use case, return recommended settings
+// plus a set of alternative scenarios for the scenario cards.
+
+fn api_vram_auto_size(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "vram" / "auto-size")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::body::json::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let model_name = body["model_name"].as_str().unwrap_or("").to_string();
+                let param_b = body["param_b"].as_f64().unwrap_or(0.0);
+                let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
+                let parallel_slots = body["parallel_slots"].as_u64().unwrap_or(1).max(1) as u32;
+                let fit_granularity = body["fit_granularity"].as_u64().unwrap_or(1024).max(512);
+
+                let use_case = match body["use_case"].as_str().unwrap_or("general") {
+                    "agentic" => crate::llama::vram_estimator::UseCase::Agentic,
+                    "roleplay" => crate::llama::vram_estimator::UseCase::Roleplay,
+                    _ => crate::llama::vram_estimator::UseCase::General,
+                };
+
+                // Model size: explicit bytes > local file stat > param_b heuristic
+                let model_size_bytes = body["model_size_bytes"].as_u64()
+                    .unwrap_or_else(|| {
+                        let path = body["model_path"].as_str().unwrap_or("");
+                        if !path.is_empty() {
+                            std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+                        } else { 0 }
+                    });
+
+                // We need *some* size info
+                if model_size_bytes == 0 && param_b <= 0.0 {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Provide model_size_bytes, model_path, or param_b"
+                        })),
+                    ));
+                }
+
+                let arch = build_arch_from_body(&body, &model_name, param_b);
+
+                // If model_size_bytes is not given, estimate from param_b + quant
+                let quant_hint = body["quant"].as_str().unwrap_or("q4_k_m");
+                let model_bytes = if model_size_bytes > 0 {
+                    model_size_bytes
+                } else {
+                    crate::llama::vram_estimator::estimate_model_size_bytes(param_b, quant_hint)
+                };
+
+                let result = crate::llama::vram_estimator::auto_size(
+                    model_bytes,
+                    &arch,
+                    available_vram_bytes,
+                    use_case,
+                    parallel_slots,
+                    fit_granularity,
+                );
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({ "ok": true, "result": result }),
+                )))
+            }
+        })
+}
+
+/// Build a `ModelArch` from a JSON request body, falling back to heuristics
+/// when introspection fields are absent.
+fn build_arch_from_body(
+    body: &serde_json::Value,
+    model_name: &str,
+    param_b: f64,
+) -> crate::llama::vram_estimator::ModelArch {
+    let heuristic = crate::llama::vram_estimator::ModelArch::from_name_and_params(model_name, param_b);
+
+    let n_layers    = body["n_layers"].as_u64().map(|v| v as u32).unwrap_or(heuristic.n_layers);
+    let n_kv_heads  = body["n_kv_heads"].as_u64().map(|v| v as u32).unwrap_or(heuristic.n_kv_heads);
+    let head_dim    = body["head_dim"].as_u64().map(|v| v as u32).unwrap_or(heuristic.head_dim);
+    let n_experts   = body["n_experts"].as_u64().map(|v| v as u32).unwrap_or(heuristic.n_experts);
+    let n_exp_used  = body["n_experts_used"].as_u64().map(|v| v as u32).unwrap_or(heuristic.n_experts_used);
+    let mtp_depth   = body["mtp_depth"].as_u64().map(|v| v as u32).unwrap_or(heuristic.mtp_depth);
+    let mmproj_bytes = body["mmproj_bytes"].as_u64().unwrap_or(heuristic.mmproj_bytes);
+    let expert_frac = body["expert_fraction"].as_f64().unwrap_or(heuristic.expert_fraction);
+
+    crate::llama::vram_estimator::ModelArch {
+        n_layers,
+        n_kv_heads,
+        head_dim,
+        n_global_attn_layers: heuristic.n_global_attn_layers,
+        local_attn_window:    heuristic.local_attn_window,
+        local_kv_heads:       heuristic.local_kv_heads,
+        n_experts:            n_experts,
+        n_experts_used:       n_exp_used,
+        expert_fraction:      expert_frac,
+        mtp_depth,
+        mmproj_bytes,
+        param_b,
+    }
+}
+
 // ── Phase 2: POST /api/benchmark ─────────────────────────────────────────────
 
 fn api_benchmark(
@@ -2963,6 +3131,10 @@ pub fn api_routes(
     let third_party_models_route = api_third_party_models(state.clone(), app_config.clone());
     let model_introspect_route = api_model_introspect(state.clone(), app_config.clone());
 
+    // Architecture-aware VRAM advisor + auto-sizer
+    let vram_quant_compare_route = api_vram_quant_compare(state.clone(), app_config.clone());
+    let vram_auto_size_route = api_vram_auto_size(state.clone(), app_config.clone());
+
     // Group routes to avoid compiler overflow on long .or() chains
     let server_routes = start.or(stop).or(kill_llama).or(attach).or(detach);
     let preset_routes = get_presets
@@ -3074,7 +3246,9 @@ pub fn api_routes(
         .or(hf_files_route)
         .or(hf_download_route)
         .or(third_party_models_route)
-        .or(model_introspect_route);
+        .or(model_introspect_route)
+        .or(vram_quant_compare_route)
+        .or(vram_auto_size_route);
 
     server_routes
         .or(preset_routes)
