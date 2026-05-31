@@ -99,6 +99,35 @@ const STOP_WORDS = new Set([
     'can','get','got','just','its','his','her','our','their','my','your',
 ]);
 
+// ── Streaming render throttle ─────────────────────────────────────────────────
+// Markdown parse + DOMPurify + innerHTML on every token is O(n²) for long
+// responses and freezes the browser. We batch DOM writes to ≤20 fps instead.
+const STREAM_RENDER_MS = 50;
+let _streamRenderTimer = null;
+let _streamRenderPending = null;   // { entryId, answer }
+
+function scheduleStreamRender(entryId, answer) {
+    _streamRenderPending = { entryId, answer };
+    if (!_streamRenderTimer) {
+        _streamRenderTimer = setTimeout(() => {
+            _streamRenderTimer = null;
+            if (_streamRenderPending) {
+                const { entryId: eid, answer: ans } = _streamRenderPending;
+                _streamRenderPending = null;
+                updateEntryDOM(eid, ans, false, false);
+            }
+        }, STREAM_RENDER_MS);
+    }
+}
+
+function flushStreamRender() {
+    if (_streamRenderTimer) {
+        clearTimeout(_streamRenderTimer);
+        _streamRenderTimer = null;
+    }
+    _streamRenderPending = null;
+}
+
 // ── Module state ──────────────────────────────────────────────────────────────
 
 // Map<tabId, { entries: QAEntry[], apiHistory: Message[] }>
@@ -679,7 +708,7 @@ async function submitQuestion(tab, question, injectionText) {
                     const delta = obj.choices?.[0]?.delta;
                     if (delta?.content) {
                         answer += delta.content;
-                        updateEntryDOM(entry.id, answer, false, false);
+                        scheduleStreamRender(entry.id, answer);
                     }
                 } catch { /* skip malformed chunk */ }
             }
@@ -695,6 +724,7 @@ async function submitQuestion(tab, question, injectionText) {
     }
 
     // ── Step 4: Finalize entry ────────────────────────────────────────────────
+    flushStreamRender();   // cancel any pending throttled render before the final one
     entry.answer    = answer;
     entry.streaming = false;
     entry.error     = failed && answer !== '[Stopped]';

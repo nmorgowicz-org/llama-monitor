@@ -638,6 +638,20 @@ export async function _doSendChat(tab, options = {}) {
         const reader = chatResp.body.getReader();
         const decoder = new TextDecoder();
         let buf = '';
+        // Throttle markdown re-renders to ≤20 fps — parsing the full accumulated
+        // string on every token is O(n²) and freezes the browser on long responses.
+        let _chatRenderTimer = null;
+        const scheduleChatRender = () => {
+            if (_chatRenderTimer) return;
+            _chatRenderTimer = setTimeout(() => {
+                _chatRenderTimer = null;
+                if (msgEl) {
+                    // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context
+                    msgEl.querySelector('.chat-msg-body').innerHTML =
+                        typeof renderMdStreaming === 'function' ? renderMdStreaming(msgContent) : msgContent;
+                }
+            }, 50);
+        };
 
         while (true) {
             if (streamTimeoutMs > 0 && Date.now() - lastContentTime > streamTimeoutMs) {
@@ -728,11 +742,7 @@ export async function _doSendChat(tab, options = {}) {
                             msgEl = appendAssistantPlaceholder();
                         }
                         if (msgEl) {
-                            // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context
-                            msgEl.querySelector('.chat-msg-body').innerHTML =
-                                typeof renderMdStreaming === 'function'
-                                    ? renderMdStreaming(msgContent)
-                                    : msgContent;
+                            scheduleChatRender();
                         }
                         // Increment once per response (not per token) so badge = unread message count
                         if (isFirstToken && typeof incrementUnreadCount === 'function') incrementUnreadCount();
@@ -743,6 +753,13 @@ export async function _doSendChat(tab, options = {}) {
                 } catch { /* malformed chunk — skip */ }
             }
             if (typeof chatScroll === 'function') chatScroll();
+        }
+        // Flush any pending throttled render now that streaming is done.
+        if (_chatRenderTimer) { clearTimeout(_chatRenderTimer); _chatRenderTimer = null; }
+        if (msgEl) {
+            // eslint-disable-next-line no-unsanitized/property -- LLM output rendered via marked.js in trusted local context
+            msgEl.querySelector('.chat-msg-body').innerHTML =
+                typeof renderMdStreaming === 'function' ? renderMdStreaming(msgContent) : msgContent;
         }
 
     } catch (err) {
