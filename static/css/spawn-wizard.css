@@ -1326,3 +1326,33 @@
   border-color: rgba(192, 57, 43, 0.25);
   background: rgba(192, 57, 43, 0.08);
 }
+
+/* ── Validation errors ─────────────────────────────────────────────────────── */
+
+.wizard-validation-error {
+  display: none;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.25);
+}
+
+[data-theme="light"] .wizard-validation-error {
+  color: #b91c1c;
+  background: rgba(185, 28, 28, 0.07);
+  border-color: rgba(185, 28, 28, 0.2);
+}
+
+/* ── HF file list states ───────────────────────────────────────────────────── */
+
+.hf-file-loading,
+.hf-file-empty {
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--text-muted, #888);
+  font-style: italic;
+}

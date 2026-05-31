@@ -1444,6 +1444,36 @@ fn api_spawn_wizard_import_launch_file(
         })
 }
 
+/// Return true for hostnames/IP strings that resolve to private or loopback ranges.
+/// Used to block SSRF in the chat-template fetch endpoint.
+fn is_private_host(host: &str) -> bool {
+    // Loopback / localhost
+    if host == "localhost" || host == "ip6-localhost" || host == "[::1]" {
+        return true;
+    }
+    // Strip brackets from IPv6 literals
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(addr) = bare.parse::<std::net::IpAddr>() {
+        return match addr {
+            std::net::IpAddr::V4(v4) => {
+                v4.is_loopback()
+                    || v4.is_private()
+                    || v4.is_link_local()
+                    || v4.is_broadcast()
+                    || v4.is_documentation()
+                    || v4.is_unspecified()
+            }
+            std::net::IpAddr::V6(v6) => v6.is_loopback() || v6.is_unspecified(),
+        };
+    }
+    // Block common internal hostnames
+    let lower = host.to_ascii_lowercase();
+    lower.ends_with(".local")
+        || lower.ends_with(".internal")
+        || lower.ends_with(".corp")
+        || lower.ends_with(".lan")
+}
+
 // 2) POST /api/chat-template/fetch
 fn api_chat_template_fetch(
     _state: AppState,
@@ -1479,6 +1509,37 @@ fn api_chat_template_fetch(
                             "error": "Missing 'source' URL"
                         })),
                     ));
+                }
+
+                // SSRF guard: only allow https:// to public hosts.
+                match reqwest::Url::parse(&source) {
+                    Err(_) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Invalid URL"
+                            })),
+                        ));
+                    }
+                    Ok(ref u) => {
+                        if u.scheme() != "https" {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Only https:// URLs are supported"
+                                })),
+                            ));
+                        }
+                        let host = u.host_str().unwrap_or("");
+                        if is_private_host(host) {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "URL resolves to a private or loopback address"
+                                })),
+                            ));
+                        }
+                    }
                 }
 
                 let client = match reqwest::Client::builder()
@@ -1565,10 +1626,23 @@ fn api_chat_template_upload(
                     .as_millis();
                 let template_id = format!("temp-{}", ts);
 
+                // Persist the template to the config directory so it can be
+                // referenced by the spawn wizard via --chat-template-file.
+                let saved_path: Option<String> = (|| {
+                    let home = dirs::home_dir()?;
+                    let dir = home.join(".config").join("llama-monitor").join("chat-templates");
+                    std::fs::create_dir_all(&dir).ok()?;
+                    let path = dir.join(format!("{template_id}.jinja"));
+                    std::fs::write(&path, template.as_bytes()).ok()?;
+                    Some(path.to_string_lossy().into_owned())
+                })();
+
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
                         "ok": true,
-                        "template_id": template_id
+                        "template_id": template_id,
+                        "template": template,
+                        "path": saved_path
                     }),
                 )))
             }
@@ -1591,65 +1665,39 @@ fn api_vram_estimate(
                     return Ok(unauthorized_api_token());
                 }
 
-                // Extract fields
-                let model = body["model"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string();
-                let context_length = body["context_length"]
-                    .as_u64()
-                    .unwrap_or(4096);
-                let layers_on_gpu = body["layers_on_gpu"]
-                    .as_i64()
-                    .map(|v| v as i32);
+                // model: local path used to determine file size (optional when
+                // model_size_bytes is provided explicitly).
+                let model = body["model"].as_str().unwrap_or("").to_string();
+                let context_length = body["context_length"].as_u64().unwrap_or(4096);
+                // n_cpu_moe: number of MoE experts to keep on CPU (0 = all on GPU).
+                let n_cpu_moe = body["n_cpu_moe"].as_i64().map(|v| v as i32);
 
-                if model.is_empty() {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                        Box::new(warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": "Missing 'model' field"
-                        }))),
-                    );
-                }
+                // model_size_bytes can be supplied explicitly (e.g. for HF models where
+                // there is no local file yet), otherwise inferred from the filesystem.
+                let model_size_bytes = body["model_size_bytes"].as_u64().unwrap_or_else(|| {
+                    if model.is_empty() {
+                        0
+                    } else {
+                        std::fs::metadata(&model).map(|m| m.len()).unwrap_or(0)
+                    }
+                });
 
-                // Attempt to get model size from filesystem if it's a local path
-                let model_size_bytes = match std::fs::metadata(&model) {
-                    Ok(m) => m.len(),
-                    Err(_) => 0,
-                };
-
-                // Use defaults for parameters not provided by caller
-                let kv_quant = body["kv_quant"]
-                    .as_str()
-                    .unwrap_or("q8_0")
-                    .to_string();
-                let batch_size = body["batch_size"]
-                    .as_u64()
-                    .unwrap_or(2048) as u32;
-                let ubatch_size = body["ubatch_size"]
-                    .as_u64()
-                    .unwrap_or(2048) as u32;
-                let speculative_decoding = body["speculative_decoding"]
-                    .as_bool()
-                    .unwrap_or(false);
-                let mmproj_size_bytes = body["mmproj_size_bytes"]
-                    .as_u64()
-                    .unwrap_or(0);
-                let available_vram_bytes = body["available_vram_bytes"]
-                    .as_u64()
-                    .unwrap_or(0);
-
-                // If model_size_bytes is 0, we can't meaningfully estimate
                 if model_size_bytes == 0 {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                         Box::new(warp::reply::json(&serde_json::json!({
                             "ok": false,
-                            "error": "Could not determine model file size. Provide a local path or 'model_size_bytes' explicitly."
+                            "error": "Could not determine model size. Provide a local model path or set 'model_size_bytes' explicitly."
                         }))),
                     );
                 }
 
-                let n_cpu_moe = layers_on_gpu; // repurpose layers_on_gpu as n_cpu_moe hint
+                let kv_quant = body["kv_quant"].as_str().unwrap_or("q8_0").to_string();
+                let batch_size = body["batch_size"].as_u64().unwrap_or(2048) as u32;
+                let ubatch_size = body["ubatch_size"].as_u64().unwrap_or(2048) as u32;
+                let speculative_decoding = body["speculative_decoding"].as_bool().unwrap_or(false);
+                let mmproj_size_bytes = body["mmproj_size_bytes"].as_u64().unwrap_or(0);
+                let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
+
                 let estimate = crate::llama::vram_estimator::estimate_vram(
                     model_size_bytes,
                     context_length,
@@ -1671,6 +1719,7 @@ fn api_vram_estimate(
                         "estimated_vram_mb": estimated_vram_mb,
                         "estimated_vram_bytes": estimate.estimated_vram_bytes,
                         "estimated_ram_bytes": estimate.estimated_ram_bytes,
+                        "available_vram_bytes": estimate.available_vram_bytes,
                         "recommendation": serde_json::to_value(&estimate.recommendation).unwrap_or(serde_json::Value::Null),
                         "note": estimate.note
                     }))),
@@ -1738,8 +1787,7 @@ fn api_models_download_start(
 
                 let target_dir = cfg.models_dir.clone().unwrap_or_else(|| cfg.default_models_dir.clone());
 
-                // HF token is read from environment by the hf module; no field in AppConfig.
-                let hf_token: Option<String> = None;
+                let hf_token = crate::hf::hf_load_token();
 
                 match crate::model_download::start_download(
                     &repo_id,
@@ -2395,9 +2443,9 @@ fn api_hf_search(
     _state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static HF_SEARCH_START: AtomicU64 = AtomicU64::new(0);
-    static HF_SEARCH_COUNT: AtomicU64 = AtomicU64::new(0);
+    // (window_start_secs, request_count) — protected by Mutex to avoid TOCTOU races.
+    static HF_SEARCH_RATE: std::sync::LazyLock<std::sync::Mutex<(u64, u64)>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new((0, 0)));
 
     warp::path!("api" / "hf" / "search")
         .and(warp::post())
@@ -2415,14 +2463,23 @@ fn api_hf_search(
                     .unwrap_or_default()
                     .as_secs();
 
-                let window_start = HF_SEARCH_START.load(Ordering::Relaxed);
-                let count = HF_SEARCH_COUNT.load(Ordering::Relaxed);
+                // Check and update rate limit atomically under the Mutex.
+                let rate_limited = {
+                    let mut guard = HF_SEARCH_RATE.lock().unwrap();
+                    let (ref mut window_start, ref mut count) = *guard;
+                    if now.saturating_sub(*window_start) >= 60 {
+                        *window_start = now;
+                        *count = 1;
+                        false
+                    } else if *count >= 10 {
+                        true
+                    } else {
+                        *count += 1;
+                        false
+                    }
+                };
 
-                if now.saturating_sub(window_start) >= 60 {
-                    // New window
-                    HF_SEARCH_START.store(now, Ordering::Relaxed);
-                    HF_SEARCH_COUNT.store(1, Ordering::Relaxed);
-                } else if count >= 10 {
+                if rate_limited {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                         Box::new(warp::reply::with_status(
                             warp::reply::json(&serde_json::json!({
@@ -2432,8 +2489,6 @@ fn api_hf_search(
                             StatusCode::TOO_MANY_REQUESTS,
                         )),
                     );
-                } else {
-                    HF_SEARCH_COUNT.fetch_add(1, Ordering::Relaxed);
                 }
 
                 let query = body["query"]
@@ -2717,6 +2772,24 @@ fn api_model_introspect(
                         warp::reply::json(&serde_json::json!({
                             "ok": false,
                             "error": "Missing 'model_path' field"
+                        })),
+                    ));
+                }
+
+                // Security: only allow .gguf files that exist on disk.
+                if !model_path.to_ascii_lowercase().ends_with(".gguf") {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "model_path must point to a .gguf file"
+                        })),
+                    ));
+                }
+                if !std::path::Path::new(&model_path).exists() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Model file not found"
                         })),
                     ));
                 }

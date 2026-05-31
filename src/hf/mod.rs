@@ -60,33 +60,21 @@ pub struct HfFileInfo {
 ///
 /// hf-hub 0.5 RepoInfo is limited (siblings + sha), so we fall back
 /// to a direct HF API call for richer metadata (gated, tags).
-pub fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
-    // Use hf-hub to validate repo.
-    let api = ApiBuilder::new()
-        .with_token(None)
-        .build()
-        .context("Failed to build HF API client")?;
+/// Honors the configured HF token for gated-model access.
+pub async fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
+    let token = hf_load_token();
 
-    let repo = Repo::new(repo_id.to_string(), RepoType::Model);
-    let model = api.repo(repo);
-    let _info = model.info().context("Failed to fetch model info")?;
-
-    // Fetch richer metadata from HF REST API.
     let client = reqwest::Client::new();
     let url = format!("https://huggingface.co/api/models/{repo_id}");
 
-    let resp = client.get(&url).send();
+    let mut req = client.get(&url);
+    if let Some(ref tok) = token {
+        req = req.bearer_auth(tok);
+    }
 
-    // Since hf_get_model_info is synchronous, we block_on for this small request.
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("Failed to build tokio runtime for HF metadata")?;
-
-    let resp = rt.block_on(resp).context("Failed to call HF models API")?;
+    let resp = req.send().await.context("Failed to call HF models API")?;
 
     if !resp.status().is_success() {
-        // Fall back to minimal info.
         return Ok(HfModelInfo {
             repo_id: repo_id.to_string(),
             gated: false,
@@ -95,8 +83,9 @@ pub fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
         });
     }
 
-    let body: serde_json::Value = rt
-        .block_on(resp.json())
+    let body: serde_json::Value = resp
+        .json()
+        .await
         .context("Failed to parse HF models API response")?;
 
     let gated = body.get("gated").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -130,7 +119,7 @@ pub fn hf_get_model_info(repo_id: &str) -> Result<HfModelInfo> {
 /// a recursive tree list.
 pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileInfo>> {
     let api = ApiBuilder::new()
-        .with_token(None)
+        .with_token(hf_load_token())
         .build()
         .context("Failed to build HF API client")?;
 
@@ -160,7 +149,7 @@ pub fn hf_list_repo_files(repo_id: &str, gguf_only: bool) -> Result<Vec<HfFileIn
 /// Get info for a specific file in a repo.
 pub fn hf_get_file_info(repo_id: &str, path: &str) -> Result<HfFileInfo> {
     let api = ApiBuilder::new()
-        .with_token(None)
+        .with_token(hf_load_token())
         .build()
         .context("Failed to build HF API client")?;
 
@@ -264,13 +253,20 @@ pub async fn hf_download_file_stream(
             .context("Failed to create directory for HF download")?;
     }
 
-    let mut file = File::options()
-        .create(true)
-        .write(true)
-        .append(true)
-        .open(local_path)
-        .await
-        .context("Failed to open HF download file")?;
+    // Truncate when starting fresh; append only when resuming a partial file.
+    let mut file = if resume_from > 0 {
+        File::options()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(local_path)
+            .await
+            .context("Failed to open HF download file for resume")?
+    } else {
+        File::create(local_path)
+            .await
+            .context("Failed to create HF download file")?
+    };
 
     use futures_util::StreamExt;
     let mut stream = resp.bytes_stream();
@@ -506,11 +502,10 @@ pub fn hf_start_download(
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_hf_get_model_info_smoke() {
-        // This is a minimal smoke test; it will fail if network is unavailable.
-        // In CI, treat as best-effort.
-        let _ = hf_get_model_info("gpt2");
+    #[tokio::test]
+    async fn test_hf_get_model_info_smoke() {
+        // Best-effort smoke test; may fail in offline CI.
+        let _ = hf_get_model_info("gpt2").await;
     }
 
     #[test]

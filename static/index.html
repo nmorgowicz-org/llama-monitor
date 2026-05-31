@@ -2208,43 +2208,6 @@
                             </div>
                         </details>
                     </div>
-                            <div class="hardware-field">
-                                <label for="spawn-ubatch-size">Ubatch size</label>
-                                <input type="number" id="spawn-ubatch-size" min="1" value="512">
-                            </div>
-                            <div class="hardware-field">
-                                <label for="spawn-parallel-slots">Parallel slots</label>
-                                <input type="number" id="spawn-parallel-slots" min="1" value="1">
-                            </div>
-                            <div class="hardware-field">
-                                <label for="spawn-cache-type-k">KV cache K type</label>
-                                <select id="spawn-cache-type-k">
-                                    <option value="">Default</option>
-                                    <option value="q8_0">q8_0</option>
-                                    <option value="q4_0">q4_0</option>
-                                </select>
-                            </div>
-                            <div class="hardware-field">
-                                <label for="spawn-cache-type-v">KV cache V type</label>
-                                <select id="spawn-cache-type-v">
-                                    <option value="">Default</option>
-                                    <option value="f16">f16</option>
-                                    <option value="q8_0">q8_0</option>
-                                    <option value="q4_0">q4_0</option>
-                                </select>
-                            </div>
-                            <div class="hardware-field">
-                                <label for="spawn-n-cpu-moe">MoE CPU experts (n_cpu_moe)</label>
-                                <input type="number" id="spawn-n-cpu-moe" min="0" placeholder="Auto">
-                                <div class="field-hint">Higher = more VRAM, faster. Lower = more CPU, slower.</div>
-                            </div>
-                            <div class="hardware-field">
-                                <label for="spawn-tensor-split">Tensor split</label>
-                                <input type="text" id="spawn-tensor-split" placeholder="e.g. 1,1">
-                                <div class="field-hint">For multi-GPU load distribution.</div>
-                            </div>
-                        </div>
-                    </div>
 
                     <!-- VRAM status -->
                     <div class="hardware-summary" id="spawn-hardware-summary">

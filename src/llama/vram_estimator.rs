@@ -153,12 +153,12 @@ mod tests {
             None,
             8u64 << 30,
         );
-        matches!(est.recommendation, VramRecommendation::Fit);
+        assert!(matches!(est.recommendation, VramRecommendation::Fit));
     }
 
     #[test]
     fn test_tight_large_context() {
-        // 12 GB model, 16 GB VRAM, large context -> Tight
+        // 12 GB model, 16 GB VRAM, large context -> Tight or Risk
         let est = estimate_vram(
             12u64 << 30,
             65536,
@@ -170,10 +170,10 @@ mod tests {
             None,
             16u64 << 30,
         );
-        matches!(
+        assert!(matches!(
             est.recommendation,
             VramRecommendation::Tight | VramRecommendation::Risk
-        );
+        ));
     }
 
     #[test]
@@ -190,7 +190,7 @@ mod tests {
             None,
             16u64 << 30,
         );
-        matches!(est.recommendation, VramRecommendation::WontFit);
+        assert!(matches!(est.recommendation, VramRecommendation::WontFit));
     }
 
     #[test]
