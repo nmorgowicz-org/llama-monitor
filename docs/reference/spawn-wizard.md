@@ -43,6 +43,10 @@ The user picks a model source. Three source types:
 #### HuggingFace Hub
 See [HuggingFace Integration](#huggingface-integration) below.
 
+- The wizard includes a short helper explaining when a token is optional and links directly to `https://huggingface.co/settings/tokens`.
+- Recommended token type: **Read**.
+- Entry point for storing the token in-app: **Settings → Models**.
+
 #### Third-Party Import
 See [Third-Party Model Import](#third-party-model-import) below.
 
@@ -141,6 +145,10 @@ One-click launch. Shows live status (starting → running / error). On success t
 ## HuggingFace Integration
 
 ### Search and Browse
+
+- Public repos can be searched and browsed without an HF token.
+- A read-only token is recommended for gated/private repos and to avoid stricter anonymous rate limits.
+- The Step 2 wizard helper links directly to the Hugging Face token settings page and explains the `New token` → `Read` flow.
 
 #### POST /api/hf/search
 Search the HuggingFace Hub for GGUF model repos.
@@ -273,7 +281,7 @@ Fetch and return the raw model card markdown for display in the in-app card pane
 ### HF Token
 
 #### GET /api/hf/token
-Returns the masked token: `{ "token": "1234****5678" }`. Requires `api-token`.
+Returns whether a token is currently stored: `{ "set": true }`. Requires `api-token`.
 
 #### PUT /api/hf/token
 Set or update the HF token: `{ "token": "hf_xxxx..." }`. Requires `api-token`. Written to `~/.config/llama-monitor/hf-token` with mode 600.

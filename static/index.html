@@ -2490,6 +2490,22 @@
                                 <option value="likes">Most liked</option>
                             </select>
                         </div>
+                        <div class="settings-card" style="margin-top:12px;padding:12px 14px;">
+                            <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                                Hugging Face Access
+                            </div>
+                            <p class="settings-help" style="margin:0 0 8px 0;">
+                                Public repos can be browsed without a token. You usually only need a token for gated/private repos or to avoid stricter rate limits.
+                            </p>
+                            <p class="settings-help" style="margin:0 0 8px 0;">
+                                To create one: open
+                                <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">Hugging Face token settings</a>,
+                                click <strong>New token</strong>, choose <strong>Read</strong>, then paste the resulting <code>hf_...</code> token into <strong>Settings → Models</strong>.
+                            </p>
+                            <p class="settings-help" style="margin:0;">
+                                If you select a gated repo and need a token later, you can add it without leaving the app.
+                            </p>
+                        </div>
                         <!-- Search results (shown when query isn't a repo ID) -->
                         <div class="hf-search-results" id="hf-search-results" style="display:none;">
                             <!-- populated by JS -->
@@ -3080,6 +3096,48 @@
                         <p class="settings-help">
                             Model paths, context sizes, speculative decoding, and GPU layering are preset-level concerns. Edit them in Presets or Runtime Configuration rather than through global placeholder fields.
                         </p>
+                    </div>
+                    <div class="settings-card" style="margin-top:14px;">
+                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                            Models Folder
+                        </div>
+                        <label class="modal-field">
+                            Download directory
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <input type="text" id="settings-models-dir" placeholder="/path/to/models">
+                                <button type="button" class="btn btn-secondary" id="settings-models-dir-browse">Browse</button>
+                                <button type="button" class="btn btn-ghost" id="settings-models-dir-clear">Clear</button>
+                            </div>
+                        </label>
+                        <p class="settings-help" id="settings-models-dir-hint" style="margin:8px 0 0 0;">
+                            If empty, downloads go to the app default models folder.
+                        </p>
+                    </div>
+                    <div class="settings-card" style="margin-top:14px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
+                            <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);">
+                                Hugging Face Token
+                            </div>
+                            <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer" style="font-size:12px;">
+                                Open token settings
+                            </a>
+                        </div>
+                        <p class="settings-help" style="margin:0 0 10px 0;">
+                            Use a read-only token for gated/private repos and smoother Hugging Face browsing. Public repos work without one.
+                        </p>
+                        <p class="settings-help" style="margin:0 0 10px 0;">
+                            Quick setup: click the link above, choose <strong>New token</strong>, set the role to <strong>Read</strong>, copy the <code>hf_...</code> value, then save it here.
+                        </p>
+                        <label class="modal-field">
+                            Read-only token
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <input type="password" id="settings-hf-token" placeholder="hf_..." autocomplete="off" spellcheck="false">
+                                <button type="button" class="btn btn-ghost" id="settings-hf-token-show">Show</button>
+                                <button type="button" class="btn btn-secondary" id="settings-hf-token-save">Save</button>
+                                <button type="button" class="btn btn-ghost" id="settings-hf-token-remove" style="display:none;">Remove</button>
+                            </div>
+                        </label>
+                        <p class="settings-help" id="settings-hf-token-status" style="display:none;margin:8px 0 0 0;"></p>
                     </div>
                 </div>
               <div class="settings-pane" id="settings-appearance">
