@@ -1145,7 +1145,9 @@ function inferMmprojPath(modelPath) {
 let introspectDebounce = null;
 
 function tryIntrospectModel(path) {
-  if (!path || !path.toLowerCase().endsWith('.gguf')) return;
+  // Allow both .gguf files and Ollama blobs (sha256-* content-addressed files)
+  const lower = path.toLowerCase();
+  if (!lower.endsWith('.gguf') && !lower.includes('/blobs/sha256-') && !lower.includes('\\blobs\\sha256-')) return;
   if (introspectDebounce) clearTimeout(introspectDebounce);
   introspectDebounce = setTimeout(() => doIntrospect(path), 1200);
 }
@@ -1159,13 +1161,19 @@ async function doIntrospect(path) {
     if (!data.ok || !data.metadata) return;
 
     const m = data.metadata;
-    // Merge into arch state
-    if (m.n_layers)      wizardState.arch.nLayers    = m.n_layers;
-    if (m.n_kv_heads)    wizardState.arch.nKvHeads   = m.n_kv_heads;
-    if (m.head_dim)      wizardState.arch.headDim     = m.head_dim;
-    if (m.n_experts)     wizardState.arch.nExperts    = m.n_experts;
+
+    // Use the actual file size from disk — exact, no estimation needed.
+    if (data.file_size_bytes > 0) {
+      wizardState.model.modelBytes = data.file_size_bytes;
+    }
+
+    // Merge arch state from GGUF metadata
+    if (m.n_layers)       wizardState.arch.nLayers      = m.n_layers;
+    if (m.n_kv_heads)     wizardState.arch.nKvHeads     = m.n_kv_heads;
+    if (m.head_dim)       wizardState.arch.headDim       = m.head_dim;
+    if (m.n_experts)      wizardState.arch.nExperts      = m.n_experts;
     if (m.n_experts_used) wizardState.arch.nExpertsUsed = m.n_experts_used;
-    if (m.mtp_depth)     wizardState.arch.mtpDepth    = m.mtp_depth;
+    if (m.mtp_depth)      wizardState.arch.mtpDepth      = m.mtp_depth;
 
     // Update MoE slider max if we got expert count
     if (wizardState.arch.nExperts > 0 && dom.moeOffloadSlider) {

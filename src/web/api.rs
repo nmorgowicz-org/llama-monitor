@@ -3576,11 +3576,16 @@ fn api_model_introspect(
                     }
                 };
 
+                // Include actual file size so the frontend can use it directly
+                // instead of estimating from param count + quant heuristic.
+                let file_size_bytes = std::fs::metadata(&model_path).map(|m| m.len()).unwrap_or(0);
+
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
                         "ok": true,
                         "metadata": metadata,
-                        "cached": metadata.cached
+                        "cached": metadata.cached,
+                        "file_size_bytes": file_size_bytes
                     }),
                 )))
             }
