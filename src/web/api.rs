@@ -1683,7 +1683,167 @@ fn api_chat_template_upload(
         })
 }
 
-// 4) POST /api/vram-estimate (architecture-aware breakdown)
+// 4) POST /api/chat-template/install-hf
+// Downloads a Jinja template from HuggingFace and saves it with a stable name.
+// Returns the cached path immediately if the file already exists.
+fn api_chat_template_install_hf(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "install-hf")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let repo = body["repo"].as_str().unwrap_or("").to_string();
+                let file = body["file"].as_str().unwrap_or("").to_string();
+                let name = body["name"].as_str().unwrap_or("").to_string();
+                let force = body["force"].as_bool().unwrap_or(false);
+
+                if repo.is_empty() || file.is_empty() || name.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Missing required fields: repo, file, name"
+                        })),
+                    ));
+                }
+                // Safe filename — alphanumeric + hyphens/underscores only
+                if !name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "name must contain only alphanumeric characters, hyphens, or underscores"
+                        })),
+                    ));
+                }
+                // SSRF guard: repo must be "owner/name" — no path traversal, no extra slashes
+                if repo.contains("..") || repo.contains("//") || repo.matches('/').count() != 1 {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": "Invalid repo format" })),
+                    ));
+                }
+                if file.contains("..") || file.starts_with('/') {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "ok": false, "error": "Invalid file path" })),
+                    ));
+                }
+
+                // Stable on-disk location
+                let dest = match dirs::home_dir() {
+                    Some(h) => h
+                        .join(".config")
+                        .join("llama-monitor")
+                        .join("chat-templates")
+                        .join(format!("{name}.jinja")),
+                    None => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Could not determine home directory"
+                            })),
+                        ))
+                    }
+                };
+
+                // Return cached file if it already exists and force is not set
+                if dest.exists() && !force {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": true,
+                            "path": dest.to_string_lossy(),
+                            "already_existed": true
+                        })),
+                    ));
+                }
+
+                let url = format!("https://huggingface.co/{repo}/raw/main/{file}");
+                let hf_token = crate::hf::hf_load_token();
+
+                let client = match reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .user_agent("llama-monitor/1.0")
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("HTTP client error: {e}")
+                            })),
+                        ))
+                    }
+                };
+
+                let mut req = client.get(&url);
+                if let Some(ref tok) = hf_token {
+                    if !tok.is_empty() {
+                        req = req.header("Authorization", format!("Bearer {tok}"));
+                    }
+                }
+
+                let content = match req.send().await {
+                    Ok(resp) if resp.status().is_success() => match resp.text().await {
+                        Ok(t) => t,
+                        Err(e) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": format!("Failed to read response: {e}")
+                                })),
+                            ))
+                        }
+                    },
+                    Ok(resp) => {
+                        let status = resp.status().as_u16();
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("HTTP {status} from HuggingFace")
+                            })),
+                        ));
+                    }
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Network error: {e}")
+                            })),
+                        ))
+                    }
+                };
+
+                if let Some(parent) = dest.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if let Err(e) = std::fs::write(&dest, content.as_bytes()) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("Failed to save template: {e}")
+                        })),
+                    ));
+                }
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "path": dest.to_string_lossy(),
+                        "already_existed": false
+                    }),
+                )))
+            }
+        })
+}
+
+// 5) POST /api/vram-estimate (architecture-aware breakdown)
 fn api_vram_estimate_breakdown(
     _state: AppState,
     app_config: Arc<AppConfig>,
@@ -3475,6 +3635,7 @@ pub fn api_routes(
         api_spawn_wizard_import_launch_file(state.clone(), app_config.clone());
     let chat_template_fetch = api_chat_template_fetch(state.clone(), app_config.clone());
     let chat_template_upload = api_chat_template_upload(state.clone(), app_config.clone());
+    let chat_template_install_hf = api_chat_template_install_hf(state.clone(), app_config.clone());
     let vram_estimate = api_vram_estimate(state.clone(), app_config.clone());
     let vram_estimate_breakdown = api_vram_estimate_breakdown(state.clone(), app_config.clone());
     let models_download_start = api_models_download_start(state.clone(), app_config.clone());
@@ -3586,6 +3747,7 @@ pub fn api_routes(
     let phase0_routes = spawn_wizard_import
         .or(chat_template_fetch)
         .or(chat_template_upload)
+        .or(chat_template_install_hf)
         .or(vram_estimate)
         .or(vram_estimate_breakdown)
         .or(models_download_start)
@@ -10378,6 +10540,14 @@ mod tests {
             "POST",
             "/api/chat-template/upload",
             Some("{}")
+        ),
+        (
+            route_chat_template_install_hf,
+            "POST",
+            "/api/chat-template/install-hf",
+            Some(
+                "{\"repo\":\"froggeric/Qwen-Fixed-Chat-Templates\",\"file\":\"chat_template.jinja\",\"name\":\"test\"}"
+            )
         ),
         // VRAM estimation
         (

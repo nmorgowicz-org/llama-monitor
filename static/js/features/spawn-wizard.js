@@ -139,6 +139,7 @@ const wizardState = {
     nCtxTrain: 0,        // training context length from GGUF metadata (0 = unknown)
     quantFiles: [],      // GGUF files from HF repo for hardware-step quant swap
     mmprojFiles: [],     // mmproj files found in HF repo
+    chatTemplatePath: null,  // local path to installed .jinja template (null = use embedded)
   },
   // Architecture from introspection (or heuristic)
   arch: {
@@ -908,6 +909,7 @@ function onModelPathChanged() {
   // Update quant advisor if we have param count
   if (wizardState.model.paramB > 0) triggerQuantAdvisor();
   scheduleVramUpdate();
+  autoInstallChatTemplate();
 }
 
 function inferParamBFromName(name) {
@@ -1150,6 +1152,130 @@ function renderQuantAdvisor(quants, availVram) {
   dom.quantAdvisorTable.innerHTML = '';
   dom.quantAdvisorTable.appendChild(table);
   dom.quantAdvisor.style.display = '';
+}
+
+// ── Chat template auto-install ───────────────────────────────────────────────
+
+// Community template registry keyed by model family
+const COMMUNITY_TEMPLATES = {
+  qwen: {
+    name: 'qwen-fixed',
+    display: "froggeric's Fixed Template",
+    repo: 'froggeric/Qwen-Fixed-Chat-Templates',
+    file: 'chat_template.jinja',
+    description: 'Fixes tool calling, KV cache invalidation & agentic loop bugs for Qwen 3.5 / 3.6',
+    hfUrl: 'https://huggingface.co/froggeric/Qwen-Fixed-Chat-Templates',
+  },
+};
+
+function detectModelFamily(name) {
+  const lower = (name || '').toLowerCase();
+  if (lower.includes('qwen')) return 'qwen';
+  if (lower.includes('llama-3') || lower.includes('llama3') || lower.match(/llama.?3/)) return 'llama3';
+  if (lower.includes('gemma')) return 'gemma';
+  if (lower.includes('mistral') || lower.includes('mixtral')) return 'mistral';
+  return null;
+}
+
+async function autoInstallChatTemplate() {
+  const { source, path, hfRepo } = wizardState.model;
+  const identityName = source === 'hf' ? hfRepo : path;
+  const family = detectModelFamily(identityName);
+  const tpl = family ? COMMUNITY_TEMPLATES[family] : null;
+
+  if (!tpl) {
+    wizardState.model.chatTemplatePath = null;
+    _renderChatTemplateStatus(family ? 'none-known' : 'no-family', family, null, null);
+    return;
+  }
+
+  _renderChatTemplateStatus('installing', family, tpl, null);
+
+  try {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+    const resp = await fetch('/api/chat-template/install-hf', {
+      method: 'POST', headers,
+      body: JSON.stringify({ repo: tpl.repo, file: tpl.file, name: tpl.name }),
+    });
+    const data = resp.ok ? await resp.json() : { ok: false, error: `HTTP ${resp.status}` };
+    if (data.ok && data.path) {
+      wizardState.model.chatTemplatePath = data.path;
+      _renderChatTemplateStatus('installed', family, tpl, data);
+    } else {
+      _renderChatTemplateStatus('error', family, tpl, data);
+    }
+  } catch (err) {
+    _renderChatTemplateStatus('error', family, tpl, { error: err.message || String(err) });
+  }
+}
+
+function _renderChatTemplateStatus(state, family, tpl, data) {
+  const section = document.getElementById('chat-template-section');
+  const statusEl = document.getElementById('ct-status');
+  const bodyEl = document.getElementById('ct-body');
+  if (!section) return;
+
+  if (state === 'no-family') { section.style.display = 'none'; return; }
+  section.style.display = '';
+
+  if (state === 'none-known') {
+    if (statusEl) { statusEl.textContent = 'Embedded'; statusEl.className = 'ct-status ct-neutral'; }
+    if (bodyEl) bodyEl.textContent = `Using template embedded in model file. No community fix available for ${family || 'this'} yet.`;
+    return;
+  }
+
+  if (state === 'installing') {
+    if (statusEl) { statusEl.textContent = 'Downloading…'; statusEl.className = 'ct-status ct-installing'; }
+    if (bodyEl) {
+      bodyEl.textContent = '';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'ct-name';
+      nameEl.textContent = tpl.display;
+      bodyEl.appendChild(nameEl);
+      bodyEl.appendChild(document.createTextNode(' — downloading…'));
+    }
+    return;
+  }
+
+  if (state === 'installed') {
+    if (statusEl) {
+      statusEl.textContent = data?.already_existed ? '✓ Cached' : '✓ Installed';
+      statusEl.className = 'ct-status ct-ok';
+    }
+    if (bodyEl) {
+      bodyEl.textContent = '';
+      const nameEl = document.createElement('strong');
+      nameEl.textContent = tpl.display;
+      const descEl = document.createElement('span');
+      descEl.textContent = ` — ${tpl.description}`;
+      const link = document.createElement('a');
+      link.href = tpl.hfUrl; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      link.textContent = ' ↗'; link.className = 'ct-hf-link';
+      bodyEl.appendChild(nameEl);
+      bodyEl.appendChild(descEl);
+      bodyEl.appendChild(link);
+    }
+    return;
+  }
+
+  if (state === 'error') {
+    if (statusEl) { statusEl.textContent = '⚠ Failed'; statusEl.className = 'ct-status ct-error'; }
+    if (bodyEl) {
+      bodyEl.textContent = '';
+      const msg = document.createElement('span');
+      msg.className = 'ct-error-msg';
+      msg.textContent = `${data?.error || 'Download failed'} — server will use embedded template.`;
+      const retryBtn = document.createElement('button');
+      retryBtn.type = 'button'; retryBtn.className = 'ct-retry-btn btn-wizard-tertiary';
+      retryBtn.textContent = 'Retry';
+      retryBtn.addEventListener('click', autoInstallChatTemplate);
+      bodyEl.appendChild(msg);
+      bodyEl.appendChild(document.createTextNode(' '));
+      bodyEl.appendChild(retryBtn);
+    }
+  }
 }
 
 // ── HF discover categories ────────────────────────────────────────────────────
@@ -1774,6 +1900,7 @@ async function fetchHfFiles(repo) {
         clearValidationError();
         if (wizardState.model.paramB > 0) triggerQuantAdvisor();
         scheduleVramUpdate();
+        autoInstallChatTemplate();
       };
       item.addEventListener('click', selectFile);
       item.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectFile(); } });
@@ -2581,6 +2708,14 @@ function renderSummary() {
     const mtpActive = hw.mtpEnabled;
     rows.push({ label: 'MTP', value: mtpActive ? `enabled · draft ${hw.mtpDraftNMax || 2} tokens/step · --parallel 1` : 'disabled' });
   }
+  const tplPath = wizardState.model.chatTemplatePath;
+  const tplFamily = detectModelFamily(m.hfRepo || m.path || '');
+  if (tplPath) {
+    const tplName = tplPath.split(/[/\\]/).pop() || tplPath;
+    rows.push({ label: 'Chat template', value: tplName });
+  } else if (tplFamily) {
+    rows.push({ label: 'Chat template', value: 'Embedded (from model file)' });
+  }
 
   const specType = dom.specTypeSelect?.value || '';
   if (specType) {
@@ -2805,6 +2940,7 @@ function buildSpawnPayload() {
     min_p: h.minP != null ? h.minP : null,
     repeat_penalty: h.repeatPenalty != null ? h.repeatPenalty : null,
     seed: h.seed != null ? h.seed : null,
+    chat_template_file: wizardState.model.chatTemplatePath || null,
     profile: wizardState.profile,
     use_case: wizardState.useCase,
   };
