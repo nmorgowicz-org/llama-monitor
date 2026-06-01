@@ -1789,12 +1789,14 @@ async function showHfSearchResults({ query, author, sort, limit }) {
   container.style.display = '';
   // Scroll the results into view so the user sees the loading state immediately
   // without having to scroll — feedback at the point of interaction.
-  // scrollIntoView targets the document viewport but the actual scroll container
-  // is .wizard-body (overflow-y: auto).  Walk up to find it and scroll there instead.
-  const scrollParent = container.closest('.wizard-body') || container.parentElement;
+  // scrollIntoView targets the document viewport; the actual scroll container
+  // is .wizard-body (overflow-y: auto).  Use getBoundingClientRect so the
+  // calculation is correct regardless of intermediate positioned ancestors.
+  const scrollParent = container.closest('.wizard-body');
   if (scrollParent) {
-    const targetTop = container.offsetTop - scrollParent.offsetTop - 16;
-    scrollParent.scrollTo({ top: targetTop, behavior: 'smooth' });
+    const cRect = container.getBoundingClientRect();
+    const pRect = scrollParent.getBoundingClientRect();
+    scrollParent.scrollTo({ top: scrollParent.scrollTop + cRect.top - pRect.top - 16, behavior: 'smooth' });
   }
 
   // Hide file list when showing search results
