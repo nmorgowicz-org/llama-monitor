@@ -2505,21 +2505,23 @@
                                 <option value="likes">Most liked</option>
                             </select>
                         </div>
-                        <div class="settings-card" style="margin-top:12px;padding:12px 14px;">
-                            <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
-                                Hugging Face Access
+                        <div class="settings-card wizard-hf-token-card" style="margin-top:12px;">
+                            <div class="wizard-hf-token-header">
+                                <span class="wizard-hf-token-title">Hugging Face Token</span>
+                                <span class="wizard-hf-token-badge" id="wizard-hf-token-badge" style="display:none;"></span>
                             </div>
-                            <p class="settings-help" style="margin:0 0 8px 0;">
-                                Public repos can be browsed without a token. You usually only need a token for gated/private repos or to avoid stricter rate limits.
+                            <p class="settings-help" style="margin:0 0 10px 0;">
+                                Public repos work without a token. You need one for gated models or to avoid rate limits.
+                                <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">Create a Read token on HuggingFace.</a>
                             </p>
-                            <p class="settings-help" style="margin:0 0 8px 0;">
-                                To create one: open
-                                <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">Hugging Face token settings</a>,
-                                click <strong>New token</strong>, choose <strong>Read</strong>, then paste the resulting <code>hf_...</code> token into <strong>Settings → Models</strong>.
-                            </p>
-                            <p class="settings-help" style="margin:0;">
-                                If you select a gated repo and need a token later, you can add it without leaving the app.
-                            </p>
+                            <div class="wizard-hf-token-input-row" id="wizard-hf-token-input-row">
+                                <input type="password" id="wizard-hf-token-input" class="wizard-hf-token-input" placeholder="hf_..." autocomplete="off" spellcheck="false">
+                                <button type="button" class="btn-wizard-secondary" id="wizard-hf-token-save">Save</button>
+                            </div>
+                            <div class="wizard-hf-token-saved-row" id="wizard-hf-token-saved-row" style="display:none;">
+                                <span class="wizard-hf-token-saved-note">✓ Token saved — gated repos enabled</span>
+                                <button type="button" class="wizard-hf-token-remove" id="wizard-hf-token-remove">Remove</button>
+                            </div>
                         </div>
                         <!-- Search results (shown when query isn't a repo ID) -->
                         <div class="hf-search-results" id="hf-search-results" style="display:none;">

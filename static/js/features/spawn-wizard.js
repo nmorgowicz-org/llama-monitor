@@ -207,6 +207,7 @@ export function initSpawnWizard() {
   bindEvents();
   bindHfSortSelect();
   bindQuantizerEditor();
+  bindWizardHfToken();
   restoreProfile();
   applyProfileVisibility();
   renderHfDiscoverPills();          // static — no network call needed
@@ -602,7 +603,62 @@ async function refreshHfTokenState() {
     if (!res.ok) return;
     const data = await res.json();
     wizardState.model.hfTokenSet = !!data.set;
+    _updateWizardHfTokenUI(!!data.set);
   } catch {}
+}
+
+function _updateWizardHfTokenUI(isSet) {
+  const badge      = document.getElementById('wizard-hf-token-badge');
+  const inputRow   = document.getElementById('wizard-hf-token-input-row');
+  const savedRow   = document.getElementById('wizard-hf-token-saved-row');
+  if (badge) {
+    badge.textContent = isSet ? '✓ Active' : 'Not set';
+    badge.className = 'wizard-hf-token-badge ' + (isSet ? 'token-badge-ok' : 'token-badge-none');
+    badge.style.display = '';
+  }
+  if (inputRow) inputRow.style.display = isSet ? 'none' : '';
+  if (savedRow) savedRow.style.display = isSet ? ''     : 'none';
+}
+
+function bindWizardHfToken() {
+  const saveBtn   = document.getElementById('wizard-hf-token-save');
+  const removeBtn = document.getElementById('wizard-hf-token-remove');
+  const input     = document.getElementById('wizard-hf-token-input');
+
+  saveBtn?.addEventListener('click', async () => {
+    const token = input?.value.trim() || '';
+    if (!token) { input?.focus(); return; }
+    const origText = saveBtn.textContent;
+    saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+    try {
+      const headers = window.authHeaders
+        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+        : { 'Content-Type': 'application/json' };
+      const res = await fetch('/api/hf/token', { method: 'PUT', headers, body: JSON.stringify({ token }) });
+      const data = await res.json().catch(() => ({}));
+      if (data.ok) {
+        if (input) input.value = '';
+        saveBtn.textContent = '✓ Saved';
+        setTimeout(() => { saveBtn.textContent = origText; saveBtn.disabled = false; }, 1500);
+        await refreshHfTokenState();
+      } else {
+        saveBtn.textContent = 'Failed'; setTimeout(() => { saveBtn.textContent = origText; saveBtn.disabled = false; }, 2000);
+      }
+    } catch {
+      saveBtn.textContent = 'Error'; setTimeout(() => { saveBtn.textContent = origText; saveBtn.disabled = false; }, 2000);
+    }
+  });
+
+  // Allow Enter key in token input to trigger save
+  input?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveBtn?.click(); } });
+
+  removeBtn?.addEventListener('click', async () => {
+    try {
+      const headers = window.authHeaders ? window.authHeaders() : {};
+      await fetch('/api/hf/token', { method: 'DELETE', headers });
+      await refreshHfTokenState();
+    } catch {}
+  });
 }
 
 function renderLocalModelHint() {

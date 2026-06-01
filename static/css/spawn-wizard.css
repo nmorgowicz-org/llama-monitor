@@ -2609,6 +2609,94 @@
 [data-theme="light"] .qa-quality-reduced    { background:rgba(239,68,68,0.08); color:#991b1b; }
 [data-theme="light"] .qa-quality-very_low   { background:rgba(239,68,68,0.06); color:#991b1b; }
 
+/* ── Inline HF token card ─────────────────────────────────────────────────── */
+.wizard-hf-token-card {
+  padding: 12px 14px;
+}
+.wizard-hf-token-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.wizard-hf-token-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.wizard-hf-token-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 9999px;
+}
+.wizard-hf-token-badge.token-badge-ok {
+  background: rgba(16,185,129,0.15);
+  color: #6ee7b7;
+}
+.wizard-hf-token-badge.token-badge-none {
+  background: rgba(148,163,184,0.1);
+  color: #94a3b8;
+}
+[data-theme="light"] .wizard-hf-token-badge.token-badge-ok  { background: rgba(16,185,129,0.1); color: #059669; }
+[data-theme="light"] .wizard-hf-token-badge.token-badge-none { color: #64748b; }
+
+.wizard-hf-token-input-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.wizard-hf-token-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1px solid var(--border-subtle, rgba(255,255,255,0.1));
+  background: var(--input-bg, rgba(255,255,255,0.05));
+  color: var(--color-text, #f1f5f9);
+  font-size: 12.5px;
+  font-family: var(--font-mono, monospace);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.wizard-hf-token-input:focus {
+  border-color: rgba(99,102,241,0.6);
+}
+[data-theme="light"] .wizard-hf-token-input {
+  background: #fff;
+  border-color: rgba(0,0,0,0.12);
+  color: #1e293b;
+}
+
+.wizard-hf-token-saved-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0 4px;
+}
+.wizard-hf-token-saved-note {
+  font-size: 12px;
+  color: #6ee7b7;
+  flex: 1;
+}
+[data-theme="light"] .wizard-hf-token-saved-note { color: #059669; }
+.wizard-hf-token-remove {
+  background: none;
+  border: 1px solid rgba(239,68,68,0.3);
+  border-radius: 6px;
+  color: #f87171;
+  font-size: 11px;
+  padding: 3px 9px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.wizard-hf-token-remove:hover {
+  background: rgba(239,68,68,0.1);
+  border-color: rgba(239,68,68,0.55);
+}
+
 /* ── HF download panel ────────────────────────────────────────────────────── */
 .hf-download-panel {
   margin-top: 10px;
