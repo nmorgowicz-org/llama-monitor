@@ -521,7 +521,7 @@ function bindEvents() {
       parts.pop();
       defaultPath = parts.join(sep) || (defaultPath.includes('\\') ? 'C:\\' : '/');
     }
-    openDeferredFileBrowser('spawn-model-path', 'gguf', defaultPath);
+    openDeferredFileBrowser('spawn-model-path', 'gguf', defaultPath, 'model');
   });
   dom.importBrowseBtn?.addEventListener('click', () => openDeferredFileBrowser('spawn-import-path', 'gguf'));
 
@@ -3492,7 +3492,8 @@ function _buildBrowseDropdown(dropdownEl, targetInputId, allDirs) {
 
     btn.addEventListener('click', () => {
       _closeBrowseDropdowns();
-      openDeferredFileBrowser(targetInputId, 'gguf', dir);
+      const ctx = targetInputId === 'spawn-model-path' ? 'model' : '';
+      openDeferredFileBrowser(targetInputId, 'gguf', dir, ctx);
     });
     dropdownEl.appendChild(btn);
   });

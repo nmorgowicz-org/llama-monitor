@@ -6,11 +6,29 @@ import { escapeHtml } from '../core/format.js';
 let fbTargetId = '';
 let fbFilter = '';
 let fbCurrentPath = '';
+let fbContext = '';   // 'model' → hide mmproj files, badge-match base models
 let initialized = false;
 
-export function openFileBrowser(targetId, filter, defaultPath) {
+// Strip quant suffix to get model stem for mmproj matching.
+function _fbModelStem(filename) {
+    return filename
+        .replace(/\.gguf$/i, '')
+        .replace(/-?(Q\d[^.]*|IQ\d[^.]*|F16|BF16)$/i, '');
+}
+
+// Returns true if mmprojName looks like a companion for modelName.
+function _mmprojMatchesModel(mmprojName, modelName) {
+    const stem = _fbModelStem(modelName).toLowerCase();
+    const mp   = mmprojName.toLowerCase();
+    // Stem-in-mmproj: "Qwen2.5-VL-7B-Q4…" → stem "Qwen2.5-VL-7B" ∈ "qwen2.5-vl-7b-mmproj-f16"
+    if (stem.length > 4 && mp.includes(stem)) return true;
+    return false;
+}
+
+export function openFileBrowser(targetId, filter, defaultPath, context) {
     fbTargetId = targetId;
     fbFilter = filter === 'dir' ? '' : (filter || '');
+    fbContext = context || '';
     const modal = document.getElementById('file-browser-modal');
     const title = document.getElementById('fb-title');
     const selectBtn = modal.querySelector('.btn-modal-save');
@@ -88,8 +106,18 @@ export async function fileBrowserGo(path) {
             return;
         }
 
+        // In model-selection context: hide mmproj files; badge base models that have a companion.
+        let entries = data.entries;
+        let mmprojNames = [];
+        if (fbContext === 'model') {
+            mmprojNames = entries
+                .filter(e => !e.is_dir && e.name.toLowerCase().includes('mmproj'))
+                .map(e => e.name);
+            entries = entries.filter(e => e.is_dir || !e.name.toLowerCase().includes('mmproj'));
+        }
+
         // eslint-disable-next-line no-unsanitized/property -- all server strings (name, path, size_display) wrapped in escapeHtml()
-        entriesEl.innerHTML = data.entries.map(e => {
+        entriesEl.innerHTML = entries.map(e => {
             const name = escapeHtml(e.name);
             const size = escapeHtml(e.size_display || '');
             if (e.is_dir) {
@@ -97,9 +125,20 @@ export async function fileBrowserGo(path) {
                     '<span class="fb-entry-icon">\u{1F4C1}</span>' +
                     '<span class="fb-entry-name">' + name + '</span></div>';
             } else {
+                let badge = '';
+                if (fbContext === 'model' && mmprojNames.length > 0) {
+                    const matched = mmprojNames.some(mp => _mmprojMatchesModel(mp, e.name));
+                    if (matched) {
+                        badge = '<span class="fb-mmproj-badge fb-mmproj-matched" title="A companion mmproj file was found in this folder">mmproj ✓</span>';
+                    } else {
+                        // Dir has unmatched mmproj files — softer hint
+                        badge = '<span class="fb-mmproj-badge" title="mmproj file(s) present in this folder">mmproj</span>';
+                    }
+                }
                 return `<div class="fb-entry fb-entry-file fb-match" data-path="${escapeHtml(e.path)}">` +
                     '<span class="fb-entry-icon">\u{1F4C4}</span>' +
                     '<span class="fb-entry-name">' + name + '</span>' +
+                    badge +
                     '<span class="fb-entry-size">' + size + '</span></div>';
             }
         }).join('');

@@ -630,6 +630,24 @@ button:disabled {
   padding-left: 12px;
 }
 
+.fb-mmproj-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.12);
+  color: rgba(148, 151, 255, 0.75);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.fb-mmproj-badge.fb-mmproj-matched {
+  background: rgba(16, 185, 129, 0.12);
+  color: rgb(52, 211, 153);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
 .fb-empty {
   padding: 24px 16px;
   text-align: center;
