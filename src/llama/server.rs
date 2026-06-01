@@ -186,6 +186,22 @@ pub struct ServerConfig {
     pub api_key: Option<String>,
     #[serde(default)]
     pub benchmark_mode: bool,
+    // Thinking / chain-of-thought control
+    // enable_thinking and preserve_thinking are passed as --chat-template-kwargs JSON.
+    // Command::arg() bypasses the shell on all platforms — no quoting needed.
+    #[serde(default)]
+    pub enable_thinking: Option<bool>,
+    #[serde(default)]
+    pub preserve_thinking: Option<bool>,
+    /// --reasoning on|off|auto
+    #[serde(default)]
+    pub reasoning: Option<String>,
+    /// --reasoning-budget N: -1 = unlimited, 0 = disabled, N = token cap
+    #[serde(default)]
+    pub reasoning_budget: Option<i32>,
+    /// --reasoning-budget-message STRING: text appended after thinking block
+    #[serde(default)]
+    pub reasoning_budget_message: Option<String>,
 }
 
 pub async fn start_server(
@@ -483,6 +499,40 @@ pub async fn start_server(
     {
         cmd.arg("--chat-template-file").arg(ct);
     }
+
+    // Thinking / chain-of-thought control.
+    // --chat-template-kwargs takes a raw JSON string. Command::arg() passes it
+    // directly to the process without shell interpretation on all platforms,
+    // so no quoting or escaping is needed regardless of OS.
+    {
+        let mut kwargs = serde_json::Map::new();
+        if let Some(et) = config.enable_thinking {
+            kwargs.insert("enable_thinking".into(), serde_json::json!(et));
+        }
+        if let Some(pt) = config.preserve_thinking {
+            kwargs.insert("preserve_thinking".into(), serde_json::json!(pt));
+        }
+        if !kwargs.is_empty() {
+            let json = serde_json::to_string(&kwargs).unwrap_or_default();
+            cmd.arg("--chat-template-kwargs").arg(json);
+        }
+    }
+    if let Some(ref mode) = config.reasoning
+        && !mode.is_empty()
+    {
+        cmd.arg("--reasoning").arg(mode);
+    }
+    if let Some(budget) = config.reasoning_budget {
+        cmd.arg("--reasoning-budget").arg(budget.to_string());
+    }
+    if let Some(ref msg) = config.reasoning_budget_message
+        && !msg.is_empty()
+    {
+        cmd.arg("--reasoning-budget-message").arg(msg);
+    }
+
+    // Always enable metrics endpoint (/metrics) — used by the dashboard
+    cmd.arg("--metrics");
 
     // Spawn V2: multimodal projector
     if let Some(ref mp) = config.mmproj

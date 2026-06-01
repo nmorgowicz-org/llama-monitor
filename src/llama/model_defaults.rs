@@ -16,6 +16,18 @@ pub struct ModelDefaults {
     /// 0.0 = disabled (default).
     pub presence_penalty: f32,
     pub max_tokens: u64,
+    /// --chat-template-kwargs {"enable_thinking": ...} — toggles CoT reasoning.
+    /// None means the flag is not set (server default).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_thinking: Option<bool>,
+    /// --chat-template-kwargs {"preserve_thinking": ...} — include prior reasoning
+    /// in multi-turn context (Qwen3.6 series).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preserve_thinking: Option<bool>,
+    /// --reasoning-budget N: -1 = unlimited, 0 = disabled, N = token cap.
+    /// None means the flag is not set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_budget: Option<i32>,
 }
 
 impl Default for ModelDefaults {
@@ -28,6 +40,9 @@ impl Default for ModelDefaults {
             repeat_penalty: 1.1,
             presence_penalty: 0.0,
             max_tokens: 2048,
+            enable_thinking: None,
+            preserve_thinking: None,
+            reasoning_budget: None,
         }
     }
 }
@@ -55,7 +70,7 @@ pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -
             && (lower.contains("27b") || lower.contains("35b") || lower.contains("a3b"));
 
     if is_qwen36 {
-        // https://unsloth.ai/docs/models/qwen3.6 — recommended max_tokens: 32k
+        // https://unsloth.ai/docs/models/qwen3.6
         let thinking_general = ModelDefaults {
             temperature: 1.0,
             top_p: 0.95,
@@ -64,6 +79,9 @@ pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -
             repeat_penalty: 1.0,
             presence_penalty: 1.5,
             max_tokens: 32768,
+            enable_thinking: Some(true),
+            preserve_thinking: Some(true),
+            reasoning_budget: None,
         };
         let thinking_coding = ModelDefaults {
             temperature: 0.6,
@@ -73,6 +91,9 @@ pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -
             repeat_penalty: 1.0,
             presence_penalty: 0.0,
             max_tokens: 32768,
+            enable_thinking: Some(true),
+            preserve_thinking: Some(true),
+            reasoning_budget: None,
         };
         return vec![
             ModelPreset {
@@ -96,6 +117,9 @@ pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -
             repeat_penalty: 1.0,
             presence_penalty: 1.5,
             max_tokens: 2048,
+            enable_thinking: None,
+            preserve_thinking: None,
+            reasoning_budget: None,
         };
         let ocr = ModelDefaults {
             temperature: 0.6,
@@ -105,6 +129,9 @@ pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -
             repeat_penalty: 1.0,
             presence_penalty: 1.5,
             max_tokens: 2048,
+            enable_thinking: None,
+            preserve_thinking: None,
+            reasoning_budget: None,
         };
         return vec![
             ModelPreset {
@@ -173,10 +200,12 @@ pub fn get_model_defaults(name_or_repo: &str, _size_bytes: u64, tags: &[String])
         d.repeat_penalty = 1.0;
         d.presence_penalty = 1.5;
         d.max_tokens = 32768;
+        d.enable_thinking = Some(true);
+        d.preserve_thinking = Some(true);
         return d;
     }
-    // Gemma 4 family: Unsloth-recommended defaults.
-    // https://docs.unsloth.ai/docs/quick-connects/gemma-4
+    // Gemma 4 family: Unsloth deployment guide defaults.
+    // https://unsloth.ai/docs — temp=1.0, top_p=0.95, top_k=64, enable_thinking=true
     else if (lower.contains("gemma-4") || lower.contains("gemma4"))
         && (lower.contains("2b")
             || lower.contains("4b")
@@ -189,6 +218,7 @@ pub fn get_model_defaults(name_or_repo: &str, _size_bytes: u64, tags: &[String])
         d.top_k = 64;
         d.min_p = 0.0;
         d.repeat_penalty = 1.0;
+        d.enable_thinking = Some(true);
     }
     // Family-specific tweaks (applied first)
     else if lower.contains("llama") || lower.contains("meta-llama") {

@@ -3755,6 +3755,35 @@
   border-color: rgba(99, 102, 241, 0.55);
   color: #a5b4fc;
 }
+.thinking-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.thinking-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.thinking-toggle-row input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: rgba(99, 102, 241, 0.9);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.thinking-toggle-row:hover {
+  color: var(--color-text-primary);
+}
+
 .sampling-params-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

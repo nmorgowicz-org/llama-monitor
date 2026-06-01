@@ -2710,6 +2710,9 @@ fn api_model_defaults(
                         "repeat_penalty": defaults.repeat_penalty,
                         "presence_penalty": defaults.presence_penalty,
                         "max_tokens": defaults.max_tokens,
+                        "enable_thinking": defaults.enable_thinking,
+                        "preserve_thinking": defaults.preserve_thinking,
+                        "reasoning_budget": defaults.reasoning_budget,
                         "presets": presets,
                     }),
                 )))

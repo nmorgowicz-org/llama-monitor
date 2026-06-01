@@ -186,6 +186,11 @@ export const wizardState = {
     repeatPenalty: null,
     presencePenalty: null,
     seed: null,
+    enableThinking: null,
+    preserveThinking: null,
+    reasoningBudget: null,
+    reasoningMode: null,
+    reasoningBudgetMessage: null,
   },
   access: {
     port: 8001,
@@ -3565,6 +3570,10 @@ function _applyPresetToHardware(preset) {
   if (preset.repeat_penalty != null) h.repeatPenalty = preset.repeat_penalty;
   h.presencePenalty = (preset.presence_penalty != null && preset.presence_penalty > 0)
     ? preset.presence_penalty : null;
+  h.enableThinking   = preset.enable_thinking   ?? null;
+  h.preserveThinking = preset.preserve_thinking ?? null;
+  h.reasoningBudget  = preset.reasoning_budget  ?? null;
+  _syncThinkingFields();
 }
 
 function _renderSamplingPresetPills(presets) {
@@ -3631,6 +3640,10 @@ async function _fetchAndApplyModelSamplingDefaults() {
     if (h.presencePenalty == null && data.presence_penalty != null && data.presence_penalty > 0) {
       h.presencePenalty = data.presence_penalty;
     }
+    if (h.enableThinking == null && data.enable_thinking != null) h.enableThinking = data.enable_thinking;
+    if (h.preserveThinking == null && data.preserve_thinking != null) h.preserveThinking = data.preserve_thinking;
+    if (h.reasoningBudget == null && data.reasoning_budget != null) h.reasoningBudget = data.reasoning_budget;
+    _syncThinkingFields();
 
     // Render mode pills if multiple presets are available
     _renderSamplingPresetPills(data.presets || []);
@@ -3812,6 +3825,62 @@ function _syncSamplingFields() {
   if (dom.apiKeyInput) dom.apiKeyInput.value = wizardState.access.apiKey || '';
 }
 
+function _syncThinkingFields() {
+  const h = wizardState.hardware;
+  const section = document.getElementById('spawn-thinking-section');
+  const hasThinking = h.enableThinking != null || h.preserveThinking != null;
+
+  if (section) {
+    section.style.display = hasThinking ? '' : 'none';
+    const preserveRow = document.getElementById('spawn-preserve-thinking-row');
+    if (preserveRow) preserveRow.style.display = h.preserveThinking != null ? '' : 'none';
+  }
+
+  const chk = id => {
+    const el = document.getElementById(id);
+    if (el) el.checked = !!wizardState.hardware[id === 'spawn-enable-thinking' ? 'enableThinking' : 'preserveThinking'];
+  };
+  chk('spawn-enable-thinking');
+  chk('spawn-preserve-thinking');
+
+  const sel = document.getElementById('spawn-reasoning-mode');
+  if (sel) sel.value = h.reasoningMode || '';
+  const budgetEl = document.getElementById('spawn-reasoning-budget');
+  if (budgetEl) budgetEl.value = h.reasoningBudget != null ? String(h.reasoningBudget) : '';
+  const msgEl = document.getElementById('spawn-reasoning-budget-message');
+  if (msgEl) msgEl.value = h.reasoningBudgetMessage || '';
+}
+
+function _bindThinkingFields() {
+  const bindChk = (id, key) => {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.bound) return;
+    el.dataset.bound = '1';
+    el.addEventListener('change', () => { wizardState.hardware[key] = el.checked; });
+  };
+  const bindInput = (id, key, isInt = false) => {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.bound) return;
+    el.dataset.bound = '1';
+    el.addEventListener('input', () => {
+      const raw = el.value.trim();
+      if (raw === '') { wizardState.hardware[key] = null; return; }
+      wizardState.hardware[key] = isInt ? parseInt(raw, 10) : raw;
+    });
+  };
+  const bindSel = (id, key) => {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.bound) return;
+    el.dataset.bound = '1';
+    el.addEventListener('change', () => { wizardState.hardware[key] = el.value || null; });
+  };
+  bindChk('spawn-enable-thinking', 'enableThinking');
+  bindChk('spawn-preserve-thinking', 'preserveThinking');
+  bindSel('spawn-reasoning-mode', 'reasoningMode');
+  bindInput('spawn-reasoning-budget', 'reasoningBudget', true);
+  bindInput('spawn-reasoning-budget-message', 'reasoningBudgetMessage');
+}
+
 function _bindSamplingFields() {
   const bind = (id, key, isInt = false) => {
     const el = document.getElementById(id);
@@ -3830,6 +3899,7 @@ function _bindSamplingFields() {
   bind('spawn-min-p', 'minP');
   bind('spawn-repeat-penalty', 'repeatPenalty');
   bind('spawn-presence-penalty', 'presencePenalty');
+  _bindThinkingFields();
 }
 
 // ── Save as preset ────────────────────────────────────────────────────────────
@@ -4009,6 +4079,12 @@ function buildSpawnPayload() {
     repeat_penalty: h.repeatPenalty != null ? h.repeatPenalty : null,
     presence_penalty: h.presencePenalty != null && h.presencePenalty > 0 ? h.presencePenalty : null,
     seed: h.seed != null ? h.seed : null,
+    // Thinking / reasoning
+    enable_thinking: h.enableThinking,
+    preserve_thinking: h.preserveThinking,
+    reasoning_budget: h.reasoningBudget,
+    reasoning: h.reasoningMode || null,
+    reasoning_budget_message: h.reasoningBudgetMessage || null,
     api_key: wizardState.access.apiKey || null,
     chat_template_file: wizardState.model.chatTemplatePath || null,
     profile: wizardState.profile,
