@@ -2155,13 +2155,6 @@ const TOOL_ICONS = {
   'HuggingFace': '🤗',
 };
 
-function formatBytes(bytes) {
-  if (!bytes) return '';
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
-  if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
-  return `${Math.round(bytes / 1e3)} KB`;
-}
-
 async function loadThirdPartyModels() {
   const listWrap = document.getElementById('import-model-list-wrap');
   const listLoading = document.getElementById('import-model-list-loading');
