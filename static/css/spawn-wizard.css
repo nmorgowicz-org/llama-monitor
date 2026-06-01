@@ -260,17 +260,20 @@
 }
 
 /* Hardware step: each column scrolls independently.
-   wizard-body must NOT be the scroll container here — without overflow:hidden
-   on it, height:100% on the step resolves to scroll-height (not viewport height)
-   and wizard-body scrolls the whole thing instead of letting columns scroll. */
-#wizard-step-2.active {
-  height: 100%;
-  grid-template-columns: minmax(0, 1fr) 310px;
-  grid-template-rows: 1fr;
+   .hw-step-active is added to .wizard-body by JS when step 2 is entered and
+   removed when leaving. Making wizard-body a flex column lets the grid step use
+   flex:1 to fill the exact available height — no fragile height:100% needed. */
+.wizard-body.hw-step-active {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
-.wizard-body:has(#wizard-step-2.active) {
-  overflow: hidden;
+#wizard-step-2.active {
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  grid-template-rows: 1fr;
 }
 
 #wizard-step-2 .wizard-main {

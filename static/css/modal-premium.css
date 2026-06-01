@@ -514,11 +514,7 @@
     backdrop-filter: blur(16px);
 }
 
-/* Must sit above spawn wizard (1250) and settings modal (1300) */
-#file-browser-modal.open,
-#file-browser-modal.active {
-    z-index: 1400;
-}
+
 
 #file-browser-modal .modal {
     position: relative;

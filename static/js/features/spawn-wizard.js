@@ -1027,9 +1027,18 @@ function showStep(index) {
   dom.steps?.forEach(s => s.classList.remove('active'));
   document.getElementById(`wizard-step-${index}`)?.classList.add('active');
 
-  // Scroll the wizard body to the top whenever changing steps.
+  // Toggle hw-step-active on wizard-body: step 2 needs each column to scroll
+  // independently. The class makes wizard-body a flex column with overflow:hidden
+  // so the grid step can use flex:1 to fill the exact available height.
   const wizardBody = document.querySelector('.wizard-body');
-  if (wizardBody) wizardBody.scrollTop = 0;
+  if (wizardBody) {
+    if (index === 2) {
+      wizardBody.classList.add('hw-step-active');
+    } else {
+      wizardBody.classList.remove('hw-step-active');
+      wizardBody.scrollTop = 0;
+    }
+  }
 
   dom.stepBadges?.forEach(b => {
     const s = Number(b.dataset.step);
@@ -3408,6 +3417,12 @@ function showCtxFitWarning(ctx, useCase, manualSet = false) {
 
 // ── Model directory switcher ──────────────────────────────────────────────────
 
+function _openSettingsModels(e) {
+  e.preventDefault();
+  window.openSettingsModal?.();
+  setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
+}
+
 function _buildDirSwitcher(container, targetInputId, allDirs) {
   container.innerHTML = '';
   container.style.display = 'flex';
@@ -3415,31 +3430,30 @@ function _buildDirSwitcher(container, targetInputId, allDirs) {
   container.style.flexWrap = 'wrap';
   container.style.gap = '6px';
 
-  const label = document.createElement('span');
-  label.className = 'dir-switcher-label';
-  label.textContent = 'Browse from:';
-  container.appendChild(label);
+  if (allDirs.length >= 2) {
+    const label = document.createElement('span');
+    label.className = 'dir-switcher-label';
+    label.textContent = 'Browse from:';
+    container.appendChild(label);
 
-  allDirs.forEach(dir => {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'dir-switcher-chip';
-    const parts = dir.replace(/\\/g, '/').split('/').filter(Boolean);
-    chip.textContent = parts.slice(-2).join('/') || dir;
-    chip.title = dir;
-    chip.addEventListener('click', () => openDeferredFileBrowser(targetInputId, 'gguf', dir));
-    container.appendChild(chip);
-  });
+    allDirs.forEach(dir => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'dir-switcher-chip';
+      const parts = dir.replace(/\\/g, '/').split('/').filter(Boolean);
+      chip.textContent = parts.slice(-2).join('/') || dir;
+      chip.title = dir;
+      chip.addEventListener('click', () => openDeferredFileBrowser(targetInputId, 'gguf', dir));
+      container.appendChild(chip);
+    });
+  }
 
+  // Always show the settings link so users can add/manage model folder locations
   const settingsLink = document.createElement('a');
   settingsLink.href = '#';
   settingsLink.className = 'dir-switcher-settings-link';
-  settingsLink.addEventListener('click', e => {
-    e.preventDefault();
-    window.openSettingsModal?.();
-    setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
-  });
-  settingsLink.textContent = '+ Add folder';
+  settingsLink.addEventListener('click', _openSettingsModels);
+  settingsLink.textContent = allDirs.length >= 2 ? '+ Add folder' : 'Manage model folders in Settings →';
   container.appendChild(settingsLink);
 }
 
@@ -3458,12 +3472,7 @@ async function _loadModelDirSwitcher() {
     const extras = Array.isArray(s.extra_models_dirs) ? s.extra_models_dirs.filter(Boolean) : [];
     const allDirs = [primary, ...extras].filter(Boolean);
 
-    if (allDirs.length < 2) {
-      if (localContainer)  localContainer.style.display  = 'none';
-      if (importContainer) importContainer.style.display = 'none';
-      return;
-    }
-
+    // Always render so the settings link is available regardless of dir count
     if (localContainer)  _buildDirSwitcher(localContainer,  'spawn-model-path',  allDirs);
     if (importContainer) _buildDirSwitcher(importContainer, 'spawn-import-path', allDirs);
   } catch { /* ignore */ }
