@@ -3259,7 +3259,7 @@ fn api_hf_download(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::AtomicU64;
     static HF_DOWNLOAD_LAST_START: AtomicU64 = AtomicU64::new(0);
 
     warp::path!("api" / "hf" / "download")
@@ -3279,8 +3279,8 @@ fn api_hf_download(
                     .elapsed()
                     .unwrap_or_default()
                     .as_secs();
-                let last = HF_DOWNLOAD_LAST_START.load(Ordering::Relaxed);
-                if now.saturating_sub(last) < 10 {
+                let (dl_ok, _) = try_cooldown(&HF_DOWNLOAD_LAST_START, now, 10);
+                if !dl_ok {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::with_status(
                             warp::reply::json(&serde_json::json!({
@@ -3291,7 +3291,6 @@ fn api_hf_download(
                         ),
                     ));
                 }
-                HF_DOWNLOAD_LAST_START.store(now, Ordering::Relaxed);
 
                 let repo_id = body["repo_id"].as_str().unwrap_or("").trim().to_string();
                 let file_path = body["file_path"].as_str().unwrap_or("").trim().to_string();
@@ -3445,7 +3444,7 @@ fn api_third_party_models(
 // ── P3.3: Model Introspection ────────────────────────────────────────────────
 
 fn api_model_introspect(
-    _state: AppState,
+    state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "model" / "introspect")
@@ -3454,6 +3453,7 @@ fn api_model_introspect(
         .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
+            let state = state.clone();
             async move {
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
@@ -3478,11 +3478,34 @@ fn api_model_introspect(
                         })),
                     ));
                 }
-                if !std::path::Path::new(&model_path).exists() {
+                // Security: resolve the path and confirm it's under an allowed root
+                // (home directory or configured models directory).
+                let canon = match std::path::Path::new(&model_path).canonicalize() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Model file not found"
+                            })),
+                        ));
+                    }
+                };
+                let models_dir = get_effective_models_dir(&state)
+                    .unwrap_or_else(|| cfg.default_models_dir.clone());
+                let in_models_dir = models_dir
+                    .canonicalize()
+                    .map(|d| canon.starts_with(&d))
+                    .unwrap_or(false);
+                let in_home = dirs::home_dir()
+                    .and_then(|h| h.canonicalize().ok())
+                    .map(|h| canon.starts_with(&h))
+                    .unwrap_or(false);
+                if !in_models_dir && !in_home {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
                             "ok": false,
-                            "error": "Model file not found"
+                            "error": "model_path is outside allowed directories"
                         })),
                     ));
                 }
@@ -3930,7 +3953,7 @@ fn api_auth_login(
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
-                let (ok, _remaining) = try_cooldown(&LOGIN_LAST_ATTEMPT, now, 2);
+                let (ok, _remaining) = try_cooldown(&LOGIN_LAST_ATTEMPT, now, 10);
                 if !ok {
                     return Box::new(warp::reply::with_status(
                         warp::reply::json(&serde_json::json!({
@@ -5776,7 +5799,7 @@ fn api_browse(
                                         "path": requested,
                                         "error": "Path not found"
                                     })),
-                                    warp::http::StatusCode::OK,
+                                    warp::http::StatusCode::NOT_FOUND,
                                 ),
                             ));
                         }
@@ -5790,7 +5813,7 @@ fn api_browse(
                                     "path": dir.display().to_string(),
                                     "error": "Path not allowed"
                                 })),
-                                warp::http::StatusCode::OK,
+                                warp::http::StatusCode::FORBIDDEN,
                             ),
                         ));
                     }
@@ -5802,7 +5825,7 @@ fn api_browse(
                                     "path": dir.display().to_string(),
                                     "error": "Not a directory"
                                 })),
-                                warp::http::StatusCode::OK,
+                                warp::http::StatusCode::BAD_REQUEST,
                             ),
                         ));
                     }
@@ -7473,26 +7496,14 @@ fn bind_host_is_loopback(bind_host: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
-fn host_header_is_loopback(host_header: Option<&str>) -> bool {
-    let Some(host) = host_header.map(str::trim).filter(|s| !s.is_empty()) else {
-        return false;
-    };
-    let host = host.trim_matches(['[', ']']);
-    let host_only = host.rsplit_once(':').map(|(name, _)| name).unwrap_or(host);
-    bind_host_is_loopback(host_only)
-}
-
-fn token_bootstrap_allowed(
-    auth_manager: &AuthManager,
-    bind_host: &str,
-    host_header: Option<&str>,
-) -> bool {
+fn token_bootstrap_allowed(auth_manager: &AuthManager, bind_host: &str) -> bool {
     // No Auth mode: fully open (local-first).
     if !auth_manager.has_any() {
         return true;
     }
-    // Auth configured: restrict token bootstrap to loopback clients.
-    bind_host_is_loopback(bind_host) || host_header_is_loopback(host_header)
+    // Auth configured: only allow bootstrap when bound to loopback.
+    // Do NOT trust the Host header — it is attacker-controlled.
+    bind_host_is_loopback(bind_host)
 }
 
 // GET /api/internal/api-token - Return internal API token for UI use
@@ -7505,19 +7516,13 @@ fn api_internal_token(
         .and(warp::get())
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::header::optional::<String>("cookie"))
-        .and(warp::header::optional::<String>("host"))
         .and(with_app_config(app_config))
         .map(
-            move |auth: Option<String>,
-                  cookie: Option<String>,
-                  host_header: Option<String>,
-                  cfg: Arc<AppConfig>| {
+            move |auth: Option<String>, cookie: Option<String>, cfg: Arc<AppConfig>| {
                 let already_authenticated = auth_manager
                     .authenticate_request(auth.as_deref(), cookie.as_deref())
                     || check_api_token(&auth, &cfg);
-                if !already_authenticated
-                    && !token_bootstrap_allowed(&auth_manager, &bind_host, host_header.as_deref())
-                {
+                if !already_authenticated && !token_bootstrap_allowed(&auth_manager, &bind_host) {
                     return Box::new(warp::reply::with_status(
                         warp::reply::json(&serde_json::json!({ "error": "forbidden" })),
                         warp::http::StatusCode::FORBIDDEN,
@@ -7540,19 +7545,13 @@ fn api_db_admin_token(
         .and(warp::get())
         .and(warp::header::optional::<String>("authorization"))
         .and(warp::header::optional::<String>("cookie"))
-        .and(warp::header::optional::<String>("host"))
         .and(with_app_config(app_config))
         .map(
-            move |auth: Option<String>,
-                  cookie: Option<String>,
-                  host_header: Option<String>,
-                  cfg: Arc<AppConfig>| {
+            move |auth: Option<String>, cookie: Option<String>, cfg: Arc<AppConfig>| {
                 let already_authenticated = auth_manager
                     .authenticate_request(auth.as_deref(), cookie.as_deref())
                     || check_api_token(&auth, &cfg);
-                if !already_authenticated
-                    && !token_bootstrap_allowed(&auth_manager, &bind_host, host_header.as_deref())
-                {
+                if !already_authenticated && !token_bootstrap_allowed(&auth_manager, &bind_host) {
                     return Box::new(warp::reply::with_status(
                         warp::reply::json(&serde_json::json!({ "error": "forbidden" })),
                         warp::http::StatusCode::FORBIDDEN,
@@ -10005,37 +10004,35 @@ mod tests {
     #[test]
     fn token_bootstrap_allows_loopback_without_basic_auth() {
         let auth = AuthManager::new(None, None, &TlsMode::None);
-        assert!(token_bootstrap_allowed(&auth, "127.0.0.1", None));
-        assert!(token_bootstrap_allowed(&auth, "localhost", None));
+        assert!(token_bootstrap_allowed(&auth, "127.0.0.1"));
+        assert!(token_bootstrap_allowed(&auth, "localhost"));
     }
 
     #[test]
     fn token_bootstrap_allows_all_when_no_auth_configured() {
         let auth = AuthManager::new(None, None, &TlsMode::None);
         // No Auth mode: fully open (local-first)
-        assert!(token_bootstrap_allowed(&auth, "0.0.0.0", None));
-        assert!(token_bootstrap_allowed(&auth, "192.168.2.44", None));
-    }
-
-    #[test]
-    fn token_bootstrap_allows_loopback_host_on_non_loopback_bind() {
-        let auth = AuthManager::new(None, None, &TlsMode::None);
-        assert!(token_bootstrap_allowed(
-            &auth,
-            "0.0.0.0",
-            Some("localhost:8080"),
-        ));
+        assert!(token_bootstrap_allowed(&auth, "0.0.0.0"));
+        assert!(token_bootstrap_allowed(&auth, "192.168.2.44"));
     }
 
     #[test]
     fn token_bootstrap_allows_non_loopback_host_when_no_auth() {
         let auth = AuthManager::new(None, None, &TlsMode::None);
-        // No Auth mode: fully open
-        assert!(token_bootstrap_allowed(
-            &auth,
-            "0.0.0.0",
-            Some("192.168.2.44:8080"),
-        ));
+        // No Auth mode: fully open regardless of bind address
+        assert!(token_bootstrap_allowed(&auth, "0.0.0.0"));
+        assert!(token_bootstrap_allowed(&auth, "192.168.2.44"));
+    }
+
+    #[test]
+    fn token_bootstrap_rejects_spoofed_host_header_on_non_loopback_bind() {
+        // Auth configured + non-loopback bind: Host header must NOT be trusted.
+        let auth = AuthManager::new(
+            AuthManager::parse_credentials("admin:secret"),
+            None,
+            &TlsMode::None,
+        );
+        assert!(!token_bootstrap_allowed(&auth, "0.0.0.0"));
     }
 
     #[test]
@@ -10045,8 +10042,8 @@ mod tests {
             None,
             &TlsMode::None,
         );
-        assert!(token_bootstrap_allowed(&auth, "127.0.0.1", None));
-        assert!(!token_bootstrap_allowed(&auth, "0.0.0.0", None));
+        assert!(token_bootstrap_allowed(&auth, "127.0.0.1"));
+        assert!(!token_bootstrap_allowed(&auth, "0.0.0.0"));
     }
 
     #[test]
@@ -10056,8 +10053,8 @@ mod tests {
             AuthManager::parse_credentials("admin:secret"),
             &TlsMode::None,
         );
-        assert!(token_bootstrap_allowed(&auth, "127.0.0.1", None));
-        assert!(!token_bootstrap_allowed(&auth, "0.0.0.0", None));
+        assert!(token_bootstrap_allowed(&auth, "127.0.0.1"));
+        assert!(!token_bootstrap_allowed(&auth, "0.0.0.0"));
     }
 
     #[tokio::test]

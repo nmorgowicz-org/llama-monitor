@@ -984,6 +984,11 @@ impl ChatStorage {
         let trimmed = sql.trim();
         let upper = trimmed.to_uppercase();
 
+        // Reject multi-statement queries — defense-in-depth against semicolon injection.
+        if trimmed.contains(';') {
+            return Err(anyhow::anyhow!("Multi-statement queries are not allowed"));
+        }
+
         // Blocklist: disallow dangerous operations
         let dangerous_keywords = [
             "ATTACH DATABASE",
@@ -1014,9 +1019,6 @@ impl ChatStorage {
             "PRAGMA temp_store",
             "PRAGMA mmap_size",
             "PRAGMA locking_mode",
-            "PRAGMA wal_checkpoint(PASSIVE)",
-            "PRAGMA wal_checkpoint(FULL)",
-            "PRAGMA wal_checkpoint(TRUNCATE)",
             "PRAGMA wal_checkpoint(PASSIVE)",
             "PRAGMA wal_checkpoint(FULL)",
             "PRAGMA wal_checkpoint(TRUNCATE)",
