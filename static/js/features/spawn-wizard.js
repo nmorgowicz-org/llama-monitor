@@ -1410,9 +1410,9 @@ function renderHfDiscoverPills() {
     pill.dataset.catId = cat.id;
     pill.addEventListener('click', () => {
       // Deactivate all discover + quantizer pills
-      container.querySelectorAll('.hf-discover-pill').forEach(p => p.classList.remove('active'));
-      dom.hfQuickpicks?.querySelectorAll('.hf-qp-btn').forEach(b => b.classList.remove('active'));
-      pill.classList.add('active');
+      container.querySelectorAll('.hf-discover-pill').forEach(p => p.classList.remove('active', 'loading'));
+      dom.hfQuickpicks?.querySelectorAll('.hf-qp-btn').forEach(b => b.classList.remove('active', 'loading'));
+      pill.classList.add('active', 'loading');
       wizardState.hfBrowseAuthor = null;
       if (dom.hfRepoInput) dom.hfRepoInput.value = '';
       // When the pill's own query is empty, the pill's sort is essential for the
@@ -1597,10 +1597,10 @@ async function loadHfQuickPicks() {
       btn.title = q.description + (q.note ? `\n\n${q.note}` : '');
       btn.dataset.author = q.username;
       btn.addEventListener('click', () => {
-        dom.hfQuickpicks?.querySelectorAll('.hf-qp-btn').forEach(b => b.classList.remove('active'));
+        dom.hfQuickpicks?.querySelectorAll('.hf-qp-btn').forEach(b => b.classList.remove('active', 'loading'));
         document.getElementById('hf-discover-pills')
-          ?.querySelectorAll('.hf-discover-pill').forEach(p => p.classList.remove('active'));
-        btn.classList.add('active');
+          ?.querySelectorAll('.hf-discover-pill').forEach(p => p.classList.remove('active', 'loading'));
+        btn.classList.add('active', 'loading');
         // Clear the repo input and show author models
         if (dom.hfRepoInput) dom.hfRepoInput.value = '';
         browseHfAuthor(q.username);
@@ -1731,9 +1731,18 @@ async function showHfSearchResults({ query, author, sort, limit }) {
 
   container.innerHTML = '<div class="hf-search-loading">Searching HuggingFace…</div>';
   container.style.display = '';
+  // Scroll the results into view so the user sees the loading state immediately
+  // without having to scroll — feedback at the point of interaction.
+  container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
   // Hide file list when showing search results
   if (dom.hfFileList) { dom.hfFileList.innerHTML = ''; dom.hfFileList.classList.remove('visible'); }
+
+  const clearPillLoading = () => {
+    dom.hfQuickpicks?.querySelectorAll('.hf-qp-btn').forEach(b => b.classList.remove('loading'));
+    document.getElementById('hf-discover-pills')
+      ?.querySelectorAll('.hf-discover-pill').forEach(p => p.classList.remove('loading'));
+  };
 
   try {
     const headers = window.authHeaders
@@ -1748,10 +1757,11 @@ async function showHfSearchResults({ query, author, sort, limit }) {
     };
 
     const resp = await fetch('/api/hf/search', { method: 'POST', headers, body: JSON.stringify(body) });
-    if (!resp.ok) { container.innerHTML = '<div class="hf-search-empty">Search failed.</div>'; return; }
+    if (!resp.ok) { clearPillLoading(); container.innerHTML = '<div class="hf-search-empty">Search failed.</div>'; return; }
     const data = await resp.json();
     const models = data.models || [];
 
+    clearPillLoading();
     container.innerHTML = '';
     if (!models.length) {
       container.innerHTML = '<div class="hf-search-empty">No models found.</div>';
@@ -1845,6 +1855,7 @@ async function showHfSearchResults({ query, author, sort, limit }) {
       container.appendChild(row);
     });
   } catch (err) {
+    clearPillLoading();
     const errEl = document.createElement('div');
     errEl.className = 'hf-search-empty';
     errEl.textContent = 'Error: ' + (err.message || String(err));

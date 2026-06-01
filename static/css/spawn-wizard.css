@@ -1388,6 +1388,15 @@
   background: rgba(99,102,241,0.18);
   color: #c7d2fe;
 }
+.hf-discover-pill.loading {
+  animation: pill-loading-pulse 0.9s ease-in-out infinite alternate;
+}
+@keyframes pill-loading-pulse {
+  from { opacity: 1; }
+  to   { opacity: 0.45; }
+}
+.reduce-motion .hf-discover-pill.loading,
+.reduce-motion .hf-qp-btn.loading { animation: none; opacity: 0.65; }
 
 /* Separator between discover pills row and quantizer row */
 .hf-discover-row + .hf-quickpick-row {
@@ -1620,6 +1629,9 @@
   border-color: rgba(99,102,241,0.7);
   background: rgba(99,102,241,0.15);
   color: #c7d2fe;
+}
+.hf-qp-btn.loading {
+  animation: pill-loading-pulse 0.9s ease-in-out infinite alternate;
 }
 .hf-qp-btn.hf-qp-imatrix { border-color: rgba(16,185,129,0.2); }
 .hf-qp-btn.hf-qp-imatrix:hover,
