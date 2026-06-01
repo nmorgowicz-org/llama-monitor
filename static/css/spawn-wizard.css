@@ -2217,16 +2217,35 @@
 
 /* ── Scenario cards ───────────────────────────────────────────────────────── */
 
+/* Scenario section header */
+.vsc-section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 14px;
+  margin-bottom: 6px;
+}
+.vsc-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted, #94a3b8);
+}
+.vsc-section-hint {
+  font-size: 10px;
+  color: var(--text-muted, #64748b);
+}
+
 .vram-scenarios {
   display: flex;
   gap: 8px;
-  margin-top: 14px;
   flex-wrap: wrap;
 }
 
 .vram-scenario-card {
   flex: 1;
-  min-width: 120px;
+  min-width: 110px;
   padding: 10px 12px;
   border-radius: 10px;
   border: 1.5px solid rgba(255,255,255,0.07);
@@ -2256,27 +2275,42 @@
   border-color: rgba(99,102,241,0.5);
 }
 
-.vsc-label {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted, #64748b);
-  margin-bottom: 3px;
+/* KV quant name — headline of the card */
+.vsc-quant-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text, #f1f5f9);
+  letter-spacing: 0.02em;
+  margin-bottom: 4px;
+}
+
+/* Context number row */
+.vsc-ctx-row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-bottom: 4px;
 }
 
 .vsc-ctx {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--text, #f1f5f9);
   font-variant-numeric: tabular-nums;
-  line-height: 1.1;
+  line-height: 1;
 }
 
-.vsc-kv {
+.vsc-ctx-unit {
   font-size: 10px;
   color: var(--text-muted, #94a3b8);
-  margin-top: 2px;
+  font-weight: 500;
+}
+
+/* Plain-English description */
+.vsc-desc {
+  font-size: 10px;
+  color: var(--text-muted, #94a3b8);
+  margin-bottom: 2px;
 }
 
 .vsc-rec-badge {
@@ -2306,6 +2340,120 @@
   100% { transform: scale(1);   opacity: 1; }
 }
 .reduce-motion .vsc-ctx.counting { animation: none; }
+
+/* ── Advanced KV details panel ──────────────────────────────────────────────── */
+
+.kv-advanced-details {
+  margin-top: 8px;
+}
+
+.kv-advanced-summary {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted, #64748b);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 0;
+  width: fit-content;
+}
+.kv-advanced-summary::-webkit-details-marker { display: none; }
+.kv-advanced-summary::before {
+  content: '›';
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1;
+  transition: transform 0.15s;
+  color: var(--color-text-muted, #64748b);
+}
+.kv-advanced-details[open] .kv-advanced-summary::before {
+  transform: rotate(90deg);
+}
+
+.kv-advanced-body {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.02);
+}
+
+.kv-advanced-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.kv-advanced-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 80px;
+}
+
+.kv-advanced-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted, #94a3b8);
+}
+
+/* ── Unified buffer toggle switch ───────────────────────────────────────────── */
+
+.kv-unified-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+  padding-bottom: 2px;
+}
+.kv-unified-toggle input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.kv-unified-track {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 34px;
+  height: 18px;
+  border-radius: 9999px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.15);
+  transition: background 0.2s, border-color 0.2s;
+  flex-shrink: 0;
+}
+.kv-unified-toggle input:checked ~ .kv-unified-track {
+  background: #6366f1;
+  border-color: #6366f1;
+}
+.kv-unified-thumb {
+  position: absolute;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.6);
+  transition: transform 0.2s, background 0.2s;
+}
+.kv-unified-toggle input:checked ~ .kv-unified-track .kv-unified-thumb {
+  transform: translateX(16px);
+  background: #fff;
+}
+.kv-unified-text {
+  font-size: 11px;
+  color: var(--color-text-muted, #94a3b8);
+  font-weight: 500;
+}
 
 /* ── MoE expert offload panel ─────────────────────────────────────────────── */
 
@@ -2427,9 +2575,12 @@
   border-color: rgba(17,24,39,0.1);
   background: rgba(255,255,255,0.7);
 }
-[data-theme="light"] .vsc-label { color: #64748b; }
-[data-theme="light"] .vsc-ctx  { color: #1e293b; }
-[data-theme="light"] .vsc-kv   { color: #64748b; }
+[data-theme="light"] .vsc-quant-name { color: #1e293b; }
+[data-theme="light"] .vsc-ctx        { color: #1e293b; }
+[data-theme="light"] .vsc-ctx-unit   { color: #64748b; }
+[data-theme="light"] .vsc-desc       { color: #64748b; }
+[data-theme="light"] .kv-unified-track { background: rgba(0,0,0,0.1); border-color: rgba(0,0,0,0.15); }
+[data-theme="light"] .kv-unified-thumb { background: rgba(0,0,0,0.35); }
 
 [data-theme="light"] .moe-offload-panel {
   background: rgba(124,58,237,0.05);
@@ -2562,6 +2713,48 @@
 
 .hardware-field-ctx { gap: 6px; }
 
+/* Context label row: label + model-max hint inline */
+.ctx-label-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.ctx-model-max-hint {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  background: rgba(99,102,241,0.15);
+  color: #a5b4fc;
+  white-space: nowrap;
+  cursor: default;
+}
+[data-theme="light"] .ctx-model-max-hint {
+  background: rgba(99,102,241,0.12);
+  color: #4f46e5;
+}
+
+/* Model-max quick-pick: visually distinct from generic picks */
+.ctx-pick-model-max {
+  border-color: rgba(99,102,241,0.4);
+  color: #a5b4fc;
+}
+[data-theme="light"] .ctx-pick-model-max { color: #4f46e5; }
+
+/* Card bottleneck note: shown when model training limit, not VRAM, is the ceiling */
+.vsc-limit-note {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(148,163,184,0.12);
+  color: #94a3b8;
+  align-self: center;
+  margin-left: 3px;
+  white-space: nowrap;
+}
+[data-theme="light"] .vsc-limit-note { color: #64748b; }
+
 .ctx-quick-picks {
   display: flex;
   flex-wrap: wrap;
@@ -2602,33 +2795,6 @@
   text-transform: uppercase;
 }
 
-/* KV cache field spans the full hardware-grid row. */
-.hardware-field-kv {
-  grid-column: 1 / -1;
-}
-
-/* KV cache row: two selects side by side */
-.kv-cache-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.kv-cache-row select { flex: 1; min-width: 0; }
-.kv-unified-toggle {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  font-size: var(--text-xs);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  white-space: nowrap;
-  user-select: none;
-}
-.kv-unified-toggle input[type="checkbox"] {
-  accent-color: #6366f1;
-  cursor: pointer;
-}
 
 /* Minimum context fit warning */
 .ctx-fit-warning {

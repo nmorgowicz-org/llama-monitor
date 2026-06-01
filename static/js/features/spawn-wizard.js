@@ -902,6 +902,7 @@ function showStep(index) {
 
   if (index === 2) {
     // Entering hardware step — refresh VRAM, then render model context + new sections
+    updateCtxModelMaxHint();
     fetchGpuVram().then(() => {
       scheduleVramUpdate();
       renderHardwareModelHeader();
@@ -1094,6 +1095,7 @@ async function doIntrospect(path) {
     if (m.n_ctx_train) {
       wizardState.model.nCtxTrain = m.n_ctx_train;
       updateCtxTrainWarning();
+      updateCtxModelMaxHint();
     }
 
     scheduleVramUpdate();
@@ -1928,6 +1930,8 @@ async function fetchHfFiles(repo) {
     if (!files.length) { dom.hfFileList.innerHTML = '<div class="hf-file-empty">No GGUF files found in this repo.</div>'; return; }
 
     const vramGb = cachedVram / (1024 ** 3);
+    let autoSelectFn = null;      // recommended quant match
+    let firstSelectFn = null;     // first non-mmproj file, fallback
 
     files.forEach(file => {
       const fname = file.path || file.name || '';
@@ -2020,8 +2024,21 @@ async function fetchHfFiles(repo) {
       item.addEventListener('click', selectFile);
       item.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectFile(); } });
 
+      if (!file.is_mmproj) {
+        if (!firstSelectFn) firstSelectFn = selectFile;
+        if (!autoSelectFn && file.label && vramGb > 0 && file.label === getRecommendedQuant(vramGb)) {
+          autoSelectFn = selectFile;
+        }
+      }
+
       dom.hfFileList.appendChild(item);
     });
+
+    // Auto-select the recommended file (or first file) so the user can hit Next without manually clicking
+    if (!wizardState.model.hfFile) {
+      const autoFn = autoSelectFn || firstSelectFn;
+      if (autoFn) autoFn();
+    }
   } catch {
     dom.hfFileList.innerHTML = '<div class="hf-file-empty">Error loading files. Check the repo ID and your HF token.</div>';
   }
@@ -2367,50 +2384,70 @@ function renderScenarioCards(modelBytes, arch, availVram) {
   const uc = wizardState.useCase;
 
   const scenarios = [
-    { label: 'Max coherence', kk: 'q8_0', kv: 'q8_0', note: 'q8_0 KV — min for agentic', rec: uc !== 'roleplay' },
-    { label: 'Max context',   kk: 'q4_0', kv: 'q4_0', note: 'q4_0 KV — roleplay OK, agentic ⚠', rec: uc === 'roleplay', warnAgentic: uc === 'agentic' },
-    { label: 'Reference',     kk: 'f16',  kv: 'f16',  note: 'f16 KV — full precision', rec: false },
+    { quant: 'q8_0', kk: 'q8_0', kv: 'q8_0', desc: uc === 'agentic' ? 'Required for agentic use' : 'Balanced quality', rec: uc !== 'roleplay' },
+    { quant: 'q4_0', kk: 'q4_0', kv: 'q4_0', desc: uc === 'agentic' ? 'Not recommended for agents' : 'More context, great for RP', rec: uc === 'roleplay', warnAgentic: uc === 'agentic' },
+    { quant: 'f16',  kk: 'f16',  kv: 'f16',  desc: 'Full precision, VRAM-heavy', rec: false },
   ];
 
   dom.vramScenarios.innerHTML = '';
+  const activeQuant = hw.cacheTypeK || 'q8_0';
+  // Cap context to the model's training window so we never show a number the model can't actually use.
+  // When VRAM is plentiful relative to the model, all three cards may hit the same cap — in that case
+  // the differentiator shifts from "more context" to "better quality".
+  const nCtxTrain = wizardState.model.nCtxTrain || 0;
 
   for (const s of scenarios) {
-    const ctx = maxContext(modelBytes, arch, s.kk, s.kv, slots, ubatch, nCpuMoe, availVram, fitGran, 0.05);
+    const vramCtx = maxContext(modelBytes, arch, s.kk, s.kv, slots, ubatch, nCpuMoe, availVram, fitGran, 0.05);
+    const cappedByModel = nCtxTrain > 0 && vramCtx > nCtxTrain;
+    const ctx = cappedByModel ? nCtxTrain : vramCtx;
+
     const card = document.createElement('div');
-    card.className = 'vram-scenario-card' + (s.rec ? ' scenario-rec' : '');
+    const isActive = s.kk === activeQuant;
+    card.className = 'vram-scenario-card' + (s.rec ? ' scenario-rec' : '') + (isActive ? ' selected' : '');
     card.setAttribute('tabindex', '0');
     card.setAttribute('role', 'button');
-    card.setAttribute('aria-label', `${s.label}: ${formatCtx(ctx)} tokens`);
+    card.setAttribute('aria-label', `${s.quant} KV: ${formatCtx(ctx)} tokens — ${s.desc}`);
 
     const selectable = ctx > 0;
+
+    // When model is the bottleneck (not VRAM), rewrite the quality-focused description
+    // so users understand all three quants give the same context, but differ in quality.
+    let desc = s.desc;
+    if (cappedByModel) {
+      if (s.quant === 'q8_0') desc = 'Best quality — VRAM headroom to spare';
+      else if (s.quant === 'q4_0') desc = 'Good quality — most VRAM headroom';
+      else if (s.quant === 'f16') desc = 'Full precision — uses most VRAM';
+    }
+
+    const limitNote = cappedByModel ? '<span class="vsc-limit-note">model max</span>' : '';
 
     // All values are internal constants — no user input reaches this template.
     // eslint-disable-next-line no-unsanitized/property
     card.innerHTML = `
-      <div class="vsc-label">${s.label}</div>
-      <div class="vsc-ctx">${selectable ? formatCtx(ctx) : '—'}</div>
-      <div class="vsc-kv">${s.kk.toUpperCase()} KV</div>
+      <div class="vsc-quant-name">${s.quant.toUpperCase()} KV</div>
+      <div class="vsc-ctx-row">
+        <span class="vsc-ctx">${selectable ? formatCtx(ctx) : '—'}</span>
+        ${selectable ? '<span class="vsc-ctx-unit">tokens</span>' : ''}
+        ${limitNote}
+      </div>
+      <div class="vsc-desc">${desc}</div>
       ${s.rec ? '<span class="vsc-rec-badge">★ Recommended</span>' : ''}
       ${s.warnAgentic ? '<span class="vsc-warn">⚠ Not for agents</span>' : ''}
     `;
 
     if (selectable) {
       const applyScenario = () => {
-        // Apply this KV quant and update context
         wizardState.hardware.cacheTypeK = s.kk;
         wizardState.hardware.cacheTypeV = s.kv;
         wizardState.hardware.contextSize = ctx;
 
-        // Sync to form fields
         if (dom.cacheTypeKSelect) dom.cacheTypeKSelect.value = s.kk;
         if (dom.cacheTypeVSelect) dom.cacheTypeVSelect.value = s.kv;
         if (dom.contextSizeInput) dom.contextSizeInput.value = ctx;
 
-        // Animate the context value
         card.querySelector('.vsc-ctx')?.classList.add('counting');
         setTimeout(() => card.querySelector('.vsc-ctx')?.classList.remove('counting'), 300);
 
-        // Update selected state
         dom.vramScenarios.querySelectorAll('.vram-scenario-card').forEach(c => c.classList.remove('selected'));
         card.classList.add('selected');
 
@@ -2709,6 +2746,34 @@ function updateCtxQuickPickActive() {
   });
 }
 
+// Show the model's training context ceiling near the context size input so users
+// always know the limit before accidentally exceeding it.
+function updateCtxModelMaxHint() {
+  const hint = document.getElementById('ctx-model-max-hint');
+  const btn  = document.getElementById('ctx-pick-model-max');
+  const nCtxTrain = wizardState.model.nCtxTrain || 0;
+  if (!nCtxTrain) {
+    if (hint) hint.style.display = 'none';
+    if (btn)  btn.style.display  = 'none';
+    return;
+  }
+  const fmtK = n => n >= 1000 ? `${Math.round(n / 1024)}k` : `${n}`;
+  const label = fmtK(nCtxTrain);
+  if (hint) {
+    hint.textContent = `model max: ${label}`;
+    hint.style.display = '';
+  }
+  if (btn) {
+    btn.dataset.ctx = nCtxTrain;
+    btn.childNodes[0].textContent = label + ' ';
+    btn.style.display = '';
+    // Remove duplicate if there's already a static pick with the same value
+    document.querySelectorAll('.ctx-pick:not(#ctx-pick-model-max)').forEach(el => {
+      if (Number(el.dataset.ctx) === nCtxTrain) btn.style.display = 'none';
+    });
+  }
+}
+
 // Warn when the selected context exceeds the model's training context length.
 // We still allow it — users may be using RoPE/YaRN extension — but we flag it clearly.
 function updateCtxTrainWarning() {
@@ -2735,6 +2800,7 @@ function updateCtxTrainWarning() {
   el.appendChild(document.createTextNode(' to Extra Args.'));
   el.className = 'ctx-fit-warning';
   el.style.display = '';
+  updateCtxModelMaxHint();
 }
 
 // Minimum-context guidance: warn when auto-size lands below the target for the use case.

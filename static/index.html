@@ -2661,7 +2661,11 @@
                             <span class="vleg-item"><span class="vleg-dot seg-free" id="vleg-free-dot"></span><span id="vleg-free-label">Free —</span></span>
                         </div>
 
-                        <!-- Scenario cards -->
+                        <!-- Scenario cards — KV precision presets -->
+                        <div class="vsc-section-header">
+                            <span class="vsc-section-label">KV cache precision</span>
+                            <span class="vsc-section-hint">Preset fills context to max — fine-tune with the input below</span>
+                        </div>
                         <div class="vram-scenarios" id="vram-scenarios">
                             <!-- populated by JS -->
                         </div>
@@ -2704,36 +2708,51 @@
                             <input type="number" id="spawn-gpu-layers-manual" min="0" placeholder="e.g. 32">
                         </div>
                         <div class="hardware-field hardware-field-ctx">
-                            <label for="spawn-context-size">Context size</label>
-                            <input type="number" id="spawn-context-size" min="512" step="512" value="8192" title="Or type any value — model max is typically 128k–256k+">
+                            <div class="ctx-label-row">
+                                <label for="spawn-context-size">Context size</label>
+                                <span id="ctx-model-max-hint" class="ctx-model-max-hint" style="display:none;" title="Maximum context this model was trained on — going beyond this degrades quality"></span>
+                            </div>
+                            <input type="number" id="spawn-context-size" min="512" step="512" value="8192" title="Type any value. Smaller = less VRAM used by KV cache.">
                             <div class="ctx-quick-picks" id="ctx-quick-picks">
                                 <button type="button" class="ctx-pick" data-ctx="65536"  title="65k — Roleplay / RP with lorebooks">65k <span class="ctx-pick-tag">RP</span></button>
                                 <button type="button" class="ctx-pick" data-ctx="131072" title="131k — Minimum for agentic work">131k <span class="ctx-pick-tag">Agent</span></button>
                                 <button type="button" class="ctx-pick" data-ctx="204800" title="200k — Large agentic context">200k</button>
-                                <button type="button" class="ctx-pick" data-ctx="262144" title="256k — Full model max context; VRAM-intensive, use KV q4_0 to fit">256k <span class="ctx-pick-tag">Max</span></button>
+                                <button type="button" class="ctx-pick" data-ctx="262144" title="256k — Full model max">256k</button>
+                                <button type="button" class="ctx-pick ctx-pick-model-max" id="ctx-pick-model-max" style="display:none;" title="This model's training context limit">— <span class="ctx-pick-tag">Model max</span></button>
                             </div>
-                        </div>
-                        <div class="hardware-field hardware-field-kv">
-                            <label for="spawn-cache-type-k">KV cache</label>
-                            <div class="kv-cache-row">
-                                <select id="spawn-cache-type-k" title="K cache quantization — q8_0 recommended, q4_0 for max context">
-                                    <option value="">f16</option>
-                                    <option value="q8_0" selected>q8_0 ★</option>
-                                    <option value="q4_0">q4_0</option>
-                                </select>
-                                <select id="spawn-cache-type-v" title="V cache quantization">
-                                    <option value="">f16</option>
-                                    <option value="q8_0" selected>q8_0</option>
-                                    <option value="q4_0">q4_0</option>
-                                </select>
-                                <label class="kv-unified-toggle" title="Use a single unified KV cache buffer (--kv-unified). Can reduce memory fragmentation on some setups.">
-                                    <input type="checkbox" id="spawn-kv-unified">
-                                    <span>Unified</span>
-                                </label>
-                            </div>
-                            <div class="field-hint">q8_0 = half the KV VRAM with negligible quality loss. q4_0 = max context for RP.</div>
                         </div>
                     </div>
+
+                    <!-- Advanced KV / unified settings -->
+                    <details class="kv-advanced-details" id="kv-advanced-details">
+                        <summary class="kv-advanced-summary">Advanced KV settings</summary>
+                        <div class="kv-advanced-body">
+                            <div class="kv-advanced-row">
+                                <div class="kv-advanced-field">
+                                    <label for="spawn-cache-type-k" class="kv-advanced-label">K cache</label>
+                                    <select id="spawn-cache-type-k" title="K cache quantization">
+                                        <option value="">f16</option>
+                                        <option value="q8_0" selected>q8_0</option>
+                                        <option value="q4_0">q4_0</option>
+                                    </select>
+                                </div>
+                                <div class="kv-advanced-field">
+                                    <label for="spawn-cache-type-v" class="kv-advanced-label">V cache</label>
+                                    <select id="spawn-cache-type-v" title="V cache quantization">
+                                        <option value="">f16</option>
+                                        <option value="q8_0" selected>q8_0</option>
+                                        <option value="q4_0">q4_0</option>
+                                    </select>
+                                </div>
+                                <label class="kv-unified-toggle" title="Use a single unified KV cache buffer (--kv-unified). Can reduce memory fragmentation on some setups.">
+                                    <input type="checkbox" id="spawn-kv-unified">
+                                    <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
+                                    <span class="kv-unified-text">Unified buffer</span>
+                                </label>
+                            </div>
+                            <div class="field-hint" style="margin-top:6px;">Overrides the preset above. K and V can differ — e.g. q8_0 K + q4_0 V to save VRAM on V.</div>
+                        </div>
+                    </details>
 
                     <!-- MTP section (shown for models with MTP heads) -->
                     <div class="hw-mtp-section" id="hw-mtp-section" style="display:none;">
