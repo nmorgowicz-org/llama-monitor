@@ -1952,8 +1952,8 @@
     </div>
 </div>
 
-<!-- File Browser Modal (z-index above all modals) -->
-<div class="modal-overlay" id="file-browser-modal" style="z-index:1200;">
+<!-- File Browser Modal (z-index above all modals, including spawn wizard at 1250) -->
+<div class="modal-overlay" id="file-browser-modal" style="z-index:1300;">
     <div class="modal file-browser-modal" style="width:560px;">
         <div class="modal-header">
             <h2 id="fb-title">Browse Files</h2>
@@ -2546,8 +2546,20 @@
 
                     <!-- Import input -->
                     <div class="model-input-area" id="model-input-import">
-                        <div class="model-input-row">
-                            <input type="text" id="spawn-import-path" placeholder="Model path (e.g. /path/to/ollama_models/...)">
+                        <!-- Auto-discovered models grouped by tool -->
+                        <div id="import-model-list-wrap">
+                            <div id="import-model-list-loading" class="import-list-state">
+                                <span class="import-list-spinner"></span>Scanning for models…
+                            </div>
+                            <div id="import-model-list-empty" class="import-list-state" style="display:none;">
+                                No models found from installed tools (Ollama, LM Studio, Jan, GPT4All, HuggingFace cache).
+                            </div>
+                            <div id="import-model-list" style="display:none;"></div>
+                        </div>
+                        <!-- Fallback: manual path entry -->
+                        <div class="import-manual-row">
+                            <span class="import-manual-label">Not listed?</span>
+                            <input type="text" id="spawn-import-path" placeholder="Paste a path to a .gguf file">
                             <button type="button" class="btn-wizard-secondary" id="spawn-import-browse-btn">Browse</button>
                         </div>
                     </div>
@@ -3162,6 +3174,20 @@
                         <p class="settings-help" id="settings-models-dir-hint" style="margin:8px 0 0 0;">
                             If empty, downloads go to the app default models folder.
                         </p>
+                        <div style="margin-top:14px;">
+                            <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
+                                Additional model locations
+                            </div>
+                            <p class="settings-help" style="margin:0 0 10px 0;">
+                                Extra folders to scan for models — useful if you keep files on multiple drives or in separate directories. All are searchable from the wizard.
+                            </p>
+                            <div id="settings-extra-dirs-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+                            <div style="display:flex;gap:8px;align-items:center;">
+                                <input type="text" id="settings-extra-dir-input" placeholder="Folder path (e.g. E:\models)" style="flex:1;min-width:0;">
+                                <button type="button" class="btn btn-secondary" id="settings-extra-dir-browse">Browse</button>
+                                <button type="button" class="btn btn-secondary" id="settings-extra-dir-add">Add</button>
+                            </div>
+                        </div>
                     </div>
                     <div class="settings-card" style="margin-top:14px;">
                         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px;">

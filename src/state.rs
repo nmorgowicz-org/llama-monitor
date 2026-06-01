@@ -89,6 +89,10 @@ pub struct UiSettings {
     pub llama_server_cwd: String,
     #[serde(default)]
     pub models_dir: String,
+    /// Additional directories to scan for models (beyond the primary download dir).
+    /// Useful for models spread across multiple drives or folders.
+    #[serde(default)]
+    pub extra_models_dirs: Vec<String>,
     #[serde(default)]
     pub server_endpoint: String,
     #[serde(default = "default_llama_poll_interval")]
@@ -330,6 +334,7 @@ impl Default for UiSettings {
             llama_server_path: String::new(),
             llama_server_cwd: String::new(),
             models_dir: String::new(),
+            extra_models_dirs: Vec::new(),
             server_endpoint: String::new(),
             llama_poll_interval: default_llama_poll_interval(),
             remote_agent_url: String::new(),

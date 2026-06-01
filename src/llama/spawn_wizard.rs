@@ -242,79 +242,419 @@ pub fn estimate_vram(
 /// Return common third-party model directories for the current platform.
 ///
 /// Only directories that actually exist are included.
+/// A model discovered from a third-party tool's local storage.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ThirdPartyModel {
+    /// Absolute path to the GGUF (or Ollama blob) file.
+    pub path: String,
+    /// Human-readable name derived from the tool's naming scheme.
+    pub name: String,
+    /// Which tool owns this model (e.g. "Ollama", "LM Studio", "Jan").
+    pub source_tool: String,
+    /// File size in bytes.
+    pub size: u64,
+}
+
+/// Scan all known third-party tool directories and return discovered models.
+/// `extra_dirs` are user-configured additional locations; each is labeled with its dir name.
+pub fn scan_third_party_models(extra_dirs: &[String]) -> Vec<ThirdPartyModel> {
+    let mut out: Vec<ThirdPartyModel> = Vec::new();
+    scan_ollama(&mut out);
+    scan_lm_studio(&mut out);
+    scan_jan(&mut out);
+    scan_gpt4all(&mut out);
+    scan_hf_cache(&mut out);
+    for dir_str in extra_dirs {
+        let dir = PathBuf::from(dir_str);
+        if dir.is_dir() {
+            let label = dir
+                .file_name()
+                .map(|n| format!("Local — {}", n.to_string_lossy()))
+                .unwrap_or_else(|| format!("Local — {dir_str}"));
+            scan_gguf_dir(&dir, &label, simple_stem_name, 5, &mut out);
+        }
+    }
+    out
+}
+
+// ── Ollama ────────────────────────────────────────────────────────────────────
+// Ollama stores GGUFs as content-addressed blobs (sha256-<hash>) without the
+// .gguf extension. We parse the JSON manifests to map digest → display name.
+
+fn scan_ollama(out: &mut Vec<ThirdPartyModel>) {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return,
+    };
+    // Respect OLLAMA_MODELS override
+    let models_dir = std::env::var_os("OLLAMA_MODELS")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".ollama").join("models"));
+
+    let manifests_dir = models_dir.join("manifests");
+    let blobs_dir = models_dir.join("blobs");
+    if !manifests_dir.is_dir() || !blobs_dir.is_dir() {
+        return;
+    }
+
+    let mut seen_blobs: std::collections::HashSet<String> = std::collections::HashSet::new();
+    walk_ollama_manifests(
+        &manifests_dir,
+        &manifests_dir,
+        &blobs_dir,
+        &mut seen_blobs,
+        out,
+    );
+}
+
+fn walk_ollama_manifests(
+    root: &Path,
+    dir: &Path,
+    blobs_dir: &Path,
+    seen: &mut std::collections::HashSet<String>,
+    out: &mut Vec<ThirdPartyModel>,
+) {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            walk_ollama_manifests(root, &path, blobs_dir, seen, out);
+        } else if path.is_file() {
+            parse_ollama_manifest(&path, root, blobs_dir, seen, out);
+        }
+    }
+}
+
+fn parse_ollama_manifest(
+    manifest_path: &Path,
+    root: &Path,
+    blobs_dir: &Path,
+    seen: &mut std::collections::HashSet<String>,
+    out: &mut Vec<ThirdPartyModel>,
+) {
+    let content = match fs::read_to_string(manifest_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let manifest: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let layers = match manifest["layers"].as_array() {
+        Some(l) => l,
+        None => return,
+    };
+    for layer in layers {
+        let media_type = layer["mediaType"].as_str().unwrap_or("");
+        if media_type != "application/vnd.ollama.image.model" {
+            continue;
+        }
+        let digest = match layer["digest"].as_str() {
+            Some(d) => d,
+            None => continue,
+        };
+        // "sha256:abc123..." → blob file "sha256-abc123..."
+        let blob_name = digest.replace(':', "-");
+        if !seen.insert(blob_name.clone()) {
+            continue;
+        }
+        let blob_path = blobs_dir.join(&blob_name);
+        if !blob_path.is_file() {
+            continue;
+        }
+        let size = blob_path.metadata().map(|m| m.len()).unwrap_or(0);
+        let name = ollama_display_name(manifest_path, root);
+        out.push(ThirdPartyModel {
+            path: blob_path.to_string_lossy().into_owned(),
+            name,
+            source_tool: "Ollama".to_string(),
+            size,
+        });
+    }
+}
+
+/// Derive a human-readable name from the manifest file path relative to the
+/// manifests root, e.g.:
+///   registry.ollama.ai/library/llama3.2/latest  → llama3.2:latest
+///   registry.ollama.ai/bartowski/Llama-3/Q4_K_M → bartowski/Llama-3:Q4_K_M
+fn ollama_display_name(manifest_path: &Path, root: &Path) -> String {
+    let rel = match manifest_path.strip_prefix(root) {
+        Ok(r) => r,
+        Err(_) => return manifest_path.to_string_lossy().into_owned(),
+    };
+    let parts: Vec<String> = rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+    // parts: [registry, namespace_or_"library", model, tag]
+    match parts.len() {
+        4.. => {
+            let namespace = &parts[1];
+            let model = &parts[parts.len() - 2];
+            let tag = &parts[parts.len() - 1];
+            if namespace == "library" {
+                format!("{model}:{tag}")
+            } else {
+                format!("{namespace}/{model}:{tag}")
+            }
+        }
+        2.. => {
+            let model = &parts[parts.len() - 2];
+            let tag = &parts[parts.len() - 1];
+            format!("{model}:{tag}")
+        }
+        _ => rel.to_string_lossy().into_owned(),
+    }
+}
+
+// ── LM Studio ─────────────────────────────────────────────────────────────────
+// Current path: ~/.lmstudio/models  (macOS/Linux, post-0.3)
+// Alternate:    ~/.cache/lm-studio/models
+// Windows:      %USERPROFILE%\.lmstudio\models
+
+fn scan_lm_studio(out: &mut Vec<ThirdPartyModel>) {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return,
+    };
+    let candidates = vec![
+        home.join(".lmstudio").join("models"),
+        home.join(".cache").join("lm-studio").join("models"),
+        #[cfg(target_os = "macos")]
+        home.join("Library")
+            .join("Application Support")
+            .join("LM Studio")
+            .join("models"),
+    ];
+    for dir in candidates {
+        if dir.is_dir() {
+            scan_gguf_dir(&dir, "LM Studio", lm_studio_name, 4, out);
+        }
+    }
+}
+
+fn lm_studio_name(path: &Path) -> String {
+    // Structure: <models_root>/<publisher>/<repo>/<file.gguf>
+    // Use the filename (without .gguf) as the display name; it's already descriptive.
+    path.file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+}
+
+// ── Jan ───────────────────────────────────────────────────────────────────────
+// macOS: ~/Library/Application Support/Jan/models
+// Linux: ~/.jan/models
+// Windows: %APPDATA%\Jan\models
+
+fn scan_jan(out: &mut Vec<ThirdPartyModel>) {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return,
+    };
+    let candidates = vec![
+        #[cfg(target_os = "macos")]
+        home.join("Library")
+            .join("Application Support")
+            .join("Jan")
+            .join("models"),
+        #[cfg(not(target_os = "macos"))]
+        home.join(".jan").join("models"),
+        #[cfg(target_os = "windows")]
+        dirs::data_dir()
+            .unwrap_or_default()
+            .join("Jan")
+            .join("models"),
+    ];
+    for dir in candidates {
+        if dir.is_dir() {
+            scan_gguf_dir(&dir, "Jan", simple_stem_name, 3, out);
+        }
+    }
+}
+
+// ── GPT4All ───────────────────────────────────────────────────────────────────
+// macOS: ~/Library/Application Support/nomic.ai/GPT4All
+// Linux: ~/.local/share/nomic.ai/GPT4All
+// Windows: %LOCALAPPDATA%\nomic.ai\GPT4All
+
+fn scan_gpt4all(out: &mut Vec<ThirdPartyModel>) {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return,
+    };
+    let candidates = vec![
+        #[cfg(target_os = "macos")]
+        home.join("Library")
+            .join("Application Support")
+            .join("nomic.ai")
+            .join("GPT4All"),
+        #[cfg(target_os = "linux")]
+        home.join(".local")
+            .join("share")
+            .join("nomic.ai")
+            .join("GPT4All"),
+        #[cfg(target_os = "windows")]
+        dirs::data_local_dir()
+            .unwrap_or_default()
+            .join("nomic.ai")
+            .join("GPT4All"),
+    ];
+    for dir in candidates {
+        if dir.is_dir() {
+            scan_gguf_dir(&dir, "GPT4All", simple_stem_name, 2, out);
+        }
+    }
+}
+
+// ── HuggingFace cache ─────────────────────────────────────────────────────────
+// Default: ~/.cache/huggingface/hub
+// Override: HF_HUB_CACHE, or HF_HOME/hub
+// Structure: models--{org}--{repo}/snapshots/{revision}/*.gguf
+// Files are symlinks to blobs; we follow them to get canonical paths and dedupe.
+
+fn scan_hf_cache(out: &mut Vec<ThirdPartyModel>) {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return,
+    };
+    let hub_dir = std::env::var_os("HF_HUB_CACHE")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HF_HOME").map(|h| PathBuf::from(h).join("hub")))
+        .unwrap_or_else(|| home.join(".cache").join("huggingface").join("hub"));
+
+    if !hub_dir.is_dir() {
+        return;
+    }
+
+    let entries = match fs::read_dir(&hub_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    let mut seen_canonical: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for entry in entries.flatten() {
+        let model_dir = entry.path();
+        let dir_name = model_dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if !dir_name.starts_with("models--") || !model_dir.is_dir() {
+            continue;
+        }
+
+        // "models--Qwen--Qwen3-8B-GGUF" → "Qwen/Qwen3-8B-GGUF"
+        let repo_name = dir_name
+            .strip_prefix("models--")
+            .map(|s| s.replacen("--", "/", 1))
+            .unwrap_or_else(|| dir_name.clone());
+
+        let snapshots_dir = model_dir.join("snapshots");
+        if !snapshots_dir.is_dir() {
+            continue;
+        }
+
+        let rev_entries = match fs::read_dir(&snapshots_dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        for rev_entry in rev_entries.flatten() {
+            let rev_dir = rev_entry.path();
+            if !rev_dir.is_dir() {
+                continue;
+            }
+            let gguf_entries = match fs::read_dir(&rev_dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for gguf_entry in gguf_entries.flatten() {
+                let gguf_path = gguf_entry.path();
+                let fname = gguf_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                if !fname.to_lowercase().ends_with(".gguf") || fname.starts_with('.') {
+                    continue;
+                }
+                // Follow symlinks to canonical path for deduplication
+                let canonical = gguf_path
+                    .canonicalize()
+                    .unwrap_or_else(|_| gguf_path.clone());
+                let canonical_str = canonical.to_string_lossy().into_owned();
+                if !seen_canonical.insert(canonical_str.clone()) {
+                    continue;
+                }
+                let size = canonical.metadata().map(|m| m.len()).unwrap_or(0);
+                let stem = fname
+                    .strip_suffix(".gguf")
+                    .or_else(|| fname.strip_suffix(".GGUF"))
+                    .unwrap_or(&fname);
+                let name = format!("{repo_name}/{stem}");
+                out.push(ThirdPartyModel {
+                    path: canonical_str,
+                    name,
+                    source_tool: "HuggingFace".to_string(),
+                    size,
+                });
+            }
+        }
+    }
+}
+
+// ── Generic GGUF scanner ──────────────────────────────────────────────────────
+
+fn scan_gguf_dir(
+    dir: &Path,
+    tool: &str,
+    name_fn: fn(&Path) -> String,
+    max_depth: usize,
+    out: &mut Vec<ThirdPartyModel>,
+) {
+    let mut paths: Vec<PathBuf> = Vec::new();
+    walk_gguf(dir, 0, max_depth, &mut paths);
+    for path in paths {
+        let size = path.metadata().map(|m| m.len()).unwrap_or(0);
+        let name = name_fn(&path);
+        out.push(ThirdPartyModel {
+            path: path.to_string_lossy().into_owned(),
+            name,
+            source_tool: tool.to_string(),
+            size,
+        });
+    }
+}
+
+fn simple_stem_name(path: &Path) -> String {
+    path.file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+}
+
+// ── Legacy helpers (kept for existing tests) ──────────────────────────────────
+
+#[allow(dead_code)]
 pub fn get_common_model_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-
-    #[cfg(target_os = "macos")]
-    {
-        // Ollama
-        if let Some(home) = std::env::var_os("HOME") {
-            let ollama = PathBuf::from(home.clone())
-                .join("Library")
-                .join("Application Support")
-                .join("Ollama")
-                .join("models");
-            if ollama.is_dir() {
-                dirs.push(ollama);
-            }
-
-            // LM Studio
-            let lm = PathBuf::from(home)
-                .join("Library")
-                .join("Application Support")
-                .join("LM Studio");
-            if lm.is_dir() {
-                dirs.push(lm);
-            }
-        }
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        // Ollama
-        if let Some(home) = std::env::var_os("HOME") {
-            let ollama = PathBuf::from(home.clone()).join(".ollama").join("models");
-            if ollama.is_dir() {
-                dirs.push(ollama);
-            }
-
-            // LM Studio
-            let lm = PathBuf::from(home)
-                .join(".local")
-                .join("share")
-                .join("lm-studio");
-            if lm.is_dir() {
-                dirs.push(lm);
-            }
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        // Ollama
-        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            let ollama = PathBuf::from(local).join("Ollama").join("models");
-            if ollama.is_dir() {
-                dirs.push(ollama);
-            }
-
-            // LM Studio
-            let lm = PathBuf::from(local).join("LM Studio");
-            if lm.is_dir() {
-                dirs.push(lm);
-            }
-        }
-    }
-
-    dirs
+    scan_third_party_models(&[])
+        .into_iter()
+        .filter_map(|m| {
+            let p = PathBuf::from(&m.path);
+            p.parent().map(|parent| parent.to_path_buf())
+        })
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 /// Recursively scan given directories for .gguf files (max depth 3).
+#[allow(dead_code)]
 pub fn find_gguf_in_dirs(dirs: &[PathBuf], include_subdirs: bool) -> Vec<PathBuf> {
     let mut results = Vec::new();
     for dir in dirs {
         if !include_subdirs {
-            // Only top-level .gguf files.
             if let Ok(entries) = fs::read_dir(dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
@@ -344,7 +684,6 @@ fn walk_gguf(dir: &Path, depth: usize, max_depth: usize, out: &mut Vec<PathBuf>)
         Ok(e) => e,
         Err(_) => return,
     };
-
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_file()

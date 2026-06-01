@@ -483,7 +483,27 @@ function bindEvents() {
     card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); } });
   });
 
-  dom.browseModelBtn?.addEventListener('click', () => openDeferredFileBrowser('spawn-model-path', 'gguf'));
+  dom.browseModelBtn?.addEventListener('click', async () => {
+    let defaultPath = dom.modelPathInput?.value.trim() || '';
+    if (!defaultPath) {
+      // Fetch the effective models directory so Browse opens there by default.
+      try {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const r = await fetch('/api/hf/download-dir', { headers });
+        if (r.ok) {
+          const d = await r.json();
+          defaultPath = d.dir || '';
+        }
+      } catch { /* ignore — fall back to home */ }
+    } else {
+      // Strip the filename to get the parent directory.
+      const sep = defaultPath.includes('\\') ? '\\' : '/';
+      const parts = defaultPath.split(sep);
+      parts.pop();
+      defaultPath = parts.join(sep) || (defaultPath.includes('\\') ? 'C:\\' : '/');
+    }
+    openDeferredFileBrowser('spawn-model-path', 'gguf', defaultPath);
+  });
   dom.importBrowseBtn?.addEventListener('click', () => openDeferredFileBrowser('spawn-import-path', 'gguf'));
 
   dom.modelPathInput?.addEventListener('input', () => {
@@ -2127,33 +2147,112 @@ function getRecommendedQuant(vramGb) {
 
 // ── Third-party model import ──────────────────────────────────────────────────
 
+const TOOL_ICONS = {
+  'Ollama': '🦙',
+  'LM Studio': '🎨',
+  'Jan': '🤖',
+  'GPT4All': '🌍',
+  'HuggingFace': '🤗',
+};
+
+function formatBytes(bytes) {
+  if (!bytes) return '';
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
+  return `${Math.round(bytes / 1e3)} KB`;
+}
+
 async function loadThirdPartyModels() {
-  if (!dom.importPathInput) return;
+  const listWrap = document.getElementById('import-model-list-wrap');
+  const listLoading = document.getElementById('import-model-list-loading');
+  const listEmpty = document.getElementById('import-model-list-empty');
+  const listEl = document.getElementById('import-model-list');
+  if (!listEl) return;
+
+  listLoading && (listLoading.style.display = '');
+  listEmpty && (listEmpty.style.display = 'none');
+  listEl.style.display = 'none';
+  listEl.innerHTML = '';
+
   try {
     const headers = window.authHeaders
       ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
       : { 'Content-Type': 'application/json' };
-    const resp = await fetch('/api/third-party-models', { method: 'POST', headers, body: JSON.stringify({ include_subdirs: true }) });
-    if (!resp.ok) return;
+    const resp = await fetch('/api/third-party-models', { method: 'POST', headers, body: JSON.stringify({}) });
+    if (!resp.ok) throw new Error('fetch failed');
     const data = await resp.json();
     const models = (data.models || []).filter(Boolean);
-    if (!models.length) return;
 
-    const listId = 'spawn-import-datalist';
-    let dl = document.getElementById(listId);
-    if (!dl) {
-      dl = document.createElement('datalist');
-      dl.id = listId;
-      dom.importPathInput.setAttribute('list', listId);
-      dom.importPathInput.parentNode.appendChild(dl);
+    listLoading && (listLoading.style.display = 'none');
+
+    if (!models.length) {
+      listEmpty && (listEmpty.style.display = '');
+      return;
     }
-    dl.innerHTML = '';
-    models.forEach(m => {
-      const opt = document.createElement('option');
-      opt.value = m.path;
-      dl.appendChild(opt);
-    });
-  } catch {}
+
+    // Group by source_tool
+    const grouped = {};
+    for (const m of models) {
+      const tool = m.source_tool || 'Other';
+      if (!grouped[tool]) grouped[tool] = [];
+      grouped[tool].push(m);
+    }
+
+    for (const [tool, toolModels] of Object.entries(grouped)) {
+      const icon = TOOL_ICONS[tool] || '📦';
+      const groupEl = document.createElement('div');
+      groupEl.className = 'import-tool-group';
+      groupEl.innerHTML = `<div class="import-tool-header"><span class="import-tool-icon">${icon}</span><span class="import-tool-name">${tool}</span></div>`;
+
+      for (const m of toolModels) {
+        const itemEl = document.createElement('div');
+        itemEl.className = 'import-model-item';
+        itemEl.setAttribute('role', 'button');
+        itemEl.setAttribute('tabindex', '0');
+        itemEl.dataset.path = m.path;
+        const sizeStr = formatBytes(m.size);
+        itemEl.innerHTML =
+          `<span class="import-model-name">${m.name}</span>` +
+          (sizeStr ? `<span class="import-model-size">${sizeStr}</span>` : '');
+        itemEl.addEventListener('click', () => selectImportedModel(m));
+        itemEl.addEventListener('keydown', e => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectImportedModel(m); }
+        });
+        groupEl.appendChild(itemEl);
+      }
+      listEl.appendChild(groupEl);
+    }
+
+    listEl.style.display = '';
+  } catch {
+    listLoading && (listLoading.style.display = 'none');
+    listEmpty && (listEmpty.style.display = '');
+  }
+}
+
+function selectImportedModel(m) {
+  wizardState.model.path = m.path;
+  wizardState.model.source = 'import';
+  wizardState.model.delivery = 'imported_local';
+  // Pre-populate localMeta with tool display info so the hint shows the
+  // human-readable name rather than the raw file/blob path.
+  wizardState.model.localMeta = {
+    model_name: m.name,
+    size_display: formatBytes(m.size),
+    source_tool: m.source_tool,
+    path: m.path,
+  };
+  // Sync the fallback text input so validation sees the path.
+  if (dom.importPathInput) dom.importPathInput.value = m.path;
+  // Mark the selected card visually.
+  document.querySelectorAll('.import-model-item').forEach(el => el.classList.remove('selected'));
+  // Find and mark the clicked item — match by path data attribute.
+  document.querySelectorAll('.import-model-item').forEach(el => {
+    if (el.dataset.path === m.path) el.classList.add('selected');
+  });
+  // Trigger arch inference + introspection using the model name for heuristics.
+  onModelPathChanged();
+  renderLocalModelHint();
 }
 
 // ── Hardware change ───────────────────────────────────────────────────────────

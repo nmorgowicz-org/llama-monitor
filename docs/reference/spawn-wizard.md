@@ -59,6 +59,8 @@ See [HuggingFace Integration](#huggingface-integration) below.
 #### Third-Party Import
 See [Third-Party Model Import](#third-party-model-import) below.
 
+When selected, the wizard immediately scans known tool directories and renders discovered models as a grouped, clickable card list — no path typing required. A manual fallback text input and Browse button remain available for models outside the scanned locations.
+
 ---
 
 ### Step 3 — Hardware
@@ -324,20 +326,46 @@ Remove the stored token. Requires `api-token`.
 ## Third-Party Model Import
 
 #### POST /api/third-party-models
-Scan common local model directories from Ollama, LM Studio, and similar tools.
+Scan local model directories from Ollama, LM Studio, Jan, GPT4All, and the HuggingFace hub cache. Returns models with display names and tool labels — no path knowledge required from the user.
 
 ```json
 // Request
-{ "include_subdirs": true }
+{}
 
 // Response
-{ "ok": true, "models": [{ "path": "/path/to/model.gguf", "name": "llama-3.1-8b", "source": "ollama", "param_b": 8.0 }] }
+{
+  "ok": true,
+  "models": [
+    { "path": "/Users/you/.ollama/models/blobs/sha256-abc123", "name": "llama3.2:latest", "source_tool": "Ollama", "size": 4900000000 },
+    { "path": "/Users/you/.lmstudio/models/bartowski/Qwen3-8B-Q4_K_M.gguf", "name": "Qwen3-8B-Q4_K_M", "source_tool": "LM Studio", "size": 5100000000 },
+    { "path": "/Users/you/.cache/huggingface/hub/models--Qwen--Qwen3-8B-GGUF/snapshots/abc/Qwen3-8B-Q4_K_M.gguf", "name": "Qwen/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M", "source_tool": "HuggingFace", "size": 5100000000 }
+  ]
+}
 ```
 
 - Requires: `api-token`
-- Scan paths (macOS): `~/.ollama/models`, `~/.cache/lm-studio/models`
-- Scan paths (Linux): `~/.ollama/models`, `~/.local/share/lm-studio/models`
-- Scan paths (Windows): `%LOCALAPPDATA%\Ollama\models`, `%APPDATA%\LM-Studio\models`
+
+**Scanned tools and paths:**
+
+| Tool | macOS | Linux | Windows |
+|------|-------|-------|---------|
+| Ollama | `~/.ollama/models/` | `~/.ollama/models/` | `%USERPROFILE%\.ollama\models\` |
+| LM Studio | `~/.lmstudio/models/`, `~/.cache/lm-studio/models/` | same | `%USERPROFILE%\.lmstudio\models\` |
+| Jan | `~/Library/Application Support/Jan/models/` | `~/.jan/models/` | `%APPDATA%\Jan\models\` |
+| GPT4All | `~/Library/Application Support/nomic.ai/GPT4All/` | `~/.local/share/nomic.ai/GPT4All/` | `%LOCALAPPDATA%\nomic.ai\GPT4All\` |
+| HuggingFace | `~/.cache/huggingface/hub/` | same | `%USERPROFILE%\.cache\huggingface\hub\` |
+
+**Ollama notes:** Models are stored as content-addressed blobs (`sha256-<hash>`) without a `.gguf` extension. The scanner reads manifests under `manifests/` to resolve blob→model-name mappings. The blob files are valid GGUFs and can be passed directly to llama-server. The `OLLAMA_MODELS` environment variable is respected if set.
+
+**HuggingFace notes:** Scans `models--{org}--{repo}/snapshots/{revision}/*.gguf`. Files are typically symlinks to blobs; canonical paths are resolved and deduplicated. `HF_HUB_CACHE` and `HF_HOME` overrides are respected. This covers Unsloth Studio downloads automatically.
+
+**Model introspection:** Ollama blob paths are accepted by `POST /api/model/introspect` (the `.gguf` extension check is relaxed for paths matching `*/blobs/sha256-*`).
+
+**Extra model directories:** Users can configure additional scan locations in Settings → Models → Additional model locations. These directories are:
+- Scanned recursively (depth 5) and shown in the import card list under a `Local — <dirname>` group header
+- Added to the file browser allowlist so Browse can navigate into them directly
+- Accepted by the model introspection endpoint
+- Useful for models spread across multiple drives (e.g. `E:\models`, `G:\models\CODE`, `G:\models\RP`)
 
 ---
 

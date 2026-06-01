@@ -3415,7 +3415,7 @@ fn api_hf_download(
 // ── P3.2: Third-Party Models ─────────────────────────────────────────────────
 
 fn api_third_party_models(
-    _state: AppState,
+    state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
     warp::path!("api" / "third-party-models")
@@ -3424,23 +3424,28 @@ fn api_third_party_models(
         .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
+            let state = state.clone();
             async move {
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
                 }
 
-                let include_subdirs: bool = body["include_subdirs"].as_bool().unwrap_or(true);
+                let _ = body["include_subdirs"].as_bool().unwrap_or(true);
 
-                let dirs = crate::llama::spawn_wizard::get_common_model_dirs();
-                let ggufs = crate::llama::spawn_wizard::find_gguf_in_dirs(&dirs, include_subdirs);
-
-                let models: Vec<serde_json::Value> = ggufs
+                let extra_dirs = state
+                    .ui_settings
+                    .lock()
+                    .map(|s| s.extra_models_dirs.clone())
+                    .unwrap_or_default();
+                let models = crate::llama::spawn_wizard::scan_third_party_models(&extra_dirs);
+                let models: Vec<serde_json::Value> = models
                     .into_iter()
-                    .map(|path| {
-                        let size = path.metadata().map(|m| m.len()).unwrap_or(0);
+                    .map(|m| {
                         serde_json::json!({
-                            "path": path.to_string_lossy().to_string(),
-                            "size": size
+                            "path": m.path,
+                            "name": m.name,
+                            "source_tool": m.source_tool,
+                            "size": m.size,
                         })
                     })
                     .collect();
@@ -3483,8 +3488,12 @@ fn api_model_introspect(
                     ));
                 }
 
-                // Security: only allow .gguf files that exist on disk.
-                if !model_path.to_ascii_lowercase().ends_with(".gguf") {
+                // Security: only allow .gguf files or Ollama content-addressed blobs
+                // (sha256-<hash> files in a blobs/ directory — valid GGUFs without extension).
+                let is_gguf_ext = model_path.to_ascii_lowercase().ends_with(".gguf");
+                let is_ollama_blob = model_path.contains("/blobs/sha256-")
+                    || model_path.contains("\\blobs\\sha256-");
+                if !is_gguf_ext && !is_ollama_blob {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
                             "ok": false,
@@ -3515,7 +3524,19 @@ fn api_model_introspect(
                     .and_then(|h| h.canonicalize().ok())
                     .map(|h| canon.starts_with(&h))
                     .unwrap_or(false);
-                if !in_models_dir && !in_home {
+                let in_extra = state
+                    .ui_settings
+                    .lock()
+                    .map(|s| {
+                        s.extra_models_dirs.iter().any(|d| {
+                            std::path::Path::new(d)
+                                .canonicalize()
+                                .map(|cd| canon.starts_with(&cd))
+                                .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false);
+                if !in_models_dir && !in_home && !in_extra {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
                             "ok": false,
@@ -5802,6 +5823,21 @@ fn api_browse(
                         && let Ok(canon) = parent.canonicalize()
                     {
                         allowed_roots.push(canon);
+                    }
+
+                    // Allow extra configured model directories and their parents
+                    if let Ok(settings) = state.ui_settings.lock() {
+                        for dir_str in &settings.extra_models_dirs {
+                            let dir = std::path::Path::new(dir_str);
+                            if let Ok(canon) = dir.canonicalize() {
+                                allowed_roots.push(canon);
+                            }
+                            if let Some(parent) = dir.parent()
+                                && let Ok(canon) = parent.canonicalize()
+                            {
+                                allowed_roots.push(canon);
+                            }
+                        }
                     }
 
                     // Allow TLS custom cert/key parent directories

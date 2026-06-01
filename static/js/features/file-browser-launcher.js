@@ -13,7 +13,7 @@ async function ensureFileBrowser() {
     return fileBrowserPromise;
 }
 
-export async function openDeferredFileBrowser(targetId, filter) {
+export async function openDeferredFileBrowser(targetId, filter, defaultPath) {
     const mod = await ensureFileBrowser();
-    mod.openFileBrowser(targetId, filter);
+    mod.openFileBrowser(targetId, filter, defaultPath);
 }

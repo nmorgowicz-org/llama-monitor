@@ -8,7 +8,7 @@ let fbFilter = '';
 let fbCurrentPath = '';
 let initialized = false;
 
-export function openFileBrowser(targetId, filter) {
+export function openFileBrowser(targetId, filter, defaultPath) {
     fbTargetId = targetId;
     fbFilter = filter === 'dir' ? '' : (filter || '');
     const modal = document.getElementById('file-browser-modal');
@@ -35,9 +35,9 @@ export function openFileBrowser(targetId, filter) {
         selectBtn.textContent = 'Select';
     }
 
-    // Determine starting path from current input value
+    // Determine starting path: current input value → defaultPath → ''
     const current = document.getElementById(targetId).value;
-    let startPath = '';
+    let startPath = defaultPath || '';
     if (current) {
         // Try to extract parent directory from current path
         const sep = current.includes('\\') ? '\\' : '/';

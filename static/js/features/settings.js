@@ -84,6 +84,7 @@ export function collectSettings() {
         llama_server_path: document.getElementById('set-server-path').value,
         llama_server_cwd: document.getElementById('set-server-cwd').value,
         models_dir: document.getElementById('settings-models-dir')?.value.trim() || '',
+        extra_models_dirs: _getExtraModelsDirs(),
         server_endpoint: endpoint,
         remote_agent_url: document.getElementById('set-remote-agent-url')?.value.trim() || '',
         remote_agent_token: getSecretValue('set-remote-agent-token') || '',
@@ -184,6 +185,10 @@ export function applySettings(s) {
         const el = document.getElementById('settings-models-dir');
         if (el) el.value = s.models_dir;
         _updateModelsDirHint(s.models_dir);
+    }
+
+    if (Array.isArray(s.extra_models_dirs)) {
+        _renderExtraModelsDirs(s.extra_models_dirs);
     }
 
     if (s.server_endpoint) {
@@ -1166,6 +1171,43 @@ export function initSettings() {
 
 // ── Models directory + HF token helpers ──────────────────────────────────────
 
+function _getExtraModelsDirs() {
+    return [...document.querySelectorAll('#settings-extra-dirs-list .extra-dir-entry')]
+        .map(el => el.dataset.path)
+        .filter(Boolean);
+}
+
+function _renderExtraModelsDirs(dirs) {
+    const list = document.getElementById('settings-extra-dirs-list');
+    if (!list) return;
+    list.innerHTML = '';
+    for (const dir of dirs) _addExtraDirItem(dir);
+}
+
+function _addExtraDirItem(path) {
+    if (!path) return;
+    const list = document.getElementById('settings-extra-dirs-list');
+    if (!list) return;
+    // Deduplicate
+    if ([...list.querySelectorAll('.extra-dir-entry')].some(el => el.dataset.path === path)) return;
+    const item = document.createElement('div');
+    item.className = 'extra-dir-entry';
+    item.dataset.path = path;
+    const label = document.createElement('span');
+    label.className = 'extra-dir-path';
+    label.textContent = path;
+    label.title = path;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-ghost extra-dir-remove';
+    btn.textContent = '×';
+    btn.setAttribute('aria-label', 'Remove');
+    btn.addEventListener('click', () => { item.remove(); markSettingsDirty(); });
+    item.appendChild(label);
+    item.appendChild(btn);
+    list.appendChild(item);
+}
+
 function _updateModelsDirHint(dir) {
     const hint = document.getElementById('settings-models-dir-hint');
     if (!hint) return;
@@ -1197,6 +1239,30 @@ function _bindModelSettingsEvents() {
         const val = document.getElementById('settings-models-dir')?.value.trim() || '';
         _updateModelsDirHint(val);
         markSettingsDirty();
+    });
+
+    // Extra model dirs — add button
+    document.getElementById('settings-extra-dir-add')?.addEventListener('click', () => {
+        const input = document.getElementById('settings-extra-dir-input');
+        const val = input?.value.trim();
+        if (!val) return;
+        _addExtraDirItem(val);
+        if (input) input.value = '';
+        markSettingsDirty();
+    });
+
+    // Extra model dirs — add on Enter in input
+    document.getElementById('settings-extra-dir-input')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            document.getElementById('settings-extra-dir-add')?.click();
+        }
+    });
+
+    // Extra model dirs — browse button
+    document.getElementById('settings-extra-dir-browse')?.addEventListener('click', async () => {
+        const { openDeferredFileBrowser } = await import('./file-browser-launcher.js');
+        openDeferredFileBrowser('settings-extra-dir-input', 'dir');
     });
 
     // HF token — show/hide toggle
