@@ -51,6 +51,11 @@ Scopes should describe the **component/area** being changed, not the type of cha
 | `settings` | Settings modal, preferences |
 | `models` | Model presets, configuration |
 | `sessions` | Session management, persistence |
+| `wizard` | Spawn wizard steps, UX, hardware config UI |
+| `vram` | VRAM estimator, ModelArch heuristics, quant advisor |
+| `hf` | HuggingFace search, browse, download, file listing |
+| `binary` | llama.cpp binary download, install, platform detection |
+| `spawn` | Server launch, introspection, third-party imports |
 | `docs` | Documentation files |
 | `ci` | CI/CD, workflows, build scripts |
 
@@ -266,6 +271,8 @@ Update documentation whenever a change falls into any of these categories:
 | Dashboard, monitoring, hardware | `docs/reference/dashboard.md` | |
 | Remote agent and SSH | `docs/reference/remote-agent.md` | |
 | CLI flags | `docs/reference/cli-flags.md` | |
+| Spawn wizard, HF integration, binary prereq, download | `docs/reference/spawn-wizard.md` | Update when wizard steps, API shapes, or hardware controls change |
+| VRAM estimator, ModelArch heuristics, quant advisor | `docs/reference/vram-estimator.md` | Update when adding new model families or changing estimation formulas |
 | High-impact features visible in the README | `README.md` | See README guidelines below |
 
 ### README.md Guidelines
@@ -757,6 +764,10 @@ All user data persists to `~/.config/llama-monitor/`:
 | `gpu-env.json` | GPU environment overrides (`arch`, `devices`, `rocm_path`, `extra_env`) |
 | `ssh-known-hosts.json` | Trusted SSH host keys for remote-agent workflows |
 | `lhm-disabled.json` | Persisted Windows LibreHardwareMonitor disabled/enabled state |
+| `hf-token` | HuggingFace API token (plaintext, 600 permissions); used for authenticated HF search and model downloads |
+| `models/` | Default directory for downloaded GGUF model files; configurable via `ui-settings.json` `models_dir` |
+| `bin/` | Default directory for downloaded llama.cpp binaries (e.g. `bin/llama-server`); auto-created on first binary download |
+| `model-cache/<sha256>.json` | Cached model introspection results keyed by file SHA-256; avoids re-running `--print-model-metadata` on every load |
 
 Data is persisted:
 - Sessions: autosaved every 30 seconds
