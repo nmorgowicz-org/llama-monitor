@@ -2195,7 +2195,18 @@ async function loadThirdPartyModels() {
       const icon = TOOL_ICONS[tool] || '📦';
       const groupEl = document.createElement('div');
       groupEl.className = 'import-tool-group';
-      groupEl.innerHTML = `<div class="import-tool-header"><span class="import-tool-icon">${icon}</span><span class="import-tool-name">${tool}</span></div>`;
+
+      const headerEl = document.createElement('div');
+      headerEl.className = 'import-tool-header';
+      const iconEl = document.createElement('span');
+      iconEl.className = 'import-tool-icon';
+      iconEl.textContent = icon;
+      const nameEl = document.createElement('span');
+      nameEl.className = 'import-tool-name';
+      nameEl.textContent = tool;
+      headerEl.appendChild(iconEl);
+      headerEl.appendChild(nameEl);
+      groupEl.appendChild(headerEl);
 
       for (const m of toolModels) {
         const itemEl = document.createElement('div');
@@ -2203,10 +2214,20 @@ async function loadThirdPartyModels() {
         itemEl.setAttribute('role', 'button');
         itemEl.setAttribute('tabindex', '0');
         itemEl.dataset.path = m.path;
+
+        const labelEl = document.createElement('span');
+        labelEl.className = 'import-model-name';
+        labelEl.textContent = m.name;
+        itemEl.appendChild(labelEl);
+
         const sizeStr = formatBytes(m.size);
-        itemEl.innerHTML =
-          `<span class="import-model-name">${m.name}</span>` +
-          (sizeStr ? `<span class="import-model-size">${sizeStr}</span>` : '');
+        if (sizeStr) {
+          const sizeEl = document.createElement('span');
+          sizeEl.className = 'import-model-size';
+          sizeEl.textContent = sizeStr;
+          itemEl.appendChild(sizeEl);
+        }
+
         itemEl.addEventListener('click', () => selectImportedModel(m));
         itemEl.addEventListener('keydown', e => {
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectImportedModel(m); }
