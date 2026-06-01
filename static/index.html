@@ -2710,7 +2710,7 @@
                                 Load mmproj for image/video input
                             </label>
                             <select id="hw-mmproj-select" class="hw-mmproj-select" style="display:none;" title="Vision projector file to load alongside the model"></select>
-                            <div class="field-hint">Adds ~0.5–1.5 GB VRAM. Required for multimodal inference. Leave unchecked for text-only use.</div>
+                            <div class="field-hint" style="margin-left:22px;">Adds ~0.5–1.5 GB VRAM. Required for multimodal inference. Leave unchecked for text-only use.</div>
                         </div>
                     </div>
 
@@ -2723,9 +2723,11 @@
                                 Enable MTP acceleration
                             </label>
                             <div class="hw-mtp-depth-row" id="hw-mtp-depth-row">
-                                <label for="hw-mtp-depth" class="hw-mtp-depth-label">Draft tokens/step</label>
-                                <input type="number" id="hw-mtp-depth" min="1" max="4" value="2" class="hw-mtp-depth-input" title="--spec-draft-n-max: how many tokens to predict ahead each step">
-                                <div class="field-hint">Sets <code>--spec-draft-n-max</code> and uses <code>--spec-type draft-mtp,ngram-mod</code>. Also forces <code>--parallel 1</code>. Value 2 ≈ +15–25% generation speed at +1.5% VRAM per MTP head. The model has these heads built-in.</div>
+                                <div class="hw-mtp-depth-inline">
+                                    <label for="hw-mtp-depth" class="hw-mtp-depth-label">Draft tokens/step</label>
+                                    <input type="number" id="hw-mtp-depth" min="1" max="4" value="2" class="hw-mtp-depth-input" title="--spec-draft-n-max: how many tokens to predict ahead each step">
+                                </div>
+                                <div class="field-hint">Uses <code>--spec-type draft-mtp,ngram-mod</code>, sets <code>--spec-draft-n-max</code>, forces <code>--parallel 1</code>. Value 2 ≈ +15–25% generation speed. +1.5% VRAM per head.</div>
                             </div>
                         </div>
                     </div>
@@ -2761,18 +2763,22 @@
                             </div>
                         </div>
 
-                        <!-- Performance (Spec + Fit) -->
-                        <div class="wizard-section-title" style="margin-top:14px;">Performance</div>
+                        <!-- Performance (Spec + Fit) — kept in Advanced for non-MTP models -->
+                        <div class="wizard-section-title" style="margin-top:14px;">Speculative decoding</div>
                         <div class="hardware-grid">
-                            <div class="hardware-field">
-                                <label for="spawn-spec-type">Speculative decoding</label>
+                            <div class="hardware-field" style="grid-column: 1/-1;">
+                                <label for="spawn-spec-type">Mode</label>
                                 <select id="spawn-spec-type">
-                                    <option value="">None</option>
-                                    <option value="ngram-mod">N-gram (fast)</option>
-                                    <option value="draft-model">Draft model</option>
+                                    <option value="">None — disabled</option>
+                                    <option value="ngram-mod">N-gram — fast, no extra files (~10–30% speedup)</option>
+                                    <option value="draft-mtp,ngram-mod">MTP + N-gram — for models with built-in MTP heads (~15–25%)</option>
+                                    <option value="draft-model">Draft model — best speedup, needs a separate small model</option>
                                 </select>
-                                <div class="field-hint">
-                                    N-gram: fast, no extra model. Draft model: best speed, requires a small model.
+                                <div class="field-hint" id="spawn-spec-hint">
+                                    <span data-spec="">Pick a mode to see a description.</span>
+                                    <span data-spec="ngram-mod" style="display:none;">N-gram lookup builds a table from prior tokens — zero extra VRAM, works on any model. Best for general and roleplay use where output is repetitive enough for predictions.</span>
+                                    <span data-spec="draft-mtp,ngram-mod" style="display:none;">Multi-Token Prediction uses heads built into the model itself. Also chains N-gram for tokens the MTP heads don't cover. Requires <code>--parallel 1</code>. Use this for Qwen3-MTP, DeepSeek-V3 MTP, and similar models. The MTP section above auto-selects this when enabled.</span>
+                                    <span data-spec="draft-model" style="display:none;">A small draft model (e.g. 1–3B) proposes tokens; the main model verifies. Highest theoretical speedup (~2–3×) but requires downloading and managing a compatible draft model alongside the main one.</span>
                                 </div>
                             </div>
                             <div class="hardware-field" id="spawn-draft-model-wrap" style="display:none;">

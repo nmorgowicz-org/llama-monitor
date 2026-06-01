@@ -3630,6 +3630,17 @@ pub fn api_routes(
     let sensor_bridge_install = api_sensor_bridge_install(app_config.clone());
     let sensor_bridge_uninstall = api_sensor_bridge_uninstall(app_config.clone());
 
+    // GPU / system metrics routes (used by spawn wizard VRAM estimation)
+    let get_gpu_metrics = {
+        let state = state.clone();
+        warp::path!("metrics" / "gpu")
+            .and(warp::get())
+            .map(move || {
+                let gpu = state.gpu_metrics.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                warp::reply::json(&gpu)
+            })
+    };
+
     // Phase 0/2/3: Spawn Llama-Server v2 routes
     let spawn_wizard_import =
         api_spawn_wizard_import_launch_file(state.clone(), app_config.clone());
@@ -3789,6 +3800,7 @@ pub fn api_routes(
         .or(api_llama_binary_update(app_config.clone()));
 
     server_routes
+        .or(get_gpu_metrics)
         .or(preset_routes)
         .or(template_routes)
         .or(model_routes)

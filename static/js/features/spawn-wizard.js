@@ -483,7 +483,9 @@ function bindEvents() {
     if (dom.gpuLayersManualWrap) dom.gpuLayersManualWrap.style.display = dom.gpuLayersSelect.value === 'manual' ? '' : 'none';
   });
   dom.specTypeSelect?.addEventListener('change', () => {
-    if (dom.draftModelWrap) dom.draftModelWrap.style.display = dom.specTypeSelect.value === 'draft-model' ? '' : 'none';
+    const v = dom.specTypeSelect.value;
+    if (dom.draftModelWrap) dom.draftModelWrap.style.display = v === 'draft-model' ? '' : 'none';
+    _updateSpecHint(v);
   });
 
   // MoE slider
@@ -786,6 +788,10 @@ function showStep(index) {
   dom.steps?.forEach(s => s.classList.remove('active'));
   document.getElementById(`wizard-step-${index}`)?.classList.add('active');
 
+  // Scroll the wizard body to the top whenever changing steps
+  const wizardBody = document.querySelector('.wizard-body');
+  if (wizardBody) wizardBody.scrollTop = 0;
+
   dom.stepBadges?.forEach(b => {
     const s = Number(b.dataset.step);
     b.classList.remove('active', 'completed');
@@ -805,6 +811,7 @@ function showStep(index) {
     });
     renderMmprojSection();
     renderMtpSection();
+    _updateSpecHint(dom.specTypeSelect?.value || '');
     // Trigger download panel now (moved from file-select to hardware step entry)
     if (wizardState.model.source === 'hf' && wizardState.model.hfFile) {
       showHfDownloadPanel(wizardState.model.hfFile);
@@ -2319,7 +2326,17 @@ function renderHardwareModelHeader() {
   header.style.display = '';
 
   const repoEl = document.getElementById('hw-model-repo');
-  if (repoEl) repoEl.textContent = hfRepo || path.split(/[/\\]/).pop() || path;
+  if (repoEl) {
+    const fullRepo = hfRepo || path.split(/[/\\]/).pop() || path;
+    const slashIdx = fullRepo.indexOf('/');
+    if (hfRepo && slashIdx > 0) {
+      const author = fullRepo.slice(0, slashIdx + 1); // "owner/"
+      const modelName = fullRepo.slice(slashIdx + 1);
+      repoEl.innerHTML = `<span class="hw-model-author">${author}</span><span class="hw-model-name">${modelName}</span>`;
+    } else {
+      repoEl.textContent = fullRepo;
+    }
+  }
 
   const quantRow = document.getElementById('hw-quant-row');
   const quantSelect = document.getElementById('hw-quant-select');
@@ -2448,6 +2465,14 @@ function renderMtpSection() {
     const depthRow = document.getElementById('hw-mtp-depth-row');
     if (depthRow) depthRow.style.display = checkbox.checked ? '' : 'none';
   }
+}
+
+function _updateSpecHint(value) {
+  const container = document.getElementById('spawn-spec-hint');
+  if (!container) return;
+  container.querySelectorAll('[data-spec]').forEach(el => {
+    el.style.display = el.dataset.spec === value ? '' : 'none';
+  });
 }
 
 function updateLegacyVramPill(total, avail) {
