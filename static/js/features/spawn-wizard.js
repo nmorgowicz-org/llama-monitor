@@ -2876,6 +2876,43 @@ function renderMmprojSection() {
   }
 }
 
+// Strip quant suffix from a model filename to produce a clean search query.
+// e.g. "Qwopus3.6-27B-v2-MTP-Q8_0.gguf" → "Qwopus3.6-27B-v2-MTP"
+function _modelStemForSearch(filename) {
+  return filename
+    .replace(/\.gguf$/i, '')
+    .replace(/-(?:(?:UD-)?(?:IQ|Q)[0-9][A-Z0-9_]*|BF16|F16|FP16|FP32)$/i, '');
+}
+
+// Search HF for the first GGUF repo that contains an mmproj file matching this model.
+// Returns {repoId, mmprojFiles} or null.
+async function _autoFindMmprojRepo(modelFilename) {
+  const query = _modelStemForSearch(modelFilename);
+  if (!query) return null;
+  const headers = window.authHeaders ? window.authHeaders() : {};
+  try {
+    const searchRes = await fetch('/api/hf/search', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, sort: 'downloads', limit: 5 }),
+    });
+    if (!searchRes.ok) return null;
+    const searchData = await searchRes.json();
+    if (!searchData.ok || !searchData.models?.length) return null;
+
+    for (const model of searchData.models) {
+      const repoId = model.id;
+      const filesRes = await fetch(`/api/hf/files?repo_id=${encodeURIComponent(repoId)}`, { headers });
+      if (!filesRes.ok) continue;
+      const filesData = await filesRes.json();
+      if (!filesData.ok) continue;
+      const mmprojFiles = (filesData.files || []).filter(f => f.is_mmproj);
+      if (mmprojFiles.length > 0) return { repoId, mmprojFiles };
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
 function _renderMmprojDownloadFromHf(row) {
   // Show the row with a "download mmproj from HuggingFace" mini-panel
   row.style.display = '';
@@ -2887,18 +2924,68 @@ function _renderMmprojDownloadFromHf(row) {
 
   panel = document.createElement('div');
   panel.className = 'hw-mmproj-hf-panel';
-  panel.innerHTML = `
-    <span class="hw-quant-label" style="color:var(--color-text-muted);font-size:10px;">
-      No mmproj found in model directory.
-    </span>
-    <button type="button" class="btn-wizard-tertiary hw-mmproj-hf-fetch-btn" style="margin-left:auto;">
-      Fetch from HuggingFace…
-    </button>
-  `;
   row.appendChild(panel);
 
-  panel.querySelector('.hw-mmproj-hf-fetch-btn').addEventListener('click', () => {
+  const originRepo = wizardState.model.originRepo || '';
+  const modelFilename = (wizardState.model.path || '').split(/[\\/]/).pop() || '';
+
+  if (originRepo) {
+    // Already know the repo — go straight to the fetch form, which auto-fetches
     _showMmprojHfFetchForm(row, panel);
+    return;
+  }
+
+  // No originRepo — try to auto-find from model filename
+  panel.innerHTML = `
+    <span class="hw-quant-label" style="color:var(--color-text-muted);font-size:10px;">
+      No mmproj found. Searching HuggingFace…
+    </span>
+  `;
+
+  _autoFindMmprojRepo(modelFilename).then(result => {
+    panel.innerHTML = '';
+
+    if (result) {
+      // Auto-found a repo with mmproj — show it for one-click download
+      const statusEl = document.createElement('div');
+      statusEl.style.cssText = 'font-size:10px;color:var(--color-text-muted);margin-top:4px;';
+
+      const repoLabel = document.createElement('span');
+      repoLabel.className = 'hw-quant-label';
+      repoLabel.style.cssText = 'font-size:10px;color:var(--color-text-muted);';
+      repoLabel.textContent = `Found: ${result.repoId}`;
+      panel.appendChild(repoLabel);
+
+      const listEl = document.createElement('div');
+      listEl.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-top:6px;';
+      result.mmprojFiles.forEach(f => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn-wizard-secondary';
+        btn.style.cssText = 'min-height:26px;padding:4px 10px;font-size:10px;text-align:left;';
+        const fname = (f.rfilename || f.path || '').split('/').pop();
+        const sizeStr = f.size ? ` · ${formatBytes(f.size)}` : '';
+        btn.textContent = `⬇ ${fname}${sizeStr}`;
+        btn.addEventListener('click', () => _downloadMmprojFromHf(result.repoId, f, wizardState.model.path, statusEl));
+        listEl.appendChild(btn);
+      });
+      panel.appendChild(listEl);
+      panel.appendChild(statusEl);
+
+      const manualLink = document.createElement('a');
+      manualLink.href = '#';
+      manualLink.style.cssText = 'font-size:10px;color:var(--color-text-muted);margin-top:6px;display:inline-block;';
+      manualLink.textContent = 'Wrong repo? Search manually…';
+      manualLink.addEventListener('click', e => {
+        e.preventDefault();
+        panel.innerHTML = '';
+        _showMmprojHfFetchForm(row, panel);
+      });
+      panel.appendChild(manualLink);
+    } else {
+      // Auto-find failed — go straight to manual form
+      _showMmprojHfFetchForm(row, panel);
+    }
   });
 }
 
@@ -3321,9 +3408,45 @@ function showCtxFitWarning(ctx, useCase, manualSet = false) {
 
 // ── Model directory switcher ──────────────────────────────────────────────────
 
+function _buildDirSwitcher(container, targetInputId, allDirs) {
+  container.innerHTML = '';
+  container.style.display = 'flex';
+  container.style.alignItems = 'center';
+  container.style.flexWrap = 'wrap';
+  container.style.gap = '6px';
+
+  const label = document.createElement('span');
+  label.className = 'dir-switcher-label';
+  label.textContent = 'Browse from:';
+  container.appendChild(label);
+
+  allDirs.forEach(dir => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'dir-switcher-chip';
+    const parts = dir.replace(/\\/g, '/').split('/').filter(Boolean);
+    chip.textContent = parts.slice(-2).join('/') || dir;
+    chip.title = dir;
+    chip.addEventListener('click', () => openDeferredFileBrowser(targetInputId, 'gguf', dir));
+    container.appendChild(chip);
+  });
+
+  const settingsLink = document.createElement('a');
+  settingsLink.href = '#';
+  settingsLink.className = 'dir-switcher-settings-link';
+  settingsLink.addEventListener('click', e => {
+    e.preventDefault();
+    window.openSettingsModal?.();
+    setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
+  });
+  settingsLink.textContent = '+ Add folder';
+  container.appendChild(settingsLink);
+}
+
 async function _loadModelDirSwitcher() {
-  const container = document.getElementById('spawn-dir-switcher');
-  if (!container) return;
+  const localContainer  = document.getElementById('spawn-dir-switcher');
+  const importContainer = document.getElementById('spawn-import-dir-switcher');
+  if (!localContainer && !importContainer) return;
 
   try {
     const headers = window.authHeaders ? window.authHeaders() : {};
@@ -3336,42 +3459,13 @@ async function _loadModelDirSwitcher() {
     const allDirs = [primary, ...extras].filter(Boolean);
 
     if (allDirs.length < 2) {
-      container.style.display = 'none';
+      if (localContainer)  localContainer.style.display  = 'none';
+      if (importContainer) importContainer.style.display = 'none';
       return;
     }
 
-    container.innerHTML = '';
-    container.style.display = 'flex';
-    container.style.alignItems = 'center';
-    container.style.flexWrap = 'wrap';
-    container.style.gap = '6px';
-
-    const label = document.createElement('span');
-    label.className = 'dir-switcher-label';
-    label.textContent = 'Browse from:';
-    container.appendChild(label);
-
-    allDirs.forEach(dir => {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'dir-switcher-chip';
-      const parts = dir.replace(/\\/g, '/').split('/').filter(Boolean);
-      chip.textContent = parts.slice(-2).join('/') || dir;
-      chip.title = dir;
-      chip.addEventListener('click', () => openDeferredFileBrowser('spawn-model-path', 'gguf', dir));
-      container.appendChild(chip);
-    });
-
-    const settingsLink = document.createElement('a');
-    settingsLink.href = '#';
-    settingsLink.className = 'dir-switcher-settings-link';
-    settingsLink.addEventListener('click', e => {
-      e.preventDefault();
-      window.openSettingsModal?.();
-      setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
-    });
-    settingsLink.textContent = '+ Add folder';
-    container.appendChild(settingsLink);
+    if (localContainer)  _buildDirSwitcher(localContainer,  'spawn-model-path',  allDirs);
+    if (importContainer) _buildDirSwitcher(importContainer, 'spawn-import-path', allDirs);
   } catch { /* ignore */ }
 }
 
