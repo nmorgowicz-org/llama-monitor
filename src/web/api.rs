@@ -3659,21 +3659,19 @@ pub fn api_routes(
     };
     let get_all_metrics = {
         let state = state.clone();
-        warp::path!("metrics")
-            .and(warp::get())
-            .map(move || {
-                let system = state
-                    .system_metrics
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone();
-                let gpu = state
-                    .gpu_metrics
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone();
-                warp::reply::json(&serde_json::json!({ "system": system, "gpu": gpu }))
-            })
+        warp::path!("metrics").and(warp::get()).map(move || {
+            let system = state
+                .system_metrics
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let gpu = state
+                .gpu_metrics
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            warp::reply::json(&serde_json::json!({ "system": system, "gpu": gpu }))
+        })
     };
 
     // Phase 0/2/3: Spawn Llama-Server v2 routes
