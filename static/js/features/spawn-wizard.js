@@ -2904,32 +2904,53 @@ function _modelStemForSearch(filename) {
     .replace(/-(?:(?:UD-)?(?:IQ|Q)[0-9][A-Z0-9_]*|BF16|F16|FP16|FP32)$/i, '');
 }
 
+// POST to /api/hf/files and return parsed JSON, or null on error.
+async function _hfFilesPost(repoId) {
+  const headers = window.authHeaders ? window.authHeaders() : {};
+  try {
+    const res = await fetch('/api/hf/files', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo_id: repoId }),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
 // Search HF for the first GGUF repo that contains an mmproj file matching this model.
 // Returns {repoId, mmprojFiles} or null.
 async function _autoFindMmprojRepo(modelFilename) {
-  const query = _modelStemForSearch(modelFilename);
-  if (!query) return null;
+  const stem = _modelStemForSearch(modelFilename);
+  if (!stem) return null;
   const headers = window.authHeaders ? window.authHeaders() : {};
-  try {
-    const searchRes = await fetch('/api/hf/search', {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, sort: 'downloads', limit: 5 }),
-    });
-    if (!searchRes.ok) return null;
-    const searchData = await searchRes.json();
-    if (!searchData.ok || !searchData.models?.length) return null;
 
-    for (const model of searchData.models) {
-      const repoId = model.id;
-      const filesRes = await fetch(`/api/hf/files?repo_id=${encodeURIComponent(repoId)}`, { headers });
-      if (!filesRes.ok) continue;
-      const filesData = await filesRes.json();
-      if (!filesData.ok) continue;
-      const mmprojFiles = (filesData.files || []).filter(f => f.is_mmproj);
-      if (mmprojFiles.length > 0) return { repoId, mmprojFiles };
-    }
-  } catch { /* ignore */ }
+  // Try progressively broader queries: exact stem, stem + GGUF keyword,
+  // then a shorter version without minor version/variant suffixes.
+  const shorter = stem
+    .replace(/-v\d+(?:\.\d+)?(?:-[A-Za-z]+)*$/i, '') // strip -v2-MTP etc.
+    .replace(/-MTP$/i, '');
+  const queries = [...new Set([stem, stem + ' GGUF', shorter])].filter(Boolean);
+
+  for (const query of queries) {
+    try {
+      const searchRes = await fetch('/api/hf/search', {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, sort: 'downloads', limit: 10 }),
+      });
+      if (!searchRes.ok) continue;
+      const searchData = await searchRes.json();
+      if (!searchData.ok || !searchData.models?.length) continue;
+
+      for (const model of searchData.models) {
+        const filesData = await _hfFilesPost(model.id);
+        if (!filesData?.ok) continue;
+        const mmprojFiles = (filesData.files || []).filter(f => f.is_mmproj);
+        if (mmprojFiles.length > 0) return { repoId: model.id, mmprojFiles };
+      }
+    } catch { continue; }
+  }
   return null;
 }
 
@@ -2939,10 +2960,10 @@ function _renderMmprojDownloadFromHf(row) {
   const select = document.getElementById('hw-mmproj-select');
   if (select) select.style.display = 'none';
 
-  let panel = row.querySelector('.hw-mmproj-hf-panel');
-  if (panel) return; // already rendered
+  // Remove stale panel so auto-search re-runs if user navigates back and forward
+  row.querySelector('.hw-mmproj-hf-panel')?.remove();
 
-  panel = document.createElement('div');
+  const panel = document.createElement('div');
   panel.className = 'hw-mmproj-hf-panel';
   row.appendChild(panel);
 
@@ -3003,14 +3024,20 @@ function _renderMmprojDownloadFromHf(row) {
       });
       panel.appendChild(manualLink);
     } else {
-      // Auto-find failed — go straight to manual form
-      _showMmprojHfFetchForm(row, panel);
+      // Auto-find failed — show manual form with the stem pre-filled and a note
+      const stem = _modelStemForSearch(modelFilename);
+      _showMmprojHfFetchForm(row, panel, stem);
     }
   });
 }
 
-function _showMmprojHfFetchForm(row, panel) {
+function _showMmprojHfFetchForm(row, panel, prefill = '') {
+  const originRepo = wizardState.model.originRepo || '';
+  const initialValue = originRepo || prefill;
+  const showNotFound = !originRepo && prefill;
+
   panel.innerHTML = `
+    ${showNotFound ? `<div style="font-size:10px;color:var(--color-text-muted);margin-bottom:6px;">Couldn't auto-find it — enter the HuggingFace repo that contains the mmproj:</div>` : ''}
     <div style="display:flex;gap:6px;align-items:center;width:100%;flex-wrap:wrap;">
       <input type="text" class="hw-mmproj-repo-input" placeholder="owner/repo (e.g. unsloth/Qwen3-VL-7B-GGUF)"
         style="flex:1;min-width:120px;padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);
@@ -3022,10 +3049,8 @@ function _showMmprojHfFetchForm(row, panel) {
     <div class="hw-mmproj-repo-list" style="display:none;flex-direction:column;gap:4px;margin-top:6px;max-height:120px;overflow-y:auto;"></div>
   `;
 
-  // Pre-fill with originRepo if we know it
-  const originRepo = wizardState.model.originRepo || '';
   const input = panel.querySelector('.hw-mmproj-repo-input');
-  if (originRepo) input.value = originRepo;
+  if (initialValue) input.value = initialValue;
 
   panel.querySelector('.hw-mmproj-cancel').addEventListener('click', () => {
     panel.remove();
@@ -3043,40 +3068,34 @@ function _showMmprojHfFetchForm(row, panel) {
     const repoId = input.value.trim();
     if (!repoId) return;
     goBtn.disabled = true; statusEl.textContent = 'Fetching files…';
-    try {
-      const headers = window.authHeaders ? window.authHeaders() : {};
-      const res = await fetch(`/api/hf/files?repo_id=${encodeURIComponent(repoId)}`, { headers });
-      const data = res.ok ? await res.json() : null;
-      goBtn.disabled = false;
-      if (!data?.ok || !data.files?.length) {
-        statusEl.textContent = 'No GGUF files found. Check the repo ID.'; return;
-      }
-      const mmprojFiles = data.files.filter(f => f.is_mmproj);
-      if (!mmprojFiles.length) {
-        statusEl.textContent = 'No mmproj file found in this repo.'; return;
-      }
-      statusEl.textContent = '';
-      listEl.style.display = 'flex';
-      listEl.innerHTML = '';
-      mmprojFiles.forEach(f => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'btn-wizard-secondary';
-        btn.style.cssText = 'min-height:26px;padding:4px 10px;font-size:10px;text-align:left;';
-        const fname = (f.rfilename || f.path || '').split('/').pop();
-        const sizeStr = f.size ? ` · ${formatBytes(f.size)}` : '';
-        btn.textContent = `⬇ ${fname}${sizeStr}`;
-        btn.addEventListener('click', () => _downloadMmprojFromHf(repoId, f, wizardState.model.path, statusEl));
-        listEl.appendChild(btn);
-      });
-    } catch (e) {
-      goBtn.disabled = false;
-      statusEl.textContent = `Error: ${e.message}`;
+    const data = await _hfFilesPost(repoId);
+    goBtn.disabled = false;
+    if (!data?.ok || !data.files?.length) {
+      statusEl.textContent = 'No GGUF files found. Check the repo ID.'; return;
     }
+    const mmprojFiles = data.files.filter(f => f.is_mmproj);
+    if (!mmprojFiles.length) {
+      statusEl.textContent = 'No mmproj file found in this repo.'; return;
+    }
+    statusEl.textContent = '';
+    listEl.style.display = 'flex';
+    listEl.innerHTML = '';
+    mmprojFiles.forEach(f => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn-wizard-secondary';
+      btn.style.cssText = 'min-height:26px;padding:4px 10px;font-size:10px;text-align:left;';
+      const fname = (f.rfilename || f.path || '').split('/').pop();
+      const sizeStr = f.size ? ` · ${formatBytes(f.size)}` : '';
+      btn.textContent = `⬇ ${fname}${sizeStr}`;
+      btn.addEventListener('click', () => _downloadMmprojFromHf(repoId, f, wizardState.model.path, statusEl));
+      listEl.appendChild(btn);
+    });
   }
 
   goBtn.addEventListener('click', doFetch);
   input.addEventListener('keydown', e => { if (e.key === 'Enter') doFetch(); });
+  // Auto-fetch when we already know the exact repo (originRepo), not for search hints
   if (originRepo) doFetch();
 }
 
