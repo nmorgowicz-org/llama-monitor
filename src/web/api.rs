@@ -3636,8 +3636,43 @@ pub fn api_routes(
         warp::path!("metrics" / "gpu")
             .and(warp::get())
             .map(move || {
-                let gpu = state.gpu_metrics.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                let gpu = state
+                    .gpu_metrics
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
                 warp::reply::json(&gpu)
+            })
+    };
+    let get_system_metrics = {
+        let state = state.clone();
+        warp::path!("metrics" / "system")
+            .and(warp::get())
+            .map(move || {
+                let sys = state
+                    .system_metrics
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                warp::reply::json(&sys)
+            })
+    };
+    let get_all_metrics = {
+        let state = state.clone();
+        warp::path!("metrics")
+            .and(warp::get())
+            .map(move || {
+                let system = state
+                    .system_metrics
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                let gpu = state
+                    .gpu_metrics
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                warp::reply::json(&serde_json::json!({ "system": system, "gpu": gpu }))
             })
     };
 
@@ -3801,6 +3836,8 @@ pub fn api_routes(
 
     server_routes
         .or(get_gpu_metrics)
+        .or(get_system_metrics)
+        .or(get_all_metrics)
         .or(preset_routes)
         .or(template_routes)
         .or(model_routes)
