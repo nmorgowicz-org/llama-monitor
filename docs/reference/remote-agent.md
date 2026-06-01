@@ -12,6 +12,8 @@ When a remote agent is installed and reachable, the dashboard can show:
 
 This is what upgrades a remote attach session from **Inference only** to **Full telemetry**.
 
+![GPU & System telemetry from a remote agent](../screenshots/gpu-metrics.gif)
+
 ## Agent states and indicators
 
 When attached to a remote endpoint, the header Agent button and Remote Agent panel reflect several states:

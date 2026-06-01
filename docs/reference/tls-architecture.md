@@ -17,6 +17,8 @@ High-level principles:
 
 ## TLS Modes
 
+![Security & Certificates settings panel](../screenshots/tls-certificates-tab.png)
+
 llama-monitor supports four TLS modes, configured via:
 - CLI flags.
 - Settings → Security & Certificates (UI).
@@ -95,6 +97,8 @@ Notes:
 - Changing certificate/key paths requires a restart to take effect.
 
 ### 4) Let’s Encrypt (ACME)
+
+![ACME / Let’s Encrypt configuration](../screenshots/tls-mode-acme-full.png)
 
 Behavior:
 - llama-monitor uses the ACME protocol to obtain and renew TLS certificates from Let’s Encrypt.

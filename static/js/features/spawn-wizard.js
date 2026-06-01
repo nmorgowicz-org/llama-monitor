@@ -110,6 +110,12 @@ function formatGB(bytes) {
   if (!bytes) return '0 GB';
   return (bytes / 1e9).toFixed(1) + ' GB';
 }
+// Use binary GiB (1024³) for system VRAM totals so "64 GiB" shows as "64 GB",
+// matching Apple's marketing convention (GiB labeled as GB).
+function formatVramTotal(bytes) {
+  if (!bytes) return '0 GB';
+  return (bytes / (1024 ** 3)).toFixed(1) + ' GB';
+}
 function formatBytes(bytes) {
   if (!bytes) return '';
   const b = Number(bytes);
@@ -129,7 +135,8 @@ function formatSpeed(bps) {
 
 const STEP_LABELS = ['Profile', 'Model', 'Hardware', 'Summary', 'Spawn'];
 
-const wizardState = {
+// Exposed for testing/screenshot scripts; internal state is mutable.
+export const wizardState = {
   currentStep: 0,
   profile: 'balanced',
   useCase: 'general',    // 'agentic' | 'general' | 'roleplay'
@@ -1406,7 +1413,12 @@ function renderHfDiscoverPills() {
       pill.classList.add('active');
       wizardState.hfBrowseAuthor = null;
       if (dom.hfRepoInput) dom.hfRepoInput.value = '';
-      const sort = dom.hfSortSelect?.value || cat.params.sort;
+      // When the pill's own query is empty, the pill's sort is essential for the
+      // backend to return meaningful results (e.g. trending requires sort=trending).
+      // Only let the sort select override when a query term anchors the search.
+      const sort = cat.params.query
+        ? (dom.hfSortSelect?.value || cat.params.sort)
+        : cat.params.sort;
       showHfSearchResults({ ...cat.params, sort });
     });
     container.appendChild(pill);
@@ -2082,7 +2094,7 @@ function readHardwareState() {
   if (dom.ignoreEosCheck) h.ignoreEos = dom.ignoreEosCheck.checked;
 }
 
-function scheduleVramUpdate() {
+export function scheduleVramUpdate() {
   if (vramDebounce) clearTimeout(vramDebounce);
   vramDebounce = setTimeout(updateVramDisplay, 250);
 }
@@ -2243,7 +2255,7 @@ function updateVramDisplay() {
 
   // Update total label
   if (dom.vramPanelTotal) {
-    if (availVram > 0) dom.vramPanelTotal.textContent = formatGB(availVram) + ' total';
+    if (availVram > 0) dom.vramPanelTotal.textContent = formatVramTotal(availVram) + ' total';
     else dom.vramPanelTotal.textContent = 'GPU VRAM unknown';
   }
 
@@ -2444,7 +2456,7 @@ function renderHardwareModelHeader() {
 
   const quantRow = document.getElementById('hw-quant-row');
   const quantSelect = document.getElementById('hw-quant-select');
-  const vramGb = cachedVram / 1e9;
+  const vramGb = cachedVram / (1024 ** 3);
 
   if (quantSelect && quantFiles && quantFiles.length > 1) {
     quantSelect.innerHTML = '';
@@ -2569,7 +2581,7 @@ function _updateSpecHint(value) {
 function updateLegacyVramPill(total, avail) {
   if (dom.vramEstimateText) {
     dom.vramEstimateText.textContent = avail > 0
-      ? `${formatGB(total)} / ${formatGB(avail)}`
+      ? `${formatGB(total)} / ${formatVramTotal(avail)}`
       : formatGB(total);
   }
   if (!dom.vramPill) return;

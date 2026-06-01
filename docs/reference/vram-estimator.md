@@ -2,6 +2,8 @@
 
 The VRAM estimator (`src/llama/vram_estimator.rs`) predicts GPU memory usage for a given model, quantization, context size, and hardware configuration. It powers the animated VRAM breakdown bar, the auto-size wizard, and the pre-download quant advisor.
 
+![VRAM breakdown bar in the Hardware step](../screenshots/spawn-wizard-step3-vram.png)
+
 ---
 
 ## ModelArch

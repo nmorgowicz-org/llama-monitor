@@ -354,7 +354,13 @@ The harness spawns a fresh `target/release/llama-monitor` binary on a temporary 
 | `panels` | Chat config panels, style, prompt debug | `docs/screenshots/artifacts/` |
 | `dashboard` | Server tab and GPU section | `docs/screenshots/artifacts/` |
 | `sparkline` | Throughput sparkline validation stills | `docs/screenshots/artifacts/` |
-| `gifs` | Inference and GPU/system animated GIFs | `docs/screenshots/artifacts/` |
+| `gifs` | Inference and GPU/system animated GIFs (900px scaled) | `docs/screenshots/artifacts/` |
+| `spawn-wizard` | Spawn wizard static stills: all 5 steps, HF browse, quant advisor, VRAM, summary | `docs/screenshots/artifacts/` |
+| `spawn-wizard-gif` | Animated GIF of the full spawn wizard flow (900px scaled, ~18s) | `docs/screenshots/artifacts/` |
+| `tls` | TLS/ACME settings panels: all four TLS modes, certificates tab, DB admin section | `docs/screenshots/artifacts/` |
+| `tune-panel` | Server tuning panel | `docs/screenshots/artifacts/` |
+| `llama-updater` | llama-server binary updater pill and release notes | `docs/screenshots/artifacts/` |
+| `chat-history-qa` | Chat history Q&A panel | `docs/screenshots/artifacts/` |
 | `smoke` | Startup smoke validation | no screenshots unless the scenario is extended |
 
 **Output directory convention:**
@@ -393,6 +399,20 @@ SCREENSHOT_PORT=8898 node tests/ui/capture.mjs --scenario sparkline
 SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs
 SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --gpu-only
 SCREENSHOT_PORT=8895 node tests/ui/capture.mjs --scenario gifs --inference-only
+
+# Spawn wizard stills (no attach needed)
+SCREENSHOT_PORT=8896 node tests/ui/capture.mjs --scenario spawn-wizard --no-attach
+
+# Spawn wizard animated GIF (no attach needed)
+SCREENSHOT_PORT=8897 node tests/ui/capture.mjs --scenario spawn-wizard-gif --no-attach
+
+# TLS/security panels
+SCREENSHOT_PORT=8898 node tests/ui/capture.mjs --scenario tls
+
+# Misc panels
+SCREENSHOT_PORT=8900 node tests/ui/capture.mjs --scenario tune-panel
+SCREENSHOT_PORT=8901 node tests/ui/capture.mjs --scenario llama-updater
+SCREENSHOT_PORT=8902 node tests/ui/capture.mjs --scenario chat-history-qa
 ```
 
 ### When to Regenerate Screenshots

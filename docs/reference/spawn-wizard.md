@@ -4,11 +4,15 @@ The Spawn Wizard is a 5-step guided flow for configuring and launching a llama-s
 
 Entry points: the **New Server Wizard** card on the welcome screen, the **+ New Session** button in the top nav, and the **Spawn Local Server** link on the logs empty state.
 
+![Spawn Wizard Flow](../screenshots/spawn-wizard-flow.gif)
+
 ---
 
 ## Wizard Steps
 
 ### Step 1 — Profile
+
+![Step 1 — Profile selection](../screenshots/spawn-wizard-step1-profiles.png)
 
 The user selects a **hardware profile** and a **use case**.
 
@@ -35,6 +39,8 @@ The user selects a **hardware profile** and a **use case**.
 
 The user picks a model source. Three source types:
 
+![Step 2 — Model source selection](../screenshots/spawn-wizard-step2-source-cards.png)
+
 #### Local GGUF File
 - User enters or browses an absolute path to a `.gguf` file.
 - Parameter count (`param_b`) is inferred from the filename using `infer_param_b_from_name()`.
@@ -43,6 +49,8 @@ The user picks a model source. Three source types:
 
 #### HuggingFace Hub
 See [HuggingFace Integration](#huggingface-integration) below.
+
+![HuggingFace Hub file browser](../screenshots/spawn-wizard-step2-hf-base.png)
 
 - The wizard includes a short helper explaining when a token is optional and links directly to `https://huggingface.co/settings/tokens`.
 - Recommended token type: **Read**.
@@ -54,6 +62,8 @@ See [Third-Party Model Import](#third-party-model-import) below.
 ---
 
 ### Step 3 — Hardware
+
+![Step 3 — VRAM breakdown and hardware tuning](../screenshots/spawn-wizard-step3-vram.png)
 
 The core tuning step. Populated using `POST /api/vram/auto-size` after model selection.
 
@@ -127,6 +137,8 @@ Shown automatically when the model has `mtp_depth > 0` (detected from GGUF metad
 
 ### Step 4 — Summary
 
+![Step 4 — Summary and launch config](../screenshots/spawn-wizard-step4-summary.png)
+
 Shows a human-readable review of all selected parameters. Health checks:
 - VRAM fit status
 - Context fit relative to training context (`n_ctx_train`); warns when n_ctx > n_ctx_train and suggests YaRN
@@ -155,6 +167,8 @@ One-click launch. Shows live status (starting → waiting for endpoint → runni
 ## HuggingFace Integration
 
 ### Search and Browse
+
+![HuggingFace community picks](../screenshots/spawn-wizard-step2-community-picks.png)
 
 - Public repos can be searched and browsed without an HF token.
 - A read-only token is recommended for gated/private repos and to avoid stricter anonymous rate limits.
@@ -486,7 +500,9 @@ Compute optimal settings for a model + hardware combination.
 - `use_case`: `"general"` | `"agentic"` | `"roleplay"`
 
 #### POST /api/vram/quant-compare
-Pre-download quant comparison table for a model.
+Pre-download quant comparison table for a model. Shown in the wizard as the **Quant Advisor** panel.
+
+![Quant Advisor — pre-download VRAM comparison](../screenshots/spawn-wizard-step2-quant-advisor.png)
 
 ```json
 // Request

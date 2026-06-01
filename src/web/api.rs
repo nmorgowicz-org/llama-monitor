@@ -2813,9 +2813,13 @@ fn api_hf_search(
                     _           => crate::hf::HfSort::Downloads,
                 };
 
-                // Allow empty query when author is set (browse mode) or when sorting by
-                // trending/trendingScore (global trending list needs no query term).
-                if query.is_empty() && author.is_none() && sort != crate::hf::HfSort::Trending {
+                // Require at least a query or an author — unless sorting by trending or
+                // downloads (in which case empty query returns a global popular/trending list).
+                if query.is_empty()
+                    && author.is_none()
+                    && sort != crate::hf::HfSort::Trending
+                    && sort != crate::hf::HfSort::Downloads
+                {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                         Box::new(warp::reply::json(&serde_json::json!({
                             "ok": false,

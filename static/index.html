@@ -2713,13 +2713,13 @@
                                 <button type="button" class="ctx-pick" data-ctx="262144" title="256k — Full model max context; VRAM-intensive, use KV q4_0 to fit">256k <span class="ctx-pick-tag">Max</span></button>
                             </div>
                         </div>
-                        <div class="hardware-field">
+                        <div class="hardware-field hardware-field-kv">
                             <label for="spawn-cache-type-k">KV cache</label>
                             <div class="kv-cache-row">
-                                <select id="spawn-cache-type-k" title="K cache quantization">
-                                    <option value="">f16 (full precision)</option>
-                                    <option value="q8_0" selected>q8_0 — recommended</option>
-                                    <option value="q4_0">q4_0 — max context / RP</option>
+                                <select id="spawn-cache-type-k" title="K cache quantization — q8_0 recommended, q4_0 for max context">
+                                    <option value="">f16</option>
+                                    <option value="q8_0" selected>q8_0 ★</option>
+                                    <option value="q4_0">q4_0</option>
                                 </select>
                                 <select id="spawn-cache-type-v" title="V cache quantization">
                                     <option value="">f16</option>

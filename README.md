@@ -21,7 +21,7 @@ The top nav and Server tab show throughput, context pressure, request activity, 
 
 Attach to a remote llama.cpp server, then add the companion remote agent when you need GPU, CPU, RAM, and host-health metrics from that machine. The header Agent flow and runtime configuration panel handle install, start, update, and repair actions.
 
-![GPU & System Metrics](docs/screenshots/dashboard-gpu-section.png)
+![GPU & System Metrics](docs/screenshots/gpu-metrics.gif)
 
 ### Multi-Session Chat Workspace
 
@@ -57,21 +57,27 @@ Built-in TLS with ACME (Let’s Encrypt) and mTLS for remote agents. Choose No H
 
 Token-protected endpoints for API access, database administration, and remote agents. Rotate tokens in-place from the UI (Settings → Security & Certificates) when credentials are suspected to be exposed or as part of routine hardening.
 
+### Spawn Local Server
+
+A 5-step wizard for downloading, configuring, and launching a llama-server instance. Pick a hardware profile, select a model from HuggingFace or local storage, tune VRAM parameters with a live breakdown bar, review the full config summary, and launch — no CLI flags required.
+
+![Spawn Wizard Flow](docs/screenshots/spawn-wizard-flow.gif)
+
+**What's included:**
+- Profile selection: Quick / Balanced / Workstation / Advanced presets for GPU layers, batch, and fit granularity
+- HuggingFace integration: search, browse community picks, list GGUF files, and stream downloads with resume support
+- Third-party model import: scan Ollama, LM Studio, and common directories for local GGUF files
+- VRAM estimator: animated breakdown bar (weights · KV cache · mmproj · MTP · overhead) with fit/tight/risk thresholds; auto-sizes context to fill available memory
+- Speculative decoding: N-gram, MTP (built-in draft heads), and draft-model modes
+- Summary review with health checks: VRAM fit, context vs training size, MoE offload impact, network exposure warnings
+
 ---
 
 **Monitoring reference**: [Dashboard Capabilities](docs/reference/dashboard.md)  
 **Remote telemetry setup**: [Remote Agent](docs/reference/remote-agent.md)  
 **Chat and guided generation**: [Chat](docs/reference/chat.md)  
 **TLS / ACME / mTLS**: [TLS Architecture](docs/reference/tls-architecture.md)  
-**Spawn Llama-Server V2**: [Spawn Wizard](docs/reference/spawn-wizard.md)
-
-## Recent (Spawn Llama-Server V2)
-
-- Spawn Llama-Server V2 wizard: guided profile selection, model source (local, HF, third-party), hardware tuning, summary, and launch.
-- HuggingFace integration: search models, list GGUF files, start downloads with resume support.
-- Third-party model import: scan Ollama / LM Studio / common directories for existing GGUF files.
-- Model introspection: read model metadata via llama-server; cache results to avoid repeated scans.
-- Hardening: rate limiting on HF search and downloads, path traversal guards, keyboard accessibility, reduced-motion support.
+**Spawn Wizard reference**: [Spawn Wizard](docs/reference/spawn-wizard.md) · [VRAM Estimator](docs/reference/vram-estimator.md)
 
 ## Supported Hardware
 
