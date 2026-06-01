@@ -1960,13 +1960,13 @@
             <button type="button" class="modal-close" id="filebrowser-close" aria-label="Close">&times;</button>
         </div>
         <div class="file-browser-bar">
-            <button class="btn-sm btn-preset" id="filebrowser-up" title="Parent folder">&uarr; Up</button>
+            <button class="fb-up-btn" id="filebrowser-up" title="Parent folder" aria-label="Go up one level">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M7 11V3M3 7l4-4 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Up
+            </button>
             <input type="text" id="fb-path-input" class="fb-path-input" placeholder="Enter path and press Enter">
         </div>
         <div class="modal-body" style="padding:0;">
-            <div class="file-browser-hint">
-                Only allowed directories are accessible.
-            </div>
             <div id="fb-entries" class="fb-entries"></div>
         </div>
         <div class="modal-buttons">
@@ -2672,36 +2672,30 @@
                         </div>
                     </div>
 
-                    <!-- Advanced KV / unified settings -->
-                    <details class="kv-advanced-details" id="kv-advanced-details">
-                        <summary class="kv-advanced-summary">Advanced KV settings</summary>
-                        <div class="kv-advanced-body">
-                            <div class="kv-advanced-row">
-                                <div class="kv-advanced-field">
-                                    <label for="spawn-cache-type-k" class="kv-advanced-label">K cache</label>
-                                    <select id="spawn-cache-type-k" title="K cache quantization">
-                                        <option value="">f16</option>
-                                        <option value="q8_0" selected>q8_0</option>
-                                        <option value="q4_0">q4_0</option>
-                                    </select>
-                                </div>
-                                <div class="kv-advanced-field">
-                                    <label for="spawn-cache-type-v" class="kv-advanced-label">V cache</label>
-                                    <select id="spawn-cache-type-v" title="V cache quantization">
-                                        <option value="">f16</option>
-                                        <option value="q8_0" selected>q8_0</option>
-                                        <option value="q4_0">q4_0</option>
-                                    </select>
-                                </div>
-                                <label class="kv-unified-toggle" title="Use a single unified KV cache buffer (--kv-unified). Can reduce memory fragmentation on some setups.">
-                                    <input type="checkbox" id="spawn-kv-unified">
-                                    <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
-                                    <span class="kv-unified-text">Unified buffer</span>
-                                </label>
-                            </div>
-                            <div class="field-hint" style="margin-top:6px;">Overrides the preset above. K and V can differ — e.g. q8_0 K + q4_0 V to save VRAM on V.</div>
+                    <!-- KV cache precision -->
+                    <div class="kv-inline-row">
+                        <div class="kv-inline-field">
+                            <label for="spawn-cache-type-k" class="kv-inline-label">K cache <span class="kv-inline-hint">quant</span></label>
+                            <select id="spawn-cache-type-k" title="KV key quantization (q8_0 recommended for quality; q4_0 saves ~2× VRAM on cache)">
+                                <option value="">f16 — lossless</option>
+                                <option value="q8_0" selected>q8_0 — recommended</option>
+                                <option value="q4_0">q4_0 — saves VRAM</option>
+                            </select>
                         </div>
-                    </details>
+                        <div class="kv-inline-field">
+                            <label for="spawn-cache-type-v" class="kv-inline-label">V cache <span class="kv-inline-hint">quant</span></label>
+                            <select id="spawn-cache-type-v" title="KV value quantization (can set lower than K to save VRAM with minimal quality impact)">
+                                <option value="">f16 — lossless</option>
+                                <option value="q8_0" selected>q8_0 — recommended</option>
+                                <option value="q4_0">q4_0 — saves VRAM</option>
+                            </select>
+                        </div>
+                        <label class="kv-unified-toggle" title="Use a single unified KV cache buffer (--kv-unified). Can reduce memory fragmentation on some setups.">
+                            <input type="checkbox" id="spawn-kv-unified">
+                            <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
+                            <span class="kv-unified-text">Unified</span>
+                        </label>
+                    </div>
 
                     <!-- MTP section (shown for models with MTP heads) -->
                     <div class="hw-mtp-section" id="hw-mtp-section" style="display:none;">
@@ -2779,16 +2773,6 @@
                             </div>
                         </div>
 
-                        <!-- Advanced runtime toggles -->
-                        <details class="wizard-advanced-details">
-                            <summary>Advanced runtime options</summary>
-                            <div class="modal-row modal-checks" style="margin-top:6px;">
-                                <label class="chk" title="Allow generation past EOS tokens (useful for some roleplay models).">
-                                    <input type="checkbox" id="spawn-ignore-eos">
-                                    Ignore EOS
-                                </label>
-                            </div>
-                        </details>
                     </div>
 
                     <!-- Download panel (moved here — shown when entering hardware step for HF models) -->

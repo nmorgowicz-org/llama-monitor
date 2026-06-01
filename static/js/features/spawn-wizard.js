@@ -174,7 +174,7 @@ export const wizardState = {
     nCpuMoe: 0,
     tensorSplit: '',
     fitCtx: 1024,
-    kvUnified: false, ignoreEos: false,
+    kvUnified: false,
     // MTP
     mtpEnabled: true,
     mtpDraftNMax: 2,
@@ -961,9 +961,14 @@ function showStep(index) {
   dom.steps?.forEach(s => s.classList.remove('active'));
   document.getElementById(`wizard-step-${index}`)?.classList.add('active');
 
-  // Scroll the wizard body to the top whenever changing steps
+  // Scroll the wizard body to the top whenever changing steps.
+  // On the hardware step (2) the body must not scroll — only .wizard-main
+  // scrolls internally so the VRAM sidebar stays fixed in the viewport.
   const wizardBody = document.querySelector('.wizard-body');
-  if (wizardBody) wizardBody.scrollTop = 0;
+  if (wizardBody) {
+    wizardBody.scrollTop = 0;
+    wizardBody.style.overflowY = index === 2 ? 'hidden' : '';
+  }
 
   dom.stepBadges?.forEach(b => {
     const s = Number(b.dataset.step);
@@ -2401,20 +2406,15 @@ async function estimateVramFull() {
 
 function getModelBytes() {
   if (wizardState.model.modelBytes > 0) return wizardState.model.modelBytes;
-  // Estimate from file size stat (local) or param count + quant
-  const path = wizardState.model.path;
-  if (!path) {
-    // HF: estimate from param count + selected quant
-    const paramB = wizardState.model.paramB;
-    if (!paramB) return 0;
-    // Guess quant from filename of selected HF file
-    const fname = (wizardState.model.hfFile || '').toLowerCase();
-    const quant = guessQuantFromName(fname);
-    const BPW = { f16:16, q8_0:8.5, q6_k:6.5625, q5_k_m:5.69, q5_k_s:5.52, q4_k_m:4.85, q4_k_s:4.58, q4_0:4.55, iq4_xs:4.25, q3_k_m:3.875, q2_k:2.625, iq2_xxs:2.0625, iq1_m:1.75 };
-    const bpw = BPW[quant] ?? 4.85;
-    return Math.round(paramB * 1e9 * bpw / 8);
-  }
-  return 0; // will be 0 until file stat succeeds
+  const paramB = wizardState.model.paramB;
+  if (!paramB) return 0;
+  // Estimate from param count + quant for both local and HF models.
+  // Use the selected HF file name first, then fall back to the local path.
+  const fname = (wizardState.model.hfFile || wizardState.model.path || '').toLowerCase();
+  const quant = guessQuantFromName(fname);
+  const BPW = { f16:16, q8_0:8.5, q6_k:6.5625, q5_k_m:5.69, q5_k_s:5.52, q4_k_m:4.85, q4_k_s:4.58, q4_0:4.55, iq4_xs:4.25, q3_k_m:3.875, q2_k:2.625, iq2_xxs:2.0625, iq1_m:1.75 };
+  const bpw = BPW[quant] ?? 4.85;
+  return Math.round(paramB * 1e9 * bpw / 8);
 }
 
 function guessQuantFromName(name) {
