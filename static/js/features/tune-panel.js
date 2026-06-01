@@ -137,7 +137,7 @@ function _renderResults(data) {
 function _renderSuggestions(suggestions) {
   const container = document.getElementById('tune-suggestions');
   if (!container) return;
-  container.innerHTML = '';
+  container.replaceChildren();
 
   // Filter out suggestions whose param is already set to the target value
   const applicable = suggestions.filter(s => !_isAlreadyApplied(s));

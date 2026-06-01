@@ -117,7 +117,7 @@ pub fn classify_benchmark_result(
     // A mid-range consumer GPU doing 8–15 t/s on a 13B model is working well.
     let verdict = if gen_tps >= 15.0 && ttft_ms <= 1500.0 {
         "good"
-    } else if gen_tps >= 4.0 || ttft_ms <= 3000.0 {
+    } else if gen_tps >= 4.0 && ttft_ms <= 3000.0 {
         "moderate"
     } else {
         "poor"

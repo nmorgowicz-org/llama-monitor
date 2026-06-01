@@ -3339,7 +3339,7 @@ fn api_hf_download(
                 // If target_path is provided, validate it is within models_dir.
                 let target_dir = if let Some(ref tp) = target_path {
                     // Reject path traversal in target_path.
-                    if tp.contains("..") || tp.starts_with("\\") {
+                    if tp.contains("..") || tp.starts_with('\\') || tp.starts_with('/') {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::json(&serde_json::json!({
                                 "ok": false,

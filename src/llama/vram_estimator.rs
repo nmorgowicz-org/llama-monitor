@@ -489,8 +489,10 @@ impl ModelArch {
                 512 // extremely sparse (Qwen3-Coder-Next style)
             } else if total_b > 100.0 {
                 128
-            } else if total_b > 50.0 || total_b > 20.0 {
+            } else if total_b > 50.0 {
                 64
+            } else if total_b > 20.0 {
+                32
             } else {
                 8 // Mixtral style
             };
