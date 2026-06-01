@@ -1076,7 +1076,7 @@ function renderQuantAdvisor(quants, availVram) {
   if (!dom.quantAdvisor || !dom.quantAdvisorTable) return;
   if (!quants || quants.length === 0) { dom.quantAdvisor.style.display = 'none'; return; }
 
-  const availGb = (availVram / 1e9).toFixed(0);
+  const availGb = Math.round(availVram / (1024 ** 3));
   if (dom.quantAdvisorSubtitle) dom.quantAdvisorSubtitle.textContent = `Estimated VRAM available: ${availGb} GB`;
 
   const table = document.createElement('table');
@@ -1823,7 +1823,7 @@ async function fetchHfFiles(repo) {
     dom.hfFileList.innerHTML = '';
     if (!files.length) { dom.hfFileList.innerHTML = '<div class="hf-file-empty">No GGUF files found in this repo.</div>'; return; }
 
-    const vramGb = cachedVram / 1e9;
+    const vramGb = cachedVram / (1024 ** 3);
 
     files.forEach(file => {
       const fname = file.path || file.name || '';
@@ -2332,7 +2332,15 @@ function renderHardwareModelHeader() {
     if (hfRepo && slashIdx > 0) {
       const author = fullRepo.slice(0, slashIdx + 1); // "owner/"
       const modelName = fullRepo.slice(slashIdx + 1);
-      repoEl.innerHTML = `<span class="hw-model-author">${author}</span><span class="hw-model-name">${modelName}</span>`;
+      repoEl.textContent = '';
+      const authorSpan = document.createElement('span');
+      authorSpan.className = 'hw-model-author';
+      authorSpan.textContent = author;
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'hw-model-name';
+      nameSpan.textContent = modelName;
+      repoEl.appendChild(authorSpan);
+      repoEl.appendChild(nameSpan);
     } else {
       repoEl.textContent = fullRepo;
     }
@@ -2350,9 +2358,10 @@ function renderHardwareModelHeader() {
       if (!fname) return;
       const opt = document.createElement('option');
       opt.value = fpath;
+      const dispLabel = qf.label || fname; // prefer "Q4_K_M" over full filename
       const sizeStr = qf.size ? ` · ${formatBytes(qf.size)}` : '';
       const isRec = qf.label && vramGb > 0 && qf.label === getRecommendedQuant(vramGb);
-      opt.textContent = fname + sizeStr + (isRec ? ' ★' : '');
+      opt.textContent = dispLabel + sizeStr + (isRec ? ' ★' : '');
       if (fpath === hfFile) opt.selected = true;
       quantSelect.appendChild(opt);
     });
@@ -2367,18 +2376,20 @@ function renderHardwareModelHeader() {
 // ── Hardware step: mmproj section ────────────────────────────────────────────
 
 function renderMmprojSection() {
-  const section = document.getElementById('hw-mmproj-section');
-  if (!section) return;
+  const row = document.getElementById('hw-mmproj-row');
+  if (!row) return;
   const files = wizardState.model.mmprojFiles || [];
-  if (!files.length) { section.style.display = 'none'; return; }
-  section.style.display = '';
+  if (!files.length) { row.style.display = 'none'; return; }
+  row.style.display = '';
 
   const select = document.getElementById('hw-mmproj-select');
-  if (select && !select.dataset.populated) {
+  if (!select) return;
+
+  if (!select.dataset.populated) {
     select.dataset.populated = '1';
     select.innerHTML = '';
     const noneOpt = document.createElement('option');
-    noneOpt.value = ''; noneOpt.textContent = '(none — text-only inference)';
+    noneOpt.value = ''; noneOpt.textContent = '(none — text-only)';
     select.appendChild(noneOpt);
     files.forEach(f => {
       const fpath = f.path || f.name || '';
@@ -2399,25 +2410,9 @@ function renderMmprojSection() {
     });
   }
 
-  const checkbox = document.getElementById('hw-use-mmproj');
-  if (checkbox && !checkbox.dataset.bound) {
-    checkbox.dataset.bound = '1';
-    checkbox.addEventListener('change', () => {
-      const show = checkbox.checked;
-      if (select) select.style.display = show ? '' : 'none';
-      if (!show) {
-        wizardState.model.mmprojHfFile = '';
-        wizardState.arch.mmprojBytes = 0;
-      } else if (select?.value) {
-        const f = files.find(x => (x.path || x.name) === select.value);
-        wizardState.arch.mmprojBytes = f?.size ? Number(f.size) : 0;
-      }
-      scheduleVramUpdate();
-    });
-  }
-  if (checkbox) {
-    checkbox.checked = !!wizardState.model.mmprojHfFile;
-    if (select) select.style.display = checkbox.checked ? '' : 'none';
+  // Sync selection state
+  if (wizardState.model.mmprojHfFile) {
+    select.value = wizardState.model.mmprojHfFile;
   }
 }
 

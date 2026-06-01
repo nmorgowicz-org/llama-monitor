@@ -830,7 +830,7 @@ pub fn moe_weight_split(model_size_bytes: u64, arch: &ModelArch, n_cpu_moe: i32)
     let total_experts = arch.n_experts as f64;
     let cpu_experts = (n_cpu_moe as f64).min(total_experts);
     let cpu_ratio = cpu_experts / total_experts;
-    let expert_frac = arch.expert_fraction.clamp(0.3, 0.85);
+    let expert_frac = arch.expert_fraction.clamp(0.3, 0.99);
 
     let cpu_bytes = (model_size_bytes as f64 * expert_frac * cpu_ratio) as u64;
     let vram_bytes = model_size_bytes.saturating_sub(cpu_bytes);
@@ -1036,6 +1036,10 @@ fn binary_search_context(
     kv_budget: u64,
 ) -> u64 {
     let mut lo = 512u64;
+    // If even the minimum context doesn't fit, report zero rather than returning 512 and OOMing.
+    if kv_cache_bytes(arch, lo, parallel_slots, ctk, ctv) > kv_budget {
+        return 0;
+    }
     let mut hi = 2_097_152u64; // 2M upper bound
     while lo + 1 < hi {
         let mid = lo + (hi - lo) / 2;

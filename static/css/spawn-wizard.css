@@ -673,9 +673,10 @@
    ========================================================================== */
 
 .hardware-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  grid-row: span 3;
+  grid-template-rows: subgrid;
+  align-content: start;
 }
 
 .hardware-field label {
@@ -737,7 +738,10 @@
 .hardware-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 10px;
+  grid-template-rows: auto auto auto; /* label / input / hint — subgrid aligns across columns */
+  column-gap: 10px;
+  row-gap: 5px;
+  align-items: start;
 }
 
 /* Advanced-only section */
@@ -2602,9 +2606,25 @@
 /* KV cache row: two selects side by side */
 .kv-cache-row {
   display: flex;
+  align-items: center;
   gap: 6px;
 }
 .kv-cache-row select { flex: 1; min-width: 0; }
+.kv-unified-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+.kv-unified-toggle input[type="checkbox"] {
+  accent-color: #6366f1;
+  cursor: pointer;
+}
 
 /* Minimum context fit warning */
 .ctx-fit-warning {
@@ -2911,9 +2931,8 @@
 
 .hw-model-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
   background: rgba(99,102,241,0.06);
   border: 1px solid rgba(99,102,241,0.18);
@@ -2923,42 +2942,38 @@
 }
 .hw-model-info {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  gap: 1px;
   min-width: 0;
-  flex: 1;
 }
 .hw-model-repo {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-text, #e2e8f0);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 400px;
+  min-width: 0;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 .hw-model-author {
-  font-size: 12px;
+  display: block;
+  font-size: 11px;
   font-weight: 400;
   color: var(--color-text-muted, #94a3b8);
 }
 .hw-model-name {
-  font-size: 13px;
+  display: block;
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text, #e2e8f0);
+  word-break: break-word;
 }
 .hw-model-file {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-muted, #94a3b8);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 .hw-quant-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
 }
 .hw-quant-label {
   font-size: 11px;
@@ -2967,13 +2982,14 @@
   white-space: nowrap;
 }
 .hw-quant-select {
+  flex: 1;
+  min-width: 0;
   font-size: 12px;
   background: rgba(15,23,42,0.7);
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 6px;
   color: var(--color-text, #e2e8f0);
-  padding: 4px 8px;
-  max-width: 300px;
+  padding: 4px 24px 4px 8px;
 }
 .hw-quant-select:focus { outline: none; border-color: rgba(99,102,241,0.5); }
 
@@ -3045,14 +3061,33 @@
   white-space: nowrap;
 }
 .hw-mtp-depth-input {
-  width: 60px;
-  font-size: 13px;
-  background: rgba(15,23,42,0.6);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 6px;
-  color: var(--color-text, #e2e8f0);
-  padding: 4px 8px;
+  width: 72px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.03), transparent 22%),
+    linear-gradient(145deg, rgba(28, 34, 42, 0.92), rgba(20, 24, 32, 0.97));
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+  box-shadow:
+    0 4px 10px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: all 180ms ease;
+  appearance: none;
+  -webkit-appearance: none;
   flex-shrink: 0;
+}
+.hw-mtp-depth-input:focus {
+  border-color: rgba(99, 102, 241, 0.55);
+  box-shadow:
+    0 0 0 3px rgba(99, 102, 241, 0.12),
+    0 4px 10px rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  outline: none;
+}
+.hw-mtp-depth-input:hover {
+  border-color: rgba(136, 192, 209, 0.3);
 }
 .hw-mtp-depth-row .field-hint {
   font-size: 11px;

@@ -125,6 +125,11 @@ pub fn start_download(
         mgr.tasks.insert(download_id.clone(), task.clone());
     }
 
+    eprintln!(
+        "[info] download started  id={download_id}  repo={repo_id}  file={file_path}  dest={}",
+        local_path.display()
+    );
+
     tokio::spawn(async move {
         run_download(
             task,
@@ -176,9 +181,10 @@ async fn run_download(
     // Determine resume offset from any existing partial file.
     let resume_from = local_path.metadata().ok().map(|m| m.len()).unwrap_or(0);
 
-    // Build the HTTP request.
+    // Build the HTTP request — use connect_timeout only; no total timeout so large
+    // files can stream for as long as needed without being killed mid-transfer.
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
+        .connect_timeout(std::time::Duration::from_secs(30))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
     let mut req = client.get(&url);
@@ -204,9 +210,19 @@ async fn run_download(
     }
 
     // Populate total_bytes from Content-Length so the status endpoint can compute ETA.
-    if let Some(cl) = resp.content_length() {
-        total_atom.store(resume_from.saturating_add(cl), Ordering::Relaxed);
-    }
+    let total_expected = if let Some(cl) = resp.content_length() {
+        let total = resume_from.saturating_add(cl);
+        total_atom.store(total, Ordering::Relaxed);
+        total
+    } else {
+        eprintln!(
+            "[warn] download: server did not send Content-Length for {repo_id}/{file_path}; progress bar will be indeterminate"
+        );
+        0
+    };
+    eprintln!(
+        "[info] download stream open  file={file_path}  resume_from={resume_from}  total={total_expected}"
+    );
 
     // Ensure parent directory exists.
     if let Some(parent) = local_path.parent()
@@ -240,6 +256,7 @@ async fn run_download(
     // Stream response body, selecting on the cancel signal for immediate abort.
     let mut stream = resp.bytes_stream();
     let mut written = resume_from;
+    let mut last_log_at = resume_from; // log every ~500 MB
 
     // Pin the cancel future once so `notify_one()` is never lost between iterations.
     let cancel_signal = cancel.notified();
@@ -258,13 +275,28 @@ async fn run_download(
         match chunk {
             Some(Ok(data)) => {
                 if let Err(e) = file.write_all(&data).await {
+                    eprintln!("[error] download write error  file={file_path}  error={e}");
                     set_failed(&task, format!("Write error: {e}"));
                     return;
                 }
                 written += data.len() as u64;
                 bytes_atom.store(written, Ordering::Relaxed);
+                if written.saturating_sub(last_log_at) >= 500 * 1024 * 1024 {
+                    let pct = if total_expected > 0 {
+                        format!(" ({:.0}%)", written as f64 / total_expected as f64 * 100.0)
+                    } else {
+                        String::new()
+                    };
+                    eprintln!(
+                        "[info] download progress  file={file_path}  written={} MB / {} MB{pct}",
+                        written / 1_048_576,
+                        total_expected / 1_048_576
+                    );
+                    last_log_at = written;
+                }
             }
             Some(Err(e)) => {
+                eprintln!("[error] download stream error  file={file_path}  error={e}");
                 set_failed(&task, format!("Stream error: {e}"));
                 return;
             }
@@ -275,21 +307,31 @@ async fn run_download(
     let mut t = task.lock().expect("DownloadTask lock poisoned");
     t.status = "completed".into();
     t.message = "Download completed.".into();
+    eprintln!("[info] download completed  file={file_path}  bytes={written}");
 }
 
 fn set_failed(task: &Arc<Mutex<DownloadTask>>, msg: String) {
     let mut t = task.lock().expect("DownloadTask lock poisoned");
     // Don't overwrite a cancel that raced us here.
     if t.status != "cancelled" {
+        eprintln!(
+            "[error] download failed  path={}  reason={msg}",
+            t.local_path.display()
+        );
         t.status = "failed".into();
         t.message = msg;
     }
 
     // Rename partial file to .part so it is not mistaken for a complete download.
-    let path = &t.local_path;
+    let path = t.local_path.clone();
     if path.exists() {
         let part_path = path.with_extension("part");
-        let _ = std::fs::rename(path, &part_path);
+        eprintln!(
+            "[warn] renaming partial download  from={}  to={}",
+            path.display(),
+            part_path.display()
+        );
+        let _ = std::fs::rename(&path, &part_path);
     }
 }
 
