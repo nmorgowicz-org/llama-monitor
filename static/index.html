@@ -257,6 +257,14 @@
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
                             New Server Wizard
                         </button>
+                        <div class="setup-recent-endpoints" id="setup-recent-spawn-sessions" style="display:none;margin-top:14px;">
+                            <div class="setup-section-header">
+                                <h3>Recent Local Servers</h3>
+                            </div>
+                            <div class="setup-endpoint-list" id="setup-spawn-session-list">
+                                <!-- Dynamically populated -->
+                            </div>
+                        </div>
                         <div class="setup-card-quick-start" id="setup-card-quick-start" style="display:none;">
                             <div class="setup-card-divider">or quick start from preset</div>
                             <div class="setup-card-form">
@@ -2445,6 +2453,13 @@
                             <input type="text" id="spawn-model-path" placeholder="Model path (e.g. /models/my-model.gguf)">
                             <button type="button" class="btn-wizard-secondary" id="spawn-browse-model-btn">Browse</button>
                         </div>
+                        <div class="settings-card" id="spawn-local-model-hint" style="display:none;margin-top:12px;padding:12px 14px;">
+                            <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:6px;">
+                                Local Model
+                            </div>
+                            <div id="spawn-local-model-hint-title" style="font-weight:600;margin-bottom:4px;"></div>
+                            <div id="spawn-local-model-hint-meta" class="settings-help" style="margin:0;"></div>
+                        </div>
                     </div>
 
                     <!-- HF repo input -->
@@ -2911,6 +2926,28 @@
                             </div>
                         </div>
                         <div class="field-hint" style="margin-top:4px;">Defaults applied to all requests that don't override them. Values come from your selected use-case profile. Leave blank for llama-server built-in defaults.</div>
+                    </div>
+
+                    <div class="sampling-params-section" style="margin-top:14px;">
+                        <div class="hw-section-divider">Network exposure</div>
+                        <div class="sampling-params-grid">
+                            <div class="sampling-field">
+                                <label for="spawn-port">Port</label>
+                                <input type="number" id="spawn-port" min="1" max="65535" value="8001">
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-bind-host">Bind host</label>
+                                <select id="spawn-bind-host">
+                                    <option value="127.0.0.1">127.0.0.1 only</option>
+                                    <option value="0.0.0.0">0.0.0.0 (LAN visible)</option>
+                                </select>
+                            </div>
+                            <div class="sampling-field" style="grid-column: span 2;">
+                                <label for="spawn-api-key">Server API key</label>
+                                <input type="password" id="spawn-api-key" placeholder="Optional bearer token for llama-server">
+                            </div>
+                        </div>
+                        <div class="field-hint" style="margin-top:4px;">Use <code>127.0.0.1</code> for local-only access. If you expose <code>0.0.0.0</code>, set an API key unless you intentionally want an open LAN endpoint.</div>
                     </div>
 
                     <div class="summary-list" id="spawn-summary-list"></div>

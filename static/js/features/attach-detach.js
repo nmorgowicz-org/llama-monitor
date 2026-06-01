@@ -51,6 +51,8 @@ export function getConfig() {
         seed: p.seed ?? null,
         system_prompt_file: p.system_prompt_file || '',
         extra_args: p.extra_args || '',
+        bind_host: p.bind_host || '127.0.0.1',
+        api_key: p.api_key || null,
     };
 }
 

@@ -94,8 +94,8 @@ pub async fn llama_metrics_poller(state: AppState, poll_interval: u64) {
 
             if let Some(sess) = session {
                 match sess.mode {
-                    crate::state::SessionMode::Spawn { port } => {
-                        (format!("http://127.0.0.1:{}", port), None)
+                    crate::state::SessionMode::Spawn { port, api_key, .. } => {
+                        (format!("http://127.0.0.1:{}", port), api_key)
                     }
                     crate::state::SessionMode::Attach { endpoint, api_key } => (endpoint, api_key),
                 }

@@ -4,6 +4,14 @@
 import { setupViewState, chat } from '../core/app-state.js';
 import { doAttachFromSetup } from './attach-detach.js';
 
+function setAttachButtonLabel(button, label) {
+    if (!button) return;
+    const icon = document.createElement('span');
+    icon.className = 'btn-icon';
+    icon.textContent = '⚡';
+    button.replaceChildren(icon, document.createTextNode(` ${label}`));
+}
+
 // ── View Switching ────────────────────────────────────────────────────────────
 
 export function switchView(targetView) {
@@ -126,21 +134,30 @@ export async function loadRecentSessions() {
 export function renderRecentEndpoints(sessions, activeId) {
     const list = document.getElementById('setup-endpoint-list');
     const container = document.getElementById('setup-recent-endpoints');
+    const spawnList = document.getElementById('setup-spawn-session-list');
+    const spawnContainer = document.getElementById('setup-recent-spawn-sessions');
     const attachBtn = document.getElementById('setup-attach-btn');
     const lastSession = setupViewState.lastSessionData || loadLastSessionData();
-    if (!list || !container) return;
+    if (!list || !container || !spawnList || !spawnContainer) return;
 
-    if (!sessions || sessions.length === 0) {
+    const allSessions = Array.isArray(sessions) ? sessions : [];
+    const attachSessions = allSessions.filter(session => !!session.mode?.Attach);
+    const spawnSessions = allSessions.filter(session => !!session.mode?.Spawn);
+
+    if (!allSessions.length) {
         container.style.display = 'none';
-        if (attachBtn) attachBtn.innerHTML = '<span class="btn-icon">⚡</span> Attach';
+        spawnContainer.style.display = 'none';
+        setAttachButtonLabel(attachBtn, 'Attach');
         return;
     }
 
-    container.style.display = '';
-    if (attachBtn) attachBtn.innerHTML = '<span class="btn-icon">⚡</span> Reconnect Manually';
+    container.style.display = attachSessions.length ? '' : 'none';
+    spawnContainer.style.display = spawnSessions.length ? '' : 'none';
+    setAttachButtonLabel(attachBtn, attachSessions.length ? 'Reconnect Manually' : 'Attach');
     list.innerHTML = '';
+    spawnList.innerHTML = '';
 
-    sessions.forEach(session => {
+    const buildCard = (session) => {
         const card = document.createElement('div');
         card.className = 'setup-endpoint-card';
         if (activeId && session.id === activeId) {
@@ -148,10 +165,13 @@ export function renderRecentEndpoints(sessions, activeId) {
         }
 
         let endpoint = '';
+        let apiKey = '';
         if (session.mode && session.mode.Attach) {
             endpoint = session.mode.Attach.endpoint;
+            apiKey = session.mode.Attach.api_key || '';
         } else if (session.mode && session.mode.Spawn) {
             endpoint = 'http://127.0.0.1:' + session.mode.Spawn.port;
+            apiKey = session.mode.Spawn.api_key || '';
         }
 
         const statusClass = session.status === 'Running' ? 'status-running' :
@@ -187,6 +207,11 @@ export function renderRecentEndpoints(sessions, activeId) {
         }
         if (lastConnected !== 'Never') metaParts.push(lastConnected);
         if (connectCount > 0) metaParts.push(connectCount + 'x');
+        if (session.mode?.Spawn) {
+            metaParts.unshift('Local spawn session');
+            if (session.mode.Spawn.bind_host === '0.0.0.0') metaParts.push('LAN visible');
+            if (session.mode.Spawn.api_key) metaParts.push('API key saved');
+        }
         let meta = metaParts.join(' · ');
         if (!meta) meta = 'Saved endpoint';
         metaEl.textContent = meta;
@@ -208,13 +233,18 @@ export function renderRecentEndpoints(sessions, activeId) {
         const doConnect = () => {
             const urlInput = document.getElementById('setup-endpoint-url');
             if (urlInput) urlInput.value = endpoint;
+            const apiKeyInput = document.getElementById('setup-endpoint-api-key');
+            if (apiKeyInput) apiKeyInput.value = apiKey;
             doAttachFromSetup();
         };
         connectBtn.addEventListener('click', (e) => { e.stopPropagation(); doConnect(); });
         card.addEventListener('click', doConnect);
 
-        list.appendChild(card);
-    });
+        return card;
+    };
+
+    attachSessions.forEach(session => list.appendChild(buildCard(session)));
+    spawnSessions.forEach(session => spawnList.appendChild(buildCard(session)));
 }
 
 function formatRelativeTime(ts) {

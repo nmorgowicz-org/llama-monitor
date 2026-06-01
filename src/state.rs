@@ -195,6 +195,10 @@ fn default_ws_push_interval_ms() -> u64 {
 pub enum SessionMode {
     Spawn {
         port: u16,
+        #[serde(default)]
+        bind_host: Option<String>,
+        #[serde(default)]
+        api_key: Option<String>,
     },
     Attach {
         endpoint: String,
@@ -204,7 +208,11 @@ pub enum SessionMode {
 
 impl Default for SessionMode {
     fn default() -> Self {
-        SessionMode::Spawn { port: 8001 }
+        SessionMode::Spawn {
+            port: 8001,
+            bind_host: None,
+            api_key: None,
+        }
     }
 }
 
@@ -241,12 +249,23 @@ impl Session {
             .as_secs()
     }
 
-    pub fn new_spawn(id: String, name: String, port: u16, preset_id: String) -> Self {
+    pub fn new_spawn(
+        id: String,
+        name: String,
+        port: u16,
+        preset_id: String,
+        bind_host: Option<String>,
+        api_key: Option<String>,
+    ) -> Self {
         let now = Self::now();
         Self {
             id,
             name,
-            mode: SessionMode::Spawn { port },
+            mode: SessionMode::Spawn {
+                port,
+                bind_host,
+                api_key,
+            },
             status: SessionStatus::Stopped,
             preset_id,
             created_at: now,
@@ -378,6 +397,8 @@ pub fn load_sessions(path: &Path) -> Vec<Session> {
         "Default Session".to_string(),
         8001,
         String::new(),
+        None,
+        None,
     )]
 }
 
@@ -1070,7 +1091,14 @@ mod tests {
                 test_tls_config(),
             );
             let session = if mode == "spawn" {
-                Session::new_spawn("test".to_string(), "Test".to_string(), 8001, String::new())
+                Session::new_spawn(
+                    "test".to_string(),
+                    "Test".to_string(),
+                    8001,
+                    String::new(),
+                    None,
+                    None,
+                )
             } else {
                 Session::new_attach(
                     "test".to_string(),
@@ -1150,6 +1178,8 @@ mod tests {
             "Existing".to_string(),
             8001,
             String::new(),
+            None,
+            None,
         ));
 
         assert!(state.set_active_session("existing"));
@@ -1173,6 +1203,8 @@ mod tests {
             "Existing".to_string(),
             8001,
             String::new(),
+            None,
+            None,
         ));
 
         assert!(state.set_active_session("existing"));

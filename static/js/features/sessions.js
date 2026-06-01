@@ -63,6 +63,8 @@ export function renderSessionList() {
         const modeIcon = isSpawn ? '🖥' : '🔗';
         const endpoint = isAttach ? s.mode.Attach.endpoint : '';
         const port = isSpawn ? s.mode.Spawn.port : '';
+        const bindHost = isSpawn ? (s.mode.Spawn.bind_host || '127.0.0.1') : '';
+        const hasApiKey = isAttach ? !!s.mode.Attach.api_key : !!s.mode.Spawn?.api_key;
         const presetId = s.preset_id || '';
         const presetObj = sessionState.presets.find(p => p.id === presetId);
         const presetName = presetObj ? presetObj.name : (isSpawn ? '(no preset)' : '');
@@ -71,7 +73,9 @@ export function renderSessionList() {
                            s.status === 'Disconnected' ? 'Disconnected' : (s.status || '');
 
         const name = escapeHtml(s.name);
-        const detailText = modeText + (port ? ' : ' + port : '') + (isSpawn && presetName ? ' · ' + escapeHtml(presetName) : '') + (endpoint ? ' · ' + escapeHtml(endpoint) : '');
+        const bindText = isSpawn ? (bindHost === '0.0.0.0' ? ' · LAN visible' : ' · localhost') : '';
+        const apiKeyText = hasApiKey ? ' · API key' : '';
+        const detailText = modeText + (port ? ' : ' + port : '') + bindText + apiKeyText + (isSpawn && presetName ? ' · ' + escapeHtml(presetName) : '') + (endpoint ? ' · ' + escapeHtml(endpoint) : '');
         const statusHtml = statusText ? '<span class="session-item-status">' + escapeHtml(statusText) + '</span>' : '';
 
         let actionsHtml = '';

@@ -101,6 +101,11 @@ function formatCtx(n) {
   if (n >= 1000) return (n / 1000).toFixed(0) + 'K';
   return String(n);
 }
+function formatParams(paramB) {
+  if (paramB >= 1000) return `${(paramB / 1000).toFixed(1)}T`;
+  if (paramB % 1 === 0) return `${paramB}B`;
+  return `${Number(paramB).toFixed(1)}B`;
+}
 function formatGB(bytes) {
   if (!bytes) return '0 GB';
   return (bytes / 1e9).toFixed(1) + ' GB';
@@ -134,6 +139,11 @@ const wizardState = {
     path: '',
     hfRepo: '',
     hfFile: '',
+    hfTokenSet: false,
+    delivery: 'local_file', // 'local_file' | 'imported_local' | 'stream_hf' | 'downloaded_hf'
+    originRepo: '',
+    originFile: '',
+    localMeta: null,
     paramB: 0,           // estimated parameter count (from HF metadata if available)
     modelBytes: 0,       // file size in bytes once known
     nCtxTrain: 0,        // training context length from GGUF metadata (0 = unknown)
@@ -169,6 +179,11 @@ const wizardState = {
     repeatPenalty: null,
     seed: null,
   },
+  access: {
+    port: 8001,
+    bindHost: '127.0.0.1',
+    apiKey: '',
+  },
   vram: { available: 0 },
   spawn: { inFlight: false, error: '' },
 };
@@ -202,17 +217,16 @@ export function initSpawnWizard() {
   });
   document.getElementById('hf-dlp-cancel-btn')?.addEventListener('click', _cancelHfDownload);
   document.getElementById('hf-dlp-open-settings')?.addEventListener('click', () => {
-    closeSpawnWizard();
+    window.openSettingsModal?.();
     setTimeout(() => {
-      window.openSettingsModal?.();
-      setTimeout(() => {
-        document.querySelector('.settings-tab[data-tab="models"]')?.click();
-      }, 80);
-    }, 100);
+      document.querySelector('.settings-tab[data-tab="models"]')?.click();
+      document.getElementById('settings-hf-token')?.focus();
+    }, 80);
   });
 
   // Refresh download destination when settings change (e.g., models dir updated)
   window.addEventListener('settings-applied', () => {
+    refreshHfTokenState();
     const panel = document.getElementById('hf-download-panel');
     if (panel && panel.style.display !== 'none') {
       const fname = (wizardState.model?.hfFile || '').split('/').pop();
@@ -230,6 +244,7 @@ function applyReducedMotion() {
 export function openSpawnWizard(opts = {}) {
   if (!dom.overlay) return;
   dom.overlay.classList.add('open');
+  refreshHfTokenState();
 
   // Check binary prereq every time wizard opens
   _checkBinaryPrereq();
@@ -238,15 +253,19 @@ export function openSpawnWizard(opts = {}) {
     // Pre-load a local model path and jump straight to step 2 (model).
     wizardState.model.source = 'local';
     wizardState.model.path = opts.localPath;
+    wizardState.model.delivery = 'local_file';
+    wizardState.model.localMeta = opts.localModel || null;
     if (dom.modelPathInput) dom.modelPathInput.value = opts.localPath;
     // Select the "local" source card visually.
     dom.modelSourceCards?.forEach(c => {
       c.classList.toggle('selected', c.dataset.source === 'local');
     });
     updateModelInputVisibility();
+    renderLocalModelHint();
     showStep(1); // step 1 = Model (0-indexed)
   } else {
     updateModelInputVisibility();
+    renderLocalModelHint();
     showStep(0);
   }
 }
@@ -278,6 +297,9 @@ function cacheDom() {
   dom.modelInputHf     = document.getElementById('model-input-hf');
   dom.modelInputImport = document.getElementById('model-input-import');
   dom.modelPathInput   = document.getElementById('spawn-model-path');
+  dom.localModelHint   = document.getElementById('spawn-local-model-hint');
+  dom.localModelHintTitle = document.getElementById('spawn-local-model-hint-title');
+  dom.localModelHintMeta  = document.getElementById('spawn-local-model-hint-meta');
   dom.hfRepoInput       = document.getElementById('spawn-hf-repo');
   dom.hfSortSelect      = document.getElementById('spawn-hf-sort');
   dom.hfQuickpicks      = document.getElementById('hf-quickpicks');
@@ -353,6 +375,9 @@ function cacheDom() {
   dom.summaryWarnings  = document.getElementById('spawn-summary-warnings');
   dom.savePresetBtn    = document.getElementById('spawn-save-preset-btn');
   dom.healthCheckBtn   = document.getElementById('spawn-health-check-btn');
+  dom.portInput        = document.getElementById('spawn-port');
+  dom.bindHostSelect   = document.getElementById('spawn-bind-host');
+  dom.apiKeyInput      = document.getElementById('spawn-api-key');
 
   // Step 5
   dom.spawnServerBtn = document.getElementById('spawn-server-btn');
@@ -436,10 +461,14 @@ function bindEvents() {
     card.setAttribute('tabindex', '0'); card.setAttribute('role', 'button');
     card.addEventListener('click', () => {
       wizardState.model.source = card.dataset.source;
+      if (card.dataset.source === 'local' && !wizardState.model.delivery) wizardState.model.delivery = 'local_file';
+      if (card.dataset.source === 'import') wizardState.model.delivery = 'imported_local';
+      if (card.dataset.source === 'hf') wizardState.model.delivery = 'stream_hf';
       dom.modelSourceCards.forEach(c => c.classList.remove('selected'));
       card.classList.add('selected');
       if (card.dataset.source !== 'hf') hideHfDownloadPanel();
       updateModelInputVisibility();
+      renderLocalModelHint();
       clearValidationError();
       if (card.dataset.source === 'import') loadThirdPartyModels();
     });
@@ -452,13 +481,21 @@ function bindEvents() {
   dom.modelPathInput?.addEventListener('input', () => {
     wizardState.model.path = dom.modelPathInput.value.trim();
     wizardState.model.source = 'local';
+    wizardState.model.delivery = 'local_file';
+    if (wizardState.model.localMeta?.path && wizardState.model.localMeta.path !== wizardState.model.path) {
+      wizardState.model.localMeta = null;
+    }
     onModelPathChanged();
+    renderLocalModelHint();
   });
 
   dom.importPathInput?.addEventListener('input', () => {
     wizardState.model.path = dom.importPathInput.value.trim();
     wizardState.model.source = 'import';
+    wizardState.model.delivery = 'imported_local';
+    wizardState.model.localMeta = null;
     onModelPathChanged();
+    renderLocalModelHint();
   });
 
   dom.hfRepoInput?.addEventListener('blur', () => triggerHfFileFetch());
@@ -508,6 +545,16 @@ function bindEvents() {
 
   // Sampling fields in review step
   _bindSamplingFields();
+  dom.portInput?.addEventListener('input', () => {
+    const parsed = parseInt(dom.portInput.value, 10);
+    wizardState.access.port = Number.isFinite(parsed) && parsed > 0 ? parsed : 8001;
+  });
+  dom.bindHostSelect?.addEventListener('change', () => {
+    wizardState.access.bindHost = dom.bindHostSelect.value || '127.0.0.1';
+  });
+  dom.apiKeyInput?.addEventListener('input', () => {
+    wizardState.access.apiKey = (dom.apiKeyInput.value || '').trim();
+  });
 
   // Hardware step quant swap
   document.getElementById('hw-quant-select')?.addEventListener('change', e => {
@@ -533,14 +580,44 @@ function bindEvents() {
   // Binary prereq buttons
   dom.prereqDownloadBtn?.addEventListener('click', _downloadBinaryForWizard);
   dom.prereqSettingsBtn?.addEventListener('click', () => {
-    closeSpawnWizard();
+    window.openSettingsModal?.();
     setTimeout(() => {
-      window.openSettingsModal?.();
-      setTimeout(() => {
-        document.querySelector('.settings-tab[data-tab="session"]')?.click();
-      }, 80);
-    }, 100);
+      document.querySelector('.settings-tab[data-tab="session"]')?.click();
+      document.getElementById('set-server-path')?.focus();
+    }, 80);
   });
+}
+
+async function refreshHfTokenState() {
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const res = await fetch('/api/hf/token', { headers });
+    if (!res.ok) return;
+    const data = await res.json();
+    wizardState.model.hfTokenSet = !!data.set;
+  } catch {}
+}
+
+function renderLocalModelHint() {
+  if (!dom.localModelHint) return;
+  const meta = wizardState.model.localMeta;
+  const isLocalSource = wizardState.model.source === 'local' || wizardState.model.source === 'import';
+  if (!isLocalSource || !meta) {
+    dom.localModelHint.style.display = 'none';
+    return;
+  }
+  dom.localModelHint.style.display = '';
+  if (dom.localModelHintTitle) {
+    dom.localModelHintTitle.textContent = meta.model_name || meta.name || meta.filename || (meta.path?.split(/[\\/]/).pop() || 'Selected model');
+  }
+  if (dom.localModelHintMeta) {
+    const parts = [];
+    if (meta.size_display) parts.push(meta.size_display);
+    if (meta.quant_type) parts.push(meta.quant_type);
+    if (meta.param_b != null) parts.push(formatParams(meta.param_b));
+    if (meta.vram_est_gb != null) parts.push(`~${Number(meta.vram_est_gb).toFixed(0)} GB weights`);
+    dom.localModelHintMeta.textContent = parts.join(' · ') || 'Opened from your local model library.';
+  }
 }
 
 // ── Validation ────────────────────────────────────────────────────────────────
@@ -682,8 +759,20 @@ function _dlPollStatus(downloadId, localPath) {
         // Switch wizard source to local with the downloaded path
         const effectivePath = (data.status?.local_path) || localPath;
         if (effectivePath) {
+          const downloadedFile = wizardState.model.hfFile || '';
+          const downloadedRepo = wizardState.model.hfRepo || '';
           wizardState.model.source = 'local';
+          wizardState.model.delivery = 'downloaded_hf';
           wizardState.model.path = effectivePath;
+          wizardState.model.originRepo = downloadedRepo;
+          wizardState.model.originFile = downloadedFile;
+          wizardState.model.localMeta = {
+            path: effectivePath,
+            filename: effectivePath.split(/[\\/]/).pop() || effectivePath,
+            size_display: wizardState.model.modelBytes ? formatBytes(wizardState.model.modelBytes) : '',
+            quant_type: guessQuantFromName(downloadedFile || effectivePath),
+            param_b: wizardState.model.paramB || null,
+          };
           wizardState.model.hfRepo = '';
           wizardState.model.hfFile = '';
           if (dom.modelPathInput) dom.modelPathInput.value = effectivePath;
@@ -692,6 +781,7 @@ function _dlPollStatus(downloadId, localPath) {
           });
           updateModelInputVisibility();
           updateSelectedModelDisplay();
+          renderLocalModelHint();
         }
         return;
       }
@@ -820,7 +910,9 @@ function showStep(index) {
     }
   }
   if (index === 3) {
-    fetchGpuVram().then(() => estimateVramFull().then(() => renderSummary()));
+    refreshHfTokenState().finally(() => {
+      fetchGpuVram().then(() => estimateVramFull().then(() => renderSummary()));
+    });
   }
 }
 
@@ -1892,6 +1984,10 @@ async function fetchHfFiles(repo) {
         dom.hfFileList.querySelectorAll('.hf-file-item.selected:not([data-mmproj])').forEach(el => el.classList.remove('selected'));
         item.classList.add('selected');
         wizardState.model.hfFile = fname;
+        wizardState.model.delivery = 'stream_hf';
+        wizardState.model.originRepo = repo;
+        wizardState.model.originFile = fname;
+        wizardState.model.localMeta = null;
         wizardState.model.path = ''; // not a local path
         if (file.size) wizardState.model.modelBytes = Number(file.size);
 
@@ -2707,13 +2803,25 @@ function renderSummary() {
     ? (m.hfFile ? `${m.hfRepo} / ${m.hfFile.split('/').pop()}` : m.hfRepo || '(none)')
     : (m.path ? m.path.split(/[\\/]/).pop() || m.path : '(none)');
 
+  let acquisition = 'Local file';
+  if (m.delivery === 'stream_hf' && m.originRepo) {
+    acquisition = `Stream from HuggingFace · ${m.originRepo}${m.originFile ? ` / ${m.originFile.split('/').pop()}` : ''}`;
+  } else if (m.delivery === 'downloaded_hf' && m.originRepo) {
+    acquisition = `Downloaded from HuggingFace · ${m.originRepo}${m.originFile ? ` / ${m.originFile.split('/').pop()}` : ''}`;
+  } else if (m.delivery === 'imported_local') {
+    acquisition = 'Imported local file';
+  }
+
   const ctxK = hw.cacheTypeK || 'q8_0', ctxV = hw.cacheTypeV || 'q8_0';
   const kvSize = modelBytes > 0 ? kvBytes(arch, hw.contextSize, hw.parallelSlots, ctxK, ctxV) : 0;
 
   const rows = [
     { label: 'Use case',      value: { agentic: 'Agentic / RAG', general: 'General chat', roleplay: 'Roleplay / creative' }[wizardState.useCase] || wizardState.useCase },
     { label: 'Profile',       value: wizardState.profile },
+    { label: 'Acquisition',   value: acquisition },
+    { label: 'Port',          value: String(wizardState.access.port || 8001) },
     { label: 'Model',         value: modelDisplay },
+    { label: 'Bind host',     value: wizardState.access.bindHost === '0.0.0.0' ? '0.0.0.0 (LAN visible)' : '127.0.0.1 only' },
     { label: 'Context size',  value: `${hw.contextSize.toLocaleString()} tokens` },
     { label: 'GPU layers',    value: hw.gpuLayers === 'manual' ? String(hw.gpuLayersManual ?? '—') : hw.gpuLayers },
     { label: 'KV quant (K/V)', value: `${ctxK.toUpperCase()} / ${ctxV.toUpperCase()}` },
@@ -2727,6 +2835,9 @@ function renderSummary() {
   if (arch.mtpDepth > 0) {
     const mtpActive = hw.mtpEnabled;
     rows.push({ label: 'MTP', value: mtpActive ? `enabled · draft ${hw.mtpDraftNMax || 2} tokens/step · --parallel 1` : 'disabled' });
+  }
+  if ((m.delivery === 'stream_hf' || m.delivery === 'downloaded_hf' || m.originRepo) && m.hfTokenSet != null) {
+    rows.push({ label: 'HF token', value: m.hfTokenSet ? 'Saved in app settings' : 'Not saved' });
   }
   const tplPath = wizardState.model.chatTemplatePath;
   const tplFamily = detectModelFamily(m.hfRepo || m.path || '');
@@ -2745,6 +2856,7 @@ function renderSummary() {
   }
   if (hw.kvUnified) rows.push({ label: 'KV unified', value: 'Yes' });
   if (hw.ignoreEos) rows.push({ label: 'Ignore EOS', value: 'Yes' });
+  if (wizardState.access.apiKey) rows.push({ label: 'Server API key', value: `${wizardState.access.apiKey.slice(0, 4)}…${wizardState.access.apiKey.slice(-4)}` });
 
   rows.forEach(r => {
     const row = document.createElement('div');
@@ -2764,6 +2876,8 @@ function renderSummary() {
     else if (ratio > 1.0) warns.push("VRAM is at risk. Consider reducing context or using KV quantization.");
     else if (ratio > 0.88) warns.push("VRAM is tight. Monitor for OOM errors.");
     if (wizardState.useCase === 'agentic' && kvBpe(ctxK) < 1.0) warns.push("⚠ q4_0 KV not recommended for agentic workflows — reduces tool-call coherence.");
+    if (wizardState.access.bindHost === '0.0.0.0' && !wizardState.access.apiKey) warns.push('LAN-visible endpoint without a server API key. Set one unless you intentionally want an open local-network server.');
+    else if (wizardState.access.bindHost === '0.0.0.0') warns.push('LAN-visible endpoint enabled. Make sure clients know the API key you set.');
     if (warns.length) {
       dom.summaryWarnings.style.display = '';
       dom.summaryWarnings.innerHTML = '';
@@ -2774,15 +2888,32 @@ function renderSummary() {
   }
   if (dom.healthCheckBtn) dom.healthCheckBtn.style.display = '';
 
-  // Add "edit hardware" shortcut
+  // Add step shortcuts for last-minute changes
   const editRow = document.createElement('div');
   editRow.className = 'summary-edit-row';
-  const editBtn = document.createElement('button');
-  editBtn.type = 'button';
-  editBtn.className = 'btn-wizard-tertiary';
-  editBtn.textContent = '← Adjust hardware settings';
-  editBtn.addEventListener('click', () => showStep(2));
-  editRow.appendChild(editBtn);
+  editRow.style.display = 'flex';
+  editRow.style.gap = '8px';
+  editRow.style.flexWrap = 'wrap';
+  editRow.style.marginTop = '10px';
+
+  const shortcuts = [
+    { label: 'Edit model', step: 1 },
+    { label: 'Edit hardware', step: 2 },
+    { label: 'Edit sampling', step: 3, focusId: 'spawn-temperature' },
+  ];
+  shortcuts.forEach(({ label, step, focusId }) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-wizard-tertiary';
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      showStep(step);
+      if (focusId) {
+        setTimeout(() => document.getElementById(focusId)?.focus(), 50);
+      }
+    });
+    editRow.appendChild(btn);
+  });
   dom.summaryList.appendChild(editRow);
 }
 
@@ -2800,6 +2931,9 @@ function _syncSamplingFields() {
   setVal('spawn-top-p', h.topP);
   setVal('spawn-min-p', h.minP);
   setVal('spawn-repeat-penalty', h.repeatPenalty);
+  if (dom.bindHostSelect) dom.bindHostSelect.value = wizardState.access.bindHost || '127.0.0.1';
+  if (dom.portInput) dom.portInput.value = String(wizardState.access.port || 8001);
+  if (dom.apiKeyInput) dom.apiKeyInput.value = wizardState.access.apiKey || '';
 }
 
 function _bindSamplingFields() {
@@ -2842,6 +2976,7 @@ function buildPresetPayload() {
     name: 'Spawn Wizard Preset',
     model_path: m.source !== 'hf' ? (m.path || '') : '',
     hf_repo: m.source === 'hf' ? (m.hfRepo || null) : null,
+    bind_host: wizardState.access.bindHost || '127.0.0.1',
     gpu_layers: gpuLayers,
     context_size: h.contextSize,
     batch_size: h.batchSize,
@@ -2855,6 +2990,7 @@ function buildPresetPayload() {
     draft_model: (dom.draftModelInput?.value || '').trim() || '',
     kv_unified: h.kvUnified || false,
     ignore_eos: h.ignoreEos || false,
+    api_key: wizardState.access.apiKey || null,
   };
 }
 
@@ -2896,13 +3032,14 @@ async function spawnServer() {
     const payload = buildSpawnPayload();
     setStatusText('Starting llama-server…'); setProgress(30);
     const headers = window.authHeaders ? { ...window.authHeaders(), 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
-    let resp;
-    try { resp = await fetch('/api/sessions/spawn', { method: 'POST', headers, body: JSON.stringify(payload) }); }
-    catch { resp = await fetch('/api/start', { method: 'POST', headers, body: JSON.stringify(payload) }); }
+    const resp = await fetch('/api/sessions/spawn', { method: 'POST', headers, body: JSON.stringify(payload) });
     setProgress(60);
     if (!resp.ok) { const t = await resp.text().catch(()=>'Unknown error'); throw new Error(t || `HTTP ${resp.status}`); }
-    setProgress(90); setStatusText('Server is starting up…');
-    await new Promise(r => setTimeout(r, 1500));
+    const data = await resp.json().catch(() => null);
+    if (!data?.ok) throw new Error(data?.error || 'Spawn request failed.');
+    setStatusText('Server process started. Waiting for endpoint…');
+    setProgress(75);
+    await waitForSpawnReadiness(payload.port);
     setProgress(100); setStatusText('Server started.');
     showSuccessText('Server is running.'); showToast('Server started', 'success');
     setTuneConfig(payload);
@@ -2912,6 +3049,7 @@ async function spawnServer() {
         switchView('monitor');
       }
       showTunePanel();
+      setTimeout(() => window.restorePreviousPosition?.(), 600);
     }, 1200);
   } catch (err) {
     const msg = (err.message || String(err)).split('\n')[0].trim();
@@ -2921,6 +3059,31 @@ async function spawnServer() {
     wizardState.spawn.inFlight = false;
     if (dom.spawnServerBtn) dom.spawnServerBtn.disabled = false;
   }
+}
+
+async function waitForSpawnReadiness(port, timeoutMs = 30000) {
+  const started = Date.now();
+  const headers = window.authHeaders ? window.authHeaders() : {};
+
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const resp = await fetch('/api/sessions/active/readiness', {
+        method: 'GET',
+        headers,
+        cache: 'no-store',
+      });
+      const data = await resp.json().catch(() => null);
+      if (resp.ok && data?.ok && data.ready) return;
+    } catch {
+      // Keep polling until timeout; the backend route may lag while the process boots.
+    }
+    const elapsed = Date.now() - started;
+    setStatusText(`Waiting for endpoint on port ${port}…`);
+    setProgress(Math.min(95, 75 + Math.floor((elapsed / timeoutMs) * 20)));
+    await new Promise(r => setTimeout(r, 800));
+  }
+
+  throw new Error(`llama-server started but did not become reachable on port ${port} in time.`);
 }
 
 function buildSpawnPayload() {
@@ -2937,6 +3100,8 @@ function buildSpawnPayload() {
     model_path: m.source !== 'hf' ? (m.path || null) : null,
     hf_repo: m.source === 'hf' ? (m.hfRepo || null) : null,
     hf_file: m.source === 'hf' ? (m.hfFile || null) : null,
+    port: wizardState.access.port || 8001,
+    bind_host: wizardState.access.bindHost || '127.0.0.1',
     gpu_layers: gpuLayers,
     context_size: h.contextSize,
     batch_size: h.batchSize,
@@ -2960,6 +3125,7 @@ function buildSpawnPayload() {
     min_p: h.minP != null ? h.minP : null,
     repeat_penalty: h.repeatPenalty != null ? h.repeatPenalty : null,
     seed: h.seed != null ? h.seed : null,
+    api_key: wizardState.access.apiKey || null,
     chat_template_file: wizardState.model.chatTemplatePath || null,
     profile: wizardState.profile,
     use_case: wizardState.useCase,

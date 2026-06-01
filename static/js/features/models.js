@@ -33,6 +33,7 @@ async function loadModels() {
             headers: window.authHeaders ? window.authHeaders() : {},
         });
         const models = await resp.json();
+        window.__lastDiscoveredModels = Array.isArray(models) ? models : [];
 
         if (!models.length) {
             summary.textContent = 'No models found';
@@ -156,8 +157,9 @@ function buildVramBar(vramGb) {
 
 function spawnLocalModel(filePath) {
     closeModelsModal();
+    const model = (window.__lastDiscoveredModels || []).find(m => (m.path || m.filename) === filePath) || null;
     // Open spawn wizard and pre-load the local file path into step 2.
-    openSpawnWizard({ localPath: filePath });
+    openSpawnWizard({ localPath: filePath, localModel: model });
 }
 
 // ── Refresh ───────────────────────────────────────────────────────────────────

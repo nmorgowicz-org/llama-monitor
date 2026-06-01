@@ -99,6 +99,9 @@ test.describe('Phase 8 - Tag Cloud', () => {
     await header.click();
     await expect(header).toHaveAttribute('aria-expanded', 'false');
 
+    // Wait for the collapse transition to settle before expanding again
+    await page.waitForTimeout(300);
+
     // Expand again
     await header.click();
     await expect(header).toHaveAttribute('aria-expanded', 'true');

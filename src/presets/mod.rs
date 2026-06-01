@@ -146,6 +146,8 @@ pub struct ModelPreset {
     pub system_prompt_file: String,
     #[serde(default)]
     pub extra_args: String,
+    #[serde(default)]
+    pub bind_host: Option<String>,
 
     // Spawn V2: extended fields
     #[serde(default)]

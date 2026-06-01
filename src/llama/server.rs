@@ -160,6 +160,8 @@ pub struct ServerConfig {
     pub system_prompt_file: String,
     #[serde(default)]
     pub extra_args: String,
+    #[serde(default)]
+    pub bind_host: Option<String>,
 
     // Spawn V2: extended fields
     #[serde(default)]
@@ -264,7 +266,8 @@ pub async fn start_server(
         .arg(config.gpu_layers.unwrap_or(99).to_string());
     cmd.arg("-ctk").arg(&config.ctk);
     cmd.arg("-ctv").arg(&config.ctv);
-    cmd.arg("--host").arg("0.0.0.0");
+    cmd.arg("--host")
+        .arg(config.bind_host.as_deref().unwrap_or("127.0.0.1"));
     cmd.arg("--port").arg(config.port.to_string());
     cmd.arg("-c").arg(config.context_size.to_string());
     cmd.arg("-b").arg(config.batch_size.to_string());

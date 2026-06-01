@@ -39,6 +39,7 @@ The user picks a model source. Three source types:
 - User enters or browses an absolute path to a `.gguf` file.
 - Parameter count (`param_b`) is inferred from the filename using `infer_param_b_from_name()`.
 - Architecture heuristics are applied via `ModelArch::from_name_and_params()`.
+- When launched from the local Models library, the wizard carries over discovered metadata and shows a small reminder card with filename, quant, and estimated size/parameter hints.
 
 #### HuggingFace Hub
 See [HuggingFace Integration](#huggingface-integration) below.
@@ -131,6 +132,12 @@ Shows a human-readable review of all selected parameters. Health checks:
 - Context fit relative to training context (`n_ctx_train`); warns when n_ctx > n_ctx_train and suggests YaRN
 - MoE CPU offload impact on generation speed
 - KV quant quality warnings for agentic use cases
+- Network exposure warnings when the user selects `0.0.0.0`, especially if no API key is set
+
+This step also includes:
+- Editable sampling defaults
+- Network controls for `Port`, `Bind host`, and optional `Server API key`
+- Inline edit shortcuts back to Model and Hardware so the user can make one last adjustment without restarting the flow
 
 The user can save the configuration as a named preset from this step.
 
@@ -138,7 +145,10 @@ The user can save the configuration as a named preset from this step.
 
 ### Step 5 — Spawn
 
-One-click launch. Shows live status (starting → running / error). On success the wizard closes and the new session appears in the session list.
+One-click launch. Shows live status (starting → waiting for endpoint → running / error). On success the wizard closes and the new session appears in the session list.
+
+- The spawned `llama-server` process is started with `--no-warmup`.
+- Readiness is confirmed by a backend probe against the active session, so launches with a server API key still report status correctly.
 
 ---
 
@@ -288,6 +298,12 @@ Set or update the HF token: `{ "token": "hf_xxxx..." }`. Requires `api-token`. W
 
 #### DELETE /api/hf/token
 Remove the stored token. Requires `api-token`.
+
+### Wizard-to-Settings Flow
+
+- The Hugging Face helper in Step 2 can open **Settings → Models** without closing the wizard.
+- The binary prerequisite banner can open **Settings → Session** without discarding wizard progress.
+- After saving settings, the wizard refreshes its token/binary state in place.
 
 ---
 

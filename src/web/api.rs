@@ -166,7 +166,7 @@ fn active_chat_completions_url(state: &AppState) -> Result<String, warp::Rejecti
         .get_active_session()
         .ok_or(warp::reject::not_found())?;
     Ok(match &session.mode {
-        crate::state::SessionMode::Spawn { port } => {
+        crate::state::SessionMode::Spawn { port, .. } => {
             format!("http://127.0.0.1:{port}/v1/chat/completions")
         }
         crate::state::SessionMode::Attach { endpoint, .. } => {
@@ -2472,7 +2472,7 @@ fn api_benchmark(
                         }
                     };
                     let url = match &session.mode {
-                        crate::state::SessionMode::Spawn { port } => {
+                        crate::state::SessionMode::Spawn { port, .. } => {
                             format!("http://127.0.0.1:{port}/v1/chat/completions")
                         }
                         crate::state::SessionMode::Attach { endpoint, .. } => {
@@ -3630,6 +3630,8 @@ pub fn api_routes(
     let create_session = api_create_session(state.clone(), app_config.clone());
     let delete_session = api_delete_session(state.clone(), app_config.clone());
     let get_active_session = api_get_active_session(state.clone(), app_config.clone());
+    let get_active_session_readiness =
+        api_get_active_session_readiness(state.clone(), app_config.clone());
     let set_active_session = api_set_active_session(state.clone(), app_config.clone());
     let get_capabilities = api_get_capabilities(state.clone(), app_config.clone());
     let spawn_session_with_preset =
@@ -3820,6 +3822,7 @@ pub fn api_routes(
         .or(create_session)
         .or(delete_session)
         .or(get_active_session)
+        .or(get_active_session_readiness)
         .or(set_active_session)
         .or(get_capabilities)
         .or(spawn_session_with_preset);
@@ -8251,7 +8254,9 @@ fn api_get_active_session(
                 match session {
                     Some(s) => {
                         let mode_str = match s.mode {
-                            crate::state::SessionMode::Spawn { port } => format!("Spawn:{}", port),
+                            crate::state::SessionMode::Spawn { port, .. } => {
+                                format!("Spawn:{}", port)
+                            }
                             crate::state::SessionMode::Attach { endpoint, .. } => {
                                 format!("Attach:{}", endpoint)
                             }
@@ -8270,6 +8275,70 @@ fn api_get_active_session(
                         warp::reply::json(&serde_json::json!({"error": "No active session"})),
                     )),
                 }
+            }
+        })
+}
+
+fn api_get_active_session_readiness(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "sessions" / "active" / "readiness")
+        .and(warp::path::end())
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(with_app_config(app_config))
+        .and_then(move |auth: Option<String>, cfg: Arc<AppConfig>| {
+            let state = state.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        unauthorized_api_token(),
+                    ));
+                }
+
+                let Some(session) = state.get_active_session() else {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({"ok": false, "ready": false, "error": "No active session"}),
+                        ),
+                    ));
+                };
+
+                let (endpoint, api_key) = match session.mode {
+                    crate::state::SessionMode::Spawn { port, api_key, .. } => {
+                        (format!("http://127.0.0.1:{port}"), api_key)
+                    }
+                    crate::state::SessionMode::Attach { endpoint, api_key } => (endpoint, api_key),
+                };
+
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(2))
+                    .build()
+                    .map_err(|e| warp::reject::custom(ApiError::internal(e.to_string())))?;
+
+                let with_auth = |mut req: reqwest::RequestBuilder| {
+                    if let Some(key) = &api_key {
+                        req = req.header("Authorization", format!("Bearer {}", key));
+                    }
+                    req
+                };
+
+                let root_ok = with_auth(client.get(&endpoint)).send().await.is_ok();
+                let health_ok = with_auth(client.get(format!("{endpoint}/health")))
+                    .send()
+                    .await
+                    .is_ok();
+                let ready = root_ok || health_ok;
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "ready": ready,
+                        "endpoint": endpoint,
+                        "status": session.status,
+                    }),
+                )))
             }
         })
 }
@@ -8420,20 +8489,74 @@ fn api_spawn_session_with_preset(
                     }
                     None => format!("Session on port {}", port),
                 };
-                let preset_id: String = match payload.get("preset_id") {
-                    Some(v) => {
-                        if let Some(s) = v.as_str() {
-                            s.to_string()
-                        } else {
-                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                                &serde_json::json!({"ok": false, "error": "Invalid preset_id"}),
-                            )));
+
+                let Some(preset_id) = payload
+                    .get("preset_id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                else {
+                    let config: ServerConfig = match serde_json::from_value(payload.clone()) {
+                        Ok(config) => config,
+                        Err(e) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(
+                                    &serde_json::json!({"ok": false, "error": format!("Invalid spawn payload: {}", e)}),
+                                ),
+                            ));
                         }
+                    };
+
+                    let session_name = if name != format!("Session on port {}", port) {
+                        name.clone()
+                    } else if !config.model_path.is_empty() {
+                        let filename = std::path::Path::new(&config.model_path)
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or(&config.model_path);
+                        format!("Local: {}", filename)
+                    } else if let Some(repo) = config.hf_repo.as_ref() {
+                        format!("HF: {}", repo)
+                    } else {
+                        name.clone()
+                    };
+
+                    let session_id = app_state::generate_session_id();
+                    let session = app_state::Session::new_spawn(
+                        session_id.clone(),
+                        session_name,
+                        config.port,
+                        String::new(),
+                        config.bind_host.clone(),
+                        config.api_key.clone(),
+                    );
+
+                    if !state.add_session(session) {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": "Failed to create session"}),
+                            ),
+                        ));
                     }
-                    None => {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": "Missing preset_id"}),
-                        )));
+
+                    state.set_active_session(&session_id);
+
+                    match crate::llama::server::start_server(&state, config, &app_config).await {
+                        Ok(()) => {
+                            state.update_session_status(&session_id, SessionStatus::Running);
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(
+                                    &serde_json::json!({"ok": true, "session_id": session_id}),
+                                ),
+                            ));
+                        }
+                        Err(e) => {
+                            state.remove_session(&session_id);
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(
+                                    &serde_json::json!({"ok": false, "error": e.to_string()}),
+                                ),
+                            ));
+                        }
                     }
                 };
 
@@ -8455,6 +8578,8 @@ fn api_spawn_session_with_preset(
                     name.clone(),
                     port,
                     preset_id,
+                    preset.bind_host.clone(),
+                    preset.api_key.clone(),
                 );
 
                 if !state.add_session(session) {
@@ -8503,6 +8628,8 @@ fn api_spawn_session_with_preset(
                     seed: preset.seed,
                     system_prompt_file: preset.system_prompt_file.clone(),
                     extra_args: preset.extra_args.clone(),
+                    bind_host: preset.bind_host.clone(),
+                    api_key: preset.api_key.clone(),
                     ..Default::default()
                 };
 

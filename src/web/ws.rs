@@ -98,7 +98,7 @@ pub fn ws_route(
                                 .iter()
                                 .find(|s| s.id == active_session_id)
                                 .map(|s| match &s.mode {
-                                    crate::state::SessionMode::Spawn { port } => {
+                                    crate::state::SessionMode::Spawn { port, .. } => {
                                         format!("http://127.0.0.1:{port}")
                                     }
                                     crate::state::SessionMode::Attach { endpoint, .. } => {

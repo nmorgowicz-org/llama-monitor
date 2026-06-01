@@ -41,6 +41,8 @@ fn local_spawn_has_all_metrics() {
         "Spawn Test".to_string(),
         8001,
         String::new(),
+        None,
+        None,
     );
     state.add_session(session);
     state.set_active_session("spawn_test");

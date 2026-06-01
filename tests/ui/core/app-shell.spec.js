@@ -84,8 +84,11 @@ test.describe('modals and menus', () => {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
 
-    // Use + New Session button in top nav
-    await page.locator('#nav-new-session-btn').click();
+    // Open session modal directly (nav button now opens spawn wizard)
+    await page.evaluate(async () => {
+      const { openSessionModal } = await import('/js/features/sessions.js');
+      openSessionModal();
+    });
     await expect(page.locator('#session-modal')).toHaveClass(/open/);
     await expect(page.locator('#session-modal-title')).toHaveText('Sessions');
     await page.locator('#btn-new-session').click();
@@ -275,7 +278,7 @@ test.describe('responsive shell', () => {
     await expect(page.locator('body')).toHaveClass(/setup-active/);
     await expect(page.locator('.sidebar-nav')).toBeVisible();
     await expect(page.locator('#setup-endpoint-url')).toBeEditable();
-    await expect(page.locator('#view-setup .setup-btn-primary')).toBeVisible();
+    await expect(page.locator('#setup-attach-btn')).toBeVisible();
   });
 });
 
