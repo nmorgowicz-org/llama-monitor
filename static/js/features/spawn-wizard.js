@@ -191,6 +191,8 @@ export const wizardState = {
     reasoningBudget: null,
     reasoningMode: null,
     reasoningBudgetMessage: null,
+    alias: '',
+    extraArgs: '',
   },
   access: {
     port: 8001,
@@ -3823,6 +3825,10 @@ function _syncSamplingFields() {
   if (dom.bindHostSelect) dom.bindHostSelect.value = wizardState.access.bindHost || '127.0.0.1';
   if (dom.portInput) dom.portInput.value = String(wizardState.access.port || 8001);
   if (dom.apiKeyInput) dom.apiKeyInput.value = wizardState.access.apiKey || '';
+  const aliasEl = document.getElementById('spawn-alias');
+  if (aliasEl) aliasEl.value = h.alias || '';
+  const extraArgsEl = document.getElementById('spawn-extra-args');
+  if (extraArgsEl) extraArgsEl.value = h.extraArgs || '';
 }
 
 function _syncThinkingFields() {
@@ -3900,6 +3906,16 @@ function _bindSamplingFields() {
   bind('spawn-repeat-penalty', 'repeatPenalty');
   bind('spawn-presence-penalty', 'presencePenalty');
   _bindThinkingFields();
+
+  // Alias and extra args — string fields, no parsing
+  const bindStr = (id, key) => {
+    const el = document.getElementById(id);
+    if (!el || el.dataset.bound) return;
+    el.dataset.bound = '1';
+    el.addEventListener('input', () => { wizardState.hardware[key] = el.value; });
+  };
+  bindStr('spawn-alias', 'alias');
+  bindStr('spawn-extra-args', 'extraArgs');
 }
 
 // ── Save as preset ────────────────────────────────────────────────────────────
@@ -4090,6 +4106,8 @@ function buildSpawnPayload() {
     image_min_tokens: mmprojLocal ? _imageMinTokens(m) : null,
     image_max_tokens: mmprojLocal ? _imageMaxTokens(m) : null,
     api_key: wizardState.access.apiKey || null,
+    alias: h.alias || null,
+    extra_args: h.extraArgs || '',
     chat_template_file: wizardState.model.chatTemplatePath || null,
     profile: wizardState.profile,
     use_case: wizardState.useCase,

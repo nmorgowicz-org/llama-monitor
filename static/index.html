@@ -2998,12 +2998,25 @@
                                     <option value="0.0.0.0">0.0.0.0 (LAN visible)</option>
                                 </select>
                             </div>
-                            <div class="sampling-field" style="grid-column: span 2;">
+                            <div class="sampling-field">
+                                <label for="spawn-alias" title="--alias STRING. Model name reported in /v1/models and displayed in API clients. Defaults to the model filename.">Server alias</label>
+                                <input type="text" id="spawn-alias" placeholder="e.g. qwen36-27b">
+                            </div>
+                            <div class="sampling-field">
                                 <label for="spawn-api-key">Server API key</label>
                                 <input type="password" id="spawn-api-key" placeholder="Optional bearer token for llama-server">
                             </div>
                         </div>
                         <div class="field-hint" style="margin-top:4px;">Use <code>127.0.0.1</code> for local-only access. If you expose <code>0.0.0.0</code>, set an API key unless you intentionally want an open LAN endpoint.</div>
+                    </div>
+
+                    <div class="sampling-params-section" style="margin-top:14px;">
+                        <div class="hw-section-divider">Extra arguments</div>
+                        <div class="sampling-field" style="margin-top:8px;">
+                            <label for="spawn-extra-args" title="Additional llama-server CLI flags appended verbatim. Space-separated; values with spaces must use the flag=value form.">Extra args</label>
+                            <input type="text" id="spawn-extra-args" placeholder="e.g. --log-verbosity 2 --no-perf">
+                        </div>
+                        <div class="field-hint" style="margin-top:4px;">Passed directly to llama-server after all other flags. Use this for any option the wizard doesn't expose.</div>
                     </div>
 
                     <div class="summary-list" id="spawn-summary-list"></div>

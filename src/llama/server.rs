@@ -168,6 +168,9 @@ pub struct ServerConfig {
     // Spawn V2: extended fields
     #[serde(default)]
     pub hf_repo: Option<String>,
+    /// --alias STRING: model name reported in /v1/models and shown in API clients.
+    #[serde(default)]
+    pub alias: Option<String>,
     #[serde(default)]
     pub chat_template_file: Option<String>,
     #[serde(default)]
@@ -587,6 +590,13 @@ pub async fn start_server(
         && !ak.is_empty()
     {
         cmd.arg("--api-key").arg(ak);
+    }
+
+    // Spawn V2: alias (model name exposed in /v1/models)
+    if let Some(ref al) = config.alias
+        && !al.is_empty()
+    {
+        cmd.arg("--alias").arg(al);
     }
 
     // KV cache
