@@ -2451,9 +2451,12 @@
                     <div class="model-input-area visible" id="model-input-local">
                         <div class="model-input-row">
                             <input type="text" id="spawn-model-path" placeholder="Model path (e.g. /models/my-model.gguf)">
-                            <button type="button" class="btn-wizard-secondary" id="spawn-browse-model-btn">Browse</button>
+                            <div class="browse-split" id="spawn-browse-split">
+                                <button type="button" class="browse-split-main" id="spawn-browse-model-btn">Browse</button>
+                                <button type="button" class="browse-split-arrow" id="spawn-browse-arrow-btn" aria-label="Browse from a specific folder" aria-haspopup="true" aria-expanded="false">▾</button>
+                                <div class="browse-split-dropdown" id="spawn-browse-dropdown" role="menu" style="display:none;"></div>
+                            </div>
                         </div>
-                        <div id="spawn-dir-switcher" style="display:none;margin-top:8px;"></div>
                         <div class="settings-card" id="spawn-local-model-hint" style="display:none;margin-top:12px;padding:12px 14px;">
                             <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:6px;">
                                 Local Model
@@ -2561,9 +2564,12 @@
                         <div class="import-manual-row">
                             <span class="import-manual-label">Not listed?</span>
                             <input type="text" id="spawn-import-path" placeholder="Paste a path to a .gguf file">
-                            <button type="button" class="btn-wizard-secondary" id="spawn-import-browse-btn">Browse</button>
+                            <div class="browse-split" id="spawn-import-browse-split">
+                                <button type="button" class="browse-split-main" id="spawn-import-browse-btn">Browse</button>
+                                <button type="button" class="browse-split-arrow" id="spawn-import-browse-arrow-btn" aria-label="Browse from a specific folder" aria-haspopup="true" aria-expanded="false">▾</button>
+                                <div class="browse-split-dropdown" id="spawn-import-browse-dropdown" role="menu" style="display:none;"></div>
+                            </div>
                         </div>
-                        <div id="spawn-import-dir-switcher" style="display:none;margin-top:8px;"></div>
                     </div>
 
                     <!-- Selected model display -->

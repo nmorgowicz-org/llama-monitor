@@ -428,7 +428,18 @@ function bindEvents() {
   bindCtxQuickPicks();
   document.addEventListener('keydown', e => {
     if (!dom.overlay?.classList.contains('open')) return;
-    if (e.key === 'Escape') closeSpawnWizard();
+    if (e.key === 'Escape') {
+      // Close any open browse dropdown first; only close wizard if none were open
+      const anyOpen = ['spawn-browse-dropdown', 'spawn-import-browse-dropdown']
+        .some(id => document.getElementById(id)?.style.display !== 'none');
+      if (anyOpen) { _closeBrowseDropdowns(); return; }
+      closeSpawnWizard();
+    }
+  });
+
+  // Close browse dropdowns when clicking outside them
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.browse-split')) _closeBrowseDropdowns();
   });
 
   dom.backBtn?.addEventListener('click', () => {
@@ -3417,51 +3428,82 @@ function showCtxFitWarning(ctx, useCase, manualSet = false) {
 
 // ── Model directory switcher ──────────────────────────────────────────────────
 
-function _openSettingsModels(e) {
-  e.preventDefault();
-  window.openSettingsModal?.();
-  setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
+// ── Browse split-button dropdown ──────────────────────────────────────────────
+
+function _closeBrowseDropdowns() {
+  ['spawn-browse-dropdown', 'spawn-import-browse-dropdown'].forEach(id => {
+    const dd = document.getElementById(id);
+    if (dd) dd.style.display = 'none';
+  });
+  document.getElementById('spawn-browse-arrow-btn')?.setAttribute('aria-expanded', 'false');
+  document.getElementById('spawn-import-browse-arrow-btn')?.setAttribute('aria-expanded', 'false');
 }
 
-function _buildDirSwitcher(container, targetInputId, allDirs) {
-  container.innerHTML = '';
-  container.style.display = 'flex';
-  container.style.alignItems = 'center';
-  container.style.flexWrap = 'wrap';
-  container.style.gap = '6px';
+function _buildBrowseDropdown(dropdownEl, targetInputId, allDirs) {
+  dropdownEl.innerHTML = '';
 
-  if (allDirs.length >= 2) {
-    const label = document.createElement('span');
-    label.className = 'dir-switcher-label';
-    label.textContent = 'Browse from:';
-    container.appendChild(label);
+  allDirs.forEach((dir, i) => {
+    const parts = dir.replace(/\\/g, '/').split('/').filter(Boolean);
+    const label = parts[parts.length - 1] || dir;
+    const pathHint = parts.slice(0, -1).join('/');
 
-    allDirs.forEach(dir => {
-      const chip = document.createElement('button');
-      chip.type = 'button';
-      chip.className = 'dir-switcher-chip';
-      const parts = dir.replace(/\\/g, '/').split('/').filter(Boolean);
-      chip.textContent = parts.slice(-2).join('/') || dir;
-      chip.title = dir;
-      chip.addEventListener('click', () => openDeferredFileBrowser(targetInputId, 'gguf', dir));
-      container.appendChild(chip);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'browse-dd-item';
+    btn.title = dir;
+
+    const labelEl = document.createElement('span');
+    labelEl.className = 'dd-item-label';
+    labelEl.textContent = label;
+    btn.appendChild(labelEl);
+
+    if (pathHint) {
+      const pathEl = document.createElement('span');
+      pathEl.className = 'dd-item-path';
+      pathEl.textContent = '/' + pathHint;
+      btn.appendChild(pathEl);
+    }
+
+    btn.addEventListener('click', () => {
+      _closeBrowseDropdowns();
+      openDeferredFileBrowser(targetInputId, 'gguf', dir);
     });
-  }
+    dropdownEl.appendChild(btn);
+  });
 
-  // Always show the settings link so users can add/manage model folder locations
-  const settingsLink = document.createElement('a');
-  settingsLink.href = '#';
-  settingsLink.className = 'dir-switcher-settings-link';
-  settingsLink.addEventListener('click', _openSettingsModels);
-  settingsLink.textContent = allDirs.length >= 2 ? '+ Add folder' : 'Manage model folders in Settings →';
-  container.appendChild(settingsLink);
+  const divider = document.createElement('div');
+  divider.className = 'browse-dd-divider';
+  dropdownEl.appendChild(divider);
+
+  const manageBtn = document.createElement('button');
+  manageBtn.type = 'button';
+  manageBtn.className = 'browse-dd-item dd-manage';
+  manageBtn.textContent = '⚙ Manage model locations…';
+  manageBtn.addEventListener('click', () => {
+    _closeBrowseDropdowns();
+    window.openSettingsModal?.();
+    setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
+  });
+  dropdownEl.appendChild(manageBtn);
+}
+
+function _toggleBrowseDropdown(arrowBtnId, dropdownId, targetInputId) {
+  const arrow = document.getElementById(arrowBtnId);
+  const dd    = document.getElementById(dropdownId);
+  if (!arrow || !dd) return;
+
+  const isOpen = dd.style.display !== 'none';
+
+  // Close all first, then open this one if it was closed
+  _closeBrowseDropdowns();
+
+  if (!isOpen) {
+    dd.style.display = 'block';
+    arrow.setAttribute('aria-expanded', 'true');
+  }
 }
 
 async function _loadModelDirSwitcher() {
-  const localContainer  = document.getElementById('spawn-dir-switcher');
-  const importContainer = document.getElementById('spawn-import-dir-switcher');
-  if (!localContainer && !importContainer) return;
-
   try {
     const headers = window.authHeaders ? window.authHeaders() : {};
     const r = await fetch('/api/settings', { headers });
@@ -3472,9 +3514,24 @@ async function _loadModelDirSwitcher() {
     const extras = Array.isArray(s.extra_models_dirs) ? s.extra_models_dirs.filter(Boolean) : [];
     const allDirs = [primary, ...extras].filter(Boolean);
 
-    // Always render so the settings link is available regardless of dir count
-    if (localContainer)  _buildDirSwitcher(localContainer,  'spawn-model-path',  allDirs);
-    if (importContainer) _buildDirSwitcher(importContainer, 'spawn-import-path', allDirs);
+    const localDd  = document.getElementById('spawn-browse-dropdown');
+    const importDd = document.getElementById('spawn-import-browse-dropdown');
+    if (localDd)  _buildBrowseDropdown(localDd,  'spawn-model-path',  allDirs);
+    if (importDd) _buildBrowseDropdown(importDd, 'spawn-import-path', allDirs);
+
+    // Wire arrow buttons (idempotent — clone to remove old listeners)
+    const wireArrow = (arrowId, dropdownId, targetInputId) => {
+      const old = document.getElementById(arrowId);
+      if (!old) return;
+      const fresh = old.cloneNode(true);
+      old.replaceWith(fresh);
+      fresh.addEventListener('click', e => {
+        e.stopPropagation();
+        _toggleBrowseDropdown(arrowId, dropdownId, targetInputId);
+      });
+    };
+    wireArrow('spawn-browse-arrow-btn',        'spawn-browse-dropdown',        'spawn-model-path');
+    wireArrow('spawn-import-browse-arrow-btn', 'spawn-import-browse-dropdown', 'spawn-import-path');
   } catch { /* ignore */ }
 }
 

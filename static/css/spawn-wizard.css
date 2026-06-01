@@ -617,50 +617,6 @@
   opacity: 0.75;
 }
 
-/* Directory switcher chips (shown below Browse when extra model dirs configured) */
-
-.dir-switcher-label {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.dir-switcher-chip {
-  padding: 3px 9px;
-  border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  cursor: pointer;
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-  white-space: nowrap;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dir-switcher-chip:hover {
-  background: rgba(99, 102, 241, 0.15);
-  border-color: rgba(99, 102, 241, 0.4);
-  color: var(--color-text-primary);
-}
-
-.dir-switcher-settings-link {
-  font-size: 11px;
-  color: var(--color-text-muted);
-  text-decoration: none;
-  white-space: nowrap;
-  opacity: 0.7;
-  transition: opacity 150ms ease;
-}
-
-.dir-switcher-settings-link:hover {
-  opacity: 1;
-  color: var(--color-accent);
-}
-
 /* Selected model display */
 
 .selected-model {
@@ -1097,6 +1053,134 @@
   transform: none;
 }
 
+/* Split Browse button */
+
+.browse-split {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.browse-split-main {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-right: none;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025));
+  color: var(--color-text-secondary);
+  font-weight: 700;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
+  transition: all 160ms ease;
+  white-space: nowrap;
+}
+
+.browse-split-main:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.04));
+  color: var(--color-text-primary);
+}
+
+.browse-split-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.025));
+  color: var(--color-text-muted);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.browse-split-arrow:hover,
+.browse-split-arrow[aria-expanded="true"] {
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.14), rgba(99, 102, 241, 0.07));
+  border-color: rgba(99, 102, 241, 0.3);
+  color: var(--color-text-primary);
+}
+
+.browse-split-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 220px;
+  max-width: 340px;
+  background: linear-gradient(160deg, rgba(36, 42, 52, 0.98), rgba(26, 30, 40, 0.99));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.36), 0 2px 8px rgba(0, 0, 0, 0.24);
+  z-index: 50;
+  overflow: hidden;
+  animation: browse-dd-open 140ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes browse-dd-open {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.browse-dd-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.browse-dd-item:hover {
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--color-text-primary);
+}
+
+.browse-dd-item .dd-item-label {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.browse-dd-item .dd-item-path {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.browse-dd-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  margin: 2px 0;
+}
+
+.browse-dd-item.dd-manage {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.browse-dd-item.dd-manage:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-accent);
+}
+
+/* .btn-wizard-secondary kept for other uses outside split button */
 .btn-wizard-secondary {
   display: inline-flex;
   align-items: center;
