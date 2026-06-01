@@ -259,6 +259,29 @@
   grid-template-columns: minmax(0, 1.4fr) minmax(200px, 0.6fr);
 }
 
+/* Hardware step: VRAM sidebar is fixed-height; only the main column scrolls */
+#wizard-step-2.active {
+  height: 100%;
+  grid-template-columns: minmax(0, 1fr) 310px;
+}
+
+#wizard-step-2 .wizard-main {
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99,102,241,0.25) transparent;
+}
+
+.hw-vram-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99,102,241,0.25) transparent;
+}
+
 @keyframes spawn-step-fade {
   0% {
     opacity: 0;
