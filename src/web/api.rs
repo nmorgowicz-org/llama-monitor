@@ -5953,11 +5953,13 @@ fn api_browse(
                     if let Ok(read_dir) = std::fs::read_dir(&dir) {
                         for entry in read_dir.flatten() {
                             let name = entry.file_name().to_string_lossy().to_string();
-                            if name.starts_with('.') {
-                                continue;
-                            }
                             let meta = entry.metadata().ok();
                             let is_dir = meta.as_ref().is_some_and(|m| m.is_dir());
+                            // Hide hidden files (e.g. .DS_Store) but show hidden directories
+                            // so users can navigate into paths like ~/.config
+                            if name.starts_with('.') && !is_dir {
+                                continue;
+                            }
 
                             if !is_dir && !filter.is_empty() {
                                 let pass = match filter.as_str() {
