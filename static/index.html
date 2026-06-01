@@ -2464,6 +2464,25 @@
 
                     <!-- HF repo input -->
                     <div class="model-input-area" id="model-input-hf">
+                        <!-- HF token — shown first so users set it before browsing -->
+                        <div class="settings-card wizard-hf-token-card" style="margin-bottom:10px;">
+                            <div class="wizard-hf-token-header">
+                                <span class="wizard-hf-token-title">Hugging Face Token</span>
+                                <span class="wizard-hf-token-badge" id="wizard-hf-token-badge" style="display:none;"></span>
+                            </div>
+                            <p class="settings-help" style="margin:0 0 10px 0;">
+                                Public repos work without a token. You need one for gated models or to avoid rate limits.
+                                <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">Create a Read token on HuggingFace.</a>
+                            </p>
+                            <div class="wizard-hf-token-input-row" id="wizard-hf-token-input-row">
+                                <input type="password" id="wizard-hf-token-input" class="wizard-hf-token-input" placeholder="hf_..." autocomplete="off" spellcheck="false">
+                                <button type="button" class="btn-wizard-secondary" id="wizard-hf-token-save">Save</button>
+                            </div>
+                            <div class="wizard-hf-token-saved-row" id="wizard-hf-token-saved-row" style="display:none;">
+                                <span class="wizard-hf-token-saved-note">✓ Token saved — gated repos enabled</span>
+                                <button type="button" class="wizard-hf-token-remove" id="wizard-hf-token-remove">Remove</button>
+                            </div>
+                        </div>
                         <!-- Discover: curated category shortcuts -->
                         <div class="hf-discover-row" id="hf-discover-row">
                             <span class="hf-quickpick-label">Discover:</span>
@@ -2504,24 +2523,6 @@
                                 <option value="trending">Trending</option>
                                 <option value="likes">Most liked</option>
                             </select>
-                        </div>
-                        <div class="settings-card wizard-hf-token-card" style="margin-top:12px;">
-                            <div class="wizard-hf-token-header">
-                                <span class="wizard-hf-token-title">Hugging Face Token</span>
-                                <span class="wizard-hf-token-badge" id="wizard-hf-token-badge" style="display:none;"></span>
-                            </div>
-                            <p class="settings-help" style="margin:0 0 10px 0;">
-                                Public repos work without a token. You need one for gated models or to avoid rate limits.
-                                <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">Create a Read token on HuggingFace.</a>
-                            </p>
-                            <div class="wizard-hf-token-input-row" id="wizard-hf-token-input-row">
-                                <input type="password" id="wizard-hf-token-input" class="wizard-hf-token-input" placeholder="hf_..." autocomplete="off" spellcheck="false">
-                                <button type="button" class="btn-wizard-secondary" id="wizard-hf-token-save">Save</button>
-                            </div>
-                            <div class="wizard-hf-token-saved-row" id="wizard-hf-token-saved-row" style="display:none;">
-                                <span class="wizard-hf-token-saved-note">✓ Token saved — gated repos enabled</span>
-                                <button type="button" class="wizard-hf-token-remove" id="wizard-hf-token-remove">Remove</button>
-                            </div>
                         </div>
                         <!-- Search results (shown when query isn't a repo ID) -->
                         <div class="hf-search-results" id="hf-search-results" style="display:none;">

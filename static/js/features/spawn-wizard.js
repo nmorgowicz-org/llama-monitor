@@ -1787,17 +1787,6 @@ async function showHfSearchResults({ query, author, sort, limit }) {
 
   container.innerHTML = '<div class="hf-search-loading">Searching HuggingFace…</div>';
   container.style.display = '';
-  // Scroll the results into view so the user sees the loading state immediately
-  // without having to scroll — feedback at the point of interaction.
-  // scrollIntoView targets the document viewport; the actual scroll container
-  // is .wizard-body (overflow-y: auto).  Use getBoundingClientRect so the
-  // calculation is correct regardless of intermediate positioned ancestors.
-  const scrollParent = container.closest('.wizard-body');
-  if (scrollParent) {
-    const cRect = container.getBoundingClientRect();
-    const pRect = scrollParent.getBoundingClientRect();
-    scrollParent.scrollTo({ top: scrollParent.scrollTop + cRect.top - pRect.top - 16, behavior: 'smooth' });
-  }
 
   // Hide file list when showing search results
   if (dom.hfFileList) { dom.hfFileList.innerHTML = ''; dom.hfFileList.classList.remove('visible'); }
@@ -1806,6 +1795,14 @@ async function showHfSearchResults({ query, author, sort, limit }) {
     dom.hfQuickpicks?.querySelectorAll('.hf-qp-btn').forEach(b => b.classList.remove('loading'));
     document.getElementById('hf-discover-pills')
       ?.querySelectorAll('.hf-discover-pill').forEach(p => p.classList.remove('loading'));
+  };
+
+  const scrollToResults = () => {
+    const scrollParent = container.closest('.wizard-body');
+    if (!scrollParent) return;
+    const cRect = container.getBoundingClientRect();
+    const pRect = scrollParent.getBoundingClientRect();
+    scrollParent.scrollTo({ top: scrollParent.scrollTop + cRect.top - pRect.top - 12, behavior: 'smooth' });
   };
 
   try {
@@ -1918,6 +1915,8 @@ async function showHfSearchResults({ query, author, sort, limit }) {
 
       container.appendChild(row);
     });
+    // Scroll after rows are in the DOM so the full result height is measured correctly.
+    scrollToResults();
   } catch (err) {
     clearPillLoading();
     const errEl = document.createElement('div');
