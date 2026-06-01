@@ -2691,11 +2691,15 @@ fn api_model_defaults(
                     ));
                 }
 
-                let defaults = crate::llama::model_defaults::get_model_defaults(
+                let presets = crate::llama::model_defaults::get_model_presets(
                     &name_or_repo,
                     size_bytes,
                     &tags,
                 );
+                let defaults = presets
+                    .first()
+                    .map(|p| p.defaults.clone())
+                    .unwrap_or_default();
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
@@ -2706,6 +2710,7 @@ fn api_model_defaults(
                         "repeat_penalty": defaults.repeat_penalty,
                         "presence_penalty": defaults.presence_penalty,
                         "max_tokens": defaults.max_tokens,
+                        "presets": presets,
                     }),
                 )))
             }

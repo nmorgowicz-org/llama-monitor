@@ -3729,6 +3729,32 @@
 .sampling-params-section {
   margin-bottom: 14px;
 }
+
+/* Model-specific sampling mode pills (e.g. Qwen3.6 thinking variants) */
+.sampling-preset-pill {
+  padding: 4px 11px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+  white-space: nowrap;
+}
+
+.sampling-preset-pill:hover {
+  background: rgba(99, 102, 241, 0.14);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: var(--color-text-primary);
+}
+
+.sampling-preset-pill.active {
+  background: rgba(99, 102, 241, 0.22);
+  border-color: rgba(99, 102, 241, 0.55);
+  color: #a5b4fc;
+}
 .sampling-params-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

@@ -3556,6 +3556,52 @@ async function _loadModelDirSwitcher() {
 
 // ── Model-specific sampling defaults (from /api/model-defaults) ──────────────
 
+function _applyPresetToHardware(preset) {
+  const h = wizardState.hardware;
+  if (preset.temperature != null) h.temperature = preset.temperature;
+  if (preset.top_p != null) h.topP = preset.top_p;
+  if (preset.top_k != null) h.topK = preset.top_k > 0 ? preset.top_k : null;
+  if (preset.min_p != null) h.minP = preset.min_p;
+  if (preset.repeat_penalty != null) h.repeatPenalty = preset.repeat_penalty;
+  h.presencePenalty = (preset.presence_penalty != null && preset.presence_penalty > 0)
+    ? preset.presence_penalty : null;
+}
+
+function _renderSamplingPresetPills(presets) {
+  const container = document.getElementById('spawn-sampling-presets');
+  if (!container) return;
+
+  if (!presets || presets.length <= 1) {
+    container.style.display = 'none';
+    container.innerHTML = '';
+    return;
+  }
+
+  container.style.display = 'flex';
+  container.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;';
+  container.innerHTML = '';
+
+  const label = document.createElement('span');
+  label.style.cssText = 'font-size:11px;color:var(--color-text-muted);flex-shrink:0;';
+  label.textContent = 'Mode:';
+  container.appendChild(label);
+
+  presets.forEach((preset, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sampling-preset-pill' + (i === 0 ? ' active' : '');
+    btn.textContent = preset.name;
+    btn.dataset.presetIndex = String(i);
+    btn.addEventListener('click', () => {
+      container.querySelectorAll('.sampling-preset-pill').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      _applyPresetToHardware(preset);
+      _syncSamplingFields();
+    });
+    container.appendChild(btn);
+  });
+}
+
 async function _fetchAndApplyModelSamplingDefaults() {
   const m = wizardState.model;
   const name = m.hfFile
@@ -3575,7 +3621,8 @@ async function _fetchAndApplyModelSamplingDefaults() {
     if (!res.ok) return;
     const data = await res.json();
     const h = wizardState.hardware;
-    // Only overwrite fields the user hasn't explicitly touched yet
+
+    // Apply first preset values (only overwrite fields not yet explicitly set)
     if (h.temperature == null && data.temperature != null) h.temperature = data.temperature;
     if (h.topP == null && data.top_p != null) h.topP = data.top_p;
     if (h.topK == null && data.top_k != null && data.top_k > 0) h.topK = data.top_k;
@@ -3584,6 +3631,9 @@ async function _fetchAndApplyModelSamplingDefaults() {
     if (h.presencePenalty == null && data.presence_penalty != null && data.presence_penalty > 0) {
       h.presencePenalty = data.presence_penalty;
     }
+
+    // Render mode pills if multiple presets are available
+    _renderSamplingPresetPills(data.presets || []);
   } catch { /* non-fatal */ }
 }
 
@@ -3744,9 +3794,11 @@ function renderSummary() {
 
 function _syncSamplingFields() {
   const h = wizardState.hardware;
+  // Round f32 API values to avoid 0.699999988079071 style display artifacts
+  const fmt = v => v == null ? '' : String(parseFloat(Number(v).toFixed(4)));
   const setVal = (id, val) => {
     const el = document.getElementById(id);
-    if (el && val != null) el.value = val;
+    if (el && val != null) el.value = fmt(val);
     else if (el) el.value = '';
   };
   setVal('spawn-temperature', h.temperature);

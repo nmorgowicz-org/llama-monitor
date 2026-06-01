@@ -32,6 +32,99 @@ impl Default for ModelDefaults {
     }
 }
 
+/// A named sampling preset — shown as a pill in the wizard's review step.
+/// The wizard auto-selects the first preset and lets users switch between them.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ModelPreset {
+    pub name: String,
+    #[serde(flatten)]
+    pub defaults: ModelDefaults,
+}
+
+/// Return named presets for models that have meaningful mode variants
+/// (e.g. Qwen3.6 thinking-general vs thinking-coding).
+/// The first preset is the recommended default.
+/// Returns a single "Default" preset for models with no special modes.
+pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -> Vec<ModelPreset> {
+    let lower = name_or_repo.to_ascii_lowercase();
+
+    // Qwen3.6 family (including Qwopus and other derivatives):
+    // two thinking-mode presets from https://unsloth.ai/docs/models/qwen3.6
+    let is_qwen36 =
+        (lower.contains("qwen3.6") || lower.contains("qwen36") || lower.contains("qwopus"))
+            && (lower.contains("27b") || lower.contains("35b") || lower.contains("a3b"));
+
+    if is_qwen36 {
+        // https://unsloth.ai/docs/models/qwen3.6 — recommended max_tokens: 32k
+        let thinking_general = ModelDefaults {
+            temperature: 1.0,
+            top_p: 0.95,
+            top_k: 20,
+            min_p: 0.0,
+            repeat_penalty: 1.0,
+            presence_penalty: 1.5,
+            max_tokens: 32768,
+        };
+        let thinking_coding = ModelDefaults {
+            temperature: 0.6,
+            top_p: 0.95,
+            top_k: 20,
+            min_p: 0.0,
+            repeat_penalty: 1.0,
+            presence_penalty: 0.0,
+            max_tokens: 32768,
+        };
+        return vec![
+            ModelPreset {
+                name: "Thinking — General".into(),
+                defaults: thinking_general,
+            },
+            ModelPreset {
+                name: "Thinking — Coding".into(),
+                defaults: thinking_coding,
+            },
+        ];
+    }
+
+    // EXAONE 4.5: general-purpose vs OCR/document
+    if lower.contains("exaone-4.5") || lower.contains("exaone4.5") {
+        let general = ModelDefaults {
+            temperature: 1.0,
+            top_p: 0.95,
+            top_k: 0,
+            min_p: 0.0,
+            repeat_penalty: 1.0,
+            presence_penalty: 1.5,
+            max_tokens: 2048,
+        };
+        let ocr = ModelDefaults {
+            temperature: 0.6,
+            top_p: 0.95,
+            top_k: 20,
+            min_p: 0.0,
+            repeat_penalty: 1.0,
+            presence_penalty: 1.5,
+            max_tokens: 2048,
+        };
+        return vec![
+            ModelPreset {
+                name: "General purpose".into(),
+                defaults: general,
+            },
+            ModelPreset {
+                name: "OCR / Document".into(),
+                defaults: ocr,
+            },
+        ];
+    }
+
+    // Default: single preset using existing per-family logic
+    vec![ModelPreset {
+        name: "Default".into(),
+        defaults: get_model_defaults(name_or_repo, size_bytes, tags),
+    }]
+}
+
 /// Determine model-specific generation defaults.
 ///
 /// - name_or_repo: model name or HuggingFace repo path.
@@ -55,32 +148,32 @@ pub fn get_model_defaults(name_or_repo: &str, _size_bytes: u64, tags: &[String])
 
     let mut d = ModelDefaults::default();
 
-    // EXAONE 4.5 family: LG AI official defaults.
-    // https://huggingface.co/LGAI-EXAONE/EXAONE-4.5-33B-GGUF
-    // General-purpose: temp=1.0, top_p=0.95, presence_penalty=1.5.
-    // OCR/Korean/document: temp=0.6, top_p=0.95, presence_penalty=1.5, top_k=20.
-    // We use the general-purpose settings as the default since most home users
-    // will not be doing OCR or Korean-language tasks.
+    // EXAONE 4.5: general-purpose as single default
+    // (presets handled by get_model_presets — this path only reached when called directly)
     if lower.contains("exaone-4.5") || lower.contains("exaone4.5") {
         d.temperature = 1.0;
         d.top_p = 0.95;
-        d.top_k = 0; // no top_k for general purpose (disabled)
+        d.top_k = 0;
         d.min_p = 0.0;
         d.repeat_penalty = 1.0;
         d.presence_penalty = 1.5;
         return d;
     }
 
-    // Qwen3.6 family: Unsloth-recommended defaults.
-    // https://docs.unsloth.ai/docs/quick-connects/qwen-3-6
-    if (lower.contains("qwen3.6") || lower.contains("qwen36"))
-        && (lower.contains("27b") || lower.contains("35b") || lower.contains("a3b"))
-    {
-        d.temperature = 0.7;
-        d.top_p = 0.8;
+    // Qwen3.6 family (including Qwopus derivatives): thinking-general as primary.
+    // https://unsloth.ai/docs/models/qwen3.6
+    let is_qwen36 =
+        (lower.contains("qwen3.6") || lower.contains("qwen36") || lower.contains("qwopus"))
+            && (lower.contains("27b") || lower.contains("35b") || lower.contains("a3b"));
+    if is_qwen36 {
+        d.temperature = 1.0;
+        d.top_p = 0.95;
         d.top_k = 20;
         d.min_p = 0.0;
-        d.repeat_penalty = 1.5;
+        d.repeat_penalty = 1.0;
+        d.presence_penalty = 1.5;
+        d.max_tokens = 32768;
+        return d;
     }
     // Gemma 4 family: Unsloth-recommended defaults.
     // https://docs.unsloth.ai/docs/quick-connects/gemma-4
