@@ -605,6 +605,13 @@ function bindEvents() {
   // Model card panel
   dom.cardPanelClose?.addEventListener('click', _closeCardPanel);
 
+  // "Settings → Models" link inside the Import card description
+  document.querySelector('.wizard-settings-link[data-open-settings="models"]')?.addEventListener('click', e => {
+    e.preventDefault();
+    window.openSettingsModal?.();
+    setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
+  });
+
   // Binary prereq buttons
   dom.prereqDownloadBtn?.addEventListener('click', _downloadBinaryForWizard);
   dom.prereqSettingsBtn?.addEventListener('click', () => {
@@ -962,13 +969,8 @@ function showStep(index) {
   document.getElementById(`wizard-step-${index}`)?.classList.add('active');
 
   // Scroll the wizard body to the top whenever changing steps.
-  // On the hardware step (2) the body must not scroll — only .wizard-main
-  // scrolls internally so the VRAM sidebar stays fixed in the viewport.
   const wizardBody = document.querySelector('.wizard-body');
-  if (wizardBody) {
-    wizardBody.scrollTop = 0;
-    wizardBody.style.overflowY = index === 2 ? 'hidden' : '';
-  }
+  if (wizardBody) wizardBody.scrollTop = 0;
 
   dom.stepBadges?.forEach(b => {
     const s = Number(b.dataset.step);
@@ -1174,6 +1176,36 @@ async function doIntrospect(path) {
     if (m.n_experts)      wizardState.arch.nExperts      = m.n_experts;
     if (m.n_experts_used) wizardState.arch.nExpertsUsed = m.n_experts_used;
     if (m.mtp_depth)      wizardState.arch.mtpDepth      = m.mtp_depth;
+
+    // Scan directory for companion mmproj file (local models only)
+    if (wizardState.model.source === 'local' || wizardState.model.source === 'import') {
+      const dir = path.replace(/[/\\][^/\\]+$/, '');
+      try {
+        const browseResp = await fetch(
+          `/api/browse?path=${encodeURIComponent(dir)}&filter=gguf`,
+          { headers }
+        );
+        if (browseResp.ok) {
+          const bd = await browseResp.json();
+          const found = (bd.entries || []).filter(
+            e => !e.is_dir && e.name.toLowerCase().includes('mmproj')
+          );
+          if (found.length) {
+            wizardState.model.mmprojFiles = found.map(e => ({
+              path: e.path, name: e.name, size: e.size || 0, is_mmproj: true,
+            }));
+            if (found.length === 1) {
+              wizardState.model.mmprojPath = found[0].path;
+              wizardState.model.mmprojHfFile = found[0].path;
+              wizardState.arch.mmprojBytes = found[0].size || 0;
+            }
+            // Re-render the mmproj section if hardware step is active
+            if (wizardState.currentStep === 2) renderMmprojSection();
+            scheduleVramUpdate();
+          }
+        }
+      } catch { /* browse may be rate-limited; skip silently */ }
+    }
 
     // Update MoE slider max if we got expert count
     if (wizardState.arch.nExperts > 0 && dom.moeOffloadSlider) {

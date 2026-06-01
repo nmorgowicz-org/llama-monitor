@@ -259,10 +259,13 @@
   grid-template-columns: minmax(0, 1.4fr) minmax(200px, 0.6fr);
 }
 
-/* Hardware step: VRAM sidebar is fixed-height; only the main column scrolls */
+/* Hardware step: sidebar stays fixed; only wizard-main scrolls.
+   grid-template-rows: 1fr constrains the row to exactly the available height
+   so wizard-main's overflow-y: auto actually activates. */
 #wizard-step-2.active {
   height: 100%;
   grid-template-columns: minmax(0, 1fr) 310px;
+  grid-template-rows: 1fr;
 }
 
 #wizard-step-2 .wizard-main {
@@ -543,6 +546,17 @@
   font-size: var(--text-xs);
   color: var(--color-text-muted);
   line-height: 1.5;
+}
+
+.wizard-settings-link {
+  color: rgba(99, 102, 241, 0.85);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.wizard-settings-link:hover {
+  color: rgba(99, 102, 241, 1);
+  text-decoration: underline;
 }
 
 /* Model input area */
@@ -2510,6 +2524,8 @@
   align-items: baseline;
   gap: 4px;
   margin-bottom: 4px;
+  flex-wrap: wrap;
+  overflow: hidden;
 }
 
 .vsc-ctx {
