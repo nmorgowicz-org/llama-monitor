@@ -2124,6 +2124,7 @@ fn api_models_download_start(
                 match crate::model_download::start_download(
                     &repo_id,
                     &file_path,
+                    None,
                     &target_dir,
                     hf_token,
                 ) {
@@ -2703,6 +2704,7 @@ fn api_model_defaults(
                         "top_k": defaults.top_k,
                         "min_p": defaults.min_p,
                         "repeat_penalty": defaults.repeat_penalty,
+                        "presence_penalty": defaults.presence_penalty,
                         "max_tokens": defaults.max_tokens,
                     }),
                 )))
@@ -3324,7 +3326,12 @@ fn api_hf_download(
                 let file_path = body["file_path"].as_str().unwrap_or("").trim().to_string();
                 let target_path: Option<String> =
                     body["target_path"].as_str().map(|s| s.trim().to_string());
+                let save_as: Option<String> =
+                    body["save_as"].as_str().map(|s| s.trim().to_string());
                 let resume: bool = body["resume"].as_bool().unwrap_or(false);
+                // Companion downloads (e.g. mmproj alongside a model) bypass the
+                // 10-second cooldown so both files can start simultaneously.
+                let companion: bool = body["companion"].as_bool().unwrap_or(false);
 
                 if repo_id.is_empty() || file_path.is_empty() {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -3358,6 +3365,16 @@ fn api_hf_download(
                         })),
                     ));
                 }
+                if let Some(ref sa) = save_as {
+                    if sa.contains("..") || sa.contains('/') || sa.contains('\\') {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Invalid save_as: must be a plain filename"
+                            })),
+                        ));
+                    }
+                }
 
                 // Determine target directory.
                 let models_dir = get_effective_models_dir(&state)
@@ -3374,26 +3391,39 @@ fn api_hf_download(
                     }
                 };
 
-                // Cooldown between starts: 10 seconds.
-                let now = std::time::SystemTime::UNIX_EPOCH
-                    .elapsed()
-                    .unwrap_or_default()
-                    .as_secs();
-                let (dl_ok, _) = try_cooldown(&HF_DOWNLOAD_LAST_START, now, 10);
-                if !dl_ok {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": "Too soon; please wait 10 seconds between downloads."
-                            })),
-                            StatusCode::TOO_MANY_REQUESTS,
-                        ),
-                    ));
+                // Cooldown between starts: 10 seconds. Companion downloads (e.g.
+                // mmproj alongside a model) are exempt so both can start together.
+                if !companion {
+                    let now = std::time::SystemTime::UNIX_EPOCH
+                        .elapsed()
+                        .unwrap_or_default()
+                        .as_secs();
+                    let (dl_ok, _) = try_cooldown(&HF_DOWNLOAD_LAST_START, now, 10);
+                    if !dl_ok {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::with_status(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": "Too soon; please wait 10 seconds between downloads."
+                                })),
+                                StatusCode::TOO_MANY_REQUESTS,
+                            ),
+                        ));
+                    }
                 }
 
-                let local_path = target_dir.join(&file_path).to_string_lossy().into_owned();
-                match crate::hf::hf_start_download(&repo_id, &file_path, &target_dir, resume) {
+                let effective_filename = save_as.as_deref().unwrap_or(&file_path);
+                let local_path = target_dir
+                    .join(effective_filename)
+                    .to_string_lossy()
+                    .into_owned();
+                match crate::hf::hf_start_download(
+                    &repo_id,
+                    &file_path,
+                    save_as.as_deref(),
+                    &target_dir,
+                    resume,
+                ) {
                     Ok(download_id) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                         Box::new(warp::reply::json(&serde_json::json!({
                             "ok": true,

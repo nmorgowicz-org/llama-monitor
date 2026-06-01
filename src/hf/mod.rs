@@ -993,13 +993,15 @@ pub fn mask_token(token: &str) -> String {
 // ── Start a managed download ──────────────────────────────────────────────────
 
 /// Start a download via the model_download manager.
+/// `save_as` overrides the local filename (e.g. to rename a companion mmproj).
 pub fn hf_start_download(
     repo_id: &str,
     file_path: &str,
+    save_as: Option<&str>,
     target_path: &Path,
     _resume: bool,
 ) -> Result<String, String> {
-    crate::model_download::start_download(repo_id, file_path, target_path, hf_load_token())
+    crate::model_download::start_download(repo_id, file_path, save_as, target_path, hf_load_token())
         .map_err(|e| format!("Failed to start download: {e}"))
 }
 

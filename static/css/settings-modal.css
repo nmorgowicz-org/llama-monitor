@@ -118,6 +118,11 @@
   backdrop-filter: blur(16px);
 }
 
+/* Must sit above spawn wizard (z-index: 1250) when opened from within it */
+#settings-modal.open {
+  z-index: 1300;
+}
+
 /* Ambient glow behind the modal */
 #settings-modal::before {
   content: '';

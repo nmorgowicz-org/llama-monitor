@@ -11,6 +11,10 @@ pub struct ModelDefaults {
     pub top_k: i32,
     pub min_p: f32,
     pub repeat_penalty: f32,
+    /// OpenAI-style presence penalty (flat logit reduction for any seen token).
+    /// Maps to llama-server's --presence-penalty flag.
+    /// 0.0 = disabled (default).
+    pub presence_penalty: f32,
     pub max_tokens: u64,
 }
 
@@ -22,6 +26,7 @@ impl Default for ModelDefaults {
             top_k: 40,
             min_p: 0.05,
             repeat_penalty: 1.1,
+            presence_penalty: 0.0,
             max_tokens: 2048,
         }
     }
@@ -49,6 +54,22 @@ pub fn get_model_defaults(name_or_repo: &str, _size_bytes: u64, tags: &[String])
         || lower.contains("starcoder");
 
     let mut d = ModelDefaults::default();
+
+    // EXAONE 4.5 family: LG AI official defaults.
+    // https://huggingface.co/LGAI-EXAONE/EXAONE-4.5-33B-GGUF
+    // General-purpose: temp=1.0, top_p=0.95, presence_penalty=1.5.
+    // OCR/Korean/document: temp=0.6, top_p=0.95, presence_penalty=1.5, top_k=20.
+    // We use the general-purpose settings as the default since most home users
+    // will not be doing OCR or Korean-language tasks.
+    if lower.contains("exaone-4.5") || lower.contains("exaone4.5") {
+        d.temperature = 1.0;
+        d.top_p = 0.95;
+        d.top_k = 0; // no top_k for general purpose (disabled)
+        d.min_p = 0.0;
+        d.repeat_penalty = 1.0;
+        d.presence_penalty = 1.5;
+        return d;
+    }
 
     // Qwen3.6 family: Unsloth-recommended defaults.
     // https://docs.unsloth.ai/docs/quick-connects/qwen-3-6
@@ -210,5 +231,16 @@ mod tests {
             &["moe".into()],
         );
         assert!(d.max_tokens >= 4096);
+    }
+
+    #[test]
+    fn exaone45_33b_uses_lg_official_defaults() {
+        // Source: https://huggingface.co/LGAI-EXAONE/EXAONE-4.5-33B-GGUF
+        // General purpose: temp=1.0, top_p=0.95, presence_penalty=1.5
+        let d = get_model_defaults("EXAONE-4.5-33B-Q4_K_M.gguf", 20_000_000_000, &[]);
+        assert_eq!(d.temperature, 1.0);
+        assert_eq!(d.top_p, 0.95);
+        assert_eq!(d.presence_penalty, 1.5);
+        assert_eq!(d.repeat_penalty, 1.0);
     }
 }

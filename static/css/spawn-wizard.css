@@ -259,13 +259,18 @@
   grid-template-columns: minmax(0, 1.4fr) minmax(200px, 0.6fr);
 }
 
-/* Hardware step: sidebar stays fixed; only wizard-main scrolls.
-   grid-template-rows: 1fr constrains the row to exactly the available height
-   so wizard-main's overflow-y: auto actually activates. */
+/* Hardware step: each column scrolls independently.
+   wizard-body must NOT be the scroll container here — without overflow:hidden
+   on it, height:100% on the step resolves to scroll-height (not viewport height)
+   and wizard-body scrolls the whole thing instead of letting columns scroll. */
 #wizard-step-2.active {
   height: 100%;
   grid-template-columns: minmax(0, 1fr) 310px;
   grid-template-rows: 1fr;
+}
+
+.wizard-body:has(#wizard-step-2.active) {
+  overflow: hidden;
 }
 
 #wizard-step-2 .wizard-main {
@@ -607,6 +612,50 @@
 .model-input-row input[type="text"]::placeholder {
   color: var(--color-text-muted);
   opacity: 0.75;
+}
+
+/* Directory switcher chips (shown below Browse when extra model dirs configured) */
+
+.dir-switcher-label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.dir-switcher-chip {
+  padding: 3px 9px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dir-switcher-chip:hover {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.4);
+  color: var(--color-text-primary);
+}
+
+.dir-switcher-settings-link {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  opacity: 0.7;
+  transition: opacity 150ms ease;
+}
+
+.dir-switcher-settings-link:hover {
+  opacity: 1;
+  color: var(--color-accent);
 }
 
 /* Selected model display */

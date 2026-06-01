@@ -82,9 +82,11 @@ static MODEL_DOWNLOAD_MANAGER: std::sync::LazyLock<Mutex<DownloadManager>> =
     std::sync::LazyLock::new(|| Mutex::new(DownloadManager::new()));
 
 /// Start an async HuggingFace download. Returns a download ID immediately.
+/// `save_as` overrides the local filename (useful for renaming companion files like mmproj).
 pub fn start_download(
     repo_id: &str,
     file_path: &str,
+    save_as: Option<&str>,
     target_dir: &Path,
     hf_token: Option<String>,
 ) -> Result<String> {
@@ -97,7 +99,7 @@ pub fn start_download(
 
     let repo_id = repo_id.to_string();
     let file_path = file_path.to_string();
-    let local_path = target_dir.join(&file_path);
+    let local_path = target_dir.join(save_as.unwrap_or(&file_path));
 
     if let Err(e) = std::fs::create_dir_all(target_dir) {
         anyhow::bail!("Failed to create model directory: {}", e);

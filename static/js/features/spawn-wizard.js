@@ -184,6 +184,7 @@ export const wizardState = {
     topK: null,
     minP: null,
     repeatPenalty: null,
+    presencePenalty: null,
     seed: null,
   },
   access: {
@@ -788,7 +789,7 @@ function _dlSetState(state) {
 }
 
 async function _startHfDownload() {
-  const { hfRepo, hfFile } = wizardState.model;
+  const { hfRepo, hfFile, mmprojHfFile } = wizardState.model;
   if (!hfRepo || !hfFile) { showValidationError('Select a GGUF file first.'); return; }
   const btn = _dlPanel('hf-dlp-download-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
@@ -810,10 +811,55 @@ async function _startHfDownload() {
     if (fileEl) fileEl.textContent = hfFile.split('/').pop();
     _dlSetState('progress');
     _dlPollStatus(data.download_id, data.local_path);
+
+    // Kick off companion mmproj download immediately if user selected one.
+    // Uses companion:true to bypass the 10-second cooldown between downloads.
+    if (mmprojHfFile) {
+      _startCompanionMmprojDownload(hfRepo, mmprojHfFile, hfFile);
+    }
   } catch (err) {
     if (btn) { btn.disabled = false; }
     showValidationError(err.message || 'Download request failed.');
   }
+}
+
+/// Derive a safe local filename for an mmproj companion file.
+/// Strips the quant suffix from the model name and prepends it to the mmproj basename
+/// so files are clearly associated: e.g. "Qwopus-Q8_0.gguf" + "mmproj-BF16.gguf"
+/// → "Qwopus-mmproj-BF16.gguf".
+function _deriveMmprojSaveName(modelHfPath, mmprojHfPath) {
+  const modelBase = (modelHfPath.split('/').pop() || modelHfPath).replace(/\.gguf$/i, '');
+  // Strip quant suffix: -Q8_0, -Q4_K_M, -IQ3_S, -BF16, -F16, etc.
+  const stem = modelBase.replace(/-?(Q\d[\w.]*|IQ\d[\w.]*|BF16|F16)$/i, '');
+  const mmprojBase = mmprojHfPath.split('/').pop() || mmprojHfPath;
+  return `${stem}-${mmprojBase}`;
+}
+
+let _mmprojCompanionId = null;
+let _mmprojCompanionLocalPath = null;
+
+async function _startCompanionMmprojDownload(repo, mmprojHfPath, modelHfPath) {
+  const saveAs = _deriveMmprojSaveName(modelHfPath, mmprojHfPath);
+  try {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+    const res = await fetch('/api/hf/download', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ repo_id: repo, file_path: mmprojHfPath, save_as: saveAs, companion: true, resume: true }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) {
+      _mmprojCompanionId = data.download_id;
+      _mmprojCompanionLocalPath = data.local_path;
+      eprintln_info(`mmproj companion download started: ${saveAs}`);
+    }
+  } catch { /* companion download failure is non-fatal */ }
+}
+
+function eprintln_info(msg) {
+  /* no-op in browser; useful for debugging */ void msg;
 }
 
 function _dlPollStatus(downloadId, localPath) {
@@ -863,6 +909,19 @@ function _dlPollStatus(downloadId, localPath) {
             quant_type: guessQuantFromName(downloadedFile || effectivePath),
             param_b: wizardState.model.paramB || null,
           };
+          // If companion mmproj is being/was downloaded, record its local path so
+          // the hardware step and spawn payload can use it.
+          if (_mmprojCompanionLocalPath) {
+            const mmprojLocalPath = _mmprojCompanionLocalPath;
+            const mmprojName = mmprojLocalPath.split(/[\\/]/).pop() || mmprojLocalPath;
+            wizardState.model.mmprojPath = mmprojLocalPath;
+            wizardState.model.mmprojFiles = [{
+              path: mmprojLocalPath, name: mmprojName,
+              size: wizardState.arch.mmprojBytes || 0, is_mmproj: true,
+            }];
+            _mmprojCompanionId = null;
+            _mmprojCompanionLocalPath = null;
+          }
           wizardState.model.hfRepo = '';
           wizardState.model.hfFile = '';
           if (dom.modelPathInput) dom.modelPathInput.value = effectivePath;
@@ -983,6 +1042,9 @@ function showStep(index) {
   if (dom.backBtn) dom.backBtn.style.display = index === 0 ? 'none' : '';
   if (dom.nextBtn) dom.nextBtn.style.display = index === STEP_LABELS.length - 1 ? 'none' : '';
 
+  if (index === 1) {
+    _loadModelDirSwitcher();
+  }
   if (index === 2) {
     // Entering hardware step — refresh VRAM, then render model context + new sections
     updateCtxModelMaxHint();
@@ -999,6 +1061,9 @@ function showStep(index) {
     } else {
       hideHfDownloadPanel();
     }
+    // Fetch model-specific sampling defaults (temperature, presence_penalty, etc.)
+    // so the review step pre-populates with the model's recommended settings.
+    _fetchAndApplyModelSamplingDefaults();
   }
   if (index === 3) {
     refreshHfTokenState().finally(() => {
@@ -1516,6 +1581,7 @@ const HF_DISCOVER_CATEGORIES = [
   { id: 'llama3',    label: 'Llama 3.x',     params: { query: 'llama-3',    sort: 'downloads', limit: 30 } },
   { id: 'mistral',   label: 'Mistral / MoE', params: { query: 'mistral',    sort: 'downloads', limit: 30 } },
   { id: 'gemma',     label: 'Gemma',         params: { query: 'gemma',      sort: 'downloads', limit: 30 } },
+  { id: 'exaone',    label: 'EXAONE',        params: { query: 'exaone',     sort: 'downloads', limit: 30 } },
   { id: 'heretic',   label: 'Heretic',       params: { query: 'heretic',    sort: 'downloads', limit: 30 } },
 ];
 
@@ -2751,14 +2817,26 @@ function renderMmprojSection() {
   const row = document.getElementById('hw-mmproj-row');
   if (!row) return;
   const files = wizardState.model.mmprojFiles || [];
-  if (!files.length) { row.style.display = 'none'; return; }
+
+  // When no local mmproj files exist, show a "download from HuggingFace" option
+  // so users can fetch a companion mmproj for any model (especially ones that
+  // were already downloaded without the mmproj).
+  if (!files.length) {
+    _renderMmprojDownloadFromHf(row);
+    return;
+  }
   row.style.display = '';
+
+  // Clear any "download from HF" panel that was previously shown
+  const hfPanel = row.querySelector('.hw-mmproj-hf-panel');
+  if (hfPanel) hfPanel.remove();
 
   const select = document.getElementById('hw-mmproj-select');
   if (!select) return;
 
-  if (!select.dataset.populated) {
-    select.dataset.populated = '1';
+  // Re-populate if the file list changed (e.g. after a companion download)
+  if (select.dataset.populated !== String(files.length)) {
+    select.dataset.populated = String(files.length);
     select.innerHTML = '';
     const noneOpt = document.createElement('option');
     noneOpt.value = ''; noneOpt.textContent = '(none — text-only)';
@@ -2770,12 +2848,13 @@ function renderMmprojSection() {
       opt.value = fpath;
       const sizeStr = f.size ? ` · ${formatBytes(f.size)}` : '';
       opt.textContent = fname + sizeStr;
-      if (fpath === wizardState.model.mmprojHfFile) opt.selected = true;
+      if (fpath === (wizardState.model.mmprojPath || wizardState.model.mmprojHfFile)) opt.selected = true;
       select.appendChild(opt);
     });
     select.addEventListener('change', () => {
       const fpath = select.value;
       wizardState.model.mmprojHfFile = fpath;
+      wizardState.model.mmprojPath = fpath;
       const f = files.find(x => (x.path || x.name) === fpath);
       wizardState.arch.mmprojBytes = f?.size ? Number(f.size) : 0;
       scheduleVramUpdate();
@@ -2783,9 +2862,179 @@ function renderMmprojSection() {
   }
 
   // Sync selection state
-  if (wizardState.model.mmprojHfFile) {
-    select.value = wizardState.model.mmprojHfFile;
+  const active = wizardState.model.mmprojPath || wizardState.model.mmprojHfFile;
+  if (active) select.value = active;
+
+  // Auto-select first file if nothing selected yet
+  if (!select.value && files.length) {
+    select.value = files[0].path || files[0].name || '';
+    wizardState.model.mmprojPath = select.value;
+    wizardState.model.mmprojHfFile = select.value;
+    const f = files[0];
+    wizardState.arch.mmprojBytes = f.size ? Number(f.size) : 0;
+    scheduleVramUpdate();
   }
+}
+
+function _renderMmprojDownloadFromHf(row) {
+  // Show the row with a "download mmproj from HuggingFace" mini-panel
+  row.style.display = '';
+  const select = document.getElementById('hw-mmproj-select');
+  if (select) select.style.display = 'none';
+
+  let panel = row.querySelector('.hw-mmproj-hf-panel');
+  if (panel) return; // already rendered
+
+  panel = document.createElement('div');
+  panel.className = 'hw-mmproj-hf-panel';
+  panel.innerHTML = `
+    <span class="hw-quant-label" style="color:var(--color-text-muted);font-size:10px;">
+      No mmproj found in model directory.
+    </span>
+    <button type="button" class="btn-wizard-tertiary hw-mmproj-hf-fetch-btn" style="margin-left:auto;">
+      Fetch from HuggingFace…
+    </button>
+  `;
+  row.appendChild(panel);
+
+  panel.querySelector('.hw-mmproj-hf-fetch-btn').addEventListener('click', () => {
+    _showMmprojHfFetchForm(row, panel);
+  });
+}
+
+function _showMmprojHfFetchForm(row, panel) {
+  panel.innerHTML = `
+    <div style="display:flex;gap:6px;align-items:center;width:100%;flex-wrap:wrap;">
+      <input type="text" class="hw-mmproj-repo-input" placeholder="owner/repo (e.g. unsloth/Qwen3-VL-7B-GGUF)"
+        style="flex:1;min-width:120px;padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);
+          background:rgba(28,34,42,0.9);color:var(--color-text-primary);font-size:11px;">
+      <button type="button" class="btn-wizard-secondary hw-mmproj-repo-go" style="min-height:28px;padding:5px 10px;font-size:11px;">Fetch</button>
+      <button type="button" class="btn-wizard-tertiary hw-mmproj-cancel" style="font-size:10px;">Cancel</button>
+    </div>
+    <div class="hw-mmproj-repo-status" style="font-size:10px;color:var(--color-text-muted);margin-top:4px;"></div>
+    <div class="hw-mmproj-repo-list" style="display:none;flex-direction:column;gap:4px;margin-top:6px;max-height:120px;overflow-y:auto;"></div>
+  `;
+
+  // Pre-fill with originRepo if we know it
+  const originRepo = wizardState.model.originRepo || '';
+  const input = panel.querySelector('.hw-mmproj-repo-input');
+  if (originRepo) input.value = originRepo;
+
+  panel.querySelector('.hw-mmproj-cancel').addEventListener('click', () => {
+    panel.remove();
+    if (row.querySelector('#hw-mmproj-select')) {
+      row.querySelector('#hw-mmproj-select').style.display = '';
+    }
+    row.style.display = 'none';
+  });
+
+  const goBtn = panel.querySelector('.hw-mmproj-repo-go');
+  const statusEl = panel.querySelector('.hw-mmproj-repo-status');
+  const listEl = panel.querySelector('.hw-mmproj-repo-list');
+
+  async function doFetch() {
+    const repoId = input.value.trim();
+    if (!repoId) return;
+    goBtn.disabled = true; statusEl.textContent = 'Fetching files…';
+    try {
+      const headers = window.authHeaders ? window.authHeaders() : {};
+      const res = await fetch(`/api/hf/files?repo_id=${encodeURIComponent(repoId)}`, { headers });
+      const data = res.ok ? await res.json() : null;
+      goBtn.disabled = false;
+      if (!data?.ok || !data.files?.length) {
+        statusEl.textContent = 'No GGUF files found. Check the repo ID.'; return;
+      }
+      const mmprojFiles = data.files.filter(f => f.is_mmproj);
+      if (!mmprojFiles.length) {
+        statusEl.textContent = 'No mmproj file found in this repo.'; return;
+      }
+      statusEl.textContent = '';
+      listEl.style.display = 'flex';
+      listEl.innerHTML = '';
+      mmprojFiles.forEach(f => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn-wizard-secondary';
+        btn.style.cssText = 'min-height:26px;padding:4px 10px;font-size:10px;text-align:left;';
+        const fname = (f.rfilename || f.path || '').split('/').pop();
+        const sizeStr = f.size ? ` · ${formatBytes(f.size)}` : '';
+        btn.textContent = `⬇ ${fname}${sizeStr}`;
+        btn.addEventListener('click', () => _downloadMmprojFromHf(repoId, f, wizardState.model.path, statusEl));
+        listEl.appendChild(btn);
+      });
+    } catch (e) {
+      goBtn.disabled = false;
+      statusEl.textContent = `Error: ${e.message}`;
+    }
+  }
+
+  goBtn.addEventListener('click', doFetch);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') doFetch(); });
+  if (originRepo) doFetch();
+}
+
+async function _downloadMmprojFromHf(repoId, file, modelPath, statusEl) {
+  const mmprojHfPath = file.rfilename || file.path || '';
+  const modelFilename = (modelPath || '').split(/[\\/]/).pop() || '';
+  const saveAs = modelFilename ? _deriveMmprojSaveName(modelFilename, mmprojHfPath) : mmprojHfPath.split('/').pop();
+  if (statusEl) statusEl.textContent = `Downloading ${saveAs}…`;
+  try {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+    const res = await fetch('/api/hf/download', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ repo_id: repoId, file_path: mmprojHfPath, save_as: saveAs, companion: true, resume: true }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      if (statusEl) statusEl.textContent = data.error || 'Download failed to start.';
+      return;
+    }
+    // Poll until complete, then update mmproj state
+    _pollMmprojDownload(data.download_id, data.local_path, file.size || 0, statusEl);
+  } catch (e) {
+    if (statusEl) statusEl.textContent = `Error: ${e.message}`;
+  }
+}
+
+function _pollMmprojDownload(downloadId, localPath, expectedSize, statusEl) {
+  const headers = window.authHeaders ? window.authHeaders() : {};
+  async function poll() {
+    try {
+      const res = await fetch(`/api/models/download/${downloadId}/status`, { headers });
+      if (!res.ok) { setTimeout(poll, 1000); return; }
+      const data = await res.json();
+      const s = data.status;
+      if (!s) { setTimeout(poll, 1000); return; }
+      const { status, bytes_downloaded = 0, total_bytes = 0 } = s;
+      const pct = total_bytes > 0 ? Math.round(bytes_downloaded / total_bytes * 100) : 0;
+      if (status === 'running') {
+        if (statusEl) statusEl.textContent = `Downloading mmproj… ${pct}%`;
+        setTimeout(poll, 1000);
+        return;
+      }
+      if (status === 'completed') {
+        const mmprojName = localPath.split(/[\\/]/).pop() || localPath;
+        wizardState.model.mmprojPath = localPath;
+        wizardState.model.mmprojHfFile = localPath;
+        wizardState.model.mmprojFiles = [{
+          path: localPath, name: mmprojName,
+          size: expectedSize || 0, is_mmproj: true,
+        }];
+        wizardState.arch.mmprojBytes = expectedSize || 0;
+        if (statusEl) statusEl.textContent = '';
+        // Re-render mmproj section to show the new file in the dropdown
+        renderMmprojSection();
+        scheduleVramUpdate();
+        showToast('mmproj downloaded', 'success', mmprojName);
+      } else if (status === 'failed') {
+        if (statusEl) statusEl.textContent = s.message || 'Download failed.';
+      }
+    } catch { setTimeout(poll, 1000); }
+  }
+  setTimeout(poll, 800);
 }
 
 // ── Hardware step: MTP section ───────────────────────────────────────────────
@@ -3070,11 +3319,100 @@ function showCtxFitWarning(ctx, useCase, manualSet = false) {
   el.style.display = '';
 }
 
+// ── Model directory switcher ──────────────────────────────────────────────────
+
+async function _loadModelDirSwitcher() {
+  const container = document.getElementById('spawn-dir-switcher');
+  if (!container) return;
+
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const r = await fetch('/api/settings', { headers });
+    if (!r.ok) return;
+    const s = await r.json();
+
+    const primary = s.models_dir || '';
+    const extras = Array.isArray(s.extra_models_dirs) ? s.extra_models_dirs.filter(Boolean) : [];
+    const allDirs = [primary, ...extras].filter(Boolean);
+
+    if (allDirs.length < 2) {
+      container.style.display = 'none';
+      return;
+    }
+
+    container.innerHTML = '';
+    container.style.display = 'flex';
+    container.style.alignItems = 'center';
+    container.style.flexWrap = 'wrap';
+    container.style.gap = '6px';
+
+    const label = document.createElement('span');
+    label.className = 'dir-switcher-label';
+    label.textContent = 'Browse from:';
+    container.appendChild(label);
+
+    allDirs.forEach(dir => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'dir-switcher-chip';
+      const parts = dir.replace(/\\/g, '/').split('/').filter(Boolean);
+      chip.textContent = parts.slice(-2).join('/') || dir;
+      chip.title = dir;
+      chip.addEventListener('click', () => openDeferredFileBrowser('spawn-model-path', 'gguf', dir));
+      container.appendChild(chip);
+    });
+
+    const settingsLink = document.createElement('a');
+    settingsLink.href = '#';
+    settingsLink.className = 'dir-switcher-settings-link';
+    settingsLink.addEventListener('click', e => {
+      e.preventDefault();
+      window.openSettingsModal?.();
+      setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
+    });
+    settingsLink.textContent = '+ Add folder';
+    container.appendChild(settingsLink);
+  } catch { /* ignore */ }
+}
+
+// ── Model-specific sampling defaults (from /api/model-defaults) ──────────────
+
+async function _fetchAndApplyModelSamplingDefaults() {
+  const m = wizardState.model;
+  const name = m.hfFile
+    ? (m.hfFile.split('/').pop() || m.hfFile)
+    : (m.path ? m.path.split(/[\\/]/).pop() : '') || m.hfRepo || '';
+  if (!name) return;
+
+  try {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+    const res = await fetch('/api/model-defaults', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model_name_or_repo: name, size_bytes: m.modelBytes || 0, tags: [] }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    const h = wizardState.hardware;
+    // Only overwrite fields the user hasn't explicitly touched yet
+    if (h.temperature == null && data.temperature != null) h.temperature = data.temperature;
+    if (h.topP == null && data.top_p != null) h.topP = data.top_p;
+    if (h.topK == null && data.top_k != null && data.top_k > 0) h.topK = data.top_k;
+    if (h.minP == null && data.min_p != null) h.minP = data.min_p;
+    if (h.repeatPenalty == null && data.repeat_penalty != null) h.repeatPenalty = data.repeat_penalty;
+    if (h.presencePenalty == null && data.presence_penalty != null && data.presence_penalty > 0) {
+      h.presencePenalty = data.presence_penalty;
+    }
+  } catch { /* non-fatal */ }
+}
+
 // Use-case sampling defaults (temperature, top-p, min-p, repeat-penalty)
 const SAMPLING_DEFAULTS = {
-  agentic:  { temperature: 0.3,  topP: 0.95, minP: 0.02, topK: null, repeatPenalty: 1.05, seed: null },
-  general:  { temperature: 0.7,  topP: 0.9,  minP: 0.05, topK: null, repeatPenalty: 1.05, seed: null },
-  roleplay: { temperature: 1.0,  topP: 0.95, minP: 0.05, topK: null, repeatPenalty: 1.05, seed: null },
+  agentic:  { temperature: 0.3,  topP: 0.95, minP: 0.02, topK: null, repeatPenalty: 1.05, presencePenalty: null, seed: null },
+  general:  { temperature: 0.7,  topP: 0.9,  minP: 0.05, topK: null, repeatPenalty: 1.05, presencePenalty: null, seed: null },
+  roleplay: { temperature: 1.0,  topP: 0.95, minP: 0.05, topK: null, repeatPenalty: 1.05, presencePenalty: null, seed: null },
 };
 
 function applyUseCaseSamplingDefaults() {
@@ -3086,6 +3424,7 @@ function applyUseCaseSamplingDefaults() {
   if (h.minP == null) h.minP = def.minP;
   if (h.topK == null && def.topK != null) h.topK = def.topK;
   if (h.repeatPenalty == null) h.repeatPenalty = def.repeatPenalty;
+  if (h.presencePenalty == null && def.presencePenalty != null) h.presencePenalty = def.presencePenalty;
 }
 
 // ── Summary (Step 4) ──────────────────────────────────────────────────────────
@@ -3236,6 +3575,7 @@ function _syncSamplingFields() {
   setVal('spawn-top-p', h.topP);
   setVal('spawn-min-p', h.minP);
   setVal('spawn-repeat-penalty', h.repeatPenalty);
+  setVal('spawn-presence-penalty', h.presencePenalty);
   if (dom.bindHostSelect) dom.bindHostSelect.value = wizardState.access.bindHost || '127.0.0.1';
   if (dom.portInput) dom.portInput.value = String(wizardState.access.port || 8001);
   if (dom.apiKeyInput) dom.apiKeyInput.value = wizardState.access.apiKey || '';
@@ -3258,6 +3598,7 @@ function _bindSamplingFields() {
   bind('spawn-top-p', 'topP');
   bind('spawn-min-p', 'minP');
   bind('spawn-repeat-penalty', 'repeatPenalty');
+  bind('spawn-presence-penalty', 'presencePenalty');
 }
 
 // ── Save as preset ────────────────────────────────────────────────────────────
@@ -3401,10 +3742,16 @@ function buildSpawnPayload() {
   const specType = mtpActive ? 'draft-mtp,ngram-mod' : (dom.specTypeSelect?.value || '');
   const parallelSlots = mtpActive ? 1 : h.parallelSlots;
 
+  // Resolve mmproj local path: prefer mmprojPath (local file), fall back to
+  // mmprojHfFile only if it looks like an absolute path (i.e. was set from
+  // a directory scan, not from an HF file list).
+  const mmprojLocal = m.mmprojPath && m.mmprojPath.startsWith('/') ? m.mmprojPath : null;
+
   return {
     model_path: m.source !== 'hf' ? (m.path || null) : null,
     hf_repo: m.source === 'hf' ? (m.hfRepo || null) : null,
     hf_file: m.source === 'hf' ? (m.hfFile || null) : null,
+    mmproj: mmprojLocal,
     port: wizardState.access.port || 8001,
     bind_host: wizardState.access.bindHost || '127.0.0.1',
     gpu_layers: gpuLayers,
@@ -3429,6 +3776,7 @@ function buildSpawnPayload() {
     top_k: h.topK != null ? h.topK : null,
     min_p: h.minP != null ? h.minP : null,
     repeat_penalty: h.repeatPenalty != null ? h.repeatPenalty : null,
+    presence_penalty: h.presencePenalty != null && h.presencePenalty > 0 ? h.presencePenalty : null,
     seed: h.seed != null ? h.seed : null,
     api_key: wizardState.access.apiKey || null,
     chat_template_file: wizardState.model.chatTemplatePath || null,

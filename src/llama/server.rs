@@ -100,6 +100,8 @@ pub struct ServerConfig {
     pub min_p: Option<f64>,
     #[serde(default)]
     pub repeat_penalty: Option<f64>,
+    #[serde(default)]
+    pub presence_penalty: Option<f64>,
     // CPU MOE
     #[serde(default)]
     pub n_cpu_moe: Option<i32>,
@@ -458,6 +460,9 @@ pub async fn start_server(
     }
     if let Some(rp) = config.repeat_penalty {
         cmd.arg("--repeat-penalty").arg(format!("{:.2}", rp));
+    }
+    if let Some(pp) = config.presence_penalty {
+        cmd.arg("--presence-penalty").arg(format!("{:.4}", pp));
     }
     if let Some(n) = config.n_cpu_moe {
         cmd.arg("--n-cpu-moe").arg(n.to_string());

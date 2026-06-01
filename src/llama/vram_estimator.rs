@@ -413,6 +413,15 @@ impl ModelArch {
     pub fn from_name_and_params(name: &str, param_b: f64) -> Self {
         let lower = name.to_ascii_lowercase();
 
+        // ── EXAONE 4.5 family (dense, hybrid sliding-window + global attention) ──
+        // 33B: 64 layers, 16 × (3 SWA + 1 global), 8 KV heads uniform,
+        // head_dim 128, 4096-token sliding window, 1 MTP head.
+        // Multimodal: 1.29B vision encoder (mmproj BF16 ≈ 2.58 GB).
+        // Source: https://huggingface.co/LGAI-EXAONE/EXAONE-4.5-33B
+        if lower.contains("exaone-4.5") || lower.contains("exaone4.5") {
+            return Self::exaone45_heuristic(param_b);
+        }
+
         // ── Special-case: Qwen3-Coder-Next (hybrid DeltaNet + MoE, 80B/3B) ──────
         // 48 layers (12 standard attn + 36 DeltaNet), 512 experts, native 262K.
         if lower.contains("coder-next") || lower.contains("qwen3-coder-next") {
@@ -710,6 +719,35 @@ impl ModelArch {
             n_experts: 256,
             n_experts_used: 9, // 8 routed + 1 shared
             expert_fraction: 0.85,
+            ..Default::default()
+        }
+    }
+
+    /// EXAONE 4.5 family: dense, hybrid sliding-window + global attention.
+    ///
+    /// 33B confirmed specs from https://huggingface.co/LGAI-EXAONE/EXAONE-4.5-33B :
+    /// 64 layers, pattern 16 × (3 SWA + 1 global) → 16 global + 48 local,
+    /// 8 KV heads uniform across both layer types, head_dim 128, 4096-token SWA,
+    /// 1 MTP head, multimodal (vision encoder 1.29B params = ~2.58 GB BF16 mmproj).
+    fn exaone45_heuristic(param_b: f64) -> Self {
+        // Only 33B released so far; table-driven for future variants.
+        let (n_layers, n_global, n_kv) = if param_b < 15.0 {
+            (32u32, 8u32, 8u32) // hypothetical smaller variant
+        } else {
+            (64, 16, 8) // 33B confirmed
+        };
+        // mmproj vision encoder: 1.29B params × 2 bytes (BF16) ≈ 2.58 GB
+        let mmproj = if param_b > 20.0 { 2_580_000_000u64 } else { 0 };
+        Self {
+            n_layers,
+            n_kv_heads: n_kv,
+            head_dim: 128,
+            n_global_attn_layers: n_global,
+            local_attn_window: 4096,
+            local_kv_heads: n_kv, // same KV head count for both layer types
+            mtp_depth: 1,
+            mmproj_bytes: mmproj,
+            param_b,
             ..Default::default()
         }
     }
@@ -2167,6 +2205,31 @@ mod tests {
         assert!(
             kv_dense > kv_gemma * 3,
             "Dense naive calculation should be > 3× Gemma's actual KV"
+        );
+    }
+
+    #[test]
+    fn exaone45_33b_has_correct_arch() {
+        // Source: https://huggingface.co/LGAI-EXAONE/EXAONE-4.5-33B
+        // 64 layers, 16 × (3 SWA + 1 global), 8 KV heads uniform,
+        // head_dim 128, 4096-token sliding window, 1 MTP head.
+        let arch = ModelArch::from_name_and_params("EXAONE-4.5-33B-Q4_K_M.gguf", 33.0);
+        assert!(!arch.is_moe(), "EXAONE 4.5-33B is dense");
+        assert!(!arch.is_hybrid_attn(), "EXAONE 4.5 is SWA not DeltaNet");
+        assert!(
+            arch.has_local_attn(),
+            "EXAONE 4.5 has sliding-window attention"
+        );
+        assert_eq!(arch.n_layers, 64);
+        assert_eq!(arch.n_kv_heads, 8);
+        assert_eq!(arch.head_dim, 128);
+        assert_eq!(arch.n_global_attn_layers, 16, "16 full-context layers");
+        assert_eq!(arch.local_attn_window, 4096, "4096-token sliding window");
+        assert_eq!(arch.local_kv_heads, 8, "same KV heads for local layers");
+        assert_eq!(arch.mtp_depth, 1, "1 MTP head");
+        assert!(
+            arch.mmproj_bytes > 2_000_000_000,
+            "vision encoder mmproj ≈ 2.58 GB"
         );
     }
 }
