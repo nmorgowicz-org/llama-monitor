@@ -202,6 +202,12 @@ pub struct ServerConfig {
     /// --reasoning-budget-message STRING: text appended after thinking block
     #[serde(default)]
     pub reasoning_budget_message: Option<String>,
+    /// --image-min-tokens / --image-max-tokens for multimodal (mmproj) models.
+    /// Qwen3.6 vision: 1024 / 4096. Gemma4 vision: 280 / 560.
+    #[serde(default)]
+    pub image_min_tokens: Option<u32>,
+    #[serde(default)]
+    pub image_max_tokens: Option<u32>,
 }
 
 pub async fn start_server(
@@ -294,6 +300,14 @@ pub async fn start_server(
     cmd.arg("--jinja");
     cmd.arg("--metrics");
     cmd.arg("--webui-mcp-proxy");
+    // Disable context-shift so long conversations error clearly rather than silently
+    // dropping prompt tokens. Users can extend context or use KV offload instead.
+    cmd.arg("--no-context-shift");
+    // Context checkpointing — saves KV cache state every N tokens for faster
+    // context restore after eviction. 32 is the llama.cpp recommended default.
+    cmd.arg("--ctx-checkpoints").arg("32");
+    // Keep all system/prompt tokens when context overflows (-1 = keep all).
+    cmd.arg("--keep").arg("-1");
 
     // Memory
     if config.no_mmap {
@@ -539,6 +553,14 @@ pub async fn start_server(
         && !mp.is_empty()
     {
         cmd.arg("--mmproj").arg(mp);
+        // Image token budget — only meaningful when a vision projector is loaded.
+        // Qwen3.6 vision: 1024/4096. Gemma4 vision: 280/560.
+        if let Some(min) = config.image_min_tokens {
+            cmd.arg("--image-min-tokens").arg(min.to_string());
+        }
+        if let Some(max) = config.image_max_tokens {
+            cmd.arg("--image-max-tokens").arg(max.to_string());
+        }
     }
 
     // Spawn V2: grammar

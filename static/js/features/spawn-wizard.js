@@ -4085,11 +4085,31 @@ function buildSpawnPayload() {
     reasoning_budget: h.reasoningBudget,
     reasoning: h.reasoningMode || null,
     reasoning_budget_message: h.reasoningBudgetMessage || null,
+    // Image token budget — only passed when mmproj is active.
+    // Values are derived from model family; user can override via extra_args.
+    image_min_tokens: mmprojLocal ? _imageMinTokens(m) : null,
+    image_max_tokens: mmprojLocal ? _imageMaxTokens(m) : null,
     api_key: wizardState.access.apiKey || null,
     chat_template_file: wizardState.model.chatTemplatePath || null,
     profile: wizardState.profile,
     use_case: wizardState.useCase,
   };
+}
+
+function _modelNameLower(m) {
+  return ((m.hfFile || '').split('/').pop() || m.path?.split(/[\\/]/).pop() || m.hfRepo || '').toLowerCase();
+}
+
+function _imageMinTokens(m) {
+  const name = _modelNameLower(m);
+  if (name.includes('gemma')) return 280;
+  return 1024; // Qwen3.6 / default for other vision models
+}
+
+function _imageMaxTokens(m) {
+  const name = _modelNameLower(m);
+  if (name.includes('gemma')) return 560;
+  return 4096; // Qwen3.6 / default for other vision models
 }
 
 // ── Status helpers ────────────────────────────────────────────────────────────
