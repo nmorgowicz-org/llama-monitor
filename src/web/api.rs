@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -27,6 +27,48 @@ fn get_effective_models_dir(state: &AppState) -> Option<PathBuf> {
         return Some(PathBuf::from(&s.models_dir));
     }
     None
+}
+
+fn resolve_hf_target_dir(models_dir: &Path, target_path: Option<&str>) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(models_dir).map_err(|e| {
+        format!(
+            "Failed to create models_dir {}: {}",
+            models_dir.display(),
+            e
+        )
+    })?;
+    let models_dir_canon = models_dir.canonicalize().map_err(|e| {
+        format!(
+            "Failed to resolve models_dir {}: {}",
+            models_dir.display(),
+            e
+        )
+    })?;
+
+    let Some(tp) = target_path else {
+        return Ok(models_dir.to_path_buf());
+    };
+
+    if tp.contains("..") || tp.starts_with('\\') || tp.starts_with('/') {
+        return Err("Invalid target_path: path traversal not allowed".to_string());
+    }
+
+    let candidate = models_dir.join(tp);
+    std::fs::create_dir_all(&candidate)
+        .map_err(|e| format!("Failed to create target_path: {}", e))?;
+    let candidate_canon = candidate.canonicalize().map_err(|e| {
+        format!(
+            "Failed to resolve target_path {}: {}",
+            candidate.display(),
+            e
+        )
+    })?;
+
+    if !candidate_canon.starts_with(&models_dir_canon) {
+        return Err("target_path escapes models_dir".to_string());
+    }
+
+    Ok(candidate_canon)
 }
 
 #[derive(Debug)]
@@ -2386,7 +2428,7 @@ fn api_benchmark(
     warp::path!("api" / "benchmark")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(super::safe_json_body::<serde_json::Value>())
+        .and(super::hf_json_body::<serde_json::Value>())
         .and_then(
             move |auth: Option<String>,
                   _body: serde_json::Value|
@@ -2618,7 +2660,7 @@ fn api_model_defaults(
     warp::path!("api" / "model-defaults")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(super::safe_json_body::<serde_json::Value>())
+        .and(super::hf_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -2677,7 +2719,7 @@ fn api_moe_tune(
     warp::path!("api" / "moe-tune")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
-        .and(super::safe_json_body::<serde_json::Value>())
+        .and(super::hf_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
@@ -3274,24 +3316,6 @@ fn api_hf_download(
                     return Ok(unauthorized_api_token());
                 }
 
-                // Cooldown between starts: 10 seconds.
-                let now = std::time::SystemTime::UNIX_EPOCH
-                    .elapsed()
-                    .unwrap_or_default()
-                    .as_secs();
-                let (dl_ok, _) = try_cooldown(&HF_DOWNLOAD_LAST_START, now, 10);
-                if !dl_ok {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": "Too soon; please wait 10 seconds between downloads."
-                            })),
-                            StatusCode::TOO_MANY_REQUESTS,
-                        ),
-                    ));
-                }
-
                 let repo_id = body["repo_id"].as_str().unwrap_or("").trim().to_string();
                 let file_path = body["file_path"].as_str().unwrap_or("").trim().to_string();
                 let target_path: Option<String> =
@@ -3334,49 +3358,35 @@ fn api_hf_download(
                 // Determine target directory.
                 let models_dir = get_effective_models_dir(&state)
                     .unwrap_or_else(|| cfg.default_models_dir.clone());
-
-                // If target_path is provided, validate it is within models_dir.
-                let target_dir = if let Some(ref tp) = target_path {
-                    // Reject path traversal in target_path.
-                    if tp.contains("..") || tp.starts_with('\\') || tp.starts_with('/') {
+                let target_dir = match resolve_hf_target_dir(&models_dir, target_path.as_deref()) {
+                    Ok(path) => path,
+                    Err(error) => {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::json(&serde_json::json!({
                                 "ok": false,
-                                "error": "Invalid target_path: path traversal not allowed"
+                                "error": error
                             })),
                         ));
                     }
-
-                    let candidate = models_dir.join(tp);
-                    match candidate.canonicalize() {
-                        Ok(c) => {
-                            if let Ok(base) = models_dir.canonicalize()
-                                && !c.starts_with(&base)
-                            {
-                                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                                    Box::new(warp::reply::json(&serde_json::json!({
-                                        "ok": false,
-                                        "error": "target_path escapes models_dir"
-                                    }))),
-                                );
-                            }
-                        }
-                        Err(_) => {
-                            // Directory doesn't exist yet; create it.
-                            if let Err(e) = std::fs::create_dir_all(&candidate) {
-                                return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                                    Box::new(warp::reply::json(&serde_json::json!({
-                                        "ok": false,
-                                        "error": format!("Failed to create target_path: {}", e)
-                                    }))),
-                                );
-                            }
-                        }
-                    }
-                    candidate
-                } else {
-                    models_dir
                 };
+
+                // Cooldown between starts: 10 seconds.
+                let now = std::time::SystemTime::UNIX_EPOCH
+                    .elapsed()
+                    .unwrap_or_default()
+                    .as_secs();
+                let (dl_ok, _) = try_cooldown(&HF_DOWNLOAD_LAST_START, now, 10);
+                if !dl_ok {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::with_status(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "Too soon; please wait 10 seconds between downloads."
+                            })),
+                            StatusCode::TOO_MANY_REQUESTS,
+                        ),
+                    ));
+                }
 
                 let local_path = target_dir.join(&file_path).to_string_lossy().into_owned();
                 match crate::hf::hf_start_download(&repo_id, &file_path, &target_dir, resume) {
@@ -3511,15 +3521,6 @@ fn api_model_introspect(
                 }
 
                 let llama_server_path = cfg.llama_server_path.clone();
-                if llama_server_path.as_os_str().is_empty() {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": "llama_server_path is not configured"
-                        })),
-                    ));
-                }
-
                 // Timeout: 30 seconds.
                 let result = tokio::time::timeout(
                     std::time::Duration::from_secs(30),
@@ -3656,45 +3657,80 @@ pub fn api_routes(
     // GPU / system metrics routes (used by spawn wizard VRAM estimation)
     let get_gpu_metrics = {
         let state = state.clone();
+        let cfg = app_config.clone();
         warp::path!("metrics" / "gpu")
             .and(warp::get())
-            .map(move || {
-                let gpu = state
-                    .gpu_metrics
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone();
-                warp::reply::json(&gpu)
+            .and(warp::header::optional::<String>("authorization"))
+            .and_then(move |auth: Option<String>| {
+                let state = state.clone();
+                let cfg = cfg.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let gpu = state
+                        .gpu_metrics
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone();
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &gpu,
+                    )))
+                }
             })
     };
     let get_system_metrics = {
         let state = state.clone();
+        let cfg = app_config.clone();
         warp::path!("metrics" / "system")
             .and(warp::get())
-            .map(move || {
-                let sys = state
-                    .system_metrics
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .clone();
-                warp::reply::json(&sys)
+            .and(warp::header::optional::<String>("authorization"))
+            .and_then(move |auth: Option<String>| {
+                let state = state.clone();
+                let cfg = cfg.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let sys = state
+                        .system_metrics
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone();
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &sys,
+                    )))
+                }
             })
     };
     let get_all_metrics = {
         let state = state.clone();
-        warp::path!("metrics").and(warp::get()).map(move || {
-            let system = state
-                .system_metrics
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
-            let gpu = state
-                .gpu_metrics
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
-            warp::reply::json(&serde_json::json!({ "system": system, "gpu": gpu }))
-        })
+        let cfg = app_config.clone();
+        warp::path!("metrics")
+            .and(warp::get())
+            .and(warp::header::optional::<String>("authorization"))
+            .and_then(move |auth: Option<String>| {
+                let state = state.clone();
+                let cfg = cfg.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let system = state
+                        .system_metrics
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone();
+                    let gpu = state
+                        .gpu_metrics
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone();
+                    Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                        &serde_json::json!({ "system": system, "gpu": gpu }),
+                    )))
+                }
+            })
     };
 
     // Phase 0/2/3: Spawn Llama-Server v2 routes
@@ -9795,7 +9831,8 @@ fn api_llama_binary_update(
                     ));
                 }
 
-                // Locate the binary in dest_dir now that everything is copied
+                // Locate the extracted binary first, then make sure the configured
+                // llama_server_path itself is updated even when it uses a custom filename.
                 let found_path = dest_dir.join(binary_name);
                 if !found_path.exists() {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -9804,6 +9841,22 @@ fn api_llama_binary_update(
                             "error": format!(
                                 "Could not find '{}' in extracted archive",
                                 binary_name
+                            )
+                        })),
+                    ));
+                }
+
+                if found_path != dest_path
+                    && let Err(e) = std::fs::copy(&found_path, &dest_path)
+                {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!(
+                                "Failed to install {} at {}: {}",
+                                binary_name,
+                                dest_path.display(),
+                                e
                             )
                         })),
                     ));
@@ -9821,11 +9874,20 @@ fn api_llama_binary_update(
                             );
                         }
                     }
+                    let _ = std::fs::set_permissions(
+                        &dest_path,
+                        std::fs::Permissions::from_mode(0o755),
+                    );
                 }
 
                 // Compute SHA256 of the llama-server binary so users can
                 // verify integrity out-of-band (e.g. `sha256sum llama-server`).
-                let sha256_hex = std::fs::read(&found_path).ok().map(|bytes| {
+                let installed_path = if dest_path.exists() {
+                    &dest_path
+                } else {
+                    &found_path
+                };
+                let sha256_hex = std::fs::read(installed_path).ok().map(|bytes| {
                     use sha2::Digest;
                     let mut hasher = sha2::Sha256::new();
                     hasher.update(&bytes);
@@ -9942,6 +10004,7 @@ fn api_self_update(
 #[cfg(test)]
 mod tests {
     use super::legacy_chat_types::*;
+    use super::resolve_hf_target_dir;
     use super::token_bootstrap_allowed;
 
     use crate::chat_storage::ChatStorage;
@@ -10006,6 +10069,41 @@ mod tests {
         let auth = AuthManager::new(None, None, &TlsMode::None);
         assert!(token_bootstrap_allowed(&auth, "127.0.0.1"));
         assert!(token_bootstrap_allowed(&auth, "localhost"));
+    }
+
+    #[test]
+    fn resolve_hf_target_dir_rejects_path_traversal() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let models_dir = tmp.path().join("models");
+        let err = resolve_hf_target_dir(&models_dir, Some("../escape")).expect_err("rejects");
+        assert!(err.contains("path traversal"));
+    }
+
+    #[test]
+    fn resolve_hf_target_dir_creates_and_resolves_child_dir() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let models_dir = tmp.path().join("models");
+        let target = resolve_hf_target_dir(&models_dir, Some("nested/model-dir")).expect("path");
+        assert!(target.starts_with(models_dir.canonicalize().expect("canonical models_dir")));
+        assert!(target.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_hf_target_dir_rechecks_symlink_escape_after_create() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let models_dir = tmp.path().join("models");
+        let outside_dir = tmp.path().join("outside");
+
+        std::fs::create_dir_all(&outside_dir).expect("outside dir");
+        std::fs::create_dir_all(&models_dir).expect("models dir");
+        symlink(&outside_dir, models_dir.join("linked")).expect("symlink");
+
+        let err =
+            resolve_hf_target_dir(&models_dir, Some("linked/new-download")).expect_err("rejects");
+        assert!(err.contains("escapes models_dir"));
     }
 
     #[test]

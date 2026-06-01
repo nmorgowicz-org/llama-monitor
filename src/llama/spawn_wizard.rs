@@ -485,6 +485,12 @@ pub async fn introspect_model(
         }
     }
 
+    if llama_server_path.trim().is_empty() {
+        return Err(
+            "GGUF metadata could not be read directly, and llama_server_path is not configured for fallback introspection.".to_string(),
+        );
+    }
+
     // ── Fallback: llama-server --print-model-metadata ─────────────────────────
     let output = tokio::task::spawn_blocking({
         let lp = llama_server_path.to_string();

@@ -7,6 +7,31 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
+fn backend_matches(name: &str, backend: &str) -> bool {
+    match backend {
+        "cpu" => name.contains("cpu") || name.contains("base") || name.contains("avx2"),
+        "avx2" => name.contains("avx2") || name.contains("cpu") || name.contains("base"),
+        "cuda" => name.contains("cuda"),
+        "cuda12" => {
+            name.contains("cuda12")
+                || name.contains("cuda-12")
+                || name.contains("cu12")
+                || name.contains("cuda_12")
+        }
+        "cuda13" => {
+            name.contains("cuda13")
+                || name.contains("cuda-13")
+                || name.contains("cu13")
+                || name.contains("cuda_13")
+        }
+        "sycl" => name.contains("sycl") || name.contains("oneapi"),
+        "vulkan" => name.contains("vulkan"),
+        "rocm" | "hip" => name.contains("rocm") || name.contains("hip"),
+        "metal" => name.contains("metal") || name.contains("mac"),
+        _ => false,
+    }
+}
+
 /// Metadata for a llama.cpp GitHub release.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlamaCppRelease {
@@ -70,14 +95,7 @@ pub fn select_assets<'a>(
         }
 
         // Match by backend and architecture.
-        let backend_match = match backend_lower.as_str() {
-            "cpu" => name.contains("cpu") || name.contains("base"),
-            "cuda" => name.contains("cuda"),
-            "vulkan" => name.contains("vulkan"),
-            "rocm" | "hip" => name.contains("rocm") || name.contains("hip"),
-            "metal" => name.contains("metal") || name.contains("mac"),
-            _ => true,
-        };
+        let backend_match = backend_matches(&name, backend_lower.as_str());
 
         let arch_match = match arch_lower.as_str() {
             "x64" | "x86_64" => {
@@ -236,5 +254,69 @@ mod tests {
         };
         let selected = select_assets(&release, "cuda", "x64");
         assert_eq!(selected.len(), 1);
+    }
+
+    #[test]
+    fn test_select_assets_avx2_does_not_fall_back_to_everything() {
+        let release = LlamaCppRelease {
+            tag_name: "b7000".into(),
+            assets: vec![
+                LlamaCppAsset {
+                    name: "llama-server-win-x64-avx2.zip".into(),
+                    browser_download_url: "https://example.com/avx2".into(),
+                },
+                LlamaCppAsset {
+                    name: "llama-server-win-x64-cuda12.zip".into(),
+                    browser_download_url: "https://example.com/cuda12".into(),
+                },
+                LlamaCppAsset {
+                    name: "llama-server-win-x64-sycl.zip".into(),
+                    browser_download_url: "https://example.com/sycl".into(),
+                },
+            ],
+        };
+        let selected = select_assets(&release, "avx2", "x64");
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].name, "llama-server-win-x64-avx2.zip");
+    }
+
+    #[test]
+    fn test_select_assets_cuda12_matches_only_cuda12() {
+        let release = LlamaCppRelease {
+            tag_name: "b7000".into(),
+            assets: vec![
+                LlamaCppAsset {
+                    name: "llama-server-win-x64-cuda12.zip".into(),
+                    browser_download_url: "https://example.com/cuda12".into(),
+                },
+                LlamaCppAsset {
+                    name: "llama-server-win-x64-cuda13.zip".into(),
+                    browser_download_url: "https://example.com/cuda13".into(),
+                },
+            ],
+        };
+        let selected = select_assets(&release, "cuda12", "x64");
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].name, "llama-server-win-x64-cuda12.zip");
+    }
+
+    #[test]
+    fn test_select_assets_sycl_matches_only_sycl() {
+        let release = LlamaCppRelease {
+            tag_name: "b7000".into(),
+            assets: vec![
+                LlamaCppAsset {
+                    name: "llama-server-win-x64-sycl.zip".into(),
+                    browser_download_url: "https://example.com/sycl".into(),
+                },
+                LlamaCppAsset {
+                    name: "llama-server-win-x64-vulkan.zip".into(),
+                    browser_download_url: "https://example.com/vulkan".into(),
+                },
+            ],
+        };
+        let selected = select_assets(&release, "sycl", "x64");
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].name, "llama-server-win-x64-sycl.zip");
     }
 }
