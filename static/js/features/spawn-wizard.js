@@ -1789,7 +1789,13 @@ async function showHfSearchResults({ query, author, sort, limit }) {
   container.style.display = '';
   // Scroll the results into view so the user sees the loading state immediately
   // without having to scroll — feedback at the point of interaction.
-  container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  // scrollIntoView targets the document viewport but the actual scroll container
+  // is .wizard-body (overflow-y: auto).  Walk up to find it and scroll there instead.
+  const scrollParent = container.closest('.wizard-body') || container.parentElement;
+  if (scrollParent) {
+    const targetTop = container.offsetTop - scrollParent.offsetTop - 16;
+    scrollParent.scrollTo({ top: targetTop, behavior: 'smooth' });
+  }
 
   // Hide file list when showing search results
   if (dom.hfFileList) { dom.hfFileList.innerHTML = ''; dom.hfFileList.classList.remove('visible'); }
