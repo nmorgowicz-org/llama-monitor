@@ -1783,10 +1783,10 @@ fn api_chat_template_install_hf(
                 };
 
                 let mut req = client.get(&url);
-                if let Some(ref tok) = hf_token {
-                    if !tok.is_empty() {
-                        req = req.header("Authorization", format!("Bearer {tok}"));
-                    }
+                if let Some(ref tok) = hf_token
+                    && !tok.is_empty()
+                {
+                    req = req.header("Authorization", format!("Bearer {tok}"));
                 }
 
                 let content = match req.send().await {
@@ -3053,7 +3053,7 @@ fn api_hf_card(
 
                     let url = format!("https://huggingface.co/{}/raw/main/README.md", repo);
 
-                    let mut builder = reqwest::Client::builder()
+                    let builder = reqwest::Client::builder()
                         .timeout(std::time::Duration::from_secs(20))
                         .user_agent("llama-monitor");
 
