@@ -37,6 +37,9 @@ let hfState = {
     mmprojFiles: [],
     mmprojPath: '',
     mmprojBytes: 0,
+    // Active filters (mirrors Quick Start behavior)
+    activeAuthor: null,          // e.g. "bartowski"
+    activeDiscoverQuery: null,   // e.g. "qwen3" from a discover pill
 };
 
 // Cached hardware
@@ -824,14 +827,29 @@ async function initHfDownloadTab() {
     await fetchGpuVram();
     await fetchSystemRam();
 
+    // Helpers to build search params while preserving active filters
+    const buildSearchParams = () => {
+        const sort = sortSelect?.value || 'downloads';
+        const typedQuery = (searchInput.value || '').trim();
+        const query = typedQuery || hfState.activeDiscoverQuery || '';
+        const author = (typedQuery ? hfState.activeAuthor : (hfState.activeAuthor || null));
+        return { query: query || undefined, author: author || undefined, sort };
+    };
+
     // Render discover pills
     hfRenderDiscoverPills({
         container: discoverPills,
         quickpicksContainer: quickpicks,
         onPillClick: (cat) => {
+            const sort = cat.params.query
+                ? (sortSelect?.value || cat.params.sort)
+                : cat.params.sort;
+            // Track active discover query so sort changes still work
+            hfState.activeDiscoverQuery = cat.params.query || null;
+            hfState.activeAuthor = null;
             hfSearch({
                 query: cat.params.query,
-                sort: cat.params.sort,
+                sort,
                 limit: cat.params.limit || 20,
                 container: resultsContainer,
                 filelistContainer,
@@ -847,10 +865,13 @@ async function initHfDownloadTab() {
         container: quickpicks,
         discoverPillsContainerId: 'mm-hf-discover-pills',
         onAuthorClick: (author) => {
+            const sort = sortSelect?.value || 'downloads';
+            hfState.activeAuthor = author;
+            hfState.activeDiscoverQuery = null;
             hfSearch({
                 query: '',
                 author,
-                sort: 'downloads',
+                sort,
                 limit: 20,
                 container: resultsContainer,
                 filelistContainer,
@@ -864,10 +885,10 @@ async function initHfDownloadTab() {
     // Search on input (debounced)
     let searchTimer = null;
     const doSearch = () => {
-        const query = (searchInput.value || '').trim();
-        const sort = sortSelect?.value || 'downloads';
+        const { query, author, sort } = buildSearchParams();
         hfSearch({
             query,
+            author,
             sort,
             limit: 20,
             container: resultsContainer,
@@ -892,6 +913,49 @@ async function initHfDownloadTab() {
 
     sortSelect?.addEventListener('change', () => {
         clearTimeout(searchTimer);
+        const sort = sortSelect.value;
+
+        // If browsing a specific author, re-run with new sort (like Quick Start)
+        if (hfState.activeAuthor) {
+            hfState.activeAuthor = hfState.activeAuthor;
+            searchTimer = setTimeout(() => {
+                hfSearch({
+                    query: '',
+                    author: hfState.activeAuthor,
+                    sort,
+                    limit: 20,
+                    container: resultsContainer,
+                    filelistContainer,
+                    quickpicksContainer: quickpicks,
+                    discoverPillsContainerId: 'mm-hf-discover-pills',
+                    onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
+                });
+            }, 200);
+            return;
+        }
+
+        // If active discover pill, re-fire with new sort
+        const activePill = document.querySelector('#mm-hf-discover-pills .hf-discover-pill.active');
+        if (activePill) {
+            const cat = window.HF_DISCOVER_CATEGORIES?.find(c => c.id === activePill.dataset.catId);
+            if (cat) {
+                searchTimer = setTimeout(() => {
+                    hfSearch({
+                        query: cat.params.query,
+                        sort,
+                        limit: cat.params.limit || 20,
+                        container: resultsContainer,
+                        filelistContainer,
+                        quickpicksContainer: quickpicks,
+                        discoverPillsContainerId: 'mm-hf-discover-pills',
+                        onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
+                    });
+                }, 200);
+                return;
+            }
+        }
+
+        // Fallback: use typed query (if any) + new sort
         searchTimer = setTimeout(doSearch, 200);
     });
 

@@ -2003,6 +2003,7 @@ body.setup-active .sidebar-nav {
 }
 
 .preset-panel-card {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -2017,6 +2018,33 @@ body.setup-active .sidebar-nav {
 .preset-panel-card:hover {
   border-color: rgba(99, 102, 241, 0.3);
   background: rgba(99, 102, 241, 0.05);
+}
+
+/* Top-right trash icon */
+.preset-panel-card-trash {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--color-text-muted);
+  opacity: 0.6;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: opacity 150ms ease, border-color 150ms ease,
+              color 150ms ease, background 150ms ease, transform 120ms ease;
+}
+
+.preset-panel-card-trash:hover {
+  opacity: 1;
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(248, 113, 113, 0.10);
+  transform: translateY(-1px);
 }
 
 .preset-panel-card-icon {
@@ -2058,6 +2086,7 @@ body.setup-active .sidebar-nav {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+  padding-right: 26px; /* space for the trash icon */
 }
 
 .btn-preset-quick-start {
@@ -2110,6 +2139,18 @@ body.setup-active .sidebar-nav {
 [data-theme="light"] .preset-panel-card:hover {
   background: rgba(99, 102, 241, 0.04);
   border-color: rgba(99, 102, 241, 0.2);
+}
+
+[data-theme="light"] .preset-panel-card-trash {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #6b7280;
+}
+
+[data-theme="light"] .preset-panel-card-trash:hover {
+  color: #dc2626;
+  border-color: rgba(220, 38, 38, 0.35);
+  background: rgba(220, 38, 38, 0.07);
 }
 
 /* ==========================================================================

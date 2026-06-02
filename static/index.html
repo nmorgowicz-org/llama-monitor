@@ -2568,6 +2568,7 @@
             <div class="preset-editor-footer">
                 <button type="button" class="btn btn-modal-cancel" id="preset-modal-cancel">Cancel</button>
                 <button type="button" class="btn btn-modal-cancel" id="preset-modal-back" style="display:none;">← Back</button>
+                <button type="button" class="btn btn-modal-danger" id="preset-modal-delete" style="display:none;" title="Delete this preset">Delete preset</button>
                 <button type="submit" class="btn btn-modal-save" id="btn-modal-save">Save</button>
             </div>
         </form>
@@ -3540,21 +3541,27 @@
                 <!-- LEFT: search, files, quant advisor, mmproj -->
                 <div class="mm-download-left">
 
-                    <!-- Search bar -->
-                    <div class="hf-search-row">
-                        <input type="text" id="mm-hf-search-input" placeholder="Search HuggingFace (e.g. Qwen3 27B, Llama 3.3 70B)" autocomplete="off">
-                        <select id="mm-hf-sort">
+                    <!-- Search bar + sort -->
+                    <div class="model-input-row">
+                        <input type="text" id="mm-hf-search-input" placeholder="Repo ID or keyword (e.g. bartowski/Llama-3.3-70B or Qwen3 27B)" autocomplete="off">
+                        <select id="mm-hf-sort" class="hf-sort-select" title="Sort order">
                             <option value="downloads">Most downloaded</option>
-                            <option value="trending">Trending</option>
                             <option value="newest">Newest</option>
+                            <option value="trending">Trending</option>
                         </select>
                     </div>
 
-                    <!-- Discover pills -->
-                    <div class="hf-discover-pills" id="mm-hf-discover-pills"></div>
+                    <!-- Discover: curated category shortcuts -->
+                    <div class="hf-discover-row">
+                        <span class="hf-quickpick-label">Discover:</span>
+                        <div class="hf-discover-pills" id="mm-hf-discover-pills"></div>
+                    </div>
 
-                    <!-- Quick-picks -->
-                    <div class="hf-quickpicks" id="mm-hf-quickpicks"></div>
+                    <!-- Quick-pick author buttons -->
+                    <div class="hf-quickpick-row">
+                        <span class="hf-quickpick-label">Quantizer:</span>
+                        <div class="hf-quickpicks" id="mm-hf-quickpicks"></div>
+                    </div>
 
                     <!-- Search results -->
                     <div class="hf-search-results" id="mm-hf-search-results" style="display:none;"></div>

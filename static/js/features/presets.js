@@ -165,6 +165,14 @@ export function openPresetModal(mode) {
     // Reset change-summary state
     _hideSummary();
 
+    // Show "Delete preset" button only when editing
+    const deleteBtn = document.getElementById('preset-modal-delete');
+    if (mode === 'edit') {
+        if (deleteBtn) deleteBtn.style.display = '';
+    } else {
+        if (deleteBtn) deleteBtn.style.display = 'none';
+    }
+
     modal.classList.add('open');
     // Reset nav to first section
     document.querySelector('.preset-nav-item[data-section="model"]')?.click();
@@ -290,6 +298,35 @@ function _renderPresetsPanel() {
         actions.appendChild(delBtn);
 
         card.appendChild(actions);
+
+        // Top-right trash icon (subtle)
+        const trashBtn = document.createElement('button');
+        trashBtn.type = 'button';
+        trashBtn.className = 'preset-panel-card-trash';
+        trashBtn.title = 'Delete preset';
+        trashBtn.innerHTML =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+            'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>' +
+            '<path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>' +
+            '<line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>' +
+            '</svg>';
+        trashBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (!confirm(`Delete preset "${preset.name}"? This cannot be undone.`)) return;
+            try {
+                const headers = window.authHeaders ? { ...window.authHeaders() } : {};
+                const resp = await fetch(`/api/presets/${preset.id}`, { method: 'DELETE', headers });
+                if (resp.ok) {
+                    await loadPresets();
+                    _renderPresetsPanel();
+                }
+            } catch (err) {
+                console.error('Delete preset failed:', err);
+            }
+        });
+        card.appendChild(trashBtn);
+
         body.appendChild(card);
     });
 }
@@ -665,6 +702,30 @@ export function initPresets() {
     document.getElementById('preset-modal-close')?.addEventListener('click', closePresetModal);
     document.getElementById('preset-modal-cancel')?.addEventListener('click', closePresetModal);
     document.getElementById('preset-modal-back')?.addEventListener('click', _hideSummary);
+
+    // Delete preset from within the modal (only visible in edit mode)
+    document.getElementById('preset-modal-delete')?.addEventListener('click', async () => {
+        const id = document.getElementById('modal-preset-id').value;
+        const p = sessionState.presets.find(pr => pr.id === id);
+        if (!p) { showToast('No preset selected', 'warn'); return; }
+        if (!confirm(`Delete preset "${p.name}"? This cannot be undone.`)) return;
+        try {
+            const resp = await fetch('/api/presets/' + encodeURIComponent(id), {
+                method: 'DELETE',
+                headers: window.authHeaders ? window.authHeaders() : {},
+            });
+            if (!resp.ok) {
+                const err = await resp.text().catch(() => 'Unknown error');
+                showToast('Delete failed: ' + err, 'error');
+                return;
+            }
+            closePresetModal();
+            await loadPresets();
+            showToast('Preset deleted', 'success');
+        } catch (err) {
+            showToast('Delete failed: ' + err.message, 'error');
+        }
+    });
     document.getElementById('preset-browse-model-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-model-path', 'gguf'));
     document.getElementById('preset-browse-mmproj-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-mmproj', 'gguf'));
     document.getElementById('preset-browse-draft-model-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-draft-model', 'gguf'));
