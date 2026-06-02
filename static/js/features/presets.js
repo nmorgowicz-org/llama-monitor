@@ -17,6 +17,12 @@ function intOrNull(id) { const v = document.getElementById(id).value; return v !
 function floatOrNull(id) { const v = document.getElementById(id).value; return v !== '' ? parseFloat(v) : null; }
 function strVal(id) { return document.getElementById(id).value.trim(); }
 
+// Returns user-created presets only if any exist; otherwise falls back to examples.
+function _visiblePresets(presets) {
+    const userPresets = presets.filter(p => !p.id.startsWith('default-'));
+    return userPresets.length > 0 ? userPresets : presets;
+}
+
 function clearFieldErrors() {
     document.querySelectorAll('#preset-form .field-error').forEach(el => el.classList.remove('field-error'));
 }
@@ -48,7 +54,8 @@ export async function loadPresets(selectId) {
 
     const sel = document.getElementById('preset-select');
     sel.innerHTML = '';
-    sessionState.presets.forEach(p => {
+    const visiblePresets = _visiblePresets(sessionState.presets);
+    visiblePresets.forEach(p => {
         const opt = document.createElement('option');
         opt.value = p.id;
         opt.textContent = p.name;
@@ -56,10 +63,10 @@ export async function loadPresets(selectId) {
     });
 
     const targetId = selectId ?? (saved?.preset_id || null);
-    if (targetId && sessionState.presets.find(p => p.id === targetId)) {
+    if (targetId && visiblePresets.find(p => p.id === targetId)) {
         sel.value = targetId;
-    } else if (sessionState.presets.length > 0) {
-        sel.value = sessionState.presets[0].id;
+    } else if (visiblePresets.length > 0) {
+        sel.value = visiblePresets[0].id;
     }
 
     if (selectId === undefined && saved) {

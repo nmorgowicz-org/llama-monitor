@@ -3021,11 +3021,10 @@
 
                     <div class="summary-list" id="spawn-summary-list"></div>
                     <div class="summary-warnings" id="spawn-summary-warnings" style="display:none;"></div>
-                    <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; align-items:center;">
-                        <button type="button" class="btn-wizard-secondary" id="spawn-save-preset-btn">
-                            Save as Preset
-                        </button>
-                        <span id="spawn-saved-preset-name" style="font-size:12px;color:var(--color-text-muted);display:none;"></span>
+                    <div class="spawn-save-preset-row" id="spawn-save-preset-row">
+                        <input type="text" id="spawn-preset-name-input" class="spawn-preset-name-input" placeholder="Preset name…" maxlength="80">
+                        <button type="button" class="btn-wizard-secondary" id="spawn-save-preset-btn">Save as Preset</button>
+                        <span id="spawn-saved-preset-name" style="font-size:12px;color:var(--color-success);display:none;"></span>
                     </div>
                 </div>
                 <div class="wizard-sidebar">

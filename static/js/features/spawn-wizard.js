@@ -389,8 +389,9 @@ function cacheDom() {
   // Step 4
   dom.summaryList      = document.getElementById('spawn-summary-list');
   dom.summaryWarnings  = document.getElementById('spawn-summary-warnings');
-  dom.savePresetBtn    = document.getElementById('spawn-save-preset-btn');
-  dom.savedPresetName  = document.getElementById('spawn-saved-preset-name');
+  dom.savePresetBtn      = document.getElementById('spawn-save-preset-btn');
+  dom.savedPresetName    = document.getElementById('spawn-saved-preset-name');
+  dom.presetNameInput    = document.getElementById('spawn-preset-name-input');
   dom.portInput        = document.getElementById('spawn-port');
   dom.bindHostSelect   = document.getElementById('spawn-bind-host');
   dom.apiKeyInput      = document.getElementById('spawn-api-key');
@@ -3688,6 +3689,14 @@ function renderSummary() {
   // Sync sampling fields in the review step form
   _syncSamplingFields();
 
+  // Pre-fill preset name input if empty
+  if (dom.presetNameInput && !dom.presetNameInput.value.trim()) {
+    const m = wizardState.model;
+    const modelFile = (m.path || m.hfRepo || '').split(/[/\\]/).pop() || '';
+    const base = modelFile.replace(/\.gguf$/i, '').replace(/[-_.]/g, ' ').trim();
+    dom.presetNameInput.value = base || 'My Preset';
+  }
+
   const m = wizardState.model, hw = wizardState.hardware;
   const arch = getEffectiveArch();
   const availVram = cachedVram || wizardState.vram.available;
@@ -3936,9 +3945,20 @@ function _bindSamplingFields() {
 // ── Save as preset ────────────────────────────────────────────────────────────
 
 async function saveAsPreset() {
-  const name = window.prompt('Preset name:', 'Spawn Wizard Preset');
-  if (!name) return;
+  const nameInput = dom.presetNameInput;
+  const name = nameInput ? nameInput.value.trim() : '';
+  if (!name) {
+    if (nameInput) {
+      nameInput.focus();
+      nameInput.classList.add('field-error');
+      setTimeout(() => nameInput.classList.remove('field-error'), 1500);
+    }
+    showToast('Enter a preset name first', 'warn');
+    return;
+  }
   const payload = buildPresetPayload(); payload.name = name;
+  const btn = dom.savePresetBtn;
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
     const headers = window.authHeaders ? { ...window.authHeaders(), 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
     const resp = await fetch('/api/presets', { method: 'POST', headers, body: JSON.stringify(payload) });
@@ -3949,10 +3969,12 @@ async function saveAsPreset() {
     }));
     showToast(`Preset "${name}" saved`, 'success');
     if (dom.savedPresetName) {
-      dom.savedPresetName.textContent = `Saved as "${name}"`;
+      dom.savedPresetName.textContent = `✓ Saved as "${name}"`;
       dom.savedPresetName.style.display = '';
     }
+    if (nameInput) nameInput.value = '';
   } catch (err) { showToast('Save preset failed: ' + (err.message || String(err)), 'error'); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = 'Save as Preset'; } }
 }
 
 function buildPresetPayload() {
@@ -3972,6 +3994,8 @@ function buildPresetPayload() {
     ctv: h.cacheTypeV || '',
     n_cpu_moe: h.nCpuMoe || null,
     tensor_split: h.tensorSplit || '',
+    no_mmap: true,
+    ngram_spec: false,
     spec_type: dom.specTypeSelect?.value || '',
     draft_model: (dom.draftModelInput?.value || '').trim() || '',
     kv_unified: h.kvUnified || false,

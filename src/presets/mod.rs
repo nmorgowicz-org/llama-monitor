@@ -13,7 +13,9 @@ pub struct ModelPreset {
     pub tensor_split: String,
     pub batch_size: u32,
     pub ubatch_size: u32,
+    #[serde(default)]
     pub no_mmap: bool,
+    #[serde(default)]
     pub ngram_spec: bool,
     pub parallel_slots: u32,
     // Generation
@@ -269,50 +271,19 @@ pub fn save_templates(path: &Path, templates: &[SystemPromptTemplate]) -> Result
 }
 
 pub fn default_presets() -> Vec<ModelPreset> {
-    let base = ModelPreset {
+    vec![ModelPreset {
+        id: "default-1".into(),
+        name: "Example: 128K context".into(),
+        context_size: 128000,
+        ctk: "q8_0".into(),
+        ctv: "f16".into(),
+        ngram_spec: true,
         batch_size: 2048,
         ubatch_size: 2048,
         no_mmap: true,
         parallel_slots: 1,
         ..Default::default()
-    };
-    vec![
-        ModelPreset {
-            id: "default-1".into(),
-            name: "Example: Small Model 128K context".into(),
-            context_size: 128000,
-            ctk: "f16".into(),
-            ctv: "f16".into(),
-            ngram_spec: true,
-            ..base.clone()
-        },
-        ModelPreset {
-            id: "default-2".into(),
-            name: "Example: Medium Model 256K turbo3 + ngram".into(),
-            context_size: 256000,
-            ctk: "turbo3".into(),
-            ctv: "turbo3".into(),
-            ngram_spec: true,
-            ..base.clone()
-        },
-        ModelPreset {
-            id: "default-3".into(),
-            name: "Example: Large Model 512K YaRN multi-GPU".into(),
-            context_size: 524288,
-            ctk: "turbo3".into(),
-            ctv: "turbo3".into(),
-            tensor_split: "7,8,8,8".into(),
-            ..base.clone()
-        },
-        ModelPreset {
-            id: "default-4".into(),
-            name: "Example: Max Context 1M YaRN".into(),
-            context_size: 1048576,
-            ctk: "turbo3".into(),
-            ctv: "turbo3".into(),
-            ..base
-        },
-    ]
+    }]
 }
 
 #[cfg(test)]
@@ -324,7 +295,7 @@ mod tests {
     fn test_default_presets_not_empty() {
         let presets = default_presets();
         assert!(!presets.is_empty());
-        assert_eq!(presets.len(), 4);
+        assert_eq!(presets.len(), 1);
     }
 
     #[test]
@@ -371,7 +342,7 @@ mod tests {
             std::process::id()
         ));
         let loaded = load_presets(&path);
-        assert_eq!(loaded.len(), 4);
+        assert_eq!(loaded.len(), 1);
         std::fs::remove_file(&path).ok();
     }
 
@@ -384,7 +355,7 @@ mod tests {
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(b"not json").unwrap();
         let loaded = load_presets(&path);
-        assert_eq!(loaded.len(), 4);
+        assert_eq!(loaded.len(), 1);
         std::fs::remove_file(&path).ok();
     }
 }
