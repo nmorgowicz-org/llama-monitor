@@ -3220,6 +3220,14 @@
                             <span class="vram-panel-total" id="vram-panel-total">— GB</span>
                         </div>
 
+                        <!-- Apple Silicon Metal GPU limit info (hidden on non-Apple) -->
+                        <div class="metal-limit-row" id="metal-limit-row" style="display:none;">
+                            <span class="metal-limit-text" id="metal-limit-text"></span>
+                            <button type="button" class="btn-metal-increase" id="metal-limit-btn" style="display:none;">
+                                Increase GPU limit
+                            </button>
+                        </div>
+
                         <!-- Stacked animated bar -->
                         <div class="vram-bar" id="vram-bar" aria-label="VRAM breakdown bar">
                             <div class="vram-segment seg-weights" id="vseg-weights" style="width:0%"

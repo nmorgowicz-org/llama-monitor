@@ -894,6 +894,35 @@ pub fn gpu_overhead_bytes(ubatch_size: u32) -> u64 {
     base + ubatch_extra
 }
 
+/// Compute the headroom fraction to reserve when sizing context or evaluating fit.
+///
+/// Both platforms use a sliding-window approach: a percentage base rate that is capped
+/// at an absolute maximum so large-memory systems don't waste capacity on oversized reserves.
+///
+/// - **Unified memory (Apple Silicon)**: 10% base, capped at 2 GB.
+///   Covers Metal burst compute buffers. The caller has already applied the Metal GPU
+///   wired cap (~66–75% of RAM) and subtracted OS/kernel reserve, so this headroom is
+///   only for transient Metal allocations during inference.
+///   - 24 GB effective budget: 10% = 2.4 GB → capped to 2 GB
+///   - 42 GB effective budget: 10% = 4.2 GB → capped to 2 GB
+///   - 10 GB effective budget: 10% = 1 GB → not capped (appropriate for small systems)
+///
+/// - **Discrete GPU**: 5% base, capped at 1.5 GB.
+///   Display-driver + CUDA context overhead is roughly flat regardless of VRAM size.
+///   Capping at 1.5 GB lets 5% apply up to a ~30 GB card; above that the cap locks in.
+pub fn compute_headroom(available_vram_bytes: u64, is_unified_memory: bool) -> f64 {
+    if available_vram_bytes == 0 {
+        return if is_unified_memory { 0.10 } else { 0.05 };
+    }
+    let (base_fraction, max_bytes) = if is_unified_memory {
+        (0.10f64, 2_000_000_000u64) // 2 GB cap for Metal burst buffers
+    } else {
+        (0.05f64, 1_500_000_000u64) // 1.5 GB cap for driver overhead
+    };
+    let cap_fraction = max_bytes as f64 / available_vram_bytes as f64;
+    f64::min(base_fraction, cap_fraction)
+}
+
 // ── Estimate model file size from param count ─────────────────────────────────
 
 /// Estimate model file size in bytes from parameter count and quantization.
@@ -932,6 +961,10 @@ pub enum VramRecommendation {
 }
 
 /// Full VRAM estimate for a configured setup.
+///
+/// `is_unified_memory`: true for Apple Silicon and other unified-memory architectures where
+/// GPU and system RAM share the same pool. On unified memory there is no CPU spill path —
+/// exceeding available memory causes OS compression/paging, not a graceful fallback.
 #[allow(clippy::too_many_arguments)]
 pub fn full_estimate(
     model_size_bytes: u64,
@@ -943,6 +976,7 @@ pub fn full_estimate(
     ubatch_size: u32,
     n_cpu_moe: i32,
     available_vram_bytes: u64,
+    is_unified_memory: bool,
 ) -> VramBreakdown {
     let (weight_vram, ram) = moe_weight_split(model_size_bytes, arch, n_cpu_moe);
     let kv = kv_cache_bytes(arch, context_size, parallel_slots, ctk, ctv);
@@ -958,22 +992,43 @@ pub fn full_estimate(
     let (recommendation, note) = if available_vram_bytes == 0 {
         (
             VramRecommendation::Risk,
-            "GPU VRAM unknown; estimate is best-effort.".into(),
+            "Memory size unknown; estimate is best-effort.".into(),
         )
     } else if total <= (available_vram_bytes * 82 / 100) {
         (
             VramRecommendation::Fit,
-            "Fits comfortably with >18% headroom.".into(),
+            if is_unified_memory {
+                "Fits with good headroom within the available unified memory budget."
+            } else {
+                "Fits comfortably with >18% headroom."
+            }
+            .into(),
         )
     } else if total <= available_vram_bytes {
         (
             VramRecommendation::Tight,
-            "Fits, but VRAM is nearly full. Reduce context or KV quant if you hit OOM.".into(),
+            if is_unified_memory {
+                "Near the memory budget — macOS may compress memory under load. Reduce context or KV quant if you notice slowdowns."
+            } else {
+                "Fits, but VRAM is nearly full. Reduce context or KV quant if you hit OOM."
+            }
+            .into(),
         )
-    } else if total <= (available_vram_bytes * 120 / 100) {
-        (VramRecommendation::Risk, "Exceeds VRAM; expect CPU spill and slower generation. Lower context or use KV quantization.".into())
+    } else if !is_unified_memory && total <= (available_vram_bytes * 120 / 100) {
+        (
+            VramRecommendation::Risk,
+            "Exceeds VRAM; expect CPU spill and slower generation. Lower context or use KV quantization.".into(),
+        )
     } else {
-        (VramRecommendation::WontFit, "Significantly over VRAM budget. Lower the model quant, context, or offload more MoE experts to CPU.".into())
+        (
+            VramRecommendation::WontFit,
+            if is_unified_memory {
+                "Exceeds unified memory budget. On Apple Silicon there is no CPU spill path — this causes memory pressure and paging. Lower context, KV quant, or model quantization."
+            } else {
+                "Significantly over VRAM budget. Lower the model quant, context, or offload more MoE experts to CPU."
+            }
+            .into(),
+        )
     };
 
     VramBreakdown {
@@ -1163,6 +1218,9 @@ pub struct ContextScenario {
 }
 
 /// Compute optimal settings for a given model, hardware, and use case.
+///
+/// `is_unified_memory`: true for Apple Silicon — tightens headroom reservation and
+/// removes the CPU-spill budget zone (paging on unified memory is not a graceful fallback).
 #[allow(clippy::too_many_arguments)]
 pub fn auto_size(
     model_size_bytes: u64,
@@ -1171,6 +1229,7 @@ pub fn auto_size(
     use_case: UseCase,
     requested_parallel_slots: u32,
     preferred_fit_granularity: u64,
+    is_unified_memory: bool,
 ) -> AutoSizeResult {
     let fit_gran = preferred_fit_granularity.max(512);
     let parallel_slots = requested_parallel_slots.max(1);
@@ -1194,6 +1253,8 @@ pub fn auto_size(
     // ── Step 2: Determine KV quant based on use case ─────────────────────────
     let (kv_k, kv_v) = best_kv_quant_for_use_case(use_case);
 
+    let headroom = compute_headroom(available_vram_bytes, is_unified_memory);
+
     // ── Step 3: Compute max context for recommended KV quant ─────────────────
     let ctx = max_context(
         model_size_bytes,
@@ -1205,7 +1266,7 @@ pub fn auto_size(
         n_cpu_moe,
         available_vram_bytes,
         fit_gran,
-        0.05,
+        headroom,
     );
 
     let breakdown = full_estimate(
@@ -1218,6 +1279,7 @@ pub fn auto_size(
         ubatch,
         n_cpu_moe,
         available_vram_bytes,
+        is_unified_memory,
     );
 
     // ── Step 4: Warnings ──────────────────────────────────────────────────────
@@ -1275,6 +1337,7 @@ pub fn auto_size(
         fit_gran,
         use_case,
         &kv_k,
+        is_unified_memory,
     );
 
     AutoSizeResult {
@@ -1346,8 +1409,10 @@ fn build_scenarios(
     fit_gran: u64,
     _use_case: UseCase,
     recommended_kv: &str,
+    is_unified_memory: bool,
 ) -> Vec<ContextScenario> {
     let mut scenarios = Vec::new();
+    let headroom = compute_headroom(available_vram_bytes, is_unified_memory);
 
     let kv_options: &[(&str, &str, &str)] = &[
         ("q8_0", "q8_0", "Max coherence (q8_0 KV)"),
@@ -1366,7 +1431,7 @@ fn build_scenarios(
             n_cpu_moe,
             available_vram_bytes,
             fit_gran,
-            0.05,
+            headroom,
         );
         let bd = full_estimate(
             model_size_bytes,
@@ -1378,6 +1443,7 @@ fn build_scenarios(
             ubatch,
             n_cpu_moe,
             available_vram_bytes,
+            is_unified_memory,
         );
         let warn = if _use_case == UseCase::Agentic && kv_elem_bytes(kk) < 1.0 {
             Some("⚠ Below q8_0 — not recommended for agents".into())
@@ -1411,7 +1477,7 @@ fn build_scenarios(
             aggressive_cpu,
             available_vram_bytes,
             fit_gran,
-            0.05,
+            headroom,
         );
         let bd = full_estimate(
             model_size_bytes,
@@ -1423,6 +1489,7 @@ fn build_scenarios(
             ubatch,
             aggressive_cpu,
             available_vram_bytes,
+            is_unified_memory,
         );
         scenarios.push(ContextScenario {
             label: format!("Extended ({}× CPU offload)", aggressive_cpu),
@@ -1476,14 +1543,16 @@ pub struct QuantOption {
 ///
 /// `param_b`: approximate parameter count (from HF metadata)
 /// `arch`: architecture (from introspection or `ModelArch::from_name_and_params`)
-/// `available_vram_bytes`: GPU VRAM
+/// `available_vram_bytes`: effective available memory (caller must subtract OS overhead on unified)
 /// `use_case`: affects the recommended-quant choice
+/// `is_unified_memory`: true for Apple Silicon — tightens headroom and fits check
 pub fn quant_comparison_table(
     param_b: f64,
     arch: &ModelArch,
     available_vram_bytes: u64,
     _use_case: UseCase,
     parallel_slots: u32,
+    is_unified_memory: bool,
 ) -> Vec<QuantOption> {
     // Quants we show in the advisor (sorted from highest to lowest quality)
     let show_quants = [
@@ -1494,6 +1563,7 @@ pub fn quant_comparison_table(
     let mut options: Vec<QuantOption> = Vec::new();
     let mut best_quant: Option<String> = None;
     let mut best_score = 0u64;
+    let headroom = compute_headroom(available_vram_bytes, is_unified_memory);
 
     for &q_name in &show_quants {
         let qi = match find_quant(q_name) {
@@ -1508,7 +1578,11 @@ pub fn quant_comparison_table(
 
         let model_bytes = estimate_model_size_bytes(param_b, q_name);
         let model_gb = model_bytes as f64 / 1e9;
-        let fits = model_bytes + gpu_overhead_bytes(512) < available_vram_bytes;
+        // A quant "fits" only if there's also room for a minimal useful KV cache (8 K tokens at q8_0).
+        // Without this check, a model that fills all available memory shows as fitting even though
+        // there's no budget left for inference context.
+        let min_kv = kv_cache_bytes(arch, 8192, parallel_slots, "q8_0", "q8_0");
+        let fits = model_bytes + gpu_overhead_bytes(512) + min_kv < available_vram_bytes;
 
         let max_q8 = max_context(
             model_bytes,
@@ -1520,7 +1594,7 @@ pub fn quant_comparison_table(
             0,
             available_vram_bytes,
             1024,
-            0.05,
+            headroom,
         );
         let max_q4 = max_context(
             model_bytes,
@@ -1532,7 +1606,7 @@ pub fn quant_comparison_table(
             0,
             available_vram_bytes,
             1024,
-            0.05,
+            headroom,
         );
 
         let mut notes = Vec::new();

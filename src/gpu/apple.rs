@@ -102,6 +102,7 @@ impl GpuBackend for AppleBackend {
             vram_total: vram_total_mb as u64,
             sclk_mhz: mactop_output.soc_metrics.gpu_freq_mhz as u32,
             mclk_mhz: mclk_mhz as u32,
+            metal_gpu_limit_mb: Some(read_iogpu_wired_limit_mb()),
         };
 
         let mut map = BTreeMap::new();
@@ -131,4 +132,18 @@ fn detect_chip_name() -> &'static str {
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "Apple Silicon".to_string())
     })
+}
+
+/// Read `iogpu.wired_limit_mb` from the kernel each call.
+/// Returns 0 if unset (system default: ~66% for ≤36 GB RAM, ~75% for larger).
+/// Not cached — the value changes when the user applies the Metal GPU limit tweak.
+/// The sysctl call takes ~10–50 µs, negligible against the metrics poll interval.
+pub fn read_iogpu_wired_limit_mb() -> u64 {
+    std::process::Command::new("sysctl")
+        .args(["-n", "iogpu.wired_limit_mb"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(0)
 }

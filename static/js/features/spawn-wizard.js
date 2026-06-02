@@ -425,6 +425,9 @@ function cacheDom() {
   dom.vramAutosizeBtn  = document.getElementById('vram-autosize-btn');
   dom.vramAutosizeNote = document.getElementById('vram-autosize-note');
   dom.vramPanelLabel   = document.getElementById('vram-panel-label');
+  dom.metalLimitRow    = document.getElementById('metal-limit-row');
+  dom.metalLimitText   = document.getElementById('metal-limit-text');
+  dom.metalLimitBtn    = document.getElementById('metal-limit-btn');
   dom.ramPanel         = document.getElementById('ram-panel');
   dom.ramPanelTotal    = document.getElementById('ram-panel-total');
   dom.rSegUsed  = document.getElementById('rseg-used');
@@ -1313,6 +1316,74 @@ async function doIntrospect(path) {
 let cachedVram = 0;
 let cachedRamTotal = 0;
 let cachedRamUsed  = 0;
+let cachedMetalGpuLimitMb = 0; // 0 = system default; >0 = custom iogpu.wired_limit_mb
+
+// ── Unified memory helpers (Apple Silicon) ────────────────────────────────────
+
+// True when the platform backend is Metal (Apple Silicon unified memory).
+// On unified memory, GPU and system RAM are the same pool; VRAM == RAM.
+function isUnifiedMemory() {
+  return _platformInfo?.auto_backend === 'metal';
+}
+
+// On unified memory, the effective budget is free RAM minus an OS reserve.
+// On discrete GPU, the cached VRAM figure is the dedicated VRAM pool.
+//
+// The 6 GB OS reserve covers: macOS kernel, Metal driver, Spotlight, Safari caches,
+// and background agent activity. This is conservative — real usage is typically
+// 8–20 GB on an active development machine — but we rely on cachedRamUsed to
+// account for the actual in-use portion. The 6 GB reserve is just the floor
+// for burst headroom the OS needs even when "idle".
+// macOS Metal GPU wired memory cap (default, without sysctl tweak):
+//   ≤ 36 GB RAM → ~66% (2/3)  e.g. 24 GB → 16 GB
+//   > 36 GB RAM → ~75% (3/4)  e.g. 64 GB → 48 GB, 128 GB → 96 GB
+// If the user has applied iogpu.wired_limit_mb, that value overrides the default.
+function metalCap(ramTotal) {
+  if (cachedMetalGpuLimitMb > 0) {
+    return cachedMetalGpuLimitMb * 1024 * 1024; // MiB → bytes
+  }
+  const fraction = ramTotal <= 36 * 1024 ** 3 ? 2 / 3 : 3 / 4;
+  return Math.floor(ramTotal * fraction);
+}
+
+// Suggested iogpu.wired_limit_mb value for the user's system.
+// Leaves 8 GB for macOS (safe minimum per llama.cpp community docs).
+// Returns 0 if the suggestion would not improve over the current/default cap.
+function suggestedMetalLimitMb(ramTotal) {
+  const currentCap = metalCap(ramTotal);
+  const suggested = Math.floor(ramTotal / (1024 * 1024)) - 8192; // total_MB - 8 GB
+  return suggested > Math.floor(currentCap / (1024 * 1024)) ? suggested : 0;
+}
+
+// 4 GB reserve for macOS kernel wired memory (~2–3 GB) + Metal driver baseline (~1 GB).
+// The Metal cap already handles the 25–33% OS headroom at the macro level;
+// this reserve is just for the wired kernel pages that can never be reclaimed.
+const APPLE_OS_RESERVE_BYTES = 4 * 1024 ** 3;
+
+// Discrete GPU headroom: 5% but capped at 1.5 GB — driver overhead is flat, not percentage-based
+const DISCRETE_MAX_HEADROOM_BYTES = 1.5 * 1024 ** 3;
+
+function computeHeadroom(availVram) {
+  if (isUnifiedMemory()) {
+    if (!availVram) return 0.10;
+    // 10% base capped at 2 GB absolute — Metal burst compute buffers are flat, not percentage-based
+    return Math.min(0.10, (2 * 1024 ** 3) / availVram);
+  }
+  if (!availVram) return 0.05;
+  return Math.min(0.05, DISCRETE_MAX_HEADROOM_BYTES / availVram);
+}
+
+function effectiveAvailBytes() {
+  if (isUnifiedMemory() && cachedRamTotal > 0) {
+    const cap = metalCap(cachedRamTotal);
+    const freeRam = cachedRamTotal - cachedRamUsed;
+    // Budget is the tighter of: Metal GPU wired cap OR currently free RAM.
+    // cachedRamUsed on macOS includes inactive pages (reclaimable) — this is conservative.
+    const budget = Math.min(cap, freeRam);
+    return Math.max(0, budget - APPLE_OS_RESERVE_BYTES);
+  }
+  return cachedVram || wizardState.vram.available;
+}
 
 async function fetchSystemRam() {
   try {
@@ -1339,6 +1410,10 @@ async function fetchGpuVram() {
       // Rust GpuMetrics struct uses `vram_total` field (value in MB); also check legacy names
       const t = g.vram_total_mb || g.total_mb || g.total_memory_mb || g.vram_total || 0;
       totalVram += t * 1024 * 1024;
+      // Capture Metal GPU wired limit from Apple backend (0 = system default)
+      if (g.metal_gpu_limit_mb !== undefined && g.metal_gpu_limit_mb !== null) {
+        cachedMetalGpuLimitMb = g.metal_gpu_limit_mb;
+      }
     }
     if (totalVram > 0) {
       cachedVram = totalVram;
@@ -1360,7 +1435,7 @@ async function loadQuantAdvisor() {
   const paramB = wizardState.model.paramB;
   if (!paramB || paramB <= 0) return;
 
-  const availVram = cachedVram || wizardState.vram.available;
+  const availVram = effectiveAvailBytes();
   if (!availVram) return; // need VRAM to give useful numbers
 
   try {
@@ -1373,6 +1448,7 @@ async function loadQuantAdvisor() {
       param_b: paramB,
       model_name: wizardState.model.path || wizardState.model.hfRepo || '',
       available_vram_bytes: availVram,
+      is_unified_memory: isUnifiedMemory(),
       use_case: wizardState.useCase,
       parallel_slots: wizardState.hardware.parallelSlots,
       n_layers: wizardState.arch.nLayers || undefined,
@@ -1396,7 +1472,8 @@ function renderQuantAdvisor(quants, availVram) {
   if (!quants || quants.length === 0) { dom.quantAdvisor.style.display = 'none'; return; }
 
   const availGb = Math.round(availVram / (1024 ** 3));
-  if (dom.quantAdvisorSubtitle) dom.quantAdvisorSubtitle.textContent = `Estimated VRAM available: ${availGb} GB`;
+  const budgetLabel = isUnifiedMemory() ? 'Unified memory available' : 'VRAM available';
+  if (dom.quantAdvisorSubtitle) dom.quantAdvisorSubtitle.textContent = `${budgetLabel}: ${availGb} GB`;
 
   const table = document.createElement('table');
   table.className = 'qa-table';
@@ -1931,7 +2008,7 @@ async function fetchHfFiles(repo) {
   // Also fetch VRAM so quant advisor has numbers
   if (!cachedVram) await fetchGpuVram();
 
-  const vramGb = cachedVram / (1024 ** 3);
+  const vramGb = effectiveAvailBytes() / (1024 ** 3);
 
   hfListFiles({
     repoId: repo,
@@ -2289,7 +2366,7 @@ function guessQuantFromName(name) {
 }
 
 function updateVramDisplay() {
-  const availVram = cachedVram || wizardState.vram.available;
+  const availVram = effectiveAvailBytes();
   if (!dom.vramPanel) return;
 
   const hw = wizardState.hardware;
@@ -2313,8 +2390,17 @@ function updateVramDisplay() {
 
   // Update total label
   if (dom.vramPanelTotal) {
-    if (availVram > 0) dom.vramPanelTotal.textContent = formatVramTotal(availVram) + ' total';
-    else dom.vramPanelTotal.textContent = 'GPU VRAM unknown';
+    if (availVram > 0) {
+      if (isUnifiedMemory() && cachedRamTotal > 0) {
+        // Show "X GB available (of Y GB total)" so users understand the budget reflects free RAM
+        dom.vramPanelTotal.textContent =
+          formatVramTotal(availVram) + ' available (of ' + formatVramTotal(cachedRamTotal) + ' total)';
+      } else {
+        dom.vramPanelTotal.textContent = formatVramTotal(availVram) + ' total';
+      }
+    } else {
+      dom.vramPanelTotal.textContent = isUnifiedMemory() ? 'Unified memory unknown' : 'GPU VRAM unknown';
+    }
   }
 
   // Update bar segments (width as % of availVram or total, whichever is larger)
@@ -2382,6 +2468,36 @@ function updateVramDisplay() {
   const isUnified = _platformInfo?.auto_backend === 'metal';
   if (dom.vramPanelLabel) {
     dom.vramPanelLabel.textContent = isUnified ? 'Unified Memory' : 'VRAM budget';
+  }
+
+  // Metal GPU limit row — Apple Silicon only
+  if (dom.metalLimitRow) {
+    if (isUnified && cachedRamTotal > 0) {
+      dom.metalLimitRow.style.display = '';
+      const currentCapMb = Math.round(metalCap(cachedRamTotal) / (1024 * 1024));
+      const isCustom = cachedMetalGpuLimitMb > 0;
+      const capGb = (currentCapMb / 1024).toFixed(0);
+      const totalGb = (cachedRamTotal / (1024 ** 3)).toFixed(0);
+      const label = isCustom
+        ? `Metal GPU cap: ${capGb} GB (custom) — of ${totalGb} GB total`
+        : `Metal GPU cap: ${capGb} GB (default) — of ${totalGb} GB total`;
+      if (dom.metalLimitText) dom.metalLimitText.textContent = label;
+
+      // Show "Increase" button if a meaningfully larger cap is achievable
+      const suggested = suggestedMetalLimitMb(cachedRamTotal);
+      if (dom.metalLimitBtn) {
+        if (suggested > 0) {
+          const suggestedGb = Math.round(suggested / 1024);
+          dom.metalLimitBtn.style.display = '';
+          dom.metalLimitBtn.textContent = `Increase to ${suggestedGb} GB`;
+          dom.metalLimitBtn.onclick = () => applyMetalGpuLimit(suggested);
+        } else {
+          dom.metalLimitBtn.style.display = 'none';
+        }
+      }
+    } else {
+      dom.metalLimitRow.style.display = 'none';
+    }
   }
 
   // RAM bar — only shown on discrete GPU systems; on unified the VRAM bar already covers it
@@ -2487,7 +2603,7 @@ function renderScenarioCards(modelBytes, arch, availVram) {
   const nCtxTrain = wizardState.model.nCtxTrain || 0;
 
   for (const s of scenarios) {
-    const vramCtx = maxContext(modelBytes, arch, s.kk, s.kv, slots, ubatch, nCpuMoe, availVram, fitGran, 0.05);
+    const vramCtx = maxContext(modelBytes, arch, s.kk, s.kv, slots, ubatch, nCpuMoe, availVram, fitGran, computeHeadroom(availVram));
     const cappedByModel = nCtxTrain > 0 && vramCtx > nCtxTrain;
     const ctx = cappedByModel ? nCtxTrain : vramCtx;
 
@@ -2583,7 +2699,7 @@ function renderHardwareModelHeader() {
 
   const quantRow = document.getElementById('hw-quant-row');
   const quantSelect = document.getElementById('hw-quant-select');
-  const vramGb = cachedVram / (1024 ** 3);
+  const vramGb = effectiveAvailBytes() / (1024 ** 3);
 
   if (quantSelect && quantFiles && quantFiles.length > 1) {
     quantSelect.innerHTML = '';
@@ -3017,6 +3133,50 @@ function updateLegacyVramPill(total, avail) {
 
 // ── Auto-size (server-side recommendation) ────────────────────────────────────
 
+// ── Apple Silicon: apply Metal GPU wired limit via osascript ─────────────────
+
+async function applyMetalGpuLimit(limitMb) {
+  if (!dom.metalLimitBtn) return;
+  const btn = dom.metalLimitBtn;
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Applying…';
+
+  try {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+
+    const resp = await fetch('/api/system/set-metal-gpu-limit', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ limit_mb: limitMb }),
+    });
+    const data = await resp.json();
+
+    if (data.ok) {
+      const gb = Math.round((data.limit_mb || limitMb) / 1024);
+      showToast(`Metal GPU limit set to ${gb} GB — saved to /etc/sysctl.conf, survives reboots.`, 'success');
+      // Re-fetch GPU metrics so cachedMetalGpuLimitMb updates and budget recalculates
+      await fetchGpuVram();
+      scheduleVramUpdate();
+    } else {
+      const msg = data.error || 'Failed to apply Metal GPU limit.';
+      if (msg.toLowerCase().includes('cancel')) {
+        showToast('Cancelled — no changes made.', 'info');
+      } else {
+        showToast(msg, 'error');
+      }
+      btn.disabled = false;
+      btn.textContent = orig;
+    }
+  } catch (e) {
+    showToast('Failed to contact server.', 'error');
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+
 async function triggerAutoSize() {
   if (!dom.vramAutosizeBtn) return;
   const btn = dom.vramAutosizeBtn;
@@ -3025,7 +3185,7 @@ async function triggerAutoSize() {
   if (dom.vramAutosizeNote) dom.vramAutosizeNote.textContent = '';
 
   try {
-    const availVram = cachedVram || wizardState.vram.available;
+    const availVram = effectiveAvailBytes();
     const modelBytes = getModelBytes();
     const arch = getEffectiveArch();
 
@@ -3039,6 +3199,7 @@ async function triggerAutoSize() {
       param_b: wizardState.model.paramB || undefined,
       model_name: wizardState.model.path || wizardState.model.hfRepo || '',
       available_vram_bytes: availVram,
+      is_unified_memory: isUnifiedMemory(),
       use_case: wizardState.useCase,
       parallel_slots: wizardState.hardware.parallelSlots,
       fit_granularity: 1024,
@@ -3065,6 +3226,15 @@ async function triggerAutoSize() {
     wizardState.hardware.ubatchSize  = r.ubatch_size;
 
     if (r.n_cpu_moe != null) wizardState.hardware.nCpuMoe = r.n_cpu_moe;
+
+    // On unified memory (Apple Silicon), disable the 8 GB KV prefix-cache RAM reservation
+    // (--cache-ram). It's a separate pool for caching previous request prompts and defaults
+    // to 8 GB, which wastes unified memory that could be used for model weights or context.
+    // Only apply if the user hasn't explicitly set a value.
+    if (isUnifiedMemory() && (wizardState.hardware.cacheRam == null || wizardState.hardware.cacheRam === 8192)) {
+      wizardState.hardware.cacheRam = 0;
+      if (dom.cacheRamInput) dom.cacheRamInput.value = '0';
+    }
 
     // Sync form fields
     if (dom.contextSizeInput) dom.contextSizeInput.value = r.context_size;
@@ -3464,7 +3634,7 @@ function renderSummary() {
 
   const m = wizardState.model, hw = wizardState.hardware;
   const arch = getEffectiveArch();
-  const availVram = cachedVram || wizardState.vram.available;
+  const availVram = effectiveAvailBytes();
   const modelBytes = getModelBytes();
 
   const modelDisplay = m.source === 'hf'
@@ -4182,6 +4352,14 @@ async function _checkBinaryPrereq() {
 
     if (_selectedBackend === null && _platformInfo) {
       _selectedBackend = _platformInfo.auto_backend;
+    }
+
+    // For unified memory (Apple Silicon): default --cache-ram to 0 on first load.
+    // The default of 8 GB wastes unified memory that is better used for model/context.
+    // Only set if the user hasn't already configured a value.
+    if (_platformInfo?.auto_backend === 'metal' && wizardState.hardware.cacheRam == null) {
+      wizardState.hardware.cacheRam = 0;
+      if (dom.cacheRamInput) dom.cacheRamInput.value = '0';
     }
 
     if (vData.build) {

@@ -28,6 +28,12 @@ pub struct GpuMetrics {
     pub sclk_mhz: u32,
     #[serde(default)]
     pub mclk_mhz: u32,
+    /// Apple Silicon only: current `iogpu.wired_limit_mb` sysctl value in MiB.
+    /// 0 = system default (~66% of RAM for ≤36 GB systems, ~75% for larger).
+    /// Non-zero = user has applied a custom Metal GPU wired memory cap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub metal_gpu_limit_mb: Option<u64>,
 }
 
 pub trait GpuBackend: Send + Sync + 'static {

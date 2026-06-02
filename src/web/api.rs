@@ -1911,6 +1911,7 @@ fn api_vram_estimate_breakdown(
                 let ctv = body["ctv"].as_str().unwrap_or("q8_0").to_string();
                 let n_cpu_moe = body["n_cpu_moe"].as_i64().map(|v| v as i32).unwrap_or(0);
                 let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
+                let is_unified_memory = body["is_unified_memory"].as_bool().unwrap_or(false);
 
                 if model_path.is_empty() {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
@@ -1957,6 +1958,7 @@ fn api_vram_estimate_breakdown(
                     ubatch_size,
                     n_cpu_moe,
                     available_vram_bytes,
+                    is_unified_memory,
                 );
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
@@ -2252,6 +2254,7 @@ fn api_vram_quant_compare(
                 let model_name = body["model_name"].as_str().unwrap_or("").to_string();
                 let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
                 let parallel_slots = body["parallel_slots"].as_u64().unwrap_or(1) as u32;
+                let is_unified_memory = body["is_unified_memory"].as_bool().unwrap_or(false);
 
                 let use_case = match body["use_case"].as_str().unwrap_or("general") {
                     "agentic" => crate::llama::vram_estimator::UseCase::Agentic,
@@ -2269,6 +2272,7 @@ fn api_vram_quant_compare(
                     available_vram_bytes,
                     use_case,
                     parallel_slots,
+                    is_unified_memory,
                 );
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
@@ -2302,6 +2306,7 @@ fn api_vram_auto_size(
                 let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
                 let parallel_slots = body["parallel_slots"].as_u64().unwrap_or(1).max(1) as u32;
                 let fit_granularity = body["fit_granularity"].as_u64().unwrap_or(1024).max(512);
+                let is_unified_memory = body["is_unified_memory"].as_bool().unwrap_or(false);
 
                 let use_case = match body["use_case"].as_str().unwrap_or("general") {
                     "agentic" => crate::llama::vram_estimator::UseCase::Agentic,
@@ -2346,6 +2351,7 @@ fn api_vram_auto_size(
                     use_case,
                     parallel_slots,
                     fit_granularity,
+                    is_unified_memory,
                 );
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
@@ -2752,6 +2758,124 @@ fn api_moe_tune(
                     &serde_json::json!({
                         "recommended_n_cpu_moe": suggestion.recommended_n_cpu_moe,
                         "note": suggestion.note,
+                    }),
+                )))
+            }
+        })
+}
+
+// ── Apple Silicon: set Metal GPU wired memory limit ───────────────────────────
+// Uses osascript to invoke `sysctl iogpu.wired_limit_mb=N` with administrator
+// privileges via the macOS native password dialog. No password touches the app.
+// Only compiled on macOS; on other platforms returns a not-supported error.
+
+#[cfg(target_os = "macos")]
+fn api_set_metal_gpu_limit(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "system" / "set-metal-gpu-limit")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let limit_mb = match body["limit_mb"].as_u64() {
+                    Some(v) if v > 0 => v,
+                    _ => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": "limit_mb must be a positive integer (MiB)"
+                            })),
+                        ));
+                    }
+                };
+
+                // Single osascript call: applies immediately via sysctl AND persists across
+                // reboots by writing to /etc/sysctl.conf (created if absent, line updated
+                // if already present with a different value). The app never sees the password.
+                let shell_cmd = format!(
+                    r#"sysctl iogpu.wired_limit_mb={n} && \
+                    if grep -q '^iogpu\.wired_limit_mb=' /etc/sysctl.conf 2>/dev/null; then \
+                        sed -i '' 's|^iogpu\.wired_limit_mb=.*|iogpu.wired_limit_mb={n}|' /etc/sysctl.conf; \
+                    else \
+                        echo 'iogpu.wired_limit_mb={n}' >> /etc/sysctl.conf; \
+                    fi"#,
+                    n = limit_mb
+                );
+                let script = format!(
+                    "do shell script \"{cmd}\" with administrator privileges",
+                    cmd = shell_cmd.replace('"', "\\\"")
+                );
+
+                let run_result = tokio::task::spawn_blocking(move || {
+                    std::process::Command::new("osascript")
+                        .args(["-e", &script])
+                        .output()
+                })
+                .await;
+
+                let reply = match run_result {
+                    Ok(Ok(output)) if output.status.success() => {
+                        let actual = crate::gpu::apple::read_iogpu_wired_limit_mb();
+                        serde_json::json!({
+                            "ok": true,
+                            "limit_mb": actual,
+                            "note": "Applied immediately and saved to /etc/sysctl.conf — will persist across reboots."
+                        })
+                    }
+                    Ok(Ok(output)) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        let msg = if stderr.contains("User canceled")
+                            || stderr.contains("cancelled")
+                            || stderr.contains("(-128)")
+                        {
+                            "Cancelled — password dialog was dismissed.".to_string()
+                        } else {
+                            format!("osascript error: {stderr}")
+                        };
+                        serde_json::json!({ "ok": false, "error": msg })
+                    }
+                    Ok(Err(e)) => {
+                        serde_json::json!({ "ok": false, "error": format!("Failed to run osascript: {e}") })
+                    }
+                    Err(e) => {
+                        serde_json::json!({ "ok": false, "error": format!("Task error: {e}") })
+                    }
+                };
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                    warp::reply::json(&reply),
+                ))
+            }
+        })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn api_set_metal_gpu_limit(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "system" / "set-metal-gpu-limit")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, _body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": false,
+                        "error": "Metal GPU limit tuning is only available on macOS."
                     }),
                 )))
             }
@@ -3786,6 +3910,7 @@ pub fn api_routes(
     let model_introspect_route = api_model_introspect(state.clone(), app_config.clone());
     let vram_quant_compare_route = api_vram_quant_compare(state.clone(), app_config.clone());
     let vram_auto_size_route = api_vram_auto_size(state.clone(), app_config.clone());
+    let set_metal_gpu_limit_route = api_set_metal_gpu_limit(state.clone(), app_config.clone());
 
     // Group routes to avoid compiler overflow on long .or() chains
     let server_routes = start.or(stop).or(kill_llama).or(attach).or(detach);
@@ -3902,7 +4027,8 @@ pub fn api_routes(
         .or(third_party_models_route)
         .or(model_introspect_route)
         .or(vram_quant_compare_route)
-        .or(vram_auto_size_route);
+        .or(vram_auto_size_route)
+        .or(set_metal_gpu_limit_route);
 
     let agent_routes = remote_agent_latest
         .or(remote_agent_detect)

@@ -2551,6 +2551,44 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ── Apple Silicon Metal GPU limit row ───────────────────────────────────── */
+
+.metal-limit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0 5px;
+  flex-wrap: wrap;
+}
+
+.metal-limit-text {
+  font-size: 11.5px;
+  color: var(--text-muted, #94a3b8);
+  flex: 1 1 auto;
+}
+
+.btn-metal-increase {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--accent, #6366f1);
+  color: var(--accent, #6366f1);
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.btn-metal-increase:hover {
+  background: var(--accent, #6366f1);
+  color: #fff;
+}
+.btn-metal-increase:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+[data-theme="light"] .metal-limit-text { color: #64748b; }
+
 /* ── Stacked bar ──────────────────────────────────────────────────────────── */
 
 .vram-bar {
