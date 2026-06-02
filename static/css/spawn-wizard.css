@@ -237,10 +237,14 @@
    Body
    ========================================================================== */
 
+/* wizard-body is always a flex column so every step can fill height and each
+   column scrolls independently — no JS class toggle needed. */
 .wizard-body {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   padding: 20px 20px 16px;
   position: relative;
   z-index: 2;
@@ -254,37 +258,18 @@
   animation: spawn-step-fade 220ms ease-out both;
 }
 
+/* All active steps fill the wizard-body height so each column can scroll. */
 .wizard-step.active {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(200px, 0.6fr);
-}
-
-/* Hardware step: each column scrolls independently.
-   .hw-step-active is added to .wizard-body by JS when step 2 is entered and
-   removed when leaving. Making wizard-body a flex column lets the grid step use
-   flex:1 to fill the exact available height — no fragile height:100% needed. */
-.wizard-body.hw-step-active {
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-#wizard-step-2.active {
   flex: 1;
   min-height: 0;
-  grid-template-columns: minmax(0, 1fr) 310px;
   grid-template-rows: 1fr;
 }
 
-#wizard-step-2 .wizard-main {
-  overflow-y: auto;
-  overflow-x: hidden;
-  min-height: 0;
-  max-width: 100%;
-  padding-right: 6px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(99,102,241,0.25) transparent;
-  box-sizing: border-box;
+/* Hardware step (step 2) uses a narrower left / fixed-width right column. */
+#wizard-step-2.active {
+  grid-template-columns: minmax(0, 1fr) 310px;
 }
 
 .hw-vram-sidebar {
@@ -292,6 +277,7 @@
   flex-direction: column;
   min-height: 0;
   overflow-y: auto;
+  overflow-anchor: none;
   scrollbar-width: thin;
   scrollbar-color: rgba(99,102,241,0.25) transparent;
 }
@@ -312,6 +298,14 @@
   flex-direction: column;
   gap: var(--gap-md);
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overflow-anchor: none; /* prevent browser scroll-anchor when sections show/hide */
+  padding-right: 6px;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99,102,241,0.25) transparent;
 }
 
 .wizard-sidebar {
@@ -329,6 +323,11 @@
     0 8px 22px rgba(0, 0, 0, 0.24),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
   backdrop-filter: blur(10px);
+  min-height: 0;
+  overflow-y: auto;
+  overflow-anchor: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99,102,241,0.25) transparent;
 }
 
 .wizard-sidebar-title {
@@ -3748,6 +3747,13 @@
   gap: 6px;
   flex-wrap: wrap;
 }
+
+/* When the HF-fetch form replaces the select, it should fill the same width */
+.hw-mmproj-hf-panel {
+  flex: 1;
+  min-width: 0;
+}
+
 .hw-quant-label {
   font-size: 11px;
   font-weight: 600;

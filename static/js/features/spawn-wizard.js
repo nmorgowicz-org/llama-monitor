@@ -651,12 +651,16 @@ function bindEvents() {
   // Prevent the fit toggle label's click from bubbling to the overlay
   dom.fitEnableLabel?.addEventListener('click', e => e.stopPropagation());
 
-  // When the fit toggle changes, ensure the Hardware step stays visible
-  // (hw-step-active + layout shift can push content off-screen).
-  dom.fitEnableCheck?.addEventListener('change', () => {
-    const body = document.querySelector('.wizard-body');
-    if (body) body.scrollTop = 0;
-  });
+  // When toggles cause layout shifts, reset the hardware step column scrolls
+  // so the top of the form stays visible (wizard-body is overflow:hidden).
+  const resetHwScroll = () => {
+    const main = document.querySelector('#wizard-step-2 .wizard-main');
+    const sidebar = document.querySelector('.hw-vram-sidebar');
+    if (main) main.scrollTop = 0;
+    if (sidebar) sidebar.scrollTop = 0;
+  };
+  dom.fitEnableCheck?.addEventListener('change', resetHwScroll);
+  dom.kvUnifiedCheck?.addEventListener('change', resetHwScroll);
 
   dom.gpuLayersSelect?.addEventListener('change', () => {
     wizardState.hardware.gpuLayers = dom.gpuLayersSelect.value;
@@ -978,20 +982,14 @@ function showStep(index) {
   dom.steps?.forEach(s => s.classList.remove('active'));
   document.getElementById(`wizard-step-${index}`)?.classList.add('active');
 
-  // Toggle hw-step-active on wizard-body: step 2 needs each column to scroll
-  // independently. The class makes wizard-body a flex column with overflow:hidden
-  // so the grid step can use flex:1 to fill the exact available height.
-  const wizardBody = document.querySelector('.wizard-body');
-  if (wizardBody) {
-    if (index === 2) {
-      wizardBody.classList.add('hw-step-active');
-      // Ensure Hardware step is visible; hw-step-active uses overflow:hidden
-      // and can trap the scroll position off-screen.
-      wizardBody.scrollTop = 0;
-    } else {
-      wizardBody.classList.remove('hw-step-active');
-      wizardBody.scrollTop = 0;
-    }
+  // wizard-body is always overflow:hidden flex — reset both column scroll
+  // positions when switching steps so nothing is trapped off-screen.
+  const newStep = document.getElementById('wizard-step-' + index);
+  if (newStep) {
+    const m = newStep.querySelector('.wizard-main');
+    if (m) m.scrollTop = 0;
+    const s = newStep.querySelector('.wizard-sidebar, .hw-vram-sidebar');
+    if (s) s.scrollTop = 0;
   }
 
   dom.stepBadges?.forEach(b => {

@@ -2800,13 +2800,9 @@ fn api_set_metal_gpu_limit(
                 // Single osascript call: applies immediately via sysctl AND persists across
                 // reboots by writing to /etc/sysctl.conf (created if absent, line updated
                 // if already present with a different value). The app never sees the password.
+                // Must be a single line — AppleScript string literals cannot span newlines.
                 let shell_cmd = format!(
-                    r#"sysctl iogpu.wired_limit_mb={n} && \
-                    if grep -q '^iogpu\.wired_limit_mb=' /etc/sysctl.conf 2>/dev/null; then \
-                        sed -i '' 's|^iogpu\.wired_limit_mb=.*|iogpu.wired_limit_mb={n}|' /etc/sysctl.conf; \
-                    else \
-                        echo 'iogpu.wired_limit_mb={n}' >> /etc/sysctl.conf; \
-                    fi"#,
+                    "sysctl iogpu.wired_limit_mb={n} && if grep -q '^iogpu\\.wired_limit_mb=' /etc/sysctl.conf 2>/dev/null; then sed -i '' 's|^iogpu\\.wired_limit_mb=.*|iogpu.wired_limit_mb={n}|' /etc/sysctl.conf; else echo 'iogpu.wired_limit_mb={n}' >> /etc/sysctl.conf; fi",
                     n = limit_mb
                 );
                 let script = format!(
