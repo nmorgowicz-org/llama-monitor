@@ -3157,67 +3157,32 @@
 
 <!-- Settings Modal with Tabbed Navigation -->
 <div class="modal-overlay" id="settings-modal" aria-hidden="true" inert>
-    <div class="modal" style="width:720px;">
+    <div class="modal" style="width:760px;">
         <div class="modal-header">
             <h2>Settings<span class="dirty-indicator" aria-label="Unsaved changes"></span></h2>
             <button type="button" class="modal-close" id="settings-modal-close" aria-label="Close">&times;</button>
         </div>
         <div class="settings-modal-body">
             <div class="settings-tabs">
-                <button class="settings-tab active" data-tab="session">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                    Session
-                </button>
-                <button class="settings-tab" data-tab="gpu">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="8" rx="2"/><rect x="9" y="9" width="8" height="4" rx="1"/><line x1="9" y1="16" x2="9" y2="21"/><line x1="15" y1="16" x2="15" y2="21"/><line x1="9" y1="21" x2="15" y2="21"/></svg>
-                    GPU
-                </button>
-                <button class="settings-tab" data-tab="models" aria-label="Model Configuration">
+                <button class="settings-tab active" data-tab="models" aria-label="Model Configuration">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                     Models
-                </button>
-                <button class="settings-tab" data-tab="appearance">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="19" cy="13.5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><path d="M13 9.5c2 1 4 3 4 6"/><path d="M9 9.5C7 10.5 5 12.5 5 15.5"/></svg>
-                    Appearance
                 </button>
                 <button class="settings-tab" data-tab="chat">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                     Chat
                 </button>
-                <button class="settings-tab" data-tab="performance">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                    Performance
+                <button class="settings-tab" data-tab="system">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4"/><path d="M12 19v4"/><path d="M4.22 4.22l2.83 2.83"/><path d="M16.95 16.95l2.83 2.83"/><path d="M1 12h4"/><path d="M19 12h4"/><path d="M4.22 19.78l2.83-2.83"/><path d="M16.95 7.05l2.83-2.83"/></svg>
+                    System
                 </button>
                 <button class="settings-tab" data-tab="security">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                     Security
                 </button>
-                <button class="settings-tab" data-tab="advanced">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4"/><path d="M12 19v4"/><path d="M4.22 4.22l2.83 2.83"/><path d="M16.95 16.95l2.83 2.83"/><path d="M1 12h4"/><path d="M19 12h4"/><path d="M4.22 19.78l2.83-2.83"/><path d="M16.95 7.05l2.83-2.83"/></svg>
-                    Advanced
-                </button>
             </div>
             <div class="settings-content">
-                <div class="settings-pane active" id="settings-session">
-                    <h3>Session Workspace</h3>
-                    <div class="settings-card">
-                        <p class="settings-help">
-                            Session resume is handled from the setup screen and recent-endpoints workspace. Runtime attach targets, remote-agent details, and local launch paths are not edited here.
-                        </p>
-                        <p class="settings-help">
-                            Use the separate Configuration modal for executable paths and remote host details.
-                        </p>
-                    </div>
-                </div>
-                <div class="settings-pane" id="settings-gpu">
-                    <h3>GPU Configuration</h3>
-                    <div class="settings-card">
-                        <p class="settings-help">
-                            GPU defaults are owned by model presets and runtime configuration. This settings modal no longer exposes placeholder GPU controls that do not persist.
-                        </p>
-                    </div>
-                </div>
-                <div class="settings-pane" id="settings-models">
+                <div class="settings-pane active" id="settings-models">
                     <h3>Model Settings</h3>
                     <div class="settings-card">
                         <p class="settings-help">
@@ -3281,16 +3246,8 @@
                         <p class="settings-help" id="settings-hf-token-status" style="display:none;margin:8px 0 0 0;"></p>
                     </div>
                 </div>
-              <div class="settings-pane" id="settings-appearance">
-                      <h3>Appearance</h3>
-                      <div class="settings-card">
-                          <p class="settings-help">
-                              Device-specific appearance preferences live in <strong>User → Preferences</strong>. Theme, font scale, spacing, and chat style remain local on purpose so different machines can keep different presentation defaults.
-                          </p>
-                      </div>
-                  </div>
                   <div class="settings-pane" id="settings-chat">
-                      <h3>Guided Generation</h3>
+                      <h3>Chat</h3>
                       <p class="settings-help">
                          Tools to help with creative writing, roleplay, and structured conversations.
                       </p>
@@ -3384,12 +3341,10 @@
                           </button>
                       </div>
                    </div>
-                 <div class="settings-pane" id="settings-performance">
-                    <h3>Performance &amp; Connection</h3>
+                <div class="settings-pane" id="settings-system">
+                    <h3>System</h3>
                     <div class="settings-card">
-                        <p class="settings-help">
-                            Control how frequently the dashboard refreshes metrics. Lower intervals give smoother real-time updates but use more bandwidth and battery. On slow or metered connections, a higher interval reduces network usage.
-                        </p>
+                        <div class="settings-section-label">Connection</div>
                         <label class="modal-field">
                             Dashboard Refresh Rate
                             <select id="settings-ws-push-interval">
@@ -3405,32 +3360,18 @@
                             <span class="network-status-text" id="network-status-text"></span>
                         </div>
                     </div>
-                </div>
-                  <div class="settings-pane" id="settings-advanced">
-                    <h3>Advanced Settings</h3>
-                    <div class="widget-card" style="padding:14px;margin-bottom:16px;">
-                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
-                            Runtime Configuration
-                        </div>
-                        <p class="settings-help">
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-                            Configure server executable paths, working directories, and GPU environment settings.
-                        </p>
-                        <button type="button" class="btn btn-secondary" id="settings-open-config-btn">Open Runtime Configuration</button>
-                    </div>
-                    <div class="settings-card">
-                        <p class="settings-help">
-                            This modal only retains shared workspace settings. Process launch paths, remote-agent SSH details, and environment-specific overrides live in Runtime Configuration instead of duplicating dead controls here.
-                        </p>
+                    <div class="settings-card" style="margin-top:14px;">
+                        <div class="settings-section-label">Runtime</div>
+                        <p class="settings-help">Configure server executable paths, working directories, and GPU environment settings.</p>
+                        <button type="button" class="btn btn-secondary" id="settings-open-config-btn" style="margin-top:10px;">Open Runtime Configuration</button>
                     </div>
                 </div>
 
                 <!-- Security & Certificates -->
                 <div class="settings-pane" id="settings-security">
-                    <h3>Security &amp; Certificates</h3>
-                    <p class="settings-help">
-                        Manage TLS encryption for the web UI. Changes require a restart to take effect.
-                    </p>
+                    <h3>Security</h3>
+
+                    <div class="settings-section-label">TLS &amp; Certificates</div>
 
                     <!-- TLS Status -->
                     <div id="tab-certificates" class="tls-status-card" style="margin-bottom:14px;padding:10px 11px;border-radius:12px;border:1px solid rgba(255,255,255,0.07);background:linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.01));box-shadow:0 8px 24px rgba(0,0,0,0.22),inset 0 1px 0 rgba(255,255,255,0.04);">
@@ -3599,6 +3540,8 @@
                         </div>
                     </div>
 
+                    <div class="settings-section-label" style="margin-top:8px;">Dashboard Access</div>
+
                     <div class="widget-card" style="padding:14px;margin-bottom:16px;">
                         <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
                             Dashboard Access
@@ -3652,6 +3595,8 @@
                             Forgot the password? Run <code>llama-monitor --clear-auth-config</code> on this machine, restart, and then set a new password here.
                         </div>
                     </div>
+
+                    <div class="settings-section-label" style="margin-top:8px;">Access Tokens</div>
 
                     <!-- Agent Token Rotation -->
                     <div class="widget-card" style="padding:14px;margin-bottom:12px;">
