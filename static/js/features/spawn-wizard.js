@@ -3745,7 +3745,7 @@ async function runHealthCheck() {
 
 // ── Spawn config preview card (step 4) ────────────────────────────────────────
 
-function _renderSpawnConfigCard() {
+async function _renderSpawnConfigCard() {
   const card = document.getElementById('spawn-config-card');
   const sidebar = document.getElementById('spawn-sidebar-config');
   const m = wizardState.model, hw = wizardState.hardware, acc = wizardState.access;
@@ -3762,6 +3762,20 @@ function _renderSpawnConfigCard() {
   const kvStr    = `${(hw.cacheTypeK || 'q8_0').toUpperCase()} / ${(hw.cacheTypeV || 'q8_0').toUpperCase()}`;
   const alias    = hw.alias || modelName.replace(/\.gguf$/i, '').replace(/[^A-Za-z0-9._-]/g, '-');
 
+  // Fetch tags for this model
+  let modelTags = [];
+  try {
+    const modelPath = m.path || (m.localPath && m.localPath.trim());
+    if (modelPath) {
+      const headers = window.authHeaders ? window.authHeaders() : {};
+      const resp = await fetch('/api/models/tags', { headers });
+      if (resp.ok) {
+        const data = await resp.json();
+        modelTags = (data.tags && data.tags[modelPath]) || [];
+      }
+    }
+  } catch { /* ignore */ }
+
   if (card) {
     card.style.display = '';
     const mk = (tag, cls, text) => {
@@ -3776,6 +3790,16 @@ function _renderSpawnConfigCard() {
     hdr.appendChild(mk('span', 'spawn-config-card-title', 'Model'));
     hdr.appendChild(mk('span', 'spawn-config-card-model', modelName));
     card.appendChild(hdr);
+
+    // Add tag pills if model has tags
+    if (modelTags.length > 0) {
+      const tagsRow = mk('div', 'spawn-config-card-tags');
+      modelTags.forEach(tag => {
+        const pill = mk('span', 'mm-tag-pill', tag);
+        tagsRow.appendChild(pill);
+      });
+      card.appendChild(tagsRow);
+    }
 
     const grid = mk('div', 'spawn-config-grid');
     const items = [

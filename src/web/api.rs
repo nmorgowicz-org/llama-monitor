@@ -3601,6 +3601,8 @@ pub fn api_routes(
     let get_models = api_get_models(state.clone(), app_config.clone());
     let refresh_models = api_refresh_models(state.clone(), app_config.clone());
     let delete_model_file = api_delete_model_file(state.clone(), app_config.clone());
+    let get_model_tags = api_get_model_tags(state.clone(), app_config.clone());
+    let put_model_tags = api_put_model_tags(state.clone(), app_config.clone());
     let get_gpu_env = api_get_gpu_env(state.clone(), app_config.clone());
     let put_gpu_env = api_put_gpu_env(state.clone(), app_config.clone());
     let get_settings = api_get_settings(state.clone(), app_config.clone());
@@ -3796,7 +3798,11 @@ pub fn api_routes(
         .or(create_template)
         .or(update_template)
         .or(delete_template);
-    let model_routes = get_models.or(refresh_models).or(delete_model_file);
+    let model_routes = get_models
+        .or(refresh_models)
+        .or(delete_model_file)
+        .or(get_model_tags)
+        .or(put_model_tags);
     let config_routes = get_gpu_env
         .or(put_gpu_env)
         .or(get_settings_full)
@@ -5386,8 +5392,21 @@ fn api_get_models(
                 return futures_util::future::ready(Ok(unauthorized_api_token()));
             }
             let models = state.discovered_models.lock().unwrap().clone();
+            let tags = state.model_tags.lock().unwrap().tags.clone();
+            let models_with_tags: Vec<serde_json::Value> = models
+                .into_iter()
+                .map(|m| {
+                    let model_path = m.path.to_string_lossy().to_string();
+                    let mut obj = serde_json::to_value(m).unwrap_or_default();
+                    if let Some(model_obj) = obj.as_object_mut() {
+                        let model_tags = tags.get(&model_path).cloned().unwrap_or_default();
+                        model_obj.insert("tags".into(), serde_json::json!(model_tags));
+                    }
+                    obj
+                })
+                .collect();
             futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
-                Box::new(warp::reply::json(&models)),
+                Box::new(warp::reply::json(&models_with_tags)),
             ))
         })
 }
@@ -5477,6 +5496,80 @@ fn api_delete_model_file(
                         ),
                     )),
                 }
+            }
+        })
+}
+
+/// GET /api/models/tags — return all model tags
+fn api_get_model_tags(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "tags")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            if !check_api_token(&auth, &cfg) {
+                return futures_util::future::ready(Ok(unauthorized_api_token()));
+            }
+            let tags = state.model_tags.lock().unwrap().clone();
+            futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                Box::new(warp::reply::json(&tags)),
+            ))
+        })
+}
+
+/// PUT /api/models/tags — update tags for a model
+fn api_put_model_tags(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "tags")
+        .and(warp::put())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let st = state.clone();
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let model_path = match body.get("model_path").and_then(|v| v.as_str()) {
+                    Some(p) => p.to_string(),
+                    None => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"ok": false, "error": "missing model_path"})),
+                        ));
+                    }
+                };
+
+                let new_tags = match body.get("tags") {
+                    Some(t) => match t.as_array() {
+                        Some(arr) => arr.iter().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<String>>(),
+                        None => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({"ok": false, "error": "tags must be an array of strings"})),
+                            ));
+                        }
+                    },
+                    None => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"ok": false, "error": "missing tags"})),
+                        ));
+                    }
+                };
+
+                let mut tags = st.model_tags.lock().unwrap();
+                tags.tags.insert(model_path, new_tags);
+                let tags_path = st.model_tags_path.clone();
+                tags.save(&tags_path);
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                    warp::reply::json(&serde_json::json!({"ok": true})),
+                ))
             }
         })
 }
@@ -10391,6 +10484,7 @@ mod tests {
             gpu_env_path: PathBuf::new(),
             ui_settings_path: PathBuf::new(),
             sessions_path: PathBuf::new(),
+            model_tags_path: PathBuf::new(),
         };
         let cs = Arc::new(
             ChatStorage::open(&PathBuf::from(":memory:")).expect("open in-memory chat storage"),
@@ -10973,6 +11067,7 @@ mod tests {
             gpu_env_path: PathBuf::new(),
             ui_settings_path: PathBuf::new(),
             sessions_path: PathBuf::new(),
+            model_tags_path: PathBuf::new(),
         };
         let cs = Arc::new(
             crate::chat_storage::ChatStorage::open(&PathBuf::from(":memory:"))

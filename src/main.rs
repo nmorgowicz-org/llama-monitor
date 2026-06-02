@@ -156,6 +156,7 @@ fn main() -> Result<()> {
             gpu_env_path: app_config.gpu_env_file.clone(),
             ui_settings_path: app_config.ui_settings_file.clone(),
             sessions_path: app_config.sessions_file.clone(),
+            model_tags_path: app_config.config_dir.join("model-tags.json"),
         },
         gpu_env,
         ui_settings,

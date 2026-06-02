@@ -4219,6 +4219,29 @@
   text-overflow: ellipsis;
   min-width: 0;
 }
+.spawn-config-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 14px 8px;
+}
+.spawn-config-card-tags .mm-tag-pill {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  background: rgba(99, 102, 241, 0.12);
+  color: rgba(165, 163, 255, 0.95);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+[data-theme="light"] .spawn-config-card-tags .mm-tag-pill {
+  border-color: rgba(79, 70, 229, 0.28);
+  background: rgba(79, 70, 229, 0.08);
+  color: rgba(79, 70, 229, 0.95);
+}
 .spawn-config-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

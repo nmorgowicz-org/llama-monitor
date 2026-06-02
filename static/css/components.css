@@ -1788,6 +1788,143 @@ button:disabled {
   border-color: rgba(236, 72, 153, 0.12);
 }
 
+/* ── Tag pills (model cards) ── */
+.mm-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 12px;
+  margin-top: 2px;
+}
+
+.mm-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.8);
+  background: rgba(148, 163, 184, 0.06);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mm-tag-pill:hover {
+  color: rgba(148, 163, 184, 1);
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.25);
+}
+
+/* ── Tag picker (popup) ── */
+.mm-tag-picker {
+  position: fixed;
+  z-index: 1000;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(15, 23, 42, 0.98);
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  border-radius: 10px;
+  padding: 10px 12px 10px 12px;
+  min-width: 180px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(18px);
+}
+
+.mm-tag-picker-title {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.7);
+  margin-bottom: 6px;
+}
+
+.mm-tag-picker-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mm-tag-picker-pills .mm-tag-pill {
+  font-size: 9px;
+  padding: 2px 7px;
+}
+
+.mm-tag-picker-pills .mm-tag-pill.mm-tag-pill--active {
+  color: rgba(148, 255, 177, 0.9);
+  background: rgba(148, 255, 177, 0.08);
+  border-color: rgba(148, 255, 177, 0.2);
+}
+
+/* ── Tag action button ── */
+.mm-action-tags {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1;
+  color: rgba(148, 163, 184, 0.5);
+  background: rgba(148, 163, 184, 0.04);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mm-action-tags:hover {
+  color: rgba(148, 255, 177, 0.9);
+  background: rgba(148, 255, 177, 0.08);
+  border-color: rgba(148, 255, 177, 0.18);
+}
+
+/* ── Light theme: tags ── */
+[data-theme="light"] .mm-tag-pill {
+  color: rgba(71, 85, 105, 0.7);
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .mm-tag-pill:hover {
+  color: rgba(15, 23, 42, 0.9);
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.14);
+}
+
+[data-theme="light"] .mm-tag-picker {
+  background: rgba(255, 255, 255, 0.98);
+  border-color: rgba(15, 23, 42, 0.12);
+  color: #374151;
+}
+
+[data-theme="light"] .mm-tag-picker-title {
+  color: rgba(71, 85, 105, 0.7);
+}
+
+[data-theme="light"] .mm-tag-picker-pills .mm-tag-pill.mm-tag-pill--active {
+  color: rgba(21, 128, 61, 0.9);
+  background: rgba(21, 128, 61, 0.08);
+  border-color: rgba(21, 128, 61, 0.2);
+}
+
+[data-theme="light"] .mm-action-tags {
+  color: rgba(71, 85, 105, 0.5);
+  background: rgba(0, 0, 0, 0.02);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"] .mm-action-tags:hover {
+  color: rgba(21, 128, 61, 0.9);
+  background: rgba(21, 128, 61, 0.06);
+  border-color: rgba(21, 128, 61, 0.18);
+}
+
 /* ── Light theme: toolbar ── */
 [data-theme="light"] .mm-lib-toolbar {
   background: rgba(0, 0, 0, 0.02);

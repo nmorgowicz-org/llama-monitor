@@ -20,6 +20,8 @@ const PREFS_KEY = 'llama-monitor-models-prefs';
 const ICON_LIST_VIEW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>';
 const ICON_CARDS_VIEW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>';
 
+const KNOWN_TAGS = ['coding', 'roleplay', 'general', 'art', 'fast', 'default'];
+
 let initialized = false;
 
 // State for the HF download tab
@@ -53,6 +55,7 @@ function loadPrefs() {
         showMain: true,
         showSplit: true,
         quantFilters: {},
+        tagFilter: '',
     };
     try {
         const raw = localStorage.getItem(PREFS_KEY);
@@ -191,6 +194,12 @@ function applyFilters(models) {
             if (!prefs.quantFilters[qt]) return false;
         }
 
+        // tag filter
+        if (prefs.tagFilter) {
+            const tags = Array.isArray(m.tags) ? m.tags : [];
+            if (!tags.includes(prefs.tagFilter)) return false;
+        }
+
         return true;
     });
 }
@@ -250,6 +259,7 @@ function buildModelCard(m) {
     const vramPct = m.vram_percent != null ? Math.min(100, m.vram_percent) : null;
     const isSplit = m.is_split;
     const mmproj = isMmproj(m);
+    const tags = Array.isArray(m.tags) ? m.tags : [];
 
     const card = document.createElement('div');
     card.className = 'mm-model-card';
@@ -285,6 +295,23 @@ function buildModelCard(m) {
     }
 
     card.appendChild(top);
+
+    // Tags row
+    if (tags.length > 0) {
+        const tagsRow = document.createElement('div');
+        tagsRow.className = 'mm-card-tags';
+        tags.forEach(tag => {
+            const pill = document.createElement('span');
+            pill.className = 'mm-tag-pill';
+            pill.textContent = tag;
+            pill.title = 'Click to remove tag';
+            pill.addEventListener('click', () => {
+                removeModelTag(m.path, tag);
+            });
+            tagsRow.appendChild(pill);
+        });
+        card.appendChild(tagsRow);
+    }
 
     // Meta row: filename
     const meta = document.createElement('div');
@@ -350,6 +377,16 @@ function buildModelCard(m) {
     deleteBtn.addEventListener('click', () => deleteModel(m.path, m.filename || name));
     actions.appendChild(deleteBtn);
 
+    const tagBtn = document.createElement('button');
+    tagBtn.type = 'button';
+    tagBtn.className = 'mm-action-btn mm-action-tags';
+    tagBtn.title = 'Add tag';
+    tagBtn.textContent = '+';
+    tagBtn.addEventListener('click', () => {
+        openTagPicker(m.path, tags);
+    });
+    actions.appendChild(tagBtn);
+
     card.appendChild(actions);
     return card;
 }
@@ -395,6 +432,83 @@ async function refreshModels() {
         if (btn) btn.classList.remove('spinning');
     }
     await loadModels();
+}
+
+// ── Model tags ────────────────────────────────────────────────────────────────
+
+async function updateModelTags(modelPath, tags) {
+    try {
+        const resp = await fetch('/api/models/tags', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model_path: modelPath, tags }),
+        });
+        const data = await resp.json();
+        if (!data.ok) {
+            showToast('Tag update failed: ' + (data.error || 'unknown'), 'error');
+            return false;
+        }
+        return true;
+    } catch (err) {
+        showToast('Tag update failed: ' + err.message, 'error');
+        return false;
+    }
+}
+
+async function removeModelTag(modelPath, tag) {
+    const resp = await fetch('/api/models/tags', {
+        headers: window.authHeaders ? window.authHeaders() : {},
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const currentTags = (data.tags[modelPath] || []).filter(t => t !== tag);
+    await updateModelTags(modelPath, currentTags);
+    await loadModels();
+}
+
+function openTagPicker(modelPath, currentTags) {
+    const existing = document.getElementById('mm-tag-picker');
+    if (existing) existing.remove();
+
+    const picker = document.createElement('div');
+    picker.id = 'mm-tag-picker';
+    picker.className = 'mm-tag-picker';
+
+    const title = document.createElement('div');
+    title.className = 'mm-tag-picker-title';
+    title.textContent = 'Tags';
+    picker.appendChild(title);
+
+    const pillsWrap = document.createElement('div');
+    pillsWrap.className = 'mm-tag-picker-pills';
+
+    const allTags = new Set([...KNOWN_TAGS, ...currentTags]);
+    allTags.forEach(tag => {
+        const pill = document.createElement('span');
+        const has = currentTags.includes(tag);
+        pill.className = 'mm-tag-pill' + (has ? ' mm-tag-pill--active' : '');
+        pill.textContent = tag;
+        pill.addEventListener('click', () => {
+            const newTags = has
+                ? currentTags.filter(t => t !== tag)
+                : [...currentTags, tag];
+            updateModelTags(modelPath, newTags).then(ok => {
+                if (ok) loadModels();
+            });
+        });
+        pillsWrap.appendChild(pill);
+    });
+
+    picker.appendChild(pillsWrap);
+    document.body.appendChild(picker);
+
+    const close = (e) => {
+        if (!picker.contains(e.target)) {
+            picker.remove();
+            document.removeEventListener('mousedown', close);
+        }
+    };
+    setTimeout(() => document.addEventListener('mousedown', close), 0);
 }
 
 // ── Library toolbar ───────────────────────────────────────────────────────────
@@ -529,6 +643,44 @@ function buildLibraryToolbar(models) {
     }
 
     filtersPanel.appendChild(quantRow);
+
+    // Tag filter
+    const tagRow = document.createElement('div');
+    tagRow.className = 'mm-lib-filter-row';
+
+    const tagLabel = document.createElement('span');
+    tagLabel.className = 'mm-lib-filter-label';
+    tagLabel.textContent = 'Tag';
+
+    const allTags = new Set(KNOWN_TAGS);
+    models.forEach(m => {
+        (Array.isArray(m.tags) ? m.tags : []).forEach(t => allTags.add(t));
+    });
+
+    const allTagArr = Array.from(allTags);
+    if (allTagArr.length > 0) {
+        const noneChip = createChip('All', !prefs.tagFilter);
+        noneChip.addEventListener('click', () => {
+            prefs.tagFilter = '';
+            savePrefs();
+            loadModels();
+        });
+        tagRow.appendChild(noneChip);
+
+        allTagArr.forEach(tag => {
+            const chip = createChip(tag, prefs.tagFilter === tag);
+            chip.classList.toggle('active', prefs.tagFilter === tag);
+            chip.addEventListener('click', () => {
+                prefs.tagFilter = prefs.tagFilter === tag ? '' : tag;
+                savePrefs();
+                loadModels();
+            });
+            tagRow.appendChild(chip);
+        });
+    }
+
+    tagRow.appendChild(tagLabel);
+    filtersPanel.appendChild(tagRow);
 
     filtersWrap.appendChild(filtersBtn);
     filtersWrap.appendChild(filtersPanel);

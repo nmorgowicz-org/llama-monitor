@@ -12,6 +12,27 @@ use crate::llama::server::ServerConfig;
 use crate::models::DiscoveredModel;
 use crate::presets;
 use crate::presets::ModelPreset;
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ModelTags {
+    #[serde(default)]
+    pub tags: BTreeMap<String, Vec<String>>,
+}
+
+impl ModelTags {
+    pub fn load(path: &Path) -> Self {
+        match std::fs::read_to_string(path) {
+            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
+            Err(_) => Self::default(),
+        }
+    }
+
+    pub fn save(&self, path: &Path) {
+        if let Ok(json) = serde_json::to_string_pretty(self) {
+            let _ = std::fs::write(path, json);
+        }
+    }
+}
 use crate::system::SystemMetrics;
 
 fn sensor_bridge_setup_available() -> bool {
@@ -428,6 +449,7 @@ pub struct AppPaths {
     pub gpu_env_path: PathBuf,
     pub ui_settings_path: PathBuf,
     pub sessions_path: PathBuf,
+    pub model_tags_path: PathBuf,
 }
 
 /// Generate unique session ID
@@ -458,6 +480,8 @@ pub struct AppState {
     pub templates_path: PathBuf,
     pub discovered_models: Arc<Mutex<Vec<DiscoveredModel>>>,
     pub models_dir: Option<PathBuf>,
+    pub model_tags: Arc<Mutex<ModelTags>>,
+    pub model_tags_path: PathBuf,
     pub gpu_env: Arc<Mutex<GpuEnv>>,
     pub gpu_env_path: PathBuf,
     pub ui_settings: Arc<Mutex<UiSettings>>,
@@ -498,10 +522,12 @@ impl AppState {
         let gpu_env_path = paths.gpu_env_path;
         let ui_settings_path = paths.ui_settings_path;
         let sessions_path = paths.sessions_path;
+        let model_tags_path = paths.model_tags_path;
         let discovered = models_dir
             .as_ref()
             .and_then(|dir| crate::models::scan_models_dir(dir).ok())
             .unwrap_or_default();
+        let model_tags = ModelTags::load(&model_tags_path);
 
         let sessions = load_sessions(&sessions_path);
         let templates = presets::load_templates(&templates_path);
@@ -536,6 +562,8 @@ impl AppState {
             templates_path,
             discovered_models: Arc::new(Mutex::new(discovered)),
             models_dir,
+            model_tags: Arc::new(Mutex::new(model_tags)),
+            model_tags_path,
             gpu_env: Arc::new(Mutex::new(gpu_env)),
             gpu_env_path,
             ui_settings: Arc::new(Mutex::new(ui_settings)),
@@ -998,6 +1026,7 @@ mod tests {
             gpu_env_path: PathBuf::new(),
             ui_settings_path: PathBuf::new(),
             sessions_path,
+            model_tags_path: PathBuf::new(),
         }
     }
 
