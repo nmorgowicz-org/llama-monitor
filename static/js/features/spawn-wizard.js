@@ -3943,6 +3943,10 @@ async function saveAsPreset() {
     const headers = window.authHeaders ? { ...window.authHeaders(), 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
     const resp = await fetch('/api/presets', { method: 'POST', headers, body: JSON.stringify(payload) });
     if (!resp.ok) { showToast('Save preset failed: ' + await resp.text().catch(()=>''), 'error'); return; }
+    // Refresh the setup view preset dropdown
+    import('./presets.js').then(({ loadPresets }) => loadPresets().then(() => {
+      import('./setup-view.js').then(({ syncSetupPresetSelect }) => syncSetupPresetSelect());
+    }));
     showToast(`Preset "${name}" saved`, 'success');
     if (dom.savedPresetName) {
       dom.savedPresetName.textContent = `Saved as "${name}"`;

@@ -3116,6 +3116,25 @@
     </div>
 </div>
 
+<!-- Presets Manager Panel -->
+<div class="modal-overlay" id="presets-panel-overlay" style="display:none; z-index:1400;" onclick="if(event.target===this)closePresetsPanel()">
+    <div class="presets-panel-modal">
+        <div class="presets-panel-header">
+            <h2 class="presets-panel-title">Saved Presets</h2>
+            <button type="button" class="presets-panel-close" id="presets-panel-close" onclick="closePresetsPanel()">&times;</button>
+        </div>
+        <div class="presets-panel-body" id="presets-panel-body">
+            <div class="presets-panel-loading">Loading presets…</div>
+        </div>
+        <div class="presets-panel-footer">
+            <button type="button" class="setup-btn setup-btn-primary" id="presets-panel-wizard-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                New Server with Wizard
+            </button>
+        </div>
+    </div>
+</div>
+
 <!-- Models Modal -->
 <div class="modal-overlay" id="models-modal">
     <div class="modal" style="width:760px;">
