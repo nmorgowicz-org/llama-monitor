@@ -173,7 +173,7 @@ export const wizardState = {
     cacheTypeK: 'q8_0', cacheTypeV: 'q8_0',
     nCpuMoe: 0,
     tensorSplit: '',
-    fitCtx: 1024,
+    fitTarget: '',
     kvUnified: false,
     // MTP
     mtpEnabled: true,
@@ -375,7 +375,7 @@ function cacheDom() {
   dom.cacheTypeVSelect   = document.getElementById('spawn-cache-type-v');
   dom.nCpuMoeInput       = document.getElementById('spawn-n-cpu-moe');
   dom.tensorSplitInput   = document.getElementById('spawn-tensor-split');
-  dom.fitCtxInput        = document.getElementById('spawn-fit-ctx');
+  dom.fitTargetInput     = document.getElementById('spawn-fit-target');
   dom.moeNote            = document.getElementById('spawn-moe-note');
   // Legacy VRAM pill (kept for backward compat if HTML still has it)
   dom.vramEstimateText = document.getElementById('spawn-vram-estimate-text');
@@ -557,7 +557,7 @@ function bindEvents() {
     dom.batchSizeInput, dom.ubatchSizeInput, dom.parallelSlotsInput,
     dom.cacheTypeKSelect, dom.cacheTypeVSelect, dom.nCpuMoeInput,
     dom.tensorSplitInput, dom.specTypeSelect, dom.draftModelInput,
-    dom.kvUnifiedCheck, dom.ignoreEosCheck, dom.fitCtxInput,
+    dom.kvUnifiedCheck, dom.ignoreEosCheck, dom.fitTargetInput,
   ].forEach(el => {
     el?.addEventListener('input', onHardwareChange);
     el?.addEventListener('change', onHardwareChange);
@@ -1016,7 +1016,7 @@ function updateRawScript() {
   if (hw.cacheTypeV) args.push('-ctv', hw.cacheTypeV);
   if (hw.nCpuMoe > 0) args.push('--n-cpu-moe', String(hw.nCpuMoe));
   if (hw.tensorSplit) args.push('--tensor-split', hw.tensorSplit);
-  if (hw.fitCtx) { args.push('--fit', 'on'); args.push('--fit-ctx', String(hw.fitCtx)); }
+  if (hw.fitTarget) { args.push('--fit', 'on'); args.push('--fit-target', String(hw.fitTarget)); }
   const specType = dom.specTypeSelect?.value || '';
   if (specType) { args.push('--spec-type', specType); if (specType === 'draft-model' && dom.draftModelInput?.value) args.push('-md', `"${dom.draftModelInput.value}"`); }
   if (hw.kvUnified) args.push('--kv-unified');
@@ -2437,7 +2437,7 @@ function readHardwareState() {
   if (dom.cacheTypeVSelect) h.cacheTypeV = dom.cacheTypeVSelect.value || 'q8_0';
   if (dom.nCpuMoeInput) { const v = dom.nCpuMoeInput.value; h.nCpuMoe = v !== '' ? Number(v) : 0; }
   if (dom.tensorSplitInput) h.tensorSplit = dom.tensorSplitInput.value.trim() || '';
-  if (dom.fitCtxInput) { const v = Number(dom.fitCtxInput.value); h.fitCtx = v > 0 ? v : 1024; }
+  if (dom.fitTargetInput) { h.fitTarget = dom.fitTargetInput.value.trim() || ''; }
   if (dom.kvUnifiedCheck) h.kvUnified = dom.kvUnifiedCheck.checked;
   if (dom.ignoreEosCheck) h.ignoreEos = dom.ignoreEosCheck.checked;
 }
@@ -2703,7 +2703,7 @@ function renderScenarioCards(modelBytes, arch, availVram) {
   if (!dom.vramScenarios || !availVram || !modelBytes) return;
 
   const hw = wizardState.hardware;
-  const fitGran = hw.fitCtx || 1024;
+  const fitGran = 1024;
   const slots = hw.parallelSlots || 1;
   const ubatch = hw.ubatchSize || 512;
   const nCpuMoe = hw.nCpuMoe || 0;
@@ -3276,7 +3276,7 @@ async function triggerAutoSize() {
       available_vram_bytes: availVram,
       use_case: wizardState.useCase,
       parallel_slots: wizardState.hardware.parallelSlots,
-      fit_granularity: wizardState.hardware.fitCtx || 1024,
+      fit_granularity: 1024,
       quant: guessQuantFromName(wizardState.model.hfFile || wizardState.model.path || ''),
       n_layers:    arch.nLayers    || undefined,
       n_kv_heads:  arch.nKvHeads   || undefined,
@@ -3298,7 +3298,7 @@ async function triggerAutoSize() {
     wizardState.hardware.cacheTypeK  = r.kv_quant_k;
     wizardState.hardware.cacheTypeV  = r.kv_quant_v;
     wizardState.hardware.ubatchSize  = r.ubatch_size;
-    wizardState.hardware.fitCtx      = r.fit_ctx;
+
     if (r.n_cpu_moe != null) wizardState.hardware.nCpuMoe = r.n_cpu_moe;
 
     // Sync form fields
@@ -3306,7 +3306,7 @@ async function triggerAutoSize() {
     if (dom.cacheTypeKSelect) dom.cacheTypeKSelect.value  = r.kv_quant_k;
     if (dom.cacheTypeVSelect) dom.cacheTypeVSelect.value  = r.kv_quant_v;
     if (dom.ubatchSizeInput)  dom.ubatchSizeInput.value   = r.ubatch_size;
-    if (dom.fitCtxInput)      dom.fitCtxInput.value       = r.fit_ctx;
+    if (dom.fitTargetInput)   dom.fitTargetInput.value    = wizardState.hardware.fitTarget || '';
     if (r.n_cpu_moe != null && dom.nCpuMoeInput) dom.nCpuMoeInput.value = r.n_cpu_moe;
     if (r.n_cpu_moe != null && dom.moeOffloadSlider) dom.moeOffloadSlider.value = r.n_cpu_moe;
 
@@ -3730,7 +3730,7 @@ function renderSummary() {
     { label: 'KV quant (K/V)', value: `${ctxK.toUpperCase()} / ${ctxV.toUpperCase()}` },
     { label: 'KV cache',      value: kvSize > 0 ? formatGB(kvSize) : '—' },
     { label: 'Batch / ubatch', value: `${hw.batchSize} / ${hw.ubatchSize}` },
-    { label: '--fit-ctx',     value: String(hw.fitCtx || 1024) },
+    ...(hw.fitTarget ? [{ label: '--fit-target', value: String(hw.fitTarget) }] : []),
   ];
   if (hw.nCpuMoe > 0 && arch.nExperts > 0) rows.push({ label: 'MoE CPU offload', value: `${hw.nCpuMoe} of ${arch.nExperts} experts` });
   if (hw.tensorSplit) rows.push({ label: 'Tensor split', value: hw.tensorSplit });
@@ -4213,8 +4213,8 @@ function buildSpawnPayload() {
     draft_model: (dom.draftModelInput?.value || '').trim() || null,
     kv_unified: h.kvUnified || null,
     ignore_eos: !!h.ignoreEos,
-    fit_enabled: h.fitCtx ? true : null,
-    fit_ctx: h.fitCtx || null,
+    fit_enabled: h.fitTarget ? true : null,
+    fit_target: h.fitTarget || null,
     // Sampling defaults (null = use llama-server built-in defaults)
     temperature: h.temperature != null ? h.temperature : null,
     top_p: h.topP != null ? h.topP : null,
