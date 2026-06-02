@@ -106,5 +106,15 @@
   --color-gray-1: #9ca3af;
   --color-gray-2: #6b7280;
   --color-gray-3: #4b5563;
+  /* Primary shades need to be darker in light mode to stay readable */
+  --color-primary: #6366f1;
+  --color-primary-dark: #4338ca;
+  --color-primary-light: #4f46e5;
+  --color-success: #059669;
+  --color-warning: #d97706;
+  --color-error: #dc2626;
+  --color-info: #0284c7;
+  --shadow-floating: 0 26px 72px rgba(15, 23, 42, 0.18);
+  --gradient-primary: linear-gradient(160deg, #6366f1 0%, #8b5cf6 52%, #0284c7 100%);
   color-scheme: light;
 }
