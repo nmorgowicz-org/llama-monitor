@@ -1326,14 +1326,11 @@ function isUnifiedMemory() {
   return _platformInfo?.auto_backend === 'metal';
 }
 
-// On unified memory, the effective budget is free RAM minus an OS reserve.
+// On unified memory, the Metal cap IS the budget. macOS compresses other processes'
+// pages to give Metal up to cap bytes — that's the purpose of the cap.
+// The suggested cap (total − 8 GB) already reserves OS headroom, so we use the
+// cap directly rather than constraining by current free RAM.
 // On discrete GPU, the cached VRAM figure is the dedicated VRAM pool.
-//
-// The 6 GB OS reserve covers: macOS kernel, Metal driver, Spotlight, Safari caches,
-// and background agent activity. This is conservative — real usage is typically
-// 8–20 GB on an active development machine — but we rely on cachedRamUsed to
-// account for the actual in-use portion. The 6 GB reserve is just the floor
-// for burst headroom the OS needs even when "idle".
 // macOS Metal GPU wired memory cap (default, without sysctl tweak):
 //   ≤ 36 GB RAM → ~66% (2/3)  e.g. 24 GB → 16 GB
 //   > 36 GB RAM → ~75% (3/4)  e.g. 64 GB → 48 GB, 128 GB → 96 GB
@@ -1355,10 +1352,14 @@ function suggestedMetalLimitMb(ramTotal) {
   return suggested > Math.floor(currentCap / (1024 * 1024)) ? suggested : 0;
 }
 
-// 4 GB reserve for macOS kernel wired memory (~2–3 GB) + Metal driver baseline (~1 GB).
-// The Metal cap already handles the 25–33% OS headroom at the macro level;
-// this reserve is just for the wired kernel pages that can never be reclaimed.
-const APPLE_OS_RESERVE_BYTES = 4 * 1024 ** 3;
+// Metal driver initialization reserve (~512 MB).
+// sysinfo::used_memory() on macOS already includes wire_count (kernel wired pages),
+// so freeRam = total - used_memory already excludes wired kernel memory.
+// The Metal cap handles the macro OS headroom (25–33% of RAM).
+// This small reserve covers Metal driver startup allocations not yet reflected in
+// the pre-launch snapshot (argument tables, shader cache, command buffer pools).
+// Inference-time burst compute buffers are handled by computeHeadroom() separately.
+const APPLE_OS_RESERVE_BYTES = 512 * 1024 * 1024;
 
 // Discrete GPU headroom: 5% but capped at 1.5 GB — driver overhead is flat, not percentage-based
 const DISCRETE_MAX_HEADROOM_BYTES = 1.5 * 1024 ** 3;
@@ -1376,11 +1377,11 @@ function computeHeadroom(availVram) {
 function effectiveAvailBytes() {
   if (isUnifiedMemory() && cachedRamTotal > 0) {
     const cap = metalCap(cachedRamTotal);
-    const freeRam = cachedRamTotal - cachedRamUsed;
-    // Budget is the tighter of: Metal GPU wired cap OR currently free RAM.
-    // cachedRamUsed on macOS includes inactive pages (reclaimable) — this is conservative.
-    const budget = Math.min(cap, freeRam);
-    return Math.max(0, budget - APPLE_OS_RESERVE_BYTES);
+    // Use the Metal cap as the budget. The cap was configured to leave OS headroom
+    // (default: 75% of RAM; suggested sysctl: total − 8 GB). macOS compresses
+    // other processes' pages as needed to give Metal up to cap bytes — the snapshot
+    // free-RAM figure understates what's actually available on unified memory.
+    return Math.max(0, Math.min(cap, cachedRamTotal) - APPLE_OS_RESERVE_BYTES);
   }
   return cachedVram || wizardState.vram.available;
 }
@@ -2419,9 +2420,9 @@ function updateVramDisplay() {
   if (dom.vramPanelTotal) {
     if (availVram > 0) {
       if (isUnifiedMemory() && cachedRamTotal > 0) {
-        // Show "X GB available (of Y GB total)" so users understand the budget reflects free RAM
+        // Show "X GB Metal cap (of Y GB total)" — budget is the configured Metal cap, not free RAM
         dom.vramPanelTotal.textContent =
-          formatVramTotal(availVram) + ' available (of ' + formatVramTotal(cachedRamTotal) + ' total)';
+          formatVramTotal(availVram) + ' Metal cap (of ' + formatVramTotal(cachedRamTotal) + ' total)';
       } else {
         dom.vramPanelTotal.textContent = formatVramTotal(availVram) + ' total';
       }
