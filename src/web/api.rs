@@ -19,6 +19,7 @@ fn validate_hf_repo_id(repo_id: &str) -> bool {
 }
 
 fn get_effective_models_dir(state: &AppState) -> Option<PathBuf> {
+    // Prefer explicit --models-dir or user-configured models_dir
     if let Some(ref d) = state.models_dir {
         return Some(d.clone());
     }

@@ -148,13 +148,12 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');
 
-        const openBtn = page.locator('#spawn-wizard-btn, button:has-text("Spawn")').first();
-        if (!(await openBtn.isVisible({ timeout: 3000 }).catch(() => false))) {
-            test.skip();
-        }
-
-        // Open wizard.
-        await openBtn.click();
+        // Open wizard via JS helper (DOM open button is a hidden compat element).
+        await page.evaluate(async () => {
+            const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+            openSpawnWizard();
+        });
+        await expect(page.locator('#spawn-wizard-overlay')).toHaveClass(/open/);
 
         // Escape key should close the wizard.
         await page.keyboard.press('Escape');
