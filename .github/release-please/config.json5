@@ -80,7 +80,7 @@
   "bump-major-for-minor": false,
   "bump-patch-for-minor": false,
   "skip-github-release": false,
-  "release-as": "1.0.0",
+  "release-as": null,
   "initial-version": "0.1.0",
   "packages": {
     ".": {
