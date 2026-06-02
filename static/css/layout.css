@@ -1388,10 +1388,17 @@ body.chat-focus-mode .sidebar-nav {
   overflow: hidden;
 }
 
-/* Hide sidebar and cockpit metrics on welcome/setup screen */
+/* Collapse sidebar and cockpit metrics on welcome/setup screen */
 body.setup-active .sidebar-nav {
+  width: 0 !important;
+  min-width: 0 !important;
   opacity: 0;
+  overflow: hidden;
   pointer-events: none;
+}
+body.setup-active .content-area {
+  margin-left: 0 !important;
+  width: 100% !important;
 }
 body.setup-active .nav-center {
   opacity: 0;
