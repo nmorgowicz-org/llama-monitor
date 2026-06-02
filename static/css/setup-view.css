@@ -2807,6 +2807,33 @@ body.setup-active .sidebar-nav {
   background: rgba(255, 255, 255, 0.04);
   color: var(--color-text-muted);
   transition: all 180ms ease;
+}
+
+.launch-card-btn-trash {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 180ms ease;
+  flex-shrink: 0;
+}
+
+.launch-card-btn-trash:hover {
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(248, 113, 113, 0.1);
+  color: #f87171;
+  transform: translateY(-1px);
+}
+
+.launch-card-btn-trash:active {
+  transform: scale(0.95);
+}
   white-space: nowrap;
 }
 
@@ -3022,6 +3049,18 @@ body.setup-active .sidebar-nav {
 
 [data-theme="light"] .launch-card--new-primary .launch-card-new-label {
   color: #4338ca;
+}
+
+[data-theme="light"] .launch-card-btn-trash {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.12);
+  color: #6b7280;
+}
+
+[data-theme="light"] .launch-card-btn-trash:hover {
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.35);
+  color: #dc2626;
 }
 
 /* ── Light theme: setup orbs (tone down for light bg) ────────────────────── */
