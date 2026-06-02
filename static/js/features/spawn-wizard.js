@@ -3996,7 +3996,26 @@ function _bindThinkingFields() {
   };
   bindChk('spawn-enable-thinking', 'enableThinking');
   bindChk('spawn-preserve-thinking', 'preserveThinking');
-  bindSel('spawn-reasoning-mode', 'reasoningMode');
+  // Reasoning mode: auto-fill budget + message defaults when user selects "on"
+  const reasoningModeEl = document.getElementById('spawn-reasoning-mode');
+  if (reasoningModeEl && !reasoningModeEl.dataset.bound) {
+    reasoningModeEl.dataset.bound = '1';
+    reasoningModeEl.addEventListener('change', () => {
+      wizardState.hardware.reasoningMode = reasoningModeEl.value || null;
+      if (reasoningModeEl.value === 'on') {
+        const budgetEl  = document.getElementById('spawn-reasoning-budget');
+        const msgEl     = document.getElementById('spawn-reasoning-budget-message');
+        if (budgetEl && !budgetEl.value) {
+          budgetEl.value = '16384';
+          wizardState.hardware.reasoningBudget = 16384;
+        }
+        if (msgEl && !msgEl.value) {
+          msgEl.value = '\nFinal Answer:';
+          wizardState.hardware.reasoningBudgetMessage = '\nFinal Answer:';
+        }
+      }
+    });
+  }
   bindInput('spawn-reasoning-budget', 'reasoningBudget', true);
   bindInput('spawn-reasoning-budget-message', 'reasoningBudgetMessage');
 }
