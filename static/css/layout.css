@@ -458,6 +458,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
 }
 
 .nav-left {
@@ -488,7 +489,8 @@
 
 .nav-center {
   flex: 1;
-  max-width: 720px;
+  min-width: 0;
+  max-width: 580px;
 }
 
 .nav-cockpit {
@@ -582,7 +584,7 @@
 
 .nav-cockpit-spark {
   margin-left: auto;
-  width: 80px;
+  width: 54px;
   height: 20px;
   flex-shrink: 0;
   color: #8fbcbb;

@@ -159,9 +159,13 @@ export function renderLaunchGrid() {
 }
 
 function _buildLaunchCard(preset, activePresetId) {
+    const isExample = preset.id.startsWith('default-');
     const card = document.createElement('div');
     card.className = 'launch-card';
-    const isRunning = preset.id === activePresetId && activePresetId;
+    if (isExample) card.classList.add('launch-card--example');
+
+    // Examples can never be "running" — only user-created presets can match active session
+    const isRunning = !isExample && preset.id === activePresetId && activePresetId;
     if (isRunning) card.classList.add('launch-card--running');
 
     const modelFile = (preset.model_path || '').split(/[/\\]/).pop() ||
@@ -172,42 +176,65 @@ function _buildLaunchCard(preset, activePresetId) {
     const ctxDisplay = ctxK >= 1000 ? `${(ctxK / 1024).toFixed(1)}M ctx` : `${ctxK}k ctx`;
     const ctkDisplay = (preset.ctk || 'q8_0') + '/' + (preset.ctv || 'f16');
 
-    card.innerHTML = `
-        <div class="launch-card-top">
-            <div class="launch-card-name">${escapeHtml(preset.name)}</div>
-            ${isRunning ? '<span class="launch-card-running-badge">● Running</span>' : ''}
-        </div>
-        <div class="launch-card-model ${hasModel ? '' : 'launch-card-model--empty'}">${escapeHtml(modelFile || 'No model configured')}</div>
-        <div class="launch-card-chips">
-            <span class="launch-chip">${ctxDisplay}</span>
-            <span class="launch-chip">${ctkDisplay}</span>
-            ${preset.ngram_spec ? '<span class="launch-chip launch-chip--accent">n-gram</span>' : ''}
-        </div>
-        <div class="launch-card-actions">
-            <button class="launch-card-btn-edit" type="button">Edit</button>
-            <button class="launch-card-btn-start ${hasModel ? '' : 'launch-card-btn-start--configure'}" type="button">
-                ${hasModel ? '▶ Start' : '⚙ Configure'}
-            </button>
-        </div>
-    `;
-
-    card.querySelector('.launch-card-btn-edit').addEventListener('click', () => {
-        const mainSel = document.getElementById('preset-select');
-        if (mainSel) mainSel.value = preset.id;
-        import('./presets.js').then(({ openPresetModal }) => openPresetModal('edit'));
-    });
-
-    card.querySelector('.launch-card-btn-start').addEventListener('click', () => {
-        if (!hasModel) {
+    if (isExample) {
+        // Example card: dimmed, no edit button, use-wizard CTA only
+        card.innerHTML = `
+            <div class="launch-card-top">
+                <div class="launch-card-name">${escapeHtml(preset.name)}</div>
+                <span class="launch-card-example-badge">Example</span>
+            </div>
+            <div class="launch-card-model launch-card-model--empty">Configure a model to use this</div>
+            <div class="launch-card-chips">
+                <span class="launch-chip">${ctxDisplay}</span>
+                <span class="launch-chip">${ctkDisplay}</span>
+            </div>
+            <div class="launch-card-actions">
+                <button class="launch-card-btn-start launch-card-btn-start--configure" type="button">
+                    + New Configuration
+                </button>
+            </div>
+        `;
+        card.querySelector('.launch-card-btn-start').addEventListener('click', () => {
             import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
-            return;
-        }
-        const setupSel = document.getElementById('setup-preset-select');
-        if (setupSel) setupSel.value = preset.id;
-        const mainSel = document.getElementById('preset-select');
-        if (mainSel) mainSel.value = preset.id;
-        import('./attach-detach.js').then(({ doStartFromSetup }) => doStartFromSetup());
-    });
+        });
+    } else {
+        card.innerHTML = `
+            <div class="launch-card-top">
+                <div class="launch-card-name">${escapeHtml(preset.name)}</div>
+                ${isRunning ? '<span class="launch-card-running-badge">● Running</span>' : ''}
+            </div>
+            <div class="launch-card-model ${hasModel ? '' : 'launch-card-model--empty'}">${escapeHtml(modelFile || 'No model configured')}</div>
+            <div class="launch-card-chips">
+                <span class="launch-chip">${ctxDisplay}</span>
+                <span class="launch-chip">${ctkDisplay}</span>
+                ${preset.ngram_spec ? '<span class="launch-chip launch-chip--accent">n-gram</span>' : ''}
+            </div>
+            <div class="launch-card-actions">
+                <button class="launch-card-btn-edit" type="button">Edit</button>
+                <button class="launch-card-btn-start ${hasModel ? '' : 'launch-card-btn-start--configure'}" type="button">
+                    ${hasModel ? '▶ Start' : '⚙ Configure'}
+                </button>
+            </div>
+        `;
+
+        card.querySelector('.launch-card-btn-edit').addEventListener('click', () => {
+            const mainSel = document.getElementById('preset-select');
+            if (mainSel) mainSel.value = preset.id;
+            import('./presets.js').then(({ openPresetModal }) => openPresetModal('edit'));
+        });
+
+        card.querySelector('.launch-card-btn-start').addEventListener('click', () => {
+            if (!hasModel) {
+                import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
+                return;
+            }
+            const setupSel = document.getElementById('setup-preset-select');
+            if (setupSel) setupSel.value = preset.id;
+            const mainSel = document.getElementById('preset-select');
+            if (mainSel) mainSel.value = preset.id;
+            import('./attach-detach.js').then(({ doStartFromSetup }) => doStartFromSetup());
+        });
+    }
 
     return card;
 }

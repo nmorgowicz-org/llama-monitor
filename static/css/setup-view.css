@@ -2405,6 +2405,39 @@ body.setup-active .sidebar-nav {
   opacity: 1;
 }
 
+/* Example card: dimmed, no hover lift, clearly reference-only */
+.launch-card--example {
+  opacity: 0.45;
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.07);
+  background: transparent;
+  pointer-events: none; /* card click does nothing */
+}
+
+.launch-card--example .launch-card-btn-start {
+  pointer-events: all; /* but the CTA button still works */
+}
+
+.launch-card--example:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+.launch-card-example-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* Running card: pulsing accent border */
 .launch-card--running {
   border-color: rgba(99, 102, 241, 0.45) !important;
@@ -2422,11 +2455,11 @@ body.setup-active .sidebar-nav {
   50% { box-shadow: 0 6px 24px rgba(0,0,0,0.32), 0 0 0 4px rgba(99,102,241,0.08), inset 0 1px 0 rgba(255,255,255,0.06); }
 }
 
-/* New config card: dashed border, centered, open wizard on click */
+/* New config card: prominent CTA — filled accent style, not just dashed */
 .launch-card--new {
-  background: transparent;
-  border: 1.5px dashed rgba(255, 255, 255, 0.13);
-  box-shadow: none;
+  background: rgba(99, 102, 241, 0.07);
+  border: 1.5px solid rgba(99, 102, 241, 0.25);
+  box-shadow: 0 2px 12px rgba(99, 102, 241, 0.08), inset 0 1px 0 rgba(255,255,255,0.04);
   align-items: center;
   justify-content: center;
   min-height: 156px;
@@ -2434,43 +2467,49 @@ body.setup-active .sidebar-nav {
   gap: 12px;
 }
 
-.launch-card--new::before { display: none; }
-
-.launch-card--new:hover {
-  border-color: rgba(99, 102, 241, 0.45);
-  background: rgba(99, 102, 241, 0.04);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+.launch-card--new::before {
+  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.4) 40%, rgba(129, 140, 248, 0.5) 50%, rgba(99, 102, 241, 0.4) 60%, transparent);
+  opacity: 0.7;
 }
 
+.launch-card--new:hover {
+  border-color: rgba(99, 102, 241, 0.55);
+  background: rgba(99, 102, 241, 0.12);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.2), 0 0 0 1px rgba(99, 102, 241, 0.12);
+}
+
+.launch-card--new:hover::before { opacity: 1; }
+
 .launch-card-new-icon {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 12px;
-  background: rgba(99, 102, 241, 0.1);
-  border: 1px solid rgba(99, 102, 241, 0.2);
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(165, 180, 252, 0.8);
-  transition: background 200ms, border-color 200ms;
+  color: rgba(165, 180, 252, 0.9);
+  transition: background 200ms, border-color 200ms, transform 200ms;
 }
 
 .launch-card--new:hover .launch-card-new-icon {
-  background: rgba(99, 102, 241, 0.18);
-  border-color: rgba(99, 102, 241, 0.38);
+  background: rgba(99, 102, 241, 0.24);
+  border-color: rgba(99, 102, 241, 0.5);
   color: #c7d2fe;
+  transform: scale(1.08);
 }
 
 .launch-card-new-label {
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: rgba(165, 180, 252, 0.8);
   transition: color 200ms;
 }
 
 .launch-card--new:hover .launch-card-new-label {
-  color: var(--color-text-secondary);
+  color: #c7d2fe;
 }
 
 /* Skeleton loading state */
