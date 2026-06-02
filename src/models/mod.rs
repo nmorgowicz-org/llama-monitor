@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DiscoveredModel {
@@ -16,6 +17,8 @@ pub struct DiscoveredModel {
     pub vram_est_gb: Option<f32>,
     /// "standard" | "imatrix" | "ud" — for badge coloring.
     pub quant_style: Option<&'static str>,
+    /// Unix timestamp (seconds) of last modification.
+    pub last_modified: u64,
 }
 
 /// Scan a directory for .gguf model files.
@@ -45,7 +48,16 @@ pub fn scan_models_dir(dir: &Path) -> Result<Vec<DiscoveredModel>> {
             continue;
         }
 
-        let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue, // Skip files we can't read metadata for
+        };
+        let size_bytes = meta.len();
+        let last_modified = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs()))
+            .unwrap_or(0);
         let (model_name, quant_type) = parse_gguf_filename(&filename);
         let param_b = model_name.as_deref().and_then(infer_param_b);
         let quant_style = quant_type.as_deref().map(infer_quant_style);
@@ -64,6 +76,7 @@ pub fn scan_models_dir(dir: &Path) -> Result<Vec<DiscoveredModel>> {
             param_b,
             vram_est_gb,
             quant_style,
+            last_modified,
         });
     }
 

@@ -15,6 +15,11 @@ import {
     hfLoadQuickPicks,
 } from './hf-browse.js';
 
+const PREFS_KEY = 'llama-monitor-models-prefs';
+
+const ICON_LIST_VIEW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>';
+const ICON_CARDS_VIEW = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>';
+
 let initialized = false;
 
 // State for the HF download tab
@@ -24,6 +29,39 @@ let hfState = {
     currentDownloadId: null,
     initialized: false,
 };
+
+// Library preferences
+let prefs = loadPrefs();
+
+function loadPrefs() {
+    const def = {
+        viewMode: 'cards',
+        search: '',
+        sort: 'name-asc',
+        showMmproj: true,
+        showMain: true,
+        showSplit: true,
+        quantFilters: {},
+    };
+    try {
+        const raw = localStorage.getItem(PREFS_KEY);
+        if (raw) {
+            const saved = JSON.parse(raw);
+            return { ...def, ...saved };
+        }
+    } catch {
+        // ignore
+    }
+    return def;
+}
+
+function savePrefs() {
+    try {
+        localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+    } catch {
+        // ignore
+    }
+}
 
 export function openModelsModal() {
     document.getElementById('models-modal')?.classList.add('open');
@@ -49,7 +87,6 @@ async function loadModels() {
     grid.innerHTML = '<div class="mm-loading">Scanning...</div>';
 
     try {
-        // Use HF download-dir endpoint for the effective models directory
         const dirResp = await fetch('/api/hf/download-dir', {
             headers: window.authHeaders ? window.authHeaders() : {},
         });
@@ -73,18 +110,43 @@ async function loadModels() {
 
         const count = models.length;
         if (tabCount) tabCount.textContent = count ? String(count) : '';
-        if (summary) summary.textContent = count
-            ? count + ' model' + (count === 1 ? '' : 's') + ' found'
-            : 'No models found';
+
+        // Build toolbar with models list for quant chips
+        buildLibraryToolbar(models);
+
+        // Apply client-side filter/sort/search
+        const filtered = applyFilters(models);
+        const sorted = applySort(filtered);
+        const result = applySearch(sorted);
+
+        if (summary) {
+            if (result.length === count) {
+                summary.textContent = count
+                    ? count + ' model' + (count === 1 ? '' : 's') + ' found'
+                    : 'No models found';
+            } else {
+                summary.textContent = result.length + ' of ' + count + ' models shown';
+            }
+        }
 
         if (!count) {
             grid.innerHTML = '<div class="mm-empty">No models found in this directory. You can download one from the Download tab.</div>';
+            grid.className = 'mm-model-grid';
             return;
         }
 
-        // Build cards using DOM to avoid innerHTML with user data
+        if (!result.length) {
+            grid.innerHTML = '<div class="mm-empty">No models match the current filters or search.</div>';
+            grid.className = 'mm-model-grid';
+            return;
+        }
+
+        grid.className = prefs.viewMode === 'list'
+            ? 'mm-model-grid mm-model-grid--list'
+            : 'mm-model-grid';
+
         grid.innerHTML = '';
-        models.forEach(m => {
+        result.forEach(m => {
             grid.appendChild(buildModelCard(m));
         });
     } catch (err) {
@@ -97,16 +159,90 @@ async function loadModels() {
     }
 }
 
+function isMmproj(m) {
+    const f = (m.filename || '').toLowerCase();
+    return f.includes('mmproj') || f.includes('.mmproj.') || f.includes('-mmproj-');
+}
+
+function applyFilters(models) {
+    return models.filter(m => {
+        // mmproj vs main
+        const mmproj = isMmproj(m);
+        if (mmproj && !prefs.showMmproj) return false;
+        if (!mmproj && !prefs.showMain) return false;
+
+        // split
+        if (m.is_split && !prefs.showSplit) return false;
+
+        // quant filter
+        const qt = (m.quant_type || '').toUpperCase();
+        if (qt && Object.keys(prefs.quantFilters).length > 0) {
+            if (!prefs.quantFilters[qt]) return false;
+        }
+
+        return true;
+    });
+}
+
+function applySort(models) {
+    const mode = prefs.sort || 'name-asc';
+    return [...models].sort((a, b) => {
+        switch (mode) {
+            case 'name-asc':
+                return (a.model_name || a.filename || '').localeCompare(b.model_name || b.filename || '');
+            case 'name-desc':
+                return (b.model_name || b.filename || '').localeCompare(a.model_name || a.filename || '');
+            case 'size-asc':
+                return (a.size_bytes || 0) - (b.size_bytes || 0);
+            case 'size-desc':
+                return (b.size_bytes || 0) - (a.size_bytes || 0);
+            case 'vram-asc':
+                return (a.vram_est_gb || 0) - (b.vram_est_gb || 0);
+            case 'vram-desc':
+                return (b.vram_est_gb || 0) - (a.vram_est_gb || 0);
+            case 'date-asc':
+                return (a.last_modified || 0) - (b.last_modified || 0);
+            case 'date-desc':
+                return (b.last_modified || 0) - (a.last_modified || 0);
+            default:
+                return (a.model_name || a.filename || '').localeCompare(b.model_name || b.filename || '');
+        }
+    });
+}
+
+function applySearch(models) {
+    const q = (prefs.search || '').trim().toLowerCase();
+    if (!q) return models;
+    return models.filter(m => {
+        const haystack = [
+            m.model_name,
+            m.filename,
+            m.path,
+            m.quant_type,
+        ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+        return haystack.includes(q);
+    });
+}
+
 function buildModelCard(m) {
     const name = m.model_name || m.filename;
     const quant = m.quant_type || 'unknown';
     const size = m.size_display || '';
-    const vramEst = m.vram_estimate_display || '';
+    const vramEst = m.vram_est_gb != null
+        ? (typeof m.vram_estimate_display === 'string'
+            ? m.vram_estimate_display
+            : (m.vram_est_gb % 1 === 0 ? m.vram_est_gb + ' GB' : m.vram_est_gb.toFixed(1) + ' GB'))
+        : '';
     const vramPct = m.vram_percent != null ? Math.min(100, m.vram_percent) : null;
     const isSplit = m.is_split;
+    const mmproj = isMmproj(m);
 
     const card = document.createElement('div');
     card.className = 'mm-model-card';
+    if (mmproj) card.classList.add('mm-model-card--mmproj');
 
     // Top row: name + quant badge
     const top = document.createElement('div');
@@ -128,6 +264,13 @@ function buildModelCard(m) {
         splitBadge.className = 'mm-quant-badge mm-split-badge';
         splitBadge.textContent = 'split';
         top.appendChild(splitBadge);
+    }
+
+    if (mmproj) {
+        const mmBadge = document.createElement('span');
+        mmBadge.className = 'mm-quant-badge mm-mmproj-badge';
+        mmBadge.textContent = 'mmproj';
+        top.appendChild(mmBadge);
     }
 
     card.appendChild(top);
@@ -241,6 +384,212 @@ async function refreshModels() {
         if (btn) btn.classList.remove('spinning');
     }
     await loadModels();
+}
+
+// ── Library toolbar ───────────────────────────────────────────────────────────
+
+function buildLibraryToolbar(models) {
+    const container = document.getElementById('mm-library-toolbar');
+    if (!container) return;
+    container.innerHTML = '';
+
+    // Search input
+    const wrap = document.createElement('div');
+    wrap.className = 'mm-lib-search-wrap';
+
+    const searchIcon = document.createElement('span');
+    searchIcon.className = 'mm-lib-search-icon';
+    searchIcon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'mm-lib-search-input';
+    input.className = 'mm-lib-search-input';
+    input.placeholder = 'Search models...';
+    input.value = prefs.search || '';
+    input.setAttribute('autocomplete', 'off');
+
+    wrap.appendChild(searchIcon);
+    wrap.appendChild(input);
+    container.appendChild(wrap);
+
+    let lastSearch = null;
+    input.addEventListener('input', () => {
+        clearTimeout(lastSearch);
+        lastSearch = setTimeout(() => {
+            prefs.search = input.value;
+            savePrefs();
+            loadModels();
+        }, 250);
+    });
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            clearTimeout(lastSearch);
+            prefs.search = input.value;
+            savePrefs();
+            loadModels();
+        }
+    });
+
+    // Right-side controls
+    const right = document.createElement('div');
+    right.className = 'mm-lib-controls';
+
+    // Filters button (collapsible on small screens)
+    const filtersWrap = document.createElement('div');
+    filtersWrap.className = 'mm-lib-filters';
+
+    const filtersBtn = document.createElement('button');
+    filtersBtn.type = 'button';
+    filtersBtn.className = 'mm-lib-btn';
+    filtersBtn.id = 'mm-lib-filters-toggle';
+    filtersBtn.title = 'Filters';
+    filtersBtn.innerHTML =
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>';
+
+    const filtersPanel = document.createElement('div');
+    filtersPanel.className = 'mm-lib-filters-panel';
+    filtersPanel.id = 'mm-lib-filters-panel';
+
+    // Type filters
+    const typeRow = document.createElement('div');
+    typeRow.className = 'mm-lib-filter-row';
+
+    const typeLabel = document.createElement('span');
+    typeLabel.className = 'mm-lib-filter-label';
+    typeLabel.textContent = 'Type';
+
+    const mmprojChip = createChip('mmproj', prefs.showMmproj);
+    const mainChip = createChip('Main', prefs.showMain);
+    const splitChip = createChip('Split', prefs.showSplit);
+
+    mmprojChip.addEventListener('click', () => {
+        prefs.showMmproj = !prefs.showMmproj;
+        mmprojChip.classList.toggle('active', prefs.showMmproj);
+        savePrefs();
+        loadModels();
+    });
+    mainChip.addEventListener('click', () => {
+        prefs.showMain = !prefs.showMain;
+        mainChip.classList.toggle('active', prefs.showMain);
+        savePrefs();
+        loadModels();
+    });
+    splitChip.addEventListener('click', () => {
+        prefs.showSplit = !prefs.showSplit;
+        splitChip.classList.toggle('active', prefs.showSplit);
+        savePrefs();
+        loadModels();
+    });
+
+    typeRow.appendChild(typeLabel);
+    typeRow.appendChild(mmprojChip);
+    typeRow.appendChild(mainChip);
+    typeRow.appendChild(splitChip);
+    filtersPanel.appendChild(typeRow);
+
+    // Quant filters (dynamic from models list)
+    const quantRow = document.createElement('div');
+    quantRow.className = 'mm-lib-filter-row';
+
+    const quantLabel = document.createElement('span');
+    quantLabel.className = 'mm-lib-filter-label';
+    quantLabel.textContent = 'Quant';
+
+    const quantSet = new Set();
+    models.forEach(m => {
+        const qt = (m.quant_type || '').toUpperCase();
+        if (qt && qt !== 'UNKNOWN') quantSet.add(qt);
+    });
+
+    if (quantSet.size > 0 && quantSet.size <= 30) {
+        quantSet.forEach(qt => {
+            const chip = createChip(qt, prefs.quantFilters[qt] !== false);
+            chip.addEventListener('click', () => {
+                const active = !prefs.quantFilters[qt];
+                prefs.quantFilters[qt] = active;
+                chip.classList.toggle('active', active);
+                savePrefs();
+                loadModels();
+            });
+            quantRow.appendChild(chip);
+        });
+    }
+
+    filtersPanel.appendChild(quantRow);
+
+    filtersWrap.appendChild(filtersBtn);
+    filtersWrap.appendChild(filtersPanel);
+    right.appendChild(filtersWrap);
+
+    // Toggle filters panel
+    filtersBtn.addEventListener('click', () => {
+        filtersPanel.classList.toggle('open');
+    });
+
+    // Sort select
+    const sortWrap = document.createElement('div');
+    sortWrap.className = 'mm-lib-sort-wrap';
+
+    const sortSelect = document.createElement('select');
+    sortSelect.className = 'mm-lib-sort-select';
+    sortSelect.id = 'mm-lib-sort-select';
+    const sortOptions = [
+        { value: 'name-asc', label: 'Name A–Z' },
+        { value: 'name-desc', label: 'Name Z–A' },
+        { value: 'size-desc', label: 'Size (largest)' },
+        { value: 'size-asc', label: 'Size (smallest)' },
+        { value: 'vram-desc', label: 'VRAM (highest)' },
+        { value: 'vram-asc', label: 'VRAM (lowest)' },
+        { value: 'date-desc', label: 'Date (newest)' },
+        { value: 'date-asc', label: 'Date (oldest)' },
+    ];
+    sortOptions.forEach(o => {
+        const opt = document.createElement('option');
+        opt.value = o.value;
+        opt.textContent = o.label;
+        if (o.value === prefs.sort) opt.selected = true;
+        sortSelect.appendChild(opt);
+    });
+
+    sortSelect.addEventListener('change', () => {
+        prefs.sort = sortSelect.value;
+        savePrefs();
+        loadModels();
+    });
+
+    sortWrap.appendChild(sortSelect);
+    right.appendChild(sortWrap);
+
+    // View mode toggle
+    const viewBtn = document.createElement('button');
+    viewBtn.type = 'button';
+    viewBtn.className = 'mm-lib-btn';
+    viewBtn.id = 'mm-lib-view-toggle';
+    viewBtn.title = prefs.viewMode === 'cards' ? 'Switch to list view' : 'Switch to cards view';
+    // eslint-disable-next-line no-unsanitized/property -- static SVG, no user data
+    viewBtn.innerHTML = prefs.viewMode === 'cards' ? ICON_LIST_VIEW : ICON_CARDS_VIEW;
+
+    viewBtn.addEventListener('click', () => {
+        prefs.viewMode = prefs.viewMode === 'cards' ? 'list' : 'cards';
+        viewBtn.title = prefs.viewMode === 'cards' ? 'Switch to list view' : 'Switch to cards view';
+        // eslint-disable-next-line no-unsanitized/property -- static SVG, no user data
+        viewBtn.innerHTML = prefs.viewMode === 'cards' ? ICON_LIST_VIEW : ICON_CARDS_VIEW;
+        savePrefs();
+        loadModels();
+    });
+
+    right.appendChild(viewBtn);
+    container.appendChild(right);
+}
+
+function createChip(label, active) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'mm-lib-chip' + (active ? ' active' : '');
+    chip.textContent = label;
+    return chip;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

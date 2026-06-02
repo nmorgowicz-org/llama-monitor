@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "openwork",
+  "plugin": [
+    "opencode-chrome-devtools"
+  ],
+  "mcp": {
+    "computer-use": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "/Applications/OpenWork.app/Contents/Resources/helpers/OpenWork Computer Use.app/Contents/MacOS/ComputerUse",
+        "mcp"
+      ]
+    }
+  }
+}
