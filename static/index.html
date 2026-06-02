@@ -2785,6 +2785,11 @@
                                 <input type="text" id="spawn-tensor-split" placeholder="e.g. 1,1">
                                 <div class="field-hint">For multi-GPU load distribution.</div>
                             </div>
+                            <div class="hardware-field">
+                                <label for="spawn-cache-ram" title="-cram / --cache-ram: max size of the persistent KV prefix-cache in MiB. llama-server uses this to reuse KV states across requests. Default is 8192 MiB (8 GB) of system RAM. Set 0 to disable, -1 for no limit.">Prefix cache RAM <span class="label-badge">-cram</span></label>
+                                <input type="number" id="spawn-cache-ram" min="-1" step="256" placeholder="8192 (default)">
+                                <div class="field-hint">Max system RAM for KV prefix reuse across requests. Default: 8192 MiB. 0 = disable · −1 = no limit.</div>
+                            </div>
                             <div class="hardware-field" style="grid-column: 1/-1;">
                                 <label>Auto-fit context to memory</label>
                                 <div class="fit-target-row">
@@ -2887,7 +2892,7 @@
                     <!-- ── Animated VRAM breakdown (sticky sidebar) ──────────────── -->
                     <div class="vram-panel" id="vram-panel">
                         <div class="vram-panel-header">
-                            <span class="vram-panel-label">VRAM budget</span>
+                            <span class="vram-panel-label" id="vram-panel-label">VRAM budget</span>
                             <span class="vram-panel-total" id="vram-panel-total">— GB</span>
                         </div>
 
@@ -2947,6 +2952,26 @@
                                 Auto-size for me
                             </button>
                             <span class="vram-autosize-note" id="vram-autosize-note"></span>
+                        </div>
+
+                        <!-- RAM panel (discrete GPU only — hidden on unified memory systems) -->
+                        <div class="ram-panel" id="ram-panel" style="display:none;">
+                            <div class="vram-panel-header ram-panel-header">
+                                <span class="vram-panel-label">System RAM</span>
+                                <span class="vram-panel-total" id="ram-panel-total">— GB</span>
+                            </div>
+                            <div class="vram-bar" id="ram-bar" aria-label="System RAM usage bar">
+                                <div class="vram-segment seg-ram-used"  id="rseg-used"  style="width:0%" title="Already in use"></div>
+                                <div class="vram-segment seg-ram-moe"   id="rseg-moe"   style="width:0%" title="MoE expert offload"></div>
+                                <div class="vram-segment seg-ram-cram"  id="rseg-cram"  style="width:0%" title="Prefix cache (-cram)"></div>
+                                <div class="vram-segment seg-ram-free"  id="rseg-free"  style="width:0%" title="Free headroom"></div>
+                            </div>
+                            <div class="vram-legend">
+                                <span class="vleg-item"><span class="vleg-dot seg-ram-used"></span><span id="rleg-used-label">In use —</span></span>
+                                <span class="vleg-item" id="rleg-moe-item" style="display:none;"><span class="vleg-dot seg-ram-moe"></span><span id="rleg-moe-label">MoE —</span></span>
+                                <span class="vleg-item"><span class="vleg-dot seg-ram-cram"></span><span id="rleg-cram-label">Cache —</span></span>
+                                <span class="vleg-item"><span class="vleg-dot seg-ram-free"></span><span id="rleg-free-label">Free —</span></span>
+                            </div>
                         </div>
                     </div>
                 </div>

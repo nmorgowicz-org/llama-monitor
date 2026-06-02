@@ -174,6 +174,7 @@ export const wizardState = {
     nCpuMoe: 0,
     tensorSplit: '',
     fitTarget: '',
+    cacheRam: null,
     kvUnified: false,
     // MTP
     mtpEnabled: true,
@@ -357,6 +358,18 @@ function cacheDom() {
   dom.moeOffloadHint    = document.getElementById('moe-offload-hint');
   dom.vramAutosizeBtn  = document.getElementById('vram-autosize-btn');
   dom.vramAutosizeNote = document.getElementById('vram-autosize-note');
+  dom.vramPanelLabel   = document.getElementById('vram-panel-label');
+  dom.ramPanel         = document.getElementById('ram-panel');
+  dom.ramPanelTotal    = document.getElementById('ram-panel-total');
+  dom.rSegUsed  = document.getElementById('rseg-used');
+  dom.rSegMoe   = document.getElementById('rseg-moe');
+  dom.rSegCram  = document.getElementById('rseg-cram');
+  dom.rSegFree  = document.getElementById('rseg-free');
+  dom.rLegUsed  = document.getElementById('rleg-used-label');
+  dom.rLegMoeItem = document.getElementById('rleg-moe-item');
+  dom.rLegMoe   = document.getElementById('rleg-moe-label');
+  dom.rLegCram  = document.getElementById('rleg-cram-label');
+  dom.rLegFree  = document.getElementById('rleg-free-label');
 
   dom.modeGuidedBtn = document.getElementById('spawn-mode-guided');
   dom.modeRawBtn    = document.getElementById('spawn-mode-raw');
@@ -386,6 +399,7 @@ function cacheDom() {
   dom.kvUnifiedCheck  = document.getElementById('spawn-kv-unified');
   dom.fitEnableCheck  = document.getElementById('spawn-fit-enable');
   dom.fitTargetWrap   = document.getElementById('spawn-fit-target-wrap');
+  dom.cacheRamInput   = document.getElementById('spawn-cache-ram');
 
   // Step 4
   dom.summaryList      = document.getElementById('spawn-summary-list');
@@ -558,7 +572,7 @@ function bindEvents() {
     dom.batchSizeInput, dom.ubatchSizeInput, dom.parallelSlotsInput,
     dom.cacheTypeKSelect, dom.cacheTypeVSelect, dom.nCpuMoeInput,
     dom.tensorSplitInput, dom.specTypeSelect, dom.draftModelInput,
-    dom.kvUnifiedCheck, dom.fitEnableCheck, dom.fitTargetInput,
+    dom.kvUnifiedCheck, dom.fitEnableCheck, dom.fitTargetInput, dom.cacheRamInput,
   ].forEach(el => {
     el?.addEventListener('input', onHardwareChange);
     el?.addEventListener('change', onHardwareChange);
@@ -1021,6 +1035,7 @@ function updateRawScript() {
   const specType = dom.specTypeSelect?.value || '';
   if (specType) { args.push('--spec-type', specType); if (specType === 'draft-model' && dom.draftModelInput?.value) args.push('-md', `"${dom.draftModelInput.value}"`); }
   if (hw.kvUnified) args.push('--kv-unified');
+  if (hw.cacheRam !== null && hw.cacheRam !== undefined) args.push('--cache-ram', String(hw.cacheRam));
   dom.rawCodeArea.textContent = 'llama-server \\\n  ' + args.join(' \\\n  ');
 }
 
@@ -1078,7 +1093,7 @@ function showStep(index) {
   if (index === 2) {
     // Entering hardware step — refresh VRAM, then render model context + new sections
     updateCtxModelMaxHint();
-    fetchGpuVram().then(() => {
+    Promise.all([fetchGpuVram(), fetchSystemRam()]).then(() => {
       scheduleVramUpdate();
       renderHardwareModelHeader();
     });
@@ -1325,6 +1340,19 @@ async function doIntrospect(path) {
 // ── GPU VRAM query ────────────────────────────────────────────────────────────
 
 let cachedVram = 0;
+let cachedRamTotal = 0;
+let cachedRamUsed  = 0;
+
+async function fetchSystemRam() {
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const resp = await fetch('/metrics/system', { headers });
+    if (!resp.ok) return;
+    const d = await resp.json();
+    cachedRamTotal = (d.ram_total_gb || 0) * 1024 * 1024 * 1024;
+    cachedRamUsed  = (d.ram_used_gb  || 0) * 1024 * 1024 * 1024;
+  } catch {}
+}
 
 async function fetchGpuVram() {
   try {
@@ -2445,6 +2473,10 @@ function readHardwareState() {
     h.fitTarget = dom.fitTargetInput.value.trim() || '';
   }
   if (dom.kvUnifiedCheck) h.kvUnified = dom.kvUnifiedCheck.checked;
+  if (dom.cacheRamInput) {
+    const v = dom.cacheRamInput.value.trim();
+    h.cacheRam = v !== '' ? parseInt(v, 10) : null;
+  }
 }
 
 export function scheduleVramUpdate() {
@@ -2666,6 +2698,55 @@ function updateVramDisplay() {
   // Legacy VRAM pill (backward compat)
   if (dom.vramPill || dom.vramEstimateText) {
     updateLegacyVramPill(total, availVram);
+  }
+
+  // Unified memory label (Apple Silicon / DGX Spark — VRAM and RAM are the same pool)
+  const isUnified = _platformInfo?.auto_backend === 'metal';
+  if (dom.vramPanelLabel) {
+    dom.vramPanelLabel.textContent = isUnified ? 'Unified Memory' : 'VRAM budget';
+  }
+
+  // RAM bar — only shown on discrete GPU systems; on unified the VRAM bar already covers it
+  if (dom.ramPanel) {
+    if (isUnified || cachedRamTotal === 0) {
+      dom.ramPanel.style.display = 'none';
+    } else {
+      dom.ramPanel.style.display = '';
+      const cramMib = (hw.cacheRam !== null && hw.cacheRam !== undefined) ? hw.cacheRam : 8192;
+      const cramBytes = cramMib < 0 ? 0 : cramMib * 1024 * 1024;
+      const ramDenom = cachedRamTotal;
+      const inUsePct   = cachedRamUsed / ramDenom;
+      const moePct     = ramBytes / ramDenom;
+      const cramPct    = cramBytes / ramDenom;
+      const freePct    = Math.max(0, (cachedRamTotal - cachedRamUsed - ramBytes - cramBytes) / ramDenom);
+      setSegWidth(dom.rSegUsed, inUsePct);
+      setSegWidth(dom.rSegMoe,  moePct);
+      setSegWidth(dom.rSegCram, cramPct);
+      setSegWidth(dom.rSegFree, freePct);
+      const totalNeeded = cachedRamUsed + ramBytes + cramBytes;
+      const isOver = totalNeeded > cachedRamTotal;
+      if (dom.ramPanelTotal) {
+        dom.ramPanelTotal.textContent = formatVramTotal(cachedRamTotal) + ' total';
+      }
+      if (dom.rLegUsed)  dom.rLegUsed.textContent  = `In use ${formatGB(cachedRamUsed)}`;
+      if (dom.rLegCram) {
+        const cramLabel = cramMib < 0 ? 'no limit' : `${formatGB(cramBytes)}`;
+        dom.rLegCram.textContent = `Cache ${cramLabel}`;
+      }
+      if (ramBytes > 0) {
+        if (dom.rLegMoeItem) dom.rLegMoeItem.style.display = '';
+        if (dom.rLegMoe) dom.rLegMoe.textContent = `MoE ${formatGB(ramBytes)}`;
+      } else {
+        if (dom.rLegMoeItem) dom.rLegMoeItem.style.display = 'none';
+      }
+      const freeBytes = cachedRamTotal - totalNeeded;
+      if (dom.rLegFree) {
+        dom.rLegFree.textContent = isOver
+          ? `Over ${formatGB(Math.abs(freeBytes))}`
+          : `Free ${formatGB(freeBytes)}`;
+      }
+      if (dom.ramPanel) dom.ramPanel.classList.toggle('over-budget', isOver);
+    }
   }
 }
 
@@ -3764,6 +3845,10 @@ function renderSummary() {
   }
   if (hw.kvUnified) rows.push({ label: 'KV unified', value: 'Yes' });
   if (hw.fitTarget) rows.push({ label: '--fit-target', value: `${hw.fitTarget} MB` });
+  if (hw.cacheRam !== null && hw.cacheRam !== undefined) {
+    const cramDisplay = hw.cacheRam < 0 ? 'no limit' : hw.cacheRam === 0 ? 'disabled' : `${hw.cacheRam} MiB`;
+    rows.push({ label: '-cram', value: cramDisplay });
+  }
   if (wizardState.access.apiKey) rows.push({ label: 'Server API key', value: `${wizardState.access.apiKey.slice(0, 4)}…${wizardState.access.apiKey.slice(-4)}` });
 
   // Summary list header
@@ -4218,6 +4303,7 @@ function buildSpawnPayload() {
     kv_unified: h.kvUnified || null,
     fit_enabled: h.fitTarget ? true : null,
     fit_target: h.fitTarget || null,
+    cache_ram_mib: (h.cacheRam !== null && h.cacheRam !== undefined) ? h.cacheRam : null,
     // Sampling defaults (null = use llama-server built-in defaults)
     temperature: h.temperature != null ? h.temperature : null,
     top_p: h.topP != null ? h.topP : null,

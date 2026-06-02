@@ -2593,6 +2593,29 @@
 .seg-overhead { background: linear-gradient(135deg, #374151, #4b5563); }
 .seg-free     { background: linear-gradient(135deg, #065f46, #047857); transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1); }
 .seg-free.over-budget { background: linear-gradient(135deg, #7f1d1d, #991b1b); }
+/* RAM bar segments */
+.seg-ram-used { background: linear-gradient(135deg, #374151, #4b5563); }
+.seg-ram-moe  { background: linear-gradient(135deg, #92400e, #d97706); }
+.seg-ram-cram { background: linear-gradient(135deg, #312e81, #4338ca); }
+.seg-ram-free { background: linear-gradient(135deg, #065f46, #047857); transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1); }
+/* RAM panel spacing */
+.ram-panel { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
+.ram-panel.over-budget .ram-panel-header .vram-panel-total { color: #ef4444; }
+.ram-panel-header { margin-bottom: 0; }
+/* Monospace flag badge inline in field labels */
+.label-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 1px 5px;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+[data-theme="light"] .label-badge { background: rgba(0,0,0,0.05); }
 
 /* Bar pulse when near limit */
 .vram-bar.tight   { box-shadow: 0 0 0 1px rgba(245,158,11,0.5); }

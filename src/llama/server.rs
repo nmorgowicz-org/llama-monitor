@@ -143,6 +143,9 @@ pub struct ServerConfig {
     pub kv_unified: Option<bool>,
     #[serde(default)]
     pub cache_idle_slots: Option<bool>,
+    /// -cram / --cache-ram N: max KV prefix-cache in MiB. Default: 8192. -1 = no limit, 0 = disable.
+    #[serde(default)]
+    pub cache_ram_mib: Option<i32>,
     // Fit
     #[serde(default)]
     pub fit_enabled: Option<bool>,
@@ -613,6 +616,9 @@ pub async fn start_server(
         } else {
             cmd.arg("--no-cache-idle-slots");
         }
+    }
+    if let Some(v) = config.cache_ram_mib {
+        cmd.arg("--cache-ram").arg(v.to_string());
     }
 
     // Fit

@@ -47,6 +47,7 @@ export function getConfig() {
         rope_freq_scale: p.rope_freq_scale ?? null,
         spec_type: p.spec_type || null,
         kv_unified: p.kv_unified ?? null,
+        cache_ram_mib: p.cache_ram_mib ?? null,
         draft_model: p.draft_model || '',
         draft_min: p.draft_min ?? null,
         draft_max: p.draft_max ?? null,
