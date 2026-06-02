@@ -5005,12 +5005,28 @@
             <span class="llama-version-current-build" id="llama-version-current-build">—</span>
         </div>
         <div class="llama-version-modal-body">
-            <div class="llama-version-list-header">
-                <span>Recent Releases</span>
-                <span class="llama-version-list-hint">Select a build to install</span>
-            </div>
-            <div class="llama-version-list" id="llama-version-list">
-                <div class="llama-version-loading">Loading releases…</div>
+            <div class="llama-version-panes">
+                <!-- Left: release list -->
+                <div class="llama-version-pane-list">
+                    <div class="llama-version-list-header">
+                        <span>Recent Releases</span>
+                        <span class="llama-version-list-hint">Click for notes</span>
+                    </div>
+                    <div class="llama-version-list" id="llama-version-list">
+                        <div class="llama-version-loading">Loading releases…</div>
+                    </div>
+                </div>
+                <!-- Right: release notes -->
+                <div class="llama-version-pane-notes" id="llama-version-notes-pane">
+                    <div class="llama-version-notes-empty" id="llama-version-notes-empty">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                        <span>Select a release to view notes</span>
+                    </div>
+                    <div class="llama-version-notes-content" id="llama-version-notes-content" style="display:none;">
+                        <div class="llama-version-notes-tag" id="llama-version-notes-tag"></div>
+                        <div class="llama-version-notes-body markdown-body" id="llama-version-notes-body"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

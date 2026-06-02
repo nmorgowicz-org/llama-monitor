@@ -39,6 +39,8 @@ pub struct LlamaCppRelease {
     pub assets: Vec<LlamaCppAsset>,
     #[serde(default)]
     pub published_at: String,
+    #[serde(default)]
+    pub body: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

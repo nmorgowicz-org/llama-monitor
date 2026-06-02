@@ -9852,6 +9852,7 @@ fn api_llama_binary_releases(
                                     "tag": r.tag_name,
                                     "build": build,
                                     "published_at": r.published_at,
+                                    "body": r.body,
                                 })
                             })
                             .collect();

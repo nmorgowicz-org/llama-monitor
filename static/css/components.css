@@ -1582,8 +1582,8 @@ button:disabled {
 }
 
 .llama-version-modal-shell {
-  width: min(440px, 94vw);
-  max-height: min(72vh, 560px);
+  width: min(860px, 94vw);
+  max-height: min(76vh, 600px);
   display: flex;
   flex-direction: column;
   background:
@@ -1700,10 +1700,149 @@ button:disabled {
 .llama-version-modal-body {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 10px 0 8px;
   position: relative;
   z-index: 2;
+}
+
+.llama-version-panes {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.llama-version-pane-list {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid rgba(255,255,255,0.07);
+  overflow-y: auto;
+}
+
+.llama-version-pane-notes {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.llama-version-notes-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  opacity: 0.5;
+}
+
+.llama-version-notes-empty svg {
+  opacity: 0.4;
+}
+
+.llama-version-notes-content {
+  padding: 16px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.llama-version-notes-tag {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+.llama-version-notes-body {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.llama-version-notes-body h1,
+.llama-version-notes-body h2,
+.llama-version-notes-body h3 {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin: 12px 0 4px;
+}
+
+.llama-version-notes-body h1:first-child,
+.llama-version-notes-body h2:first-child,
+.llama-version-notes-body h3:first-child {
+  margin-top: 0;
+}
+
+.llama-version-notes-body ul,
+.llama-version-notes-body ol {
+  padding-left: 16px;
+  margin: 4px 0;
+}
+
+.llama-version-notes-body li {
+  margin: 2px 0;
+}
+
+.llama-version-notes-body p {
+  margin: 4px 0;
+}
+
+.llama-version-notes-body code {
+  font-family: var(--font-mono, 'Fira Code', monospace);
+  font-size: 11px;
+  background: rgba(255,255,255,0.07);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.llama-version-notes-body pre {
+  background: rgba(0,0,0,0.25);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-size: 11px;
+  margin: 6px 0;
+}
+
+.llama-version-notes-body a {
+  color: #a5b4fc;
+  text-decoration: none;
+}
+
+.llama-version-notes-body a:hover {
+  text-decoration: underline;
+}
+
+.llama-version-notes-body strong {
+  color: var(--color-text-primary);
+}
+
+.llama-version-notes-none {
+  color: var(--color-text-muted);
+  font-style: italic;
+  opacity: 0.6;
+}
+
+.llama-version-row--selected {
+  background: rgba(99,102,241,0.1);
+  border-color: rgba(99,102,241,0.25);
+}
+
+[data-theme="light"] .llama-version-notes-body code {
+  background: rgba(0,0,0,0.06);
+}
+
+[data-theme="light"] .llama-version-notes-body pre {
+  background: rgba(0,0,0,0.04);
 }
 
 .llama-version-list-header {
