@@ -3908,6 +3908,7 @@ pub fn api_routes(
 
     let llama_binary_routes = api_llama_binary_version(app_config.clone())
         .or(api_llama_binary_latest(app_config.clone()))
+        .or(api_llama_binary_releases(app_config.clone()))
         .or(api_llama_binary_platform_info(app_config.clone()))
         .or(api_llama_binary_update(app_config.clone()));
 
@@ -9737,6 +9738,87 @@ fn api_llama_binary_latest(
         })
 }
 
+/// GET /api/llama-binary/releases — lists the last 8 llama.cpp releases for the version picker
+fn api_llama_binary_releases(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::LazyLock;
+    use tokio::sync::Mutex;
+
+    static RELEASES_CACHE: LazyLock<Mutex<Option<(std::time::Instant, serde_json::Value)>>> =
+        LazyLock::new(|| Mutex::new(None));
+
+    warp::path!("api" / "llama-binary" / "releases")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                // Check 30-minute cache
+                {
+                    let guard = RELEASES_CACHE.lock().await;
+                    if let Some((ts, ref cached)) = *guard
+                        && ts.elapsed() < std::time::Duration::from_secs(30 * 60)
+                    {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(cached),
+                        ));
+                    }
+                }
+
+                let client = match reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(20))
+                    .user_agent("llama-monitor")
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "error": format!("Failed to create HTTP client: {}", e)
+                            })),
+                        ));
+                    }
+                };
+
+                match crate::llama::llama_cpp_downloader::list_releases(&client).await {
+                    Ok(releases) => {
+                        let items: Vec<serde_json::Value> = releases
+                            .into_iter()
+                            .take(8)
+                            .map(|r| {
+                                let build: Option<u64> =
+                                    r.tag_name.trim_start_matches('b').parse().ok();
+                                serde_json::json!({
+                                    "tag": r.tag_name,
+                                    "build": build,
+                                    "published_at": r.published_at,
+                                })
+                            })
+                            .collect();
+                        let result = serde_json::json!({ "releases": items });
+                        {
+                            let mut guard = RELEASES_CACHE.lock().await;
+                            *guard = Some((std::time::Instant::now(), result.clone()));
+                        }
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&result),
+                        ))
+                    }
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "error": format!("Failed to fetch releases: {}", e)
+                        })),
+                    )),
+                }
+            }
+        })
+}
+
 /// GET /api/llama-binary/platform-info — returns platform/backend info for the download UI
 fn api_llama_binary_platform_info(
     app_config: Arc<AppConfig>,
@@ -9904,6 +9986,13 @@ fn api_llama_binary_update(
                     .to_string();
                 let backend = backend_owned.as_str();
 
+                // Caller may specify a specific tag (e.g. "b4567") to install a previous build.
+                let requested_tag: Option<String> = _body
+                    .get("tag")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
+
                 let arch_str = match arch {
                     "aarch64" => "arm64",
                     "x86_64" => "x86_64",
@@ -9926,7 +10015,7 @@ fn api_llama_binary_update(
                     }
                 };
 
-                // Fetch latest release list and take the first (most recent)
+                // Fetch release list; pick specific tag if requested, otherwise take latest.
                 let mut releases =
                     match crate::llama::llama_cpp_downloader::list_releases(&client).await {
                         Ok(r) => r,
@@ -9949,7 +10038,21 @@ fn api_llama_binary_update(
                     ));
                 }
 
-                let release = releases.remove(0);
+                let release = if let Some(ref wanted) = requested_tag {
+                    match releases.iter().position(|r| &r.tag_name == wanted) {
+                        Some(idx) => releases.remove(idx),
+                        None => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "ok": false,
+                                    "error": format!("Tag {} not found in the last {} releases", wanted, releases.len())
+                                })),
+                            ));
+                        }
+                    }
+                } else {
+                    releases.remove(0)
+                };
                 let tag = release.tag_name.clone();
 
                 let assets =

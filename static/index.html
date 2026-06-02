@@ -210,21 +210,24 @@
                     <div class="setup-orb setup-orb-3"></div>
                 </div>
 
-                <!-- Header: brand + Models toolbar btn -->
+                <!-- Header: brand + toolbar -->
                 <div class="setup-header">
                     <div class="setup-brand">
                         <div class="setup-logo">
-                            <svg width="36" height="36" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M16 2C8.268 2 2 8.268 2 16C2 23.732 8.268 30 16 30C23.732 30 30 23.732 30 16C30 8.268 23.732 2 16 2ZM16 26C10.477 26 6 21.523 6 16C6 10.477 10.477 6 16 6C21.523 6 26 10.477 26 16C26 21.523 21.523 26 16 26Z" fill="var(--theme-primary)"/>
                                 <path d="M16 12C14.6739 12 13.4021 12.5268 12.4645 13.4645C11.5268 14.4021 11 15.6739 11 17C11 18.3261 11.5268 19.5979 12.4645 20.5355C13.4021 21.4732 14.6739 22 16 22C17.3261 22 18.5979 21.4732 19.5355 20.5355C20.4732 19.5979 21 18.3261 21 17C21 15.6739 20.4732 14.4021 19.5355 13.4645C18.5979 12.5268 17.3261 12 16 12ZM16 20C14.9391 20 13.9217 19.5786 13.1716 18.8284C12.4214 18.0783 12 17.0609 12 16C12 14.9391 12.4214 13.9217 13.1716 13.1716C13.9217 12.4214 14.9391 12 16 12C17.0609 12 18.0783 12.4214 18.8284 13.1716C19.5786 13.9217 20 14.9391 20 16C20 17.0609 19.5786 18.0783 18.8284 18.8284C18.0783 19.5786 17.0609 20 16 20Z" fill="white"/>
                             </svg>
                         </div>
                         <div class="setup-brand-text">
-                            <h1 class="setup-brand-title">Llama Monitor</h1>
                             <p class="setup-brand-sub">Local inference, fully observed</p>
                         </div>
                     </div>
                     <div class="setup-toolbar">
+                        <button class="setup-toolbar-btn setup-toolbar-btn-ghost" id="setup-llama-version-btn" title="Manage llama.cpp binary version" style="display:none;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/></svg>
+                            <span id="setup-llama-version-text">llama.cpp</span>
+                        </button>
                         <button class="setup-toolbar-btn" id="setup-models-btn" title="Browse and download models">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                             Models
@@ -4665,6 +4668,34 @@
         <div class="command-palette-results" id="command-palette-results"></div>
         <div class="command-palette-footer">
             <span class="command-palette-hint">↑↓ navigate · enter select · esc close</span>
+        </div>
+    </div>
+</div>
+
+<!-- llama.cpp Version Picker Modal -->
+<div class="modal-overlay" id="llama-version-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="llama-version-modal-title">
+    <div class="llama-version-modal-shell">
+        <div class="llama-version-modal-header">
+            <div class="llama-version-modal-title-row">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/></svg>
+                <h2 class="llama-version-modal-title" id="llama-version-modal-title">llama.cpp Version</h2>
+            </div>
+            <button class="llama-version-modal-close" id="llama-version-modal-close" type="button" aria-label="Close">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="llama-version-modal-current" id="llama-version-modal-current">
+            <span class="llama-version-current-label">Installed</span>
+            <span class="llama-version-current-build" id="llama-version-current-build">—</span>
+        </div>
+        <div class="llama-version-modal-body">
+            <div class="llama-version-list-header">
+                <span>Recent Releases</span>
+                <span class="llama-version-list-hint">Select a build to install</span>
+            </div>
+            <div class="llama-version-list" id="llama-version-list">
+                <div class="llama-version-loading">Loading releases…</div>
+            </div>
         </div>
     </div>
 </div>

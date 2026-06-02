@@ -1127,12 +1127,10 @@ button:disabled {
 /* ── llama-server binary pill ─────────────────────────────────────────────── */
 
 .llama-pill-idle {
-  /* matches .top-nav-pill but muted — just informational */
   opacity: 0.65;
 }
 
 .llama-pill-update {
-  /* amber/update available — matches warning color */
   background: rgba(245,158,11,0.15) !important;
   border-color: rgba(245,158,11,0.4) !important;
   color: #f59e0b !important;
@@ -1143,4 +1141,300 @@ button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
   pointer-events: none;
+}
+
+/* Setup toolbar update state */
+.setup-toolbar-btn-update {
+  background: rgba(245, 158, 11, 0.12) !important;
+  border-color: rgba(245, 158, 11, 0.45) !important;
+  color: #f59e0b !important;
+  box-shadow: 0 2px 10px rgba(245, 158, 11, 0.15) !important;
+}
+.setup-toolbar-btn-update:hover {
+  background: rgba(245, 158, 11, 0.2) !important;
+  border-color: rgba(245, 158, 11, 0.65) !important;
+  box-shadow: 0 4px 18px rgba(245, 158, 11, 0.25) !important;
+}
+
+/* ── llama.cpp Version Picker Modal ──────────────────────────────────────── */
+
+#llama-version-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0.52) 0%, rgba(0,0,0,0.76) 100%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+#llama-version-modal.open {
+  display: flex;
+}
+
+.llama-version-modal-shell {
+  width: min(440px, 94vw);
+  max-height: min(72vh, 560px);
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(circle at 16% 16%, rgba(99, 102, 241, 0.13), transparent 30%),
+    radial-gradient(circle at 84% 84%, rgba(245, 158, 11, 0.08), transparent 28%),
+    linear-gradient(160deg, rgba(36, 44, 56, 0.96), rgba(24, 30, 42, 0.99));
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 18px;
+  box-shadow:
+    0 20px 56px rgba(0, 0, 0, 0.55),
+    0 4px 16px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(24px);
+  animation: llama-vm-in 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  overflow: hidden;
+  position: relative;
+}
+
+.llama-version-modal-shell::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 5%, rgba(99, 102, 241, 0.5) 30%, rgba(255, 255, 255, 0.22) 50%, rgba(99, 102, 241, 0.5) 70%, transparent 95%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+@keyframes llama-vm-in {
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.llama-version-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.06), transparent);
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+}
+
+.llama-version-modal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #a5b4fc;
+}
+
+.llama-version-modal-title {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  background: linear-gradient(135deg, #a5b4fc, #67e8f9);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.llama-version-modal-close {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background 150ms ease, color 150ms ease;
+}
+.llama-version-modal-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--color-text-primary);
+}
+
+.llama-version-modal-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 20px;
+  background: rgba(99, 102, 241, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.llama-version-current-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+.llama-version-current-build {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.llama-version-current-build.llama-version-has-update {
+  color: #f59e0b;
+}
+
+.llama-version-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 0 8px;
+  position: relative;
+  z-index: 2;
+}
+
+.llama-version-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  opacity: 0.6;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  margin-bottom: 4px;
+}
+
+.llama-version-list-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+
+.llama-version-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 10px;
+}
+
+.llama-version-loading {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.llama-version-error {
+  color: #f87171;
+}
+
+.llama-version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.llama-version-row:hover {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+.llama-version-row--current {
+  background: rgba(99, 102, 241, 0.06);
+  border-color: rgba(99, 102, 241, 0.18);
+}
+
+.llama-version-row-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.llama-version-row-tag {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.llama-version-row-badges {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.llama-version-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.llama-version-badge--latest {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: #a5b4fc;
+}
+
+.llama-version-badge--installed {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #34d399;
+}
+
+.llama-version-row-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.llama-version-row-age {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  opacity: 0.65;
+}
+
+.llama-version-install-btn {
+  padding: 4px 12px;
+  border-radius: 7px;
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  background: rgba(99, 102, 241, 0.1);
+  color: #a5b4fc;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, transform 120ms ease;
+  white-space: nowrap;
+}
+
+.llama-version-install-btn:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.22);
+  border-color: rgba(99, 102, 241, 0.6);
+  transform: translateY(-1px);
+}
+
+.llama-version-install-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

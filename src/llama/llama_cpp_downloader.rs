@@ -37,6 +37,8 @@ fn backend_matches(name: &str, backend: &str) -> bool {
 pub struct LlamaCppRelease {
     pub tag_name: String,
     pub assets: Vec<LlamaCppAsset>,
+    #[serde(default)]
+    pub published_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
