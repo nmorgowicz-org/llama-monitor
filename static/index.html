@@ -2964,7 +2964,7 @@
                                 <span>Preserve thinking in multi-turn</span>
                             </label>
                         </div>
-                        <div class="sampling-params-grid" style="margin-top:10px;">
+                        <div class="thinking-row-grid">
                             <div class="sampling-field">
                                 <label for="spawn-reasoning-mode" title="--reasoning on|off|auto. Controls thinking block activation.">Reasoning</label>
                                 <select id="spawn-reasoning-mode">
@@ -2974,12 +2974,12 @@
                                 </select>
                             </div>
                             <div class="sampling-field">
-                                <label for="spawn-reasoning-budget" title="--reasoning-budget N. Token budget for thinking. -1 = unlimited, 0 = disabled.">Reasoning budget (tokens)</label>
+                                <label for="spawn-reasoning-budget" title="--reasoning-budget N. Token budget for thinking. -1 = unlimited, 0 = disabled.">Budget (tokens)</label>
                                 <input type="number" id="spawn-reasoning-budget" min="-1" step="1024" placeholder="-1 (unlimited)">
                             </div>
-                            <div class="sampling-field" style="grid-column: span 2;">
+                            <div class="sampling-field">
                                 <label for="spawn-reasoning-budget-message" title="--reasoning-budget-message STRING. Text appended after the thinking block.">Budget message</label>
-                                <input type="text" id="spawn-reasoning-budget-message" placeholder="e.g. &#10;Final Answer:">
+                                <input type="text" id="spawn-reasoning-budget-message" placeholder="e.g. Final Answer:">
                             </div>
                         </div>
                     </div>
@@ -3021,13 +3021,11 @@
 
                     <div class="summary-list" id="spawn-summary-list"></div>
                     <div class="summary-warnings" id="spawn-summary-warnings" style="display:none;"></div>
-                    <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+                    <div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; align-items:center;">
                         <button type="button" class="btn-wizard-secondary" id="spawn-save-preset-btn">
                             Save as Preset
                         </button>
-                        <button type="button" class="btn-wizard-tertiary" id="spawn-health-check-btn" style="display:none;">
-                            Run Health Check
-                        </button>
+                        <span id="spawn-saved-preset-name" style="font-size:12px;color:var(--color-text-muted);display:none;"></span>
                     </div>
                 </div>
                 <div class="wizard-sidebar">

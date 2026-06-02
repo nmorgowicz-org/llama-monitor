@@ -390,7 +390,7 @@ function cacheDom() {
   dom.summaryList      = document.getElementById('spawn-summary-list');
   dom.summaryWarnings  = document.getElementById('spawn-summary-warnings');
   dom.savePresetBtn    = document.getElementById('spawn-save-preset-btn');
-  dom.healthCheckBtn   = document.getElementById('spawn-health-check-btn');
+  dom.savedPresetName  = document.getElementById('spawn-saved-preset-name');
   dom.portInput        = document.getElementById('spawn-port');
   dom.bindHostSelect   = document.getElementById('spawn-bind-host');
   dom.apiKeyInput      = document.getElementById('spawn-api-key');
@@ -584,7 +584,6 @@ function bindEvents() {
   dom.vramAutosizeBtn?.addEventListener('click', triggerAutoSize);
 
   dom.savePresetBtn?.addEventListener('click', saveAsPreset);
-  dom.healthCheckBtn?.addEventListener('click', runHealthCheck);
   dom.spawnServerBtn?.addEventListener('click', spawnServer);
   dom.modeGuidedBtn?.addEventListener('click', () => setMode('guided'));
   dom.modeRawBtn?.addEventListener('click', () => setMode('raw'));
@@ -595,12 +594,15 @@ function bindEvents() {
   dom.portInput?.addEventListener('input', () => {
     const parsed = parseInt(dom.portInput.value, 10);
     wizardState.access.port = Number.isFinite(parsed) && parsed > 0 ? parsed : 8001;
+    if (wizardState.currentStep === 3) renderSummary();
   });
   dom.bindHostSelect?.addEventListener('change', () => {
     wizardState.access.bindHost = dom.bindHostSelect.value || '127.0.0.1';
+    if (wizardState.currentStep === 3) renderSummary();
   });
   dom.apiKeyInput?.addEventListener('input', () => {
     wizardState.access.apiKey = (dom.apiKeyInput.value || '').trim();
+    if (wizardState.currentStep === 3) renderSummary();
   });
 
   // Hardware step quant swap
@@ -3775,7 +3777,7 @@ function renderSummary() {
       dom.summaryWarnings.style.display = 'none';
     }
   }
-  if (dom.healthCheckBtn) dom.healthCheckBtn.style.display = '';
+  // (health check button removed — it checked the currently-running server, not the new config)
 
   // Add step shortcuts for last-minute changes
   const editRow = document.createElement('div');
@@ -3930,6 +3932,10 @@ async function saveAsPreset() {
     const resp = await fetch('/api/presets', { method: 'POST', headers, body: JSON.stringify(payload) });
     if (!resp.ok) { showToast('Save preset failed: ' + await resp.text().catch(()=>''), 'error'); return; }
     showToast(`Preset "${name}" saved`, 'success');
+    if (dom.savedPresetName) {
+      dom.savedPresetName.textContent = `Saved as "${name}"`;
+      dom.savedPresetName.style.display = '';
+    }
   } catch (err) { showToast('Save preset failed: ' + (err.message || String(err)), 'error'); }
 }
 
@@ -3995,7 +4001,12 @@ async function spawnServer() {
   try {
     const payload = buildSpawnPayload();
     setStatusText('Starting llama-server…'); setProgress(30);
-    const headers = window.authHeaders ? { ...window.authHeaders(), 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+    // /api/sessions/spawn requires the db-admin-token, not the llama-server API token.
+    const tokenResp = await fetch('/api/db/admin-token');
+    const tokenData = tokenResp.ok ? await tokenResp.json().catch(() => ({})) : {};
+    const adminToken = tokenData.token;
+    if (!adminToken) { throw new Error('Authentication required. Could not retrieve admin token.'); }
+    const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` };
     const resp = await fetch('/api/sessions/spawn', { method: 'POST', headers, body: JSON.stringify(payload) });
     setProgress(60);
     if (!resp.ok) { const t = await resp.text().catch(()=>'Unknown error'); throw new Error(t || `HTTP ${resp.status}`); }

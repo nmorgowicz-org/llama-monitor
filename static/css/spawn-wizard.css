@@ -3790,6 +3790,43 @@
   gap: 10px;
   margin-top: 8px;
 }
+
+/* Three-column fixed grid for the thinking/reasoning row so all three
+   controls (Reasoning mode, Budget, Budget message) sit on one line. */
+.thinking-row-grid {
+  display: grid;
+  grid-template-columns: 160px 160px 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+/* Premium info callout for field hints in the sampling/network sections */
+.sampling-params-section .field-hint {
+  font-size: 12px;
+  color: var(--color-text-muted, #94a3b8);
+  background: rgba(99, 102, 241, 0.05);
+  border-left: 3px solid rgba(99, 102, 241, 0.25);
+  border-radius: 0 6px 6px 0;
+  padding: 7px 12px;
+  margin-top: 8px;
+  line-height: 1.5;
+}
+.sampling-params-section .field-hint code {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  background: rgba(255,255,255,0.07);
+  border-radius: 3px;
+  padding: 1px 4px;
+  color: var(--color-text-secondary, #cbd5e1);
+}
+[data-theme="light"] .sampling-params-section .field-hint {
+  background: rgba(99, 102, 241, 0.04);
+  border-left-color: rgba(99, 102, 241, 0.3);
+}
+[data-theme="light"] .sampling-params-section .field-hint code {
+  background: rgba(0,0,0,0.06);
+  color: #374151;
+}
 .sampling-field {
   display: flex;
   flex-direction: column;
