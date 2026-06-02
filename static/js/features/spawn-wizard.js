@@ -393,6 +393,7 @@ function cacheDom() {
   dom.draftModelInput = document.getElementById('spawn-draft-model');
   dom.kvUnifiedCheck  = document.getElementById('spawn-kv-unified');
   dom.fitEnableCheck  = document.getElementById('spawn-fit-enable');
+  dom.fitEnableLabel  = dom.fitEnableCheck?.closest('label');
   dom.fitTargetWrap   = document.getElementById('spawn-fit-target-wrap');
   dom.cacheRamInput   = document.getElementById('spawn-cache-ram');
 
@@ -572,6 +573,9 @@ function bindEvents() {
     el?.addEventListener('input', onHardwareChange);
     el?.addEventListener('change', onHardwareChange);
   });
+
+  // Prevent the fit toggle label's click from bubbling to the overlay
+  dom.fitEnableLabel?.addEventListener('click', e => e.stopPropagation());
 
   dom.gpuLayersSelect?.addEventListener('change', () => {
     wizardState.hardware.gpuLayers = dom.gpuLayersSelect.value;
@@ -2807,7 +2811,7 @@ function renderScenarioCards(modelBytes, arch, availVram) {
 
         updateVramDisplay();
       };
-      card.addEventListener('click', applyScenario);
+      card.addEventListener('click', e => { e.stopPropagation(); applyScenario(); });
       card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); applyScenario(); } });
     }
 

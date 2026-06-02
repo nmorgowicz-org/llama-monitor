@@ -1,227 +1,208 @@
-// ── Local Models Modal ────────────────────────────────────────────────────────
-// Scans discovered local GGUF files and presents them as launch-ready cards.
+// ── Models ────────────────────────────────────────────────────────────────────
+// Models modal: open, close, load, refresh, delete.
 
 import { escapeHtml } from '../core/format.js';
-import { sessionState } from '../core/app-state.js';
 import { showToast } from './toast.js';
-import { openSpawnWizard } from './spawn-wizard.js';
 
 let initialized = false;
-let switchModelMode = false;
 
 export function openModelsModal() {
-    switchModelMode = false;
     document.getElementById('models-modal')?.classList.add('open');
     loadModels();
 }
 
 export function openModelsModalForSwitch() {
-    switchModelMode = true;
-    document.getElementById('models-modal')?.classList.add('open');
-    loadModels();
+    openModelsModal();
 }
 
 function closeModelsModal() {
-    switchModelMode = false;
     document.getElementById('models-modal')?.classList.remove('open');
 }
 
-// ── Data loading ──────────────────────────────────────────────────────────────
-
 async function loadModels() {
-    const list = document.getElementById('models-list');
+    const grid = document.getElementById('models-list');
     const summary = document.getElementById('models-summary');
-    const hint = document.getElementById('models-no-dir-hint');
-    if (!list || !summary) return;
+    const tabCount = document.getElementById('models-tab-count');
+    const dirLabel = document.getElementById('models-dir-label');
+    if (!grid) return;
 
-    summary.textContent = 'Scanning…';
-    if (hint) hint.style.display = 'none';
-    list.innerHTML = '<div class="models-loading">Scanning for GGUF files…</div>';
+    if (summary) summary.textContent = 'Loading...';
+    grid.innerHTML = '<div class="mm-loading">Scanning...</div>';
 
     try {
+        // Fetch settings to show models dir
+        const settingsResp = await fetch('/api/settings', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
+        if (settingsResp.ok) {
+            const settings = await settingsResp.json();
+            if (dirLabel) {
+                dirLabel.textContent = settings.models_dir || 'No models directory configured';
+            }
+        }
+
         const resp = await fetch('/api/models', {
             headers: window.authHeaders ? window.authHeaders() : {},
         });
         const models = await resp.json();
-        window.__lastDiscoveredModels = Array.isArray(models) ? models : [];
 
-        if (!models.length) {
-            summary.textContent = 'No models found';
-            if (hint) hint.style.display = '';
-            list.innerHTML = '<div class="models-empty">No GGUF files discovered. Configure a models directory in Settings or add model paths to a preset.</div>';
+        const count = models.length;
+        if (tabCount) tabCount.textContent = count ? String(count) : '';
+        if (summary) summary.textContent = count
+            ? count + ' model' + (count === 1 ? '' : 's') + ' found'
+            : 'No models found';
+
+        if (!count) {
+            grid.innerHTML = '<div class="mm-empty">No models discovered. Configure a models directory in Settings.</div>';
             return;
         }
 
-        summary.textContent = `${models.length} model${models.length === 1 ? '' : 's'} found`;
-        list.innerHTML = '';
-        for (const m of models) {
-            list.appendChild(buildModelCard(m));
-        }
+        // Build cards using DOM to avoid innerHTML with user data
+        grid.innerHTML = '';
+        models.forEach(m => {
+            grid.appendChild(buildModelCard(m));
+        });
     } catch (err) {
-        summary.textContent = 'Failed to scan';
-        list.innerHTML = `<div class="models-empty">Error: ${escapeHtml(err.message)}</div>`;
+        if (summary) summary.textContent = 'Failed to load models';
+        const errDiv = document.createElement('div');
+        errDiv.className = 'mm-empty';
+        errDiv.textContent = 'Error: ' + err.message;
+        grid.innerHTML = '';
+        grid.appendChild(errDiv);
     }
 }
 
-// ── Card rendering ────────────────────────────────────────────────────────────
-
 function buildModelCard(m) {
+    const name = m.model_name || m.filename;
+    const quant = m.quant_type || 'unknown';
+    const size = m.size_display || '';
+    const vramEst = m.vram_estimate_display || '';
+    const vramPct = m.vram_percent != null ? Math.min(100, m.vram_percent) : null;
+    const isSplit = m.is_split;
+
     const card = document.createElement('div');
-    card.className = 'model-card';
+    card.className = 'mm-model-card';
 
-    const name = m.model_name || m.filename.replace(/\.gguf$/i, '');
-    const quant = m.quant_type || null;
-    const quantStyle = m.quant_style || 'standard';
-    const paramStr = m.param_b != null ? formatParams(m.param_b) : null;
-    const vramStr = m.vram_est_gb != null ? `~${m.vram_est_gb.toFixed(0)} GB VRAM` : null;
-
-    // Header row: name + quant badge
-    const header = document.createElement('div');
-    header.className = 'model-card-header';
+    // Top row: name + quant badge
+    const top = document.createElement('div');
+    top.className = 'mm-card-top';
 
     const nameEl = document.createElement('div');
-    nameEl.className = 'model-card-name';
+    nameEl.className = 'mm-card-name';
+    nameEl.title = m.path || '';
     nameEl.textContent = name;
-    nameEl.title = m.path || m.filename;
-    header.appendChild(nameEl);
+    top.appendChild(nameEl);
 
-    if (quant) {
-        const badge = document.createElement('span');
-        badge.className = `model-card-quant quant-style-${quantStyle}`;
-        badge.textContent = quant;
-        header.appendChild(badge);
+    const badge = document.createElement('span');
+    badge.className = 'mm-quant-badge';
+    badge.textContent = quant;
+    top.appendChild(badge);
+
+    if (isSplit) {
+        const splitBadge = document.createElement('span');
+        splitBadge.className = 'mm-quant-badge mm-split-badge';
+        splitBadge.textContent = 'split';
+        top.appendChild(splitBadge);
     }
-    card.appendChild(header);
 
-    // Meta row: file size + params + VRAM
+    card.appendChild(top);
+
+    // Meta row: filename
     const meta = document.createElement('div');
-    meta.className = 'model-card-meta';
-    const metaParts = [m.size_display, paramStr, vramStr, m.is_split ? 'split' : null].filter(Boolean);
-    meta.textContent = metaParts.join(' · ');
+    meta.className = 'mm-card-meta';
+    meta.textContent = m.filename || '';
     card.appendChild(meta);
 
-    // VRAM fit bar (if we have an estimate)
-    if (m.vram_est_gb != null) {
-        card.appendChild(buildVramBar(m.vram_est_gb));
+    // Stats row
+    if (size || vramEst) {
+        const stats = document.createElement('div');
+        stats.className = 'mm-card-stats';
+        if (size) {
+            const sizeEl = document.createElement('span');
+            sizeEl.className = 'mm-stat';
+            sizeEl.textContent = size;
+            stats.appendChild(sizeEl);
+        }
+        if (vramEst) {
+            const vramEl = document.createElement('span');
+            vramEl.className = 'mm-stat mm-stat-vram';
+            vramEl.textContent = 'VRAM ~' + vramEst;
+            stats.appendChild(vramEl);
+        }
+        card.appendChild(stats);
     }
 
-    // Actions
+    // VRAM bar
+    if (vramPct !== null) {
+        const barWrap = document.createElement('div');
+        barWrap.className = 'mm-vram-bar';
+        const fill = document.createElement('div');
+        fill.className = 'mm-vram-fill';
+        fill.style.width = vramPct + '%';
+        if (vramPct > 90) fill.classList.add('mm-vram-fill--warn');
+        barWrap.appendChild(fill);
+        card.appendChild(barWrap);
+    }
+
+    // Actions row
     const actions = document.createElement('div');
-    actions.className = 'model-card-actions';
+    actions.className = 'mm-card-actions';
 
-    const spawnBtn = document.createElement('button');
-    spawnBtn.type = 'button';
-    spawnBtn.className = 'btn-sm btn-model-spawn';
-    if (switchModelMode) {
-        spawnBtn.textContent = 'Use This Model';
-        spawnBtn.title = 'Stop the running server and restart with this model';
-        spawnBtn.addEventListener('click', () => switchToModel(m.path || m.filename));
-    } else {
-        spawnBtn.textContent = 'Spawn';
-        spawnBtn.title = 'Open spawn wizard with this model pre-loaded';
-        spawnBtn.addEventListener('click', () => spawnLocalModel(m.path || m.filename));
-    }
-    actions.appendChild(spawnBtn);
-
-    const pathBtn = document.createElement('button');
-    pathBtn.type = 'button';
-    pathBtn.className = 'btn-sm btn-preset';
-    pathBtn.textContent = 'Copy path';
-    pathBtn.addEventListener('click', () => {
-        navigator.clipboard?.writeText(m.path || m.filename)
-            .then(() => showToast('Path copied', 'success'))
-            .catch(() => showToast('Copy failed', 'error'));
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'mm-action-btn mm-action-copy';
+    copyBtn.title = 'Copy path';
+    copyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy Path';
+    const pathToCopy = m.path || '';
+    copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(pathToCopy).then(() => {
+            showToast('Path copied', 'success');
+        }).catch(() => {
+            showToast('Copy failed', 'error');
+        });
     });
-    actions.appendChild(pathBtn);
+    actions.appendChild(copyBtn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'mm-action-btn mm-action-delete';
+    deleteBtn.title = 'Delete model file';
+    deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+    deleteBtn.addEventListener('click', () => deleteModel(m.path, m.filename || name));
+    actions.appendChild(deleteBtn);
 
     card.appendChild(actions);
     return card;
 }
 
-function formatParams(paramB) {
-    if (paramB >= 1000) return `${(paramB / 1000).toFixed(1)}T`;
-    if (paramB % 1 === 0) return `${paramB}B`;
-    return `${paramB.toFixed(1)}B`;
-}
-
-function buildVramBar(vramGb) {
-    const tiers = [8, 16, 24, 48, 80]; // common VRAM tiers
-    const maxTier = tiers.find(t => t >= vramGb) || tiers[tiers.length - 1];
-    const pct = Math.min(100, (vramGb / maxTier) * 100);
-    const fits = vramGb <= 24; // conservative: show green if fits in 24 GB
-
-    const wrap = document.createElement('div');
-    wrap.className = 'model-vram-bar-wrap';
-
-    const label = document.createElement('span');
-    label.className = 'model-vram-label';
-    label.textContent = `VRAM: ~${vramGb.toFixed(0)} GB`;
-    wrap.appendChild(label);
-
-    const track = document.createElement('div');
-    track.className = 'model-vram-track';
-    const fill = document.createElement('div');
-    fill.className = `model-vram-fill ${fits ? 'fits' : 'large'}`;
-    fill.style.width = `${pct}%`;
-    track.appendChild(fill);
-    wrap.appendChild(track);
-
-    return wrap;
-}
-
-// ── Spawn integration ─────────────────────────────────────────────────────────
-
-function spawnLocalModel(filePath) {
-    closeModelsModal();
-    const model = (window.__lastDiscoveredModels || []).find(m => (m.path || m.filename) === filePath) || null;
-    // Open spawn wizard and pre-load the local file path into step 2.
-    openSpawnWizard({ localPath: filePath, localModel: model });
-}
-
-// ── Switch Model ──────────────────────────────────────────────────────────────
-
-async function switchToModel(filePath) {
-    closeModelsModal();
-
-    const presetId = document.getElementById('preset-select')?.value;
-    if (!presetId) { showToast('No preset selected', 'warn'); return; }
-
-    const preset = (sessionState.presets || []).find(p => p.id === presetId);
-    if (!preset) { showToast('Preset not found', 'error'); return; }
-
-    const headers = window.authHeaders
-        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
-        : { 'Content-Type': 'application/json' };
+async function deleteModel(path, filename) {
+    if (!confirm('Delete ' + filename + '?\n\nThis will permanently remove the file from disk.')) return;
 
     try {
-        // Update the preset's model_path
-        const updated = { ...preset, model_path: filePath };
-        const resp = await fetch(`/api/presets/${encodeURIComponent(presetId)}`, {
-            method: 'PUT', headers, body: JSON.stringify(updated),
+        const resp = await fetch('/api/models/file', {
+            method: 'DELETE',
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path }),
         });
-        if (!resp.ok) { showToast('Failed to update preset: ' + await resp.text().catch(() => ''), 'error'); return; }
-
-        // Refresh in-memory preset list
-        const { loadPresets } = await import('./presets.js');
-        await loadPresets(presetId);
-
-        // Stop then restart
-        const { doStop, doStart } = await import('./attach-detach.js');
-        await doStop();
-        await new Promise(r => setTimeout(r, 600));
-        doStart();
-
-        showToast(`Switching to ${filePath.split(/[/\\]/).pop()}…`, 'success');
+        if (!resp.ok) {
+            const err = await resp.text().catch(() => 'Unknown error');
+            showToast('Delete failed: ' + err, 'error');
+            return;
+        }
+        showToast('Model deleted', 'success');
+        await loadModels();
     } catch (err) {
-        showToast('Switch failed: ' + (err.message || String(err)), 'error');
+        showToast('Delete failed: ' + err.message, 'error');
     }
 }
 
-// ── Refresh ───────────────────────────────────────────────────────────────────
-
 async function refreshModels() {
     const summary = document.getElementById('models-summary');
-    if (summary) summary.textContent = 'Refreshing…';
+    if (summary) summary.textContent = 'Refreshing...';
+    const btn = document.getElementById('models-refresh-btn');
+    if (btn) btn.classList.add('spinning');
     try {
         const resp = await fetch('/api/models/refresh', {
             method: 'POST',
@@ -231,31 +212,63 @@ async function refreshModels() {
         if (!data.ok) showToast('Model refresh failed: ' + (data.error || 'unknown'), 'error');
     } catch (err) {
         showToast('Model refresh failed: ' + err.message, 'error');
+    } finally {
+        if (btn) btn.classList.remove('spinning');
     }
     await loadModels();
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────────
+// ── Public API ────────────────────────────────────────────────────────────────
 
 export function initModels() {
     if (initialized) return;
     initialized = true;
 
-    document.getElementById('models-modal-close')?.addEventListener('click', closeModelsModal);
-    document.getElementById('models-modal-cancel')?.addEventListener('click', closeModelsModal);
-    document.getElementById('models-refresh-btn')?.addEventListener('click', refreshModels);
-    document.getElementById('models-open-settings-link')?.addEventListener('click', () => {
-        closeModelsModal();
-        import('./settings.js').then(({ openSettingsModal }) => {
-            openSettingsModal();
-            setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
+    // Bind modal close buttons
+    const closeBtn = document.getElementById('models-modal-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeModelsModal);
+
+    const cancelBtn = document.getElementById('models-modal-cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', closeModelsModal);
+
+    const refreshBtn = document.getElementById('models-refresh-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', refreshModels);
+
+    // Tab switching
+    document.querySelectorAll('#models-modal .mm-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const target = tab.dataset.tab;
+            document.querySelectorAll('#models-modal .mm-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('#models-modal .mm-tab-panel').forEach(p => p.classList.remove('active'));
+            tab.classList.add('active');
+            const panel = document.querySelector('#models-modal .mm-tab-panel[data-tab="' + target + '"]');
+            if (panel) panel.classList.add('active');
         });
     });
 
-    // Auto-refresh when models_dir is updated via settings
-    window.addEventListener('settings-applied', () => {
-        if (document.getElementById('models-modal')?.classList.contains('open')) {
-            loadModels();
-        }
-    });
+    // HF browse button
+    const hfBtn = document.getElementById('mm-hf-browse-btn');
+    if (hfBtn) {
+        hfBtn.addEventListener('click', () => {
+            closeModelsModal();
+            showToast('Open the Spawn Wizard to browse HuggingFace models', 'info');
+        });
+    }
+
+    // Configure settings link
+    const settingsLink = document.getElementById('models-open-settings-link');
+    if (settingsLink) {
+        settingsLink.addEventListener('click', () => {
+            closeModelsModal();
+            if (typeof window.openSettingsModal === 'function') window.openSettingsModal('models');
+        });
+    }
+
+    // Modal overlay click to close
+    const modal = document.getElementById('models-modal');
+    if (modal) {
+        modal.addEventListener('click', e => {
+            if (e.target === modal) closeModelsModal();
+        });
+    }
 }

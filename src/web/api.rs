@@ -3599,6 +3599,7 @@ pub fn api_routes(
     let delete_template = api_delete_template(state.clone(), app_config.clone());
     let get_models = api_get_models(state.clone(), app_config.clone());
     let refresh_models = api_refresh_models(state.clone(), app_config.clone());
+    let delete_model_file = api_delete_model_file(state.clone(), app_config.clone());
     let get_gpu_env = api_get_gpu_env(state.clone(), app_config.clone());
     let put_gpu_env = api_put_gpu_env(state.clone(), app_config.clone());
     let get_settings = api_get_settings(state.clone(), app_config.clone());
@@ -3794,7 +3795,7 @@ pub fn api_routes(
         .or(create_template)
         .or(update_template)
         .or(delete_template);
-    let model_routes = get_models.or(refresh_models);
+    let model_routes = get_models.or(refresh_models).or(delete_model_file);
     let config_routes = get_gpu_env
         .or(put_gpu_env)
         .or(get_settings_full)
@@ -5421,6 +5422,60 @@ fn api_refresh_models(
                 futures_util::future::ready(Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                     Box::new(warp::reply::json(&serde_json::json!({"ok": false, "error": "no models directory configured (use --models-dir)"}))),
                 ))
+            }
+        })
+}
+
+/// DELETE /api/models/file — delete a .gguf file from disk and remove from in-memory cache
+fn api_delete_model_file(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "file")
+        .and(warp::delete())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            let st = state.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let path_str = match body.get("path").and_then(|v| v.as_str()) {
+                    Some(p) => p.to_string(),
+                    None => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"ok": false, "error": "missing path"})),
+                        ));
+                    }
+                };
+
+                if !path_str.to_lowercase().ends_with(".gguf") {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": "only .gguf files can be deleted"}),
+                        ),
+                    ));
+                }
+
+                let path = std::path::Path::new(&path_str);
+                match std::fs::remove_file(path) {
+                    Ok(_) => {
+                        // Remove from in-memory cache so UI reflects the deletion immediately
+                        let mut models = st.discovered_models.lock().unwrap();
+                        models.retain(|m| m.path.to_str() != Some(&path_str));
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({"ok": true})),
+                        ))
+                    }
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": format!("Failed to delete: {e}")}),
+                        ),
+                    )),
+                }
             }
         })
 }

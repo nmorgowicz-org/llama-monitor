@@ -17,12 +17,6 @@ function intOrNull(id) { const v = document.getElementById(id).value; return v !
 function floatOrNull(id) { const v = document.getElementById(id).value; return v !== '' ? parseFloat(v) : null; }
 function strVal(id) { return document.getElementById(id).value.trim(); }
 
-// Returns user-created presets only if any exist; otherwise falls back to examples.
-function _visiblePresets(presets) {
-    const userPresets = presets.filter(p => !p.id.startsWith('default-'));
-    return userPresets.length > 0 ? userPresets : presets;
-}
-
 function clearFieldErrors() {
     document.querySelectorAll('#preset-form .field-error').forEach(el => el.classList.remove('field-error'));
 }
@@ -54,8 +48,7 @@ export async function loadPresets(selectId) {
 
     const sel = document.getElementById('preset-select');
     sel.innerHTML = '';
-    const visiblePresets = _visiblePresets(sessionState.presets);
-    visiblePresets.forEach(p => {
+    sessionState.presets.forEach(p => {
         const opt = document.createElement('option');
         opt.value = p.id;
         opt.textContent = p.name;
@@ -63,10 +56,10 @@ export async function loadPresets(selectId) {
     });
 
     const targetId = selectId ?? (saved?.preset_id || null);
-    if (targetId && visiblePresets.find(p => p.id === targetId)) {
+    if (targetId && sessionState.presets.find(p => p.id === targetId)) {
         sel.value = targetId;
-    } else if (visiblePresets.length > 0) {
-        sel.value = visiblePresets[0].id;
+    } else if (sessionState.presets.length > 0) {
+        sel.value = sessionState.presets[0].id;
     }
 
     if (selectId === undefined && saved) {
@@ -75,9 +68,6 @@ export async function loadPresets(selectId) {
     if (selectId === undefined) {
         saveSettings();
     }
-
-    // Keep the setup view preset dropdown in sync
-    import('./setup-view.js').then(m => m.syncSetupPresetSelect?.()).catch(() => {});
 }
 
 // ── Modal ──────────────────────────────────────────────────────────────────────
@@ -85,6 +75,7 @@ export async function loadPresets(selectId) {
 export function openPresetModal(mode) {
     const modal = document.getElementById('preset-modal');
     const title = document.getElementById('modal-title');
+    const subtitle = document.getElementById('preset-editor-subtitle');
     const form = document.getElementById('preset-form');
     form.reset();
     clearFieldErrors();
@@ -94,6 +85,7 @@ export function openPresetModal(mode) {
         const p = sessionState.presets.find(pr => pr.id === id);
         if (!p) { showToast('No preset selected', 'warn'); return; }
         title.textContent = 'Edit Preset';
+        if (subtitle) subtitle.textContent = p.name;
         setVal('modal-preset-id', p.id);
         // Model & Memory
         setVal('modal-name', p.name);
@@ -140,6 +132,7 @@ export function openPresetModal(mode) {
         setVal('modal-extra-args', p.extra_args);
     } else {
         title.textContent = 'New Preset';
+        if (subtitle) subtitle.textContent = 'New configuration';
         setVal('modal-preset-id', '');
         setVal('modal-context-size', 128000);
         setVal('modal-ctk', 'q8_0');
@@ -156,132 +149,14 @@ export function openPresetModal(mode) {
     }
 
     modal.classList.add('open');
+    // Reset nav to first section
+    document.querySelector('.preset-nav-item[data-section="model"]')?.click();
     const body = modal.querySelector('.modal-body');
     if (body) body.scrollTop = 0;
 }
 
 export function closePresetModal() {
     document.getElementById('preset-modal').classList.remove('open');
-}
-
-// ── Presets Panel ──────────────────────────────────────────────────────────────
-
-export function openPresetsPanel() {
-    const overlay = document.getElementById('presets-panel-overlay');
-    if (!overlay) return;
-    overlay.style.display = '';
-    overlay.classList.add('open');
-    _renderPresetsPanel();
-    document.getElementById('presets-panel-wizard-btn')?.addEventListener('click', () => {
-        closePresetsPanel();
-        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
-    }, { once: true });
-}
-
-export function closePresetsPanel() {
-    const overlay = document.getElementById('presets-panel-overlay');
-    if (!overlay) return;
-    overlay.classList.remove('open');
-    overlay.style.display = 'none';
-}
-
-function _renderPresetsPanel() {
-    const body = document.getElementById('presets-panel-body');
-    if (!body) return;
-    body.innerHTML = '';
-
-    const presets = sessionState.presets || [];
-    if (!presets.length) {
-        const empty = document.createElement('div');
-        empty.className = 'presets-panel-empty';
-        empty.textContent = 'No presets saved yet. Use the Spawn Wizard to create one.';
-        body.appendChild(empty);
-        return;
-    }
-
-    presets.forEach(preset => {
-        const card = document.createElement('div');
-        card.className = 'preset-panel-card';
-
-        const icon = document.createElement('div');
-        icon.className = 'preset-panel-card-icon';
-        icon.textContent = '🧠';
-        card.appendChild(icon);
-
-        const info = document.createElement('div');
-        info.className = 'preset-panel-card-info';
-
-        const name = document.createElement('div');
-        name.className = 'preset-panel-card-name';
-        name.textContent = preset.name || 'Unnamed preset';
-        info.appendChild(name);
-
-        const metaParts = [];
-        if (preset.model_path) metaParts.push(preset.model_path.split(/[/\\]/).pop() || preset.model_path);
-        else if (preset.hf_repo) metaParts.push(preset.hf_repo);
-        if (preset.bind_host === '0.0.0.0') metaParts.push('LAN');
-        if (preset.context_size) metaParts.push(`${Math.round(preset.context_size / 1024)}k ctx`);
-        const ctk = preset.ctk || 'q8_0';
-        const ctv = preset.ctv || 'q8_0';
-        if (ctk || ctv) metaParts.push(`KV: ${ctk}/${ctv}`);
-
-        const meta = document.createElement('div');
-        meta.className = 'preset-panel-card-meta';
-        meta.textContent = metaParts.join(' · ') || 'No details';
-        meta.title = metaParts.join(' · ');
-        info.appendChild(meta);
-        card.appendChild(info);
-
-        const actions = document.createElement('div');
-        actions.className = 'preset-panel-card-actions';
-
-        const startBtn = document.createElement('button');
-        startBtn.type = 'button';
-        startBtn.className = 'btn-preset-quick-start';
-        startBtn.textContent = '▶ Quick Start';
-        startBtn.title = 'Spawn this server configuration now';
-        startBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const mainSelect = document.getElementById('preset-select');
-            if (mainSelect) {
-                mainSelect.value = preset.id;
-                mainSelect.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-            closePresetsPanel();
-            import('./attach-detach.js').then(({ doStartFromSetup }) => {
-                const setupSelect = document.getElementById('setup-preset-select');
-                if (setupSelect) setupSelect.value = preset.id;
-                doStartFromSetup();
-            });
-        });
-        actions.appendChild(startBtn);
-
-        const delBtn = document.createElement('button');
-        delBtn.type = 'button';
-        delBtn.className = 'btn-preset-delete';
-        delBtn.title = 'Delete preset';
-        delBtn.textContent = '✕';
-        delBtn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            if (!confirm(`Delete preset "${preset.name}"?`)) return;
-            try {
-                const headers = window.authHeaders ? { ...window.authHeaders() } : {};
-                const resp = await fetch(`/api/presets/${preset.id}`, { method: 'DELETE', headers });
-                if (resp.ok) {
-                    await loadPresets();
-                    _renderPresetsPanel();
-                    const { syncSetupPresetSelect } = await import('./setup-view.js');
-                    syncSetupPresetSelect();
-                }
-            } catch (err) {
-                console.error('Delete preset failed:', err);
-            }
-        });
-        actions.appendChild(delBtn);
-
-        card.appendChild(actions);
-        body.appendChild(card);
-    });
 }
 
 // ── CRUD ───────────────────────────────────────────────────────────────────────
@@ -463,9 +338,32 @@ export async function resetPresets() {
     }
 }
 
+// ── Preset Editor Nav ─────────────────────────────────────────────────────────
+
+function initPresetEditorNav() {
+    const navItems = document.querySelectorAll('.preset-nav-item');
+    const sections = document.querySelectorAll('.preset-editor-section');
+
+    navItems.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const target = btn.dataset.section;
+            // Deactivate all
+            navItems.forEach(b => b.classList.remove('active'));
+            sections.forEach(s => s.classList.remove('active'));
+            // Activate clicked
+            btn.classList.add('active');
+            const activeSection = document.querySelector('.preset-editor-section[data-section="' + target + '"]');
+            if (activeSection) activeSection.classList.add('active');
+        });
+    });
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 export function initPresets() {
+    // Init preset editor nav
+    initPresetEditorNav();
+
     // Bind preset action buttons
     document.getElementById('preset-new-btn')?.addEventListener('click', () => openPresetModal('new'));
     document.getElementById('preset-edit-btn')?.addEventListener('click', () => openPresetModal('edit'));
@@ -485,7 +383,7 @@ export function initPresets() {
     // Bind setup view link
     document.getElementById('setup-manage-presets-link')?.addEventListener('click', (e) => {
         e.preventDefault();
-        openPresetsPanel();
+        openPresetModal('new');
     });
 
     // Modal overlay click
@@ -495,8 +393,6 @@ export function initPresets() {
             if (e.target === e.currentTarget) closePresetModal();
         });
     }
-
-    window.closePresetsPanel = closePresetsPanel;
 
     // Clear field errors on input
     ['modal-name', 'modal-model-path'].forEach(id => {
