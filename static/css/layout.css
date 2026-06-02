@@ -712,14 +712,14 @@
 
 .nav-user {
   position: relative;
-  z-index: 20;
+  z-index: 200;
 }
 
 .nav-user-menu {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  z-index: 260;
+  z-index: 400;
   display: none;
   min-width: 200px;
   overflow: hidden;

@@ -143,19 +143,22 @@ export function renderLaunchGrid() {
     if (!grid) return;
     grid.innerHTML = '';
 
-    const presets = _visiblePresetsLocal(sessionState.presets || []);
+    const allPresets = sessionState.presets || [];
+    const userPresets = allPresets.filter(p => !p.id.startsWith('default-'));
+    const hasUserPresets = userPresets.length > 0;
+    const presets = _visiblePresetsLocal(allPresets);
     const activePresetId = document.getElementById('preset-select')?.value || '';
+
+    // "New Configuration" card always goes first (leftmost)
+    const newCard = _buildNewConfigCard(!hasUserPresets);
+    newCard.style.animationDelay = '0ms';
+    grid.appendChild(newCard);
 
     presets.forEach((preset, i) => {
         const card = _buildLaunchCard(preset, activePresetId);
-        card.style.animationDelay = `${i * 55}ms`;
+        card.style.animationDelay = `${(i + 1) * 55}ms`;
         grid.appendChild(card);
     });
-
-    // "New Configuration" card
-    const newCard = _buildNewConfigCard();
-    newCard.style.animationDelay = `${presets.length * 55}ms`;
-    grid.appendChild(newCard);
 }
 
 function _buildLaunchCard(preset, activePresetId) {
@@ -239,14 +242,15 @@ function _buildLaunchCard(preset, activePresetId) {
     return card;
 }
 
-function _buildNewConfigCard() {
+function _buildNewConfigCard(isPrimary = false) {
     const card = document.createElement('div');
-    card.className = 'launch-card launch-card--new';
+    card.className = 'launch-card launch-card--new' + (isPrimary ? ' launch-card--new-primary' : '');
     card.innerHTML = `
         <div class="launch-card-new-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </div>
         <div class="launch-card-new-label">New Configuration</div>
+        ${isPrimary ? '<div class="launch-card-new-hint">Set up your first local model</div>' : ''}
     `;
     card.addEventListener('click', () => {
         import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
