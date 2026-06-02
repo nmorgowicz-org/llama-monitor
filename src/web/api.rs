@@ -2797,12 +2797,17 @@ fn api_set_metal_gpu_limit(
                     }
                 };
 
-                // Single osascript call: applies immediately via sysctl AND persists across
-                // reboots by writing to /etc/sysctl.conf (created if absent, line updated
-                // if already present with a different value). The app never sees the password.
-                // Must be a single line — AppleScript string literals cannot span newlines.
+                // Single-line osascript command (AppleScript string literals cannot span
+                // newlines). Use full binary paths so the restricted do-shell-script PATH
+                // (/usr/bin:/bin:/usr/sbin:/sbin) is never an issue.
+                // Logic: apply sysctl immediately, then upsert the line in /etc/sysctl.conf
+                // for persistence across reboots. Subshell grouping avoids if/then/fi.
+                let manual_cmd = format!(
+                    "sudo /usr/sbin/sysctl -w iogpu.wired_limit_mb={n} && grep -q '^iogpu.wired_limit_mb=' /etc/sysctl.conf 2>/dev/null && sudo /usr/bin/sed -i '' 's/iogpu.wired_limit_mb=.*/iogpu.wired_limit_mb={n}/' /etc/sysctl.conf || echo 'iogpu.wired_limit_mb={n}' | sudo /usr/bin/tee -a /etc/sysctl.conf",
+                    n = limit_mb
+                );
                 let shell_cmd = format!(
-                    "sysctl iogpu.wired_limit_mb={n} && if grep -q '^iogpu\\.wired_limit_mb=' /etc/sysctl.conf 2>/dev/null; then sed -i '' 's|^iogpu\\.wired_limit_mb=.*|iogpu.wired_limit_mb={n}|' /etc/sysctl.conf; else echo 'iogpu.wired_limit_mb={n}' >> /etc/sysctl.conf; fi",
+                    "/usr/sbin/sysctl iogpu.wired_limit_mb={n} && (/usr/bin/grep -q '^iogpu.wired_limit_mb=' /etc/sysctl.conf 2>/dev/null && /usr/bin/sed -i '' 's/iogpu.wired_limit_mb=.*/iogpu.wired_limit_mb={n}/' /etc/sysctl.conf || /bin/echo 'iogpu.wired_limit_mb={n}' >> /etc/sysctl.conf)",
                     n = limit_mb
                 );
                 let script = format!(
@@ -2811,7 +2816,7 @@ fn api_set_metal_gpu_limit(
                 );
 
                 let run_result = tokio::task::spawn_blocking(move || {
-                    std::process::Command::new("osascript")
+                    std::process::Command::new("/usr/bin/osascript")
                         .args(["-e", &script])
                         .output()
                 })
@@ -2828,21 +2833,23 @@ fn api_set_metal_gpu_limit(
                     }
                     Ok(Ok(output)) => {
                         let stderr = String::from_utf8_lossy(&output.stderr);
-                        let msg = if stderr.contains("User canceled")
-                            || stderr.contains("cancelled")
-                            || stderr.contains("(-128)")
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        let combined = format!("{}{}", stdout.trim(), stderr.trim());
+                        let msg = if combined.contains("User canceled")
+                            || combined.contains("cancelled")
+                            || combined.contains("(-128)")
                         {
                             "Cancelled — password dialog was dismissed.".to_string()
                         } else {
-                            format!("osascript error: {stderr}")
+                            format!("osascript failed: {combined}")
                         };
-                        serde_json::json!({ "ok": false, "error": msg })
+                        serde_json::json!({ "ok": false, "error": msg, "manual_cmd": manual_cmd })
                     }
                     Ok(Err(e)) => {
-                        serde_json::json!({ "ok": false, "error": format!("Failed to run osascript: {e}") })
+                        serde_json::json!({ "ok": false, "error": format!("Failed to launch osascript: {e}"), "manual_cmd": manual_cmd })
                     }
                     Err(e) => {
-                        serde_json::json!({ "ok": false, "error": format!("Task error: {e}") })
+                        serde_json::json!({ "ok": false, "error": format!("Task error: {e}"), "manual_cmd": manual_cmd })
                     }
                 };
 

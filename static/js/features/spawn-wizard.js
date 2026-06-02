@@ -3193,7 +3193,6 @@ async function applyMetalGpuLimit(limitMb) {
     if (data.ok) {
       const gb = Math.round((data.limit_mb || limitMb) / 1024);
       showToast(`Metal GPU limit set to ${gb} GB — saved to /etc/sysctl.conf, survives reboots.`, 'success');
-      // Re-fetch GPU metrics so cachedMetalGpuLimitMb updates and budget recalculates
       await fetchGpuVram();
       scheduleVramUpdate();
     } else {
@@ -3201,16 +3200,43 @@ async function applyMetalGpuLimit(limitMb) {
       if (msg.toLowerCase().includes('cancel')) {
         showToast('Cancelled — no changes made.', 'info');
       } else {
-        showToast(msg, 'error');
+        // osascript failed — show the error and a Terminal fallback the user can copy
+        const manualCmd = data.manual_cmd || `sudo /usr/sbin/sysctl -w iogpu.wired_limit_mb=${limitMb}`;
+        _showMetalLimitFallback(btn, msg, manualCmd);
       }
       btn.disabled = false;
       btn.textContent = orig;
     }
   } catch (e) {
-    showToast('Failed to contact server.', 'error');
+    showToast('Failed to contact server: ' + e.message, 'error');
     btn.disabled = false;
     btn.textContent = orig;
   }
+}
+
+function _showMetalLimitFallback(btn, errorMsg, manualCmd) {
+  // Replace the button row with an inline error + copyable Terminal command
+  const row = btn.closest('.metal-limit-row');
+  if (!row) { showToast(errorMsg, 'error'); return; }
+
+  const fallback = document.createElement('div');
+  fallback.className = 'metal-limit-fallback';
+  fallback.innerHTML = `
+    <div class="metal-limit-fallback-error">${errorMsg}</div>
+    <div class="metal-limit-fallback-hint">Run this in Terminal instead:</div>
+    <div class="metal-limit-fallback-cmd-row">
+      <code class="metal-limit-fallback-cmd">${manualCmd}</code>
+      <button type="button" class="metal-limit-fallback-copy">Copy</button>
+    </div>
+  `;
+  fallback.querySelector('.metal-limit-fallback-copy').addEventListener('click', () => {
+    navigator.clipboard.writeText(manualCmd).then(() => {
+      showToast('Copied to clipboard', 'success');
+    });
+  });
+
+  // Append below the existing row content (don't remove the row itself)
+  row.appendChild(fallback);
 }
 
 async function triggerAutoSize() {

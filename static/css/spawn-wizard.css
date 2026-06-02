@@ -2609,6 +2609,74 @@
 
 [data-theme="light"] .metal-limit-text { color: #64748b; }
 
+/* ── Metal GPU limit fallback (shown when osascript fails) ───────────────── */
+
+.metal-limit-fallback {
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(239,68,68,0.07);
+  border: 1px solid rgba(239,68,68,0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metal-limit-fallback-error {
+  font-size: 11px;
+  color: rgba(252,165,165,0.9);
+}
+
+.metal-limit-fallback-hint {
+  font-size: 10.5px;
+  color: var(--text-muted, #94a3b8);
+  margin-top: 2px;
+}
+
+.metal-limit-fallback-cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.metal-limit-fallback-cmd {
+  flex: 1;
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+  color: #e2e8f0;
+  background: rgba(0,0,0,0.25);
+  padding: 3px 6px;
+  border-radius: 4px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.metal-limit-fallback-copy {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.05);
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.metal-limit-fallback-copy:hover {
+  background: rgba(99,102,241,0.15);
+  border-color: rgba(99,102,241,0.4);
+  color: #a5b4fc;
+}
+
+[data-theme="light"] .metal-limit-fallback {
+  background: rgba(239,68,68,0.04);
+  border-color: rgba(239,68,68,0.15);
+}
+[data-theme="light"] .metal-limit-fallback-error { color: #dc2626; }
+[data-theme="light"] .metal-limit-fallback-cmd { color: #1e293b; background: rgba(0,0,0,0.04); }
+
 /* ── Stacked bar ──────────────────────────────────────────────────────────── */
 
 .vram-bar {
