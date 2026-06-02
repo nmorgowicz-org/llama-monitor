@@ -27,6 +27,8 @@
     <link rel="stylesheet" href="/css/setup-view.css">
     <link rel="stylesheet" href="/css/settings-modal.css">
     <link rel="stylesheet" href="/css/logs.css">
+    <link rel="stylesheet" href="/css/spawn-wizard.css">
+    <link rel="stylesheet" href="/css/tune-panel.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
@@ -147,9 +149,11 @@
         </div>
         <div class="nav-right">
             <div id="session-controls">
-                <button class="nav-btn" id="nav-new-session-btn" title="New Session">+ New Session</button>
+                <button class="nav-btn" id="nav-new-session-btn" title="New Session" style="display:none;">+ New Session</button>
             </div>
-                      <button id="settings-btn" class="nav-btn" title="Settings">⚙️ Settings</button>
+            <button id="llama-pill" class="top-nav-pill llama-pill-idle" style="display:none;" type="button" title="llama-server binary version">
+              <span id="llama-pill-version">b—</span>
+            </button>
             <button id="update-pill" class="top-nav-pill" style="display:none;">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/>
@@ -157,12 +161,11 @@
                 <span id="update-pill-text"></span>
             </button>
             <div class="nav-user" id="user-menu">
-                <button class="nav-user-btn" id="nav-user-btn" type="button" aria-expanded="false" aria-controls="nav-user-menu-items">👤 User</button>
+                <button class="nav-user-btn nav-user-btn-icon" id="nav-user-btn" type="button" aria-expanded="false" aria-controls="nav-user-menu-items" title="Account">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+                </button>
                 <div class="nav-user-menu" id="nav-user-menu-items" role="menu">
-                    <a href="#" class="nav-user-menu-item" id="user-menu-profile">Profile</a>
-                    <a href="#" class="nav-user-menu-item" id="user-menu-preferences">Preferences</a>
                     <a href="#" class="nav-user-menu-item" id="user-menu-theme">Toggle Theme</a>
-                    <a href="#" class="nav-user-menu-item" id="user-menu-help">Help</a>
                     <a href="#" class="nav-user-menu-item" id="user-menu-logout">Logout</a>
                 </div>
             </div>
@@ -200,65 +203,95 @@
         <div class="view-container">
             <!-- SETUP VIEW -->
             <div class="view view-setup" id="view-setup">
-                <div class="setup-bg"></div>
-                <div class="setup-hero">
-                    <div class="setup-title-row">
+                <!-- Ambient orb background -->
+                <div class="setup-bg">
+                    <div class="setup-orb setup-orb-1"></div>
+                    <div class="setup-orb setup-orb-2"></div>
+                    <div class="setup-orb setup-orb-3"></div>
+                </div>
+
+                <!-- Header: brand + toolbar -->
+                <div class="setup-header">
+                    <div class="setup-brand">
                         <div class="setup-logo">
-                            <svg width="40" height="40" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M16 2C8.268 2 2 8.268 2 16C2 23.732 8.268 30 16 30C23.732 30 30 23.732 30 16C30 8.268 23.732 2 16 2ZM16 26C10.477 26 6 21.523 6 16C6 10.477 10.477 6 16 6C21.523 6 26 10.477 26 16C26 21.523 21.523 26 16 26Z" fill="var(--theme-primary)"/>
                                 <path d="M16 12C14.6739 12 13.4021 12.5268 12.4645 13.4645C11.5268 14.4021 11 15.6739 11 17C11 18.3261 11.5268 19.5979 12.4645 20.5355C13.4021 21.4732 14.6739 22 16 22C17.3261 22 18.5979 21.4732 19.5355 20.5355C20.4732 19.5979 21 18.3261 21 17C21 15.6739 20.4732 14.4021 19.5355 13.4645C18.5979 12.5268 17.3261 12 16 12ZM16 20C14.9391 20 13.9217 19.5786 13.1716 18.8284C12.4214 18.0783 12 17.0609 12 16C12 14.9391 12.4214 13.9217 13.1716 13.1716C13.9217 12.4214 14.9391 12 16 12C17.0609 12 18.0783 12.4214 18.8284 13.1716C19.5786 13.9217 20 14.9391 20 16C20 17.0609 19.5786 18.0783 18.8284 18.8284C18.0783 19.5786 17.0609 20 16 20Z" fill="white"/>
                             </svg>
                         </div>
-                        <h1 class="setup-title">Llama Monitor</h1>
+                        <div class="setup-brand-text">
+                            <p class="setup-brand-sub">Local inference, fully observed</p>
+                        </div>
                     </div>
-                    <p class="setup-subtitle">Real-time telemetry for your inference stack</p>
+                    <div class="setup-toolbar">
+                        <button class="setup-toolbar-btn" id="setup-models-btn" title="Browse and download models">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                            Models
+                        </button>
+                    </div>
                 </div>
-                <div class="setup-actions">
-                    <div class="setup-card setup-card-attach">
-                        <div class="setup-card-icon">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h4M18 12h4M12 2v4M12 18v4"/><circle cx="12" cy="12" r="3"/></svg>
+
+                <!-- Two-pane body: Connect (left) + Local Servers (right) — both always visible -->
+                <div class="setup-body">
+
+                    <!-- LEFT PANE: Connect to Endpoint -->
+                    <div class="setup-pane setup-pane-connect">
+                        <div class="setup-pane-label">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 7h3a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-3m-6 0H6a5 5 0 0 1-5-5 5 5 0 0 1 5-5h3"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                            Connect to Endpoint
                         </div>
-                        <h2 class="setup-card-title">Attach to Endpoint</h2>
-                        <p class="setup-card-desc">Connect to a running llama.cpp server on any machine</p>
-                        <div class="setup-recent-endpoints" id="setup-recent-endpoints">
+
+                        <!-- Recent endpoints (populated by renderRecentEndpoints) -->
+                        <div id="setup-recent-endpoints" style="display:none;">
                             <div class="setup-section-header">
-                                <h3>Recent Endpoints</h3>
-                                <a id="setup-browse-sessions-link">Manage all sessions →</a>
+                                <span class="setup-section-title">Recent</span>
+                                <a id="setup-browse-sessions-link" class="setup-link">Manage →</a>
                             </div>
-                            <div class="setup-endpoint-list" id="setup-endpoint-list">
-                                <!-- Dynamically populated -->
-                            </div>
+                            <div class="setup-endpoint-list" id="setup-endpoint-list"></div>
                         </div>
-                        <div class="setup-endpoint-manual" id="setup-endpoint-manual">
-                            <div class="setup-section-header">
-                                <h3>Manual Attach</h3>
-                            </div>
-                            <div class="setup-card-form">
-                                <input type="text" class="setup-input" id="setup-endpoint-url" placeholder="http://127.0.0.1:8080">
-                                <input type="password" class="setup-input" id="setup-endpoint-api-key" placeholder="API key (optional)">
-                                <button class="setup-btn setup-btn-primary" id="setup-attach-btn">
-                                    <span class="btn-icon">⚡</span> Attach
-                                </button>
-                            </div>
+
+                        <!-- Manual attach form -->
+                        <div class="setup-pane-divider" id="setup-pane-divider-manual"></div>
+                        <div class="setup-section-header" style="margin-bottom:10px;">
+                            <span class="setup-section-title">Manual</span>
                         </div>
-                    </div>
-                    <div class="setup-card setup-card-spawn">
-                        <div class="setup-card-icon">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M8 21V7a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v14"/><path d="M12 11h.01"/></svg>
-                        </div>
-                        <h2 class="setup-card-title">Spawn Local Server</h2>
-                        <p class="setup-card-desc">Start a llama.cpp server from a model preset</p>
                         <div class="setup-card-form">
-                            <select class="setup-select" id="setup-preset-select"></select>
-                            <button class="setup-btn setup-btn-secondary" id="setup-start-btn">
-                                <span class="btn-icon">▶</span> Start Server
+                            <input type="text" class="setup-input" id="setup-endpoint-url" placeholder="http://192.168.x.x:8080" autocomplete="off">
+                            <input type="password" class="setup-input" id="setup-endpoint-api-key" placeholder="API key (optional)">
+                            <button class="setup-btn setup-btn-primary setup-btn-connect" id="setup-attach-btn">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                                Connect
                             </button>
                         </div>
-                        <div class="setup-card-footer">
-                            <a class="setup-link" id="setup-manage-presets-link">Manage presets →</a>
+                    </div>
+
+                    <!-- Vertical divider -->
+                    <div class="setup-pane-sep" aria-hidden="true"></div>
+
+                    <!-- RIGHT PANE: Local Servers (preset launch cards) -->
+                    <div class="setup-pane setup-pane-local">
+                        <div class="setup-pane-label">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                            Local Server
+                        </div>
+
+                        <!-- Preset cards grid (populated by renderLaunchGrid) -->
+                        <div class="launch-grid" id="setup-launch-grid">
+                            <div class="launch-card-skeleton"></div>
+                            <div class="launch-card-skeleton"></div>
+                        </div>
+
+                        <!-- Recent spawn sessions -->
+                        <div id="setup-recent-spawn-sessions" style="display:none;">
+                            <div class="setup-section-header" style="margin-top:14px;margin-bottom:6px;">
+                                <span class="setup-section-title">Recent</span>
+                            </div>
+                            <div class="setup-endpoint-list" id="setup-spawn-session-list"></div>
                         </div>
                     </div>
                 </div>
+
+                <!-- Quick stats row (shown after at least one session) -->
                 <div class="setup-stats" id="setup-stats" style="display:none;">
                     <div class="setup-stat-item">
                         <span class="setup-stat-value" id="setup-last-prompt-rate">—</span>
@@ -272,6 +305,18 @@
                         <span class="setup-stat-value" id="setup-last-session">—</span>
                         <span class="setup-stat-label">Last session</span>
                     </div>
+                </div>
+
+                <!-- Hidden compat elements: preserved for JS bindings -->
+                <div style="display:none;" aria-hidden="true">
+                    <div id="setup-card-quick-start">
+                        <select id="setup-preset-select"></select>
+                        <button type="button" id="setup-start-btn">Start</button>
+                    </div>
+                    <button type="button" id="setup-spawn-wizard-btn">Wizard</button>
+                    <a id="setup-manage-presets-link"></a>
+                    <!-- Removed: setup-attach-remote-btn (no longer a toggle) -->
+                    <div id="setup-attach-drawer"></div>
                 </div>
             </div>
 
@@ -305,6 +350,10 @@
                     </span>
                     <button class="btn btn-start" id="btn-start">Start</button>
                     <button class="btn btn-stop" id="btn-stop" disabled>Stop</button>
+                    <button class="btn btn-switch-model" id="btn-switch-model" style="display:none;" title="Switch the running model (keeps current preset settings)">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
+                        Switch Model
+                    </button>
                 </div>
 
                 <section class="metric-section" id="inference-section">
@@ -2413,6 +2462,926 @@
     </div>
 </div>
 
+<div class="modal-overlay" id="spawn-wizard-overlay">
+    <div class="spawn-wizard-modal">
+        <!-- Header -->
+        <div class="wizard-header">
+            <div class="wizard-header-left">
+                <span class="wizard-header-title">Spawn Llama-Server</span>
+                <span class="wizard-header-subtitle" id="wizard-step-label">Profile</span>
+            </div>
+            <div class="wizard-steps">
+                <span class="step-badge active" data-step="0" title="Step 1: Profile"><span class="step-num">1</span></span>
+                <span class="wizard-step-sep" aria-hidden="true"></span>
+                <span class="step-badge" data-step="1" title="Step 2: Model"><span class="step-num">2</span></span>
+                <span class="wizard-step-sep" aria-hidden="true"></span>
+                <span class="step-badge" data-step="2" title="Step 3: Hardware"><span class="step-num">3</span></span>
+                <span class="wizard-step-sep" aria-hidden="true"></span>
+                <span class="step-badge" data-step="3" title="Step 4: Summary"><span class="step-num">4</span></span>
+                <span class="wizard-step-sep" aria-hidden="true"></span>
+                <span class="step-badge" data-step="4" title="Step 5: Spawn"><span class="step-num">5</span></span>
+            </div>
+            <button type="button" class="wizard-close" id="spawn-wizard-close" aria-label="Close">&times;</button>
+        </div>
+
+        <!-- Binary prerequisite banner — shown when llama-server binary is missing -->
+        <div class="wizard-prereq" id="wizard-binary-prereq" style="display:none;">
+            <div class="wizard-prereq-icon" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+            <div class="wizard-prereq-body">
+                <div class="wizard-prereq-title">llama.cpp binary not found</div>
+                <!-- idle -->
+                <div id="wizard-prereq-idle">
+                    <div class="wizard-prereq-desc">
+                        The <code>llama-server</code> binary is required to spawn models locally.
+                        We can download and install the latest build for your platform.
+                    </div>
+                    <div class="wizard-prereq-path-row" id="wizard-prereq-path-row" style="display:none;">
+                        Configured path: <code id="wizard-prereq-path"></code>
+                    </div>
+                    <div class="wizard-prereq-actions">
+                        <button type="button" class="btn-wizard-primary" id="wizard-prereq-download-btn">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:5px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Download llama.cpp for my platform
+                        </button>
+                        <button type="button" class="btn-wizard-tertiary" id="wizard-prereq-settings-btn">
+                            Configure binary path in Settings →
+                        </button>
+                    </div>
+                </div>
+                <!-- in-progress -->
+                <div id="wizard-prereq-progress" style="display:none;">
+                    <div class="wizard-prereq-desc">Downloading llama.cpp — this may take a minute…</div>
+                    <div class="hf-dlp-bar-wrap" style="margin:8px 0 6px;">
+                        <div class="hf-dlp-bar wizard-prereq-bar-fill" id="wizard-prereq-bar" style="width:5%;transition:width 2s ease;"></div>
+                    </div>
+                    <div class="wizard-prereq-elapsed" id="wizard-prereq-elapsed"></div>
+                </div>
+                <!-- success -->
+                <div id="wizard-prereq-success" style="display:none;" class="wizard-prereq-success-row">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                    <span id="wizard-prereq-success-text">llama.cpp installed and ready.</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Body -->
+        <div class="wizard-body">
+
+            <!-- Step 1: Profile -->
+            <div class="wizard-step active" id="wizard-step-0">
+                <div class="wizard-main">
+                    <div>
+                        <div class="wizard-section-title">Choose your setup profile</div>
+                        <div class="wizard-section-desc">
+                            This controls how much detail and control you’ll see in the next steps.
+                        </div>
+                    </div>
+                    <div class="profile-cards">
+                        <div class="profile-card" data-profile="quick">
+                            <div class="profile-card-radio">⚡</div>
+                            <div class="profile-card-body">
+                                <div class="profile-card-name">Quick</div>
+                                <div class="profile-card-desc">
+                                    Fully auto-tuned. Best for most users — we pick safe defaults based on your hardware.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="profile-card selected" data-profile="balanced">
+                            <div class="profile-card-radio">⚖️</div>
+                            <div class="profile-card-body">
+                                <div class="profile-card-name">Balanced</div>
+                                <div class="profile-card-desc">
+                                    Guided tuning with sensible defaults. Recommended for most setups.
+                                </div>
+                            </div>
+                        </div>
+                        <div class="profile-card" data-profile="advanced">
+                            <div class="profile-card-radio">🛠️</div>
+                            <div class="profile-card-body">
+                                <div class="profile-card-name">Advanced</div>
+                                <div class="profile-card-desc">
+                                    Full control over all parameters, including MoE tuning, KV cache quant, and multi-GPU.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Use-case selector: affects KV quant recommendations and warnings -->
+                    <div class="wizard-section-title" style="margin-top:18px;">What are you running this for?</div>
+                    <div class="usecase-cards">
+                        <div class="usecase-card" data-usecase="agentic" tabindex="0" role="button">
+                            <span class="usecase-icon">🤖</span>
+                            <div class="usecase-body">
+                                <div class="usecase-name">Agentic / RAG</div>
+                                <div class="usecase-desc">Tool calling, multi-step agents, retrieval pipelines. Needs coherent long context — q8_0 KV minimum.</div>
+                            </div>
+                        </div>
+                        <div class="usecase-card selected" data-usecase="general" tabindex="0" role="button">
+                            <span class="usecase-icon">💬</span>
+                            <div class="usecase-body">
+                                <div class="usecase-name">General chat</div>
+                                <div class="usecase-desc">Everyday conversation, summarization, coding help. Balanced quality and context.</div>
+                            </div>
+                        </div>
+                        <div class="usecase-card" data-usecase="roleplay" tabindex="0" role="button">
+                            <span class="usecase-icon">🎭</span>
+                            <div class="usecase-body">
+                                <div class="usecase-name">Roleplay / creative</div>
+                                <div class="usecase-desc">Fiction, roleplay, long narrative sessions. Context beats precision — q4_0 KV accepted.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="wizard-sidebar">
+                    <div class="wizard-sidebar-title">Need to know</div>
+                    <ul>
+                        <li>Quick hides advanced fields.</li>
+                        <li>Balanced shows core settings.</li>
+                        <li>Advanced exposes everything.</li>
+                    </ul>
+                    <div class="wizard-sidebar-title" style="margin-top:14px;">Use case matters</div>
+                    <ul>
+                        <li><strong>Agentic:</strong> q8_0 KV minimum for coherent chains.</li>
+                        <li><strong>General:</strong> q8_0 KV recommended.</li>
+                        <li><strong>Roleplay:</strong> q4_0 KV fine for max context.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Step 2: Model -->
+            <div class="wizard-step" id="wizard-step-1">
+                <div class="wizard-main">
+                    <div>
+                        <div class="wizard-section-title">Select your model</div>
+                        <div class="wizard-section-desc">
+                            Choose where your GGUF model comes from.
+                        </div>
+                    </div>
+                    <div class="model-source-cards">
+                        <!-- Local -->
+                        <div class="model-source-card selected" data-source="local">
+                            <div class="model-source-icon">📁</div>
+                            <div class="model-source-body">
+                                <div class="model-source-name">Select local model</div>
+                                <div class="model-source-desc">
+                                    Browse your filesystem for an existing GGUF file.
+                                </div>
+                            </div>
+                        </div>
+                        <!-- HuggingFace -->
+                        <div class="model-source-card" data-source="hf">
+                            <div class="model-source-icon">🤗</div>
+                            <div class="model-source-body">
+                                <div class="model-source-name">Use HuggingFace repo</div>
+                                <div class="model-source-desc">
+                                    Enter a HF repo ID (e.g. user/repo) and we’ll list available GGUF files.
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Import -->
+                        <div class="model-source-card" data-source="import">
+                            <div class="model-source-icon">📥</div>
+                            <div class="model-source-body">
+                                <div class="model-source-name">Import from another tool</div>
+                                <div class="model-source-desc">
+                                    Ollama, LM Studio, Jan, GPT4All, HuggingFace cache — or add custom folders in <a href="#" class="wizard-settings-link" data-open-settings="models">Settings → Models</a>.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Local model input -->
+                    <div class="model-input-area visible" id="model-input-local">
+                        <div class="model-input-row">
+                            <input type="text" id="spawn-model-path" placeholder="Model path (e.g. /models/my-model.gguf)">
+                            <div class="browse-split" id="spawn-browse-split">
+                                <button type="button" class="browse-split-main" id="spawn-browse-model-btn">Browse</button>
+                                <button type="button" class="browse-split-arrow" id="spawn-browse-arrow-btn" aria-label="Browse from a specific folder" aria-haspopup="true" aria-expanded="false">▾</button>
+                                <div class="browse-split-dropdown" id="spawn-browse-dropdown" role="menu" style="display:none;"></div>
+                            </div>
+                        </div>
+                        <div class="settings-card" id="spawn-local-model-hint" style="display:none;margin-top:12px;padding:12px 14px;">
+                            <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:6px;">
+                                Local Model
+                            </div>
+                            <div id="spawn-local-model-hint-title" style="font-weight:600;margin-bottom:4px;"></div>
+                            <div id="spawn-local-model-hint-meta" class="settings-help" style="margin:0;"></div>
+                        </div>
+                    </div>
+
+                    <!-- HF repo input -->
+                    <div class="model-input-area" id="model-input-hf">
+                        <!-- HF token — shown first so users set it before browsing -->
+                        <div class="settings-card wizard-hf-token-card" style="margin-bottom:10px;">
+                            <div class="wizard-hf-token-header">
+                                <span class="wizard-hf-token-title">Hugging Face Token</span>
+                                <span class="wizard-hf-token-badge" id="wizard-hf-token-badge" style="display:none;"></span>
+                            </div>
+                            <p class="settings-help" style="margin:0 0 10px 0;">
+                                Public repos work without a token. You need one for gated models or to avoid rate limits.
+                                <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer">Create a Read token on HuggingFace.</a>
+                            </p>
+                            <div class="wizard-hf-token-input-row" id="wizard-hf-token-input-row">
+                                <input type="password" id="wizard-hf-token-input" class="wizard-hf-token-input" placeholder="hf_..." autocomplete="off" spellcheck="false">
+                                <button type="button" class="btn-wizard-secondary" id="wizard-hf-token-save">Save</button>
+                            </div>
+                            <div class="wizard-hf-token-saved-row" id="wizard-hf-token-saved-row" style="display:none;">
+                                <span class="wizard-hf-token-saved-note">✓ Token saved — gated repos enabled</span>
+                                <button type="button" class="wizard-hf-token-remove" id="wizard-hf-token-remove">Remove</button>
+                            </div>
+                        </div>
+                        <!-- Discover: curated category shortcuts -->
+                        <div class="hf-discover-row" id="hf-discover-row">
+                            <span class="hf-quickpick-label">Discover:</span>
+                            <div class="hf-discover-pills" id="hf-discover-pills">
+                                <!-- populated by JS (static categories) -->
+                            </div>
+                        </div>
+                        <!-- Quick-pick author buttons -->
+                        <div class="hf-quickpick-row" id="hf-quickpick-row">
+                            <span class="hf-quickpick-label">Quantizer:</span>
+                            <div class="hf-quickpicks" id="hf-quickpicks">
+                                <!-- populated by JS from /api/hf/quantizers -->
+                            </div>
+                            <button type="button" class="hf-qp-edit-btn" id="hf-qp-edit-btn" title="Customize quantizer list" aria-expanded="false">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                            </button>
+                        </div>
+                        <!-- Quantizer editor (shown when gear is clicked) -->
+                        <div class="hf-qp-editor" id="hf-qp-editor" style="display:none;" aria-label="Customize quantizer authors">
+                            <div class="hf-qp-editor-list" id="hf-qp-editor-list"></div>
+                            <div class="hf-qp-editor-add">
+                                <input type="text" class="hf-qp-editor-input" id="hf-qp-editor-username" placeholder="HuggingFace username" autocomplete="off" spellcheck="false">
+                                <input type="text" class="hf-qp-editor-input hf-qp-editor-input-sm" id="hf-qp-editor-displayname" placeholder="Display name (optional)">
+                                <button type="button" class="btn-sm btn-preset" id="hf-qp-editor-add-btn">Add</button>
+                            </div>
+                            <div class="hf-qp-editor-actions">
+                                <button type="button" class="btn-sm btn-preset-reset" id="hf-qp-editor-reset-btn">Reset to Defaults</button>
+                                <button type="button" class="btn-sm btn-preset" id="hf-qp-editor-save-btn" style="background:rgba(99,102,241,0.15);border-color:rgba(99,102,241,0.35);color:#a5b4fc;">Save</button>
+                            </div>
+                        </div>
+                        <!-- Repo ID / search field -->
+                        <div class="model-input-row">
+                            <input type="text" id="spawn-hf-repo"
+                                placeholder="Repo ID or keyword (e.g. bartowski/Llama-3.3-70B or Qwen3 27B)">
+                            <select id="spawn-hf-sort" class="hf-sort-select" title="Sort order">
+                                <option value="downloads">Most downloaded</option>
+                                <option value="newest">Newest</option>
+                                <option value="trending">Trending</option>
+                                <option value="likes">Most liked</option>
+                            </select>
+                        </div>
+                        <!-- Search results (shown when query isn't a repo ID) -->
+                        <div class="hf-search-results" id="hf-search-results" style="display:none;">
+                            <!-- populated by JS -->
+                        </div>
+                        <!-- File list (shown when a repo ID is selected) -->
+                        <div class="hf-file-list" id="spawn-hf-file-list"></div>
+                        <!-- Community picks (from ~/.config/llama-monitor/community-picks.json) -->
+                        <div class="hf-community-picks" id="hf-community-picks" style="display:none;">
+                            <button type="button" class="hf-cp-toggle" id="hf-cp-toggle" aria-expanded="false">
+                                <span class="hf-cp-toggle-label">Community picks</span>
+                                <span class="hf-cp-toggle-meta" id="hf-cp-toggle-meta"></span>
+                                <span class="hf-cp-chevron" id="hf-cp-chevron">▸</span>
+                            </button>
+                            <div class="hf-cp-body" id="hf-cp-body" style="display:none;">
+                                <div class="hf-cp-tabs" id="hf-cp-tabs"></div>
+                                <div class="hf-cp-list" id="hf-cp-list"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Import input -->
+                    <div class="model-input-area" id="model-input-import">
+                        <!-- Auto-discovered models grouped by tool -->
+                        <div id="import-model-list-wrap">
+                            <div id="import-model-list-loading" class="import-list-state">
+                                <span class="import-list-spinner"></span>Scanning for models…
+                            </div>
+                            <div id="import-model-list-empty" class="import-list-state" style="display:none;">
+                                No models found from installed tools (Ollama, LM Studio, Jan, GPT4All, HuggingFace cache).
+                            </div>
+                            <div id="import-model-list" style="display:none;"></div>
+                        </div>
+                        <!-- Fallback: manual path entry -->
+                        <div class="import-manual-row">
+                            <span class="import-manual-label">Not listed?</span>
+                            <input type="text" id="spawn-import-path" placeholder="Paste a path to a .gguf file">
+                            <div class="browse-split" id="spawn-import-browse-split">
+                                <button type="button" class="browse-split-main" id="spawn-import-browse-btn">Browse</button>
+                                <button type="button" class="browse-split-arrow" id="spawn-import-browse-arrow-btn" aria-label="Browse from a specific folder" aria-haspopup="true" aria-expanded="false">▾</button>
+                                <div class="browse-split-dropdown" id="spawn-import-browse-dropdown" role="menu" style="display:none;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Selected model display -->
+                    <div class="selected-model" id="spawn-selected-model">
+                        <span class="selected-model-icon">🧠</span>
+                        <div class="selected-model-info">
+                            <div class="selected-model-name" id="spawn-selected-model-name"></div>
+                            <div class="selected-model-meta" id="spawn-selected-model-meta"></div>
+                        </div>
+                    </div>
+
+                    <!-- Chat template status (auto-populated based on model family) -->
+                    <div class="chat-template-section" id="chat-template-section" style="display:none;">
+                        <div class="ct-header">
+                            <span class="ct-label">Chat Template</span>
+                            <span class="ct-status" id="ct-status"></span>
+                        </div>
+                        <div class="ct-body" id="ct-body"></div>
+                    </div>
+
+                    <!-- Quant advisor (shown after model + param count known) -->
+                    <div class="quant-advisor" id="quant-advisor" style="display:none;">
+                        <div class="quant-advisor-header">
+                            <span class="quant-advisor-title">Quant advisor</span>
+                            <span class="quant-advisor-subtitle" id="quant-advisor-subtitle">Compare quants — select one, then continue to configure hardware &amp; download</span>
+                        </div>
+                        <div class="quant-advisor-table" id="quant-advisor-table">
+                            <!-- populated by JS -->
+                        </div>
+                        <div class="quant-advisor-legend">
+                            <span class="legend-item"><span class="legend-dot legend-fit"></span>Fits in VRAM</span>
+                            <span class="legend-item"><span class="legend-dot legend-nofit"></span>Requires CPU offload</span>
+                            <span class="legend-item"><span class="legend-dot legend-rec"></span>Recommended</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="wizard-sidebar">
+                    <div class="wizard-sidebar-title">Choosing a model</div>
+                    <ul>
+                        <li><strong>New to this?</strong> Start with a 7–14B Q4_K_M — good quality and fits in most GPUs.</li>
+                        <li><strong>Local file</strong> — a <code>.gguf</code> already on your disk.</li>
+                        <li><strong>HuggingFace</strong> — search or paste a repo ID. llama-server streams the file from HF at startup (cached locally after).</li>
+                        <li><strong>Import</strong> — reuse a model from Ollama or LM Studio.</li>
+                    </ul>
+                    <div class="wizard-sidebar-title" style="margin-top:14px;">Quant guide</div>
+                    <ul>
+                        <li title="Best starting point — good quality, fits 8 GB GPU for 7B models"><strong>Q4_K_M</strong> — best balance ✓ start here</li>
+                        <li title="Better output quality but uses more VRAM"><strong>Q5_K_M</strong> — higher quality, needs more VRAM</li>
+                        <li title="Near-lossless quality but largest size"><strong>Q8_0</strong> — near-lossless, largest</li>
+                        <li title="imatrix quantization — slightly smaller than standard Q4 with similar quality"><strong>IQ4_XS</strong> — imatrix, slightly smaller</li>
+                        <li title="Very aggressively compressed — only suitable for huge Mixture-of-Experts models"><strong>IQ2_*</strong> — large MoE only</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Step 3: Hardware -->
+            <div class="wizard-step" id="wizard-step-2">
+                <div class="wizard-main">
+                    <div>
+                        <div class="wizard-section-title">Configure hardware</div>
+                        <div class="wizard-section-desc">
+                            Fine-tune how your model uses GPU and memory.
+                        </div>
+                    </div>
+
+                    <!-- Model context: repo name + quant swap + mmproj (populated by JS) -->
+                    <div class="hw-model-header" id="hw-model-header" style="display:none;">
+                        <div class="hw-model-info">
+                            <span class="hw-model-repo" id="hw-model-repo"></span>
+                            <span class="hw-model-file" id="hw-model-file"></span>
+                        </div>
+                        <div class="hw-quant-row" id="hw-quant-row" style="display:none;">
+                            <label for="hw-quant-select" class="hw-quant-label">Quantization</label>
+                            <select id="hw-quant-select" class="hw-quant-select" title="Swap quantization to compare VRAM impact"></select>
+                        </div>
+                        <div class="hw-quant-row" id="hw-mmproj-row" style="display:none;">
+                            <label for="hw-mmproj-select" class="hw-quant-label" title="Adds ~0.5–1.5 GB VRAM. Required for multimodal inference.">Vision (mmproj)</label>
+                            <select id="hw-mmproj-select" class="hw-quant-select" title="Vision projector file. Choose (none) for text-only inference."></select>
+                        </div>
+                    </div>
+
+                    <div class="hardware-grid">
+                        <div class="hardware-field">
+                            <label for="spawn-gpu-layers">GPU layers</label>
+                            <select id="spawn-gpu-layers">
+                                <option value="auto">Auto (recommended)</option>
+                                <option value="all">All layers on GPU</option>
+                                <option value="manual">Manual</option>
+                            </select>
+                        </div>
+                        <div class="hardware-field" id="spawn-gpu-layers-manual-wrap" style="display:none;">
+                            <label for="spawn-gpu-layers-manual">Layers count</label>
+                            <input type="number" id="spawn-gpu-layers-manual" min="0" placeholder="e.g. 32">
+                        </div>
+                        <div class="hardware-field hardware-field-ctx">
+                            <div class="ctx-label-row">
+                                <label for="spawn-context-size">Context size</label>
+                                <span id="ctx-model-max-hint" class="ctx-model-max-hint" style="display:none;" title="Maximum context this model was trained on — going beyond this degrades quality"></span>
+                            </div>
+                            <input type="number" id="spawn-context-size" min="512" step="512" value="8192" title="Type any value. Smaller = less VRAM used by KV cache.">
+                            <div class="ctx-quick-picks" id="ctx-quick-picks">
+                                <button type="button" class="ctx-pick" data-ctx="65536"  title="65k — Roleplay / RP with lorebooks">65k <span class="ctx-pick-tag">RP</span></button>
+                                <button type="button" class="ctx-pick" data-ctx="131072" title="131k — Minimum for agentic work">131k <span class="ctx-pick-tag">Agent</span></button>
+                                <button type="button" class="ctx-pick" data-ctx="204800" title="200k — Large agentic context">200k</button>
+                                <button type="button" class="ctx-pick" data-ctx="262144" title="256k — Full model max">256k</button>
+                                <button type="button" class="ctx-pick ctx-pick-model-max" id="ctx-pick-model-max" style="display:none;" title="This model's training context limit">— <span class="ctx-pick-tag">Model max</span></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- KV cache precision -->
+                    <div class="kv-inline-row">
+                        <div class="kv-inline-field">
+                            <label for="spawn-cache-type-k" class="kv-inline-label">K cache <span class="kv-inline-hint">quant</span></label>
+                            <select id="spawn-cache-type-k" title="KV key quantization (q8_0 recommended for quality; q4_0 saves ~2× VRAM on cache)">
+                                <option value="">f16 — lossless</option>
+                                <option value="q8_0" selected>q8_0 — recommended</option>
+                                <option value="q4_0">q4_0 — saves VRAM</option>
+                            </select>
+                        </div>
+                        <div class="kv-inline-field">
+                            <label for="spawn-cache-type-v" class="kv-inline-label">V cache <span class="kv-inline-hint">quant</span></label>
+                            <select id="spawn-cache-type-v" title="KV value quantization (can set lower than K to save VRAM with minimal quality impact)">
+                                <option value="">f16 — lossless</option>
+                                <option value="q8_0" selected>q8_0 — recommended</option>
+                                <option value="q4_0">q4_0 — saves VRAM</option>
+                            </select>
+                        </div>
+                        <label class="kv-unified-toggle" title="Use a single unified KV cache buffer (--kv-unified). Can reduce memory fragmentation on some setups.">
+                            <input type="checkbox" id="spawn-kv-unified">
+                            <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
+                            <span class="kv-unified-text">Unified</span>
+                        </label>
+                    </div>
+
+                    <!-- MTP section (shown for models with MTP heads) -->
+                    <div class="hw-mtp-section" id="hw-mtp-section" style="display:none;">
+                        <div class="hw-section-divider">Multi-Token Prediction (MTP)</div>
+                        <div class="hw-mtp-content">
+                            <label class="hw-toggle-label">
+                                <input type="checkbox" id="hw-use-mtp" checked>
+                                Enable MTP acceleration
+                            </label>
+                            <div class="hw-mtp-depth-row" id="hw-mtp-depth-row">
+                                <div class="hw-mtp-depth-inline">
+                                    <label for="hw-mtp-depth" class="hw-mtp-depth-label">Draft tokens/step</label>
+                                    <input type="number" id="hw-mtp-depth" min="1" max="4" value="2" class="hw-mtp-depth-input" title="--spec-draft-n-max: how many tokens to predict ahead each step">
+                                </div>
+                                <div class="field-hint">Uses <code>--spec-type draft-mtp,ngram-mod</code>, sets <code>--spec-draft-n-max</code>, forces <code>--parallel 1</code>. Value 2 ≈ +50–200% generation speed on dense models. +1.5% VRAM per head.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Minimum-context warning (shown after auto-size when result < target) -->
+                    <div class="ctx-fit-warning" id="ctx-fit-warning" style="display:none;"></div>
+                    <div class="ctx-fit-warning" id="ctx-train-warning" style="display:none;"></div>
+
+                    <!-- Advanced-only fields -->
+                    <div class="advanced-only" id="spawn-advanced-fields">
+                        <div class="wizard-section-title">Advanced options</div>
+                        <div class="hardware-grid">
+                            <div class="hardware-field">
+                                <label for="spawn-batch-size">Batch size</label>
+                                <input type="number" id="spawn-batch-size" min="1" value="2048">
+                                <div class="field-hint">Prompt batch size. 2048 is a good default.</div>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-parallel-slots">Parallel slots</label>
+                                <input type="number" id="spawn-parallel-slots" min="1" value="1">
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-ubatch-size">Ubatch size</label>
+                                <input type="number" id="spawn-ubatch-size" min="64" max="4096" step="64" value="512" title="Micro-batch size for prompt processing">
+                                <div class="field-hint">512 = default · 1024–2048 = faster prompt processing.</div>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-n-cpu-moe">MoE CPU experts (n_cpu_moe)</label>
+                                <input type="number" id="spawn-n-cpu-moe" min="0" placeholder="Auto">
+                                <div class="field-hint">Higher = more VRAM, faster. Lower = more CPU, slower.</div>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-tensor-split">Tensor split</label>
+                                <input type="text" id="spawn-tensor-split" placeholder="e.g. 1,1">
+                                <div class="field-hint">For multi-GPU load distribution.</div>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-cache-ram" title="-cram / --cache-ram: max size of the persistent KV prefix-cache in MiB. llama-server uses this to reuse KV states across requests. Default is 8192 MiB (8 GB) of system RAM. Set 0 to disable, -1 for no limit.">Prefix cache RAM <span class="label-badge">-cram</span></label>
+                                <input type="number" id="spawn-cache-ram" min="-1" step="256" placeholder="8192 (default)">
+                                <div class="field-hint">Max system RAM for KV prefix reuse across requests. Default: 8192 MiB. 0 = disable · −1 = no limit.</div>
+                            </div>
+                            <div class="hardware-field" style="grid-column: 1/-1;">
+                                <label>Auto-fit context to memory</label>
+                                <div class="fit-target-row">
+                                    <label class="fit-enable-toggle" title="Pass --fit on to llama-server, which automatically adjusts context size to fit within the target memory budget.">
+                                        <input type="checkbox" id="spawn-fit-enable">
+                                        <span class="fit-enable-track"><span class="fit-enable-thumb"></span></span>
+                                        <span class="fit-enable-text">Enable</span>
+                                    </label>
+                                    <div class="fit-target-input-wrap" id="spawn-fit-target-wrap" style="display:none;">
+                                        <input type="number" id="spawn-fit-target" min="512" step="256" placeholder="2048">
+                                        <span class="fit-target-unit">MB</span>
+                                    </div>
+                                </div>
+                                <div class="field-hint">--fit on --fit-target &lt;MB&gt; — shrinks context until the model fits in the specified memory budget.</div>
+                            </div>
+                        </div>
+
+                        <!-- Performance (Spec + Fit) — kept in Advanced for non-MTP models -->
+                        <div class="wizard-section-title" style="margin-top:14px;">Speculative decoding</div>
+                        <div class="hardware-grid">
+                            <div class="hardware-field" style="grid-column: 1/-1;">
+                                <label for="spawn-spec-type">Mode</label>
+                                <select id="spawn-spec-type">
+                                    <option value="">None — disabled</option>
+                                    <option value="ngram-mod">N-gram — fast, no extra files (~10–30% speedup)</option>
+                                    <option value="draft-mtp,ngram-mod">MTP + N-gram — for models with built-in MTP heads (~50–200% on dense models)</option>
+                                    <option value="draft-model">Draft model — best speedup, needs a separate small model</option>
+                                </select>
+                                <div class="field-hint" id="spawn-spec-hint">
+                                    <span data-spec="">Pick a mode to see a description.</span>
+                                    <span data-spec="ngram-mod" style="display:none;">N-gram lookup builds a table from prior tokens — zero extra VRAM, works on any model. Best for general and roleplay use where output is repetitive enough for predictions.</span>
+                                    <span data-spec="draft-mtp,ngram-mod" style="display:none;">Multi-Token Prediction uses heads built into the model itself. Also chains N-gram for tokens the MTP heads don't cover. Requires <code>--parallel 1</code>. Use this for Qwen3-MTP, DeepSeek-V3 MTP, and similar models. The MTP section above auto-selects this when enabled.</span>
+                                    <span data-spec="draft-model" style="display:none;">A small draft model (e.g. 1–3B) proposes tokens; the main model verifies. Highest theoretical speedup (~2–3×) but requires downloading and managing a compatible draft model alongside the main one.</span>
+                                </div>
+                            </div>
+                            <div class="hardware-field" id="spawn-draft-model-wrap" style="display:none;">
+                                <label for="spawn-draft-model">Draft model path</label>
+                                <input type="text" id="spawn-draft-model" placeholder="/path/to/draft-model.gguf">
+                            </div>
+                        </div>
+
+                    </div>
+
+                    <!-- Download panel (moved here — shown when entering hardware step for HF models) -->
+                    <div class="hf-download-panel" id="hf-download-panel" style="display:none;">
+                        <!-- Idle: ready to download -->
+                        <div id="hf-dlp-idle">
+                            <div class="hf-dlp-dest-row">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                <span class="hf-dlp-dest-label">Save to:</span>
+                                <span class="hf-dlp-dest-path" id="hf-dlp-dest-path" title="This is where the downloaded file will be saved">—</span>
+                            </div>
+                            <div id="hf-dlp-no-dir-warn" style="display:none;" class="hf-dlp-warn">
+                                No models folder configured.
+                                <button type="button" class="hf-dlp-warn-link" id="hf-dlp-open-settings">Set one in Settings → Models</button>
+                                or the file will go to the app default folder.
+                            </div>
+                            <div class="hf-dlp-actions">
+                                <button type="button" class="btn-wizard-primary" id="hf-dlp-download-btn" title="Download the file to your models folder now, then continue as a local model">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:5px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    Download to models folder
+                                </button>
+                                <button type="button" class="btn-wizard-tertiary" id="hf-dlp-use-hf-btn" title="Skip downloading — llama-server will stream the file from HuggingFace at startup and cache it in ~/.cache/huggingface/hub/">
+                                    Stream from HuggingFace instead
+                                </button>
+                            </div>
+                        </div>
+                        <!-- In-progress -->
+                        <div id="hf-dlp-progress" style="display:none;">
+                            <div class="hf-dlp-progress-label">
+                                <span id="hf-dlp-progress-file"></span>
+                                <span id="hf-dlp-progress-pct"></span>
+                            </div>
+                            <div class="hf-dlp-bar-wrap">
+                                <div class="hf-dlp-bar" id="hf-dlp-bar" style="width:0%"></div>
+                            </div>
+                            <div class="hf-dlp-stats" id="hf-dlp-stats"></div>
+                            <button type="button" class="btn-wizard-secondary" id="hf-dlp-cancel-btn">Cancel download</button>
+                        </div>
+                        <!-- Complete -->
+                        <div id="hf-dlp-complete" style="display:none;" class="hf-dlp-complete-box">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                            Downloaded — model ready. Click Next to continue.
+                        </div>
+                    </div>
+
+                    <!-- VRAM status -->
+                    <div class="hardware-summary" id="spawn-hardware-summary">
+                        <div class="hardware-summary-row">
+                            <span>VRAM estimate</span>
+                            <span id="spawn-vram-estimate-text">Calculating...</span>
+                        </div>
+                        <div class="hardware-summary-row">
+                            <span>Status</span>
+                            <span id="spawn-vram-pill"></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="hw-vram-sidebar">
+                    <!-- ── Animated VRAM breakdown (sticky sidebar) ──────────────── -->
+                    <div class="vram-panel" id="vram-panel">
+                        <div class="vram-panel-header">
+                            <span class="vram-panel-label" id="vram-panel-label">VRAM budget</span>
+                            <span class="vram-panel-total" id="vram-panel-total">— GB</span>
+                        </div>
+
+                        <!-- Stacked animated bar -->
+                        <div class="vram-bar" id="vram-bar" aria-label="VRAM breakdown bar">
+                            <div class="vram-segment seg-weights" id="vseg-weights" style="width:0%"
+                                 title="Model weights"></div>
+                            <div class="vram-segment seg-kv"      id="vseg-kv"      style="width:0%"
+                                 title="KV cache"></div>
+                            <div class="vram-segment seg-mmproj"  id="vseg-mmproj"  style="width:0%"
+                                 title="Vision projector (mmproj)"></div>
+                            <div class="vram-segment seg-mtp"     id="vseg-mtp"     style="width:0%"
+                                 title="MTP prediction heads"></div>
+                            <div class="vram-segment seg-overhead" id="vseg-overhead" style="width:0%"
+                                 title="GPU overhead"></div>
+                            <div class="vram-segment seg-free"    id="vseg-free"    style="width:0%"
+                                 title="Free headroom"></div>
+                        </div>
+
+                        <!-- Legend row -->
+                        <div class="vram-legend">
+                            <span class="vleg-item" id="vleg-weights"><span class="vleg-dot seg-weights"></span><span id="vleg-weights-label">Weights —</span></span>
+                            <span class="vleg-item" id="vleg-kv"><span class="vleg-dot seg-kv"></span><span id="vleg-kv-label">KV —</span></span>
+                            <span class="vleg-item vleg-mmproj" id="vleg-mmproj" style="display:none;"><span class="vleg-dot seg-mmproj"></span><span id="vleg-mmproj-label">mmproj —</span></span>
+                            <span class="vleg-item vleg-mtp" id="vleg-mtp" style="display:none;"><span class="vleg-dot seg-mtp"></span><span id="vleg-mtp-label">MTP —</span></span>
+                            <span class="vleg-item"><span class="vleg-dot seg-overhead"></span><span id="vleg-overhead-label">OH —</span></span>
+                            <span class="vleg-item"><span class="vleg-dot seg-free" id="vleg-free-dot"></span><span id="vleg-free-label">Free —</span></span>
+                        </div>
+
+                        <!-- Scenario cards — KV precision presets -->
+                        <div class="vsc-section-header">
+                            <span class="vsc-section-label">KV cache precision</span>
+                            <span class="vsc-section-hint">Preset fills context to max — adjust in Context size</span>
+                        </div>
+                        <div class="vram-scenarios" id="vram-scenarios">
+                            <!-- populated by JS -->
+                        </div>
+
+                        <!-- MoE expert offload slider (hidden unless MoE model) -->
+                        <div class="moe-offload-panel" id="moe-offload-panel" style="display:none;">
+                            <div class="moe-offload-header">
+                                <span class="moe-offload-title">Expert offload</span>
+                                <span class="moe-offload-subtitle" id="moe-offload-subtitle">0 of N experts on CPU</span>
+                            </div>
+                            <input type="range" id="moe-offload-slider" class="moe-slider"
+                                   min="0" max="128" value="0" step="1">
+                            <div class="moe-offload-labels">
+                                <span>All on GPU (faster)</span>
+                                <span>All on CPU (more context)</span>
+                            </div>
+                            <div class="moe-offload-hint" id="moe-offload-hint"></div>
+                        </div>
+
+                        <!-- Auto-size button + note -->
+                        <div class="vram-autosize-row">
+                            <button type="button" class="btn-wizard-secondary" id="vram-autosize-btn">
+                                Auto-size for me
+                            </button>
+                            <span class="vram-autosize-note" id="vram-autosize-note"></span>
+                        </div>
+
+                        <!-- RAM panel (discrete GPU only — hidden on unified memory systems) -->
+                        <div class="ram-panel" id="ram-panel" style="display:none;">
+                            <div class="vram-panel-header ram-panel-header">
+                                <span class="vram-panel-label">System RAM</span>
+                                <span class="vram-panel-total" id="ram-panel-total">— GB</span>
+                            </div>
+                            <div class="vram-bar" id="ram-bar" aria-label="System RAM usage bar">
+                                <div class="vram-segment seg-ram-used"  id="rseg-used"  style="width:0%" title="Already in use"></div>
+                                <div class="vram-segment seg-ram-moe"   id="rseg-moe"   style="width:0%" title="MoE expert offload"></div>
+                                <div class="vram-segment seg-ram-cram"  id="rseg-cram"  style="width:0%" title="Prefix cache (-cram)"></div>
+                                <div class="vram-segment seg-ram-free"  id="rseg-free"  style="width:0%" title="Free headroom"></div>
+                            </div>
+                            <div class="vram-legend">
+                                <span class="vleg-item"><span class="vleg-dot seg-ram-used"></span><span id="rleg-used-label">In use —</span></span>
+                                <span class="vleg-item" id="rleg-moe-item" style="display:none;"><span class="vleg-dot seg-ram-moe"></span><span id="rleg-moe-label">MoE —</span></span>
+                                <span class="vleg-item"><span class="vleg-dot seg-ram-cram"></span><span id="rleg-cram-label">Cache —</span></span>
+                                <span class="vleg-item"><span class="vleg-dot seg-ram-free"></span><span id="rleg-free-label">Free —</span></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Summary -->
+            <div class="wizard-step" id="wizard-step-3">
+                <div class="wizard-main">
+                    <div>
+                        <div class="wizard-section-title">Review your configuration</div>
+                        <div class="wizard-section-desc">
+                            Adjust sampling defaults, then confirm settings before spawning.
+                        </div>
+                    </div>
+
+                    <!-- Sampling defaults (pre-populated by use-case; user can adjust) -->
+                    <div class="sampling-params-section">
+                        <div class="hw-section-divider">Sampling defaults</div>
+                        <!-- Model-specific mode pills (e.g. Qwen3.6 thinking-general vs coding) -->
+                        <div id="spawn-sampling-presets" style="display:none;"></div>
+                        <div class="sampling-params-grid">
+                            <div class="sampling-field">
+                                <label for="spawn-temperature">Temperature</label>
+                                <input type="number" id="spawn-temperature" min="0" max="2" step="0.05" placeholder="server default">
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-top-p">Top-P</label>
+                                <input type="number" id="spawn-top-p" min="0" max="1" step="0.05" placeholder="server default">
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-min-p">Min-P</label>
+                                <input type="number" id="spawn-min-p" min="0" max="1" step="0.01" placeholder="server default">
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-repeat-penalty">Repeat penalty</label>
+                                <input type="number" id="spawn-repeat-penalty" min="0.5" max="2" step="0.05" placeholder="server default">
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-presence-penalty" title="Flat penalty added to logit of any token that has appeared. OpenAI-style presence_penalty. Use ~1.5 for EXAONE 4.5, 0 to disable.">Presence penalty</label>
+                                <input type="number" id="spawn-presence-penalty" min="0" max="3" step="0.05" placeholder="0 (disabled)">
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-seed">Seed</label>
+                                <input type="number" id="spawn-seed" min="-1" placeholder="-1 (random)">
+                            </div>
+                        </div>
+                        <div class="field-hint" style="margin-top:4px;">Defaults applied to all requests that don't override them. Values come from your selected use-case profile. Leave blank for llama-server built-in defaults.</div>
+                    </div>
+
+                    <!-- Thinking / reasoning controls (shown for models that support it) -->
+                    <div class="sampling-params-section" id="spawn-thinking-section" style="display:none;margin-top:14px;">
+                        <div class="hw-section-divider">Thinking &amp; reasoning</div>
+                        <div class="thinking-controls">
+                            <label class="thinking-toggle-row" title="--chat-template-kwargs {&quot;enable_thinking&quot;:true}. Enables chain-of-thought reasoning blocks.">
+                                <input type="checkbox" id="spawn-enable-thinking">
+                                <span>Enable thinking mode</span>
+                            </label>
+                            <label class="thinking-toggle-row" id="spawn-preserve-thinking-row" title="--chat-template-kwargs {&quot;preserve_thinking&quot;:true}. Includes prior reasoning in multi-turn context (Qwen3.6 series).">
+                                <input type="checkbox" id="spawn-preserve-thinking">
+                                <span>Preserve thinking in multi-turn</span>
+                            </label>
+                        </div>
+                        <div class="thinking-row-grid">
+                            <div class="sampling-field">
+                                <label for="spawn-reasoning-mode" title="--reasoning on|off|auto. Controls thinking block activation.">Reasoning</label>
+                                <select id="spawn-reasoning-mode">
+                                    <option value="">auto (model decides)</option>
+                                    <option value="on">on (always)</option>
+                                    <option value="off">off (disabled)</option>
+                                </select>
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-reasoning-budget" title="--reasoning-budget N. Token budget for thinking. -1 = unlimited, 0 = disabled.">Budget (tokens)</label>
+                                <input type="number" id="spawn-reasoning-budget" min="-1" step="1024" placeholder="16384">
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-reasoning-budget-message" title="--reasoning-budget-message STRING. Text appended after the thinking block.">Budget message</label>
+                                <input type="text" id="spawn-reasoning-budget-message" placeholder="Final Answer:">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sampling-params-section" style="margin-top:14px;">
+                        <div class="hw-section-divider">Network exposure</div>
+                        <div class="sampling-params-grid">
+                            <div class="sampling-field">
+                                <label for="spawn-port">Port</label>
+                                <input type="number" id="spawn-port" min="1" max="65535" value="8001">
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-bind-host">Bind host</label>
+                                <select id="spawn-bind-host">
+                                    <option value="127.0.0.1">127.0.0.1 only</option>
+                                    <option value="0.0.0.0">0.0.0.0 (LAN visible)</option>
+                                </select>
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-alias" title="--alias STRING. Model name reported in /v1/models and displayed in API clients. Defaults to the model filename.">Server alias</label>
+                                <input type="text" id="spawn-alias" placeholder="e.g. qwen36-27b">
+                            </div>
+                            <div class="sampling-field">
+                                <label for="spawn-api-key">Server API key</label>
+                                <input type="password" id="spawn-api-key" placeholder="Optional bearer token for llama-server">
+                            </div>
+                        </div>
+                        <div class="field-hint" style="margin-top:4px;">Use <code>127.0.0.1</code> for local-only access. If you expose <code>0.0.0.0</code>, set an API key unless you intentionally want an open LAN endpoint.</div>
+                    </div>
+
+                    <div class="sampling-params-section" style="margin-top:14px;">
+                        <div class="hw-section-divider">Extra arguments</div>
+                        <div class="sampling-field" style="margin-top:8px;">
+                            <label for="spawn-extra-args" title="Additional llama-server CLI flags appended verbatim. Space-separated; values with spaces must use the flag=value form.">Extra args</label>
+                            <input type="text" id="spawn-extra-args" placeholder="e.g. --log-verbosity 2 --no-perf">
+                        </div>
+                        <div class="field-hint" style="margin-top:4px;">Passed directly to llama-server after all other flags. Use this for any option the wizard doesn't expose.</div>
+                    </div>
+
+                    <div class="summary-list" id="spawn-summary-list"></div>
+                    <div class="summary-warnings" id="spawn-summary-warnings" style="display:none;"></div>
+                    <div class="spawn-save-preset-row" id="spawn-save-preset-row">
+                        <input type="text" id="spawn-preset-name-input" class="spawn-preset-name-input" placeholder="Preset name…" maxlength="80">
+                        <button type="button" class="btn-wizard-secondary" id="spawn-save-preset-btn">Save as Preset</button>
+                        <span id="spawn-saved-preset-name" style="font-size:12px;color:var(--color-success);display:none;"></span>
+                    </div>
+                </div>
+                <div class="wizard-sidebar">
+                    <div class="wizard-sidebar-title">Sampling guide</div>
+                    <ul>
+                        <li><strong>Agentic</strong>: temp 0.3, top-p 0.95 — predictable, focused</li>
+                        <li><strong>General chat</strong>: temp 0.7, top-p 0.9 — balanced</li>
+                        <li><strong>Roleplay</strong>: temp 1.0, min-p 0.05 — creative</li>
+                        <li>These are per-server defaults. Individual API requests can override them.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Step 5: Spawn -->
+            <div class="wizard-step" id="wizard-step-4">
+                <div class="wizard-main">
+                    <div>
+                        <div class="wizard-section-title">Ready to launch</div>
+                        <div class="wizard-section-desc">
+                            Review what’s about to be started, then click Spawn.
+                        </div>
+                    </div>
+                    <!-- Config preview card — populated by JS when entering this step -->
+                    <div class="spawn-config-card" id="spawn-config-card" style="display:none;"></div>
+                    <button type="button" class="btn-wizard-primary" id="spawn-server-btn">
+                        Spawn Server
+                    </button>
+                    <div class="spawn-status-area" id="spawn-status-area">
+                        <div class="spawn-status-text" id="spawn-status-text">Ready to spawn.</div>
+                        <div class="spawn-progress-bar">
+                            <div class="spawn-progress-fill" id="spawn-progress-fill"></div>
+                        </div>
+                        <div class="spawn-error-text" id="spawn-error-text"></div>
+                        <div class="spawn-success-text" id="spawn-success-text"></div>
+                    </div>
+                </div>
+                <div class="wizard-sidebar">
+                    <div class="wizard-sidebar-title">Configuration</div>
+                    <div id="spawn-sidebar-config" style="margin-bottom:10px;"></div>
+                    <div class="wizard-sidebar-title">What happens next</div>
+                    <ul>
+                        <li>llama-server starts as a background process.</li>
+                        <li>Status updates appear in real time below.</li>
+                        <li>On success you’re taken to the dashboard.</li>
+                    </ul>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Footer -->
+        <div class="wizard-footer">
+            <div class="wizard-footer-left">
+                <button type="button" class="btn-wizard-secondary" id="wizard-back-btn">Back</button>
+            </div>
+            <div class="wizard-footer-right">
+                <button type="button" class="btn-wizard-primary" id="wizard-next-btn">Next</button>
+            </div>
+        </div>
+
+        <!-- Model card panel — slides over the wizard body when a card link is clicked -->
+        <div class="wizard-card-panel" id="wizard-card-panel" aria-hidden="true">
+            <div class="wizard-card-panel-header">
+                <div class="wizard-card-panel-title" id="wizard-card-panel-title">Model Card</div>
+                <div class="wizard-card-panel-actions">
+                    <a class="wizard-card-panel-hf-link" id="wizard-card-panel-hf-link"
+                       target="_blank" rel="noopener noreferrer" title="Open on HuggingFace">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        huggingface.co
+                    </a>
+                    <button type="button" class="wizard-card-panel-close" id="wizard-card-panel-close" aria-label="Close model card">&times;</button>
+                </div>
+            </div>
+            <div class="wizard-card-panel-body">
+                <div class="wizard-card-loading" id="wizard-card-loading">
+                    <div class="wizard-card-spinner"></div>
+                    Loading model card…
+                </div>
+                <div class="wizard-card-error" id="wizard-card-error" style="display:none;"></div>
+                <!-- YAML front-matter collapsible block -->
+                <details class="wizard-card-frontmatter" id="wizard-card-frontmatter" style="display:none;">
+                    <summary>Model metadata (YAML)</summary>
+                    <pre id="wizard-card-frontmatter-content"></pre>
+                </details>
+                <div class="wizard-card-content markdown-body" id="wizard-card-content" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Presets Manager Panel -->
+
+<div class="modal-overlay" id="presets-panel-overlay" style="display:none; z-index:1400;" onclick="if(event.target===this)closePresetsPanel()">
+    <div class="presets-panel-modal">
+        <div class="presets-panel-header">
+            <h2 class="presets-panel-title">Saved Presets</h2>
+            <button type="button" class="presets-panel-close" id="presets-panel-close" onclick="closePresetsPanel()">&times;</button>
+        </div>
+        <div class="presets-panel-body" id="presets-panel-body">
+            <div class="presets-panel-loading">Loading presets…</div>
+        </div>
+        <div class="presets-panel-footer">
+            <button type="button" class="setup-btn setup-btn-primary" id="presets-panel-wizard-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                New Server with Wizard
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Models Modal -->
+
 <!-- Models Modal -->
 <div class="modal-overlay" id="models-modal">
     <div class="models-manager-shell">
@@ -4018,6 +4987,35 @@
         </div>
     </div>
 </div>
+
+
+<div class="modal-overlay" id="llama-version-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="llama-version-modal-title">
+    <div class="llama-version-modal-shell">
+        <div class="llama-version-modal-header">
+            <div class="llama-version-modal-title-row">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4"/></svg>
+                <h2 class="llama-version-modal-title" id="llama-version-modal-title">llama.cpp Version</h2>
+            </div>
+            <button class="llama-version-modal-close" id="llama-version-modal-close" type="button" aria-label="Close">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="llama-version-modal-current" id="llama-version-modal-current">
+            <span class="llama-version-current-label">Installed</span>
+            <span class="llama-version-current-build" id="llama-version-current-build">—</span>
+        </div>
+        <div class="llama-version-modal-body">
+            <div class="llama-version-list-header">
+                <span>Recent Releases</span>
+                <span class="llama-version-list-hint">Select a build to install</span>
+            </div>
+            <div class="llama-version-list" id="llama-version-list">
+                <div class="llama-version-loading">Loading releases…</div>
+            </div>
+        </div>
+    </div>
+</div>
+
 
 </body>
 </html>
