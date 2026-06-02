@@ -3043,11 +3043,13 @@
             <div class="wizard-step" id="wizard-step-4">
                 <div class="wizard-main">
                     <div>
-                        <div class="wizard-section-title">Spawn your server</div>
+                        <div class="wizard-section-title">Ready to launch</div>
                         <div class="wizard-section-desc">
-                            This will start llama-server with your selected configuration.
+                            Review what’s about to be started, then click Spawn.
                         </div>
                     </div>
+                    <!-- Config preview card — populated by JS when entering this step -->
+                    <div class="spawn-config-card" id="spawn-config-card" style="display:none;"></div>
                     <button type="button" class="btn-wizard-primary" id="spawn-server-btn">
                         Spawn Server
                     </button>
@@ -3061,11 +3063,13 @@
                     </div>
                 </div>
                 <div class="wizard-sidebar">
+                    <div class="wizard-sidebar-title">Configuration</div>
+                    <div id="spawn-sidebar-config" style="margin-bottom:10px;"></div>
                     <div class="wizard-sidebar-title">What happens next</div>
                     <ul>
-                        <li>We’ll start llama-server.</li>
-                        <li>Status updates appear in real time.</li>
-                        <li>On success, you’re taken to the dashboard.</li>
+                        <li>llama-server starts as a background process.</li>
+                        <li>Status updates appear in real time below.</li>
+                        <li>On success you’re taken to the dashboard.</li>
                     </ul>
                 </div>
             </div>

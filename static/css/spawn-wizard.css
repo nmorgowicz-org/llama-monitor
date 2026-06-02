@@ -3934,3 +3934,282 @@
 }
 [data-theme="light"] .ct-body { color: #475569; }
 [data-theme="light"] .ct-body strong { color: #1e293b; }
+
+/* ==========================================================================
+   UI/UX Pass — June 2026
+   ========================================================================== */
+
+/* ── Section dividers: left-accent indigo style ─────────────────────────── */
+
+.hw-section-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(165, 180, 252, 0.75);
+  padding: 1px 0 1px 9px;
+  border-left: 2px solid rgba(99, 102, 241, 0.45);
+  border-bottom: none;
+  margin-bottom: 10px;
+  margin-top: 14px;
+}
+.hw-section-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.05);
+}
+[data-theme="light"] .hw-section-divider {
+  color: rgba(99, 102, 241, 0.8);
+  border-left-color: rgba(99, 102, 241, 0.4);
+}
+[data-theme="light"] .hw-section-divider::after {
+  background: rgba(0, 0, 0, 0.07);
+}
+
+/* ── Selected-state checkmark badge on cards ─────────────────────────────── */
+
+.profile-card { position: relative; }
+.profile-card.selected::after {
+  content: '✓';
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 17px;
+  text-align: center;
+  color: #a5b4fc;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 50%;
+  width: 17px;
+  height: 17px;
+  display: block;
+}
+
+.model-source-card { position: relative; }
+.model-source-card.selected::after {
+  content: '✓';
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 17px;
+  text-align: center;
+  color: #a5b4fc;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 50%;
+  width: 17px;
+  height: 17px;
+  display: block;
+}
+
+.usecase-card { position: relative; }
+.usecase-card.selected::after {
+  content: '✓';
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 17px;
+  text-align: center;
+  color: #a5b4fc;
+  background: rgba(99, 102, 241, 0.18);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 50%;
+  width: 17px;
+  height: 17px;
+  display: block;
+}
+
+/* ── Thinking controls: side-by-side instead of stacked ─────────────────── */
+
+.thinking-controls {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+/* ── Summary list: framed card with header ───────────────────────────────── */
+
+.summary-list {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.summary-list-header {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-text-muted, #94a3b8);
+  padding: 8px 12px 6px;
+  background: rgba(255, 255, 255, 0.025);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.summary-row {
+  border-radius: 0;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  padding: 7px 12px;
+}
+.summary-row:last-of-type { border-bottom: none; }
+.summary-row:nth-child(even) { background: rgba(0, 0, 0, 0.08); }
+.summary-row:hover { background: rgba(99, 102, 241, 0.06); border-color: transparent; }
+
+[data-theme="light"] .summary-list {
+  border-color: rgba(0, 0, 0, 0.08);
+}
+[data-theme="light"] .summary-list-header {
+  background: rgba(0, 0, 0, 0.02);
+  border-bottom-color: rgba(0, 0, 0, 0.07);
+}
+[data-theme="light"] .summary-row:nth-child(even) {
+  background: rgba(0, 0, 0, 0.02);
+}
+[data-theme="light"] .summary-row:hover {
+  background: rgba(99, 102, 241, 0.04);
+}
+
+/* ── Summary warnings: icon prefix ──────────────────────────────────────── */
+
+.summary-warnings {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+}
+.summary-warnings::before {
+  content: '⚠';
+  font-size: 14px;
+  flex-shrink: 0;
+  line-height: 1.4;
+  color: #ebcb8b;
+  padding-top: 1px;
+}
+.summary-warnings-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* ── Edit shortcuts: ghost pill buttons ──────────────────────────────────── */
+
+.summary-edit-row {
+  padding: 0 12px 10px;
+}
+.summary-edit-row .btn-wizard-tertiary {
+  font-size: 11px;
+  padding: 4px 12px;
+  min-height: 0;
+  height: 26px;
+  border-radius: 20px;
+  opacity: 0.75;
+}
+.summary-edit-row .btn-wizard-tertiary:hover {
+  opacity: 1;
+}
+
+/* ── Spawn step: config preview card + full-width launch button ──────────── */
+
+.spawn-config-card {
+  background:
+    radial-gradient(circle at top left, rgba(99, 102, 241, 0.07), transparent 40%),
+    linear-gradient(160deg, rgba(30, 37, 48, 0.95), rgba(20, 26, 35, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-base);
+  overflow: hidden;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.25);
+}
+.spawn-config-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.spawn-config-card-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-text-muted);
+}
+.spawn-config-card-model {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.spawn-config-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+}
+.spawn-config-item {
+  padding: 7px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  border-right: 1px solid rgba(255, 255, 255, 0.03);
+}
+.spawn-config-item:nth-child(even) { border-right: none; }
+.spawn-config-item:nth-last-child(-n+2) { border-bottom: none; }
+.spawn-config-item-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  margin-bottom: 2px;
+}
+.spawn-config-item-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+#wizard-step-4 .wizard-main > .btn-wizard-primary {
+  width: 100%;
+  min-height: 48px;
+  font-size: 15px;
+  letter-spacing: 0.01em;
+  border-radius: var(--radius-base);
+}
+
+/* Spawn sidebar: dynamic config summary */
+.spawn-sidebar-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.spawn-sidebar-stat:last-child { border-bottom: none; }
+.spawn-sidebar-stat-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+}
+.spawn-sidebar-stat-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  word-break: break-all;
+}
+
+[data-theme="light"] .spawn-config-card {
+  background: linear-gradient(160deg, #f8fafc, #f1f5f9);
+  border-color: rgba(0, 0, 0, 0.08);
+}

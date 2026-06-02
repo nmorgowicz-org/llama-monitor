@@ -1099,6 +1099,9 @@ function showStep(index) {
       fetchGpuVram().then(() => estimateVramFull().then(() => renderSummary()));
     });
   }
+  if (index === 4) {
+    _renderSpawnConfigCard();
+  }
 }
 
 // ── Profile & use-case ────────────────────────────────────────────────────────
@@ -3749,6 +3752,12 @@ function renderSummary() {
   if (hw.ignoreEos) rows.push({ label: 'Ignore EOS', value: 'Yes' });
   if (wizardState.access.apiKey) rows.push({ label: 'Server API key', value: `${wizardState.access.apiKey.slice(0, 4)}…${wizardState.access.apiKey.slice(-4)}` });
 
+  // Summary list header
+  const listHeader = document.createElement('div');
+  listHeader.className = 'summary-list-header';
+  listHeader.textContent = 'Configuration summary';
+  dom.summaryList.appendChild(listHeader);
+
   rows.forEach(r => {
     const row = document.createElement('div');
     row.className = 'summary-row';
@@ -3766,13 +3775,16 @@ function renderSummary() {
     if (ratio > 1.2) warns.push("Configuration likely exceeds VRAM. Reduce context size or KV quant.");
     else if (ratio > 1.0) warns.push("VRAM is at risk. Consider reducing context or using KV quantization.");
     else if (ratio > 0.88) warns.push("VRAM is tight. Monitor for OOM errors.");
-    if (wizardState.useCase === 'agentic' && kvBpe(ctxK) < 1.0) warns.push("⚠ q4_0 KV not recommended for agentic workflows — reduces tool-call coherence.");
+    if (wizardState.useCase === 'agentic' && kvBpe(ctxK) < 1.0) warns.push("q4_0 KV not recommended for agentic workflows — reduces tool-call coherence.");
     if (wizardState.access.bindHost === '0.0.0.0' && !wizardState.access.apiKey) warns.push('LAN-visible endpoint without a server API key. Set one unless you intentionally want an open local-network server.');
     else if (wizardState.access.bindHost === '0.0.0.0') warns.push('LAN-visible endpoint enabled. Make sure clients know the API key you set.');
     if (warns.length) {
       dom.summaryWarnings.style.display = '';
       dom.summaryWarnings.innerHTML = '';
-      warns.forEach(w => { const p = document.createElement('div'); p.textContent = w; dom.summaryWarnings.appendChild(p); });
+      const textWrap = document.createElement('div');
+      textWrap.className = 'summary-warnings-text';
+      warns.forEach(w => { const p = document.createElement('div'); p.textContent = w; textWrap.appendChild(p); });
+      dom.summaryWarnings.appendChild(textWrap);
     } else {
       dom.summaryWarnings.style.display = 'none';
     }
@@ -3984,6 +3996,80 @@ async function runHealthCheck() {
     showToast(`Health: ${verdict || 'complete'}`, verdict === 'good' ? 'success' : verdict === 'poor' ? 'error' : 'warning', details || (data.hints?.[0] ?? ''));
   } catch (err) { showToast('Health check error', 'error', err.message || String(err)); }
   finally { btn.disabled = false; btn.textContent = orig; }
+}
+
+// ── Spawn config preview card (step 4) ────────────────────────────────────────
+
+function _renderSpawnConfigCard() {
+  const card = document.getElementById('spawn-config-card');
+  const sidebar = document.getElementById('spawn-sidebar-config');
+  const m = wizardState.model, hw = wizardState.hardware, acc = wizardState.access;
+
+  const modelName = m.source === 'hf'
+    ? (m.hfFile ? m.hfFile.split('/').pop() : (m.hfRepo || '—'))
+    : (m.path ? (m.path.split(/[\\/]/).pop() || m.path) : '—');
+  const port     = acc.port || 8001;
+  const ctx      = hw.contextSize ? hw.contextSize.toLocaleString() + ' tok' : '—';
+  const gpu      = hw.gpuLayers === 'manual'
+    ? `${hw.gpuLayersManual ?? '?'} layers`
+    : (hw.gpuLayers === 'all' ? 'All GPU' : 'Auto');
+  const bind     = acc.bindHost === '0.0.0.0' ? '0.0.0.0 (LAN)' : '127.0.0.1';
+  const kvStr    = `${(hw.cacheTypeK || 'q8_0').toUpperCase()} / ${(hw.cacheTypeV || 'q8_0').toUpperCase()}`;
+  const alias    = hw.alias || modelName.replace(/\.gguf$/i, '').replace(/[^A-Za-z0-9._-]/g, '-');
+
+  if (card) {
+    card.style.display = '';
+    const mk = (tag, cls, text) => {
+      const el = document.createElement(tag);
+      if (cls) el.className = cls;
+      if (text !== undefined) el.textContent = text;
+      return el;
+    };
+    card.innerHTML = '';
+
+    const hdr = mk('div', 'spawn-config-card-header');
+    hdr.appendChild(mk('span', 'spawn-config-card-title', 'Model'));
+    hdr.appendChild(mk('span', 'spawn-config-card-model', modelName));
+    card.appendChild(hdr);
+
+    const grid = mk('div', 'spawn-config-grid');
+    const items = [
+      ['Port',    String(port)],
+      ['Host',    bind],
+      ['Context', ctx],
+      ['GPU',     gpu],
+      ['KV quant', kvStr],
+      ['Alias',   alias],
+    ];
+    items.forEach(([label, value]) => {
+      const item = mk('div', 'spawn-config-item');
+      item.appendChild(mk('div', 'spawn-config-item-label', label));
+      item.appendChild(mk('div', 'spawn-config-item-value', value));
+      grid.appendChild(item);
+    });
+    card.appendChild(grid);
+  }
+
+  if (sidebar) {
+    sidebar.innerHTML = '';
+    [
+      ['Model', modelName],
+      ['Port',  String(port)],
+      ['Host',  bind],
+    ].forEach(([label, value]) => {
+      const stat = document.createElement('div');
+      stat.className = 'spawn-sidebar-stat';
+      const lbl = document.createElement('span');
+      lbl.className = 'spawn-sidebar-stat-label';
+      lbl.textContent = label;
+      const val = document.createElement('span');
+      val.className = 'spawn-sidebar-stat-value';
+      val.textContent = value;
+      stat.appendChild(lbl);
+      stat.appendChild(val);
+      sidebar.appendChild(stat);
+    });
+  }
 }
 
 // ── Spawn server ──────────────────────────────────────────────────────────────
