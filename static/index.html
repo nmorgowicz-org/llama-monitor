@@ -149,9 +149,8 @@
         </div>
         <div class="nav-right">
             <div id="session-controls">
-                <button class="nav-btn" id="nav-new-session-btn" title="New Session">+ New Session</button>
+                <button class="nav-btn" id="nav-new-session-btn" title="New Session" style="display:none;">+ New Session</button>
             </div>
-                      <button id="settings-btn" class="nav-btn" title="Settings">⚙️ Settings</button>
             <button id="llama-pill" class="top-nav-pill llama-pill-idle" style="display:none;" type="button" title="llama-server binary version">
               <span id="llama-pill-version">b—</span>
             </button>
@@ -162,12 +161,11 @@
                 <span id="update-pill-text"></span>
             </button>
             <div class="nav-user" id="user-menu">
-                <button class="nav-user-btn" id="nav-user-btn" type="button" aria-expanded="false" aria-controls="nav-user-menu-items">👤 User</button>
+                <button class="nav-user-btn nav-user-btn-icon" id="nav-user-btn" type="button" aria-expanded="false" aria-controls="nav-user-menu-items" title="Account">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+                </button>
                 <div class="nav-user-menu" id="nav-user-menu-items" role="menu">
-                    <a href="#" class="nav-user-menu-item" id="user-menu-profile">Profile</a>
-                    <a href="#" class="nav-user-menu-item" id="user-menu-preferences">Preferences</a>
                     <a href="#" class="nav-user-menu-item" id="user-menu-theme">Toggle Theme</a>
-                    <a href="#" class="nav-user-menu-item" id="user-menu-help">Help</a>
                     <a href="#" class="nav-user-menu-item" id="user-menu-logout">Logout</a>
                 </div>
             </div>
@@ -205,80 +203,80 @@
         <div class="view-container">
             <!-- SETUP VIEW -->
             <div class="view view-setup" id="view-setup">
-                <div class="setup-bg"></div>
-                <div class="setup-hero">
-                    <div class="setup-title-row">
+                <!-- Ambient orb background -->
+                <div class="setup-bg">
+                    <div class="setup-orb setup-orb-1"></div>
+                    <div class="setup-orb setup-orb-2"></div>
+                    <div class="setup-orb setup-orb-3"></div>
+                </div>
+
+                <!-- Header: brand + toolbar -->
+                <div class="setup-header">
+                    <div class="setup-brand">
                         <div class="setup-logo">
-                            <svg width="40" height="40" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <svg width="36" height="36" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M16 2C8.268 2 2 8.268 2 16C2 23.732 8.268 30 16 30C23.732 30 30 23.732 30 16C30 8.268 23.732 2 16 2ZM16 26C10.477 26 6 21.523 6 16C6 10.477 10.477 6 16 6C21.523 6 26 10.477 26 16C26 21.523 21.523 26 16 26Z" fill="var(--theme-primary)"/>
                                 <path d="M16 12C14.6739 12 13.4021 12.5268 12.4645 13.4645C11.5268 14.4021 11 15.6739 11 17C11 18.3261 11.5268 19.5979 12.4645 20.5355C13.4021 21.4732 14.6739 22 16 22C17.3261 22 18.5979 21.4732 19.5355 20.5355C20.4732 19.5979 21 18.3261 21 17C21 15.6739 20.4732 14.4021 19.5355 13.4645C18.5979 12.5268 17.3261 12 16 12ZM16 20C14.9391 20 13.9217 19.5786 13.1716 18.8284C12.4214 18.0783 12 17.0609 12 16C12 14.9391 12.4214 13.9217 13.1716 13.1716C13.9217 12.4214 14.9391 12 16 12C17.0609 12 18.0783 12.4214 18.8284 13.1716C19.5786 13.9217 20 14.9391 20 16C20 17.0609 19.5786 18.0783 18.8284 18.8284C18.0783 19.5786 17.0609 20 16 20Z" fill="white"/>
                             </svg>
                         </div>
-                        <h1 class="setup-title">Llama Monitor</h1>
+                        <div class="setup-brand-text">
+                            <h1 class="setup-brand-title">Llama Monitor</h1>
+                            <p class="setup-brand-sub">Local inference, fully observed</p>
+                        </div>
                     </div>
-                    <p class="setup-subtitle">Real-time telemetry for your inference stack</p>
+                    <div class="setup-toolbar">
+                        <button class="setup-toolbar-btn" id="setup-models-btn" title="Browse and download models">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                            Models
+                        </button>
+                        <button class="setup-toolbar-btn setup-toolbar-btn-ghost" id="setup-attach-remote-btn" title="Attach to a running remote endpoint">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 7h3a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-3m-6 0H6a5 5 0 0 1-5-5 5 5 0 0 1 5-5h3"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                            Attach Remote
+                        </button>
+                    </div>
                 </div>
-                <div class="setup-actions">
-                    <div class="setup-card setup-card-attach">
-                        <div class="setup-card-icon">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h4M18 12h4M12 2v4M12 18v4"/><circle cx="12" cy="12" r="3"/></svg>
-                        </div>
-                        <h2 class="setup-card-title">Attach to Endpoint</h2>
-                        <p class="setup-card-desc">Connect to a running llama.cpp server on any machine</p>
-                        <div class="setup-recent-endpoints" id="setup-recent-endpoints">
+
+                <!-- Launch grid: preset cards + new config card (populated by JS) -->
+                <div class="launch-grid" id="setup-launch-grid">
+                    <div class="launch-card-skeleton"></div>
+                    <div class="launch-card-skeleton"></div>
+                    <div class="launch-card-skeleton"></div>
+                </div>
+
+                <!-- Attach remote drawer (collapsed, toggled by Attach Remote btn) -->
+                <div class="setup-attach-drawer" id="setup-attach-drawer">
+                    <div class="setup-attach-inner">
+                        <div id="setup-recent-endpoints" style="display:none;">
                             <div class="setup-section-header">
-                                <h3>Recent Endpoints</h3>
-                                <a id="setup-browse-sessions-link">Manage all sessions →</a>
+                                <span class="setup-section-title">Recent Endpoints</span>
+                                <a id="setup-browse-sessions-link" class="setup-link">Manage →</a>
                             </div>
-                            <div class="setup-endpoint-list" id="setup-endpoint-list">
-                                <!-- Dynamically populated -->
-                            </div>
+                            <div class="setup-endpoint-list" id="setup-endpoint-list"></div>
                         </div>
-                        <div class="setup-endpoint-manual" id="setup-endpoint-manual">
+                        <div class="setup-attach-manual">
                             <div class="setup-section-header">
-                                <h3>Manual Attach</h3>
+                                <span class="setup-section-title">Manual Attach</span>
                             </div>
                             <div class="setup-card-form">
                                 <input type="text" class="setup-input" id="setup-endpoint-url" placeholder="http://127.0.0.1:8080">
                                 <input type="password" class="setup-input" id="setup-endpoint-api-key" placeholder="API key (optional)">
                                 <button class="setup-btn setup-btn-primary" id="setup-attach-btn">
-                                    <span class="btn-icon">⚡</span> Attach
+                                    <span class="btn-icon">⚡</span> Connect
                                 </button>
                             </div>
-                        </div>
-                    </div>
-                    <div class="setup-card setup-card-spawn">
-                        <div class="setup-card-icon">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M8 21V7a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v14"/><path d="M12 11h.01"/></svg>
-                        </div>
-                        <h2 class="setup-card-title">Spawn Local Server</h2>
-                        <p class="setup-card-desc">Download a model and start a local llama.cpp server — guided step by step.</p>
-                        <button class="setup-btn setup-btn-primary setup-btn-full" id="setup-spawn-wizard-btn">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-                            New Server Wizard
-                        </button>
-                        <div class="setup-recent-endpoints" id="setup-recent-spawn-sessions" style="display:none;margin-top:14px;">
-                            <div class="setup-section-header">
-                                <h3>Recent Local Servers</h3>
-                            </div>
-                            <div class="setup-endpoint-list" id="setup-spawn-session-list">
-                                <!-- Dynamically populated -->
-                            </div>
-                        </div>
-                        <div class="setup-card-quick-start" id="setup-card-quick-start" style="display:none;">
-                            <div class="setup-card-divider">or quick start from preset</div>
-                            <div class="setup-card-form">
-                                <select class="setup-select" id="setup-preset-select"></select>
-                                <button class="setup-btn setup-btn-secondary" id="setup-start-btn">
-                                    <span class="btn-icon">▶</span> Start
-                                </button>
-                            </div>
-                        </div>
-                        <div class="setup-card-footer">
-                            <a class="setup-link" id="setup-manage-presets-link">Manage presets →</a>
                         </div>
                     </div>
                 </div>
+
+                <!-- Recent local servers (spawn history) -->
+                <div class="setup-history" id="setup-recent-spawn-sessions" style="display:none;">
+                    <div class="setup-section-header">
+                        <span class="setup-section-title">Recent Local Servers</span>
+                    </div>
+                    <div class="setup-endpoint-list" id="setup-spawn-session-list"></div>
+                </div>
+
+                <!-- Quick stats row (shown after at least one session) -->
                 <div class="setup-stats" id="setup-stats" style="display:none;">
                     <div class="setup-stat-item">
                         <span class="setup-stat-value" id="setup-last-prompt-rate">—</span>
@@ -292,6 +290,16 @@
                         <span class="setup-stat-value" id="setup-last-session">—</span>
                         <span class="setup-stat-label">Last session</span>
                     </div>
+                </div>
+
+                <!-- Hidden compat elements: preserved for JS bindings -->
+                <div style="display:none;" aria-hidden="true">
+                    <div id="setup-card-quick-start">
+                        <select id="setup-preset-select"></select>
+                        <button type="button" id="setup-start-btn">Start</button>
+                    </div>
+                    <button type="button" id="setup-spawn-wizard-btn">Wizard</button>
+                    <a id="setup-manage-presets-link"></a>
                 </div>
             </div>
 
@@ -325,6 +333,10 @@
                     </span>
                     <button class="btn btn-start" id="btn-start">Start</button>
                     <button class="btn btn-stop" id="btn-stop" disabled>Stop</button>
+                    <button class="btn btn-switch-model" id="btn-switch-model" style="display:none;" title="Switch the running model (keeps current preset settings)">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
+                        Switch Model
+                    </button>
                 </div>
 
                 <section class="metric-section" id="inference-section">

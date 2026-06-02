@@ -2,17 +2,27 @@
 // Scans discovered local GGUF files and presents them as launch-ready cards.
 
 import { escapeHtml } from '../core/format.js';
+import { sessionState } from '../core/app-state.js';
 import { showToast } from './toast.js';
 import { openSpawnWizard } from './spawn-wizard.js';
 
 let initialized = false;
+let switchModelMode = false;
 
 export function openModelsModal() {
+    switchModelMode = false;
+    document.getElementById('models-modal')?.classList.add('open');
+    loadModels();
+}
+
+export function openModelsModalForSwitch() {
+    switchModelMode = true;
     document.getElementById('models-modal')?.classList.add('open');
     loadModels();
 }
 
 function closeModelsModal() {
+    switchModelMode = false;
     document.getElementById('models-modal')?.classList.remove('open');
 }
 
@@ -102,9 +112,15 @@ function buildModelCard(m) {
     const spawnBtn = document.createElement('button');
     spawnBtn.type = 'button';
     spawnBtn.className = 'btn-sm btn-model-spawn';
-    spawnBtn.textContent = 'Spawn';
-    spawnBtn.title = 'Open spawn wizard with this model pre-loaded';
-    spawnBtn.addEventListener('click', () => spawnLocalModel(m.path || m.filename));
+    if (switchModelMode) {
+        spawnBtn.textContent = 'Use This Model';
+        spawnBtn.title = 'Stop the running server and restart with this model';
+        spawnBtn.addEventListener('click', () => switchToModel(m.path || m.filename));
+    } else {
+        spawnBtn.textContent = 'Spawn';
+        spawnBtn.title = 'Open spawn wizard with this model pre-loaded';
+        spawnBtn.addEventListener('click', () => spawnLocalModel(m.path || m.filename));
+    }
     actions.appendChild(spawnBtn);
 
     const pathBtn = document.createElement('button');
@@ -162,6 +178,45 @@ function spawnLocalModel(filePath) {
     openSpawnWizard({ localPath: filePath, localModel: model });
 }
 
+// ── Switch Model ──────────────────────────────────────────────────────────────
+
+async function switchToModel(filePath) {
+    closeModelsModal();
+
+    const presetId = document.getElementById('preset-select')?.value;
+    if (!presetId) { showToast('No preset selected', 'warn'); return; }
+
+    const preset = (sessionState.presets || []).find(p => p.id === presetId);
+    if (!preset) { showToast('Preset not found', 'error'); return; }
+
+    const headers = window.authHeaders
+        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+        : { 'Content-Type': 'application/json' };
+
+    try {
+        // Update the preset's model_path
+        const updated = { ...preset, model_path: filePath };
+        const resp = await fetch(`/api/presets/${encodeURIComponent(presetId)}`, {
+            method: 'PUT', headers, body: JSON.stringify(updated),
+        });
+        if (!resp.ok) { showToast('Failed to update preset: ' + await resp.text().catch(() => ''), 'error'); return; }
+
+        // Refresh in-memory preset list
+        const { loadPresets } = await import('./presets.js');
+        await loadPresets(presetId);
+
+        // Stop then restart
+        const { doStop, doStart } = await import('./attach-detach.js');
+        await doStop();
+        await new Promise(r => setTimeout(r, 600));
+        doStart();
+
+        showToast(`Switching to ${filePath.split(/[/\\]/).pop()}…`, 'success');
+    } catch (err) {
+        showToast('Switch failed: ' + (err.message || String(err)), 'error');
+    }
+}
+
 // ── Refresh ───────────────────────────────────────────────────────────────────
 
 async function refreshModels() {
@@ -191,11 +246,10 @@ export function initModels() {
     document.getElementById('models-refresh-btn')?.addEventListener('click', refreshModels);
     document.getElementById('models-open-settings-link')?.addEventListener('click', () => {
         closeModelsModal();
-        // Open settings and activate the Models tab
-        document.getElementById('settings-btn')?.click();
-        setTimeout(() => {
-            document.querySelector('.settings-tab[data-tab="models"]')?.click();
-        }, 80);
+        import('./settings.js').then(({ openSettingsModal }) => {
+            openSettingsModal();
+            setTimeout(() => document.querySelector('.settings-tab[data-tab="models"]')?.click(), 80);
+        });
     });
 
     // Auto-refresh when models_dir is updated via settings

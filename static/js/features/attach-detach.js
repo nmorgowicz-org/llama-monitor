@@ -352,6 +352,12 @@ export function initAttachDetach() {
     const btnStop = document.getElementById('btn-stop');
     if (btnStop) btnStop.addEventListener('click', doStop);
 
+    // Bind Switch Model button
+    const btnSwitchModel = document.getElementById('btn-switch-model');
+    if (btnSwitchModel) btnSwitchModel.addEventListener('click', () => {
+        import('./models.js').then(({ openModelsModalForSwitch }) => openModelsModalForSwitch());
+    });
+
     // Bind logs empty state button — opens wizard
     const btnSpawnFromLogs = document.getElementById('btn-spawn-server');
     if (btnSpawnFromLogs) btnSpawnFromLogs.addEventListener('click', () => {

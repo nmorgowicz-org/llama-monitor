@@ -395,6 +395,9 @@ function updateServerState(d) {
     if (btnStart) btnStart.disabled = localRunning;
     if (btnStop) btnStop.disabled = !localRunning;
 
+    const btnSwitchModel = document.getElementById('btn-switch-model');
+    if (btnSwitchModel) btnSwitchModel.style.display = localRunning ? '' : 'none';
+
     setLastServerState(d.server_running);
     setLastLlamaMetrics(d.llama);
     setLastSystemMetrics(d.system || null);

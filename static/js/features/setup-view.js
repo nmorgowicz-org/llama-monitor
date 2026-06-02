@@ -1,8 +1,9 @@
 // ── Setup / Monitor View ──────────────────────────────────────────────────────
 // View transitions, animations, quick stats, and view state initialization.
 
-import { setupViewState, chat } from '../core/app-state.js';
+import { setupViewState, chat, sessionState } from '../core/app-state.js';
 import { doAttachFromSetup } from './attach-detach.js';
+import { escapeHtml } from '../core/format.js';
 
 function setAttachButtonLabel(button, label) {
     if (!button) return;
@@ -111,9 +112,128 @@ function animateCardsExit() {
 }
 
 function animateSetupCardsEnter() {
-    const cards = document.querySelectorAll('.view-setup .setup-card.entrance');
-    cards.forEach((card, i) => {
-        setTimeout(() => card.classList.add('active'), 80 * i);
+    // no-op: launch cards use CSS animation-delay via inline style
+}
+
+// ── Attach drawer toggle ──────────────────────────────────────────────────────
+
+let _attachDrawerOpen = false;
+
+export function toggleAttachDrawer(forceOpen) {
+    const drawer = document.getElementById('setup-attach-drawer');
+    if (!drawer) return;
+    _attachDrawerOpen = forceOpen !== undefined ? forceOpen : !_attachDrawerOpen;
+    drawer.classList.toggle('open', _attachDrawerOpen);
+    const btn = document.getElementById('setup-attach-remote-btn');
+    if (btn) {
+        btn.style.background = _attachDrawerOpen ? 'rgba(255,255,255,0.08)' : '';
+        btn.style.borderColor = _attachDrawerOpen ? 'rgba(255,255,255,0.18)' : '';
+    }
+}
+
+// ── Launch Grid — Preset Cards ────────────────────────────────────────────────
+
+function _visiblePresetsLocal(presets) {
+    const user = presets.filter(p => !p.id.startsWith('default-'));
+    return user.length > 0 ? user : presets;
+}
+
+export function renderLaunchGrid() {
+    const grid = document.getElementById('setup-launch-grid');
+    if (!grid) return;
+    grid.innerHTML = '';
+
+    const presets = _visiblePresetsLocal(sessionState.presets || []);
+    const activePresetId = document.getElementById('preset-select')?.value || '';
+
+    presets.forEach((preset, i) => {
+        const card = _buildLaunchCard(preset, activePresetId);
+        card.style.animationDelay = `${i * 55}ms`;
+        grid.appendChild(card);
+    });
+
+    // "New Configuration" card
+    const newCard = _buildNewConfigCard();
+    newCard.style.animationDelay = `${presets.length * 55}ms`;
+    grid.appendChild(newCard);
+}
+
+function _buildLaunchCard(preset, activePresetId) {
+    const card = document.createElement('div');
+    card.className = 'launch-card';
+    const isRunning = preset.id === activePresetId && activePresetId;
+    if (isRunning) card.classList.add('launch-card--running');
+
+    const modelFile = (preset.model_path || '').split(/[/\\]/).pop() ||
+                      (preset.hf_repo ? preset.hf_repo.split('/').slice(-1)[0] : '');
+    const hasModel = !!modelFile;
+
+    const ctxK = preset.context_size ? Math.round(preset.context_size / 1024) : 128;
+    const ctxDisplay = ctxK >= 1000 ? `${(ctxK / 1024).toFixed(1)}M ctx` : `${ctxK}k ctx`;
+    const ctkDisplay = (preset.ctk || 'q8_0') + '/' + (preset.ctv || 'f16');
+
+    card.innerHTML = `
+        <div class="launch-card-top">
+            <div class="launch-card-name">${escapeHtml(preset.name)}</div>
+            ${isRunning ? '<span class="launch-card-running-badge">● Running</span>' : ''}
+        </div>
+        <div class="launch-card-model ${hasModel ? '' : 'launch-card-model--empty'}">${escapeHtml(modelFile || 'No model configured')}</div>
+        <div class="launch-card-chips">
+            <span class="launch-chip">${ctxDisplay}</span>
+            <span class="launch-chip">${ctkDisplay}</span>
+            ${preset.ngram_spec ? '<span class="launch-chip launch-chip--accent">n-gram</span>' : ''}
+        </div>
+        <div class="launch-card-actions">
+            <button class="launch-card-btn-edit" type="button">Edit</button>
+            <button class="launch-card-btn-start ${hasModel ? '' : 'launch-card-btn-start--configure'}" type="button">
+                ${hasModel ? '▶ Start' : '⚙ Configure'}
+            </button>
+        </div>
+    `;
+
+    card.querySelector('.launch-card-btn-edit').addEventListener('click', () => {
+        const mainSel = document.getElementById('preset-select');
+        if (mainSel) mainSel.value = preset.id;
+        import('./presets.js').then(({ openPresetModal }) => openPresetModal('edit'));
+    });
+
+    card.querySelector('.launch-card-btn-start').addEventListener('click', () => {
+        if (!hasModel) {
+            import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
+            return;
+        }
+        const setupSel = document.getElementById('setup-preset-select');
+        if (setupSel) setupSel.value = preset.id;
+        const mainSel = document.getElementById('preset-select');
+        if (mainSel) mainSel.value = preset.id;
+        import('./attach-detach.js').then(({ doStartFromSetup }) => doStartFromSetup());
+    });
+
+    return card;
+}
+
+function _buildNewConfigCard() {
+    const card = document.createElement('div');
+    card.className = 'launch-card launch-card--new';
+    card.innerHTML = `
+        <div class="launch-card-new-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </div>
+        <div class="launch-card-new-label">New Configuration</div>
+    `;
+    card.addEventListener('click', () => {
+        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
+    });
+    return card;
+}
+
+export function updateRunningCardHighlight() {
+    const activePresetId = document.getElementById('preset-select')?.value || '';
+    document.querySelectorAll('.launch-card[data-preset-id]').forEach(card => {
+        const isRunning = card.dataset.presetId === activePresetId && activePresetId;
+        card.classList.toggle('launch-card--running', !!isRunning);
+        const badge = card.querySelector('.launch-card-running-badge');
+        if (badge) badge.style.display = isRunning ? '' : 'none';
     });
 }
 
@@ -400,12 +520,8 @@ export function syncSetupPresetSelect() {
     });
     setupSelect.value = mainSelect.value;
 
-    // Show/hide the quick-start area depending on whether any presets exist
-    const quickStart = document.getElementById('setup-card-quick-start');
-    if (quickStart) {
-        const hasPresets = options.length > 0 && [...options].some(o => o.value !== '');
-        quickStart.style.display = hasPresets ? '' : 'none';
-    }
+    // Also re-render the launch grid when presets change
+    renderLaunchGrid();
 }
 
 // ── Initialization ────────────────────────────────────────────────────────────
@@ -413,12 +529,21 @@ export function syncSetupPresetSelect() {
 export function initViewState() {
     if (document.body.classList.contains('setup-active')) return; // already initialized
     renderQuickStats();
-    syncSetupPresetSelect();
+    syncSetupPresetSelect(); // also calls renderLaunchGrid
     const lastEndpoint = localStorage.getItem('llama-monitor-last-endpoint');
     if (lastEndpoint) {
         const input = document.getElementById('setup-endpoint-url');
         if (input) input.value = lastEndpoint;
     }
+
+    // Bind attach drawer toggle
+    document.getElementById('setup-attach-remote-btn')?.addEventListener('click', () => toggleAttachDrawer());
+
+    // Bind models button
+    document.getElementById('setup-models-btn')?.addEventListener('click', () => {
+        import('./models.js').then(({ openModelsModal }) => openModelsModal());
+    });
+
     document.body.classList.add('setup-active');
     const setupView = document.getElementById('view-setup');
     const monitorView = document.getElementById('view-monitor');
