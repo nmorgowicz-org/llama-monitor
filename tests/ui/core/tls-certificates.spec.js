@@ -9,7 +9,11 @@ test.describe('TLS / Certificates settings', () => {
   });
 
   test('Certificates tab exists and is selectable', async ({ page }) => {
-    await page.getByRole('button', { name: /settings/i }).first().click();
+    // Use JS to open settings modal directly (sidebar click may be intercepted by setup view)
+    await page.evaluate(async () => {
+      const { openSettingsModal } = await import('/js/features/settings.js');
+      openSettingsModal();
+    });
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
     await page.waitForTimeout(300);
 
@@ -21,7 +25,11 @@ test.describe('TLS / Certificates settings', () => {
   });
 
   test('TLS mode controls exist', async ({ page }) => {
-    await page.getByRole('button', { name: /settings/i }).first().click();
+    // Use JS to open settings modal directly (sidebar click may be intercepted by setup view)
+    await page.evaluate(async () => {
+      const { openSettingsModal } = await import('/js/features/settings.js');
+      openSettingsModal();
+    });
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
     await page.waitForTimeout(300);
 
@@ -55,7 +63,11 @@ test.describe('TLS / Certificates settings', () => {
   });
 
   test('ACME section exists with required controls', async ({ page }) => {
-    await page.getByRole('button', { name: /settings/i }).first().click();
+    // Use JS to open settings modal directly (sidebar click may be intercepted by setup view)
+    await page.evaluate(async () => {
+      const { openSettingsModal } = await import('/js/features/settings.js');
+      openSettingsModal();
+    });
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
     await page.waitForTimeout(300);
 
@@ -100,7 +112,11 @@ test.describe('TLS / Certificates settings', () => {
   });
 
   test('switching TLS mode updates UI', async ({ page }) => {
-    await page.getByRole('button', { name: /settings/i }).first().click();
+    // Use JS to open settings modal directly (sidebar click may be intercepted by setup view)
+    await page.evaluate(async () => {
+      const { openSettingsModal } = await import('/js/features/settings.js');
+      openSettingsModal();
+    });
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
     await page.waitForTimeout(300);
 

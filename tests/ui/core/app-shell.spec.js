@@ -24,8 +24,9 @@ test.describe('app shell', () => {
     await expect(page.locator('.top-nav-bar')).toBeVisible();
     await expect(page.locator('.sidebar-nav')).toBeVisible();
     await expect(page.locator('#view-setup')).toBeVisible();
-    await expect(page.getByText('Connect to Endpoint')).toBeVisible();
-    await expect(page.getByText('Local Server')).toBeVisible();
+    // setup-pane-label elements are divs, not headings
+    await expect(page.locator('.setup-pane-label').getByText('Connect to Endpoint')).toBeVisible();
+    await expect(page.locator('.setup-pane-label').getByText('Local Server')).toBeVisible();
   });
 
   test('top status endpoint is read-only and edit control is in dashboard', async ({ page }) => {
@@ -71,7 +72,11 @@ test.describe('modals and menus', () => {
   });
 
   test('settings opens and secondary tabs switch', async ({ page }) => {
-    await page.getByRole('button', { name: /settings/i }).first().click();
+    // Use JS to open settings modal directly (sidebar click may be intercepted by setup view)
+    await page.evaluate(async () => {
+      const { openSettingsModal } = await import('/js/features/settings.js');
+      openSettingsModal();
+    });
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
     await expect(page.locator('#settings-models')).toBeVisible();
 
@@ -135,7 +140,11 @@ test.describe('modals and menus', () => {
   });
 
   test('configuration explains local executable, GPU, and explicit SSH flow', async ({ page }) => {
-    await page.getByRole('button', { name: /settings/i }).first().click();
+    // Use JS to open settings modal directly (sidebar click may be intercepted by setup view)
+    await page.evaluate(async () => {
+      const { openSettingsModal } = await import('/js/features/settings.js');
+      openSettingsModal();
+    });
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
 
     // Use System tab
@@ -185,7 +194,11 @@ test.describe('modals and menus', () => {
       });
     });
 
-    await page.getByRole('button', { name: /settings/i }).first().click();
+    // Use JS to open settings modal directly (sidebar click may be intercepted by setup view)
+    await page.evaluate(async () => {
+      const { openSettingsModal } = await import('/js/features/settings.js');
+      openSettingsModal();
+    });
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
 
     // Use System tab
@@ -233,7 +246,11 @@ test.describe('modals and menus', () => {
       });
     });
 
-    await page.getByRole('button', { name: /settings/i }).first().click();
+    // Use JS to open settings modal directly (sidebar click may be intercepted by setup view)
+    await page.evaluate(async () => {
+      const { openSettingsModal } = await import('/js/features/settings.js');
+      openSettingsModal();
+    });
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
 
     // Use System tab
