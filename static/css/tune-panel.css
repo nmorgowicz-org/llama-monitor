@@ -368,6 +368,30 @@
   transform: none;
 }
 
+/* ── Light theme: tune panel (full pass) ─────────────────────────────── */
+
+[data-theme="light"] .tune-panel {
+  background:
+    linear-gradient(180deg, rgba(99, 102, 241, 0.04) 0%, rgba(15, 23, 42, 0.02) 100%);
+  border-color: var(--border-subtle);
+}
+
+/* Suggestion cards */
+[data-theme="light"] .tune-suggestion-card {
+  background: rgba(15, 23, 42, 0.02);
+  border-color: var(--border-subtle);
+}
+
+[data-theme="light"] .tune-suggestion-card:hover {
+  border-color: rgba(99, 102, 241, 0.25);
+  background: rgba(99, 102, 241, 0.04);
+}
+
+/* Restarting overlay */
+[data-theme="light"] .tune-restarting-overlay {
+  background: rgba(15, 23, 42, 0.75);
+}
+
 /* "Already well-tuned" / no suggestions message */
 .tune-no-suggestions {
   font-size: var(--text-xs);

@@ -1922,3 +1922,163 @@
 
   /* viz-gear-btn, viz-reset-btn, viz-option transitions — color/bg (visual, keep) */
 }
+
+/* ── Light theme: cards-hardware (full pass) ───────────────────────────── */
+
+/* Base widget-hardware / widget-gpu / widget-system */
+[data-theme="light"] .widget-hardware,
+[data-theme="light"] .widget-gpu,
+[data-theme="light"] .widget-system {
+  background:
+    radial-gradient(circle at 18% 18%, var(--surface-card-ambient-a), transparent 26%),
+    radial-gradient(circle at 82% 14%, var(--surface-card-ambient-b), transparent 24%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.04), rgba(15, 23, 42, 0.02));
+}
+
+/* Pseudo-ambient overlays */
+[data-theme="light"] .widget-hardware::after {
+  opacity: 0.6;
+}
+
+/* Metric blocks */
+[data-theme="light"] .hw-metric-block {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 252, 0.9));
+  border-color: var(--border-subtle);
+  box-shadow:
+    0 8px 18px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+[data-theme="light"] .hw-metric-block:hover {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.94));
+  border-color: var(--surface-card-line);
+  box-shadow:
+    0 12px 24px rgba(15, 23, 42, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+[data-theme="light"] .hw-metric-block::before {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.6), transparent 38%);
+  opacity: 0.9;
+}
+
+/* Slot pills */
+[data-theme="light"] .slot-pill {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: var(--border-subtle);
+  box-shadow:
+    0 2px 8px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/* Idle pill */
+[data-theme="light"] .slot-pill.idle {
+  border-color: rgba(22, 163, 74, 0.3);
+  box-shadow:
+    0 2px 8px rgba(15, 23, 42, 0.12),
+    0 0 16px rgba(16, 185, 129, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/* Busy pill */
+[data-theme="light"] .slot-pill.busy {
+  border-color: rgba(2, 132, 199, 0.3);
+  box-shadow:
+    0 2px 8px rgba(15, 23, 42, 0.12),
+    0 0 16px rgba(6, 182, 212, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/* Detach button */
+[data-theme="light"] .btn-detach-top {
+  background: rgba(220, 38, 38, 0.07);
+  border-color: rgba(220, 38, 38, 0.4);
+  color: #dc2626;
+}
+
+[data-theme="light"] .btn-detach-top:hover {
+  background: rgba(220, 38, 38, 0.12);
+  border-color: rgba(220, 38, 38, 0.6);
+  color: #dc2626;
+}
+
+/* Bar backgrounds */
+[data-theme="light"] .hw-bar-bg,
+[data-theme="light"] .hw-stacked-bg {
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0.04)),
+    rgba(15, 23, 42, 0.06);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -1px 2px rgba(15, 23, 42, 0.08),
+    0 2px 6px rgba(15, 23, 42, 0.06);
+}
+
+/* Glow for bars in light theme: keep color, reduce spread */
+[data-theme="light"] .hw-bar-fill,
+[data-theme="light"] .hw-stacked-fill {
+  animation-duration: 3.4s;
+}
+
+/* Sparkline containers for hardware metrics */
+[data-theme="light"] .hw-sparkline,
+[data-theme="light"] .hw-metric-sparkline {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(248, 250, 252, 0.9)),
+    repeating-linear-gradient(90deg, rgba(15, 23, 42, 0.04) 0 1px, transparent 1px 16px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -1px 0 rgba(15, 23, 42, 0.08),
+    0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
+/* Reduce pseudo-element sheen in light */
+[data-theme="light"] .hw-sparkline::before,
+[data-theme="light"] .hw-metric-sparkline::before,
+[data-theme="light"] .hw-clock-footer-spark::before {
+  opacity: 0.3;
+}
+
+/* Current dot contrast on light backgrounds */
+[data-theme="light"] .hw-metric-sparkline .sparkline-current {
+  fill: rgba(15, 23, 42, 0.94);
+}
+
+/* Clock clusters: soften glow */
+[data-theme="light"] .hw-clock-cluster {
+  box-shadow:
+    inset 0 0 0 1px rgba(15, 23, 42, 0.12),
+    0 0 22px rgba(14, 116, 144, 0.08);
+}
+
+/* GPU table rows / header: ensure contrast */
+[data-theme="light"] .hw-gpu-table,
+[data-theme="light"] .gpu-table-row {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.96));
+  border-color: var(--border-subtle);
+  box-shadow:
+    0 6px 14px rgba(15, 23, 42, 0.09),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+/* Viz switcher and options */
+[data-theme="light"] .viz-option {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: var(--border-subtle);
+  color: var(--color-text-muted);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/* Temp gauge: soften inner shadow for light theme */
+[data-theme="light"] .hw-temp-gauge {
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.18);
+}
+
+/* Temp unavailable badge */
+[data-theme="light"] .hw-temp-unavailable-badge {
+  background: rgba(217, 119, 6, 0.08);
+  border-color: rgba(217, 119, 6, 0.3);
+  color: #b8860b;
+}

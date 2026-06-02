@@ -126,8 +126,8 @@ export function toggleAttachDrawer(forceOpen) {
     drawer.classList.toggle('open', _attachDrawerOpen);
     const btn = document.getElementById('setup-attach-remote-btn');
     if (btn) {
-        btn.style.background = _attachDrawerOpen ? 'rgba(255,255,255,0.08)' : '';
-        btn.style.borderColor = _attachDrawerOpen ? 'rgba(255,255,255,0.18)' : '';
+        btn.style.background = _attachDrawerOpen ? 'var(--neutral-soft-bg-strong)' : '';
+        btn.style.borderColor = _attachDrawerOpen ? 'var(--neutral-soft-border)' : '';
     }
 }
 

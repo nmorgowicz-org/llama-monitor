@@ -1521,7 +1521,7 @@ function renderQuantAdvisor(quants, availVram) {
     // Size
     const sizeTd = tr.insertCell();
     sizeTd.textContent = q.model_size_gb.toFixed(1) + ' GB';
-    sizeTd.style.color = '#94a3b8';
+    sizeTd.style.color = 'var(--color-text-muted)';
 
     // Max ctx q8_0
     const ctxQ8Td = tr.insertCell();
@@ -2441,7 +2441,7 @@ function updateVramDisplay() {
   if (dom.vLegFreeLabel) {
     const freeAbs = Math.abs(free);
     dom.vLegFreeLabel.textContent = free >= 0 ? `Free ${formatGB(free)}` : `Over ${formatGB(freeAbs)}`;
-    if (dom.vLegFreeDot) dom.vLegFreeDot.style.background = free >= 0 ? '' : '#ef4444';
+    if (dom.vLegFreeDot) dom.vLegFreeDot.style.background = free >= 0 ? '' : 'var(--color-error)';
   }
 
   // Show/hide MoE panel
@@ -2560,7 +2560,8 @@ function updateMoeSliderVisuals() {
   const pct = cpu / n * 100;
 
   if (dom.moeOffloadSlider) {
-    dom.moeOffloadSlider.style.background = `linear-gradient(90deg, #7c3aed ${pct.toFixed(1)}%, rgba(255,255,255,0.1) ${pct.toFixed(1)}%)`;
+    dom.moeOffloadSlider.style.background =
+         `linear-gradient(90deg, var(--color-purple) ${pct.toFixed(1)}%, var(--neutral-soft-bg-strong) ${pct.toFixed(1)}%)`;
   }
   if (dom.moeOffloadSubtitle) {
     dom.moeOffloadSubtitle.textContent = `${cpu} of ${n} experts on CPU · ${gpu} in VRAM`;

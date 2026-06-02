@@ -227,11 +227,11 @@ export async function showLHMNotification() {
                         <div id="progress-bar-container" style="width: 100%; height: 8px; background: #4c566a; border-radius: 4px; overflow: hidden; margin-bottom: 15px;">
                             <div id="progress-bar" style="width: 0%; height: 100%; background: #88c0d0; transition: width 0.3s ease;"></div>
                         </div>
-                        <div id="progress-text" style="color: #bf616a; font-size: 14px;">Waiting for UAC...</div>
-                        <div style="margin-top: 15px; font-size: 12px; color: #616e88;">
-                            <span class="spinner" style="display: inline-block; width: 12px; height: 12px; border: 2px solid #616e88; border-top: 2px solid #88c0d0; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px;"></span>
-                            Please wait...
-                        </div>
+                        <div id="progress-text" style="color: var(--color-error); font-size: 14px;">Waiting for UAC...</div>
+                         <div style="margin-top: 15px; font-size: 12px; color: var(--color-text-muted);">
+                             <span class="spinner" style="display: inline-block; width: 12px; height: 12px; border: 2px solid var(--color-text-muted); border-top: 2px solid var(--color-info); border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px;"></span>
+                             Please wait...
+                         </div>
                         <style>
                             @keyframes spin { to { transform: rotate(360deg); } }
                         </style>
@@ -288,13 +288,17 @@ export async function showLHMNotification() {
                                                 progressDisplay = progress;
                                                 const pct = progress.match(/(\d+)%/);
                                                 if (pct) progressBarWidth = pct[1] + '%';
-                                            } else if (progress === 'completed') {
-                                                progressDisplay = 'Installation complete! LHM is now running.';
-                                                if (progressBar) progressBar.style.background = '#a3be8c';
-                                            } else if (progress === 'failed') {
-                                                progressDisplay = 'Installation failed!';
-                                                if (progressBar) progressBar.style.background = '#bf616a';
-                                            }
+                                           } else if (progress === 'completed') {
+                                                 progressDisplay = 'Installation complete! LHM is now running.';
+                                                 if (progressBar) {
+                                                     progressBar.style.background = 'var(--color-success)';
+                                                 }
+                                             } else if (progress === 'failed') {
+                                                 progressDisplay = 'Installation failed!';
+                                                 if (progressBar) {
+                                                     progressBar.style.background = 'var(--color-error)';
+                                                 }
+                                             }
 
                                             progressText.textContent = progressDisplay;
                                             if (progressBar && progressBarWidth !== '0%') {

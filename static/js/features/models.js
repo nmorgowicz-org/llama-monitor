@@ -1194,7 +1194,7 @@ function renderQuantAdvisor(quants, availVram) {
         // Size
         const sizeTd = tr.insertCell();
         sizeTd.textContent = q.model_size_gb.toFixed(1) + ' GB';
-        sizeTd.style.color = '#94a3b8';
+        sizeTd.style.color = 'var(--color-text-muted)';
 
         // Max ctx q8_0
         const ctxQ8Td = tr.insertCell();
@@ -1363,7 +1363,7 @@ async function updateVramDisplay(file) {
         const freeAbs = Math.abs(free);
         freeLabel.textContent = free >= 0 ? 'Free ' + formatGB(free) : 'Over ' + formatGB(freeAbs);
     }
-    if (freeDot) freeDot.style.background = free >= 0 ? '' : '#ef4444';
+    if (freeDot) freeDot.style.background = free >= 0 ? '' : 'var(--color-error)';
 
     // Update ctx train warning (if introspection revealed n_ctx_train)
     updateCtxTrainWarning();
