@@ -1882,6 +1882,18 @@ button:disabled {
   color: #f87171;
 }
 
+.llama-version-pinned-sep {
+  padding: 6px 20px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  opacity: 0.45;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  margin-top: 4px;
+}
+
 .llama-version-row {
   display: flex;
   align-items: center;

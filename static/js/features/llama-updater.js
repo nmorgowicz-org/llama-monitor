@@ -128,6 +128,16 @@ async function loadReleaseList() {
       listEl.appendChild(row);
     });
 
+    // If the installed build is older than the 8-release window, pin it at the bottom
+    if (_currentBuild && !releases.some(r => r.build === _currentBuild)) {
+      const sep = document.createElement('div');
+      sep.className = 'llama-version-pinned-sep';
+      sep.textContent = '— installed —';
+      listEl.appendChild(sep);
+      const pinnedRow = buildReleaseRow({ build: _currentBuild, tag: `b${_currentBuild}`, published_at: '', body: '' }, false);
+      listEl.appendChild(pinnedRow);
+    }
+
     // Auto-select the latest release to show notes on open
     if (releases.length > 0) showReleaseNotes(releases[0]);
   } catch (err) {
@@ -157,6 +167,10 @@ function showReleaseNotes(release) {
   tagEl.textContent = tag;
   if (empty) empty.style.display = 'none';
   content.style.display = '';
+
+  // Scroll notes pane to top
+  const notesPane = document.getElementById('llama-version-notes-pane');
+  if (notesPane) notesPane.scrollTop = 0;
 
   if (release.body && release.body.trim()) {
     const md = typeof marked !== 'undefined' ? marked.parse(release.body) : release.body.replace(/\n/g, '<br>');

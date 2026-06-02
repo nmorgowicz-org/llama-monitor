@@ -2301,6 +2301,66 @@
   z-index: 3;
 }
 
+/* ── Change summary ── */
+.preset-change-summary {
+  padding: 12px 20px 8px;
+  border-top: 1px solid rgba(245, 158, 11, 0.2);
+  background: rgba(245, 158, 11, 0.04);
+  flex-shrink: 0;
+}
+
+.preset-change-summary-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(251, 191, 36, 0.8);
+  margin-bottom: 6px;
+}
+
+.preset-change-summary-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.preset-change-item {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.preset-change-field {
+  font-weight: 600;
+  color: var(--color-text-primary);
+  min-width: 100px;
+  flex-shrink: 0;
+}
+
+.preset-change-from {
+  color: rgba(251, 113, 133, 0.85);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+
+.preset-change-arrow {
+  color: var(--color-text-muted);
+  opacity: 0.5;
+}
+
+.preset-change-to {
+  color: rgba(110, 231, 183, 0.9);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+
 /* ── Light theme overrides ── */
 [data-theme="light"] #preset-modal .preset-editor-shell {
   background:

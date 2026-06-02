@@ -111,7 +111,6 @@ export function openPresetModal(mode) {
         numOrEmpty('modal-top-k', p.top_k);
         numOrEmpty('modal-min-p', p.min_p);
         numOrEmpty('modal-repeat-penalty', p.repeat_penalty);
-        numOrEmpty('modal-n-cpu-moe', p.n_cpu_moe);
         // GPU
         setVal('modal-tensor-split', p.tensor_split);
         setOpt('modal-split-mode', p.split_mode);
@@ -119,6 +118,7 @@ export function openPresetModal(mode) {
         // Threading
         numOrEmpty('modal-threads', p.threads);
         numOrEmpty('modal-threads-batch', p.threads_batch);
+        numOrEmpty('modal-n-cpu-moe', p.n_cpu_moe);
         // Rope
         setOpt('modal-rope-scaling', p.rope_scaling);
         numOrEmpty('modal-rope-freq-base', p.rope_freq_base);
@@ -129,8 +129,19 @@ export function openPresetModal(mode) {
         numOrEmpty('modal-draft-min', p.draft_min);
         numOrEmpty('modal-draft-max', p.draft_max);
         setVal('modal-draft-model', p.draft_model);
+        // Context extras
+        setChk('modal-kv-unified', p.kv_unified ?? false);
+        // Model extras
+        setVal('modal-mmproj', p.mmproj || '');
         // Advanced
+        setOpt('modal-bind-host', p.bind_host || '');
+        setVal('modal-api-key', p.api_key || '');
+        numOrEmpty('modal-max-tokens', p.max_tokens);
         numOrEmpty('modal-seed', p.seed);
+        setChk('modal-ignore-eos', p.ignore_eos ?? false);
+        setChk('modal-fit-enabled', p.fit_enabled ?? false);
+        setOpt('modal-fit-target', p.fit_target || '');
+        _toggleFitTarget(p.fit_enabled ?? false);
         setVal('modal-system-prompt-file', p.system_prompt_file);
         setVal('modal-extra-args', p.extra_args);
     } else {
@@ -143,13 +154,11 @@ export function openPresetModal(mode) {
         setVal('modal-batch-size', 2048);
         setVal('modal-ubatch-size', 2048);
         setVal('modal-parallel-slots', 1);
-        setVal('modal-temperature', 1.0);
-        setVal('modal-top-p', 0.95);
-        numOrEmpty('modal-top-k', 40);
-        numOrEmpty('modal-min-p', 0.01);
-        numOrEmpty('modal-repeat-penalty', 1.0);
-        numOrEmpty('modal-n-cpu-moe', 16);
+        _toggleFitTarget(false);
     }
+
+    // Reset change-summary state
+    _hideSummary();
 
     modal.classList.add('open');
     // Reset nav to first section
@@ -280,16 +289,32 @@ function _renderPresetsPanel() {
     });
 }
 
-// ── CRUD ───────────────────────────────────────────────────────────────────────
+// ── Change summary ────────────────────────────────────────────────────────────
 
-export async function savePreset(event) {
-    event.preventDefault();
-    clearFieldErrors();
+function _toggleFitTarget(enabled) {
+    const wrap = document.getElementById('modal-fit-target-wrap');
+    if (wrap) wrap.style.display = enabled ? '' : 'none';
+}
 
-    const id = document.getElementById('modal-preset-id').value;
-    const preset = {
+function _hideSummary() {
+    const summary = document.getElementById('preset-change-summary');
+    const back = document.getElementById('preset-modal-back');
+    const cancel = document.getElementById('preset-modal-cancel');
+    const saveBtn = document.getElementById('btn-modal-save');
+    if (summary) summary.style.display = 'none';
+    if (back) back.style.display = 'none';
+    if (cancel) cancel.style.display = '';
+    if (saveBtn) { saveBtn.textContent = 'Save'; saveBtn.dataset.confirmed = ''; }
+}
+
+function _buildFormPreset(existing) {
+    return {
+        // Spread ALL existing fields first — preserves wizard-set values not shown in the editor
+        ...existing,
+        // Override only what the editor manages
         name: strVal('modal-name'),
         model_path: strVal('modal-model-path'),
+        mmproj: strVal('modal-mmproj') || null,
         gpu_layers: intOrNull('modal-gpu-layers'),
         no_mmap: document.getElementById('modal-no-mmap').checked,
         mlock: document.getElementById('modal-mlock').checked,
@@ -297,6 +322,7 @@ export async function savePreset(event) {
         ctk: strVal('modal-ctk') || 'q8_0',
         ctv: strVal('modal-ctv') || 'f16',
         flash_attn: strVal('modal-flash-attn'),
+        kv_unified: document.getElementById('modal-kv-unified').checked || null,
         batch_size: parseInt(document.getElementById('modal-batch-size').value) || 2048,
         ubatch_size: parseInt(document.getElementById('modal-ubatch-size').value) || 2048,
         parallel_slots: parseInt(document.getElementById('modal-parallel-slots').value) || 1,
@@ -305,12 +331,12 @@ export async function savePreset(event) {
         top_k: intOrNull('modal-top-k'),
         min_p: floatOrNull('modal-min-p'),
         repeat_penalty: floatOrNull('modal-repeat-penalty'),
-        n_cpu_moe: intOrNull('modal-n-cpu-moe'),
         tensor_split: strVal('modal-tensor-split'),
         split_mode: strVal('modal-split-mode'),
         main_gpu: intOrNull('modal-main-gpu'),
         threads: intOrNull('modal-threads'),
         threads_batch: intOrNull('modal-threads-batch'),
+        n_cpu_moe: intOrNull('modal-n-cpu-moe'),
         rope_scaling: strVal('modal-rope-scaling'),
         rope_freq_base: floatOrNull('modal-rope-freq-base'),
         rope_freq_scale: floatOrNull('modal-rope-freq-scale'),
@@ -319,10 +345,59 @@ export async function savePreset(event) {
         draft_min: intOrNull('modal-draft-min'),
         draft_max: intOrNull('modal-draft-max'),
         draft_model: strVal('modal-draft-model'),
+        bind_host: strVal('modal-bind-host') || null,
+        api_key: strVal('modal-api-key') || null,
+        max_tokens: intOrNull('modal-max-tokens'),
         seed: intOrNull('modal-seed'),
+        ignore_eos: document.getElementById('modal-ignore-eos').checked,
+        fit_enabled: document.getElementById('modal-fit-enabled').checked || null,
+        fit_target: strVal('modal-fit-target') || null,
         system_prompt_file: strVal('modal-system-prompt-file'),
         extra_args: strVal('modal-extra-args'),
     };
+}
+
+const CHANGE_LABELS = {
+    name: 'Name', model_path: 'Model Path', mmproj: 'Multimodal Projector',
+    gpu_layers: 'GPU Layers', no_mmap: 'no-mmap', mlock: 'mlock',
+    context_size: 'Context Size', ctk: 'KV Key Type', ctv: 'KV Value Type',
+    flash_attn: 'Flash Attn', kv_unified: 'KV Unified',
+    batch_size: 'Batch Size', ubatch_size: 'Micro-batch', parallel_slots: 'Parallel Slots',
+    temperature: 'Temperature', top_p: 'Top-P', top_k: 'Top-K',
+    min_p: 'Min-P', repeat_penalty: 'Repeat Penalty',
+    tensor_split: 'Tensor Split', split_mode: 'Split Mode', main_gpu: 'Main GPU',
+    threads: 'Threads', threads_batch: 'Threads Batch', n_cpu_moe: 'CPU MoE Threads',
+    rope_scaling: 'RoPE Scaling', rope_freq_base: 'RoPE Freq Base', rope_freq_scale: 'RoPE Freq Scale',
+    ngram_spec: 'ngram-spec', spec_ngram_size: 'N-gram Size',
+    draft_min: 'Draft Min', draft_max: 'Draft Max', draft_model: 'Draft Model',
+    bind_host: 'Bind Host', api_key: 'API Key', max_tokens: 'Max Tokens',
+    seed: 'Seed', ignore_eos: 'Ignore EOS', fit_enabled: 'Fit to VRAM',
+    fit_target: 'Fit Target', system_prompt_file: 'System Prompt File', extra_args: 'Extra Args',
+};
+
+function _buildChangeSummary(existing, incoming) {
+    const changes = [];
+    const fmt = v => v == null || v === '' ? '(none)' : String(v);
+    for (const key of Object.keys(CHANGE_LABELS)) {
+        const prev = existing[key] ?? null;
+        const next = incoming[key] ?? null;
+        if (JSON.stringify(prev) !== JSON.stringify(next)) {
+            changes.push({ label: CHANGE_LABELS[key], from: fmt(prev), to: fmt(next) });
+        }
+    }
+    return changes;
+}
+
+// ── CRUD ───────────────────────────────────────────────────────────────────────
+
+export async function savePreset(event) {
+    event.preventDefault();
+    clearFieldErrors();
+
+    const id = document.getElementById('modal-preset-id').value;
+    const saveBtn = document.getElementById('btn-modal-save');
+    const existing = id ? (sessionState.presets.find(p => p.id === id) || {}) : {};
+    const preset = _buildFormPreset(existing);
 
     // Inline validation
     let valid = true;
@@ -339,9 +414,36 @@ export async function savePreset(event) {
         return;
     }
 
-    const saveBtn = document.getElementById('btn-modal-save');
+    // For edits: show change summary and require confirmation
+    if (id && saveBtn.dataset.confirmed !== 'yes') {
+        const changes = _buildChangeSummary(existing, preset);
+        if (changes.length > 0) {
+            const summary = document.getElementById('preset-change-summary');
+            const list = document.getElementById('preset-change-summary-list');
+            const back = document.getElementById('preset-modal-back');
+            const cancel = document.getElementById('preset-modal-cancel');
+            if (summary && list) {
+                list.innerHTML = '';
+                changes.forEach(({ label, from, to }) => {
+                    const li = document.createElement('li');
+                    li.className = 'preset-change-item';
+                    // eslint-disable-next-line no-unsanitized/property
+                    li.innerHTML = `<span class="preset-change-field">${escapeHtml(label)}</span> <span class="preset-change-from">${escapeHtml(from)}</span><span class="preset-change-arrow">→</span><span class="preset-change-to">${escapeHtml(to)}</span>`;
+                    list.appendChild(li);
+                });
+                summary.style.display = '';
+                if (back) back.style.display = '';
+                if (cancel) cancel.style.display = 'none';
+                saveBtn.textContent = 'Confirm Save';
+                saveBtn.dataset.confirmed = 'yes';
+            }
+            return;
+        }
+    }
+
     saveBtn.classList.add('saving');
     saveBtn.textContent = 'Saving...';
+    _hideSummary();
 
     try {
         let resp;
@@ -479,6 +581,38 @@ function initPresetEditorNav() {
     });
 }
 
+// ── Model-family generation defaults ─────────────────────────────────────────
+
+async function _suggestGenerationDefaults(modelPath) {
+    const modelName = modelPath.split(/[/\\]/).pop() || modelPath;
+    try {
+        const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+        const resp = await fetch('/api/model-defaults', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ model_name_or_repo: modelName, size_bytes: 0, tags: [] }),
+        });
+        if (!resp.ok) return;
+        const d = await resp.json();
+        if (d.error) return;
+
+        // Only fill fields the user hasn't already set
+        const fill = (id, val) => {
+            const el = document.getElementById(id);
+            if (el && el.value === '') numOrEmpty(id, val);
+        };
+        fill('modal-temperature', d.temperature ?? null);
+        fill('modal-top-p', d.top_p ?? null);
+        fill('modal-top-k', d.top_k ?? null);
+        fill('modal-min-p', d.min_p ?? null);
+        fill('modal-repeat-penalty', d.repeat_penalty ?? null);
+    } catch (_) {
+        // Silent — best-effort only
+    }
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────────
 
 export function initPresets() {
@@ -495,7 +629,13 @@ export function initPresets() {
     // Bind preset modal buttons
     document.getElementById('preset-modal-close')?.addEventListener('click', closePresetModal);
     document.getElementById('preset-modal-cancel')?.addEventListener('click', closePresetModal);
+    document.getElementById('preset-modal-back')?.addEventListener('click', _hideSummary);
     document.getElementById('preset-browse-model-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-model-path', 'gguf'));
+
+    // Fit-to-VRAM toggle shows/hides fit target
+    document.getElementById('modal-fit-enabled')?.addEventListener('change', function() {
+        _toggleFitTarget(this.checked);
+    });
 
     // Bind preset form submit
     const presetForm = document.getElementById('preset-form');
@@ -525,6 +665,15 @@ export function initPresets() {
                 this.classList.remove('field-error');
             });
         }
+    });
+
+    // When model path changes, suggest model-family generation defaults (only fills empty fields)
+    let _modelDefaultsTimer = null;
+    document.getElementById('modal-model-path')?.addEventListener('input', function() {
+        clearTimeout(_modelDefaultsTimer);
+        const path = this.value.trim();
+        if (!path) return;
+        _modelDefaultsTimer = setTimeout(() => _suggestGenerationDefaults(path), 600);
     });
     // Initial load
     loadPresets();

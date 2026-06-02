@@ -2175,6 +2175,10 @@
                                 </div>
                                 <span class="field-error-msg">Model path is required</span>
                             </div>
+                            <div class="pe-field">
+                                <label class="pe-label" for="modal-mmproj" title="Path to multimodal projector .mmproj.gguf file for vision models (LLaVA, Qwen-VL, etc.).">Multimodal Projector (-mmproj)</label>
+                                <input type="text" class="pe-input" id="modal-mmproj" placeholder="/path/to/model.mmproj.gguf">
+                            </div>
                             <div class="pe-row">
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-gpu-layers" title="Number of layers to offload to GPU. 99 = all layers. Lower values keep some layers on CPU to save VRAM.">GPU Layers (-ngl)</label>
@@ -2229,6 +2233,13 @@
                                     </select>
                                 </div>
                             </div>
+                            <div class="pe-toggles">
+                                <label class="pe-toggle-item" title="Use a single unified KV cache pool shared across all slots. Required for Apple Silicon unified memory.">
+                                    <input type="checkbox" id="modal-kv-unified">
+                                    <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
+                                    <span class="pe-toggle-label">KV unified</span>
+                                </label>
+                            </div>
                         </div>
                     </div>
 
@@ -2271,30 +2282,26 @@
                         <div class="pe-section-body">
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-temperature" title="Temperature for sampling. Higher = more randomness.">Temperature (--temp)</label>
-                                    <input type="number" class="pe-input" id="modal-temperature" step="any" value="1.0">
+                                    <label class="pe-label" for="modal-temperature" title="Temperature for sampling. Higher = more randomness. Empty = use server default (1.0).">Temperature (--temp)</label>
+                                    <input type="number" class="pe-input" id="modal-temperature" step="any" placeholder="default 1.0">
                                 </div>
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-top-p" title="Top-P cumulative probability threshold. Lower = more focused predictions.">Top-P (--top-p)</label>
-                                    <input type="number" class="pe-input" id="modal-top-p" step="any" value="0.95">
+                                    <label class="pe-label" for="modal-top-p" title="Top-P cumulative probability threshold. Empty = server default (0.95).">Top-P (--top-p)</label>
+                                    <input type="number" class="pe-input" id="modal-top-p" step="any" placeholder="default 0.95">
                                 </div>
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-top-k" title="Top-K maximum number of tokens to consider. Lower = more deterministic.">Top-K (--top-k)</label>
-                                    <input type="number" class="pe-input" id="modal-top-k" value="40">
+                                    <label class="pe-label" for="modal-top-k" title="Top-K maximum number of tokens to consider. Empty = server default (40).">Top-K (--top-k)</label>
+                                    <input type="number" class="pe-input" id="modal-top-k" placeholder="default 40">
                                 </div>
                             </div>
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-min-p" title="Minimum probability threshold. Filters out very low probability tokens.">Min-P (--min-p)</label>
-                                    <input type="number" class="pe-input" id="modal-min-p" step="any" value="0.01">
+                                    <label class="pe-label" for="modal-min-p" title="Minimum probability threshold. Empty = server default (0.01).">Min-P (--min-p)</label>
+                                    <input type="number" class="pe-input" id="modal-min-p" step="any" placeholder="default 0.01">
                                 </div>
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-repeat-penalty" title="Penalty for repetition. Higher = less repetition.">Repeat Penalty</label>
-                                    <input type="number" class="pe-input" id="modal-repeat-penalty" step="any" value="1.0">
-                                </div>
-                                <div class="pe-field">
-                                    <label class="pe-label" for="modal-n-cpu-moe" title="Number of CPU threads for MoE layers.">CPU MoE Threads</label>
-                                    <input type="number" class="pe-input" id="modal-n-cpu-moe" value="16">
+                                    <label class="pe-label" for="modal-repeat-penalty" title="Penalty for repetition. Higher = less repetition. Empty = server default (1.0).">Repeat Penalty</label>
+                                    <input type="number" class="pe-input" id="modal-repeat-penalty" step="any" placeholder="default 1.0">
                                 </div>
                             </div>
                         </div>
@@ -2337,11 +2344,11 @@
                             <span class="pe-section-accent" style="--accent: rgba(244,63,94,0.7)"></span>
                             <div>
                                 <h3 class="pe-section-title">Threading</h3>
-                                <p class="pe-section-desc">CPU thread count for generation and batching</p>
+                                <p class="pe-section-desc">CPU thread count for generation, batching, and MoE layers</p>
                             </div>
                         </div>
                         <div class="pe-section-body">
-                            <div class="pe-row">
+                            <div class="pe-row pe-row-3">
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-threads" title="Number of CPU threads for token generation. Leave empty to use all available CPUs.">Threads (-t)</label>
                                     <input type="number" class="pe-input" id="modal-threads" placeholder="auto">
@@ -2349,6 +2356,10 @@
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-threads-batch" title="Number of CPU threads for prompt/batch processing. Leave empty to use same as threads.">Threads Batch (-tb)</label>
                                     <input type="number" class="pe-input" id="modal-threads-batch" placeholder="auto">
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-n-cpu-moe" title="CPU threads for MoE expert layers. Useful for hybrid GPU+CPU MoE models.">CPU MoE (-n-cpu-moe)</label>
+                                    <input type="number" class="pe-input" id="modal-n-cpu-moe" placeholder="auto">
                                 </div>
                             </div>
                         </div>
@@ -2430,19 +2441,57 @@
                             <span class="pe-section-accent" style="--accent: rgba(249,115,22,0.7)"></span>
                             <div>
                                 <h3 class="pe-section-title">Advanced</h3>
-                                <p class="pe-section-desc">Seed, system prompt file, and extra CLI flags</p>
+                                <p class="pe-section-desc">Server access, fit-to-VRAM, seed, and extra CLI flags</p>
                             </div>
                         </div>
                         <div class="pe-section-body">
                             <div class="pe-row">
                                 <div class="pe-field">
+                                    <label class="pe-label" for="modal-bind-host" title="Network interface the server listens on. 0.0.0.0 makes it reachable from other machines on your LAN.">Bind Host</label>
+                                    <select class="pe-select" id="modal-bind-host">
+                                        <option value="">(default 127.0.0.1)</option>
+                                        <option value="127.0.0.1">127.0.0.1 (localhost only)</option>
+                                        <option value="0.0.0.0">0.0.0.0 (LAN visible)</option>
+                                    </select>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-api-key" title="API key required by clients to connect to this server. Leave empty for no authentication.">API Key</label>
+                                    <input type="text" class="pe-input" id="modal-api-key" placeholder="(none)">
+                                </div>
+                            </div>
+                            <div class="pe-row pe-row-3">
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-max-tokens" title="Maximum tokens to generate per request. Empty = unlimited (model's context limit).">Max Tokens</label>
+                                    <input type="number" class="pe-input" id="modal-max-tokens" placeholder="unlimited">
+                                </div>
+                                <div class="pe-field">
                                     <label class="pe-label" for="modal-seed" title="Random seed for reproducible generation. -1 = random.">Seed (-s)</label>
                                     <input type="number" class="pe-input" id="modal-seed" placeholder="random">
                                 </div>
-                                <div class="pe-field">
-                                    <label class="pe-label" for="modal-system-prompt-file" title="Path to a text file containing the system prompt.">System Prompt File</label>
-                                    <input type="text" class="pe-input" id="modal-system-prompt-file" placeholder="/path/to/system.txt">
-                                </div>
+                            </div>
+                            <div class="pe-toggles">
+                                <label class="pe-toggle-item" title="Ignore end-of-sequence token — model will keep generating beyond EOS. Useful for some instruct formats.">
+                                    <input type="checkbox" id="modal-ignore-eos">
+                                    <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
+                                    <span class="pe-toggle-label">ignore EOS</span>
+                                </label>
+                                <label class="pe-toggle-item" title="Automatically scale context size and GPU layers to fit within available VRAM.">
+                                    <input type="checkbox" id="modal-fit-enabled">
+                                    <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
+                                    <span class="pe-toggle-label">fit to VRAM</span>
+                                </label>
+                            </div>
+                            <div class="pe-field" id="modal-fit-target-wrap" style="display:none;">
+                                <label class="pe-label" for="modal-fit-target" title="What to optimize when fitting: maximize context, maximize speed, or balance both.">Fit Target</label>
+                                <select class="pe-select" id="modal-fit-target">
+                                    <option value="">balance (default)</option>
+                                    <option value="ctx">maximize context</option>
+                                    <option value="speed">maximize speed</option>
+                                </select>
+                            </div>
+                            <div class="pe-field">
+                                <label class="pe-label" for="modal-system-prompt-file" title="Path to a text file containing the system prompt.">System Prompt File</label>
+                                <input type="text" class="pe-input" id="modal-system-prompt-file" placeholder="/path/to/system.txt">
                             </div>
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-extra-args" title="Additional llama-server CLI flags (space-separated). Example: --log-verbosity 2 --no-perf">Extra Args</label>
@@ -2454,8 +2503,13 @@
                 </div><!-- /preset-editor-content -->
             </div><!-- /preset-editor-layout -->
 
+            <div class="preset-change-summary" id="preset-change-summary" style="display:none;">
+                <div class="preset-change-summary-title">Changes</div>
+                <ul class="preset-change-summary-list" id="preset-change-summary-list"></ul>
+            </div>
             <div class="preset-editor-footer">
                 <button type="button" class="btn btn-modal-cancel" id="preset-modal-cancel">Cancel</button>
+                <button type="button" class="btn btn-modal-cancel" id="preset-modal-back" style="display:none;">← Back</button>
                 <button type="submit" class="btn btn-modal-save" id="btn-modal-save">Save</button>
             </div>
         </form>
