@@ -3351,70 +3351,37 @@
                           </label>
                       </div>
                       <div class="settings-card" style="margin-top:14px;">
-                          <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
-                              Prompt Templates
+                          <div class="db-admin-header" style="margin-bottom:10px;">
+                              <div class="db-admin-title">
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                                  <span>Chat Database</span>
+                              </div>
+                              <div class="db-admin-status">
+                                  <span class="db-status-dot" id="settings-db-status-dot"></span>
+                                  <span class="db-status-text" id="settings-db-status-text">Checking...</span>
+                              </div>
                           </div>
-                          <label class="modal-field">
-                              General Prompt
-                              <textarea id="settings-prompt-general" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                          </label>
-                          <label class="modal-field">
-                              Plot Twist Prompt
-                              <textarea id="settings-prompt-plot-twist" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                          </label>
-                          <label class="modal-field">
-                               New Character Prompt
-                               <textarea id="settings-prompt-new-character" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Context Prompt
-                               <textarea id="settings-prompt-context" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Director Prompt
-                               <textarea id="settings-prompt-director" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Explicit Prompt
-                               <textarea id="settings-prompt-explicit" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Action Prompt
-                               <textarea id="settings-prompt-action" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Comedy Prompt
-                               <textarea id="settings-prompt-comedy" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Fantasy Prompt
-                               <textarea id="settings-prompt-fantasy" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Horror Prompt
-                               <textarea id="settings-prompt-horror" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Mystery Prompt
-                               <textarea id="settings-prompt-mystery" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Noir Prompt
-                               <textarea id="settings-prompt-noir" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Romance Prompt
-                               <textarea id="settings-prompt-romance" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Sci-Fi Prompt
-                               <textarea id="settings-prompt-sci-fi" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <label class="modal-field">
-                               Thriller Prompt
-                               <textarea id="settings-prompt-thriller" rows="4" style="width:100%;font-family:inherit;font-size:12px;padding:8px;border:1px solid var(--border-color);border-radius:4px;background:var(--bg-secondary);color:var(--text-primary);" placeholder="Enter prompt template..."></textarea>
-                           </label>
-                           <button type="button" id="settings-reset-prompts" class="btn btn-secondary" style="margin-top:8px;font-size:12px;padding:6px 12px;">Reset Prompts to Defaults</button>
+                          <div class="db-admin-stats" style="margin-bottom:12px;">
+                              <div class="db-stat">
+                                  <span class="db-stat-label">Conversations</span>
+                                  <span class="db-stat-value" id="settings-db-stat-tabs">-</span>
+                              </div>
+                              <div class="db-stat">
+                                  <span class="db-stat-label">Messages</span>
+                                  <span class="db-stat-value" id="settings-db-stat-messages">-</span>
+                              </div>
+                              <div class="db-stat">
+                                  <span class="db-stat-label">Size</span>
+                                  <span class="db-stat-value" id="settings-db-stat-size">-</span>
+                              </div>
+                              <div class="db-stat">
+                                  <span class="db-stat-label">FTS Index</span>
+                                  <span class="db-stat-value" id="settings-db-stat-fts">-</span>
+                              </div>
+                          </div>
+                          <button type="button" class="btn btn-secondary" id="settings-open-db-admin-btn">
+                              Open Full Administration
+                          </button>
                       </div>
                    </div>
                  <div class="settings-pane" id="settings-performance">
@@ -3685,11 +3652,9 @@
                             Forgot the password? Run <code>llama-monitor --clear-auth-config</code> on this machine, restart, and then set a new password here.
                         </div>
                     </div>
-                </div>
 
-                <!-- Agent Token Rotation -->
-                <div class="settings-section">
-                    <div class="widget-card" style="padding:14px;margin-bottom:16px;">
+                    <!-- Agent Token Rotation -->
+                    <div class="widget-card" style="padding:14px;margin-bottom:12px;">
                         <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
                             Agent Token
                         </div>
@@ -3703,11 +3668,9 @@
                             <span id="rotate-agent-token-status" style="font-size:11px;color:var(--color-text-muted);"></span>
                         </div>
                     </div>
-                </div>
 
-                <!-- API Token Rotation -->
-                <div class="settings-section">
-                    <div class="widget-card" style="padding:14px;margin-bottom:16px;">
+                    <!-- API Token Rotation -->
+                    <div class="widget-card" style="padding:14px;margin-bottom:12px;">
                         <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
                             API Token
                         </div>
@@ -3721,11 +3684,9 @@
                             <span id="rotate-api-token-status" style="font-size:11px;color:var(--color-text-muted);"></span>
                         </div>
                     </div>
-                </div>
 
-                <!-- DB Admin Token Rotation -->
-                <div class="settings-section">
-                    <div class="widget-card" style="padding:14px;margin-bottom:16px;">
+                    <!-- DB Admin Token Rotation -->
+                    <div class="widget-card" style="padding:14px;">
                         <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
                             DB Admin Token
                         </div>
@@ -3737,71 +3698,6 @@
                                 Rotate DB Admin Token
                             </button>
                             <span id="rotate-db-admin-token-status" style="font-size:11px;color:var(--color-text-muted);"></span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Database Administration -->
-                <div class="settings-section">
-                    <div class="widget-card db-admin-card" style="padding:14px;margin-bottom:16px;">
-                        <div style="font-size:11px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);margin-bottom:8px;">
-                            Database Administration
-                        </div>
-
-                        <div class="db-admin-panel" id="db-admin-panel">
-                            <div class="db-admin-header">
-                                <div class="db-admin-title">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-                                    <span>Chat Database</span>
-                                </div>
-                                <div class="db-admin-status" id="db-admin-status">
-                                    <span class="status-dot"></span>
-                                    <span class="status-text">Checking...</span>
-                                </div>
-                            </div>
-
-                            <div class="db-admin-stats" id="db-admin-stats">
-                                <div class="db-stat">
-                                    <span class="db-stat-label">Conversations</span>
-                                    <span class="db-stat-value" id="db-stat-tabs">-</span>
-                                </div>
-                                <div class="db-stat">
-                                    <span class="db-stat-label">Messages</span>
-                                    <span class="db-stat-value" id="db-stat-messages">-</span>
-                                </div>
-                                <div class="db-stat">
-                                    <span class="db-stat-label">Database Size</span>
-                                    <span class="db-stat-value" id="db-stat-size">-</span>
-                                </div>
-                                <div class="db-stat">
-                                    <span class="db-stat-label">FTS Index</span>
-                                    <span class="db-stat-value" id="db-stat-fts">-</span>
-                                </div>
-                            </div>
-
-                            <div class="db-admin-actions">
-                                <button type="button" class="btn btn-secondary db-admin-btn" id="db-btn-backup" title="Create database backup">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                                    Backup Now
-                                </button>
-                                <button type="button" class="btn btn-secondary db-admin-btn" id="db-btn-check" title="Run integrity check">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                                    Verify
-                                </button>
-                                <button type="button" class="btn btn-secondary db-admin-btn" id="db-btn-maintenance" title="Run maintenance">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-                                    Maintain
-                                </button>
-                                <button type="button" class="btn btn-secondary db-admin-btn" id="db-btn-query" title="Run SQL query">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-                                    Query
-                                </button>
-                            </div>
-
-                            <div class="db-admin-log" id="db-admin-log">
-                                <div class="db-log-header">Activity Log</div>
-                                <div class="db-log-content" id="db-log-content"></div>
-                            </div>
                         </div>
                     </div>
                 </div>

@@ -886,10 +886,15 @@ impl ChatStorage {
         let fts_count: i64 =
             conn.query_row("SELECT COUNT(*) FROM messages_fts", [], |row| row.get(0))?;
 
+        let file_size_bytes = std::fs::metadata(&self.db_path)
+            .map(|m| m.len())
+            .unwrap_or(0);
+
         Ok(serde_json::json!({
             "tab_count": tab_count,
             "message_count": msg_count,
             "fts_index_count": fts_count,
+            "file_size_bytes": file_size_bytes,
         }))
     }
 

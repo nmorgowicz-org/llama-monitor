@@ -245,6 +245,23 @@ export function renderRecentEndpoints(sessions, activeId) {
 
     attachSessions.forEach(session => list.appendChild(buildCard(session)));
     spawnSessions.forEach(session => spawnList.appendChild(buildCard(session)));
+
+    // Live health-check attach sessions that aren't already confirmed Running
+    attachSessions.forEach((session, i) => {
+        if (session.status === 'Running') return;
+        const endpoint = session.mode?.Attach?.endpoint;
+        if (!endpoint) return;
+        const card = list.children[i];
+        if (!card) return;
+        const dot = card.querySelector('.setup-endpoint-status');
+        if (!dot) return;
+        const authHdrs = window.authHeaders ? window.authHeaders() : {};
+        const checkUrl = '/api/sessions/check-endpoint?url=' + encodeURIComponent(endpoint);
+        fetch(checkUrl, { headers: authHdrs, signal: AbortSignal.timeout(6000) })
+            .then(r => r.ok ? r.json() : null)
+            .then(data => { if (data?.reachable) dot.className = 'setup-endpoint-status status-running'; })
+            .catch(() => {});
+    });
 }
 
 function formatRelativeTime(ts) {

@@ -1266,9 +1266,12 @@ function _bindModelSettingsEvents() {
     });
 
     // HF token — show/hide toggle
-    document.getElementById('settings-hf-token-show')?.addEventListener('click', () => {
+    document.getElementById('settings-hf-token-show')?.addEventListener('click', (e) => {
         const input = document.getElementById('settings-hf-token');
-        if (input) input.type = input.type === 'password' ? 'text' : 'password';
+        if (!input) return;
+        const isPassword = input.type === 'password';
+        input.type = isPassword ? 'text' : 'password';
+        e.currentTarget.textContent = isPassword ? 'Hide' : 'Show';
     });
 
     // HF token — save button

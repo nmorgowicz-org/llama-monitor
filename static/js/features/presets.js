@@ -68,6 +68,9 @@ export async function loadPresets(selectId) {
     if (selectId === undefined) {
         saveSettings();
     }
+
+    // Keep the setup view preset dropdown in sync
+    import('./setup-view.js').then(m => m.syncSetupPresetSelect?.()).catch(() => {});
 }
 
 // ── Modal ──────────────────────────────────────────────────────────────────────
@@ -160,6 +163,7 @@ export function openPresetsPanel() {
     const overlay = document.getElementById('presets-panel-overlay');
     if (!overlay) return;
     overlay.style.display = '';
+    overlay.classList.add('open');
     _renderPresetsPanel();
     document.getElementById('presets-panel-wizard-btn')?.addEventListener('click', () => {
         closePresetsPanel();
@@ -169,7 +173,9 @@ export function openPresetsPanel() {
 
 export function closePresetsPanel() {
     const overlay = document.getElementById('presets-panel-overlay');
-    if (overlay) overlay.style.display = 'none';
+    if (!overlay) return;
+    overlay.classList.remove('open');
+    overlay.style.display = 'none';
 }
 
 function _renderPresetsPanel() {
