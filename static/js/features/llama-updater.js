@@ -13,9 +13,6 @@ export function initLlamaUpdater() {
   const pill = document.getElementById('llama-pill');
   if (pill) pill.addEventListener('click', openVersionModal);
 
-  const setupBtn = document.getElementById('setup-llama-version-btn');
-  if (setupBtn) setupBtn.addEventListener('click', openVersionModal);
-
   const closeBtn = document.getElementById('llama-version-modal-close');
   if (closeBtn) closeBtn.addEventListener('click', closeVersionModal);
 
@@ -33,8 +30,6 @@ export function initLlamaUpdater() {
 async function checkVersion() {
   const pill    = document.getElementById('llama-pill');
   const verSpan = document.getElementById('llama-pill-version');
-  const setupBtn  = document.getElementById('setup-llama-version-btn');
-  const setupText = document.getElementById('setup-llama-version-text');
 
   try {
     const headers = window.authHeaders ? window.authHeaders() : {};
@@ -47,8 +42,6 @@ async function checkVersion() {
     if (_currentBuild) {
       if (verSpan) verSpan.textContent = `llama.cpp · b${_currentBuild}`;
       if (pill) pill.style.display = 'flex';
-      if (setupText) setupText.textContent = `b${_currentBuild}`;
-      if (setupBtn) setupBtn.style.display = 'inline-flex';
     }
 
     const lResp = await fetch('/api/llama-binary/latest', { headers });
@@ -63,12 +56,6 @@ async function checkVersion() {
         pill.classList.remove('llama-pill-idle');
         pill.classList.add('llama-pill-update');
         pill.title = `Update available: b${_currentBuild} → b${_latestBuild}. Click to manage.`;
-      }
-      if (setupBtn) {
-        setupBtn.classList.remove('setup-toolbar-btn-ghost');
-        setupBtn.classList.add('setup-toolbar-btn-update');
-        setupBtn.title = `Update available → b${_latestBuild}`;
-        if (setupText) setupText.textContent = `↑ b${_latestBuild}`;
       }
     }
   } catch (_) {
@@ -243,14 +230,6 @@ async function installRelease(btn, release) {
       pill.disabled = false;
       pill.title = 'llama-server binary version';
     }
-    const setupText = document.getElementById('setup-llama-version-text');
-    const setupBtn  = document.getElementById('setup-llama-version-btn');
-    if (setupText) setupText.textContent = `b${_currentBuild}`;
-    if (setupBtn) {
-      setupBtn.classList.remove('setup-toolbar-btn-update');
-      setupBtn.classList.add('setup-toolbar-btn-ghost');
-    }
-
     // Refresh the list so badges update
     closeVersionModal();
   } catch (err) {
