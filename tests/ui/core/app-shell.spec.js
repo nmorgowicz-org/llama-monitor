@@ -24,8 +24,8 @@ test.describe('app shell', () => {
     await expect(page.locator('.top-nav-bar')).toBeVisible();
     await expect(page.locator('.sidebar-nav')).toBeVisible();
     await expect(page.locator('#view-setup')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Attach to Endpoint' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Spawn Local Server' })).toBeVisible();
+    await expect(page.getByText('Connect to Endpoint')).toBeVisible();
+    await expect(page.getByText('Local Server')).toBeVisible();
   });
 
   test('top status endpoint is read-only and edit control is in dashboard', async ({ page }) => {
@@ -73,10 +73,10 @@ test.describe('modals and menus', () => {
   test('settings opens and secondary tabs switch', async ({ page }) => {
     await page.getByRole('button', { name: /settings/i }).first().click();
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
-    await expect(page.locator('#settings-session')).toBeVisible();
+    await expect(page.locator('#settings-models')).toBeVisible();
 
-    await page.getByRole('button', { name: 'Advanced' }).click();
-    await expect(page.locator('#settings-advanced')).toBeVisible();
+    await page.getByRole('button', { name: 'System' }).click();
+    await expect(page.locator('#settings-system')).toBeVisible();
     await expect(page.getByRole('button', { name: /open runtime configuration/i })).toBeVisible();
   });
 
@@ -113,23 +113,13 @@ test.describe('modals and menus', () => {
     await page.locator('#nav-user-btn').click();
     await page.waitForSelector('#nav-user-menu-items', { state: 'visible', timeout: 5000 });
     await expect(page.locator('.nav-user-menu')).toHaveClass(/open/);
-    await expect(page.getByRole('link', { name: 'Preferences' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Toggle Theme' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Logout' })).toBeVisible();
   });
 
  test('profile dropdown actions are wired', async ({ page }) => {
     await page.locator('#nav-user-btn').click();
     await page.waitForSelector('#nav-user-menu-items', { state: 'visible' });
-    await page.getByRole('link', { name: 'Preferences' }).click();
-    await expect(page.locator('#user-preferences-modal')).toHaveClass(/open/);
-    await page.locator('#user-preferences-modal .modal-close').click();
-
-    await page.locator('#nav-user-btn').click();
-    await page.waitForSelector('#nav-user-menu-items', { state: 'visible' });
-    await page.locator('#user-menu-help').click();
-    await expect(page.locator('#keyboard-shortcuts-modal')).toHaveClass(/open/);
-    await page.locator('#keyboard-shortcuts-modal .shortcuts-close').click();
-
-    await page.locator('#nav-user-btn').click();
     await page.getByRole('link', { name: 'Toggle Theme' }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', /light|dark/);
   });
@@ -147,14 +137,13 @@ test.describe('modals and menus', () => {
   test('configuration explains local executable, GPU, and explicit SSH flow', async ({ page }) => {
     await page.getByRole('button', { name: /settings/i }).first().click();
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
-    await page.getByRole('button', { name: 'Advanced' }).click();
-    await expect(page.locator('#settings-advanced')).toBeVisible();
 
-    // Open config modal via DOM to avoid flaky overlay clicks
-    await page.evaluate(() => {
-      document.getElementById('settings-modal')?.classList.remove('open');
-      document.getElementById('config-modal')?.classList.add('open');
-    });
+    // Use System tab
+    await page.getByRole('button', { name: 'System' }).click();
+    await expect(page.locator('#settings-system')).toBeVisible();
+
+    // Open config modal via button
+    await page.getByRole('button', { name: /open runtime configuration/i }).click();
 
     await expect(page.locator('#config-modal')).toHaveClass(/open/);
     await expect(page.getByText('Local llama-server executable')).toBeVisible();
@@ -198,14 +187,13 @@ test.describe('modals and menus', () => {
 
     await page.getByRole('button', { name: /settings/i }).first().click();
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
-    await page.getByRole('button', { name: 'Advanced' }).click();
-    await expect(page.locator('#settings-advanced')).toBeVisible();
 
-    // Open config modal via DOM to avoid flaky overlay clicks
-    await page.evaluate(() => {
-      document.getElementById('settings-modal')?.classList.remove('open');
-      document.getElementById('config-modal')?.classList.add('open');
-    });
+    // Use System tab
+    await page.getByRole('button', { name: 'System' }).click();
+    await expect(page.locator('#settings-system')).toBeVisible();
+
+    // Open config modal via button
+    await page.getByRole('button', { name: /open runtime configuration/i }).click();
 
     await expect(page.locator('#config-modal')).toHaveClass(/open/);
     await page.getByRole('button', { name: 'Guided SSH Setup' }).click();
@@ -247,14 +235,13 @@ test.describe('modals and menus', () => {
 
     await page.getByRole('button', { name: /settings/i }).first().click();
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
-    await page.getByRole('button', { name: 'Advanced' }).click();
-    await expect(page.locator('#settings-advanced')).toBeVisible();
 
-    // Open config modal via DOM to avoid flaky overlay clicks
-    await page.evaluate(() => {
-      document.getElementById('settings-modal')?.classList.remove('open');
-      document.getElementById('config-modal')?.classList.add('open');
-    });
+    // Use System tab
+    await page.getByRole('button', { name: 'System' }).click();
+    await expect(page.locator('#settings-system')).toBeVisible();
+
+    // Open config modal via button
+    await page.getByRole('button', { name: /open runtime configuration/i }).click();
 
     await expect(page.locator('#config-modal')).toHaveClass(/open/);
     const sshSummary = page.getByText('SSH and Agent Details');

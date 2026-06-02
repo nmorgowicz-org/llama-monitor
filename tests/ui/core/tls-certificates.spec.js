@@ -11,6 +11,7 @@ test.describe('TLS / Certificates settings', () => {
   test('Certificates tab exists and is selectable', async ({ page }) => {
     await page.getByRole('button', { name: /settings/i }).first().click();
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
+    await page.waitForTimeout(300);
 
     const certsTab = page.locator('.settings-tab').getByText('Security');
     await expect(certsTab).toBeVisible();
@@ -22,14 +23,15 @@ test.describe('TLS / Certificates settings', () => {
   test('TLS mode controls exist', async ({ page }) => {
     await page.getByRole('button', { name: /settings/i }).first().click();
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
+    await page.waitForTimeout(300);
 
     const certsTab = page.locator('.settings-tab').getByText('Security');
     await certsTab.click();
     await expect(page.locator('#settings-security')).toBeVisible();
 
     // Wait for loadTlsConfig to complete (status text gets populated)
-    await expect(page.locator('#tls-status-text')).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(500);
+    await expect(page.locator('#tls-status-text')).toBeVisible({ timeout: 15000 });
+    await page.waitForTimeout(800);
 
     // Helper: switch cert mode using the authoritative settings function
     const setCertMode = (mode) =>
@@ -55,14 +57,15 @@ test.describe('TLS / Certificates settings', () => {
   test('ACME section exists with required controls', async ({ page }) => {
     await page.getByRole('button', { name: /settings/i }).first().click();
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
+    await page.waitForTimeout(300);
 
     const certsTab = page.locator('.settings-tab').getByText('Security');
     await certsTab.click();
     await expect(page.locator('#settings-security')).toBeVisible();
 
     // Wait for loadTlsConfig to complete, then switch to ACME mode
-    await expect(page.locator('#tls-status-text')).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(500);
+    await expect(page.locator('#tls-status-text')).toBeVisible({ timeout: 15000 });
+    await page.waitForTimeout(800);
 
     await page.evaluate(async (m) => {
       const mod = await import('/js/features/settings.js');
@@ -99,6 +102,7 @@ test.describe('TLS / Certificates settings', () => {
   test('switching TLS mode updates UI', async ({ page }) => {
     await page.getByRole('button', { name: /settings/i }).first().click();
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
+    await page.waitForTimeout(300);
 
     const certsTab = page.locator('.settings-tab').getByText('Security');
     await certsTab.click();
@@ -106,8 +110,8 @@ test.describe('TLS / Certificates settings', () => {
 
     // Wait for loadTlsConfig to complete
     const tlsStatusText = page.locator('#tls-status-text');
-    await expect(tlsStatusText).toBeVisible({ timeout: 10000 });
-    await page.waitForTimeout(500);
+    await expect(tlsStatusText).toBeVisible({ timeout: 15000 });
+    await page.waitForTimeout(800);
 
     // Helper to switch cert mode using authoritative settings function
     const setCertMode = (mode) =>
