@@ -2803,6 +2803,25 @@
   font-weight: 600;
 }
 
+.vsc-active-badge {
+  display: inline-block;
+  margin-top: 5px;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: rgba(20,184,166,0.18);
+  border: 1px solid rgba(20,184,166,0.3);
+  color: rgba(94,234,212,0.9);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+[data-theme="light"] .vsc-active-badge {
+  background: rgba(13,148,136,0.08);
+  border-color: rgba(13,148,136,0.25);
+  color: rgba(15,118,110,0.9);
+}
+
 .vsc-warn {
   display: block;
   margin-top: 4px;

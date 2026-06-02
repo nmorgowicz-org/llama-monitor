@@ -712,7 +712,9 @@ function bindEvents() {
     const qf = wizardState.model.quantFiles?.find(q => (q.path || q.name) === fpath);
     if (qf) {
       wizardState.model.hfFile = fpath;
-      if (qf.size) wizardState.model.modelBytes = Number(qf.size);
+      // Always reset modelBytes so getModelBytes() re-estimates from the new filename
+      // if the file size is unknown — stale size from a different quant would corrupt the math.
+      wizardState.model.modelBytes = Number(qf.size) || 0;
       if (detectMtpFromName(fpath) && !wizardState.arch.mtpDepth) {
         wizardState.arch.mtpDepth = 1;
         renderMtpSection();
@@ -2586,22 +2588,41 @@ function renderScenarioCards(modelBytes, arch, availVram) {
   const ubatch = hw.ubatchSize || 512;
   const nCpuMoe = hw.nCpuMoe || 0;
   const uc = wizardState.useCase;
+  const headroom = computeHeadroom(availVram);
+  const nCtxTrain = wizardState.model.nCtxTrain || 0;
+  const currentCtx = hw.contextSize || 8192;
+
+  // Pre-compute max context for q8_0 and q4_0 so the recommendation logic can
+  // factor in whether Q8_0 actually supports the user's current context target.
+  const q8Max = maxContext(modelBytes, arch, 'q8_0', 'q8_0', slots, ubatch, nCpuMoe, availVram, fitGran, headroom);
+  const q4Max = maxContext(modelBytes, arch, 'q4_0', 'q4_0', slots, ubatch, nCpuMoe, availVram, fitGran, headroom);
+
+  // Q8_0 is "tight" if the user's current context exceeds 85% of what Q8_0 can support.
+  // In that case q4_0 is a better pick (unless agentic, which requires q8_0 quality).
+  const q8TightForCtx = q8Max > 0 && currentCtx > q8Max * 0.85;
+  const q4ValueAdd = q4Max > q8Max * 1.2; // Q4_0 gives meaningfully more headroom
 
   const scenarios = [
-    { quant: 'q8_0', kk: 'q8_0', kv: 'q8_0', desc: uc === 'agentic' ? 'Required for agentic use' : 'Balanced quality', rec: uc !== 'roleplay' },
-    { quant: 'q4_0', kk: 'q4_0', kv: 'q4_0', desc: uc === 'agentic' ? 'Not recommended for agents' : 'More context, great for RP', rec: uc === 'roleplay', warnAgentic: uc === 'agentic' },
-    { quant: 'f16',  kk: 'f16',  kv: 'f16',  desc: 'Full precision, VRAM-heavy', rec: false },
+    {
+      quant: 'q8_0', kk: 'q8_0', kv: 'q8_0',
+      desc: uc === 'agentic' ? 'Required for agentic use' : (q8TightForCtx ? 'Better quality, less context' : 'Balanced quality'),
+      rec: uc === 'agentic' || (uc !== 'roleplay' && !q8TightForCtx),
+    },
+    {
+      quant: 'q4_0', kk: 'q4_0', kv: 'q4_0',
+      desc: uc === 'agentic' ? 'Not recommended for agents' : (q8TightForCtx ? 'More context for your target' : 'More context, great for RP'),
+      rec: uc === 'roleplay' || (uc !== 'agentic' && q8TightForCtx && q4ValueAdd),
+      warnAgentic: uc === 'agentic',
+    },
+    { quant: 'f16', kk: 'f16', kv: 'f16', desc: 'Full precision, VRAM-heavy', rec: false },
   ];
 
   dom.vramScenarios.innerHTML = '';
   const activeQuant = hw.cacheTypeK || 'q8_0';
-  // Cap context to the model's training window so we never show a number the model can't actually use.
-  // When VRAM is plentiful relative to the model, all three cards may hit the same cap — in that case
-  // the differentiator shifts from "more context" to "better quality".
-  const nCtxTrain = wizardState.model.nCtxTrain || 0;
 
   for (const s of scenarios) {
-    const vramCtx = maxContext(modelBytes, arch, s.kk, s.kv, slots, ubatch, nCpuMoe, availVram, fitGran, computeHeadroom(availVram));
+    const vramCtx = s.kk === 'q8_0' ? q8Max : s.kk === 'q4_0' ? q4Max
+      : maxContext(modelBytes, arch, s.kk, s.kv, slots, ubatch, nCpuMoe, availVram, fitGran, headroom);
     const cappedByModel = nCtxTrain > 0 && vramCtx > nCtxTrain;
     const ctx = cappedByModel ? nCtxTrain : vramCtx;
 
@@ -2614,8 +2635,7 @@ function renderScenarioCards(modelBytes, arch, availVram) {
 
     const selectable = ctx > 0;
 
-    // When model is the bottleneck (not VRAM), rewrite the quality-focused description
-    // so users understand all three quants give the same context, but differ in quality.
+    // When model is the bottleneck (not VRAM), quality is the differentiator.
     let desc = s.desc;
     if (cappedByModel) {
       if (s.quant === 'q8_0') desc = 'Best quality — VRAM headroom to spare';
@@ -2624,6 +2644,9 @@ function renderScenarioCards(modelBytes, arch, availVram) {
     }
 
     const limitNote = cappedByModel ? '<span class="vsc-limit-note">model max</span>' : '';
+    // Warn when this card can't accommodate the user's current context setting.
+    const ctxWontFit = selectable && !cappedByModel && ctx < currentCtx;
+    const ctxWarnNote = ctxWontFit ? `<span class="vsc-warn">⚠ won't fit your ${formatCtx(currentCtx)} ctx</span>` : '';
 
     // All values are internal constants — no user input reaches this template.
     // eslint-disable-next-line no-unsanitized/property
@@ -2636,7 +2659,9 @@ function renderScenarioCards(modelBytes, arch, availVram) {
       </div>
       <div class="vsc-desc">${desc}</div>
       ${s.rec ? '<span class="vsc-rec-badge">★ Recommended</span>' : ''}
+      ${isActive ? '<span class="vsc-active-badge">✓ Active</span>' : ''}
       ${s.warnAgentic ? '<span class="vsc-warn">⚠ Not for agents</span>' : ''}
+      ${ctxWarnNote}
     `;
 
     if (selectable) {
