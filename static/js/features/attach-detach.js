@@ -34,7 +34,6 @@ export function getConfig() {
         min_p: p.min_p,
         repeat_penalty: p.repeat_penalty,
         presence_penalty: p.presence_penalty ?? null,
-        ignore_eos: !!p.ignore_eos,
         n_cpu_moe: p.n_cpu_moe,
         gpu_layers: p.gpu_layers ?? null,
         mlock: !!p.mlock,

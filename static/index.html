@@ -2785,6 +2785,21 @@
                                 <input type="text" id="spawn-tensor-split" placeholder="e.g. 1,1">
                                 <div class="field-hint">For multi-GPU load distribution.</div>
                             </div>
+                            <div class="hardware-field" style="grid-column: 1/-1;">
+                                <label>Auto-fit context to memory</label>
+                                <div class="fit-target-row">
+                                    <label class="fit-enable-toggle" title="Pass --fit on to llama-server, which automatically adjusts context size to fit within the target memory budget.">
+                                        <input type="checkbox" id="spawn-fit-enable">
+                                        <span class="fit-enable-track"><span class="fit-enable-thumb"></span></span>
+                                        <span class="fit-enable-text">Enable</span>
+                                    </label>
+                                    <div class="fit-target-input-wrap" id="spawn-fit-target-wrap" style="display:none;">
+                                        <input type="number" id="spawn-fit-target" min="512" step="256" placeholder="2048">
+                                        <span class="fit-target-unit">MB</span>
+                                    </div>
+                                </div>
+                                <div class="field-hint">--fit on --fit-target &lt;MB&gt; — shrinks context until the model fits in the specified memory budget.</div>
+                            </div>
                         </div>
 
                         <!-- Performance (Spec + Fit) — kept in Advanced for non-MTP models -->

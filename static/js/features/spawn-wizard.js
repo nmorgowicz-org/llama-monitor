@@ -384,7 +384,8 @@ function cacheDom() {
   dom.draftModelWrap  = document.getElementById('spawn-draft-model-wrap');
   dom.draftModelInput = document.getElementById('spawn-draft-model');
   dom.kvUnifiedCheck  = document.getElementById('spawn-kv-unified');
-  dom.ignoreEosCheck  = document.getElementById('spawn-ignore-eos');
+  dom.fitEnableCheck  = document.getElementById('spawn-fit-enable');
+  dom.fitTargetWrap   = document.getElementById('spawn-fit-target-wrap');
 
   // Step 4
   dom.summaryList      = document.getElementById('spawn-summary-list');
@@ -557,7 +558,7 @@ function bindEvents() {
     dom.batchSizeInput, dom.ubatchSizeInput, dom.parallelSlotsInput,
     dom.cacheTypeKSelect, dom.cacheTypeVSelect, dom.nCpuMoeInput,
     dom.tensorSplitInput, dom.specTypeSelect, dom.draftModelInput,
-    dom.kvUnifiedCheck, dom.ignoreEosCheck, dom.fitTargetInput,
+    dom.kvUnifiedCheck, dom.fitEnableCheck, dom.fitTargetInput,
   ].forEach(el => {
     el?.addEventListener('input', onHardwareChange);
     el?.addEventListener('change', onHardwareChange);
@@ -1020,7 +1021,6 @@ function updateRawScript() {
   const specType = dom.specTypeSelect?.value || '';
   if (specType) { args.push('--spec-type', specType); if (specType === 'draft-model' && dom.draftModelInput?.value) args.push('-md', `"${dom.draftModelInput.value}"`); }
   if (hw.kvUnified) args.push('--kv-unified');
-  if (hw.ignoreEos) args.push('--ignore-eos');
   dom.rawCodeArea.textContent = 'llama-server \\\n  ' + args.join(' \\\n  ');
 }
 
@@ -2437,9 +2437,14 @@ function readHardwareState() {
   if (dom.cacheTypeVSelect) h.cacheTypeV = dom.cacheTypeVSelect.value || 'q8_0';
   if (dom.nCpuMoeInput) { const v = dom.nCpuMoeInput.value; h.nCpuMoe = v !== '' ? Number(v) : 0; }
   if (dom.tensorSplitInput) h.tensorSplit = dom.tensorSplitInput.value.trim() || '';
-  if (dom.fitTargetInput) { h.fitTarget = dom.fitTargetInput.value.trim() || ''; }
+  if (dom.fitEnableCheck) {
+    const enabled = dom.fitEnableCheck.checked;
+    if (dom.fitTargetWrap) dom.fitTargetWrap.style.display = enabled ? '' : 'none';
+    h.fitTarget = enabled && dom.fitTargetInput ? (dom.fitTargetInput.value.trim() || '') : '';
+  } else if (dom.fitTargetInput) {
+    h.fitTarget = dom.fitTargetInput.value.trim() || '';
+  }
   if (dom.kvUnifiedCheck) h.kvUnified = dom.kvUnifiedCheck.checked;
-  if (dom.ignoreEosCheck) h.ignoreEos = dom.ignoreEosCheck.checked;
 }
 
 export function scheduleVramUpdate() {
@@ -3758,7 +3763,7 @@ function renderSummary() {
     rows.push({ label: 'Speculative', value: sv });
   }
   if (hw.kvUnified) rows.push({ label: 'KV unified', value: 'Yes' });
-  if (hw.ignoreEos) rows.push({ label: 'Ignore EOS', value: 'Yes' });
+  if (hw.fitTarget) rows.push({ label: '--fit-target', value: `${hw.fitTarget} MB` });
   if (wizardState.access.apiKey) rows.push({ label: 'Server API key', value: `${wizardState.access.apiKey.slice(0, 4)}…${wizardState.access.apiKey.slice(-4)}` });
 
   // Summary list header
@@ -3999,7 +4004,6 @@ function buildPresetPayload() {
     spec_type: dom.specTypeSelect?.value || '',
     draft_model: (dom.draftModelInput?.value || '').trim() || '',
     kv_unified: h.kvUnified || false,
-    ignore_eos: h.ignoreEos || false,
     api_key: wizardState.access.apiKey || null,
   };
 }
@@ -4212,7 +4216,6 @@ function buildSpawnPayload() {
     spec_draft_n_max: mtpActive ? (h.mtpDraftNMax || 2) : undefined,
     draft_model: (dom.draftModelInput?.value || '').trim() || null,
     kv_unified: h.kvUnified || null,
-    ignore_eos: !!h.ignoreEos,
     fit_enabled: h.fitTarget ? true : null,
     fit_target: h.fitTarget || null,
     // Sampling defaults (null = use llama-server built-in defaults)
