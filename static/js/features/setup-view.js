@@ -273,7 +273,7 @@ export function renderRecentEndpoints(sessions, activeId) {
 
     container.style.display = attachSessions.length ? '' : 'none';
     spawnContainer.style.display = spawnSessions.length ? '' : 'none';
-    setAttachButtonLabel(attachBtn, attachSessions.length ? 'Reconnect Manually' : 'Attach');
+    // Don't clobber the Connect button label — it's fixed in the two-pane layout
     list.innerHTML = '';
     spawnList.innerHTML = '';
 
@@ -535,9 +535,6 @@ export function initViewState() {
         const input = document.getElementById('setup-endpoint-url');
         if (input) input.value = lastEndpoint;
     }
-
-    // Bind attach drawer toggle
-    document.getElementById('setup-attach-remote-btn')?.addEventListener('click', () => toggleAttachDrawer());
 
     // Bind models button
     document.getElementById('setup-models-btn')?.addEventListener('click', () => {

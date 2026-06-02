@@ -210,7 +210,7 @@
                     <div class="setup-orb setup-orb-3"></div>
                 </div>
 
-                <!-- Header: brand + toolbar -->
+                <!-- Header: brand + Models toolbar btn -->
                 <div class="setup-header">
                     <div class="setup-brand">
                         <div class="setup-logo">
@@ -229,51 +229,67 @@
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
                             Models
                         </button>
-                        <button class="setup-toolbar-btn setup-toolbar-btn-ghost" id="setup-attach-remote-btn" title="Attach to a running remote endpoint">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 7h3a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-3m-6 0H6a5 5 0 0 1-5-5 5 5 0 0 1 5-5h3"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-                            Attach Remote
-                        </button>
                     </div>
                 </div>
 
-                <!-- Launch grid: preset cards + new config card (populated by JS) -->
-                <div class="launch-grid" id="setup-launch-grid">
-                    <div class="launch-card-skeleton"></div>
-                    <div class="launch-card-skeleton"></div>
-                    <div class="launch-card-skeleton"></div>
-                </div>
+                <!-- Two-pane body: Connect (left) + Local Servers (right) — both always visible -->
+                <div class="setup-body">
 
-                <!-- Attach remote drawer (collapsed, toggled by Attach Remote btn) -->
-                <div class="setup-attach-drawer" id="setup-attach-drawer">
-                    <div class="setup-attach-inner">
+                    <!-- LEFT PANE: Connect to Endpoint -->
+                    <div class="setup-pane setup-pane-connect">
+                        <div class="setup-pane-label">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 7h3a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-3m-6 0H6a5 5 0 0 1-5-5 5 5 0 0 1 5-5h3"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+                            Connect to Endpoint
+                        </div>
+
+                        <!-- Recent endpoints (populated by renderRecentEndpoints) -->
                         <div id="setup-recent-endpoints" style="display:none;">
                             <div class="setup-section-header">
-                                <span class="setup-section-title">Recent Endpoints</span>
+                                <span class="setup-section-title">Recent</span>
                                 <a id="setup-browse-sessions-link" class="setup-link">Manage →</a>
                             </div>
                             <div class="setup-endpoint-list" id="setup-endpoint-list"></div>
                         </div>
-                        <div class="setup-attach-manual">
-                            <div class="setup-section-header">
-                                <span class="setup-section-title">Manual Attach</span>
-                            </div>
-                            <div class="setup-card-form">
-                                <input type="text" class="setup-input" id="setup-endpoint-url" placeholder="http://127.0.0.1:8080">
-                                <input type="password" class="setup-input" id="setup-endpoint-api-key" placeholder="API key (optional)">
-                                <button class="setup-btn setup-btn-primary" id="setup-attach-btn">
-                                    <span class="btn-icon">⚡</span> Connect
-                                </button>
-                            </div>
+
+                        <!-- Manual attach form -->
+                        <div class="setup-pane-divider" id="setup-pane-divider-manual"></div>
+                        <div class="setup-section-header" style="margin-bottom:10px;">
+                            <span class="setup-section-title">Manual</span>
+                        </div>
+                        <div class="setup-card-form">
+                            <input type="text" class="setup-input" id="setup-endpoint-url" placeholder="http://192.168.x.x:8080" autocomplete="off">
+                            <input type="password" class="setup-input" id="setup-endpoint-api-key" placeholder="API key (optional)">
+                            <button class="setup-btn setup-btn-primary setup-btn-connect" id="setup-attach-btn">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                                Connect
+                            </button>
                         </div>
                     </div>
-                </div>
 
-                <!-- Recent local servers (spawn history) -->
-                <div class="setup-history" id="setup-recent-spawn-sessions" style="display:none;">
-                    <div class="setup-section-header">
-                        <span class="setup-section-title">Recent Local Servers</span>
+                    <!-- Vertical divider -->
+                    <div class="setup-pane-sep" aria-hidden="true"></div>
+
+                    <!-- RIGHT PANE: Local Servers (preset launch cards) -->
+                    <div class="setup-pane setup-pane-local">
+                        <div class="setup-pane-label">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                            Local Server
+                        </div>
+
+                        <!-- Preset cards grid (populated by renderLaunchGrid) -->
+                        <div class="launch-grid" id="setup-launch-grid">
+                            <div class="launch-card-skeleton"></div>
+                            <div class="launch-card-skeleton"></div>
+                        </div>
+
+                        <!-- Recent spawn sessions -->
+                        <div id="setup-recent-spawn-sessions" style="display:none;">
+                            <div class="setup-section-header" style="margin-top:14px;margin-bottom:6px;">
+                                <span class="setup-section-title">Recent</span>
+                            </div>
+                            <div class="setup-endpoint-list" id="setup-spawn-session-list"></div>
+                        </div>
                     </div>
-                    <div class="setup-endpoint-list" id="setup-spawn-session-list"></div>
                 </div>
 
                 <!-- Quick stats row (shown after at least one session) -->
@@ -300,6 +316,8 @@
                     </div>
                     <button type="button" id="setup-spawn-wizard-btn">Wizard</button>
                     <a id="setup-manage-presets-link"></a>
+                    <!-- Removed: setup-attach-remote-btn (no longer a toggle) -->
+                    <div id="setup-attach-drawer"></div>
                 </div>
             </div>
 
