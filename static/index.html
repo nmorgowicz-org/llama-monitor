@@ -2840,8 +2840,8 @@
                             <input type="text" id="spawn-hf-repo"
                                 placeholder="Repo ID or keyword (e.g. bartowski/Llama-3.3-70B or Qwen3 27B)">
                             <select id="spawn-hf-sort" class="hf-sort-select" title="Sort order">
+                                <option value="newest" selected>Newest</option>
                                 <option value="downloads">Most downloaded</option>
-                                <option value="newest">Newest</option>
                                 <option value="trending">Trending</option>
                                 <option value="likes">Most liked</option>
                             </select>
@@ -3102,20 +3102,56 @@
                                 <label for="spawn-spec-type">Mode</label>
                                 <select id="spawn-spec-type">
                                     <option value="">None — disabled</option>
-                                    <option value="ngram-mod">N-gram — fast, no extra files (~10–30% speedup)</option>
-                                    <option value="draft-mtp,ngram-mod">MTP + N-gram — for models with built-in MTP heads (~50–200% on dense models)</option>
-                                    <option value="draft-model">Draft model — best speedup, needs a separate small model</option>
+                                    <optgroup label="N-gram methods (no extra files required)">
+                                        <option value="ngram-mod">ngram-mod — shared hash pool, best for server use (~10–30% speedup)</option>
+                                        <option value="ngram-simple">ngram-simple — minimal overhead, looks up last n-gram in history</option>
+                                        <option value="ngram-map-k">ngram-map-k — hash-map patterns, good for repetitive/code content</option>
+                                        <option value="ngram-map-k4v">ngram-map-k4v — experimental: 4 values/key, complex repetition patterns</option>
+                                    </optgroup>
+                                    <optgroup label="MTP — Multi-Token Prediction (requires model with MTP heads)">
+                                        <option value="draft-mtp,ngram-mod">draft-mtp + ngram-mod — MTP + n-gram fallback (recommended for Qwen3 / DeepSeek, ~50–200%)</option>
+                                        <option value="draft-mtp">draft-mtp only — pure MTP, no n-gram fallback</option>
+                                    </optgroup>
+                                    <optgroup label="Draft model (requires separate small model file)">
+                                        <option value="draft-model">draft-model — separate draft model, highest potential speedup</option>
+                                    </optgroup>
                                 </select>
                                 <div class="field-hint" id="spawn-spec-hint">
                                     <span data-spec="">Pick a mode to see a description.</span>
-                                    <span data-spec="ngram-mod" style="display:none;">N-gram lookup builds a table from prior tokens — zero extra VRAM, works on any model. Best for general and roleplay use where output is repetitive enough for predictions.</span>
-                                    <span data-spec="draft-mtp,ngram-mod" style="display:none;">Multi-Token Prediction uses heads built into the model itself. Also chains N-gram for tokens the MTP heads don't cover. Requires <code>--parallel 1</code>. Use this for Qwen3-MTP, DeepSeek-V3 MTP, and similar models. The MTP section above auto-selects this when enabled.</span>
-                                    <span data-spec="draft-model" style="display:none;">A small draft model (e.g. 1–3B) proposes tokens; the main model verifies. Highest theoretical speedup (~2–3×) but requires downloading and managing a compatible draft model alongside the main one.</span>
+                                    <span data-spec="ngram-mod" style="display:none;">Shared hash pool n-gram: efficient for server use, good for general and roleplay. ~10–30% speedup, no extra files.</span>
+                                    <span data-spec="ngram-simple" style="display:none;">Minimal-overhead n-gram: looks up last n-gram in history. Lightweight and safe for most models.</span>
+                                    <span data-spec="ngram-map-k" style="display:none;">Hash-map patterns: strong for repetitive or code-heavy content where longer sequences recur.</span>
+                                    <span data-spec="ngram-map-k4v" style="display:none;">Experimental: 4 values per key for complex repetition patterns. Best for very repetitive or structured outputs.</span>
+                                    <span data-spec="draft-mtp,ngram-mod" style="display:none;">MTP plus n-gram fallback: best for models with built-in MTP heads (Qwen3, DeepSeek, etc.). Requires <code>--parallel 1</code>. The MTP section above auto-selects this when enabled.</span>
+                                    <span data-spec="draft-mtp" style="display:none;">Pure MTP: uses built-in prediction heads only. Requires <code>--parallel 1</code>. Use if you want MTP without n-gram fallback.</span>
+                                    <span data-spec="draft-model" style="display:none;">Separate small draft model (1–3B) proposes tokens; main model verifies. Highest theoretical speedup (~2–3×) but requires an extra model file.</span>
                                 </div>
                             </div>
                             <div class="hardware-field" id="spawn-draft-model-wrap" style="display:none;">
                                 <label for="spawn-draft-model">Draft model path</label>
                                 <input type="text" id="spawn-draft-model" placeholder="/path/to/draft-model.gguf">
+                            </div>
+
+                            <!-- N-gram advanced knobs (shown for n-gram modes) -->
+                            <div class="hardware-field" id="spawn-spec-ngram-wrap" style="display:none; grid-column: 1/-1;">
+                                <div class="hw-section-divider">N-gram tuning</div>
+                                <div class="hardware-grid">
+                                    <div class="hardware-field">
+                                        <label for="spawn-spec-ngram-size">N-gram Size</label>
+                                        <input type="number" id="spawn-spec-ngram-size" min="1" max="64" placeholder="24">
+                                        <div class="field-hint">Window size for n-gram lookup. Larger = longer patterns, more memory.</div>
+                                    </div>
+                                    <div class="hardware-field">
+                                        <label for="spawn-draft-min">Draft Min</label>
+                                        <input type="number" id="spawn-draft-min" min="1" max="64" placeholder="8">
+                                        <div class="field-hint">Minimum draft tokens to propose per step.</div>
+                                    </div>
+                                    <div class="hardware-field">
+                                        <label for="spawn-draft-max">Draft Max</label>
+                                        <input type="number" id="spawn-draft-max" min="1" max="128" placeholder="24">
+                                        <div class="field-hint">Maximum draft tokens per step; higher = more aggressive.</div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 

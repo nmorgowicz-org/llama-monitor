@@ -14,6 +14,7 @@ import { openDeferredFileBrowser } from './file-browser-launcher.js';
 import { showToast } from './toast.js';
 import { switchView } from './setup-view.js';
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
+import { lastCapabilities } from '../core/app-state.js';
 import {
   HF_DISCOVER_CATEGORIES,
   hfSearch,
@@ -454,9 +455,13 @@ function cacheDom() {
   // Legacy VRAM pill (kept for backward compat if HTML still has it)
   dom.vramEstimateText = document.getElementById('spawn-vram-estimate-text');
   dom.vramPill         = document.getElementById('spawn-vram-pill');
-  dom.specTypeSelect  = document.getElementById('spawn-spec-type');
-  dom.draftModelWrap  = document.getElementById('spawn-draft-model-wrap');
-  dom.draftModelInput = document.getElementById('spawn-draft-model');
+  dom.specTypeSelect     = document.getElementById('spawn-spec-type');
+  dom.draftModelWrap     = document.getElementById('spawn-draft-model-wrap');
+  dom.draftModelInput    = document.getElementById('spawn-draft-model');
+  dom.specNgramWrap      = document.getElementById('spawn-spec-ngram-wrap');
+  dom.specNgramSizeInput = document.getElementById('spawn-spec-ngram-size');
+  dom.draftMinInput      = document.getElementById('spawn-draft-min');
+  dom.draftMaxInput      = document.getElementById('spawn-draft-max');
   dom.kvUnifiedCheck  = document.getElementById('spawn-kv-unified');
   dom.fitEnableCheck  = document.getElementById('spawn-fit-enable');
   dom.fitEnableLabel  = dom.fitEnableCheck?.closest('label');
@@ -643,13 +648,22 @@ function bindEvents() {
   // Prevent the fit toggle label's click from bubbling to the overlay
   dom.fitEnableLabel?.addEventListener('click', e => e.stopPropagation());
 
+  // When the fit toggle changes, ensure the Hardware step stays visible
+  // (hw-step-active + layout shift can push content off-screen).
+  dom.fitEnableCheck?.addEventListener('change', () => {
+    const body = document.querySelector('.wizard-body');
+    if (body) body.scrollTop = 0;
+  });
+
   dom.gpuLayersSelect?.addEventListener('change', () => {
     wizardState.hardware.gpuLayers = dom.gpuLayersSelect.value;
     if (dom.gpuLayersManualWrap) dom.gpuLayersManualWrap.style.display = dom.gpuLayersSelect.value === 'manual' ? '' : 'none';
   });
   dom.specTypeSelect?.addEventListener('change', () => {
     const v = dom.specTypeSelect.value;
+    const isNgram = v && (v.includes('ngram') || v === 'ngram');
     if (dom.draftModelWrap) dom.draftModelWrap.style.display = v === 'draft-model' ? '' : 'none';
+    if (dom.specNgramWrap) dom.specNgramWrap.style.display = isNgram ? '' : 'none';
     _updateSpecHint(v);
   });
 
@@ -968,6 +982,9 @@ function showStep(index) {
   if (wizardBody) {
     if (index === 2) {
       wizardBody.classList.add('hw-step-active');
+      // Ensure Hardware step is visible; hw-step-active uses overflow:hidden
+      // and can trap the scroll position off-screen.
+      wizardBody.scrollTop = 0;
     } else {
       wizardBody.classList.remove('hw-step-active');
       wizardBody.scrollTop = 0;
@@ -994,6 +1011,7 @@ function showStep(index) {
     Promise.all([fetchGpuVram(), fetchSystemRam()]).then(() => {
       scheduleVramUpdate();
       renderHardwareModelHeader();
+      _populateKvCacheOptions();
     });
     renderMmprojSection();
     renderMtpSection();
@@ -1017,6 +1035,60 @@ function showStep(index) {
   if (index === 4) {
     _renderSpawnConfigCard();
   }
+}
+
+// ── KV cache options from llama-server capabilities ──────────────────────────
+
+function _populateKvCacheOptions() {
+  const kSelect = dom.cacheTypeKSelect;
+  const vSelect = dom.cacheTypeVSelect;
+  if (!kSelect || !vSelect) return;
+
+  // Use capabilities if available; otherwise fall back to safe defaults.
+  const caps = lastCapabilities || {};
+  const kvTypes = (caps.kv_cache_types || []).map(String);
+
+  const baseOptions = [
+    { value: 'q8_0', label: 'q8_0 — recommended' },
+    { value: 'f16', label: 'f16 — lossless' },
+    { value: 'bf16', label: 'bf16' },
+    { value: 'q4_0', label: 'q4_0 — saves VRAM' },
+    { value: 'q4_1', label: 'q4_1' },
+    { value: 'iq4_nl', label: 'iq4_nl' },
+    { value: 'q5_0', label: 'q5_0' },
+    { value: 'q5_1', label: 'q5_1' },
+    { value: 'f32', label: 'f32 — full precision' },
+  ];
+
+  // Build options: always include base, then add any extra from capabilities.
+  const used = new Set(baseOptions.map(o => o.value));
+  const allOptions = baseOptions.slice();
+  for (const t of kvTypes) {
+    if (!used.has(t)) {
+      allOptions.push({ value: t, label: t });
+      used.add(t);
+    }
+  }
+
+  const fillSelect = (sel) => {
+    const current = sel.value || 'q8_0';
+    sel.innerHTML = '';
+    for (const o of allOptions) {
+      const opt = document.createElement('option');
+      opt.value = o.value;
+      opt.textContent = o.label;
+      if (o.value === current) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    // Ensure a valid default if current is not in list
+    if (!sel.querySelector('option:checked')) {
+      const q8 = sel.querySelector('option[value="q8_0"]');
+      if (q8) q8.selected = true;
+    }
+  };
+
+  fillSelect(kSelect);
+  fillSelect(vSelect);
 }
 
 // ── Profile & use-case ────────────────────────────────────────────────────────
@@ -3714,6 +3786,9 @@ function buildPresetPayload() {
     ngram_spec: false,
     spec_type: dom.specTypeSelect?.value || '',
     draft_model: (dom.draftModelInput?.value || '').trim() || '',
+    spec_ngram_size: (dom.specNgramSizeInput?.value || '').trim() || null,
+    draft_min: (dom.draftMinInput?.value || '').trim() || null,
+    draft_max: (dom.draftMaxInput?.value || '').trim() || null,
     kv_unified: h.kvUnified || false,
     api_key: wizardState.access.apiKey || null,
     mmproj: m.mmprojPath && m.mmprojPath.startsWith('/') ? m.mmprojPath : null,

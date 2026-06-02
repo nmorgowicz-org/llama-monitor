@@ -278,10 +278,13 @@
 
 #wizard-step-2 .wizard-main {
   overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
+  max-width: 100%;
   padding-right: 6px;
   scrollbar-width: thin;
   scrollbar-color: rgba(99,102,241,0.25) transparent;
+  box-sizing: border-box;
 }
 
 .hw-vram-sidebar {
@@ -2815,6 +2818,64 @@
 .kv-inline-field select {
   padding: 7px 10px;
   font-size: var(--text-xs);
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background:
+    radial-gradient(circle at top right, rgba(99,102,241,0.12), transparent 28%),
+    linear-gradient(160deg, rgba(15,23,42,0.96), rgba(9,9,11,1));
+  color: var(--color-text-primary, #e2e8f0);
+  box-shadow:
+    0 4px 14px rgba(0,0,0,0.25),
+    inset 0 1px 0 rgba(255,255,255,0.04);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+  background-image:
+    linear-gradient(
+      to bottom right,
+      transparent 40%,
+      rgba(148,163,253,0.18) 40%,
+      rgba(148,163,253,0.18) 60%,
+      transparent 60%
+    ),
+    radial-gradient(circle at top right, rgba(99,102,241,0.12), transparent 28%),
+    linear-gradient(160deg, rgba(15,23,42,0.96), rgba(9,9,11,1));
+  background-size: 100% 100%, 100% 100%, 100% 100%;
+  background-position: right 9px center, top right, 0 0;
+  background-repeat: no-repeat;
+  padding-right: 24px;
+}
+
+.kv-inline-field select:focus {
+  outline: none;
+  border-color: rgba(99,102,241,0.6);
+  box-shadow:
+    0 6px 18px rgba(99,102,241,0.22),
+    0 0 0 1px rgba(99,102,241,0.25),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* Light theme */
+[data-theme="light"] .kv-inline-field select {
+  background:
+    radial-gradient(circle at top left, rgba(99,102,241,0.07), transparent 28%),
+    linear-gradient(160deg, #ffffff, #f8fafc);
+  border-color: rgba(15,23,42,0.12);
+  color: #0f172a;
+  box-shadow:
+    0 3px 10px rgba(15,23,42,0.06),
+    inset 0 1px 0 rgba(255,255,255,0.9);
+}
+
+[data-theme="light"] .kv-inline-field select:focus {
+  border-color: rgba(99,102,241,0.7);
+  box-shadow:
+    0 6px 18px rgba(99,102,241,0.18),
+    0 0 0 1px rgba(99,102,241,0.25),
+    inset 0 1px 0 rgba(255,255,255,1);
 }
 
 /* ── Unified buffer toggle switch ───────────────────────────────────────────── */
@@ -3647,6 +3708,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 }
 .hw-quant-label {
   font-size: 11px;
@@ -3655,14 +3717,18 @@
   white-space: nowrap;
 }
 .hw-quant-select {
-  flex: 1;
+  flex: 1 1 min-content;
   min-width: 0;
+  max-width: 100%;
   font-size: 12px;
   background: rgba(15,23,42,0.7);
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 6px;
   color: var(--color-text, #e2e8f0);
   padding: 4px 24px 4px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .hw-quant-select:focus { outline: none; border-color: rgba(99,102,241,0.5); }
 
