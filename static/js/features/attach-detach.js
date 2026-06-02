@@ -44,6 +44,8 @@ export function getConfig() {
         rope_scaling: p.rope_scaling || '',
         rope_freq_base: p.rope_freq_base ?? null,
         rope_freq_scale: p.rope_freq_scale ?? null,
+        spec_type: p.spec_type || null,
+        kv_unified: p.kv_unified ?? null,
         draft_model: p.draft_model || '',
         draft_min: p.draft_min ?? null,
         draft_max: p.draft_max ?? null,

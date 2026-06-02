@@ -1388,6 +1388,12 @@ body.chat-focus-mode .sidebar-nav {
   overflow: hidden;
 }
 
+/* Hide sidebar on welcome/setup screen — nav items aren't usable there */
+body.setup-active .sidebar-nav {
+  opacity: 0;
+  pointer-events: none;
+}
+
 body.chat-focus-mode .content-area {
   margin-left: 0 !important;
   width: 100% !important;

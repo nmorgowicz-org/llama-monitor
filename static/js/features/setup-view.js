@@ -149,16 +149,27 @@ export function renderLaunchGrid() {
     const presets = _visiblePresetsLocal(allPresets);
     const activePresetId = document.getElementById('preset-select')?.value || '';
 
-    // "New Configuration" card always goes first (leftmost)
-    const newCard = _buildNewConfigCard(!hasUserPresets);
-    newCard.style.animationDelay = '0ms';
-    grid.appendChild(newCard);
-
-    presets.forEach((preset, i) => {
-        const card = _buildLaunchCard(preset, activePresetId);
-        card.style.animationDelay = `${(i + 1) * 55}ms`;
-        grid.appendChild(card);
-    });
+    if (!hasUserPresets) {
+        // No user presets: New Config goes first so it's the obvious CTA
+        const newCard = _buildNewConfigCard(true);
+        newCard.style.animationDelay = '0ms';
+        grid.appendChild(newCard);
+        presets.forEach((preset, i) => {
+            const card = _buildLaunchCard(preset, activePresetId);
+            card.style.animationDelay = `${(i + 1) * 55}ms`;
+            grid.appendChild(card);
+        });
+    } else {
+        // User has presets: show them first (leftmost), New Config goes last
+        presets.forEach((preset, i) => {
+            const card = _buildLaunchCard(preset, activePresetId);
+            card.style.animationDelay = `${i * 55}ms`;
+            grid.appendChild(card);
+        });
+        const newCard = _buildNewConfigCard(false);
+        newCard.style.animationDelay = `${presets.length * 55}ms`;
+        grid.appendChild(newCard);
+    }
 }
 
 function _buildLaunchCard(preset, activePresetId) {
@@ -167,8 +178,8 @@ function _buildLaunchCard(preset, activePresetId) {
     card.className = 'launch-card';
     if (isExample) card.classList.add('launch-card--example');
 
-    // Examples can never be "running" — only user-created presets can match active session
-    const isRunning = !isExample && preset.id === activePresetId && activePresetId;
+    // Only show running if the server is actually live and this preset is the active one
+    const isRunning = !isExample && sessionState.serverRunning && preset.id === activePresetId && activePresetId;
     if (isRunning) card.classList.add('launch-card--running');
 
     const modelFile = (preset.model_path || '').split(/[/\\]/).pop() ||
