@@ -3255,58 +3255,6 @@ fn api_hf_token_delete(
         })
 }
 
-// ── POST /api/hf/author-models ────────────────────────────────────────────────
-// Browse all GGUF models by a specific HF author/org.
-
-fn api_hf_author_models(
-    _state: AppState,
-    app_config: Arc<AppConfig>,
-) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("api" / "hf" / "author-models")
-        .and(warp::post())
-        .and(warp::header::optional::<String>("authorization"))
-        .and(super::hf_json_body::<serde_json::Value>())
-        .and_then(move |auth: Option<String>, body: serde_json::Value| {
-            let cfg = app_config.clone();
-            async move {
-                if !check_api_token(&auth, &cfg) {
-                    return Ok(unauthorized_api_token());
-                }
-
-                let author = body["author"].as_str().unwrap_or("").trim().to_string();
-                if author.is_empty() {
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": false,
-                            "error": "Missing 'author' field"
-                        })),
-                    ));
-                }
-
-                let limit: usize = body["limit"].as_u64().unwrap_or(50).min(100) as usize;
-                let sort = match body["sort"].as_str().unwrap_or("downloads") {
-                    "likes" => crate::hf::HfSort::Likes,
-                    "newest" | "createdAt" => crate::hf::HfSort::CreatedAt,
-                    "trending" => crate::hf::HfSort::Trending,
-                    _ => crate::hf::HfSort::Downloads,
-                };
-
-                match crate::hf::hf_browse_author(&author, sort, limit).await {
-                    Ok(models) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({
-                            "ok": true,
-                            "author": author,
-                            "models": models
-                        })),
-                    )),
-                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({ "ok": false, "error": e })),
-                    )),
-                }
-            }
-        })
-}
-
 // ── P3.1: HF Download (with concurrency + cooldown) ──────────────────────────
 // - Max 5 concurrent downloads.
 // - 10-second cooldown between download starts.
@@ -3373,15 +3321,16 @@ fn api_hf_download(
                         })),
                     ));
                 }
-                if let Some(ref sa) = save_as {
-                    if sa.contains("..") || sa.contains('/') || sa.contains('\\') {
-                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&serde_json::json!({
-                                "ok": false,
-                                "error": "Invalid save_as: must be a plain filename"
-                            })),
-                        ));
-                    }
+                if save_as
+                    .as_ref()
+                    .is_some_and(|sa| sa.contains("..") || sa.contains('/') || sa.contains('\\'))
+                {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Invalid save_as: must be a plain filename"
+                        })),
+                    ));
                 }
 
                 // Determine target directory.
@@ -3828,7 +3777,6 @@ pub fn api_routes(
     let hf_token_put_route = api_hf_token_put(app_config.clone());
     let hf_token_delete_route = api_hf_token_delete(app_config.clone());
     let hf_card_route = api_hf_card(app_config.clone());
-    let hf_author_models_route = api_hf_author_models(state.clone(), app_config.clone());
     let hf_community_picks_route = api_hf_community_picks(state.clone(), app_config.clone());
     let third_party_models_route = api_third_party_models(state.clone(), app_config.clone());
     let model_introspect_route = api_model_introspect(state.clone(), app_config.clone());
@@ -3942,7 +3890,6 @@ pub fn api_routes(
         .or(hf_token_put_route)
         .or(hf_token_delete_route)
         .or(hf_card_route)
-        .or(hf_author_models_route)
         .or(hf_community_picks_route)
         .or(third_party_models_route)
         .or(model_introspect_route)

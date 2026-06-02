@@ -600,20 +600,6 @@ pub async fn hf_search_models(params: &HfSearchParams) -> Result<Vec<SimpleModel
 }
 
 /// Browse all GGUF models from a specific HF author/org (convenience wrapper).
-pub async fn hf_browse_author(
-    author: &str,
-    sort: HfSort,
-    limit: usize,
-) -> Result<Vec<SimpleModelInfo>, String> {
-    hf_search_models(&HfSearchParams {
-        query: String::new(),
-        author: Some(author.to_string()),
-        sort,
-        limit,
-    })
-    .await
-}
-
 /// Parse a single model JSON object from the HF API into SimpleModelInfo.
 fn parse_model_item(item: serde_json::Value) -> Option<SimpleModelInfo> {
     let id = item

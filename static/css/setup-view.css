@@ -2162,6 +2162,12 @@ body.setup-active .sidebar-nav {
   animation-delay: -17s;
 }
 
+[data-theme="light"] .setup-orb-1,
+[data-theme="light"] .setup-orb-2,
+[data-theme="light"] .setup-orb-3 {
+  opacity: 0.6;
+}
+
 @keyframes orb-drift-a {
   0%, 100% { transform: translate(0, 0) scale(1); }
   30% { transform: translate(60px, 40px) scale(1.12); }
@@ -3077,5 +3083,15 @@ body.setup-active .sidebar-nav {
   .setup-toolbar-btn {
     padding: 8px;
     gap: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

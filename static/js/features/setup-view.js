@@ -193,6 +193,7 @@ function _buildLaunchCard(preset, activePresetId) {
 
     if (isExample) {
         // Example card: dimmed, no edit button, use-wizard CTA only
+        // eslint-disable-next-line no-unsanitized/property -- content sanitized via escapeHtml
         card.innerHTML = `
             <div class="launch-card-top">
                 <div class="launch-card-name">${escapeHtml(preset.name)}</div>
@@ -213,6 +214,7 @@ function _buildLaunchCard(preset, activePresetId) {
             import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
         });
     } else {
+        // eslint-disable-next-line no-unsanitized/property -- content sanitized via escapeHtml
         card.innerHTML = `
             <div class="launch-card-top">
                 <div class="launch-card-name">${escapeHtml(preset.name)}</div>
@@ -257,7 +259,8 @@ function _buildLaunchCard(preset, activePresetId) {
 function _buildNewConfigCard(isPrimary = false) {
     const card = document.createElement('div');
     card.className = 'launch-card launch-card--new' + (isPrimary ? ' launch-card--new-primary' : '');
-    card.innerHTML = `
+    // eslint-disable-next-line no-unsanitized/property -- static HTML, no user data
+        card.innerHTML = `
         <div class="launch-card-new-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </div>

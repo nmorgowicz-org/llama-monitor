@@ -223,8 +223,7 @@ export function initSpawnWizard() {
   loadHfQuickPicks();               // pre-load author quick-picks in background
   loadCommunityPicks();             // load community-picks.json if present
 
-  document.getElementById('btn-open-spawn-wizard')
-    ?.addEventListener('click', () => openSpawnWizard());
+
 
   // HF download panel buttons
   document.getElementById('hf-dlp-download-btn')?.addEventListener('click', _startHfDownload);
@@ -371,11 +370,7 @@ function cacheDom() {
   dom.rLegCram  = document.getElementById('rleg-cram-label');
   dom.rLegFree  = document.getElementById('rleg-free-label');
 
-  dom.modeGuidedBtn = document.getElementById('spawn-mode-guided');
-  dom.modeRawBtn    = document.getElementById('spawn-mode-raw');
-  dom.rawCodeArea   = document.getElementById('spawn-raw-script');
-  dom.wizardGuidedSection = document.getElementById('spawn-wizard-guided-section');
-  dom.wizardRawSection    = document.getElementById('spawn-wizard-raw-section');
+
   dom.gpuLayersSelect      = document.getElementById('spawn-gpu-layers');
   dom.gpuLayersManualWrap  = document.getElementById('spawn-gpu-layers-manual-wrap');
   dom.gpuLayersManualInput = document.getElementById('spawn-gpu-layers-manual');
@@ -389,7 +384,7 @@ function cacheDom() {
   dom.nCpuMoeInput       = document.getElementById('spawn-n-cpu-moe');
   dom.tensorSplitInput   = document.getElementById('spawn-tensor-split');
   dom.fitTargetInput     = document.getElementById('spawn-fit-target');
-  dom.moeNote            = document.getElementById('spawn-moe-note');
+
   // Legacy VRAM pill (kept for backward compat if HTML still has it)
   dom.vramEstimateText = document.getElementById('spawn-vram-estimate-text');
   dom.vramPill         = document.getElementById('spawn-vram-pill');
@@ -601,9 +596,8 @@ function bindEvents() {
 
   dom.savePresetBtn?.addEventListener('click', saveAsPreset);
   dom.spawnServerBtn?.addEventListener('click', spawnServer);
-  dom.modeGuidedBtn?.addEventListener('click', () => setMode('guided'));
-  dom.modeRawBtn?.addEventListener('click', () => setMode('raw'));
-  dom.rawCodeArea?.addEventListener('input', onRawCodeChange);
+
+
 
   // Sampling fields in review step
   _bindSamplingFields();
@@ -1001,58 +995,6 @@ async function _cancelHfDownload() {
 }
 
 // ── Mode toggle ───────────────────────────────────────────────────────────────
-
-function setMode(mode) {
-  wizardState.mode = mode;
-  dom.wizardGuidedSection?.classList.toggle('hidden', mode !== 'guided');
-  dom.wizardRawSection?.classList.toggle('hidden', mode !== 'raw');
-  dom.modeGuidedBtn?.classList.toggle('active', mode === 'guided');
-  dom.modeRawBtn?.classList.toggle('active', mode !== 'guided');
-  if (mode === 'raw') updateRawScript();
-}
-
-function updateRawScript() {
-  if (!dom.rawCodeArea) return;
-  const s = wizardState, hw = s.hardware, m = s.model;
-  const args = [];
-  if (m.source === 'hf' && m.hfRepo) {
-    args.push('-hf', m.hfRepo);
-    if (m.hfFile) args.push('--hf-file', m.hfFile);
-  } else if (m.path) {
-    args.push('-m', `"${m.path}"`);
-  }
-  if (hw.gpuLayers === 'manual' && hw.gpuLayersManual != null) args.push('-ngl', String(hw.gpuLayersManual));
-  else args.push('-ngl', '9999');
-  if (hw.contextSize) args.push('-c', String(hw.contextSize));
-  if (hw.batchSize) args.push('-b', String(hw.batchSize));
-  if (hw.ubatchSize) args.push('-ub', String(hw.ubatchSize));
-  if (hw.parallelSlots > 1) args.push('--parallel', String(hw.parallelSlots));
-  if (hw.cacheTypeK) args.push('-ctk', hw.cacheTypeK);
-  if (hw.cacheTypeV) args.push('-ctv', hw.cacheTypeV);
-  if (hw.nCpuMoe > 0) args.push('--n-cpu-moe', String(hw.nCpuMoe));
-  if (hw.tensorSplit) args.push('--tensor-split', hw.tensorSplit);
-  if (hw.fitTarget) { args.push('--fit', 'on'); args.push('--fit-target', String(hw.fitTarget)); }
-  const specType = dom.specTypeSelect?.value || '';
-  if (specType) { args.push('--spec-type', specType); if (specType === 'draft-model' && dom.draftModelInput?.value) args.push('-md', `"${dom.draftModelInput.value}"`); }
-  if (hw.kvUnified) args.push('--kv-unified');
-  if (hw.cacheRam !== null && hw.cacheRam !== undefined) args.push('--cache-ram', String(hw.cacheRam));
-  dom.rawCodeArea.textContent = 'llama-server \\\n  ' + args.join(' \\\n  ');
-}
-
-function onRawCodeChange() {
-  const text = dom.rawCodeArea?.textContent || '';
-  const hw = wizardState.hardware;
-  const rf = flag => {
-    const idx = text.indexOf(flag + ' ');
-    if (idx === -1) return null;
-    return text.slice(idx + flag.length).trim().split(/[\s\\]+/)[0] || null;
-  };
-  const ctx = rf('-c') || rf('--ctx-size'); if (ctx) { const n = Number(ctx); if (n > 0) hw.contextSize = n; }
-  const ngl = rf('-ngl'); if (ngl) { const n = Number(ngl); if (!isNaN(n)) { hw.gpuLayersManual = n; hw.gpuLayers = 'manual'; } }
-  const bs = rf('-b') || rf('--batch-size'); if (bs) { const n = Number(bs); if (n > 0) hw.batchSize = n; }
-  const ub = rf('-ub') || rf('--ubatch-size'); if (ub) { const n = Number(ub); if (n > 0) hw.ubatchSize = n; }
-  const moe = rf('--n-cpu-moe'); if (moe) { const n = Number(moe); if (!isNaN(n) && n >= 0) hw.nCpuMoe = n; }
-}
 
 // ── Step management ───────────────────────────────────────────────────────────
 
@@ -3135,6 +3077,7 @@ function _showMmprojHfFetchForm(row, panel, prefill = '') {
   const initialValue = originRepo || prefill;
   const showNotFound = !originRepo && prefill;
 
+  // eslint-disable-next-line no-unsanitized/property -- static HTML, no user data
   panel.innerHTML = `
     ${showNotFound ? `<div style="font-size:10px;color:var(--color-text-muted);margin-bottom:6px;">Couldn't auto-find it — enter the HuggingFace repo that contains the mmproj:</div>` : ''}
     <div style="display:flex;gap:6px;align-items:center;width:100%;flex-wrap:wrap;">

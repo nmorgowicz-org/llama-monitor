@@ -54,18 +54,21 @@ function updateUserLabel() {
     if (!btn) return;
 
     if (authState.authenticated && authState.username) {
+        // eslint-disable-next-line no-unsanitized/property -- static SVG, no user data
         btn.innerHTML = _PERSON_SVG;
         btn.appendChild(_navUserLabelSpan(authState.username));
         btn.classList.remove('nav-user-btn-icon');
         return;
     }
     if (authState.methods.form) {
+        // eslint-disable-next-line no-unsanitized/property -- static SVG, no user data
         btn.innerHTML = _LOCK_SVG;
         btn.appendChild(_navUserLabelSpan('Sign In'));
         btn.classList.remove('nav-user-btn-icon');
         return;
     }
     // Anonymous / no auth required — icon only, no label
+    // eslint-disable-next-line no-unsanitized/property -- static SVG, no user data
     btn.innerHTML = _PERSON_SVG;
     btn.classList.add('nav-user-btn-icon');
 }
