@@ -768,6 +768,7 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
         cache_type_v: None,
         max_tokens: None,
         api_key: None,
+        alias: None,
         benchmark_mode: false,
     }
 }

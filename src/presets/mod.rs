@@ -171,6 +171,8 @@ pub struct ModelPreset {
     #[serde(default)]
     pub api_key: Option<String>,
     #[serde(default)]
+    pub alias: Option<String>,
+    #[serde(default)]
     pub benchmark_mode: bool,
 }
 

@@ -8764,6 +8764,7 @@ fn api_spawn_session_with_preset(
                     extra_args: preset.extra_args.clone(),
                     bind_host: preset.bind_host.clone(),
                     api_key: preset.api_key.clone(),
+                    alias: preset.alias.clone(),
                     ..Default::default()
                 };
 

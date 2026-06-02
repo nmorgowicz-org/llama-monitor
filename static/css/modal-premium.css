@@ -2222,6 +2222,13 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.pe-field-hint {
+  margin-top: 5px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+
 /* ── Toggle switches ── */
 .pe-toggles {
   display: flex;

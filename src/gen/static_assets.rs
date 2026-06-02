@@ -67,6 +67,7 @@ pub const FEATURES_DB_ADMIN_JS: &str = include_str!("../../static/js/features/db
 pub const FEATURES_FILE_BROWSER_LAUNCHER_JS: &str =
     include_str!("../../static/js/features/file-browser-launcher.js");
 pub const FEATURES_FILE_BROWSER_JS: &str = include_str!("../../static/js/features/file-browser.js");
+pub const FEATURES_HF_BROWSE_JS: &str = include_str!("../../static/js/features/hf-browse.js");
 pub const FEATURES_LHM_JS: &str = include_str!("../../static/js/features/lhm.js");
 pub const FEATURES_LLAMA_UPDATER_JS: &str =
     include_str!("../../static/js/features/llama-updater.js");

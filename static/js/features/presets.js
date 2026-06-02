@@ -93,6 +93,7 @@ export function openPresetModal(mode) {
         // Model & Memory
         setVal('modal-name', p.name);
         setVal('modal-model-path', p.model_path);
+        setVal('modal-alias', p.alias || '');
         numOrEmpty('modal-gpu-layers', p.gpu_layers);
         setChk('modal-no-mmap', p.no_mmap);
         setChk('modal-mlock', p.mlock);
@@ -123,12 +124,15 @@ export function openPresetModal(mode) {
         setOpt('modal-rope-scaling', p.rope_scaling);
         numOrEmpty('modal-rope-freq-base', p.rope_freq_base);
         numOrEmpty('modal-rope-freq-scale', p.rope_freq_scale);
-        // Spec decoding
-        setChk('modal-ngram-spec', p.ngram_spec);
+        // Spec decoding — use spec_type; fallback: ngram_spec bool → ngram-mod
+        const specType = p.spec_type || (p.ngram_spec ? 'ngram-mod' : '');
+        setOpt('modal-spec-type', specType);
         numOrEmpty('modal-spec-ngram-size', p.spec_ngram_size);
         numOrEmpty('modal-draft-min', p.draft_min);
         numOrEmpty('modal-draft-max', p.draft_max);
+        numOrEmpty('modal-spec-draft-n-max', p.spec_draft_n_max);
         setVal('modal-draft-model', p.draft_model);
+        _toggleSpecFields(specType);
         // Context extras
         setChk('modal-kv-unified', p.kv_unified ?? false);
         // Model extras
@@ -155,6 +159,7 @@ export function openPresetModal(mode) {
         setVal('modal-ubatch-size', 2048);
         setVal('modal-parallel-slots', 1);
         _toggleFitTarget(false);
+        _toggleSpecFields('');
     }
 
     // Reset change-summary state
@@ -296,6 +301,33 @@ function _toggleFitTarget(enabled) {
     if (wrap) wrap.style.display = enabled ? '' : 'none';
 }
 
+function _toggleSpecFields(specType) {
+    const hasNgram = specType.includes('ngram');
+    const hasMtp   = specType.includes('draft-mtp');
+    const hasDraft = specType === 'draft-model';
+    const ngWrap  = document.getElementById('spec-ngram-params-wrap');
+    const mtpWrap = document.getElementById('spec-mtp-wrap');
+    const dmWrap  = document.getElementById('spec-draft-model-wrap');
+    const hint    = document.getElementById('spec-type-hint');
+    if (ngWrap)  ngWrap.style.display  = hasNgram ? '' : 'none';
+    if (mtpWrap) mtpWrap.style.display = hasMtp   ? '' : 'none';
+    if (dmWrap)  dmWrap.style.display  = hasDraft ? '' : 'none';
+    const hints = {
+        'ngram-mod': 'Best for server deployments with multiple slots. Uses a shared hash pool — requires no extra files or VRAM.',
+        'ngram-simple': 'Lightest-weight option. Scans recent history for matching n-grams. Good for single-slot use.',
+        'ngram-map-k': 'Hash-map based pattern matching. Works well for repetitive content like code or structured data.',
+        'ngram-map-k4v': 'Experimental. Tracks up to 4 candidate tokens per n-gram key. May outperform ngram-map-k on long repetitive content.',
+        'draft-mtp,ngram-mod': 'Recommended for Qwen3, DeepSeek V3, and other models with built-in MTP heads. MTP handles main predictions; ngram-mod fills gaps. Forces --parallel 1.',
+        'draft-mtp': 'Pure MTP — uses built-in prediction heads with no n-gram fallback. Forces --parallel 1.',
+        'draft-model': 'Needs a separate draft model (same family, smaller size). Highest potential speedup but requires downloading and managing an additional file.',
+    };
+    if (hint) {
+        const text = hints[specType] || '';
+        hint.textContent = text;
+        hint.style.display = text ? '' : 'none';
+    }
+}
+
 function _hideSummary() {
     const summary = document.getElementById('preset-change-summary');
     const back = document.getElementById('preset-modal-back');
@@ -314,6 +346,7 @@ function _buildFormPreset(existing) {
         // Override only what the editor manages
         name: strVal('modal-name'),
         model_path: strVal('modal-model-path'),
+        alias: strVal('modal-alias') || null,
         mmproj: strVal('modal-mmproj') || null,
         gpu_layers: intOrNull('modal-gpu-layers'),
         no_mmap: document.getElementById('modal-no-mmap').checked,
@@ -340,10 +373,12 @@ function _buildFormPreset(existing) {
         rope_scaling: strVal('modal-rope-scaling'),
         rope_freq_base: floatOrNull('modal-rope-freq-base'),
         rope_freq_scale: floatOrNull('modal-rope-freq-scale'),
-        ngram_spec: document.getElementById('modal-ngram-spec').checked,
+        spec_type: strVal('modal-spec-type') || null,
+        ngram_spec: false,
         spec_ngram_size: intOrNull('modal-spec-ngram-size'),
         draft_min: intOrNull('modal-draft-min'),
         draft_max: intOrNull('modal-draft-max'),
+        spec_draft_n_max: intOrNull('modal-spec-draft-n-max'),
         draft_model: strVal('modal-draft-model'),
         bind_host: strVal('modal-bind-host') || null,
         api_key: strVal('modal-api-key') || null,
@@ -358,21 +393,22 @@ function _buildFormPreset(existing) {
 }
 
 const CHANGE_LABELS = {
-    name: 'Name', model_path: 'Model Path', mmproj: 'Multimodal Projector',
+    name: 'Name', model_path: 'Model Path', alias: 'Server Alias', mmproj: 'Multimodal Projector',
     gpu_layers: 'GPU Layers', no_mmap: 'no-mmap', mlock: 'mlock',
     context_size: 'Context Size', ctk: 'KV Key Type', ctv: 'KV Value Type',
     flash_attn: 'Flash Attn', kv_unified: 'KV Unified',
+    fit_enabled: 'Fit to VRAM', fit_target: 'Fit Target',
     batch_size: 'Batch Size', ubatch_size: 'Micro-batch', parallel_slots: 'Parallel Slots',
     temperature: 'Temperature', top_p: 'Top-P', top_k: 'Top-K',
     min_p: 'Min-P', repeat_penalty: 'Repeat Penalty',
     tensor_split: 'Tensor Split', split_mode: 'Split Mode', main_gpu: 'Main GPU',
     threads: 'Threads', threads_batch: 'Threads Batch', n_cpu_moe: 'CPU MoE Threads',
     rope_scaling: 'RoPE Scaling', rope_freq_base: 'RoPE Freq Base', rope_freq_scale: 'RoPE Freq Scale',
-    ngram_spec: 'ngram-spec', spec_ngram_size: 'N-gram Size',
-    draft_min: 'Draft Min', draft_max: 'Draft Max', draft_model: 'Draft Model',
+    spec_type: 'Speculative Mode', spec_ngram_size: 'N-gram Size',
+    draft_min: 'Draft Min', draft_max: 'Draft Max', spec_draft_n_max: 'MTP Depth', draft_model: 'Draft Model',
     bind_host: 'Bind Host', api_key: 'API Key', max_tokens: 'Max Tokens',
-    seed: 'Seed', ignore_eos: 'Ignore EOS', fit_enabled: 'Fit to VRAM',
-    fit_target: 'Fit Target', system_prompt_file: 'System Prompt File', extra_args: 'Extra Args',
+    seed: 'Seed', ignore_eos: 'Ignore EOS',
+    system_prompt_file: 'System Prompt File', extra_args: 'Extra Args',
 };
 
 function _buildChangeSummary(existing, incoming) {
@@ -427,7 +463,6 @@ export async function savePreset(event) {
                 changes.forEach(({ label, from, to }) => {
                     const li = document.createElement('li');
                     li.className = 'preset-change-item';
-                    // eslint-disable-next-line no-unsanitized/property
                     li.innerHTML = `<span class="preset-change-field">${escapeHtml(label)}</span> <span class="preset-change-from">${escapeHtml(from)}</span><span class="preset-change-arrow">→</span><span class="preset-change-to">${escapeHtml(to)}</span>`;
                     list.appendChild(li);
                 });
@@ -631,10 +666,17 @@ export function initPresets() {
     document.getElementById('preset-modal-cancel')?.addEventListener('click', closePresetModal);
     document.getElementById('preset-modal-back')?.addEventListener('click', _hideSummary);
     document.getElementById('preset-browse-model-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-model-path', 'gguf'));
+    document.getElementById('preset-browse-mmproj-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-mmproj', 'gguf'));
+    document.getElementById('preset-browse-draft-model-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-draft-model', 'gguf'));
 
     // Fit-to-VRAM toggle shows/hides fit target
     document.getElementById('modal-fit-enabled')?.addEventListener('change', function() {
         _toggleFitTarget(this.checked);
+    });
+
+    // Spec type dropdown shows/hides relevant fields
+    document.getElementById('modal-spec-type')?.addEventListener('change', function() {
+        _toggleSpecFields(this.value);
     });
 
     // Bind preset form submit

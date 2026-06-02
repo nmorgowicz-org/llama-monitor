@@ -2176,8 +2176,15 @@
                                 <span class="field-error-msg">Model path is required</span>
                             </div>
                             <div class="pe-field">
+                                <label class="pe-label" for="modal-alias" title="Model alias reported in /v1/models and shown in API clients (--alias). Defaults to the model filename if left empty.">Server Alias (--alias)</label>
+                                <input type="text" class="pe-input" id="modal-alias" placeholder="e.g. qwen3-27b">
+                            </div>
+                            <div class="pe-field">
                                 <label class="pe-label" for="modal-mmproj" title="Path to multimodal projector .mmproj.gguf file for vision models (LLaVA, Qwen-VL, etc.).">Multimodal Projector (-mmproj)</label>
-                                <input type="text" class="pe-input" id="modal-mmproj" placeholder="/path/to/model.mmproj.gguf">
+                                <div class="pe-input-row">
+                                    <input type="text" class="pe-input" id="modal-mmproj" placeholder="/path/to/model.mmproj.gguf">
+                                    <button type="button" class="btn-sm btn-preset" id="preset-browse-mmproj-btn" title="Browse filesystem for .mmproj.gguf files">Browse</button>
+                                </div>
                             </div>
                             <div class="pe-row">
                                 <div class="pe-field">
@@ -2206,7 +2213,7 @@
                             <span class="pe-section-accent" style="--accent: rgba(6,182,212,0.7)"></span>
                             <div>
                                 <h3 class="pe-section-title">Context &amp; KV Cache</h3>
-                                <p class="pe-section-desc">Context window size and KV cache quantization</p>
+                                <p class="pe-section-desc">Context window size, KV cache quantization, and VRAM fitting</p>
                             </div>
                         </div>
                         <div class="pe-section-body">
@@ -2216,12 +2223,32 @@
                             </div>
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-ctk" title="KV cache key quantization type: f16 (best quality), q8_0, turbo3 (4.6x compression, fast)">KV Key Type (-ctk)</label>
-                                    <input type="text" class="pe-input" id="modal-ctk" value="q8_0">
+                                    <label class="pe-label" for="modal-ctk" title="KV cache key quantization. q8_0 is the best quality-per-byte for keys. f16 = lossless. q4_0/iq4_nl = 4-bit for aggressive VRAM savings.">KV Key Type (-ctk)</label>
+                                    <select class="pe-select" id="modal-ctk">
+                                        <option value="q8_0">q8_0 (recommended)</option>
+                                        <option value="f16">f16 (lossless)</option>
+                                        <option value="bf16">bf16</option>
+                                        <option value="q4_0">q4_0</option>
+                                        <option value="q4_1">q4_1</option>
+                                        <option value="iq4_nl">iq4_nl</option>
+                                        <option value="q5_0">q5_0</option>
+                                        <option value="q5_1">q5_1</option>
+                                        <option value="f32">f32 (full precision)</option>
+                                    </select>
                                 </div>
                                 <div class="pe-field">
-                                    <label class="pe-label" for="modal-ctv" title="KV cache value quantization type: f16 (best quality), q8_0, turbo3 (4.6x compression, fast)">KV Value Type (-ctv)</label>
-                                    <input type="text" class="pe-input" id="modal-ctv" value="f16">
+                                    <label class="pe-label" for="modal-ctv" title="KV cache value quantization. f16 is the default and recommended for values. q8_0 saves ~50% VRAM with negligible quality loss.">KV Value Type (-ctv)</label>
+                                    <select class="pe-select" id="modal-ctv">
+                                        <option value="f16">f16 (default)</option>
+                                        <option value="q8_0">q8_0</option>
+                                        <option value="bf16">bf16</option>
+                                        <option value="q4_0">q4_0</option>
+                                        <option value="q4_1">q4_1</option>
+                                        <option value="iq4_nl">iq4_nl</option>
+                                        <option value="q5_0">q5_0</option>
+                                        <option value="q5_1">q5_1</option>
+                                        <option value="f32">f32 (full precision)</option>
+                                    </select>
                                 </div>
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-flash-attn" title="Flash Attention mode: auto (default), on, off. Speeds up inference when supported by model architecture.">Flash Attn (-fa)</label>
@@ -2239,6 +2266,19 @@
                                     <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
                                     <span class="pe-toggle-label">KV unified</span>
                                 </label>
+                                <label class="pe-toggle-item" title="Automatically scale context size and GPU layers to fit within available VRAM.">
+                                    <input type="checkbox" id="modal-fit-enabled">
+                                    <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
+                                    <span class="pe-toggle-label">fit to VRAM</span>
+                                </label>
+                            </div>
+                            <div class="pe-field" id="modal-fit-target-wrap" style="display:none;">
+                                <label class="pe-label" for="modal-fit-target" title="What to optimize when fitting: maximize context, maximize speed, or balance both.">Fit Target</label>
+                                <select class="pe-select" id="modal-fit-target">
+                                    <option value="">balance (default)</option>
+                                    <option value="ctx">maximize context</option>
+                                    <option value="speed">maximize speed</option>
+                                </select>
                             </div>
                         </div>
                     </div>
@@ -2403,34 +2443,65 @@
                             <span class="pe-section-accent" style="--accent: rgba(217,70,239,0.7)"></span>
                             <div>
                                 <h3 class="pe-section-title">Speculative Decoding</h3>
-                                <p class="pe-section-desc">N-gram and draft model acceleration</p>
+                                <p class="pe-section-desc">Token prediction acceleration — faster generation at no quality cost</p>
                             </div>
                         </div>
                         <div class="pe-section-body">
-                            <div class="pe-toggles">
-                                <label class="pe-toggle-item" title="Enable ngram-mod speculative decoding. Boosts generation speed ~47% on compatible models (pure transformers).">
-                                    <input type="checkbox" id="modal-ngram-spec">
-                                    <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
-                                    <span class="pe-toggle-label">ngram-spec</span>
-                                </label>
-                            </div>
-                            <div class="pe-row pe-row-3">
-                                <div class="pe-field">
-                                    <label class="pe-label" for="modal-spec-ngram-size" title="N-gram size for speculative lookup table. Larger = better predictions but more memory.">N-gram Size</label>
-                                    <input type="number" class="pe-input" id="modal-spec-ngram-size" placeholder="24">
-                                </div>
-                                <div class="pe-field">
-                                    <label class="pe-label" for="modal-draft-min" title="Minimum number of tokens to draft before verification.">Draft Min</label>
-                                    <input type="number" class="pe-input" id="modal-draft-min" placeholder="8">
-                                </div>
-                                <div class="pe-field">
-                                    <label class="pe-label" for="modal-draft-max" title="Maximum number of tokens to draft per speculation step.">Draft Max</label>
-                                    <input type="number" class="pe-input" id="modal-draft-max" placeholder="24">
-                                </div>
-                            </div>
                             <div class="pe-field">
-                                <label class="pe-label" for="modal-draft-model" title="Path to a smaller draft model for model-based speculative decoding (alternative to ngram).">Draft Model (-md)</label>
-                                <input type="text" class="pe-input" id="modal-draft-model" placeholder="/path/to/draft-model.gguf">
+                                <label class="pe-label" for="modal-spec-type" title="Speculative decoding predicts tokens ahead and verifies them in a single forward pass, boosting generation speed with no quality cost. Types can be combined with commas (e.g. draft-mtp,ngram-mod). N-gram methods need no extra files; MTP requires a model with built-in prediction heads; draft-model needs a separate smaller model file.">Speculative Mode</label>
+                                <select class="pe-select" id="modal-spec-type">
+                                    <option value="">Disabled</option>
+                                    <optgroup label="N-gram methods (no extra files required)">
+                                        <option value="ngram-mod">ngram-mod — shared hash pool, best for server use (~10–30% speedup)</option>
+                                        <option value="ngram-simple">ngram-simple — minimal overhead, looks up last n-gram in history</option>
+                                        <option value="ngram-map-k">ngram-map-k — hash-map patterns, good for repetitive/code content</option>
+                                        <option value="ngram-map-k4v">ngram-map-k4v — experimental: 4 values/key, complex repetition patterns</option>
+                                    </optgroup>
+                                    <optgroup label="MTP — Multi-Token Prediction (requires model with MTP heads)">
+                                        <option value="draft-mtp,ngram-mod">draft-mtp + ngram-mod — MTP + n-gram fallback (recommended for Qwen3 / DeepSeek, ~50–200%)</option>
+                                        <option value="draft-mtp">draft-mtp only — pure MTP, no n-gram fallback</option>
+                                    </optgroup>
+                                    <optgroup label="Draft model (requires separate small model file)">
+                                        <option value="draft-model">draft-model — separate draft model, highest potential speedup</option>
+                                    </optgroup>
+                                </select>
+                                <div class="pe-field-hint" id="spec-type-hint" style="display:none;"></div>
+                            </div>
+                            <!-- N-gram params: visible for any ngram variant -->
+                            <div id="spec-ngram-params-wrap" style="display:none;">
+                                <div class="pe-row pe-row-3">
+                                    <div class="pe-field">
+                                        <label class="pe-label" for="modal-spec-ngram-size" title="N-gram window size for the lookup table. Larger windows catch longer repeating patterns but use more memory. Default 24 is a good balance.">N-gram Size</label>
+                                        <input type="number" class="pe-input" id="modal-spec-ngram-size" placeholder="24">
+                                    </div>
+                                    <div class="pe-field">
+                                        <label class="pe-label" for="modal-draft-min" title="Minimum number of draft tokens to propose before the main model verifies. Higher = fewer verification passes, better for long outputs.">Draft Min</label>
+                                        <input type="number" class="pe-input" id="modal-draft-min" placeholder="8">
+                                    </div>
+                                    <div class="pe-field">
+                                        <label class="pe-label" for="modal-draft-max" title="Maximum draft tokens proposed per step. Higher = more aggressive speculation, better speedup if hit rate is good.">Draft Max</label>
+                                        <input type="number" class="pe-input" id="modal-draft-max" placeholder="24">
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- MTP depth: visible when draft-mtp is selected -->
+                            <div id="spec-mtp-wrap" style="display:none;">
+                                <div class="pe-row">
+                                    <div class="pe-field">
+                                        <label class="pe-label" for="modal-spec-draft-n-max" title="MTP depth: how many tokens ahead each MTP head predicts simultaneously. 2 is the recommended default for Qwen3 and DeepSeek V3. Higher may help dense models but costs VRAM. Requires --parallel 1 (set automatically).">MTP Depth (--spec-draft-n-max)</label>
+                                        <input type="number" class="pe-input" id="modal-spec-draft-n-max" min="1" max="8" placeholder="2">
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Draft model path: visible for draft-model -->
+                            <div id="spec-draft-model-wrap" style="display:none;">
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-draft-model" title="Path to the draft model .gguf file. Must be from the same model family as the main model (e.g. a 1–3B version). The draft model proposes tokens; the main model verifies them.">Draft Model (-md)</label>
+                                    <div class="pe-input-row">
+                                        <input type="text" class="pe-input" id="modal-draft-model" placeholder="/path/to/draft-model.gguf">
+                                        <button type="button" class="btn-sm btn-preset" id="preset-browse-draft-model-btn" title="Browse filesystem for draft model .gguf file">Browse</button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2475,19 +2546,6 @@
                                     <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
                                     <span class="pe-toggle-label">ignore EOS</span>
                                 </label>
-                                <label class="pe-toggle-item" title="Automatically scale context size and GPU layers to fit within available VRAM.">
-                                    <input type="checkbox" id="modal-fit-enabled">
-                                    <span class="pe-toggle-track"><span class="pe-toggle-thumb"></span></span>
-                                    <span class="pe-toggle-label">fit to VRAM</span>
-                                </label>
-                            </div>
-                            <div class="pe-field" id="modal-fit-target-wrap" style="display:none;">
-                                <label class="pe-label" for="modal-fit-target" title="What to optimize when fitting: maximize context, maximize speed, or balance both.">Fit Target</label>
-                                <select class="pe-select" id="modal-fit-target">
-                                    <option value="">balance (default)</option>
-                                    <option value="ctx">maximize context</option>
-                                    <option value="speed">maximize speed</option>
-                                </select>
                             </div>
                             <div class="pe-field">
                                 <label class="pe-label" for="modal-system-prompt-file" title="Path to a text file containing the system prompt.">System Prompt File</label>
@@ -3477,11 +3535,66 @@
         <!-- Download tab -->
         <div class="mm-tab-panel" data-tab="download">
             <div class="mm-download-body">
-                <div class="mm-download-option" id="mm-hf-download-card">
-                    <div class="mm-download-option-icon">&#129303;</div>
-                    <div class="mm-download-option-title">HuggingFace Hub</div>
-                    <div class="mm-download-option-desc">Browse and download GGUF models from HuggingFace. Opens the spawn wizard at the model selection step.</div>
-                    <button class="mm-download-cta" type="button" id="mm-hf-browse-btn">Browse Models &#8594;</button>
+                <!-- Search bar -->
+                <div class="hf-search-row">
+                    <input type="text" id="mm-hf-search-input" placeholder="Search HuggingFace (e.g. Qwen3 27B, Llama 3.3 70B)" autocomplete="off">
+                    <select id="mm-hf-sort">
+                        <option value="downloads">Most downloaded</option>
+                        <option value="trending">Trending</option>
+                        <option value="newest">Newest</option>
+                    </select>
+                </div>
+
+                <!-- Discover pills -->
+                <div class="hf-discover-pills" id="mm-hf-discover-pills"></div>
+
+                <!-- Quick-picks -->
+                <div class="hf-quickpicks" id="mm-hf-quickpicks"></div>
+
+                <!-- Search results -->
+                <div class="hf-search-results" id="mm-hf-search-results" style="display:none;"></div>
+
+                <!-- File list -->
+                <div class="hf-file-list" id="mm-hf-file-list"></div>
+
+                <!-- Download panel -->
+                <div class="hf-download-panel" id="mm-hf-download-panel" style="display:none;">
+                    <!-- Idle -->
+                    <div id="mm-hf-dlp-idle">
+                        <div class="hf-dlp-dest-row">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            <span class="hf-dlp-dest-label">Save to:</span>
+                            <span class="hf-dlp-dest-path" id="mm-hf-dlp-dest-path" title="This is where the downloaded file will be saved">—</span>
+                        </div>
+                        <div id="mm-hf-dlp-no-dir-warn" style="display:none;" class="hf-dlp-warn">
+                            No models folder configured.
+                            <button type="button" class="hf-dlp-warn-link" id="mm-hf-dlp-open-settings">Set one in Settings → Models</button>
+                            or the file will go to the app default folder.
+                        </div>
+                        <div class="hf-dlp-actions">
+                            <button type="button" class="btn-wizard-primary" id="mm-hf-dlp-download-btn">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:5px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                Download to models folder
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Progress -->
+                    <div id="mm-hf-dlp-progress" style="display:none;">
+                        <div class="hf-dlp-progress-label">
+                            <span id="mm-hf-dlp-progress-file"></span>
+                            <span id="mm-hf-dlp-progress-pct"></span>
+                        </div>
+                        <div class="hf-dlp-bar-wrap">
+                            <div class="hf-dlp-bar" id="mm-hf-dlp-bar" style="width:0%"></div>
+                        </div>
+                        <div class="hf-dlp-stats" id="mm-hf-dlp-stats"></div>
+                        <button type="button" class="btn-wizard-secondary" id="mm-hf-dlp-cancel-btn">Cancel download</button>
+                    </div>
+                    <!-- Complete -->
+                    <div id="mm-hf-dlp-complete" style="display:none;" class="hf-dlp-complete-box">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                        Downloaded — model ready. It will appear in the Library tab.
+                    </div>
                 </div>
             </div>
         </div>

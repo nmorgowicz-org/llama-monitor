@@ -236,6 +236,8 @@ mod tests {
                     browser_download_url: "https://example.com/cuda".into(),
                 },
             ],
+            published_at: String::new(),
+            body: String::new(),
         };
         let selected = select_assets(&release, "cpu", "x64");
         assert_eq!(selected.len(), 1);
@@ -255,6 +257,8 @@ mod tests {
                     browser_download_url: "https://example.com/cuda".into(),
                 },
             ],
+            published_at: String::new(),
+            body: String::new(),
         };
         let selected = select_assets(&release, "cuda", "x64");
         assert_eq!(selected.len(), 1);
@@ -278,6 +282,8 @@ mod tests {
                     browser_download_url: "https://example.com/sycl".into(),
                 },
             ],
+            published_at: String::new(),
+            body: String::new(),
         };
         let selected = select_assets(&release, "avx2", "x64");
         assert_eq!(selected.len(), 1);
@@ -298,6 +304,8 @@ mod tests {
                     browser_download_url: "https://example.com/cuda13".into(),
                 },
             ],
+            published_at: String::new(),
+            body: String::new(),
         };
         let selected = select_assets(&release, "cuda12", "x64");
         assert_eq!(selected.len(), 1);
@@ -318,6 +326,8 @@ mod tests {
                     browser_download_url: "https://example.com/vulkan".into(),
                 },
             ],
+            published_at: String::new(),
+            body: String::new(),
         };
         let selected = select_assets(&release, "sycl", "x64");
         assert_eq!(selected.len(), 1);

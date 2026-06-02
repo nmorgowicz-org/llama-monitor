@@ -1,3 +1,5 @@
+/* global DOMPurify */
+
 // ── llama-server Binary Updater ───────────────────────────────────────────────
 // Shows current binary version in nav pill + setup toolbar button.
 // Clicking opens a version picker modal with the last 8 releases;

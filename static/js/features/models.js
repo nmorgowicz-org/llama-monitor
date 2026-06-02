@@ -1,10 +1,29 @@
 // ── Models ────────────────────────────────────────────────────────────────────
-// Models modal: open, close, load, refresh, delete.
+// Models modal: open, close, load, refresh, delete, and HF download tab.
 
 import { escapeHtml } from '../core/format.js';
 import { showToast } from './toast.js';
+import {
+    hfSearch,
+    hfListFiles,
+    hfStartDownload,
+    hfPollDownload,
+    hfCancelDownload,
+    hfShowDownloadPanel,
+    hfHideDownloadPanel,
+    hfRenderDiscoverPills,
+    hfLoadQuickPicks,
+} from './hf-browse.js';
 
 let initialized = false;
+
+// State for the HF download tab
+let hfState = {
+    selectedRepoId: null,
+    selectedFile: null,
+    currentDownloadId: null,
+    initialized: false,
+};
 
 export function openModelsModal() {
     document.getElementById('models-modal')?.classList.add('open');
@@ -30,14 +49,20 @@ async function loadModels() {
     grid.innerHTML = '<div class="mm-loading">Scanning...</div>';
 
     try {
-        // Fetch settings to show models dir
-        const settingsResp = await fetch('/api/settings', {
+        // Use HF download-dir endpoint for the effective models directory
+        const dirResp = await fetch('/api/hf/download-dir', {
             headers: window.authHeaders ? window.authHeaders() : {},
         });
-        if (settingsResp.ok) {
-            const settings = await settingsResp.json();
-            if (dirLabel) {
-                dirLabel.textContent = settings.models_dir || 'No models directory configured';
+        if (dirResp.ok && dirLabel) {
+            const dirInfo = await dirResp.json();
+            if (dirInfo.dir) {
+                if (dirInfo.configured) {
+                    dirLabel.textContent = dirInfo.dir;
+                } else {
+                    dirLabel.textContent = 'Using default: ' + dirInfo.dir;
+                }
+            } else {
+                dirLabel.textContent = 'No models directory configured';
             }
         }
 
@@ -53,7 +78,7 @@ async function loadModels() {
             : 'No models found';
 
         if (!count) {
-            grid.innerHTML = '<div class="mm-empty">No models discovered. Configure a models directory in Settings.</div>';
+            grid.innerHTML = '<div class="mm-empty">No models found in this directory. You can download one from the Download tab.</div>';
             return;
         }
 
@@ -243,17 +268,11 @@ export function initModels() {
             tab.classList.add('active');
             const panel = document.querySelector('#models-modal .mm-tab-panel[data-tab="' + target + '"]');
             if (panel) panel.classList.add('active');
+            if (target === 'download') {
+                initHfDownloadTab();
+            }
         });
     });
-
-    // HF browse button
-    const hfBtn = document.getElementById('mm-hf-browse-btn');
-    if (hfBtn) {
-        hfBtn.addEventListener('click', () => {
-            closeModelsModal();
-            showToast('Open the Spawn Wizard to browse HuggingFace models', 'info');
-        });
-    }
 
     // Configure settings link
     const settingsLink = document.getElementById('models-open-settings-link');
@@ -270,5 +289,166 @@ export function initModels() {
         modal.addEventListener('click', e => {
             if (e.target === modal) closeModelsModal();
         });
+    }
+}
+
+// ── HF Download tab (inside models modal) ─────────────────────────────────────
+
+async function initHfDownloadTab() {
+    if (hfState.initialized) return;
+    hfState.initialized = true;
+
+    const searchInput = document.getElementById('mm-hf-search-input');
+    const sortSelect = document.getElementById('mm-hf-sort');
+    const discoverPills = document.getElementById('mm-hf-discover-pills');
+    const quickpicks = document.getElementById('mm-hf-quickpicks');
+    const resultsContainer = document.getElementById('mm-hf-search-results');
+    const filelistContainer = document.getElementById('mm-hf-file-list');
+    const downloadPanel = document.getElementById('mm-hf-download-panel');
+
+    if (!searchInput || !resultsContainer || !filelistContainer || !downloadPanel) return;
+
+    // Render discover pills
+    hfRenderDiscoverPills({
+        container: discoverPills,
+        quickpicksContainer: quickpicks,
+        onPillClick: (cat) => {
+            hfSearch({
+                query: cat.params.query,
+                sort: cat.params.sort,
+                limit: cat.params.limit || 20,
+                container: resultsContainer,
+                filelistContainer,
+                quickpicksContainer: quickpicks,
+                discoverPillsContainerId: 'mm-hf-discover-pills',
+                onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
+            });
+        },
+    });
+
+    // Load quick-picks
+    hfLoadQuickPicks({
+        container: quickpicks,
+        discoverPillsContainerId: 'mm-hf-discover-pills',
+        onAuthorClick: (author) => {
+            hfSearch({
+                query: '',
+                author,
+                sort: 'downloads',
+                limit: 20,
+                container: resultsContainer,
+                filelistContainer,
+                quickpicksContainer: quickpicks,
+                discoverPillsContainerId: 'mm-hf-discover-pills',
+                onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
+            });
+        },
+    });
+
+    // Search on input (debounced)
+    let searchTimer = null;
+    const doSearch = () => {
+        const query = (searchInput.value || '').trim();
+        const sort = sortSelect?.value || 'downloads';
+        hfSearch({
+            query,
+            sort,
+            limit: 20,
+            container: resultsContainer,
+            filelistContainer,
+            quickpicksContainer: quickpicks,
+            discoverPillsContainerId: 'mm-hf-discover-pills',
+            onSelectModel: (m) => onHfModelSelected(m, filelistContainer, downloadPanel),
+        });
+    };
+
+    searchInput.addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(doSearch, 350);
+    });
+
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            clearTimeout(searchTimer);
+            doSearch();
+        }
+    });
+
+    sortSelect?.addEventListener('change', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(doSearch, 200);
+    });
+
+    // Settings link from warning
+    const settingsBtn = document.getElementById('mm-hf-dlp-open-settings');
+    if (settingsBtn) {
+        settingsBtn.addEventListener('click', () => {
+            if (typeof window.openSettingsModal === 'function') {
+                window.openSettingsModal('models');
+            }
+        });
+    }
+}
+
+async function onHfModelSelected(model, filelistContainer, downloadPanel) {
+    hfState.selectedRepoId = model.id;
+    hfState.selectedFile = null;
+    hfHideDownloadPanel(downloadPanel);
+
+    await hfListFiles({
+        repoId: model.id,
+        container: filelistContainer,
+        vramGb: 0,
+        onSelectFile: (file, repoId) => onHfFileSelected(file, repoId, downloadPanel),
+    });
+}
+
+async function onHfFileSelected(file, repoId, downloadPanel) {
+    hfState.selectedFile = file;
+
+    // Show download panel
+    await hfShowDownloadPanel(downloadPanel, file.path || file.name || '');
+
+    // Wire download button
+    const downloadBtn = document.getElementById('mm-hf-dlp-download-btn');
+    if (downloadBtn) {
+        downloadBtn.replaceWith(downloadBtn.cloneNode(true));
+    }
+    const newBtn = document.getElementById('mm-hf-dlp-download-btn');
+    if (newBtn) {
+        newBtn.onclick = () => {
+            hfStartDownload({
+                repoId,
+                filePath: file.path || file.name,
+                panelEl: downloadPanel,
+                onComplete: (downloadId, localPath) => {
+                    hfState.currentDownloadId = downloadId;
+                    showToast('Model downloaded', 'success');
+                    // Refresh library tab
+                    loadModels();
+                },
+                onValidationError: (msg) => {
+                    showToast(msg || 'Download failed', 'error');
+                },
+            });
+        };
+    }
+
+    // Wire cancel button
+    const cancelBtn = document.getElementById('mm-hf-dlp-cancel-btn');
+    if (cancelBtn) {
+        cancelBtn.replaceWith(cancelBtn.cloneNode(true));
+    }
+    const newCancel = document.getElementById('mm-hf-dlp-cancel-btn');
+    if (newCancel) {
+        newCancel.onclick = () => {
+            if (hfState.currentDownloadId) {
+                hfCancelDownload({
+                    downloadId: hfState.currentDownloadId,
+                    panelEl: downloadPanel,
+                });
+                hfState.currentDownloadId = null;
+            }
+        };
     }
 }
