@@ -2825,11 +2825,25 @@ fn api_set_metal_gpu_limit(
                 let reply = match run_result {
                     Ok(Ok(output)) if output.status.success() => {
                         let actual = crate::gpu::apple::read_iogpu_wired_limit_mb();
-                        serde_json::json!({
-                            "ok": true,
-                            "limit_mb": actual,
-                            "note": "Applied immediately and saved to /etc/sysctl.conf — will persist across reboots."
-                        })
+                        if actual >= limit_mb {
+                            serde_json::json!({
+                                "ok": true,
+                                "limit_mb": actual,
+                                "note": "Applied immediately and saved to /etc/sysctl.conf — will persist across reboots."
+                            })
+                        } else {
+                            // osascript exited 0 but sysctl read-back shows no change.
+                            // Most likely the server PATH can't find sysctl or the
+                            // kernel parameter name differs on this macOS version.
+                            serde_json::json!({
+                                "ok": false,
+                                "error": format!(
+                                    "osascript exited 0 but iogpu.wired_limit_mb read back as {} MB (expected {}). The setting may not have applied.",
+                                    actual, limit_mb
+                                ),
+                                "manual_cmd": manual_cmd
+                            })
+                        }
                     }
                     Ok(Ok(output)) => {
                         let stderr = String::from_utf8_lossy(&output.stderr);

@@ -2515,9 +2515,12 @@ function updateVramDisplay() {
       if (dom.metalLimitBtn) {
         if (suggested > 0) {
           const suggestedGb = Math.round(suggested / 1024);
+          dom.metalLimitBtn.disabled = false; // clear disabled from any previous attempt
           dom.metalLimitBtn.style.display = '';
           dom.metalLimitBtn.textContent = `Increase to ${suggestedGb} GB`;
           dom.metalLimitBtn.onclick = () => applyMetalGpuLimit(suggested);
+          // Remove any stale fallback panel from a previous failed attempt
+          dom.metalLimitRow?.querySelector('.metal-limit-fallback')?.remove();
         } else {
           dom.metalLimitBtn.style.display = 'none';
         }

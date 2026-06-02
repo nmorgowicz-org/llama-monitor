@@ -139,7 +139,8 @@ fn detect_chip_name() -> &'static str {
 /// Not cached — the value changes when the user applies the Metal GPU limit tweak.
 /// The sysctl call takes ~10–50 µs, negligible against the metrics poll interval.
 pub fn read_iogpu_wired_limit_mb() -> u64 {
-    std::process::Command::new("sysctl")
+    // Use full path — the server process PATH may not include /usr/sbin.
+    std::process::Command::new("/usr/sbin/sysctl")
         .args(["-n", "iogpu.wired_limit_mb"])
         .output()
         .ok()
