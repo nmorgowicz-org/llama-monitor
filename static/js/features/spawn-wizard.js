@@ -4191,7 +4191,7 @@ function buildSpawnPayload() {
   const mmprojLocal = m.mmprojPath && m.mmprojPath.startsWith('/') ? m.mmprojPath : null;
 
   return {
-    model_path: m.source !== 'hf' ? (m.path || null) : null,
+    model_path: m.source !== 'hf' ? (m.path || '') : '',
     hf_repo: m.source === 'hf' ? (m.hfRepo || null) : null,
     hf_file: m.source === 'hf' ? (m.hfFile || null) : null,
     mmproj: mmprojLocal,
@@ -4202,15 +4202,17 @@ function buildSpawnPayload() {
     batch_size: h.batchSize,
     ubatch_size: h.ubatchSize,
     parallel_slots: parallelSlots,
-    ctk: h.cacheTypeK || null,
-    ctv: h.cacheTypeV || null,
+    ctk: h.cacheTypeK || '',
+    ctv: h.cacheTypeV || '',
     n_cpu_moe: h.nCpuMoe || null,
-    tensor_split: h.tensorSplit || null,
+    tensor_split: h.tensorSplit || '',
+    no_mmap: true,
+    ngram_spec: false,
     spec_type: specType,
     spec_draft_n_max: mtpActive ? (h.mtpDraftNMax || 2) : undefined,
     draft_model: (dom.draftModelInput?.value || '').trim() || null,
     kv_unified: h.kvUnified || null,
-    ignore_eos: h.ignoreEos || null,
+    ignore_eos: !!h.ignoreEos,
     fit: h.fitCtx ? 'on' : null,
     fit_ctx: h.fitCtx || null,
     // Sampling defaults (null = use llama-server built-in defaults)
