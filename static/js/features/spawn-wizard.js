@@ -1473,14 +1473,29 @@ function renderQuantAdvisor(quants, availVram) {
 
   const availGb = Math.round(availVram / (1024 ** 3));
   const budgetLabel = isUnifiedMemory() ? 'Unified memory available' : 'VRAM available';
-  if (dom.quantAdvisorSubtitle) dom.quantAdvisorSubtitle.textContent = `${budgetLabel}: ${availGb} GB`;
+
+  // Context-aware pass: find the best quant that fits the user's context target.
+  // Only annotate when the user has set a non-trivial context (> 8k default).
+  const desiredCtx = wizardState.hardware?.contextSize || 0;
+  const annotateCtx = desiredCtx > 8192;
+  // First quant (highest quality) whose q8_0 KV max context meets the target.
+  const ctxFitQuant = annotateCtx
+    ? quants.find(q => q.fits_vram && q.max_ctx_q8 >= desiredCtx)
+    : null;
+  const qualityRecQuant = quants.find(q => q.recommended && q.fits_vram);
+  // Does the quality recommendation also satisfy the context target?
+  const qualityRecFitsCtx = !annotateCtx || (qualityRecQuant && qualityRecQuant.max_ctx_q8 >= desiredCtx);
+
+  let subtitle = `${budgetLabel}: ${availGb} GB`;
+  if (annotateCtx) subtitle += ` · Context target: ${formatCtx(desiredCtx)}`;
+  if (dom.quantAdvisorSubtitle) dom.quantAdvisorSubtitle.textContent = subtitle;
 
   const table = document.createElement('table');
   table.className = 'qa-table';
 
   const thead = table.createTHead();
   const hrow = thead.insertRow();
-  ['', 'Quant', 'Size', 'Max ctx (q8_0)', 'Max ctx (q4_0)', 'Quality'].forEach(h => {
+  ['', 'Quant', 'Size', 'Max ctx (q8_0 KV)', 'Max ctx (q4_0 KV)', 'Quality'].forEach(h => {
     const th = document.createElement('th');
     th.textContent = h;
     hrow.appendChild(th);
@@ -1498,22 +1513,32 @@ function renderQuantAdvisor(quants, availVram) {
     dot.className = 'qa-fit-dot ' + (q.fits_vram ? 'fits' : 'nofit');
     dotTd.appendChild(dot);
 
-    // Quant name + rec badge
+    // Quant name + badges
     const nameTd = tr.insertCell();
     const nameSpan = document.createElement('span');
     nameSpan.style.fontWeight = '600';
     nameSpan.textContent = q.label;
     nameTd.appendChild(nameSpan);
+
     if (q.recommended) {
       const badge = document.createElement('span');
       badge.className = 'qa-badge-rec';
-      badge.textContent = '★ Rec';
+      // If context target is active and this rec won't meet it, clarify it's quality-only
+      badge.textContent = (annotateCtx && !qualityRecFitsCtx) ? '★ Quality' : '★ Rec';
       badge.style.marginLeft = '6px';
       nameTd.appendChild(badge);
     }
+    // Context recommendation badge — shown when it differs from the quality pick
+    if (annotateCtx && ctxFitQuant && q.label === ctxFitQuant.label && !qualityRecFitsCtx) {
+      const ctxBadge = document.createElement('span');
+      ctxBadge.className = 'qa-badge-ctx';
+      ctxBadge.textContent = `✓ fits ${formatCtx(desiredCtx)}`;
+      ctxBadge.style.marginLeft = '6px';
+      nameTd.appendChild(ctxBadge);
+    }
     if (q.is_imatrix) {
       const im = document.createElement('span');
-      im.style.cssText = 'margin-left:4px; font-size:10px; color:#94a3b8;';
+      im.style.cssText = 'margin-left:4px; font-size:10px; color:var(--color-text-muted);';
       im.textContent = 'imatrix';
       nameTd.appendChild(im);
     }
@@ -1523,12 +1548,14 @@ function renderQuantAdvisor(quants, availVram) {
     sizeTd.textContent = q.model_size_gb.toFixed(1) + ' GB';
     sizeTd.style.color = 'var(--color-text-muted)';
 
-    // Max ctx q8_0
+    // Max ctx q8_0 — warn if below context target
     const ctxQ8Td = tr.insertCell();
     ctxQ8Td.className = 'qa-ctx';
     if (q.max_ctx_q8 > 0) {
       ctxQ8Td.textContent = formatCtx(q.max_ctx_q8);
-      ctxQ8Td.classList.add('qa-ctx-q8');
+      const underTarget = annotateCtx && q.max_ctx_q8 < desiredCtx;
+      ctxQ8Td.classList.add(underTarget ? 'qa-ctx-under' : 'qa-ctx-q8');
+      if (underTarget) ctxQ8Td.title = `Max ${formatCtx(q.max_ctx_q8)} — below your ${formatCtx(desiredCtx)} target`;
     } else {
       ctxQ8Td.textContent = '—'; ctxQ8Td.classList.add('qa-ctx-na');
     }
@@ -2593,29 +2620,14 @@ function renderScenarioCards(modelBytes, arch, availVram) {
   const nCtxTrain = wizardState.model.nCtxTrain || 0;
   const currentCtx = hw.contextSize || 8192;
 
-  // Pre-compute max context for q8_0 and q4_0 so the recommendation logic can
-  // factor in whether Q8_0 actually supports the user's current context target.
+  // Pre-compute so each card reuses the value without a second call.
   const q8Max = maxContext(modelBytes, arch, 'q8_0', 'q8_0', slots, ubatch, nCpuMoe, availVram, fitGran, headroom);
   const q4Max = maxContext(modelBytes, arch, 'q4_0', 'q4_0', slots, ubatch, nCpuMoe, availVram, fitGran, headroom);
 
-  // Q8_0 is "tight" if the user's current context exceeds 85% of what Q8_0 can support.
-  // In that case q4_0 is a better pick (unless agentic, which requires q8_0 quality).
-  const q8TightForCtx = q8Max > 0 && currentCtx > q8Max * 0.85;
-  const q4ValueAdd = q4Max > q8Max * 1.2; // Q4_0 gives meaningfully more headroom
-
   const scenarios = [
-    {
-      quant: 'q8_0', kk: 'q8_0', kv: 'q8_0',
-      desc: uc === 'agentic' ? 'Required for agentic use' : (q8TightForCtx ? 'Better quality, less context' : 'Balanced quality'),
-      rec: uc === 'agentic' || (uc !== 'roleplay' && !q8TightForCtx),
-    },
-    {
-      quant: 'q4_0', kk: 'q4_0', kv: 'q4_0',
-      desc: uc === 'agentic' ? 'Not recommended for agents' : (q8TightForCtx ? 'More context for your target' : 'More context, great for RP'),
-      rec: uc === 'roleplay' || (uc !== 'agentic' && q8TightForCtx && q4ValueAdd),
-      warnAgentic: uc === 'agentic',
-    },
-    { quant: 'f16', kk: 'f16', kv: 'f16', desc: 'Full precision, VRAM-heavy', rec: false },
+    { quant: 'q8_0', kk: 'q8_0', kv: 'q8_0', desc: uc === 'agentic' ? 'Required for agentic use' : 'Balanced quality', rec: uc !== 'roleplay' },
+    { quant: 'q4_0', kk: 'q4_0', kv: 'q4_0', desc: uc === 'agentic' ? 'Not recommended for agents' : 'More context, great for RP', rec: uc === 'roleplay', warnAgentic: uc === 'agentic' },
+    { quant: 'f16',  kk: 'f16',  kv: 'f16',  desc: 'Full precision, VRAM-heavy', rec: false },
   ];
 
   dom.vramScenarios.innerHTML = '';

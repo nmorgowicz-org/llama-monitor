@@ -2470,6 +2470,25 @@
   letter-spacing: 0.02em;
 }
 
+/* Context-fit recommendation badge — teal, distinct from the quality rec */
+.qa-badge-ctx {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  background: rgba(20,184,166,0.18);
+  border: 1px solid rgba(20,184,166,0.3);
+  color: rgba(94,234,212,0.9);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+[data-theme="light"] .qa-badge-ctx {
+  background: rgba(13,148,136,0.08);
+  border-color: rgba(13,148,136,0.25);
+  color: rgba(15,118,110,0.9);
+}
+
 .qa-quality-badge {
   display: inline-block;
   padding: 1px 6px;
@@ -2487,9 +2506,11 @@
 .qa-quality-very_low   { background: rgba(239,68,68,0.08);  color:#fca5a5; }
 
 .qa-ctx { font-variant-numeric: tabular-nums; font-weight: 500; }
-.qa-ctx-q8  { color: #86efac; }
-.qa-ctx-q4  { color: #93c5fd; }
-.qa-ctx-na  { color: var(--text-muted, #64748b); }
+.qa-ctx-q8    { color: #86efac; }
+.qa-ctx-q4    { color: #93c5fd; }
+.qa-ctx-na    { color: var(--text-muted, #64748b); }
+/* Context target not met — muted amber to signal "less than you asked for" */
+.qa-ctx-under { color: rgba(251,191,36,0.7); }
 
 .qa-fit-dot {
   display: inline-block;
