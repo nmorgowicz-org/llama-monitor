@@ -4213,7 +4213,7 @@ function buildSpawnPayload() {
     draft_model: (dom.draftModelInput?.value || '').trim() || null,
     kv_unified: h.kvUnified || null,
     ignore_eos: !!h.ignoreEos,
-    fit: h.fitCtx ? 'on' : null,
+    fit_enabled: h.fitCtx ? true : null,
     fit_ctx: h.fitCtx || null,
     // Sampling defaults (null = use llama-server built-in defaults)
     temperature: h.temperature != null ? h.temperature : null,

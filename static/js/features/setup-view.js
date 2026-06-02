@@ -176,6 +176,7 @@ function _buildLaunchCard(preset, activePresetId) {
     const isExample = preset.id.startsWith('default-');
     const card = document.createElement('div');
     card.className = 'launch-card';
+    card.dataset.presetId = preset.id;
     if (isExample) card.classList.add('launch-card--example');
 
     // Only show running if the server is actually live and this preset is the active one
@@ -272,7 +273,7 @@ function _buildNewConfigCard(isPrimary = false) {
 export function updateRunningCardHighlight() {
     const activePresetId = document.getElementById('preset-select')?.value || '';
     document.querySelectorAll('.launch-card[data-preset-id]').forEach(card => {
-        const isRunning = card.dataset.presetId === activePresetId && activePresetId;
+        const isRunning = sessionState.serverRunning && card.dataset.presetId === activePresetId && activePresetId;
         card.classList.toggle('launch-card--running', !!isRunning);
         const badge = card.querySelector('.launch-card-running-badge');
         if (badge) badge.style.display = isRunning ? '' : 'none';
