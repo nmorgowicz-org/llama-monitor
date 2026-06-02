@@ -716,10 +716,10 @@
 }
 
 .nav-user-menu {
-  position: absolute;
-  top: calc(100% + 8px);
+  position: fixed;
+  top: 0;
   right: 0;
-  z-index: 400;
+  z-index: 9000;
   display: none;
   min-width: 200px;
   overflow: hidden;

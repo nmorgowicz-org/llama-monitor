@@ -4196,12 +4196,16 @@
   font-size: var(--text-sm);
   font-weight: 600;
   margin-bottom: 2px;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .toast-message {
   color: var(--color-text-secondary);
   font-size: var(--text-xs);
   line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .toast-close {

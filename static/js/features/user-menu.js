@@ -8,6 +8,15 @@ import { saveSettings } from './settings.js';
 
 // ── User Menu ─────────────────────────────────────────────────────────────────
 
+function _positionUserMenu() {
+    const menu = document.getElementById('nav-user-menu-items');
+    const btn = document.getElementById('nav-user-btn');
+    if (!menu || !btn) return;
+    const rect = btn.getBoundingClientRect();
+    menu.style.top = (rect.bottom + 8) + 'px';
+    menu.style.right = (window.innerWidth - rect.right) + 'px';
+}
+
 function toggleUserMenu(event) {
     event.preventDefault();
     event.stopPropagation();
@@ -15,6 +24,7 @@ function toggleUserMenu(event) {
     const btn = document.getElementById('nav-user-btn');
     if (!menu || !btn) return;
     const nextOpen = !menu.classList.contains('open');
+    if (nextOpen) _positionUserMenu();
     menu.classList.toggle('open', nextOpen);
     btn.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
 }
@@ -25,7 +35,7 @@ function closeUserMenu() {
 }
 
 document.addEventListener('click', event => {
-    if (!event.target.closest('.nav-user')) {
+    if (!event.target.closest('.nav-user') && !event.target.closest('#nav-user-menu-items')) {
         closeUserMenu();
     }
 });
@@ -148,6 +158,10 @@ function _loadSavedPreferences() {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 export function initUserMenu() {
+    // Portal the menu to <body> so it escapes the nav bar's backdrop-filter stacking context
+    const menu = document.getElementById('nav-user-menu-items');
+    if (menu) document.body.appendChild(menu);
+
     // Bind user menu toggle
     const userBtn = document.getElementById('nav-user-btn');
     if (userBtn) {
