@@ -1635,6 +1635,20 @@ button:disabled {
   color: rgba(165, 180, 252, 0.9);
 }
 
+.mm-lib-btn--labeled {
+  width: auto;
+  padding: 0 9px;
+  gap: 5px;
+  font-size: 0.66rem;
+  font-weight: 600;
+}
+
+.mm-lib-btn--active {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: rgba(165, 180, 252, 0.9);
+}
+
 .mm-lib-filters {
   position: relative;
 }
@@ -1708,6 +1722,16 @@ button:disabled {
 .mm-lib-sort-wrap {
   display: flex;
   align-items: center;
+  gap: 5px;
+}
+
+.mm-lib-sort-label {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: rgba(148, 163, 184, 0.5);
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .mm-lib-sort-select {
@@ -1968,6 +1992,16 @@ button:disabled {
   border-color: rgba(99, 102, 241, 0.3);
   background: rgba(99, 102, 241, 0.06);
   color: #6366f1;
+}
+
+[data-theme="light"] .mm-lib-btn--active {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.3);
+  color: #6366f1;
+}
+
+[data-theme="light"] .mm-lib-sort-label {
+  color: rgba(71, 85, 105, 0.5);
 }
 
 [data-theme="light"] .mm-lib-filters-panel {

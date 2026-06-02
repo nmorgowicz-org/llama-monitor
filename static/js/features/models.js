@@ -278,10 +278,13 @@ function buildModelCard(m) {
     nameEl.textContent = name;
     top.appendChild(nameEl);
 
-    const badge = document.createElement('span');
-    badge.className = 'mm-quant-badge';
-    badge.textContent = quant;
-    top.appendChild(badge);
+    // Only show quant badge when it's meaningful — skip for mmproj files with no known quant
+    if (!(mmproj && quant === 'unknown')) {
+        const badge = document.createElement('span');
+        badge.className = 'mm-quant-badge';
+        badge.textContent = quant;
+        top.appendChild(badge);
+    }
 
     if (isSplit) {
         const splitBadge = document.createElement('span');
@@ -299,31 +302,14 @@ function buildModelCard(m) {
 
     card.appendChild(top);
 
-    // Tags row
-    if (tags.length > 0) {
-        const tagsRow = document.createElement('div');
-        tagsRow.className = 'mm-card-tags';
-        tags.forEach(tag => {
-            const pill = document.createElement('span');
-            pill.className = 'mm-tag-pill';
-            pill.textContent = tag;
-            pill.title = 'Click to remove tag';
-            pill.addEventListener('click', () => {
-                removeModelTag(m.path, tag);
-            });
-            tagsRow.appendChild(pill);
-        });
-        card.appendChild(tagsRow);
-    }
-
     // Meta row: filename
     const meta = document.createElement('div');
     meta.className = 'mm-card-meta';
     meta.textContent = m.filename || '';
     card.appendChild(meta);
 
-    // Stats row
-    if (size || vramEst) {
+    // Stats row: size, VRAM, and tag pills all in one row
+    if (size || vramEst || tags.length > 0) {
         const stats = document.createElement('div');
         stats.className = 'mm-card-stats';
         if (size) {
@@ -338,6 +324,17 @@ function buildModelCard(m) {
             vramEl.textContent = 'VRAM ~' + vramEst;
             stats.appendChild(vramEl);
         }
+        tags.forEach(tag => {
+            const pill = document.createElement('span');
+            pill.className = 'mm-tag-pill';
+            pill.textContent = tag;
+            pill.title = 'Click to remove tag';
+            pill.addEventListener('click', e => {
+                e.stopPropagation();
+                removeModelTag(m.path, tag);
+            });
+            stats.appendChild(pill);
+        });
         card.appendChild(stats);
     }
 
@@ -570,11 +567,16 @@ function buildLibraryToolbar(models) {
 
     const filtersBtn = document.createElement('button');
     filtersBtn.type = 'button';
-    filtersBtn.className = 'mm-lib-btn';
+    filtersBtn.className = 'mm-lib-btn mm-lib-btn--labeled';
     filtersBtn.id = 'mm-lib-filters-toggle';
-    filtersBtn.title = 'Filters';
+    filtersBtn.title = 'Filter models by type, quantization, or tag';
+    const hasActiveFilters = !prefs.showMmproj || !prefs.showMain || !prefs.showSplit ||
+        Object.values(prefs.quantFilters).some(v => v === false) || !!prefs.tagFilter;
+    if (hasActiveFilters) filtersBtn.classList.add('mm-lib-btn--active');
+    // eslint-disable-next-line no-unsanitized/property -- static SVG, no user data
     filtersBtn.innerHTML =
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>';
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>'
+        + '<span>Filter' + (hasActiveFilters ? ' •' : '') + '</span>';
 
     const filtersPanel = document.createElement('div');
     filtersPanel.className = 'mm-lib-filters-panel';
@@ -725,23 +727,31 @@ function buildLibraryToolbar(models) {
         loadModels();
     });
 
+    const sortLabel = document.createElement('span');
+    sortLabel.className = 'mm-lib-sort-label';
+    sortLabel.textContent = 'Sort:';
+    sortWrap.appendChild(sortLabel);
     sortWrap.appendChild(sortSelect);
     right.appendChild(sortWrap);
 
     // View mode toggle
     const viewBtn = document.createElement('button');
     viewBtn.type = 'button';
-    viewBtn.className = 'mm-lib-btn';
+    viewBtn.className = 'mm-lib-btn mm-lib-btn--labeled';
     viewBtn.id = 'mm-lib-view-toggle';
     viewBtn.title = prefs.viewMode === 'cards' ? 'Switch to list view' : 'Switch to cards view';
     // eslint-disable-next-line no-unsanitized/property -- static SVG, no user data
-    viewBtn.innerHTML = prefs.viewMode === 'cards' ? ICON_LIST_VIEW : ICON_CARDS_VIEW;
+    viewBtn.innerHTML = prefs.viewMode === 'cards'
+        ? ICON_LIST_VIEW + '<span>List</span>'
+        : ICON_CARDS_VIEW + '<span>Cards</span>';
 
     viewBtn.addEventListener('click', () => {
         prefs.viewMode = prefs.viewMode === 'cards' ? 'list' : 'cards';
         viewBtn.title = prefs.viewMode === 'cards' ? 'Switch to list view' : 'Switch to cards view';
         // eslint-disable-next-line no-unsanitized/property -- static SVG, no user data
-        viewBtn.innerHTML = prefs.viewMode === 'cards' ? ICON_LIST_VIEW : ICON_CARDS_VIEW;
+        viewBtn.innerHTML = prefs.viewMode === 'cards'
+            ? ICON_LIST_VIEW + '<span>List</span>'
+            : ICON_CARDS_VIEW + '<span>Cards</span>';
         savePrefs();
         loadModels();
     });
