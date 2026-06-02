@@ -149,7 +149,10 @@ fn main() -> Result<()> {
         state::AppPaths {
             presets_path: app_config.presets_file.clone(),
             templates_path: app_config.templates_file.clone(),
-            models_dir: app_config.models_dir.clone().or(Some(app_config.default_models_dir.clone())),
+            models_dir: app_config
+                .models_dir
+                .clone()
+                .or(Some(app_config.default_models_dir.clone())),
             gpu_env_path: app_config.gpu_env_file.clone(),
             ui_settings_path: app_config.ui_settings_file.clone(),
             sessions_path: app_config.sessions_file.clone(),

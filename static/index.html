@@ -3533,68 +3533,150 @@
             </div>
         </div>
 
-        <!-- Download tab -->
-        <div class="mm-tab-panel" data-tab="download">
-            <div class="mm-download-body">
-                <!-- Search bar -->
-                <div class="hf-search-row">
-                    <input type="text" id="mm-hf-search-input" placeholder="Search HuggingFace (e.g. Qwen3 27B, Llama 3.3 70B)" autocomplete="off">
-                    <select id="mm-hf-sort">
-                        <option value="downloads">Most downloaded</option>
-                        <option value="trending">Trending</option>
-                        <option value="newest">Newest</option>
-                    </select>
+        <!-- Download tab (wizard-style two-column layout) -->
+        <div class="mm-tab-panel mm-tab-panel--download" data-tab="download">
+            <div class="mm-download-layout">
+
+                <!-- LEFT: search, files, quant advisor, mmproj -->
+                <div class="mm-download-left">
+
+                    <!-- Search bar -->
+                    <div class="hf-search-row">
+                        <input type="text" id="mm-hf-search-input" placeholder="Search HuggingFace (e.g. Qwen3 27B, Llama 3.3 70B)" autocomplete="off">
+                        <select id="mm-hf-sort">
+                            <option value="downloads">Most downloaded</option>
+                            <option value="trending">Trending</option>
+                            <option value="newest">Newest</option>
+                        </select>
+                    </div>
+
+                    <!-- Discover pills -->
+                    <div class="hf-discover-pills" id="mm-hf-discover-pills"></div>
+
+                    <!-- Quick-picks -->
+                    <div class="hf-quickpicks" id="mm-hf-quickpicks"></div>
+
+                    <!-- Search results -->
+                    <div class="hf-search-results" id="mm-hf-search-results" style="display:none;"></div>
+
+                    <!-- File list -->
+                    <div class="hf-file-list" id="mm-hf-file-list"></div>
+
+                    <!-- Selected model info (wizard-style) -->
+                    <div class="selected-model" id="mm-selected-model" style="display:none;">
+                        <span class="selected-model-icon">🧠</span>
+                        <div class="selected-model-info">
+                            <div class="selected-model-name" id="mm-selected-model-name"></div>
+                            <div class="selected-model-meta" id="mm-selected-model-meta"></div>
+                        </div>
+                    </div>
+
+                    <!-- Quant advisor (wizard-style) -->
+                    <div class="quant-advisor" id="mm-quant-advisor" style="display:none;">
+                        <div class="quant-advisor-header">
+                            <span class="quant-advisor-title">Quant advisor</span>
+                            <span class="quant-advisor-subtitle" id="mm-quant-advisor-subtitle">Compare quants — VRAM, size, context per quantization</span>
+                        </div>
+                        <div class="quant-advisor-table" id="mm-quant-advisor-table">
+                            <!-- populated by JS -->
+                        </div>
+                        <div class="quant-advisor-legend">
+                            <span class="legend-item"><span class="legend-dot legend-fit"></span>Fits in VRAM</span>
+                            <span class="legend-item"><span class="legend-dot legend-nofit"></span>Requires CPU offload</span>
+                            <span class="legend-item"><span class="legend-dot legend-rec"></span>Recommended</span>
+                        </div>
+                    </div>
+
+                    <!-- mmproj companion section (wizard-style) -->
+                    <div class="hw-mmproj-section" id="mm-mmproj-section" style="display:none;">
+                        <div class="hw-section-header">
+                            <span class="hw-section-title">Vision projector (mmproj)</span>
+                            <span class="hw-section-subtitle">For multimodal models — load alongside the main model</span>
+                        </div>
+                        <div class="hw-mmproj-content" id="mm-mmproj-content">
+                            <!-- populated by JS -->
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Discover pills -->
-                <div class="hf-discover-pills" id="mm-hf-discover-pills"></div>
+                <!-- RIGHT: VRAM, context, download panel -->
+                <div class="mm-download-right">
 
-                <!-- Quick-picks -->
-                <div class="hf-quickpicks" id="mm-hf-quickpicks"></div>
-
-                <!-- Search results -->
-                <div class="hf-search-results" id="mm-hf-search-results" style="display:none;"></div>
-
-                <!-- File list -->
-                <div class="hf-file-list" id="mm-hf-file-list"></div>
-
-                <!-- Download panel -->
-                <div class="hf-download-panel" id="mm-hf-download-panel" style="display:none;">
-                    <!-- Idle -->
-                    <div id="mm-hf-dlp-idle">
-                        <div class="hf-dlp-dest-row">
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                            <span class="hf-dlp-dest-label">Save to:</span>
-                            <span class="hf-dlp-dest-path" id="mm-hf-dlp-dest-path" title="This is where the downloaded file will be saved">—</span>
+                    <!-- VRAM panel (wizard-style) -->
+                    <div class="vram-panel" id="mm-vram-panel" style="display:none;">
+                        <div class="vram-panel-header">
+                            <span class="vram-panel-label" id="mm-vram-panel-label">VRAM budget</span>
+                            <span class="vram-panel-total" id="mm-vram-panel-total">—</span>
                         </div>
-                        <div id="mm-hf-dlp-no-dir-warn" style="display:none;" class="hf-dlp-warn">
-                            No models folder configured.
-                            <button type="button" class="hf-dlp-warn-link" id="mm-hf-dlp-open-settings">Set one in Settings → Models</button>
-                            or the file will go to the app default folder.
+                        <div class="vram-bar" id="mm-vram-bar">
+                            <div class="vram-segment vram-weights" id="mm-vseg-weights"></div>
+                            <div class="vram-segment vram-kv" id="mm-vseg-kv"></div>
+                            <div class="vram-segment vram-mmproj" id="mm-vseg-mmproj"></div>
+                            <div class="vram-segment vram-overhead" id="mm-vseg-overhead"></div>
+                            <div class="vram-segment vram-free" id="mm-vseg-free"></div>
                         </div>
-                        <div class="hf-dlp-actions">
-                            <button type="button" class="btn-wizard-primary" id="mm-hf-dlp-download-btn">
-                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:5px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                                Download to models folder
-                            </button>
+                        <div class="vram-legend" id="mm-vram-legend">
+                            <span class="vram-legend-item" id="mm-vleg-weights"><span class="vram-legend-dot vram-legend-dot-weights"></span><span id="mm-vleg-weights-label">Weights</span></span>
+                            <span class="vram-legend-item" id="mm-vleg-kv"><span class="vram-legend-dot vram-legend-dot-kv"></span><span id="mm-vleg-kv-label">KV</span></span>
+                            <span class="vram-legend-item" id="mm-vleg-mmproj" style="display:none;"><span class="vram-legend-dot vram-legend-dot-mmproj"></span><span id="mm-vleg-mmproj-label">mmproj</span></span>
+                            <span class="vram-legend-item" id="mm-vleg-overhead"><span class="vram-legend-dot vram-legend-dot-overhead"></span><span id="mm-vleg-overhead-label">Overhead</span></span>
+                            <span class="vram-legend-item" id="mm-vleg-free"><span class="vram-legend-dot vram-legend-dot-free"></span><span id="mm-vleg-free-label">Free</span></span>
                         </div>
                     </div>
-                    <!-- Progress -->
-                    <div id="mm-hf-dlp-progress" style="display:none;">
-                        <div class="hf-dlp-progress-label">
-                            <span id="mm-hf-dlp-progress-file"></span>
-                            <span id="mm-hf-dlp-progress-pct"></span>
-                        </div>
-                        <div class="hf-dlp-bar-wrap">
-                            <div class="hf-dlp-bar" id="mm-hf-dlp-bar" style="width:0%"></div>
-                        </div>
-                        <div class="hf-dlp-stats" id="mm-hf-dlp-stats"></div>
-                        <button type="button" class="btn-wizard-secondary" id="mm-hf-dlp-cancel-btn">Cancel download</button>
+
+                    <!-- Context train warning -->
+                    <div class="ctx-fit-warning" id="mm-ctx-train-warning" style="display:none;"></div>
+
+                    <!-- Hardware info card -->
+                    <div class="mm-hw-info" id="mm-hw-info">
+                        <div class="mm-hw-info-title">Hardware-aware download</div>
+                        <p class="mm-hw-info-desc">
+                            We'll estimate VRAM usage, recommend a quant, and warn if a model is too large for your GPU.
+                        </p>
                     </div>
-                    <!-- Complete -->
-                    <div id="mm-hf-dlp-complete" style="display:none;" class="hf-dlp-complete-box">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                        Downloaded — model ready. It will appear in the Library tab.
+
+                    <!-- Download panel (wizard-style) -->
+                    <div class="hf-download-panel" id="mm-hf-download-panel" style="display:none;">
+                        <!-- Idle -->
+                        <div id="mm-hf-dlp-idle">
+                            <div class="hf-dlp-header">
+                                <span class="hf-dlp-header-title">Ready to download</span>
+                                <span class="hf-dlp-header-sub" id="mm-hf-dlp-file-name"></span>
+                            </div>
+                            <div class="hf-dlp-dest-row">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                <span class="hf-dlp-dest-label">Save to:</span>
+                                <span class="hf-dlp-dest-path" id="mm-hf-dlp-dest-path" title="This is where the downloaded file will be saved">—</span>
+                            </div>
+                            <div id="mm-hf-dlp-no-dir-warn" style="display:none;" class="hf-dlp-warn">
+                                No models folder configured.
+                                <button type="button" class="hf-dlp-warn-link" id="mm-hf-dlp-open-settings">Set one in Settings → Models</button>
+                                or the file will go to the app default folder.
+                            </div>
+                            <div class="hf-dlp-actions">
+                                <button type="button" class="btn-wizard-primary" id="mm-hf-dlp-download-btn">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-right:5px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    Download to models folder
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Progress -->
+                        <div id="mm-hf-dlp-progress" style="display:none;">
+                            <div class="hf-dlp-progress-label">
+                                <span id="mm-hf-dlp-progress-file"></span>
+                                <span id="mm-hf-dlp-progress-pct"></span>
+                            </div>
+                            <div class="hf-dlp-bar-wrap">
+                                <div class="hf-dlp-bar" id="mm-hf-dlp-bar" style="width:0%"></div>
+                            </div>
+                            <div class="hf-dlp-stats" id="mm-hf-dlp-stats"></div>
+                            <button type="button" class="btn-wizard-secondary" id="mm-hf-dlp-cancel-btn">Cancel download</button>
+                        </div>
+                        <!-- Complete -->
+                        <div id="mm-hf-dlp-complete" style="display:none;" class="hf-dlp-complete-box">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                            Downloaded — model ready. It will appear in the Library tab.
+                        </div>
                     </div>
                 </div>
             </div>

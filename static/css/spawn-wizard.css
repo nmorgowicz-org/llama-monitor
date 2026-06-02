@@ -4352,3 +4352,174 @@
 }
 [data-theme="light"] .fit-enable-track { background: rgba(0,0,0,0.1); border-color: rgba(0,0,0,0.15); }
 [data-theme="light"] .fit-enable-thumb { background: rgba(0,0,0,0.35); }
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* Models modal: Download tab (wizard-style two-column layout)                */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.mm-tab-panel--download {
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mm-download-layout {
+  flex: 1;
+  display: flex;
+  gap: 16px;
+  padding: 14px 16px 12px;
+  overflow: hidden;
+}
+
+/* Left column: search, files, quant advisor, mmproj */
+.mm-download-left {
+  flex: 1.2;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* Right column: VRAM, context, download panel */
+.mm-download-right {
+  flex: 0.8;
+  min-width: 260px;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding-left: 4px;
+}
+
+/* Scrollbar styling for both columns */
+.mm-download-left::-webkit-scrollbar,
+.mm-download-right::-webkit-scrollbar {
+  width: 5px;
+}
+.mm-download-left::-webkit-scrollbar-track,
+.mm-download-right::-webkit-scrollbar-track {
+  background: transparent;
+}
+.mm-download-left::-webkit-scrollbar-thumb,
+.mm-download-right::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.12);
+  border-radius: 999px;
+}
+.mm-download-left::-webkit-scrollbar-thumb:hover,
+.mm-download-right::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.22);
+}
+
+/* Hardware info card */
+.mm-hw-info {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: rgba(15,23,42,0.35);
+}
+.mm-hw-info-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted, #64748b);
+  margin-bottom: 4px;
+}
+.mm-hw-info-desc {
+  font-size: 11px;
+  color: var(--color-text-secondary, #94a3b8);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Context train warning (for download tab) */
+#mm-ctx-train-warning {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(245,158,11,0.25);
+  background: rgba(245,158,11,0.08);
+  font-size: 10px;
+  color: #fde68a;
+  line-height: 1.5;
+}
+
+/* Selected model in download tab (wizard-style) */
+#mm-selected-model {
+  margin-top: 4px;
+}
+
+/* mmproj section in download tab */
+#mm-mmproj-section {
+  margin-top: 4px;
+}
+#mm-mmproj-section .hw-section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+#mm-mmproj-section .hw-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted, #64748b);
+}
+#mm-mmproj-section .hw-section-subtitle {
+  font-size: 10px;
+  color: var(--color-text-secondary, #94a3b8);
+}
+
+/* VRAM panel in download tab (reuses wizard classes) */
+#mm-vram-panel {
+  flex-shrink: 0;
+}
+
+/* Download panel in download tab (reuses wizard classes) */
+#mm-hf-download-panel {
+  flex-shrink: 0;
+}
+
+/* hf-dlp-header (for download panel) */
+.hf-dlp-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+.hf-dlp-header-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-primary, #e2e8f0);
+}
+.hf-dlp-header-sub {
+  font-size: 10px;
+  color: var(--color-text-muted, #94a3b8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Light theme overrides for download tab */
+[data-theme="light"] .mm-download-layout {
+  background: rgba(0,0,0,0.015);
+}
+[data-theme="light"] .mm-download-left::-webkit-scrollbar-thumb,
+[data-theme="light"] .mm-download-right::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.12);
+}
+[data-theme="light"] .mm-download-left::-webkit-scrollbar-thumb:hover,
+[data-theme="light"] .mm-download-right::-webkit-scrollbar-thumb:hover {
+  background: rgba(0,0,0,0.22);
+}
+[data-theme="light"] .mm-hw-info {
+  background: rgba(99,102,241,0.04);
+  border-color: rgba(99,102,241,0.15);
+}
+[data-theme="light"] #mm-ctx-train-warning {
+  background: rgba(245,158,11,0.1);
+  border-color: rgba(245,158,11,0.3);
+  color: #92400e;
+}

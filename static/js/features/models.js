@@ -28,7 +28,18 @@ let hfState = {
     selectedFile: null,
     currentDownloadId: null,
     initialized: false,
+    // Wizard-like state
+    paramB: 0,
+    modelBytes: 0,
+    nCtxTrain: 0,
+    mmprojFiles: [],
+    mmprojPath: '',
+    mmprojBytes: 0,
 };
+
+// Cached hardware
+let cachedVram = 0;
+let cachedRamTotal = 0;
 
 // Library preferences
 let prefs = loadPrefs();
@@ -205,7 +216,7 @@ function applySort(models) {
             case 'date-desc':
                 return (b.last_modified || 0) - (a.last_modified || 0);
             default:
-                return (a.model_name || a.filename || '').localeCompare(b.model_name || b.filename || '');
+                return (a.model_name || a.filename || '').localeCompare(b.model_name || a.filename || '');
         }
     });
 }
@@ -657,6 +668,10 @@ async function initHfDownloadTab() {
 
     if (!searchInput || !resultsContainer || !filelistContainer || !downloadPanel) return;
 
+    // Fetch hardware info
+    await fetchGpuVram();
+    await fetchSystemRam();
+
     // Render discover pills
     hfRenderDiscoverPills({
         container: discoverPills,
@@ -742,21 +757,55 @@ async function initHfDownloadTab() {
 async function onHfModelSelected(model, filelistContainer, downloadPanel) {
     hfState.selectedRepoId = model.id;
     hfState.selectedFile = null;
+    hfState.paramB = model.param_b || 0;
     hfHideDownloadPanel(downloadPanel);
+    hideQuantAdvisor();
+    hideMmprojSection();
+    hideVramPanel();
+    hideCtxTrainWarning();
+
+    // Show selected model info
+    showSelectedModel(model.id, model);
 
     await hfListFiles({
         repoId: model.id,
         container: filelistContainer,
-        vramGb: 0,
+        vramGb: cachedVram > 0 ? cachedVram / (1024 * 1024 * 1024) : 0,
         onSelectFile: (file, repoId) => onHfFileSelected(file, repoId, downloadPanel),
     });
+
+    // Trigger quant advisor if we have param count
+    if (hfState.paramB > 0) {
+        triggerQuantAdvisor();
+    }
 }
 
 async function onHfFileSelected(file, repoId, downloadPanel) {
     hfState.selectedFile = file;
+    hfState.modelBytes = Number(file.size) || 0;
+
+    // Update selected model display with file info
+    const nameEl = document.getElementById('mm-selected-model-name');
+    const metaEl = document.getElementById('mm-selected-model-meta');
+    if (nameEl) nameEl.textContent = (file.path || file.name || '').split('/').pop() || '';
+    if (metaEl) {
+        const parts = [];
+        if (repoId) parts.push(repoId);
+        if (file.size) parts.push(formatBytes(file.size));
+        if (file.label) parts.push(file.label);
+        metaEl.textContent = parts.join(' · ');
+    }
 
     // Show download panel
     await hfShowDownloadPanel(downloadPanel, file.path || file.name || '');
+
+    // Update VRAM panel with live estimate
+    if (hfState.paramB > 0 || hfState.modelBytes > 0) {
+        scheduleVramUpdate(file);
+    }
+
+    // Check for mmproj companion in this repo
+    await detectMmprojCompanion(repoId);
 
     // Wire download button
     const downloadBtn = document.getElementById('mm-hf-dlp-download-btn');
@@ -800,4 +849,509 @@ async function onHfFileSelected(file, repoId, downloadPanel) {
             }
         };
     }
+}
+
+// ── Selected model display (wizard-style) ────────────────────────────────────
+
+function showSelectedModel(repoId, model) {
+    const el = document.getElementById('mm-selected-model');
+    const nameEl = document.getElementById('mm-selected-model-name');
+    const metaEl = document.getElementById('mm-selected-model-meta');
+    if (!el) return;
+
+    el.style.display = '';
+    if (nameEl) nameEl.textContent = repoId;
+    if (metaEl) {
+        const parts = [];
+        if (model.param_b > 0) parts.push(formatParams(model.param_b));
+        if (model.downloads > 0) parts.push(model.downloads + ' downloads');
+        metaEl.textContent = parts.join(' · ');
+    }
+}
+
+// ── Quant advisor (wizard-style) ─────────────────────────────────────────────
+
+let quantAdvisorDebounce = null;
+
+function triggerQuantAdvisor() {
+    if (quantAdvisorDebounce) clearTimeout(quantAdvisorDebounce);
+    quantAdvisorDebounce = setTimeout(loadQuantAdvisor, 600);
+}
+
+function hideQuantAdvisor() {
+    const el = document.getElementById('mm-quant-advisor');
+    if (el) el.style.display = 'none';
+}
+
+async function loadQuantAdvisor() {
+    const paramB = hfState.paramB;
+    if (!paramB || paramB <= 0) return;
+
+    const availVram = cachedVram || 0;
+    if (!availVram) return;
+
+    try {
+        const headers = window.authHeaders
+            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+
+        const body = {
+            param_b: paramB,
+            model_name: hfState.selectedRepoId || '',
+            available_vram_bytes: availVram,
+        };
+
+        const resp = await fetch('/api/vram/quant-compare', { method: 'POST', headers, body: JSON.stringify(body) });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data.ok || !data.quants) return;
+
+        renderQuantAdvisor(data.quants, availVram);
+    } catch {
+        // ignore
+    }
+}
+
+function renderQuantAdvisor(quants, availVram) {
+    const panel = document.getElementById('mm-quant-advisor');
+    const tableEl = document.getElementById('mm-quant-advisor-table');
+    const subtitleEl = document.getElementById('mm-quant-advisor-subtitle');
+    if (!panel || !tableEl) return;
+    if (!quants || quants.length === 0) { panel.style.display = 'none'; return; }
+
+    const availGb = Math.round(availVram / (1024 ** 3));
+    if (subtitleEl) subtitleEl.textContent = `Estimated VRAM available: ${availGb} GB`;
+
+    const table = document.createElement('table');
+    table.className = 'qa-table';
+
+    const thead = table.createTHead();
+    const hrow = thead.insertRow();
+    ['', 'Quant', 'Size', 'Max ctx (q8_0)', 'Max ctx (q4_0)', 'Quality'].forEach(h => {
+        const th = document.createElement('th');
+        th.textContent = h;
+        hrow.appendChild(th);
+    });
+
+    const tbody = table.createTBody();
+    for (const q of quants) {
+        const tr = tbody.insertRow();
+        if (q.recommended) tr.className = 'qa-row-rec';
+        if (!q.fits_vram) tr.className = (tr.className + ' qa-row-nofit').trim();
+
+        // Fit dot
+        const dotTd = tr.insertCell();
+        const dot = document.createElement('span');
+        dot.className = 'qa-fit-dot ' + (q.fits_vram ? 'fits' : 'nofit');
+        dotTd.appendChild(dot);
+
+        // Quant name + rec badge
+        const nameTd = tr.insertCell();
+        const nameSpan = document.createElement('span');
+        nameSpan.style.fontWeight = '600';
+        nameSpan.textContent = q.label;
+        nameTd.appendChild(nameSpan);
+        if (q.recommended) {
+            const badge = document.createElement('span');
+            badge.className = 'qa-badge-rec';
+            badge.textContent = '\u2605 Rec';
+            badge.style.marginLeft = '6px';
+            nameTd.appendChild(badge);
+        }
+        if (q.is_imatrix) {
+            const im = document.createElement('span');
+            im.style.cssText = 'margin-left:4px; font-size:10px; color:#94a3b8;';
+            im.textContent = 'imatrix';
+            nameTd.appendChild(im);
+        }
+
+        // Size
+        const sizeTd = tr.insertCell();
+        sizeTd.textContent = q.model_size_gb.toFixed(1) + ' GB';
+        sizeTd.style.color = '#94a3b8';
+
+        // Max ctx q8_0
+        const ctxQ8Td = tr.insertCell();
+        ctxQ8Td.className = 'qa-ctx';
+        if (q.max_ctx_q8 > 0) {
+            ctxQ8Td.textContent = formatCtx(q.max_ctx_q8);
+            ctxQ8Td.classList.add('qa-ctx-q8');
+        } else {
+            ctxQ8Td.textContent = '\u2014'; ctxQ8Td.classList.add('qa-ctx-na');
+        }
+
+        // Max ctx q4_0
+        const ctxQ4Td = tr.insertCell();
+        ctxQ4Td.className = 'qa-ctx';
+        if (q.max_ctx_q4 > 0) {
+            ctxQ4Td.textContent = formatCtx(q.max_ctx_q4);
+            ctxQ4Td.classList.add('qa-ctx-q4');
+        } else {
+            ctxQ4Td.textContent = '\u2014'; ctxQ4Td.classList.add('qa-ctx-na');
+        }
+
+        // Quality badge
+        const qualTd = tr.insertCell();
+        const qualBadge = document.createElement('span');
+        const qClass = 'qa-quality-' + (q.quality || '').toLowerCase();
+        qualBadge.className = `qa-quality-badge ${qClass}`;
+        qualBadge.textContent = q.quality_label || q.quality;
+        qualTd.appendChild(qualBadge);
+    }
+
+    tableEl.innerHTML = '';
+    tableEl.appendChild(table);
+    panel.style.display = '';
+}
+
+// ── VRAM estimation (wizard-style) ───────────────────────────────────────────
+
+let vramDebounce = null;
+
+function scheduleVramUpdate(file) {
+    if (vramDebounce) clearTimeout(vramDebounce);
+    vramDebounce = setTimeout(() => updateVramDisplay(file), 250);
+}
+
+function hideVramPanel() {
+    const el = document.getElementById('mm-vram-panel');
+    if (el) el.style.display = 'none';
+}
+
+async function fetchGpuVram() {
+    try {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const resp = await fetch('/metrics/gpu', { headers });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        let totalVram = 0;
+        const gpus = Array.isArray(data) ? data : (data.gpus ? data.gpus : Object.values(data));
+        for (const g of gpus) {
+            const t = g.vram_total_mb || g.total_mb || g.total_memory_mb || g.vram_total || 0;
+            totalVram += t * 1024 * 1024;
+        }
+        if (totalVram > 0) cachedVram = totalVram;
+    } catch {
+        // ignore
+    }
+}
+
+async function fetchSystemRam() {
+    try {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const resp = await fetch('/metrics/system', { headers });
+        if (!resp.ok) return;
+        const d = await resp.json();
+        cachedRamTotal = (d.ram_total_gb || 0) * 1024 * 1024 * 1024;
+    } catch {
+        // ignore
+    }
+}
+
+async function updateVramDisplay(file) {
+    const panel = document.getElementById('mm-vram-panel');
+    if (!panel) return;
+
+    const availVram = cachedVram || 0;
+    if (!availVram) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    // Use model bytes from file or estimate from paramB
+    let modelBytes = hfState.modelBytes;
+    if (!modelBytes && hfState.paramB > 0) {
+        const fname = (file?.path || file?.name || '').toLowerCase();
+        const quant = guessQuantFromName(fname);
+        const BPW = { q8_0: 8.5, q6_k: 6.5625, q5_k_m: 5.69, q4_k_m: 4.85, iq4_xs: 4.25, q3_k_m: 3.875, q2_k: 2.625, iq2_xxs: 2.0625, f16: 16, bf16: 16 };
+        const bpw = BPW[quant] ?? 4.85;
+        modelBytes = Math.round(hfState.paramB * 1e9 * bpw / 8);
+    }
+    if (!modelBytes) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    // Simple VRAM estimate: weights + KV cache + overhead
+    const kvEstimate = estimateKvBytes(hfState.paramB, 4096); // assume 4k ctx for download preview
+    const overhead = 200 * 1024 * 1024; // 200 MB overhead
+    const mmprojBytes = hfState.mmprojBytes || 0;
+    const total = modelBytes + kvEstimate + overhead + mmprojBytes;
+    const free = availVram - total;
+
+    // Show panel
+    panel.style.display = '';
+
+    // Update header
+    const labelEl = document.getElementById('mm-vram-panel-label');
+    const totalEl = document.getElementById('mm-vram-panel-total');
+    if (labelEl) labelEl.textContent = 'VRAM budget';
+    if (totalEl) totalEl.textContent = formatVramTotal(availVram) + ' total';
+
+    // Update bar
+    const denom = availVram > 0 ? availVram : total;
+    const weightsPct = modelBytes / denom;
+    const kvPct = kvEstimate / denom;
+    const mmprojPct = mmprojBytes / denom;
+    const overheadPct = overhead / denom;
+    const freePct = Math.max(0, free) / denom;
+
+    setSegWidth(document.getElementById('mm-vseg-weights'), weightsPct);
+    setSegWidth(document.getElementById('mm-vseg-kv'), kvPct);
+    setSegWidth(document.getElementById('mm-vseg-mmproj'), mmprojPct);
+    setSegWidth(document.getElementById('mm-vseg-overhead'), overheadPct);
+    setSegWidth(document.getElementById('mm-vseg-free'), freePct);
+
+    const barEl = document.getElementById('mm-vram-bar');
+    if (barEl) {
+        const ratio = availVram > 0 ? total / availVram : 0;
+        barEl.classList.toggle('tight', ratio >= 0.88 && ratio < 1.0);
+        barEl.classList.toggle('over', ratio >= 1.0);
+    }
+
+    const freeSeg = document.getElementById('mm-vseg-free');
+    if (freeSeg) freeSeg.classList.toggle('over-budget', free < 0);
+
+    // Update legend
+    const weightsLabel = document.getElementById('mm-vleg-weights-label');
+    const kvLabel = document.getElementById('mm-vleg-kv-label');
+    const mmprojItem = document.getElementById('mm-vleg-mmproj');
+    const mmprojLabel = document.getElementById('mm-vleg-mmproj-label');
+    const overheadLabel = document.getElementById('mm-vleg-overhead-label');
+    const freeLabel = document.getElementById('mm-vleg-free-label');
+    const freeDot = document.querySelector('#mm-vleg-free .vram-legend-dot-free');
+
+    if (weightsLabel) weightsLabel.textContent = 'Weights ' + formatGB(modelBytes);
+    if (kvLabel) kvLabel.textContent = 'KV ' + formatGB(kvEstimate);
+
+    if (mmprojBytes > 0) {
+        if (mmprojItem) mmprojItem.style.display = '';
+        if (mmprojLabel) mmprojLabel.textContent = 'mmproj ' + formatGB(mmprojBytes);
+    } else {
+        if (mmprojItem) mmprojItem.style.display = 'none';
+    }
+
+    if (overheadLabel) overheadLabel.textContent = 'Overhead ' + formatGB(overhead);
+
+    if (freeLabel) {
+        const freeAbs = Math.abs(free);
+        freeLabel.textContent = free >= 0 ? 'Free ' + formatGB(free) : 'Over ' + formatGB(freeAbs);
+    }
+    if (freeDot) freeDot.style.background = free >= 0 ? '' : '#ef4444';
+
+    // Update ctx train warning (if introspection revealed n_ctx_train)
+    updateCtxTrainWarning();
+}
+
+// ── Context train warning (wizard-style) ─────────────────────────────────────
+
+function hideCtxTrainWarning() {
+    const el = document.getElementById('mm-ctx-train-warning');
+    if (el) el.style.display = 'none';
+}
+
+function updateCtxTrainWarning() {
+    const el = document.getElementById('mm-ctx-train-warning');
+    if (!el) return;
+    const nCtxTrain = hfState.nCtxTrain;
+    if (!nCtxTrain) {
+        el.style.display = 'none';
+        return;
+    }
+    // Show warning if we're looking at a model with a known training limit
+    // and the user might set context beyond it
+    const fmtK = n => n >= 1024 ? Math.round(n / 1024) + 'k' : String(n);
+    el.textContent = '';
+    const strong = document.createElement('strong');
+    strong.textContent = 'Training context: ' + fmtK(nCtxTrain) + ' tokens';
+    el.appendChild(strong);
+    el.appendChild(document.createTextNode(
+        ' — setting context beyond this may degrade quality. Use --rope-scaling yarn if needed.'
+    ));
+    el.className = 'ctx-fit-warning';
+    el.style.display = '';
+}
+
+// ── mmproj companion detection (wizard-style) ────────────────────────────────
+
+async function detectMmprojCompanion(repoId) {
+    const section = document.getElementById('mm-mmproj-section');
+    const content = document.getElementById('mm-mmproj-content');
+    if (!section || !content) return;
+
+    if (!repoId) {
+        section.style.display = 'none';
+        return;
+    }
+
+    try {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const resp = await fetch('/api/hf/files', {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ repo_id: repoId }),
+        });
+        if (!resp.ok) { section.style.display = 'none'; return; }
+        const data = await resp.json();
+        const files = data.files || [];
+        const mmprojFiles = files.filter(f => f.is_mmproj);
+
+        if (!mmprojFiles.length) {
+            section.style.display = 'none';
+            hfState.mmprojFiles = [];
+            hfState.mmprojBytes = 0;
+            return;
+        }
+
+        hfState.mmprojFiles = mmprojFiles;
+        section.style.display = '';
+
+        // Render mmproj options
+        content.innerHTML = '';
+
+        // Checkbox to enable mmproj
+        const checkLabel = document.createElement('label');
+        checkLabel.className = 'hw-toggle-label';
+        const check = document.createElement('input');
+        check.type = 'checkbox';
+        check.checked = !!hfState.mmprojPath;
+        checkLabel.appendChild(check);
+        const span = document.createElement('span');
+        span.textContent = 'Include vision projector (mmproj)';
+        checkLabel.appendChild(span);
+        content.appendChild(checkLabel);
+
+        // Select for mmproj file
+        const select = document.createElement('select');
+        select.className = 'hw-mmproj-select';
+        select.style.marginLeft = '22px';
+        select.style.display = check.checked ? '' : 'none';
+
+        const noneOpt = document.createElement('option');
+        noneOpt.value = '';
+        noneOpt.textContent = '(none — text-only)';
+        select.appendChild(noneOpt);
+
+        mmprojFiles.forEach(f => {
+            const fpath = f.path || f.name || '';
+            const fname = fpath.split('/').pop();
+            const opt = document.createElement('option');
+            opt.value = fpath;
+            const sizeStr = f.size ? ' · ' + formatBytes(f.size) : '';
+            opt.textContent = fname + sizeStr;
+            if (fpath === hfState.mmprojPath) opt.selected = true;
+            select.appendChild(opt);
+        });
+
+        select.addEventListener('change', () => {
+            const fpath = select.value;
+            hfState.mmprojPath = fpath;
+            const f = mmprojFiles.find(x => (x.path || x.name) === fpath);
+            hfState.mmprojBytes = f?.size ? Number(f.size) : 0;
+            scheduleVramUpdate(hfState.selectedFile);
+        });
+
+        check.addEventListener('change', () => {
+            select.style.display = check.checked ? '' : 'none';
+            if (!check.checked) {
+                hfState.mmprojPath = '';
+                hfState.mmprojBytes = 0;
+            } else if (!select.value && mmprojFiles.length) {
+                select.value = mmprojFiles[0].path || mmprojFiles[0].name || '';
+                hfState.mmprojPath = select.value;
+                const f = mmprojFiles[0];
+                hfState.mmprojBytes = f.size ? Number(f.size) : 0;
+            }
+            scheduleVramUpdate(hfState.selectedFile);
+        });
+
+        content.appendChild(select);
+
+        // Hint
+        const hint = document.createElement('div');
+        hint.style.cssText = 'font-size:11px; color:var(--color-text-muted,#94a3b8); margin-left:22px; line-height:1.5;';
+        hint.textContent = 'Adds ~' + (mmprojFiles[0]?.size ? formatBytes(mmprojFiles[0].size) : '0.5–1.5 GB') + ' VRAM. Required for multimodal inference.';
+        content.appendChild(hint);
+
+    } catch {
+        section.style.display = 'none';
+    }
+}
+
+function hideMmprojSection() {
+    const el = document.getElementById('mm-mmproj-section');
+    if (el) el.style.display = 'none';
+}
+
+// ── Utilities ────────────────────────────────────────────────────────────────
+
+function formatBytes(bytes) {
+    if (!bytes) return '';
+    const b = Number(bytes);
+    if (!isFinite(b)) return '';
+    if (b >= 1e9) return (b / 1e9).toFixed(1) + ' GB';
+    if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB';
+    if (b >= 1e3) return (b / 1e3).toFixed(0) + ' KB';
+    return b + ' B';
+}
+
+function formatParams(paramB) {
+    if (paramB >= 1000) return (paramB / 1000).toFixed(1) + 'T';
+    return paramB + 'B';
+}
+
+function formatCtx(n) {
+    if (n >= 1024) return Math.round(n / 1024) + 'k';
+    return String(n);
+}
+
+function formatVramTotal(bytes) {
+    const gb = bytes / (1024 ** 3);
+    if (gb >= 100) return Math.round(gb) + ' GB';
+    return gb.toFixed(1) + ' GB';
+}
+
+function formatGB(bytes) {
+    if (!bytes || !isFinite(bytes)) return '0 MB';
+    const gb = bytes / (1024 ** 3);
+    if (gb >= 1) return gb.toFixed(1) + ' GB';
+    return Math.round(bytes / (1024 ** 2)) + ' MB';
+}
+
+function setSegWidth(el, ratio) {
+    if (!el) return;
+    const pct = Math.max(0, Math.min(1, ratio)) * 100;
+    el.style.width = pct + '%';
+}
+
+function guessQuantFromName(name) {
+    const lower = name.toLowerCase();
+    if (lower.includes('q8_0')) return 'q8_0';
+    if (lower.includes('q6_k')) return 'q6_k';
+    if (lower.includes('q5_k_m')) return 'q5_k_m';
+    if (lower.includes('q5_k_s')) return 'q5_k_s';
+    if (lower.includes('q4_k_m')) return 'q4_k_m';
+    if (lower.includes('q4_k_s')) return 'q4_k_s';
+    if (lower.includes('iq4_xs')) return 'iq4_xs';
+    if (lower.includes('q4_0')) return 'q4_0';
+    if (lower.includes('q3_k_m')) return 'q3_k_m';
+    if (lower.includes('q2_k')) return 'q2_k';
+    if (lower.includes('iq2_xxs')) return 'iq2_xxs';
+    if (lower.includes('f16') || lower.includes('bf16')) return 'f16';
+    return 'q4_k_m';
+}
+
+function estimateKvBytes(paramB, ctxTokens) {
+    // Rough KV cache estimate: 2 * ctx * (n_layers * n_kv_heads * head_dim * 2 bytes)
+    // Use heuristic arch based on param count
+    let nLayers, nKvHeads, headDim;
+    if (paramB < 2)       { nLayers = 22; nKvHeads = 4; headDim = 64; }
+    else if (paramB < 5)  { nLayers = 28; nKvHeads = 4; headDim = 128; }
+    else if (paramB < 10) { nLayers = 32; nKvHeads = 8; headDim = 128; }
+    else if (paramB < 18) { nLayers = 40; nKvHeads = 8; headDim = 128; }
+    else if (paramB < 35) { nLayers = 40; nKvHeads = 8; headDim = 128; }
+    else if (paramB < 55) { nLayers = 60; nKvHeads = 8; headDim = 128; }
+    else                  { nLayers = 80; nKvHeads = 8; headDim = 128; }
+
+    return 2 * ctxTokens * nLayers * nKvHeads * headDim * 2; // *2 for K+V, *2 for f16
 }
