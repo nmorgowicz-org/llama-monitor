@@ -1388,10 +1388,17 @@ body.chat-focus-mode .sidebar-nav {
   overflow: hidden;
 }
 
-/* Hide sidebar on welcome/setup screen — nav items aren't usable there */
+/* Hide sidebar and cockpit metrics on welcome/setup screen */
 body.setup-active .sidebar-nav {
   opacity: 0;
   pointer-events: none;
+}
+body.setup-active .nav-center {
+  opacity: 0;
+  pointer-events: none;
+}
+body.setup-active #session-controls {
+  display: none;
 }
 
 body.chat-focus-mode .content-area {
