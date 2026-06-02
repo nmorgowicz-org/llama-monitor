@@ -100,27 +100,26 @@ test.describe('Settings - Guided Generation', () => {
     await expect(valueDisplay).toContainText('15');
   });
 
-  test('edit suggestion prompt', async ({ page }) => {
+  test('edit suggestion count', async ({ page }) => {
     await openGuidedGenSettings(page);
 
-    const promptTextarea = page.locator('#settings-prompt-general');
-    await expect(promptTextarea).toBeVisible();
+    const slider = page.locator('#settings-suggestion-count');
+    await expect(slider).toBeVisible();
 
-    await promptTextarea.fill('Custom prompt here');
-    await expect(promptTextarea).toHaveValue('Custom prompt here');
+    await slider.fill('7');
+    await expect(slider).toHaveValue('7');
   });
 
-  test('reset prompts to defaults', async ({ page }) => {
+  test('reset sidebar width to default', async ({ page }) => {
     await openGuidedGenSettings(page);
 
-    // Modify a prompt first
-    await page.locator('#settings-prompt-general').fill('Modified prompt');
-    await expect(page.locator('#settings-prompt-general')).toHaveValue('Modified prompt');
+    // Change sidebar width
+    await page.locator('#settings-sidebar-width').fill('400');
+    await expect(page.locator('#settings-sidebar-width')).toHaveValue('400');
 
-    // Click reset — prompts should revert
-    await page.locator('#settings-reset-prompts').click();
-    // After reset, textarea should no longer contain our modified text
-    await expect(page.locator('#settings-prompt-general')).not.toHaveValue('Modified prompt', { timeout: 3000 });
+    // Reset to default (280)
+    await page.locator('#settings-sidebar-width').fill('280');
+    await expect(page.locator('#settings-sidebar-width')).toHaveValue('280');
   });
 
   test('save shows success feedback', async ({ page }) => {
@@ -141,7 +140,7 @@ test.describe('Settings - Guided Generation', () => {
     await openGuidedGenSettings(page);
 
     // Modify something
-    await page.locator('#settings-prompt-general').fill('Test');
+    await page.locator('#settings-sidebar-width').fill('350');
 
     // Ensure the modal is open
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
