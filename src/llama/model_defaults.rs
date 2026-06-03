@@ -28,6 +28,13 @@ pub struct ModelDefaults {
     /// None means the flag is not set.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_budget: Option<i32>,
+    /// --reasoning flag: whether to enable reasoning/extended CoT behavior.
+    /// True when this model family benefits from structured reasoning.
+    pub reasoning: bool,
+    /// --reasoning-budget-message: text that marks the start of final answer.
+    /// None means the flag is not set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_budget_message: Option<String>,
 }
 
 impl Default for ModelDefaults {
@@ -43,6 +50,8 @@ impl Default for ModelDefaults {
             enable_thinking: None,
             preserve_thinking: None,
             reasoning_budget: None,
+            reasoning: false,
+            reasoning_budget_message: None,
         }
     }
 }
@@ -52,6 +61,8 @@ impl Default for ModelDefaults {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ModelPreset {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(flatten)]
     pub defaults: ModelDefaults,
 }
@@ -59,19 +70,32 @@ pub struct ModelPreset {
 /// Return named presets for models that have meaningful mode variants
 /// (e.g. Qwen3.6 thinking-general vs thinking-coding).
 /// The first preset is the recommended default.
-/// Returns a single "Default" preset for models with no special modes.
+/// Returns generic fallback presets for models with no special modes.
 pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -> Vec<ModelPreset> {
     let lower = name_or_repo.to_ascii_lowercase();
 
     // Qwen3.6 family (including Qwopus and other derivatives):
-    // two thinking-mode presets from https://unsloth.ai/docs/models/qwen3.6
+    // preset values from https://unsloth.ai/docs/models/qwen3.6
     let is_qwen36 =
         (lower.contains("qwen3.6") || lower.contains("qwen36") || lower.contains("qwopus"))
             && (lower.contains("27b") || lower.contains("35b") || lower.contains("a3b"));
 
     if is_qwen36 {
-        // https://unsloth.ai/docs/models/qwen3.6
-        let thinking_general = ModelDefaults {
+        let agentic_coding = ModelDefaults {
+            temperature: 1.0,
+            top_p: 0.95,
+            top_k: 20,
+            min_p: 0.0,
+            repeat_penalty: 1.0,
+            presence_penalty: 0.0,
+            max_tokens: 32768,
+            enable_thinking: Some(true),
+            preserve_thinking: Some(true),
+            reasoning_budget: Some(16384),
+            reasoning: true,
+            reasoning_budget_message: Some("\nFinal Answer:".into()),
+        };
+        let creative_roleplay = ModelDefaults {
             temperature: 1.0,
             top_p: 0.95,
             top_k: 20,
@@ -81,9 +105,11 @@ pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -
             max_tokens: 32768,
             enable_thinking: Some(true),
             preserve_thinking: Some(true),
-            reasoning_budget: None,
+            reasoning_budget: Some(16384),
+            reasoning: true,
+            reasoning_budget_message: Some("\nFinal Answer:".into()),
         };
-        let thinking_coding = ModelDefaults {
+        let precise_coding = ModelDefaults {
             temperature: 0.6,
             top_p: 0.95,
             top_k: 20,
@@ -93,16 +119,67 @@ pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -
             max_tokens: 32768,
             enable_thinking: Some(true),
             preserve_thinking: Some(true),
-            reasoning_budget: None,
+            reasoning_budget: Some(16384),
+            reasoning: true,
+            reasoning_budget_message: Some("\nFinal Answer:".into()),
         };
         return vec![
             ModelPreset {
-                name: "Thinking — General".into(),
-                defaults: thinking_general,
+                name: "Agentic / Coding (thinking)".into(),
+                description: Some(
+                    "Recommended default for coding agents and tool-heavy work.".into(),
+                ),
+                defaults: agentic_coding,
             },
             ModelPreset {
-                name: "Thinking — Coding".into(),
-                defaults: thinking_coding,
+                name: "Creative / Roleplay (thinking)".into(),
+                description: Some(
+                    "Higher presence penalty for looser, more exploratory outputs.".into(),
+                ),
+                defaults: creative_roleplay,
+            },
+            ModelPreset {
+                name: "Precise coding (thinking)".into(),
+                description: Some(
+                    "Lower temperature for deterministic coding and debugging.".into(),
+                ),
+                defaults: precise_coding,
+            },
+            ModelPreset {
+                name: "Non-thinking general".into(),
+                description: Some("Balanced chat mode with thinking explicitly disabled.".into()),
+                defaults: ModelDefaults {
+                    temperature: 0.7,
+                    top_p: 0.8,
+                    top_k: 20,
+                    min_p: 0.0,
+                    repeat_penalty: 1.0,
+                    presence_penalty: 1.5,
+                    max_tokens: 32768,
+                    enable_thinking: Some(false),
+                    preserve_thinking: Some(false),
+                    reasoning_budget: None,
+                    reasoning: false,
+                    reasoning_budget_message: None,
+                },
+            },
+            ModelPreset {
+                name: "Non-thinking reasoning".into(),
+                description: Some("High-entropy chat mode without visible thinking blocks.".into()),
+                defaults: ModelDefaults {
+                    temperature: 1.0,
+                    top_p: 0.95,
+                    top_k: 20,
+                    min_p: 0.0,
+                    repeat_penalty: 1.0,
+                    presence_penalty: 1.5,
+                    max_tokens: 32768,
+                    enable_thinking: Some(false),
+                    preserve_thinking: Some(false),
+                    reasoning_budget: None,
+                    reasoning: false,
+                    reasoning_budget_message: None,
+                },
             },
         ];
     }
@@ -120,6 +197,8 @@ pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -
             enable_thinking: None,
             preserve_thinking: None,
             reasoning_budget: None,
+            reasoning: false,
+            reasoning_budget_message: None,
         };
         let ocr = ModelDefaults {
             temperature: 0.6,
@@ -132,24 +211,123 @@ pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -
             enable_thinking: None,
             preserve_thinking: None,
             reasoning_budget: None,
+            reasoning: false,
+            reasoning_budget_message: None,
         };
         return vec![
             ModelPreset {
                 name: "General purpose".into(),
+                description: Some(
+                    "Balanced default for chat, analysis, and mixed workloads.".into(),
+                ),
                 defaults: general,
             },
             ModelPreset {
                 name: "OCR / Document".into(),
+                description: Some(
+                    "Lower temperature preset for extraction and document-focused tasks.".into(),
+                ),
                 defaults: ocr,
             },
         ];
     }
 
-    // Default: single preset using existing per-family logic
-    vec![ModelPreset {
-        name: "Default".into(),
-        defaults: get_model_defaults(name_or_repo, size_bytes, tags),
-    }]
+    if (lower.contains("gemma-4") || lower.contains("gemma4"))
+        && (lower.contains("2b")
+            || lower.contains("4b")
+            || lower.contains("15b")
+            || lower.contains("26b")
+            || lower.contains("31b"))
+    {
+        return vec![
+            ModelPreset {
+                name: "General".into(),
+                description: Some("Recommended default for everyday chat and analysis.".into()),
+                defaults: get_model_defaults(name_or_repo, size_bytes, tags),
+            },
+            ModelPreset {
+                name: "Creative / Roleplay".into(),
+                description: Some(
+                    "Slightly wider sampling for character voice and fiction.".into(),
+                ),
+                defaults: ModelDefaults {
+                    temperature: 1.0,
+                    top_p: 0.97,
+                    top_k: 64,
+                    min_p: 0.0,
+                    repeat_penalty: 1.0,
+                    presence_penalty: 0.0,
+                    max_tokens: 8192,
+                    enable_thinking: Some(true),
+                    preserve_thinking: None,
+                    reasoning_budget: None,
+                    reasoning: false,
+                    reasoning_budget_message: None,
+                },
+            },
+            ModelPreset {
+                name: "Precise / Agentic".into(),
+                description: Some(
+                    "Lower temperature preset for structured tool use and coding.".into(),
+                ),
+                defaults: ModelDefaults {
+                    temperature: 0.7,
+                    top_p: 0.95,
+                    top_k: 64,
+                    min_p: 0.0,
+                    repeat_penalty: 1.0,
+                    presence_penalty: 0.25,
+                    max_tokens: 8192,
+                    enable_thinking: Some(true),
+                    preserve_thinking: None,
+                    reasoning_budget: None,
+                    reasoning: false,
+                    reasoning_budget_message: None,
+                },
+            },
+        ];
+    }
+
+    vec![
+        ModelPreset {
+            name: "General".into(),
+            description: Some("Safe fallback for unknown or older GGUFs.".into()),
+            defaults: ModelDefaults {
+                temperature: 0.9,
+                top_p: 0.95,
+                top_k: 64,
+                min_p: 0.03,
+                repeat_penalty: 1.05,
+                presence_penalty: 0.0,
+                max_tokens: 4096,
+                enable_thinking: None,
+                preserve_thinking: None,
+                reasoning_budget: None,
+                reasoning: false,
+                reasoning_budget_message: None,
+            },
+        },
+        ModelPreset {
+            name: "Creative / Roleplay".into(),
+            description: Some(
+                "Broader fallback preset for finetunes and RP-oriented models.".into(),
+            ),
+            defaults: ModelDefaults {
+                temperature: 1.0,
+                top_p: 0.97,
+                top_k: 100,
+                min_p: 0.02,
+                repeat_penalty: 1.1,
+                presence_penalty: 0.1,
+                max_tokens: 4096,
+                enable_thinking: None,
+                preserve_thinking: None,
+                reasoning_budget: None,
+                reasoning: false,
+                reasoning_budget_message: None,
+            },
+        },
+    ]
 }
 
 /// Determine model-specific generation defaults.
@@ -202,6 +380,9 @@ pub fn get_model_defaults(name_or_repo: &str, _size_bytes: u64, tags: &[String])
         d.max_tokens = 32768;
         d.enable_thinking = Some(true);
         d.preserve_thinking = Some(true);
+        d.reasoning_budget = Some(16384);
+        d.reasoning = true;
+        d.reasoning_budget_message = Some("\nFinal Answer:".into());
         return d;
     }
     // Gemma 4 family: Unsloth deployment guide defaults.
@@ -291,8 +472,6 @@ mod tests {
         assert!(d.temperature > 0.2);
     }
 
-
-
     #[test]
     fn gemma4_e2b_uses_unsloth_defaults() {
         // Source: https://docs.unsloth.ai/docs/quick-connects/gemma-4
@@ -345,5 +524,33 @@ mod tests {
         assert_eq!(d.top_p, 0.95);
         assert_eq!(d.presence_penalty, 1.5);
         assert_eq!(d.repeat_penalty, 1.0);
+    }
+
+    #[test]
+    fn qwen36_exposes_all_planned_presets() {
+        let presets = get_model_presets("Qwen3.6-30B-A3B", 0, &[]);
+        assert_eq!(presets.len(), 5);
+        assert_eq!(presets[0].name, "Agentic / Coding (thinking)");
+        assert_eq!(presets[1].name, "Creative / Roleplay (thinking)");
+        assert_eq!(presets[2].name, "Precise coding (thinking)");
+        assert_eq!(presets[3].defaults.enable_thinking, Some(false));
+        assert!(!presets[4].defaults.reasoning);
+    }
+
+    #[test]
+    fn gemma4_exposes_three_presets() {
+        let presets = get_model_presets("gemma-4-27b-it", 0, &[]);
+        assert_eq!(presets.len(), 3);
+        assert_eq!(presets[0].name, "General");
+        assert_eq!(presets[1].name, "Creative / Roleplay");
+        assert_eq!(presets[2].name, "Precise / Agentic");
+    }
+
+    #[test]
+    fn generic_models_get_fallback_presets() {
+        let presets = get_model_presets("my-custom-rp-model.gguf", 0, &[]);
+        assert_eq!(presets.len(), 2);
+        assert_eq!(presets[0].name, "General");
+        assert_eq!(presets[1].name, "Creative / Roleplay");
     }
 }

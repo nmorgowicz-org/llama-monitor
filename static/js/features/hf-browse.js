@@ -78,6 +78,10 @@ export async function hfSearch({
   author,
   sort,
   limit,
+  minParamB = 0,
+  cursor = null,
+  append = false,
+  _cascadeDepth = 0,
   container,
   filelistContainer,
   quickpicksContainer,
@@ -87,12 +91,20 @@ export async function hfSearch({
 }) {
   if (!container) return;
 
-  container.innerHTML = '<div class="hf-search-loading">Searching HuggingFace…</div>';
-  container.style.display = '';
-
-  if (filelistContainer) {
-    filelistContainer.innerHTML = '';
-    filelistContainer.classList.remove('visible');
+  if (!append) {
+    container.innerHTML = '<div class="hf-search-loading">Searching HuggingFace…</div>';
+    container.style.display = '';
+    if (filelistContainer) {
+      filelistContainer.innerHTML = '';
+      filelistContainer.classList.remove('visible');
+    }
+  } else {
+    // Remove existing load-more button so we can append fresh results + new button
+    container.querySelector('.hf-load-more-btn')?.remove();
+    const loadingEl = document.createElement('div');
+    loadingEl.className = 'hf-search-loading hf-load-more-loading';
+    loadingEl.textContent = 'Loading more…';
+    container.appendChild(loadingEl);
   }
 
   const clearPillLoading = () => {
@@ -101,12 +113,19 @@ export async function hfSearch({
       ?.querySelectorAll('.hf-discover-pill').forEach(p => p.classList.remove('loading'));
   };
 
+  // Find the nearest overflow-scrollable ancestor
   const scrollToResults = () => {
-    const scrollParent = container.closest('.wizard-body');
-    if (!scrollParent) return;
-    const cRect = container.getBoundingClientRect();
-    const pRect = scrollParent.getBoundingClientRect();
-    scrollParent.scrollTo({ top: scrollParent.scrollTop + cRect.top - pRect.top - 12, behavior: 'smooth' });
+    let p = container.parentElement;
+    while (p) {
+      const s = getComputedStyle(p);
+      if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && p.scrollHeight > p.clientHeight) {
+        const cRect = container.getBoundingClientRect();
+        const pRect = p.getBoundingClientRect();
+        p.scrollTo({ top: p.scrollTop + cRect.top - pRect.top - 12, behavior: 'smooth' });
+        return;
+      }
+      p = p.parentElement;
+    }
   };
 
   try {
@@ -115,22 +134,51 @@ export async function hfSearch({
       author: author || undefined,
       sort: sort || 'downloads',
       limit: limit || 20,
+      cursor: cursor || undefined,
     };
 
     const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
     const resp = await fetch('/api/hf/search', { method: 'POST', headers, body: JSON.stringify(body) });
     if (!resp.ok) {
       clearPillLoading();
-      container.innerHTML = '<div class="hf-search-empty">Search failed.</div>';
+      if (append) {
+        container.querySelector('.hf-load-more-loading')?.remove();
+      } else {
+        container.innerHTML = '<div class="hf-search-empty">Search failed.</div>';
+      }
       return;
     }
     const data = await resp.json();
-    const models = data.models || [];
+    const allModels = data.models || [];
+    const nextCursor = data.next_cursor || null;
+    const hasMore = !!nextCursor;
 
     clearPillLoading();
-    container.innerHTML = '';
-    if (!models.length) {
-      container.innerHTML = '<div class="hf-search-empty">No models found.</div>';
+
+    // Remove "loading more" placeholder if appending
+    if (append) container.querySelector('.hf-load-more-loading')?.remove();
+    else container.innerHTML = '';
+
+    // Apply client-side param_b filter
+    const models = minParamB > 0 ? allModels.filter(m => (m.param_b || 0) >= minParamB) : allModels;
+
+    if (!models.length && !append) {
+      const msg = minParamB > 0
+        ? `No models \u2265${minParamB}B found. Try a lower size filter or "Load more".`
+        : 'No models found.';
+      const empty = document.createElement('div');
+      empty.className = 'hf-search-empty';
+      empty.textContent = msg;
+      container.replaceChildren(empty);
+      if (hasMore) {
+        const moreBtn = _makeLoadMoreBtn(() => hfSearch({
+          query, author, sort, limit, minParamB, cursor: nextCursor, append: true,
+          container, filelistContainer, quickpicksContainer,
+          discoverPillsContainerId, onOpenCardPanel, onSelectModel,
+        }));
+        container.appendChild(moreBtn);
+      }
+      if (!append) scrollToResults();
       return;
     }
 
@@ -214,14 +262,49 @@ export async function hfSearch({
       container.appendChild(row);
     }
 
-    scrollToResults();
+    if (hasMore) {
+      const moreBtn = _makeLoadMoreBtn(() => hfSearch({
+        query, author, sort, limit, minParamB, cursor: nextCursor, append: true,
+        _cascadeDepth: 0,
+        container, filelistContainer, quickpicksContainer,
+        discoverPillsContainerId, onOpenCardPanel, onSelectModel,
+      }));
+      container.appendChild(moreBtn);
+    }
+
+    if (!append) scrollToResults();
+
+    // Auto-cascade: if fewer than 10 results are visible and there are more pages,
+    // silently fetch the next page (capped at 3 auto-fetches to avoid runaway).
+    const visibleCount = container.querySelectorAll('.hf-search-result').length;
+    if (hasMore && visibleCount < 10 && _cascadeDepth < 3) {
+      hfSearch({
+        query, author, sort, limit, minParamB, cursor: nextCursor, append: true,
+        _cascadeDepth: _cascadeDepth + 1,
+        container, filelistContainer, quickpicksContainer,
+        discoverPillsContainerId, onOpenCardPanel, onSelectModel,
+      });
+    }
   } catch (err) {
     clearPillLoading();
-    const errEl = document.createElement('div');
-    errEl.className = 'hf-search-empty';
-    errEl.textContent = 'Error: ' + (err.message || String(err));
-    container.appendChild(errEl);
+    if (append) {
+      container.querySelector('.hf-load-more-loading')?.remove();
+    } else {
+      const errEl = document.createElement('div');
+      errEl.className = 'hf-search-empty';
+      errEl.textContent = 'Error: ' + (err.message || String(err));
+      container.appendChild(errEl);
+    }
   }
+}
+
+function _makeLoadMoreBtn(onClick) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'hf-load-more-btn';
+  btn.textContent = 'Load more';
+  btn.addEventListener('click', onClick);
+  return btn;
 }
 
 // ── hfListFiles ───────────────────────────────────────────────────────────────

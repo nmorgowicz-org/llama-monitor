@@ -2710,6 +2710,7 @@ fn api_model_defaults(
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
+                        "defaults": &defaults,
                         "temperature": defaults.temperature,
                         "top_p": defaults.top_p,
                         "top_k": defaults.top_k,
@@ -2719,7 +2720,9 @@ fn api_model_defaults(
                         "max_tokens": defaults.max_tokens,
                         "enable_thinking": defaults.enable_thinking,
                         "preserve_thinking": defaults.preserve_thinking,
+                        "reasoning": defaults.reasoning,
                         "reasoning_budget": defaults.reasoning_budget,
+                        "reasoning_budget_message": defaults.reasoning_budget_message,
                         "presets": presets,
                     }),
                 )))
@@ -2980,17 +2983,16 @@ fn api_hf_search(
                     );
                 }
 
-                let page: u64 = body["page"].as_u64().unwrap_or(0).min(50);
-                let params = crate::hf::HfSearchParams { query, author, sort, limit: limit as usize, page: page as usize };
+                let cursor = body["cursor"].as_str().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+                let params = crate::hf::HfSearchParams { query, author, sort, limit: limit as usize, cursor };
 
                 match crate::hf::hf_search_models(&params).await {
-                    Ok(models) => {
-                        let has_more = models.len() >= limit as usize;
+                    Ok((models, next_cursor)) => {
                         Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                         Box::new(warp::reply::json(&serde_json::json!({
                             "ok": true,
                             "models": models,
-                            "has_more": has_more
+                            "next_cursor": next_cursor
                         }))))
                     },
                     Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(

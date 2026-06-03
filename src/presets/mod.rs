@@ -29,6 +29,8 @@ pub struct ModelPreset {
     pub min_p: Option<f64>,
     #[serde(default)]
     pub repeat_penalty: Option<f64>,
+    #[serde(default)]
+    pub presence_penalty: Option<f64>,
     // CPU MOE
     #[serde(default)]
     pub n_cpu_moe: Option<i32>,
@@ -169,6 +171,16 @@ pub struct ModelPreset {
     #[serde(default)]
     pub max_tokens: Option<u64>,
     #[serde(default)]
+    pub enable_thinking: Option<bool>,
+    #[serde(default)]
+    pub preserve_thinking: Option<bool>,
+    #[serde(default)]
+    pub reasoning: Option<String>,
+    #[serde(default)]
+    pub reasoning_budget: Option<i32>,
+    #[serde(default)]
+    pub reasoning_budget_message: Option<String>,
+    #[serde(default)]
     pub api_key: Option<String>,
     #[serde(default)]
     pub alias: Option<String>,
@@ -308,6 +320,33 @@ mod tests {
         assert_eq!(deserialized.len(), presets.len());
         assert_eq!(deserialized[0].name, presets[0].name);
         assert_eq!(deserialized[0].id, "default-1");
+    }
+
+    #[test]
+    fn test_reasoning_fields_roundtrip() {
+        let preset = ModelPreset {
+            id: "p1".into(),
+            name: "Reasoning".into(),
+            model_path: "/tmp/model.gguf".into(),
+            reasoning: Some("on".into()),
+            reasoning_budget: Some(16384),
+            reasoning_budget_message: Some("\nFinal Answer:".into()),
+            enable_thinking: Some(true),
+            preserve_thinking: Some(true),
+            presence_penalty: Some(1.5),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&preset).unwrap();
+        let decoded: ModelPreset = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.reasoning.as_deref(), Some("on"));
+        assert_eq!(decoded.reasoning_budget, Some(16384));
+        assert_eq!(
+            decoded.reasoning_budget_message.as_deref(),
+            Some("\nFinal Answer:")
+        );
+        assert_eq!(decoded.enable_thinking, Some(true));
+        assert_eq!(decoded.preserve_thinking, Some(true));
+        assert_eq!(decoded.presence_penalty, Some(1.5));
     }
 
     #[test]

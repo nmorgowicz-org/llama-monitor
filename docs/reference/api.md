@@ -303,6 +303,7 @@ Auth: api-token.
     "top_k": null,
     "min_p": null,
     "repeat_penalty": null,
+    "presence_penalty": null,
     "n_cpu_moe": null,
     "gpu_layers": null,
     "mlock": false,
@@ -319,10 +320,44 @@ Auth: api-token.
     "draft_max": null,
     "spec_ngram_size": null,
     "seed": null,
+    "enable_thinking": null,
+    "preserve_thinking": null,
+    "reasoning": null,
+    "reasoning_budget": null,
+    "reasoning_budget_message": null,
     "system_prompt_file": "",
     "extra_args": ""
   }
 ]
+```
+
+### `POST /api/model-defaults`
+Auth: api-token.
+
+Returns model-family sampling recommendations used by the spawn wizard and preset editor.
+
+```json
+{
+  "defaults": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0.0,
+    "repeat_penalty": 1.0,
+    "presence_penalty": 0.0,
+    "enable_thinking": true,
+    "preserve_thinking": true,
+    "reasoning": true,
+    "reasoning_budget": 16384,
+    "reasoning_budget_message": "\nFinal Answer:"
+  },
+  "presets": [
+    {
+      "name": "Agentic / Coding (thinking)",
+      "description": "Recommended default for coding agents and tool-heavy work."
+    }
+  ]
+}
 ```
 
 ### `POST /api/presets`

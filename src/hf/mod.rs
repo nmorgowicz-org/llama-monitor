@@ -549,14 +549,35 @@ pub struct HfSearchParams {
     pub author: Option<String>,
     pub sort: HfSort,
     pub limit: usize,
+    /// Opaque cursor from the HF API `Link` response header for pagination.
+    pub cursor: Option<String>,
+}
+
+/// Parse the `cursor=` value out of a HF API `Link: <url>; rel="next"` header.
+fn parse_cursor_from_link(link: &str) -> Option<String> {
+    for part in link.split(',') {
+        let part = part.trim();
+        if !part.contains(r#"rel="next""#) {
+            continue;
+        }
+        if let (Some(s), Some(e)) = (part.find('<'), part.find('>')) {
+            let url_str = &part[s + 1..e];
+            for param in url_str.split('&') {
+                if let Some(val) = param.strip_prefix("cursor=") {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Search HuggingFace for GGUF models with keyword + optional author filter.
 ///
-/// - Empty query + author = browse all of that author's GGUF models
-/// - Non-empty query + no author = keyword search across all GGUF models
-/// - Both = keyword search scoped to that author (uses both API params)
-pub async fn hf_search_models(params: &HfSearchParams) -> Result<Vec<SimpleModelInfo>, String> {
+/// Returns (models, next_cursor) where next_cursor is Some when more pages exist.
+pub async fn hf_search_models(
+    params: &HfSearchParams,
+) -> Result<(Vec<SimpleModelInfo>, Option<String>), String> {
     let limit = params.limit.clamp(1, 100);
     let token = hf_load_token();
 
@@ -574,6 +595,9 @@ pub async fn hf_search_models(params: &HfSearchParams) -> Result<Vec<SimpleModel
         p.append_pair("limit", &limit.to_string());
         p.append_pair("sort", params.sort.as_api_str());
         p.append_pair("direction", "-1");
+        if let Some(ref cursor) = params.cursor {
+            p.append_pair("cursor", cursor);
+        }
         // Always filter for GGUF
         p.append_pair("filter", "gguf");
     }
@@ -591,12 +615,22 @@ pub async fn hf_search_models(params: &HfSearchParams) -> Result<Vec<SimpleModel
         return Err(format!("HF search failed: HTTP {}", resp.status()));
     }
 
+    // Read the Link header BEFORE consuming the body.
+    let next_cursor = resp
+        .headers()
+        .get("link")
+        .and_then(|v| v.to_str().ok())
+        .and_then(parse_cursor_from_link);
+
     let items: Vec<serde_json::Value> = resp
         .json()
         .await
         .map_err(|e| format!("Failed to parse HF response: {e}"))?;
 
-    Ok(items.into_iter().filter_map(parse_model_item).collect())
+    Ok((
+        items.into_iter().filter_map(parse_model_item).collect(),
+        next_cursor,
+    ))
 }
 
 /// Browse all GGUF models from a specific HF author/org (convenience wrapper).

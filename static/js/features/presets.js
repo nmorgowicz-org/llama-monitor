@@ -16,6 +16,12 @@ function numOrEmpty(id, v) { document.getElementById(id).value = v != null ? v :
 function intOrNull(id) { const v = document.getElementById(id).value; return v !== '' ? parseInt(v) : null; }
 function floatOrNull(id) { const v = document.getElementById(id).value; return v !== '' ? parseFloat(v) : null; }
 function strVal(id) { return document.getElementById(id).value.trim(); }
+function nullableBoolOpt(id) {
+    const v = document.getElementById(id).value;
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+    return null;
+}
 
 function clearFieldErrors() {
     document.querySelectorAll('#preset-form .field-error').forEach(el => el.classList.remove('field-error'));
@@ -112,6 +118,12 @@ export function openPresetModal(mode) {
         numOrEmpty('modal-top-k', p.top_k);
         numOrEmpty('modal-min-p', p.min_p);
         numOrEmpty('modal-repeat-penalty', p.repeat_penalty);
+        numOrEmpty('modal-presence-penalty', p.presence_penalty);
+        setOpt('modal-enable-thinking', p.enable_thinking == null ? '' : String(!!p.enable_thinking));
+        setOpt('modal-preserve-thinking', p.preserve_thinking == null ? '' : String(!!p.preserve_thinking));
+        setOpt('modal-reasoning', p.reasoning || '');
+        numOrEmpty('modal-reasoning-budget', p.reasoning_budget);
+        setVal('modal-reasoning-budget-message', p.reasoning_budget_message || '');
         // GPU
         setVal('modal-tensor-split', p.tensor_split);
         setOpt('modal-split-mode', p.split_mode);
@@ -161,6 +173,10 @@ export function openPresetModal(mode) {
         _toggleFitTarget(false);
         _toggleSpecFields('');
     }
+
+    const presetModel = document.getElementById('modal-model-path')?.value.trim();
+    if (presetModel) _suggestGenerationDefaults(presetModel);
+    else _renderGenerationPresetPills([]);
 
     // Reset change-summary state
     _hideSummary();
@@ -401,6 +417,12 @@ function _buildFormPreset(existing) {
         top_k: intOrNull('modal-top-k'),
         min_p: floatOrNull('modal-min-p'),
         repeat_penalty: floatOrNull('modal-repeat-penalty'),
+        presence_penalty: floatOrNull('modal-presence-penalty'),
+        enable_thinking: nullableBoolOpt('modal-enable-thinking'),
+        preserve_thinking: nullableBoolOpt('modal-preserve-thinking'),
+        reasoning: strVal('modal-reasoning') || null,
+        reasoning_budget: intOrNull('modal-reasoning-budget'),
+        reasoning_budget_message: document.getElementById('modal-reasoning-budget-message').value || null,
         tensor_split: strVal('modal-tensor-split'),
         split_mode: strVal('modal-split-mode'),
         main_gpu: intOrNull('modal-main-gpu'),
@@ -437,7 +459,10 @@ const CHANGE_LABELS = {
     fit_enabled: 'Fit to VRAM', fit_target: 'Fit Target',
     batch_size: 'Batch Size', ubatch_size: 'Micro-batch', parallel_slots: 'Parallel Slots',
     temperature: 'Temperature', top_p: 'Top-P', top_k: 'Top-K',
-    min_p: 'Min-P', repeat_penalty: 'Repeat Penalty',
+    min_p: 'Min-P', repeat_penalty: 'Repeat Penalty', presence_penalty: 'Presence Penalty',
+    enable_thinking: 'Thinking Mode', preserve_thinking: 'Preserve Thinking',
+    reasoning: 'Reasoning', reasoning_budget: 'Reasoning Budget',
+    reasoning_budget_message: 'Reasoning Budget Message',
     tensor_split: 'Tensor Split', split_mode: 'Split Mode', main_gpu: 'Main GPU',
     threads: 'Threads', threads_batch: 'Threads Batch', n_cpu_moe: 'CPU MoE Threads',
     rope_scaling: 'RoPE Scaling', rope_freq_base: 'RoPE Freq Base', rope_freq_scale: 'RoPE Freq Scale',
@@ -669,20 +694,84 @@ async function _suggestGenerationDefaults(modelPath) {
         if (!resp.ok) return;
         const d = await resp.json();
         if (d.error) return;
+        const defaults = d.defaults || d;
 
         // Only fill fields the user hasn't already set
         const fill = (id, val) => {
             const el = document.getElementById(id);
             if (el && el.value === '') numOrEmpty(id, val);
         };
-        fill('modal-temperature', d.temperature ?? null);
-        fill('modal-top-p', d.top_p ?? null);
-        fill('modal-top-k', d.top_k ?? null);
-        fill('modal-min-p', d.min_p ?? null);
-        fill('modal-repeat-penalty', d.repeat_penalty ?? null);
+        fill('modal-temperature', defaults.temperature ?? null);
+        fill('modal-top-p', defaults.top_p ?? null);
+        fill('modal-top-k', defaults.top_k ?? null);
+        fill('modal-min-p', defaults.min_p ?? null);
+        fill('modal-repeat-penalty', defaults.repeat_penalty ?? null);
+        fill('modal-presence-penalty', defaults.presence_penalty ?? null);
+        _fillSelectIfEmpty('modal-enable-thinking', defaults.enable_thinking);
+        _fillSelectIfEmpty('modal-preserve-thinking', defaults.preserve_thinking);
+        _fillSelectIfEmpty('modal-reasoning', defaults.reasoning ? 'on' : 'off');
+        fill('modal-reasoning-budget', defaults.reasoning_budget ?? null);
+        const msgEl = document.getElementById('modal-reasoning-budget-message');
+        if (msgEl && msgEl.value === '' && defaults.reasoning_budget_message != null) {
+            msgEl.value = defaults.reasoning_budget_message;
+        }
+        _renderGenerationPresetPills(d.presets || []);
     } catch (_) {
         // Silent — best-effort only
     }
+}
+
+function _fillSelectIfEmpty(id, value) {
+    const el = document.getElementById(id);
+    if (!el || el.value !== '' || value == null) return;
+    el.value = typeof value === 'boolean' ? String(value) : String(value);
+}
+
+function _renderGenerationPresetPills(presets) {
+    const container = document.getElementById('modal-generation-presets');
+    if (!container) return;
+    if (!presets || presets.length <= 1) {
+        container.style.display = 'none';
+        container.innerHTML = '';
+        return;
+    }
+
+    container.style.display = 'flex';
+    container.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:12px;';
+    container.innerHTML = '';
+
+    const label = document.createElement('span');
+    label.style.cssText = 'font-size:11px;color:var(--color-text-muted);flex-shrink:0;';
+    label.textContent = 'Mode:';
+    container.appendChild(label);
+
+    presets.forEach((preset, index) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'sampling-preset-pill' + (index === 0 ? ' active' : '');
+        btn.textContent = preset.name;
+        if (preset.description) btn.title = preset.description;
+        btn.addEventListener('click', () => {
+            container.querySelectorAll('.sampling-preset-pill').forEach(p => p.classList.remove('active'));
+            btn.classList.add('active');
+            _applyGenerationPreset(preset);
+        });
+        container.appendChild(btn);
+    });
+}
+
+function _applyGenerationPreset(preset) {
+    numOrEmpty('modal-temperature', preset.temperature);
+    numOrEmpty('modal-top-p', preset.top_p);
+    numOrEmpty('modal-top-k', preset.top_k);
+    numOrEmpty('modal-min-p', preset.min_p);
+    numOrEmpty('modal-repeat-penalty', preset.repeat_penalty);
+    numOrEmpty('modal-presence-penalty', preset.presence_penalty);
+    setOpt('modal-enable-thinking', preset.enable_thinking == null ? '' : String(!!preset.enable_thinking));
+    setOpt('modal-preserve-thinking', preset.preserve_thinking == null ? '' : String(!!preset.preserve_thinking));
+    setOpt('modal-reasoning', preset.reasoning ? 'on' : 'off');
+    numOrEmpty('modal-reasoning-budget', preset.reasoning_budget);
+    setVal('modal-reasoning-budget-message', preset.reasoning_budget_message || '');
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────────

@@ -385,6 +385,7 @@ function cacheDom() {
   dom.localModelHintMeta  = document.getElementById('spawn-local-model-hint-meta');
   dom.hfRepoInput       = document.getElementById('spawn-hf-repo');
   dom.hfSortSelect      = document.getElementById('spawn-hf-sort');
+  dom.hfMinSize         = document.getElementById('spawn-hf-min-size');
   dom.hfQuickpicks      = document.getElementById('hf-quickpicks');
   dom.hfSearchResults   = document.getElementById('hf-search-results');
   dom.importPathInput   = document.getElementById('spawn-import-path');
@@ -950,11 +951,16 @@ async function _startCompanionMmprojDownload(repo, mmprojHfPath, modelHfPath) {
 
 // Wrapper for hfSearch used by wizard (wires callbacks)
 function hfSearchForWizard({ query, author, sort, limit }) {
+  const minParamB = parseFloat(dom.hfMinSize?.value || '0') || 0;
+  // When a size filter is active we need a large batch so enough results survive
+  // the client-side filter. Without a filter, a smaller page is better UX.
+  const effectiveLimit = limit ?? (minParamB > 0 ? 100 : 25);
   hfSearch({
     query,
     author,
     sort,
-    limit,
+    limit: effectiveLimit,
+    minParamB,
     container: dom.hfSearchResults,
     filelistContainer: dom.hfFileList,
     quickpicksContainer: dom.hfQuickpicks,
@@ -1985,7 +1991,7 @@ function _reloadHfQuickPicks() {
 async function browseHfAuthor(author) {
   const sort = dom.hfSortSelect?.value || 'downloads';
   wizardState.hfBrowseAuthor = author;
-  hfSearchForWizard({ author, sort, limit: 40 });
+  hfSearchForWizard({ author, sort });
 }
 
 // ── HF file listing ───────────────────────────────────────────────────────────
@@ -2005,29 +2011,30 @@ function triggerHfFileFetch() {
     fetchHfFiles(input);
   } else {
     const sort = dom.hfSortSelect?.value || 'downloads';
-    hfSearchForWizard({ query: input, sort, limit: 20 });
+    hfSearchForWizard({ query: input, sort });
   }
 }
 
-// Sort select triggers a re-search
+// Sort or min-size change triggers a re-search from page 0
 function bindHfSortSelect() {
-  dom.hfSortSelect?.addEventListener('change', () => {
+  const refire = () => {
     const author = wizardState.hfBrowseAuthor;
     const query  = dom.hfRepoInput?.value.trim() || '';
-    const sort   = dom.hfSortSelect.value;
+    const sort   = dom.hfSortSelect?.value || 'downloads';
     if (author) {
       browseHfAuthor(author);
     } else if (query && !query.includes('/')) {
       hfSearchForWizard({ query, sort, limit: 20 });
     } else {
-      // Re-fire the active discover pill with the new sort
       const activePill = document.querySelector('#hf-discover-pills .hf-discover-pill.active');
       if (activePill) {
         const cat = HF_DISCOVER_CATEGORIES.find(c => c.id === activePill.dataset.catId);
         if (cat) hfSearchForWizard({ ...cat.params, sort });
       }
     }
-  });
+  };
+  dom.hfSortSelect?.addEventListener('change', refire);
+  dom.hfMinSize?.addEventListener('change', refire);
 }
 
 async function fetchHfFiles(repo) {
@@ -2940,7 +2947,7 @@ function _renderMmprojDownloadFromHf(row) {
         const fname = (f.rfilename || f.path || '').split('/').pop();
         const sizeStr = f.size ? ` · ${formatBytes(f.size)}` : '';
         btn.textContent = `⬇ ${fname}${sizeStr}`;
-        btn.addEventListener('click', () => _downloadMmprojFromHf(result.repoId, f, wizardState.model.path, statusEl));
+        btn.addEventListener('click', () => _downloadMmprojFromHf(result.repoId, f, wizardState.model.path || wizardState.model.hfFile, statusEl));
         listEl.appendChild(btn);
       });
       panel.appendChild(listEl);
@@ -3022,7 +3029,7 @@ function _showMmprojHfFetchForm(row, panel, prefill = '') {
       const fname = (f.rfilename || f.path || '').split('/').pop();
       const sizeStr = f.size ? ` · ${formatBytes(f.size)}` : '';
       btn.textContent = `⬇ ${fname}${sizeStr}`;
-      btn.addEventListener('click', () => _downloadMmprojFromHf(repoId, f, wizardState.model.path, statusEl));
+      btn.addEventListener('click', () => _downloadMmprojFromHf(repoId, f, wizardState.model.path || wizardState.model.hfFile, statusEl));
       listEl.appendChild(btn);
     });
   }
@@ -3602,6 +3609,10 @@ function _applyPresetToHardware(preset) {
   h.enableThinking   = preset.enable_thinking   ?? null;
   h.preserveThinking = preset.preserve_thinking ?? null;
   h.reasoningBudget  = preset.reasoning_budget  ?? null;
+  h.reasoningMode = typeof preset.reasoning === 'boolean'
+    ? (preset.reasoning ? 'on' : 'off')
+    : (preset.reasoning || null);
+  h.reasoningBudgetMessage = preset.reasoning_budget_message ?? null;
   _syncThinkingFields();
 }
 
@@ -3629,6 +3640,7 @@ function _renderSamplingPresetPills(presets) {
     btn.type = 'button';
     btn.className = 'sampling-preset-pill' + (i === 0 ? ' active' : '');
     btn.textContent = preset.name;
+    if (preset.description) btn.title = preset.description;
     btn.dataset.presetIndex = String(i);
     btn.addEventListener('click', () => {
       container.querySelectorAll('.sampling-preset-pill').forEach(p => p.classList.remove('active'));
@@ -3658,20 +3670,27 @@ async function _fetchAndApplyModelSamplingDefaults() {
     });
     if (!res.ok) return;
     const data = await res.json();
+    const defaults = data.defaults || data;
     const h = wizardState.hardware;
 
     // Apply first preset values (only overwrite fields not yet explicitly set)
-    if (h.temperature == null && data.temperature != null) h.temperature = data.temperature;
-    if (h.topP == null && data.top_p != null) h.topP = data.top_p;
-    if (h.topK == null && data.top_k != null && data.top_k > 0) h.topK = data.top_k;
-    if (h.minP == null && data.min_p != null) h.minP = data.min_p;
-    if (h.repeatPenalty == null && data.repeat_penalty != null) h.repeatPenalty = data.repeat_penalty;
-    if (h.presencePenalty == null && data.presence_penalty != null && data.presence_penalty > 0) {
-      h.presencePenalty = data.presence_penalty;
+    if (h.temperature == null && defaults.temperature != null) h.temperature = defaults.temperature;
+    if (h.topP == null && defaults.top_p != null) h.topP = defaults.top_p;
+    if (h.topK == null && defaults.top_k != null && defaults.top_k > 0) h.topK = defaults.top_k;
+    if (h.minP == null && defaults.min_p != null) h.minP = defaults.min_p;
+    if (h.repeatPenalty == null && defaults.repeat_penalty != null) h.repeatPenalty = defaults.repeat_penalty;
+    if (h.presencePenalty == null && defaults.presence_penalty != null && defaults.presence_penalty > 0) {
+      h.presencePenalty = defaults.presence_penalty;
     }
-    if (h.enableThinking == null && data.enable_thinking != null) h.enableThinking = data.enable_thinking;
-    if (h.preserveThinking == null && data.preserve_thinking != null) h.preserveThinking = data.preserve_thinking;
-    if (h.reasoningBudget == null && data.reasoning_budget != null) h.reasoningBudget = data.reasoning_budget;
+    if (h.enableThinking == null && defaults.enable_thinking != null) h.enableThinking = defaults.enable_thinking;
+    if (h.preserveThinking == null && defaults.preserve_thinking != null) h.preserveThinking = defaults.preserve_thinking;
+    if (h.reasoningMode == null && defaults.reasoning != null) {
+      h.reasoningMode = defaults.reasoning ? 'on' : 'off';
+    }
+    if (h.reasoningBudget == null && defaults.reasoning_budget != null) h.reasoningBudget = defaults.reasoning_budget;
+    if (h.reasoningBudgetMessage == null && defaults.reasoning_budget_message != null) {
+      h.reasoningBudgetMessage = defaults.reasoning_budget_message;
+    }
     _syncThinkingFields();
 
     // Render mode pills if multiple presets are available
@@ -3882,7 +3901,12 @@ function _syncSamplingFields() {
 function _syncThinkingFields() {
   const h = wizardState.hardware;
   const section = document.getElementById('spawn-thinking-section');
-  const hasThinking = h.enableThinking != null || h.preserveThinking != null;
+  const hasThinking =
+    h.enableThinking != null ||
+    h.preserveThinking != null ||
+    h.reasoningMode != null ||
+    h.reasoningBudget != null ||
+    h.reasoningBudgetMessage != null;
 
   if (section) {
     section.style.display = hasThinking ? '' : 'none';
@@ -4045,9 +4069,22 @@ function buildPresetPayload() {
     draft_min: (dom.draftMinInput?.value || '').trim() || null,
     draft_max: (dom.draftMaxInput?.value || '').trim() || null,
     kv_unified: h.kvUnified || false,
+    temperature: h.temperature != null ? h.temperature : null,
+    top_p: h.topP != null ? h.topP : null,
+    top_k: h.topK != null ? h.topK : null,
+    min_p: h.minP != null ? h.minP : null,
+    repeat_penalty: h.repeatPenalty != null ? h.repeatPenalty : null,
+    presence_penalty: h.presencePenalty != null ? h.presencePenalty : null,
+    seed: h.seed != null ? h.seed : null,
+    enable_thinking: h.enableThinking,
+    preserve_thinking: h.preserveThinking,
+    reasoning: h.reasoningMode || null,
+    reasoning_budget: h.reasoningBudget,
+    reasoning_budget_message: h.reasoningBudgetMessage || null,
     api_key: wizardState.access.apiKey || null,
     mmproj: m.mmprojPath && m.mmprojPath.startsWith('/') ? m.mmprojPath : null,
     alias: h.alias || null,
+    extra_args: h.extraArgs || '',
   };
 }
 

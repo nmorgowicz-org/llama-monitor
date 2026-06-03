@@ -150,6 +150,8 @@ Shows a human-readable review of all selected parameters. Health checks:
 
 This step also includes:
 - Editable sampling defaults
+- Model-family mode pills from `/api/model-defaults` so users can switch between recommended presets before editing individual fields
+- Thinking and reasoning controls when the selected model family exposes them, including `enable_thinking`, `preserve_thinking`, reasoning mode, reasoning budget, and reasoning budget message
 - Network controls for `Port`, `Bind host`, and optional `Server API key`
 - Inline edit shortcuts back to Model and Hardware so the user can make one last adjustment without restarting the flow
 
@@ -544,6 +546,43 @@ Pre-download quant comparison table for a model. Shown in the wizard as the **Qu
   ]
 }
 ```
+
+#### POST /api/model-defaults
+Returns model-family sampling recommendations for the Step 4 wizard review form and the preset editor.
+
+```json
+// Request
+{ "model_name_or_repo": "Qwen3.6-30B-A3B", "size_bytes": 0, "tags": [] }
+
+// Response
+{
+  "defaults": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0.0,
+    "repeat_penalty": 1.0,
+    "presence_penalty": 0.0,
+    "max_tokens": 32768,
+    "enable_thinking": true,
+    "preserve_thinking": true,
+    "reasoning": true,
+    "reasoning_budget": 16384,
+    "reasoning_budget_message": "\nFinal Answer:"
+  },
+  "presets": [
+    {
+      "name": "Agentic / Coding (thinking)",
+      "description": "Recommended default for coding agents and tool-heavy work.",
+      "temperature": 1.0,
+      "top_p": 0.95
+    }
+  ]
+}
+```
+
+- `defaults` is always the primary preset that should be preselected in the UI.
+- `presets` is the full model-specific mode list shown as clickable pills.
 
 ---
 

@@ -2320,6 +2320,7 @@
                             </div>
                         </div>
                         <div class="pe-section-body">
+                            <div id="modal-generation-presets" style="display:none;margin-bottom:12px;"></div>
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-temperature" title="Temperature for sampling. Higher = more randomness. Empty = use server default (1.0).">Temperature (--temp)</label>
@@ -2342,6 +2343,46 @@
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-repeat-penalty" title="Penalty for repetition. Higher = less repetition. Empty = server default (1.0).">Repeat Penalty</label>
                                     <input type="number" class="pe-input" id="modal-repeat-penalty" step="any" placeholder="default 1.0">
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-presence-penalty" title="OpenAI-style presence penalty. Empty = disabled.">Presence Penalty</label>
+                                    <input type="number" class="pe-input" id="modal-presence-penalty" step="any" placeholder="disabled">
+                                </div>
+                            </div>
+                            <div class="pe-row pe-row-3">
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-enable-thinking" title="Sets --chat-template-kwargs {&quot;enable_thinking&quot;:...}.">Thinking Mode</label>
+                                    <select class="pe-select" id="modal-enable-thinking">
+                                        <option value="">(default)</option>
+                                        <option value="true">Enabled</option>
+                                        <option value="false">Disabled</option>
+                                    </select>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-preserve-thinking" title="Sets --chat-template-kwargs {&quot;preserve_thinking&quot;:...}.">Preserve Thinking</label>
+                                    <select class="pe-select" id="modal-preserve-thinking">
+                                        <option value="">(default)</option>
+                                        <option value="true">Enabled</option>
+                                        <option value="false">Disabled</option>
+                                    </select>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-reasoning" title="Sets --reasoning on|off|auto.">Reasoning</label>
+                                    <select class="pe-select" id="modal-reasoning">
+                                        <option value="">auto</option>
+                                        <option value="on">on</option>
+                                        <option value="off">off</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="pe-row">
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-reasoning-budget" title="Sets --reasoning-budget.">Reasoning Budget</label>
+                                    <input type="number" class="pe-input" id="modal-reasoning-budget" step="1024" placeholder="16384">
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-reasoning-budget-message" title="Sets --reasoning-budget-message.">Reasoning Budget Message</label>
+                                    <input type="text" class="pe-input" id="modal-reasoning-budget-message" placeholder="Final Answer:">
                                 </div>
                             </div>
                         </div>
@@ -2844,6 +2885,14 @@
                                 <option value="downloads">Most downloaded</option>
                                 <option value="trending">Trending</option>
                                 <option value="likes">Most liked</option>
+                            </select>
+                            <select id="spawn-hf-min-size" class="hf-sort-select" title="Minimum model size">
+                                <option value="0">Any size</option>
+                                <option value="7">≥7B</option>
+                                <option value="14">≥14B</option>
+                                <option value="20">≥20B</option>
+                                <option value="30">≥30B</option>
+                                <option value="70">≥70B</option>
                             </select>
                         </div>
                         <!-- Search results (shown when query isn't a repo ID) -->

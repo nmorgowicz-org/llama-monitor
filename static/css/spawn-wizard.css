@@ -2281,6 +2281,29 @@
   text-align: center;
 }
 
+/* ── Load more button ─────────────────────────────────────────────────────── */
+
+.hf-load-more-btn {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted, #94a3b8);
+  background: transparent;
+  border: none;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  cursor: pointer;
+  text-align: center;
+  transition: color 0.15s, background 0.15s;
+}
+.hf-load-more-btn:hover {
+  color: #a5b4fc;
+  background: rgba(99,102,241,0.07);
+}
+[data-theme="light"] .hf-load-more-btn { border-top-color: rgba(17,24,39,0.08); }
+[data-theme="light"] .hf-load-more-btn:hover { color: #4f46e5; background: rgba(99,102,241,0.05); }
+
 /* ── File type badges in GGUF list ────────────────────────────────────────── */
 
 .hf-file-badge {
