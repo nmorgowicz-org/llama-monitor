@@ -651,13 +651,13 @@ function bindEvents() {
   // Prevent the fit toggle label's click from bubbling to the overlay
   dom.fitEnableLabel?.addEventListener('click', e => e.stopPropagation());
 
-  // When toggles cause layout shifts, reset the hardware step column scrolls
-  // so the top of the form stays visible (wizard-body is overflow:hidden).
+  // When toggles cause layout shifts, gently reset scroll only if there is
+  // actual overflow; this avoids “blank center” when content jumps out of view.
   const resetHwScroll = () => {
     const main = document.querySelector('#wizard-step-2 .wizard-main');
     const sidebar = document.querySelector('.hw-vram-sidebar');
-    if (main) main.scrollTop = 0;
-    if (sidebar) sidebar.scrollTop = 0;
+    if (main && main.scrollHeight > main.clientHeight + 2) main.scrollTop = 0;
+    if (sidebar && sidebar.scrollHeight > sidebar.clientHeight + 2) sidebar.scrollTop = 0;
   };
   dom.fitEnableCheck?.addEventListener('change', resetHwScroll);
   dom.kvUnifiedCheck?.addEventListener('change', resetHwScroll);
@@ -3225,14 +3225,33 @@ function _showMetalLimitFallback(btn, errorMsg, manualCmd) {
 
   const fallback = document.createElement('div');
   fallback.className = 'metal-limit-fallback';
-  fallback.innerHTML = `
-    <div class="metal-limit-fallback-error">${errorMsg}</div>
-    <div class="metal-limit-fallback-hint">Run this in Terminal instead:</div>
-    <div class="metal-limit-fallback-cmd-row">
-      <code class="metal-limit-fallback-cmd">${manualCmd}</code>
-      <button type="button" class="metal-limit-fallback-copy">Copy</button>
-    </div>
-  `;
+
+  const errorDiv = document.createElement('div');
+  errorDiv.className = 'metal-limit-fallback-error';
+  errorDiv.textContent = errorMsg || '';
+
+  const hintDiv = document.createElement('div');
+  hintDiv.className = 'metal-limit-fallback-hint';
+  hintDiv.textContent = 'Run this in Terminal instead:';
+
+  const cmdRow = document.createElement('div');
+  cmdRow.className = 'metal-limit-fallback-cmd-row';
+
+  const codeEl = document.createElement('code');
+  codeEl.className = 'metal-limit-fallback-cmd';
+  codeEl.textContent = manualCmd || '';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'metal-limit-fallback-copy';
+  copyBtn.textContent = 'Copy';
+
+  cmdRow.appendChild(codeEl);
+  cmdRow.appendChild(copyBtn);
+
+  fallback.appendChild(errorDiv);
+  fallback.appendChild(hintDiv);
+  fallback.appendChild(cmdRow);
   fallback.querySelector('.metal-limit-fallback-copy').addEventListener('click', () => {
     navigator.clipboard.writeText(manualCmd).then(() => {
       showToast('Copied to clipboard', 'success');
@@ -4262,7 +4281,7 @@ function buildSpawnPayload() {
     ngram_spec: false,
     spec_type: specType,
     spec_draft_n_max: mtpActive ? (h.mtpDraftNMax || 2) : undefined,
-    draft_model: (dom.draftModelInput?.value || '').trim() || null,
+    draft_model: (dom.draftModelInput?.value || '').trim() || '',
     kv_unified: h.kvUnified || null,
     fit_enabled: h.fitTarget ? true : null,
     fit_target: h.fitTarget || null,
@@ -4426,6 +4445,11 @@ async function _checkBinaryPrereq() {
     if (_platformInfo?.auto_backend === 'metal' && wizardState.hardware.cacheRam == null) {
       wizardState.hardware.cacheRam = 0;
       if (dom.cacheRamInput) dom.cacheRamInput.value = '0';
+    }
+    // Show unified memory note about -cram.
+    if (_platformInfo?.auto_backend === 'metal') {
+      const hint = document.getElementById('unified-cram-hint');
+      if (hint) hint.style.display = '';
     }
 
     if (vData.build) {

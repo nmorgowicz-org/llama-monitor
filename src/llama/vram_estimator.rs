@@ -1898,6 +1898,7 @@ mod tests {
             UseCase::General,
             1,
             1024,
+            false, // not unified memory in this test
         );
         assert!(
             result.context_size >= 100_000,
@@ -1915,8 +1916,14 @@ mod tests {
             head_dim: 128,
             ..Default::default()
         };
-        let opts =
-            quant_comparison_table(27.0, &arch, 32 * 1024 * 1024 * 1024, UseCase::General, 1);
+        let opts = quant_comparison_table(
+            27.0,
+            &arch,
+            32 * 1024 * 1024 * 1024,
+            UseCase::General,
+            1,
+            false,
+        );
         let rec: Vec<_> = opts.iter().filter(|o| o.recommended).collect();
         assert_eq!(rec.len(), 1, "Expected exactly one recommended quant");
     }
@@ -2248,7 +2255,15 @@ mod tests {
         let vram_32gb = 32u64 * 1024 * 1024 * 1024;
 
         // Verify that with n_cpu_moe auto-sizing, it fits on 32GB
-        let result = auto_size(model_bytes, &arch, vram_32gb, UseCase::General, 1, 1024);
+        let result = auto_size(
+            model_bytes,
+            &arch,
+            vram_32gb,
+            UseCase::General,
+            1,
+            1024,
+            false,
+        );
         // Should recommend substantial CPU offload
         assert!(
             result.n_cpu_moe.unwrap_or(0) > 0,

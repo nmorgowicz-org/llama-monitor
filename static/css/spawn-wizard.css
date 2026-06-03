@@ -2961,7 +2961,7 @@
 }
 
 .kv-inline-field select {
-  padding: 7px 10px;
+  padding: 7px 24px 7px 9px;
   font-size: var(--text-xs);
   appearance: none;
   -webkit-appearance: none;
@@ -2969,8 +2969,11 @@
   border-radius: 6px;
   border: 1px solid rgba(255,255,255,0.12);
   background:
-    radial-gradient(circle at top right, rgba(99,102,241,0.12), transparent 28%),
-    linear-gradient(160deg, rgba(15,23,42,0.96), rgba(9,9,11,1));
+    linear-gradient(
+      to bottom,
+      rgba(15,23,42,0.96),
+      rgba(9,9,11,1)
+    );
   color: var(--color-text-primary, #e2e8f0);
   box-shadow:
     0 4px 14px rgba(0,0,0,0.25),
@@ -2979,19 +2982,11 @@
   cursor: pointer;
   transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
   background-image:
-    linear-gradient(
-      to bottom right,
-      transparent 40%,
-      rgba(148,163,253,0.18) 40%,
-      rgba(148,163,253,0.18) 60%,
-      transparent 60%
-    ),
-    radial-gradient(circle at top right, rgba(99,102,241,0.12), transparent 28%),
-    linear-gradient(160deg, rgba(15,23,42,0.96), rgba(9,9,11,1));
-  background-size: 100% 100%, 100% 100%, 100% 100%;
-  background-position: right 9px center, top right, 0 0;
+    url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='rgba(148,163,253,0.7)' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"),
+    linear-gradient(to bottom, rgba(15,23,42,0.96), rgba(9,9,11,1));
+  background-size: 10px 6px, 100% 100%;
+  background-position: right 9px center, 0 0;
   background-repeat: no-repeat;
-  padding-right: 24px;
 }
 
 .kv-inline-field select:focus {
@@ -3006,7 +3001,6 @@
 /* Light theme */
 [data-theme="light"] .kv-inline-field select {
   background:
-    radial-gradient(circle at top left, rgba(99,102,241,0.07), transparent 28%),
     linear-gradient(160deg, #ffffff, #f8fafc);
   border-color: rgba(15,23,42,0.12);
   color: #0f172a;
@@ -4413,7 +4407,14 @@
   border-radius: var(--radius-base);
   overflow: hidden;
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.25);
+  max-height: 340px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
+.spawn-config-card::-webkit-scrollbar { width: 5px; }
+.spawn-config-card::-webkit-scrollbar-track { background: transparent; }
+.spawn-config-card::-webkit-scrollbar-thumb { background: rgba(148,163,253,0.18); border-radius: 999px; }
 .spawn-config-card-header {
   display: flex;
   align-items: center;
