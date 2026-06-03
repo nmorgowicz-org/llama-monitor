@@ -17,6 +17,7 @@ export function getConfig() {
 
     return {
         model_path: p.model_path || '',
+        hf_repo: p.hf_repo || null,
         context_size: p.context_size || 128000,
         ctk: p.ctk || 'q8_0',
         ctv: p.ctv || 'f16',
@@ -34,6 +35,11 @@ export function getConfig() {
         min_p: p.min_p,
         repeat_penalty: p.repeat_penalty,
         presence_penalty: p.presence_penalty ?? null,
+        enable_thinking: p.enable_thinking ?? null,
+        preserve_thinking: p.preserve_thinking ?? null,
+        reasoning: p.reasoning || null,
+        reasoning_budget: p.reasoning_budget ?? null,
+        reasoning_budget_message: p.reasoning_budget_message || null,
         n_cpu_moe: p.n_cpu_moe,
         gpu_layers: p.gpu_layers ?? null,
         mlock: !!p.mlock,
@@ -52,7 +58,14 @@ export function getConfig() {
         draft_min: p.draft_min ?? null,
         draft_max: p.draft_max ?? null,
         spec_ngram_size: p.spec_ngram_size ?? null,
+        spec_draft_n_max: p.spec_draft_n_max ?? null,
         seed: p.seed ?? null,
+        mmproj: p.mmproj || null,
+        alias: p.alias || null,
+        max_tokens: p.max_tokens ?? null,
+        ignore_eos: !!p.ignore_eos,
+        fit_enabled: p.fit_enabled ?? null,
+        fit_target: p.fit_target || null,
         system_prompt_file: p.system_prompt_file || '',
         extra_args: p.extra_args || '',
         bind_host: p.bind_host || '127.0.0.1',
@@ -64,8 +77,8 @@ export function getConfig() {
 
 export async function doStart() {
     const config = getConfig();
-    if (!config.model_path) {
-        showToast('No model path set. Edit the preset to select a model.', 'error');
+    if (!config.model_path && !config.hf_repo) {
+        showToast('No model source set. Edit the preset to select a local model or HuggingFace repo.', 'error');
         return;
     }
 
@@ -117,7 +130,9 @@ export async function doKillLlama() {
     if (btnKill) btnKill.disabled = true;
 
     try {
-        const tokenResp = await fetch('/api/db/admin-token');
+        const tokenResp = await fetch('/api/db/admin-token', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         const tokenData = await tokenResp.json();
         const token = tokenData.token;
         if (!token) {
@@ -155,7 +170,9 @@ export async function doKillLlama() {
 
 export async function doKillLlamaInternal() {
     try {
-        const tokenResp = await fetch('/api/db/admin-token');
+        const tokenResp = await fetch('/api/db/admin-token', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         const tokenData = await tokenResp.json();
         const token = tokenData.token;
         if (!token) return;

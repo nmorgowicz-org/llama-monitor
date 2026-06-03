@@ -126,7 +126,9 @@ export function quickStartSession(sessionId) {
 export async function deleteSession(sessionId) {
     if (!confirm('Delete this session?')) return;
     try {
-        const tokenResp = await fetch('/api/db/admin-token');
+        const tokenResp = await fetch('/api/db/admin-token', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         const tokenData = await tokenResp.json();
         const token = tokenData.token;
         if (!token) {
@@ -294,7 +296,9 @@ export async function saveSession(event) {
     if (url === '/api/sessions/spawn') {
         // spawn requires db-admin-token
         try {
-            const tokenResp = await fetch('/api/db/admin-token');
+            const tokenResp = await fetch('/api/db/admin-token', {
+                headers: window.authHeaders ? window.authHeaders() : {},
+            });
             const tokenData = await tokenResp.json();
             const token = tokenData.token;
             if (!token) {

@@ -1603,12 +1603,12 @@
 
              <details class="modal-section" open>
                  <summary>Local llama-server executable</summary>
-                <p class="modal-help">Choose the actual executable file that starts llama.cpp's HTTP server. Leave it blank to run <code>llama-server</code> from your PATH.</p>
-                <label class="modal-field" title="Path to the llama-server executable file. Leave empty to use PATH.">llama-server executable file
+                <p class="modal-help">Choose the actual executable file that starts llama.cpp's HTTP server. Leave it blank to use llama-monitor's managed default binary location. If you prefer PATH resolution, enter <code>llama-server</code> explicitly.</p>
+                <label class="modal-field" title="Path to the llama-server executable file. Leave blank to use the app default location, or enter llama-server to resolve from PATH.">llama-server executable file
                     <div style="display:flex;gap:6px;">
-                        <input type="text" id="set-server-path" placeholder="llama-server (from $PATH)" style="flex:1;">
+                        <input type="text" id="set-server-path" placeholder="Managed by llama-monitor (default)" style="flex:1;">
                         <button type="button" class="btn-sm btn-preset" id="config-browse-server-path">Browse</button>
-                        <button type="button" class="btn-sm btn-preset" id="config-use-path-btn">Use PATH</button>
+                        <button type="button" class="btn-sm btn-preset" id="config-use-path-btn">Use Default</button>
                     </div>
                 </label>
                 <label class="modal-field" title="Optional process working directory. This is usually left blank.">Process working directory (optional)

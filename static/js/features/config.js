@@ -89,10 +89,10 @@ function saveConfig() {
     showToast('Configuration saved', 'success');
 }
 
-function usePathServerBinary() {
+function useDefaultServerBinary() {
     const input = document.getElementById('set-server-path');
     if (input) input.value = '';
-    showToast('llama-server will be resolved from PATH', 'info');
+    showToast('Using llama-monitor default binary location', 'info');
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -120,7 +120,7 @@ export function initConfig() {
     if (browseServerPath) browseServerPath.addEventListener('click', () => openDeferredFileBrowser('set-server-path', 'executable'));
 
     const usePathBtn = document.getElementById('config-use-path-btn');
-    if (usePathBtn) usePathBtn.addEventListener('click', usePathServerBinary);
+    if (usePathBtn) usePathBtn.addEventListener('click', useDefaultServerBinary);
 
     const browseCwd = document.getElementById('config-browse-cwd');
     if (browseCwd) browseCwd.addEventListener('click', () => openDeferredFileBrowser('set-server-cwd', 'dir'));

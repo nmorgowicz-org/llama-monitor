@@ -8,7 +8,9 @@ let dbAdminToken = null;
 async function ensureDbAdminToken() {
     if (dbAdminToken) return;
     try {
-        const res = await fetch('/api/db/admin-token');
+        const res = await fetch('/api/db/admin-token', {
+            headers: window.authHeaders ? window.authHeaders() : {},
+        });
         if (res.ok) {
             const data = await res.json();
             if (data.token) dbAdminToken = data.token;

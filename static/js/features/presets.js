@@ -23,6 +23,34 @@ function nullableBoolOpt(id) {
     return null;
 }
 
+function isWindowsAbsolutePath(value) {
+    return /^[A-Za-z]:[\\/]/.test(value);
+}
+
+function looksLikeLocalModelSource(value) {
+    const v = (value || '').trim();
+    if (!v) return false;
+    const lower = v.toLowerCase();
+    return v.startsWith('/') ||
+        v.startsWith('./') ||
+        v.startsWith('../') ||
+        v.startsWith('~') ||
+        v.includes('\\') ||
+        isWindowsAbsolutePath(v) ||
+        lower.endsWith('.gguf');
+}
+
+function normalizeModelSourceInput(value) {
+    const input = (value || '').trim();
+    if (!input) {
+        return { model_path: '', hf_repo: null };
+    }
+    if (looksLikeLocalModelSource(input)) {
+        return { model_path: input, hf_repo: null };
+    }
+    return { model_path: '', hf_repo: input };
+}
+
 function clearFieldErrors() {
     document.querySelectorAll('#preset-form .field-error').forEach(el => el.classList.remove('field-error'));
 }
@@ -98,7 +126,7 @@ export function openPresetModal(mode) {
         setVal('modal-preset-id', p.id);
         // Model & Memory
         setVal('modal-name', p.name);
-        setVal('modal-model-path', p.model_path);
+        setVal('modal-model-path', p.model_path || p.hf_repo || '');
         setVal('modal-alias', p.alias || '');
         numOrEmpty('modal-gpu-layers', p.gpu_layers);
         setChk('modal-no-mmap', p.no_mmap);
@@ -175,7 +203,7 @@ export function openPresetModal(mode) {
     }
 
     const presetModel = document.getElementById('modal-model-path')?.value.trim();
-    if (presetModel) _suggestGenerationDefaults(presetModel);
+    if (mode !== 'edit' && presetModel) _suggestGenerationDefaults(presetModel);
     else _renderGenerationPresetPills([]);
 
     // Reset change-summary state
@@ -393,12 +421,14 @@ function _hideSummary() {
 }
 
 function _buildFormPreset(existing) {
+    const modelSource = normalizeModelSourceInput(strVal('modal-model-path'));
     return {
         // Spread ALL existing fields first — preserves wizard-set values not shown in the editor
         ...existing,
         // Override only what the editor manages
         name: strVal('modal-name'),
-        model_path: strVal('modal-model-path'),
+        model_path: modelSource.model_path,
+        hf_repo: modelSource.hf_repo,
         alias: strVal('modal-alias') || null,
         mmproj: strVal('modal-mmproj') || null,
         gpu_layers: intOrNull('modal-gpu-layers'),
@@ -452,7 +482,7 @@ function _buildFormPreset(existing) {
 }
 
 const CHANGE_LABELS = {
-    name: 'Name', model_path: 'Model Path', alias: 'Server Alias', mmproj: 'Multimodal Projector',
+    name: 'Name', model_path: 'Model Path', hf_repo: 'HuggingFace Repo', alias: 'Server Alias', mmproj: 'Multimodal Projector',
     gpu_layers: 'GPU Layers', no_mmap: 'no-mmap', mlock: 'mlock',
     context_size: 'Context Size', ctk: 'KV Key Type', ctv: 'KV Value Type',
     flash_attn: 'Flash Attn', kv_unified: 'KV Unified',
@@ -503,7 +533,7 @@ export async function savePreset(event) {
         document.getElementById('modal-name').classList.add('field-error');
         valid = false;
     }
-    if (!preset.model_path) {
+    if (!preset.model_path && !preset.hf_repo) {
         document.getElementById('modal-model-path').classList.add('field-error');
         valid = false;
     }

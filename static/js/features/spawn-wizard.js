@@ -326,6 +326,8 @@ function applyReducedMotion() {
 
 export function openSpawnWizard(opts = {}) {
   if (!dom.overlay) return;
+  document.getElementById('models-modal')?.classList.remove('open');
+  window.closePresetsPanel?.();
   dom.overlay.classList.add('open');
   refreshHfTokenState();
 
@@ -336,9 +338,12 @@ export function openSpawnWizard(opts = {}) {
     // Pre-load a local model path and jump straight to step 2 (model).
     wizardState.model.source = 'local';
     wizardState.model.path = opts.localPath;
+    wizardState.model.hfRepo = '';
+    wizardState.model.hfFile = '';
     wizardState.model.delivery = 'local_file';
     wizardState.model.localMeta = opts.localModel || null;
     if (dom.modelPathInput) dom.modelPathInput.value = opts.localPath;
+    if (dom.hfRepoInput) dom.hfRepoInput.value = '';
     // Select the "local" source card visually.
     dom.modelSourceCards?.forEach(c => {
       c.classList.toggle('selected', c.dataset.source === 'local');
@@ -4224,7 +4229,9 @@ async function spawnServer() {
     const payload = buildSpawnPayload();
     setStatusText('Starting llama-server…'); setProgress(30);
     // /api/sessions/spawn requires the db-admin-token, not the llama-server API token.
-    const tokenResp = await fetch('/api/db/admin-token');
+    const tokenResp = await fetch('/api/db/admin-token', {
+      headers: window.authHeaders ? window.authHeaders() : {},
+    });
     const tokenData = tokenResp.ok ? await tokenResp.json().catch(() => ({})) : {};
     const adminToken = tokenData.token;
     if (!adminToken) { throw new Error('Authentication required. Could not retrieve admin token.'); }

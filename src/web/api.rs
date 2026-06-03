@@ -5810,7 +5810,10 @@ fn api_get_settings_full(
                 )) as Box<dyn warp::reply::Reply>;
             }
 
-            let settings = state.ui_settings.lock().unwrap().clone();
+            let mut settings = state.ui_settings.lock().unwrap().clone();
+            if settings.llama_server_path.is_empty() {
+                settings.llama_server_path = cfg.llama_server_path.display().to_string();
+            }
             Box::new(warp::reply::json(&settings))
         })
 }

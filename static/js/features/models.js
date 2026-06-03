@@ -1,6 +1,7 @@
 // ── Models ────────────────────────────────────────────────────────────────────
 // Models modal: open, close, load, refresh, delete, and HF download tab.
 
+import { sessionState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { showToast } from './toast.js';
 import {
@@ -92,6 +93,8 @@ export function openModelsModalForSwitch() {
 function closeModelsModal() {
     document.getElementById('models-modal')?.classList.remove('open');
 }
+
+export { closeModelsModal };
 
 async function loadModels() {
     const grid = document.getElementById('models-list');
@@ -263,6 +266,7 @@ function buildModelCard(m) {
     const isSplit = m.is_split;
     const mmproj = isMmproj(m);
     const tags = Array.isArray(m.tags) ? m.tags : [];
+    const relatedPresets = mmproj ? [] : findPresetsForModel(m);
 
     const card = document.createElement('div');
     card.className = 'mm-model-card';
@@ -350,9 +354,48 @@ function buildModelCard(m) {
         card.appendChild(barWrap);
     }
 
+    if (relatedPresets.length) {
+        const presetMeta = document.createElement('div');
+        presetMeta.className = 'mm-card-meta';
+        presetMeta.textContent = buildPresetSummary(relatedPresets);
+        presetMeta.title = relatedPresets.map(formatPresetSummaryLine).join('\n');
+        card.appendChild(presetMeta);
+    }
+
     // Actions row
     const actions = document.createElement('div');
     actions.className = 'mm-card-actions';
+
+    if (!mmproj) {
+        const useBtn = document.createElement('button');
+        useBtn.type = 'button';
+        useBtn.className = 'mm-action-btn';
+        useBtn.title = relatedPresets.length ? 'Build a new preset from this model' : 'Open this model in the spawn wizard';
+        useBtn.textContent = relatedPresets.length ? 'New Preset' : 'Use in Wizard';
+        useBtn.addEventListener('click', () => {
+            closeModelsModal();
+            import('./spawn-wizard.js').then(({ openSpawnWizard }) => {
+                openSpawnWizard({ localPath: m.path || '', localModel: m });
+            });
+        });
+        actions.appendChild(useBtn);
+
+        if (relatedPresets.length) {
+            const editBtn = document.createElement('button');
+            editBtn.type = 'button';
+            editBtn.className = 'mm-action-btn';
+            editBtn.title = 'Edit the saved preset that already uses this model';
+            editBtn.textContent = 'Edit Preset';
+            editBtn.addEventListener('click', () => {
+                const preset = relatedPresets[0];
+                const select = document.getElementById('preset-select');
+                if (select) select.value = preset.id;
+                closeModelsModal();
+                import('./presets.js').then(({ openPresetModal }) => openPresetModal('edit'));
+            });
+            actions.appendChild(editBtn);
+        }
+    }
 
     const copyBtn = document.createElement('button');
     copyBtn.type = 'button';
@@ -389,6 +432,36 @@ function buildModelCard(m) {
 
     card.appendChild(actions);
     return card;
+}
+
+function findPresetsForModel(model) {
+    const path = model.path || '';
+    if (!path) return [];
+    return (sessionState.presets || []).filter(preset => preset.model_path === path);
+}
+
+function formatPresetSummaryLine(preset) {
+    const parts = [preset.name || 'Unnamed preset'];
+    if (preset.context_size) parts.push(`${Math.round(preset.context_size / 1024)}k ctx`);
+    const ctk = preset.ctk || '';
+    const ctv = preset.ctv || '';
+    if (ctk || ctv) parts.push(`KV ${ctk || 'default'}/${ctv || 'default'}`);
+    if (preset.reasoning) parts.push(`reasoning ${preset.reasoning}`);
+    else if (preset.enable_thinking != null) parts.push(preset.enable_thinking ? 'thinking on' : 'thinking off');
+    if (preset.mmproj) parts.push('vision');
+    if (preset.bind_host === '0.0.0.0') parts.push('LAN');
+    if (preset.api_key) parts.push('API key');
+    return parts.join(' · ');
+}
+
+function buildPresetSummary(presets) {
+    if (!presets.length) return '';
+    const first = presets[0];
+    const summary = formatPresetSummaryLine(first);
+    if (presets.length === 1) {
+        return `Saved preset: ${summary}`;
+    }
+    return `Saved presets (${presets.length}): ${summary} +${presets.length - 1} more`;
 }
 
 async function deleteModel(path, filename) {
