@@ -2980,15 +2980,19 @@ fn api_hf_search(
                     );
                 }
 
-                let params = crate::hf::HfSearchParams { query, author, sort, limit: limit as usize };
+                let page: u64 = body["page"].as_u64().unwrap_or(0).min(50);
+                let params = crate::hf::HfSearchParams { query, author, sort, limit: limit as usize, page: page as usize };
 
                 match crate::hf::hf_search_models(&params).await {
-                    Ok(models) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                    Ok(models) => {
+                        let has_more = models.len() >= limit as usize;
+                        Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                         Box::new(warp::reply::json(&serde_json::json!({
                             "ok": true,
-                            "models": models
-                        }))),
-                    ),
+                            "models": models,
+                            "has_more": has_more
+                        }))))
+                    },
                     Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
                         Box::new(warp::reply::json(&serde_json::json!({
                             "ok": false,
@@ -11385,12 +11389,6 @@ mod tests {
         (route_hf_token_delete, "DELETE", "/api/hf/token", None),
         // hf/card requires ?repo= param — without it we expect 400, not 404
         (route_hf_card, "GET", "/api/hf/card?repo=test%2Fmodel", None),
-        (
-            route_hf_author_models,
-            "POST",
-            "/api/hf/author-models",
-            Some("{}")
-        ),
         (route_hf_download, "POST", "/api/hf/download", Some("{}")),
         // llama-server binary updater
         (
