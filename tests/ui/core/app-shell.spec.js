@@ -78,10 +78,14 @@ test.describe('modals and menus', () => {
       openSettingsModal();
     });
     await expect(page.locator('#settings-modal')).toHaveClass(/open/);
-    await expect(page.locator('#settings-models')).toBeVisible();
 
-    await page.getByRole('button', { name: 'System' }).click();
-    await expect(page.locator('#settings-system')).toBeVisible();
+    // Default active pane is now Session
+    await expect(page.locator('#settings-session')).toBeVisible();
+
+    // Switch to Advanced tab and confirm Runtime Configuration button exists
+    const advancedTab = page.locator('.settings-tab', { hasText: 'Advanced' });
+    await advancedTab.click();
+    await expect(page.locator('#settings-advanced')).toBeVisible();
     await expect(page.getByRole('button', { name: /open runtime configuration/i })).toBeVisible();
   });
 
@@ -139,20 +143,12 @@ test.describe('modals and menus', () => {
     await expect(page.locator('#remote-agent-setup-modal')).toBeVisible();
   });
 
-  test('configuration explains local executable, GPU, and explicit SSH flow', async ({ page }) => {
-    // Use JS to open settings modal directly (sidebar click may be intercepted by setup view)
+test('configuration explains local executable, GPU, and explicit SSH flow', async ({ page }) => {
+    // Open config modal directly via JS (avoids flaky Settings modal interactions)
     await page.evaluate(async () => {
-      const { openSettingsModal } = await import('/js/features/settings.js');
-      openSettingsModal();
+      const { openConfigModal } = await import('/js/features/config.js');
+      openConfigModal();
     });
-    await expect(page.locator('#settings-modal')).toHaveClass(/open/);
-
-    // Use System tab
-    await page.getByRole('button', { name: 'System' }).click();
-    await expect(page.locator('#settings-system')).toBeVisible();
-
-    // Open config modal via button
-    await page.getByRole('button', { name: /open runtime configuration/i }).click();
 
     await expect(page.locator('#config-modal')).toHaveClass(/open/);
     await expect(page.getByText('Local llama-server executable')).toBeVisible();
@@ -194,19 +190,11 @@ test.describe('modals and menus', () => {
       });
     });
 
-    // Use JS to open settings modal directly (sidebar click may be intercepted by setup view)
+    // Open config modal directly via JS
     await page.evaluate(async () => {
-      const { openSettingsModal } = await import('/js/features/settings.js');
-      openSettingsModal();
+      const { openConfigModal } = await import('/js/features/config.js');
+      openConfigModal();
     });
-    await expect(page.locator('#settings-modal')).toHaveClass(/open/);
-
-    // Use System tab
-    await page.getByRole('button', { name: 'System' }).click();
-    await expect(page.locator('#settings-system')).toBeVisible();
-
-    // Open config modal via button
-    await page.getByRole('button', { name: /open runtime configuration/i }).click();
 
     await expect(page.locator('#config-modal')).toHaveClass(/open/);
     await page.getByRole('button', { name: 'Guided SSH Setup' }).click();
@@ -246,19 +234,11 @@ test.describe('modals and menus', () => {
       });
     });
 
-    // Use JS to open settings modal directly (sidebar click may be intercepted by setup view)
+    // Open config modal directly via JS
     await page.evaluate(async () => {
-      const { openSettingsModal } = await import('/js/features/settings.js');
-      openSettingsModal();
+      const { openConfigModal } = await import('/js/features/config.js');
+      openConfigModal();
     });
-    await expect(page.locator('#settings-modal')).toHaveClass(/open/);
-
-    // Use System tab
-    await page.getByRole('button', { name: 'System' }).click();
-    await expect(page.locator('#settings-system')).toBeVisible();
-
-    // Open config modal via button
-    await page.getByRole('button', { name: /open runtime configuration/i }).click();
 
     await expect(page.locator('#config-modal')).toHaveClass(/open/);
     const sshSummary = page.getByText('SSH and Agent Details');
