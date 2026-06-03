@@ -85,26 +85,42 @@ export async function doStart() {
     const btnStart = document.getElementById('btn-start');
     if (btnStart) btnStart.disabled = true;
 
-    await doKillLlamaInternal();
+    try {
+        await doKillLlamaInternal();
 
-    const resp = await fetch('/api/start', {
-        method: 'POST',
-        headers: window.authHeaders
-            ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
-            : { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-    });
-    const data = await resp.json();
+        const resp = await fetch('/api/start', {
+            method: 'POST',
+            headers: window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config),
+        });
 
-    if (!data.ok) {
-        showToast('Start failed: ' + (data.error || 'unknown'), 'error');
-        hideConnectingState();
-    } else {
+        if (!resp.ok) {
+            const text = await resp.text().catch(() => 'Request failed');
+            showToast('Start failed: ' + text, 'error');
+            hideConnectingState();
+            return;
+        }
+
+        const data = await resp.json().catch(() => ({}));
+
+        if (!data.ok) {
+            showToast('Start failed: ' + (data.error || 'server responded with an error'), 'error');
+            hideConnectingState();
+            return;
+        }
+
         setTuneConfig(config);
         switchView('monitor');
         hideConnectingState();
         showTunePanel();
         setTimeout(() => restorePreviousPosition(), 600);
+    } catch (e) {
+        showToast('Start failed: ' + (e.message || 'network or server error'), 'error');
+        hideConnectingState();
+    } finally {
+        if (btnStart) btnStart.disabled = false;
     }
 }
 
