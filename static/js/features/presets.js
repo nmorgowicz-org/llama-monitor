@@ -126,7 +126,11 @@ export function openPresetModal(mode) {
         setVal('modal-preset-id', p.id);
         // Model & Memory
         setVal('modal-name', p.name);
-        setVal('modal-model-path', p.model_path || p.hf_repo || '');
+        // Prefill model field:
+        // - If model_path present, treat as local file.
+        // - Else if hf_repo present, treat as HF repo.
+        const modelValue = p.model_path || p.hf_repo || '';
+        setVal('modal-model-path', modelValue);
         setVal('modal-alias', p.alias || '');
         numOrEmpty('modal-gpu-layers', p.gpu_layers);
         setChk('modal-no-mmap', p.no_mmap);
@@ -482,7 +486,7 @@ function _buildFormPreset(existing) {
 }
 
 const CHANGE_LABELS = {
-    name: 'Name', model_path: 'Model Path', hf_repo: 'HuggingFace Repo', alias: 'Server Alias', mmproj: 'Multimodal Projector',
+    name: 'Name', model_path: 'Model (local path or HF repo)', hf_repo: 'HuggingFace Repo', alias: 'Server Alias', mmproj: 'Multimodal Projector',
     gpu_layers: 'GPU Layers', no_mmap: 'no-mmap', mlock: 'mlock',
     context_size: 'Context Size', ctk: 'KV Key Type', ctv: 'KV Value Type',
     flash_attn: 'Flash Attn', kv_unified: 'KV Unified',
