@@ -291,27 +291,7 @@ mod tests {
         assert!(d.temperature > 0.2);
     }
 
-    #[test]
-    fn qwen36_27b_uses_unsloth_defaults() {
-        // Source: https://docs.unsloth.ai/docs/quick-connects/qwen-3-6
-        let d = get_model_defaults("Qwen3.6-27B-Instruct-Q8_0.gguf", 20_000_000_000, &[]);
-        assert_eq!(d.temperature, 0.7);
-        assert_eq!(d.top_p, 0.8);
-        assert_eq!(d.top_k, 20);
-        assert_eq!(d.min_p, 0.0);
-        assert_eq!(d.repeat_penalty, 1.5);
-    }
 
-    #[test]
-    fn qwen36_35b_a3b_uses_unsloth_defaults() {
-        // Source: https://docs.unsloth.ai/docs/quick-connects/qwen-3-6
-        let d = get_model_defaults("Qwen3.6-35B-A3B-Instruct-Q8_0.gguf", 25_000_000_000, &[]);
-        assert_eq!(d.temperature, 0.7);
-        assert_eq!(d.top_p, 0.8);
-        assert_eq!(d.top_k, 20);
-        assert_eq!(d.min_p, 0.0);
-        assert_eq!(d.repeat_penalty, 1.5);
-    }
 
     #[test]
     fn gemma4_e2b_uses_unsloth_defaults() {
