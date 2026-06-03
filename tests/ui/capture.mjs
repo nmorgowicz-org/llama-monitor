@@ -125,6 +125,10 @@ Scenarios:
     sidebar          Sidebar, FTS search flyout, context menu, title filter
     chat-history-qa  History Q&A panel (ask questions about conversation)
 
+  Models and Presets
+    models-v2        Models modal: discovery summary, third-party scan, HF download panel
+    preset-editor    Preset editor: model/context, GPU, and advanced tabs
+
   Configuration
     settings         Settings modal, preferences, persona, models, shortcuts
     tls              TLS modes and ACME (Certificates tab, each TLS mode, custom certs, ACME config)
@@ -133,8 +137,9 @@ Scenarios:
     dashboard        Server tab, GPU section
 
   Spawn Wizard
-    spawn-wizard     Wizard step 1 profiles, step 2 HF discover/community picks/quant advisor, step 3 VRAM
-    spawn-wizard-gif Animated GIF walking through the spawn wizard steps (1→2→3)
+    spawn-wizard           Wizard step 1 profiles, step 2 HF discover/community picks/quant advisor, step 3 VRAM
+    spawn-wizard-gif       Animated GIF walking through the spawn wizard steps (1→2→3)
+    spawn-wizard-hf-download  HF download panel: idle options and simulated progress
 
   Performance & Updates
     tune-panel       Performance benchmark panel on server tab
@@ -905,7 +910,16 @@ async function scenarioWelcome(ctx, options) {
     // two screenshots tell a clear before→after story.
     const spawnBtn = await page.$('#setup-spawn-wizard-btn');
     if (spawnBtn) {
-        await spawnBtn.click();
+        try {
+            await spawnBtn.click();
+        } catch {
+            // Fallback click via DOM when Puppeteer thinks it’s not clickable.
+            await page.evaluate(() => {
+                (document.getElementById('setup-spawn-wizard-btn')
+                    || document.querySelector('#view-setup button:has-text("New Server Wizard")'))
+                    ?.click();
+            });
+        }
         await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 8000 }).catch(() => {
             console.log('[CAPTURE] Wizard overlay did not open; falling back to welcome shot');
         });
@@ -1110,9 +1124,13 @@ async function scenarioGuidedGen(ctx, options) {
     // Fresh chat to reduce context buildup
     await createFreshChat(page);
     await sleep(500);
-    // Use a short prompt to set context
+    // Use a short prompt to set context (best-effort; continue if server is slow)
     await sendChatPrompt(page, 'Brainstorm 3 product names for a CLI tool that monitors GPUs.');
-    await waitForChatComplete(page);
+    try {
+        await waitForChatComplete(page);
+    } catch (e) {
+        console.log(`[CAPTURE] guided-gen: chat complete timed out, continuing with UI captures... ${e.message}`);
+    }
     await sleep(2000);
 
     await page.evaluate(async () => {
@@ -1517,6 +1535,93 @@ async function scenarioModels(ctx, options) {
     await page.waitForSelector('#models-modal.open', { timeout: 8000 });
     await sleep(1500);
     await captureShot(page, 'panels-models-modal.png', { fullPage: true });
+}
+
+async function scenarioModelsV2(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    if (!options.noAttach) {
+        try { await attachToServer(page); } catch {}
+    }
+
+    // 1. Open models modal and capture initial discovery view.
+    await page.evaluate(() => window.openModelsModal?.());
+    await page.waitForSelector('#models-modal.open', { timeout: 8000 });
+    await sleep(1500);
+    await captureShot(page, 'models-discovery-overview.png', { fullPage: true });
+
+    // 2. Show third-party scan section if present (expand for richer context).
+    await page.evaluate(() => {
+        const section = document.querySelector('#models-modal .third-party-section');
+        if (section) {
+            section.setAttribute('open', '');
+            section.style.maxHeight = 'none';
+        }
+    });
+    await sleep(500);
+    await captureShot(page, 'models-third-party-scan.png', { fullPage: true });
+
+    // 3. Simulate HF file selection and show HF download panel inside models modal.
+    await page.evaluate(() => {
+        const panel = document.getElementById('mm-hf-download-panel');
+        if (!panel) return;
+        const idle = document.getElementById('mm-hf-dlp-idle');
+        const fileName = document.getElementById('mm-hf-dlp-file-name');
+        const destPath = document.getElementById('mm-hf-dlp-dest-path');
+
+        if (idle && panel) {
+            panel.style.display = 'block';
+            panel.style.maxHeight = 'none';
+            if (fileName) fileName.textContent = 'llama-3.1-8b-instruct-Q4_K_M.gguf';
+            if (destPath) destPath.textContent = '~/.config/llama-monitor/models/';
+        }
+    });
+    await sleep(500);
+    await captureShot(page, 'models-hf-download-panel.png', { fullPage: true });
+}
+
+async function scenarioPresetEditor(ctx, options) {
+    const { page, baseUrl } = ctx;
+    await gotoApp(page, baseUrl);
+    if (!options.noAttach) {
+        try { await attachToServer(page); } catch {}
+    }
+
+    // 1. Open preset editor via "New"
+    const newBtn = await page.$('#preset-new-btn');
+    if (!newBtn) {
+        console.log('[CAPTURE] #preset-new-btn not found; skipping preset-editor scenario');
+        return;
+    }
+    await newBtn.click();
+    await page.waitForSelector('#preset-modal', { timeout: 6000 });
+    await sleep(800);
+
+    // Capture Model+Context section (default active)
+    await captureShot(page, 'preset-editor-model-tab.png', { fullPage: true });
+
+    // 2. Capture GPU section
+    await page.evaluate(() => {
+        const gpuNav = document.querySelector('#preset-modal .preset-editor-nav [data-section="gpu"]');
+        if (gpuNav) gpuNav.click();
+    });
+    await sleep(500);
+    await captureShot(page, 'preset-editor-gpu-tab.png', { fullPage: true });
+
+    // 3. Capture Advanced section
+    await page.evaluate(() => {
+        const advNav = document.querySelector('#preset-modal .preset-editor-nav [data-section="advanced"]');
+        if (advNav) advNav.click();
+    });
+    await sleep(500);
+    await captureShot(page, 'preset-editor-advanced-tab.png', { fullPage: true });
+
+    // 4. Close preset modal
+    await page.evaluate(() => {
+        const close = document.getElementById('preset-modal-close');
+        if (close) close.click();
+    });
+    await sleep(300);
 }
 
 async function scenarioPanels(ctx, options) {
@@ -2851,6 +2956,105 @@ async function scenarioSpawnWizard(ctx, options) {
     await sleep(400);
 }
 
+// Spawn wizard HF download panel: idle options + simulated progress.
+async function scenarioSpawnWizardHfDownload(ctx, options) {
+    const { page, baseUrl } = ctx;
+
+    await gotoApp(page, baseUrl);
+    if (!options.noAttach) {
+        try { await attachToServer(page); } catch {}
+    }
+
+    // Open wizard via JS (safer than DOM click in headless).
+    await page.evaluate(async () => {
+        const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+        openSpawnWizard();
+    });
+    await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 8000 });
+    await sleep(400);
+
+    // Choose a profile quickly.
+    await page.evaluate(() => {
+        (document.querySelector('.profile-card[data-profile="power"]')
+            || document.querySelector('.profile-card'))?.click();
+    });
+    await sleep(200);
+    await page.evaluate(() => {
+        (document.querySelector('.usecase-card[data-usecase="general"]')
+            || document.querySelector('.usecase-card'))?.click();
+    });
+    await sleep(200);
+
+    // Next to step 1 (model), then directly jump to step 2 (VRAM) with injected HF model.
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-1')?.classList.contains('active'),
+        { timeout: 6000 }
+    ).catch(() => {});
+
+    // Inject model so VRAM bar and HF download panel behave.
+    await page.evaluate(async () => {
+        const { wizardState } = await import('/js/features/spawn-wizard.js');
+        wizardState.model.source   = 'hf';
+        wizardState.model.delivery = 'download';
+        wizardState.model.hfRepo   = 'bartowski/Meta-Llama-3.1-8B-Instruct-GGUF';
+        wizardState.model.hfFile   = 'Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf';
+        wizardState.model.paramB   = 8;
+        wizardState.model.modelBytes = 4_920_000_000;
+        wizardState.vram.available = 64 * 1024 * 1024 * 1024;
+    });
+
+    // Move to step 2 (VRAM).
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-2')?.classList.contains('active'),
+        { timeout: 6000 }
+    ).catch(() => {
+        console.log('[CAPTURE] Step 2 (Hardware) wait timed out; continuing.');
+    });
+    await sleep(400);
+
+    // Ensure the HF download panel is visible in "idle" state.
+    await page.evaluate(() => {
+        const panel = document.getElementById('hf-download-panel');
+        const idle = document.getElementById('hf-dlp-idle');
+        if (panel && idle) {
+            panel.style.display = 'block';
+        }
+    });
+    await sleep(400);
+
+    // 1) Capture idle HF download panel.
+    await captureShot(page, 'spawn-wizard-hf-download-idle.png', { fullPage: true });
+
+    // 2) Simulate a progress state for a second shot.
+    await page.evaluate(() => {
+        const panel = document.getElementById('hf-download-panel');
+        const progress = document.getElementById('hf-dlp-progress');
+        const bar = document.getElementById('hf-dlp-bar');
+        const pct = document.getElementById('hf-dlp-progress-pct');
+        const fileEl = document.getElementById('hf-dlp-progress-file');
+        const stats = document.getElementById('hf-dlp-stats');
+
+        if (panel && progress) {
+            panel.style.display = 'block';
+            progress.style.display = 'block';
+            if (bar) bar.style.width = '64%';
+            if (pct) pct.textContent = '64%';
+            if (fileEl) fileEl.textContent = 'Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf';
+            if (stats) stats.textContent = '3.18 GB / 4.92 GB · 98 MiB/s · 17m left';
+        }
+    });
+    await sleep(400);
+
+    // Capture simulated progress.
+    await captureShot(page, 'spawn-wizard-hf-download-progress.png', { fullPage: true });
+
+    // Close wizard.
+    await page.keyboard.press('Escape');
+    await sleep(400);
+}
+
 // Animated GIF walking through the spawn wizard: welcome → profile → model → VRAM → summary.
 //
 // Design: fully sequential — each wizard state is fully reached before frames are captured.
@@ -2883,15 +3087,10 @@ async function scenarioSpawnWizardGif(ctx, _options) {
     await capture(1500);
 
     // ── Open wizard ───────────────────────────────────────────────────────────
-    const spawnBtn = await page.$('#setup-spawn-wizard-btn');
-    if (spawnBtn) {
-        await spawnBtn.click();
-    } else {
-        await page.evaluate(async () => {
-            const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
-            openSpawnWizard();
-        });
-    }
+    await page.evaluate(async () => {
+        const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+        openSpawnWizard();
+    });
     await page.waitForSelector('#spawn-wizard-overlay.open', { timeout: 8000 });
     // Hide the binary prereq banner — it's expected info but clutters the GIF.
     await page.evaluate(() => {
@@ -3087,6 +3286,9 @@ const SCENARIOS = {
     // Chat features
     'guided-gen': scenarioGuidedGen,
     sidebar: scenarioSidebar,
+    // Models and presets
+    'models-v2': scenarioModelsV2,
+    'preset-editor': scenarioPresetEditor,
     // Configuration
     settings: scenarioSettings,
     tls: scenarioTls,
@@ -3097,6 +3299,7 @@ const SCENARIOS = {
     // Spawn wizard
     'spawn-wizard': scenarioSpawnWizard,
     'spawn-wizard-gif': scenarioSpawnWizardGif,
+    'spawn-wizard-hf-download': scenarioSpawnWizardHfDownload,
     // New features (spawn-llama-server-v2)
     'tune-panel': scenarioTunePanel,
     'llama-updater': scenarioLlamaUpdater,
