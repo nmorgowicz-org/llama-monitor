@@ -384,10 +384,41 @@ function buildModelCard(m) {
             const editBtn = document.createElement('button');
             editBtn.type = 'button';
             editBtn.className = 'mm-action-btn';
-            editBtn.title = 'Edit the saved preset that already uses this model';
-            editBtn.textContent = 'Edit Preset';
+            editBtn.title = relatedPresets.length === 1
+                ? 'Edit the saved preset that uses this model'
+                : `Edit one of the ${relatedPresets.length} presets using this model`;
+
+            if (relatedPresets.length === 1) {
+                editBtn.textContent = 'Edit Preset';
+            } else {
+                editBtn.textContent = 'Edit Presets';
+            }
+
             editBtn.addEventListener('click', () => {
-                const preset = relatedPresets[0];
+                const presets = relatedPresets;
+                if (presets.length === 1) {
+                    const preset = presets[0];
+                    const select = document.getElementById('preset-select');
+                    if (select) select.value = preset.id;
+                    closeModelsModal();
+                    import('./presets.js').then(({ openPresetModal }) => openPresetModal('edit'));
+                    return;
+                }
+
+                // Multiple presets: ask which one to edit
+                const lines = presets.map((p, i) =>
+                    `${i + 1}. ${p.name || 'Unnamed preset'} (${(p.context_size || 0) ? Math.round(p.context_size / 1024) + 'k ctx' : 'default'})`
+                ).join('\n');
+                const choice = prompt(
+                    `This model is used by multiple presets.\nSelect the preset to edit (enter number):\n\n${lines}`
+                );
+                if (choice == null) return;
+                const index = parseInt(choice, 10) - 1;
+                if (Number.isNaN(index) || index < 0 || index >= presets.length) {
+                    showToast('Invalid choice', 'error');
+                    return;
+                }
+                const preset = presets[index];
                 const select = document.getElementById('preset-select');
                 if (select) select.value = preset.id;
                 closeModelsModal();
@@ -465,7 +496,13 @@ function buildPresetSummary(presets) {
 }
 
 async function deleteModel(path, filename) {
-    if (!confirm('Delete ' + filename + '?\n\nThis will permanently remove the file from disk.')) return;
+    const presets = findPresetsForModel({ path });
+    const extra = presets.length
+        ? `\nThis will break presets that use this model:\n- ${presets.map(p => p.name || 'Unnamed preset').join('\n- ')}\n`
+        : '';
+    if (!confirm(
+        `Delete this model file?\n\n${filename}\nPath: ${path}\n\nThis will permanently remove the file from disk.${extra}\nThis action cannot be undone.`
+    )) return;
 
     try {
         const resp = await fetch('/api/models/file', {
