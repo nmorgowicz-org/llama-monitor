@@ -150,13 +150,20 @@ export function renderLaunchGrid() {
     const activePresetId = document.getElementById('preset-select')?.value || '';
 
     if (!hasUserPresets) {
+        // Onboarding hint (first-time / no presets)
+        const hint = document.createElement('div');
+        hint.className = 'launch-grid-hint';
+        hint.style.gridColumn = '1 / -1';
+        hint.textContent = 'First time? Use the wizard to pick a model and configure your server.';
+        grid.appendChild(hint);
+
         // No user presets: New Config goes first so it's the obvious CTA
         const newCard = _buildNewConfigCard(true);
-        newCard.style.animationDelay = '0ms';
+        newCard.style.animationDelay = '80ms';
         grid.appendChild(newCard);
         presets.forEach((preset, i) => {
             const card = _buildLaunchCard(preset, activePresetId);
-            card.style.animationDelay = `${(i + 1) * 55}ms`;
+            card.style.animationDelay = `${(i + 2) * 55}ms`;
             grid.appendChild(card);
         });
     } else {
@@ -312,13 +319,16 @@ export function updateRunningCardHighlight() {
 
 export async function loadRecentSessions() {
     try {
-        const headers = window.authHeaders || (() => ({ 'Authorization': 'Bearer ' + (localStorage.getItem('llama-monitor-api-token') || '') }));
-        const resp = await fetch('/api/sessions/recent', { headers: headers() });
-        if (!resp.ok) return;
+        const headers = (typeof window.authHeaders === 'function') ? window.authHeaders() : {};
+        const resp = await fetch('/api/sessions/recent', { headers });
+        if (!resp.ok) {
+            // Recent sessions are optional; silently ignore 4xx/5xx to avoid noisy errors.
+            return;
+        }
         const data = await resp.json();
         renderRecentEndpoints(data.sessions, data.active_session_id);
-    } catch (e) {
-        // Silent fail — first-run users won't have this endpoint
+    } catch {
+        // Silent fail — first-run users or unreachable backend won't have this endpoint.
     }
 }
 

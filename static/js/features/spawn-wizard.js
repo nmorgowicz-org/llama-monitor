@@ -956,6 +956,10 @@ async function _startCompanionMmprojDownload(repo, mmprojHfPath, modelHfPath) {
 
 // Wrapper for hfSearch used by wizard (wires callbacks)
 function hfSearchForWizard({ query, author, sort, limit }) {
+  if (!wizardState.model.hfTokenSet) {
+    showValidationError('HuggingFace token not set. Set it in the top-right panel to search for models.');
+    return;
+  }
   const minParamB = parseFloat(dom.hfMinSize?.value || '0') || 0;
   // When a size filter is active we need a large batch so enough results survive
   // the client-side filter. Without a filter, a smaller page is better UX.
@@ -1450,6 +1454,14 @@ async function loadQuantAdvisor() {
   const availVram = effectiveAvailBytes();
   if (!availVram) return; // need VRAM to give useful numbers
 
+  // Show loading hint so user knows we're working
+  if (dom.quantAdvisorSubtitle) {
+    dom.quantAdvisorSubtitle.textContent = 'Analyzing model…';
+  }
+  if (dom.quantAdvisor) {
+    dom.quantAdvisor.style.display = '';
+  }
+
   try {
     const headers = window.authHeaders
       ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
@@ -1471,12 +1483,20 @@ async function loadQuantAdvisor() {
     };
 
     const resp = await fetch('/api/vram/quant-compare', { method: 'POST', headers, body: JSON.stringify(body) });
-    if (!resp.ok) return;
+    if (!resp.ok) {
+      if (dom.quantAdvisorSubtitle) dom.quantAdvisorSubtitle.textContent = 'Failed to analyze model.';
+      return;
+    }
     const data = await resp.json();
-    if (!data.ok || !data.quants) return;
+    if (!data.ok || !data.quants) {
+      if (dom.quantAdvisorSubtitle) dom.quantAdvisorSubtitle.textContent = 'Failed to analyze model.';
+      return;
+    }
 
     renderQuantAdvisor(data.quants, availVram);
-  } catch {}
+  } catch {
+    if (dom.quantAdvisorSubtitle) dom.quantAdvisorSubtitle.textContent = 'Failed to analyze model.';
+  }
 }
 
 function renderQuantAdvisor(quants, availVram) {
@@ -3824,23 +3844,54 @@ function renderSummary() {
     dom.summaryList.appendChild(row);
   });
 
-  // Warnings
+  // Warnings — stronger and more explicit for risky configs
   if (dom.summaryWarnings) {
     const warns = [];
     if (!modelDisplay || modelDisplay === '(none)') warns.push('No model selected.');
     const ratio = availVram > 0 && modelBytes > 0 ? (modelBytes + kvSize) / availVram : 0;
-    if (ratio > 1.2) warns.push("Configuration likely exceeds VRAM. Reduce context size or KV quant.");
-    else if (ratio > 1.0) warns.push("VRAM is at risk. Consider reducing context or using KV quantization.");
-    else if (ratio > 0.88) warns.push("VRAM is tight. Monitor for OOM errors.");
-    if (wizardState.useCase === 'agentic' && kvBpe(ctxK) < 1.0) warns.push("q4_0 KV not recommended for agentic workflows — reduces tool-call coherence.");
-    if (wizardState.access.bindHost === '0.0.0.0' && !wizardState.access.apiKey) warns.push('LAN-visible endpoint without a server API key. Set one unless you intentionally want an open local-network server.');
-    else if (wizardState.access.bindHost === '0.0.0.0') warns.push('LAN-visible endpoint enabled. Make sure clients know the API key you set.');
+
+    if (ratio > 1.5) {
+      warns.push("CRITICAL: Your configuration heavily exceeds available VRAM. The server will likely crash or run extremely slowly. Reduce context size, increase KV quant, or choose a smaller model.");
+    } else if (ratio > 1.2) {
+      warns.push("HIGH RISK: Configuration likely exceeds VRAM. The server may crash. Reduce context size or use a stronger KV quant (e.g., q4_K_M).");
+    } else if (ratio > 1.0) {
+      warns.push("RISKY: VRAM is exceeded or barely covered. Expect instability. Consider reducing context or using KV quantization.");
+    } else if (ratio > 0.88) {
+      warns.push("VRAM is tight. Minor increases in context or requests can trigger OOM errors. Watch GPU memory.");
+    }
+
+    // High context size: warn if user sets a very large context that strains VRAM
+    if (hw.contextSize >= 32768) {
+      const ctxRisk = ratio > 0.9;
+      warns.push(
+        ctxRisk
+          ? "Very large context size selected. This puts significant pressure on VRAM and may slow generation."
+          : "Large context size selected. This improves long tasks but uses more VRAM and may slow generation."
+      );
+    }
+
+    // Agentic use case KV recommendation
+    if (wizardState.useCase === 'agentic' && kvBpe(ctxK) < 1.0) {
+      warns.push("q4_0 KV not recommended for agentic workflows — reduces tool-call coherence. Prefer q8_0 or q6_K when VRAM allows.");
+    }
+
+    // Binding/host visibility warnings
+    if (wizardState.access.bindHost === '0.0.0.0' && !wizardState.access.apiKey) {
+      warns.push('LAN-visible endpoint without a server API key. Set one unless you intentionally want an open local-network server.');
+    } else if (wizardState.access.bindHost === '0.0.0.0') {
+      warns.push('LAN-visible endpoint enabled. Make sure clients know the API key you set.');
+    }
+
     if (warns.length) {
       dom.summaryWarnings.style.display = '';
       dom.summaryWarnings.innerHTML = '';
       const textWrap = document.createElement('div');
       textWrap.className = 'summary-warnings-text';
-      warns.forEach(w => { const p = document.createElement('div'); p.textContent = w; textWrap.appendChild(p); });
+      warns.forEach(w => {
+        const p = document.createElement('div');
+        p.textContent = w;
+        textWrap.appendChild(p);
+      });
       dom.summaryWarnings.appendChild(textWrap);
     } else {
       dom.summaryWarnings.style.display = 'none';
