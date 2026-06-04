@@ -30,6 +30,20 @@ function nullableBoolOpt(id) {
     return null;
 }
 
+function getStructuredOutputMode() {
+    return document.getElementById('modal-structured-output-mode')?.value || '';
+}
+
+function setStructuredOutputMode(mode) {
+    const normalized = mode === 'grammar' || mode === 'json_schema' ? mode : '';
+    const modeEl = document.getElementById('modal-structured-output-mode');
+    const grammarWrap = document.getElementById('modal-grammar-wrap');
+    const schemaWrap = document.getElementById('modal-json-schema-wrap');
+    if (modeEl) modeEl.value = normalized;
+    if (grammarWrap) grammarWrap.style.display = normalized === 'grammar' ? '' : 'none';
+    if (schemaWrap) schemaWrap.style.display = normalized === 'json_schema' ? '' : 'none';
+}
+
 function isWindowsAbsolutePath(value) {
     return /^[A-Za-z]:[\\/]/.test(value);
 }
@@ -200,6 +214,9 @@ export function openPresetModal(mode) {
         setVal('modal-fit-target', p.fit_target || '');
         _toggleFitTarget(p.fit_enabled ?? false);
         setVal('modal-system-prompt-file', p.system_prompt_file);
+        setStructuredOutputMode(p.json_schema ? 'json_schema' : p.grammar ? 'grammar' : '');
+        setVal('modal-grammar', p.grammar || '');
+        setVal('modal-json-schema', p.json_schema || '');
         setVal('modal-extra-args', p.extra_args);
     } else {
         title.textContent = 'New Preset';
@@ -213,6 +230,7 @@ export function openPresetModal(mode) {
         setVal('modal-parallel-slots', 1);
         _toggleFitTarget(false);
         _toggleSpecFields('');
+        setStructuredOutputMode('');
     }
 
     const presetModel = document.getElementById('modal-model-path')?.value.trim();
@@ -492,6 +510,8 @@ function _buildFormPreset(existing) {
         fit_enabled: document.getElementById('modal-fit-enabled').checked || null,
         fit_target: strVal('modal-fit-target') || null,
         system_prompt_file: strVal('modal-system-prompt-file'),
+        grammar: getStructuredOutputMode() === 'grammar' ? (document.getElementById('modal-grammar').value.trim() || null) : null,
+        json_schema: getStructuredOutputMode() === 'json_schema' ? (document.getElementById('modal-json-schema').value.trim() || null) : null,
         extra_args: strVal('modal-extra-args'),
     };
 }
@@ -515,7 +535,7 @@ const CHANGE_LABELS = {
     draft_min: 'Draft Min', draft_max: 'Draft Max', spec_draft_n_max: 'MTP Depth', draft_model: 'Draft Model',
     bind_host: 'Bind Host', api_key: 'API Key', max_tokens: 'Max Tokens',
     seed: 'Seed', ignore_eos: 'Ignore EOS',
-    system_prompt_file: 'System Prompt File', extra_args: 'Extra Args',
+    system_prompt_file: 'System Prompt File', grammar: 'Grammar', json_schema: 'JSON Schema', extra_args: 'Extra Args',
 };
 
 function _buildChangeSummary(existing, incoming) {
@@ -756,6 +776,7 @@ async function _suggestGenerationDefaults(modelPath) {
         fill('modal-min-p', defaults.min_p ?? null);
         fill('modal-repeat-penalty', defaults.repeat_penalty ?? null);
         fill('modal-presence-penalty', defaults.presence_penalty ?? null);
+        fill('modal-max-tokens', defaults.max_tokens ?? null);
         _fillSelectIfEmpty('modal-enable-thinking', defaults.enable_thinking);
         _fillSelectIfEmpty('modal-preserve-thinking', defaults.preserve_thinking);
         _fillSelectIfEmpty('modal-reasoning', defaults.reasoning ? 'on' : 'off');
@@ -816,6 +837,7 @@ function _applyGenerationPreset(preset) {
     numOrEmpty('modal-min-p', preset.min_p);
     numOrEmpty('modal-repeat-penalty', preset.repeat_penalty);
     numOrEmpty('modal-presence-penalty', preset.presence_penalty);
+    numOrEmpty('modal-max-tokens', preset.max_tokens);
     setOpt('modal-enable-thinking', preset.enable_thinking == null ? '' : String(!!preset.enable_thinking));
     setOpt('modal-preserve-thinking', preset.preserve_thinking == null ? '' : String(!!preset.preserve_thinking));
     setOpt('modal-reasoning', preset.reasoning ? 'on' : 'off');
@@ -896,6 +918,10 @@ export function initPresets() {
     // Spec type dropdown shows/hides relevant fields
     document.getElementById('modal-spec-type')?.addEventListener('change', function() {
         _toggleSpecFields(this.value);
+    });
+
+    document.getElementById('modal-structured-output-mode')?.addEventListener('change', function() {
+        setStructuredOutputMode(this.value);
     });
 
     // Bind preset form submit

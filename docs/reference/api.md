@@ -506,6 +506,7 @@ Example:
   "enter_to_send": true,
   "context_notes_sidebar_expanded": false,
   "context_notes_intro_hidden": false,
+  "persist_thinking_content": false,
   "custom_suggestion_categories": {}
 }
 ```

@@ -4181,7 +4181,8 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.sampling-field input {
+.sampling-field input,
+.sampling-field textarea {
   font-size: 13px;
   background: rgba(15,23,42,0.6);
   border: 1px solid rgba(255,255,255,0.1);
@@ -4190,7 +4191,14 @@
   padding: 5px 8px;
   width: 100%;
 }
-.sampling-field input:focus {
+.sampling-field textarea {
+  resize: vertical;
+  min-height: 110px;
+  font-family: var(--font-mono, "SFMono-Regular", "SF Mono", ui-monospace, monospace);
+  line-height: 1.45;
+}
+.sampling-field input:focus,
+.sampling-field textarea:focus {
   outline: none;
   border-color: rgba(99,102,241,0.5);
 }
@@ -4212,6 +4220,7 @@
   border-color: rgba(99,102,241,0.5);
 }
 [data-theme="light"] .sampling-field input,
+[data-theme="light"] .sampling-field textarea,
 [data-theme="light"] .sampling-field select {
   background-color: #f8fafc;
   border-color: rgba(0,0,0,0.12);
@@ -4883,5 +4892,33 @@
 [data-theme="light"] .hw-tag-picker-pills .mm-tag-pill.mm-tag-pill--active {
   color: rgba(5, 150, 105, 0.9);
   background: rgba(5, 150, 105, 0.08);
+
+/* ==========================================================================
+   Info Tip — reusable ⓘ icon with a hover tooltip
+   ========================================================================== */
+
+.info-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  border-radius: 50%;
+  color: var(--color-text-muted);
+  background: rgba(99, 102, 241, 0.1);
+  cursor: help;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+.info-tip:hover {
+  opacity: 0.7;
+}
+[data-theme="light"] .info-tip {
+  color: rgba(30, 41, 59, 0.5);
+  background: rgba(99, 102, 241, 0.08);
+}
   border-color: rgba(5, 150, 105, 0.2);
 }

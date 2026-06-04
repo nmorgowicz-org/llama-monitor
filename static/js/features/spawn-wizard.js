@@ -200,12 +200,16 @@ export const wizardState = {
     minP: null,
     repeatPenalty: null,
     presencePenalty: null,
+    maxTokens: null,
     seed: null,
+    outputMode: '',
     enableThinking: null,
     preserveThinking: null,
     reasoningBudget: null,
     reasoningMode: null,
     reasoningBudgetMessage: null,
+    grammar: '',
+    jsonSchema: '',
     alias: '',
     extraArgs: '',
   },
@@ -483,6 +487,13 @@ function cacheDom() {
   // Step 4 (Summary)
   dom.summaryList      = document.getElementById('spawn-summary-list');
   dom.summaryWarnings  = document.getElementById('spawn-summary-warnings');
+  dom.topKInput        = document.getElementById('spawn-top-k');
+  dom.maxTokensInput   = document.getElementById('spawn-max-tokens');
+  dom.outputModeSelect = document.getElementById('spawn-output-mode');
+  dom.grammarWrap      = document.getElementById('spawn-grammar-wrap');
+  dom.grammarInput     = document.getElementById('spawn-grammar');
+  dom.jsonSchemaWrap   = document.getElementById('spawn-json-schema-wrap');
+  dom.jsonSchemaInput  = document.getElementById('spawn-json-schema');
   // Step 5 (Preset Parameters)
   dom.presetParamsTable  = document.getElementById('preset-params-table');
   dom.savePresetBtn      = document.getElementById('spawn-save-preset-btn');
@@ -4920,6 +4931,7 @@ function _applyPresetToHardware(preset) {
   if (preset.repeat_penalty != null) h.repeatPenalty = preset.repeat_penalty;
   h.presencePenalty = (preset.presence_penalty != null && preset.presence_penalty > 0)
     ? preset.presence_penalty : null;
+  h.maxTokens = preset.max_tokens != null ? preset.max_tokens : null;
   h.enableThinking   = preset.enable_thinking   ?? null;
   h.preserveThinking = preset.preserve_thinking ?? null;
   h.reasoningBudget  = preset.reasoning_budget  ?? null;
@@ -4996,6 +5008,7 @@ async function _fetchAndApplyModelSamplingDefaults() {
     if (h.presencePenalty == null && defaults.presence_penalty != null && defaults.presence_penalty > 0) {
       h.presencePenalty = defaults.presence_penalty;
     }
+    if (h.maxTokens == null && defaults.max_tokens != null) h.maxTokens = defaults.max_tokens;
     if (h.enableThinking == null && defaults.enable_thinking != null) h.enableThinking = defaults.enable_thinking;
     if (h.preserveThinking == null && defaults.preserve_thinking != null) h.preserveThinking = defaults.preserve_thinking;
     if (h.reasoningMode == null && defaults.reasoning != null) {
@@ -5234,9 +5247,11 @@ function _syncSamplingFields() {
   setVal('spawn-temperature', h.temperature);
   setVal('spawn-seed', h.seed);
   setVal('spawn-top-p', h.topP);
+  setVal('spawn-top-k', h.topK);
   setVal('spawn-min-p', h.minP);
   setVal('spawn-repeat-penalty', h.repeatPenalty);
   setVal('spawn-presence-penalty', h.presencePenalty);
+  setVal('spawn-max-tokens', h.maxTokens);
   if (dom.bindHostSelect) dom.bindHostSelect.value = wizardState.access.bindHost || '127.0.0.1';
   if (dom.portInput) dom.portInput.value = String(wizardState.access.port || 8001);
   if (dom.apiKeyInput) dom.apiKeyInput.value = wizardState.access.apiKey || '';
@@ -5244,6 +5259,24 @@ function _syncSamplingFields() {
   if (aliasEl) aliasEl.value = h.alias || '';
   const extraArgsEl = document.getElementById('spawn-extra-args');
   if (extraArgsEl) extraArgsEl.value = h.extraArgs || '';
+  _syncStructuredOutputFields();
+}
+
+function _structuredOutputMode() {
+  const h = wizardState.hardware;
+  if (h.outputMode) return h.outputMode;
+  if (h.jsonSchema) return 'json_schema';
+  if (h.grammar) return 'grammar';
+  return '';
+}
+
+function _syncStructuredOutputFields() {
+  const mode = _structuredOutputMode();
+  if (dom.outputModeSelect) dom.outputModeSelect.value = mode;
+  if (dom.grammarWrap) dom.grammarWrap.style.display = mode === 'grammar' ? '' : 'none';
+  if (dom.jsonSchemaWrap) dom.jsonSchemaWrap.style.display = mode === 'json_schema' ? '' : 'none';
+  if (dom.grammarInput) dom.grammarInput.value = wizardState.hardware.grammar || '';
+  if (dom.jsonSchemaInput) dom.jsonSchemaInput.value = wizardState.hardware.jsonSchema || '';
 }
 
 function _syncThinkingFields() {
@@ -5341,10 +5374,41 @@ function _bindSamplingFields() {
   bind('spawn-temperature', 'temperature');
   bind('spawn-seed', 'seed', true);
   bind('spawn-top-p', 'topP');
+  bind('spawn-top-k', 'topK', true);
   bind('spawn-min-p', 'minP');
   bind('spawn-repeat-penalty', 'repeatPenalty');
   bind('spawn-presence-penalty', 'presencePenalty');
+  bind('spawn-max-tokens', 'maxTokens', true);
   _bindThinkingFields();
+
+  if (dom.outputModeSelect && !dom.outputModeSelect.dataset.bound) {
+    dom.outputModeSelect.dataset.bound = '1';
+    dom.outputModeSelect.addEventListener('change', () => {
+      const mode = dom.outputModeSelect.value || '';
+      wizardState.hardware.outputMode = mode;
+      if (!mode) {
+        wizardState.hardware.grammar = '';
+        wizardState.hardware.jsonSchema = '';
+      }
+      if (mode === 'grammar') wizardState.hardware.jsonSchema = '';
+      if (mode === 'json_schema') wizardState.hardware.grammar = '';
+      _syncStructuredOutputFields();
+    });
+  }
+  if (dom.grammarInput && !dom.grammarInput.dataset.bound) {
+    dom.grammarInput.dataset.bound = '1';
+    dom.grammarInput.addEventListener('input', () => {
+      wizardState.hardware.outputMode = 'grammar';
+      wizardState.hardware.grammar = dom.grammarInput.value || '';
+    });
+  }
+  if (dom.jsonSchemaInput && !dom.jsonSchemaInput.dataset.bound) {
+    dom.jsonSchemaInput.dataset.bound = '1';
+    dom.jsonSchemaInput.addEventListener('input', () => {
+      wizardState.hardware.outputMode = 'json_schema';
+      wizardState.hardware.jsonSchema = dom.jsonSchemaInput.value || '';
+    });
+  }
 
   // Alias and extra args — string fields, no parsing
   const bindStr = (id, key) => {
@@ -5483,9 +5547,11 @@ function _renderPresetParamsStep() {
       rows: [
         { label: 'Temperature', value: fmtSampling(h.temperature) },
         { label: 'Top-P', value: fmtSampling(h.topP) },
+        { label: 'Top-K', value: fmtSampling(h.topK) },
         { label: 'Min-P', value: fmtSampling(h.minP) },
         { label: 'Repeat penalty', value: fmtSampling(h.repeatPenalty) },
         { label: 'Presence penalty', value: fmtSampling(h.presencePenalty) },
+        { label: 'Max tokens', value: h.maxTokens != null ? String(h.maxTokens) : '— (server default)' },
         { label: 'Seed', value: h.seed != null ? String(h.seed) : '— (random)' },
       ],
     },
@@ -5502,6 +5568,19 @@ function _renderPresetParamsStep() {
     if (h.reasoningBudget != null) rows.push({ label: 'Reasoning budget', value: `${h.reasoningBudget} tokens` });
     if (h.reasoningBudgetMessage) rows.push({ label: 'Budget message', value: h.reasoningBudgetMessage });
     if (rows.length) sections.push({ label: 'Thinking & Reasoning', rows });
+  }
+
+  const outputMode = _structuredOutputMode();
+  if (outputMode) {
+    sections.push({
+      label: 'Response Shaping',
+      rows: [{
+        label: outputMode === 'grammar' ? 'Grammar' : 'JSON schema',
+        value: outputMode === 'grammar'
+          ? ((h.grammar || '').split('\n')[0] || 'configured')
+          : ((h.jsonSchema || '').split('\n')[0] || 'configured'),
+      }],
+    });
   }
 
   sections.push({
@@ -5801,6 +5880,7 @@ function buildSpawnPayload() {
     min_p: h.minP != null ? h.minP : null,
     repeat_penalty: h.repeatPenalty != null ? h.repeatPenalty : null,
     presence_penalty: h.presencePenalty != null && h.presencePenalty > 0 ? h.presencePenalty : null,
+    max_tokens: h.maxTokens != null ? h.maxTokens : null,
     seed: h.seed != null ? h.seed : null,
     // Thinking / reasoning
     enable_thinking: h.enableThinking,
@@ -5808,6 +5888,8 @@ function buildSpawnPayload() {
     reasoning_budget: h.reasoningBudget,
     reasoning: h.reasoningMode || null,
     reasoning_budget_message: h.reasoningBudgetMessage || null,
+    grammar: h.grammar.trim() ? h.grammar.trim() : null,
+    json_schema: h.jsonSchema.trim() ? h.jsonSchema.trim() : null,
     // Image token budget — only passed when mmproj is active.
     // Values are derived from model family; user can override via extra_args.
     image_min_tokens: mmprojLocal ? _imageMinTokens(m) : null,

@@ -151,7 +151,9 @@ Shows a human-readable review of all selected parameters. Health checks:
 This step also includes:
 - Editable sampling defaults
 - Model-family mode pills from `/api/model-defaults` so users can switch between recommended presets before editing individual fields
+- Additional sampling controls for `top_k` and `max_tokens`
 - Thinking and reasoning controls when the selected model family exposes them, including `enable_thinking`, `preserve_thinking`, reasoning mode, reasoning budget, and reasoning budget message
+- A **Response shaping** section for constrained output using either `--grammar` (GBNF) or `--json-schema`
 - Network controls for `Port`, `Bind host`, and optional `Server API key`
 - Inline edit shortcuts back to Model and Hardware so the user can make one last adjustment without restarting the flow
 
@@ -165,6 +167,63 @@ One-click launch. Shows live status (starting → waiting for endpoint → runni
 
 - The spawned `llama-server` process is started with `--no-warmup`.
 - Readiness is confirmed by a backend probe against the active session, so launches with a server API key still report status correctly.
+
+---
+
+## Structured Output (Grammar / JSON Schema)
+
+Available in Step 4 (Summary) of the spawn wizard and the preset editor.
+
+Structured output forces the model to produce output matching a specific format instead of free-form text. The model cannot generate tokens that violate the rules — it's mechanically enforced at inference time, not just instructed via the prompt. This is useful for agent pipelines, data extraction, or any app that needs a guaranteed response shape.
+
+### Options
+
+| Option | What it is | When to use |
+|--------|-----------|-------------|
+| Freeform | No constraints | Normal chatting (default) |
+| GBNF Grammar | Rules defining a custom output language | Fine-grained control, compact formats |
+| JSON Schema | JSON structure definition | App contracts, most structured output use cases |
+
+### GBNF Grammar
+
+GBNF (Grouped Backus-Naur Form) defines rules for what the model can generate. The model can only produce tokens that match these rules. Think of it as a custom language the model is forced to write in.
+
+Community grammars are available at [llama.cpp/grammars](https://github.com/ggml-org/llama.cpp/tree/master/grammars).
+
+Example — a grammar that produces valid JSON objects:
+```
+root ::= object
+object ::= "{" ws string ":" value ("," string ":" value)* "}" ws
+```
+
+### JSON Schema
+
+JSON Schema defines the shape of the JSON the model returns (field names, types, required fields). Llama-server converts the schema to a GBNF grammar behind the scenes, so you get the same mechanical enforcement without writing grammar rules by hand.
+
+Easier than raw GBNF for most cases.
+
+Example — a schema requiring a `answer` field:
+```json
+{
+  "type": "object",
+  "properties": {
+    "answer": { "type": "string" }
+  },
+  "required": ["answer"]
+}
+```
+
+### Performance
+
+Structured output adds a small per-token validation overhead. For simple schemas, this is typically a few percent slower. Complex grammars can be more noticeable, especially at long context lengths.
+
+### API Payload
+
+When a grammar or JSON schema is configured, the spawn payload includes:
+- `grammar`: the GBNF grammar string (passed as `--grammar`)
+- `json_schema`: the JSON schema object (passed as `--json-schema`)
+
+Only one should be set at a time. If both are configured, the output mode setting from the UI determines which takes precedence.
 
 ---
 

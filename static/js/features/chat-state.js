@@ -1,7 +1,7 @@
 // ── Chat State & Persistence ─────────────────────────────────────────────────
 // Tab collection, active tab, busy flags, persistence scheduling, tab CRUD.
 
-import { chat } from '../core/app-state.js';
+import { chat, settingsState } from '../core/app-state.js';
 import { refreshTopCockpit } from './nav.js';
 import { showToast, showToastWithActions } from './toast.js';
 
@@ -113,6 +113,14 @@ function normalizeChatTab(tab) {
     };
 }
 
+function sanitizeThinkingContent(messages) {
+    if (settingsState.persist_thinking_content) return messages || [];
+    return (messages || []).map(message => {
+        if (!message?.thinking_content) return message;
+        return { ...message, thinking_content: undefined };
+    });
+}
+
 // ── Tab Initialization ────────────────────────────────────────────────────────
 
 export async function initChatTabs() {
@@ -207,6 +215,9 @@ async function _loadTabMessages(id) {
             headers: window.authHeaders ? window.authHeaders() : {},
         });
         const full = await resp.json();
+        if (Array.isArray(full?.messages)) {
+            full.messages = sanitizeThinkingContent(full.messages);
+        }
         Object.assign(tab, full);
         tab._loaded = true;
     } catch (e) {
@@ -549,9 +560,32 @@ export function normalizeTabForSave(tab) {
         const msg = { ...m };
         delete msg.cumulativeInputTokens;
         delete msg.cumulativeOutputTokens;
+        if (!settingsState.persist_thinking_content) {
+            delete msg.thinking_content;
+        }
         return msg;
     });
     return t;
+}
+
+function stripThinkingFromLoadedTabs() {
+    let changed = false;
+    for (const tab of chat.tabs || []) {
+        if (!Array.isArray(tab?.messages)) continue;
+        let tabChanged = false;
+        tab.messages = tab.messages.map(message => {
+            if (!message?.thinking_content) return message;
+            tabChanged = true;
+            return { ...message, thinking_content: undefined };
+        });
+        if (tabChanged) {
+            changed = true;
+            scheduleChatPersist(tab);
+        }
+    }
+    if (changed) {
+        chatViewBindings.renderChatMessages?.();
+    }
 }
 
 export function scheduleChatPersist(tab) {
@@ -686,6 +720,11 @@ export function autoResizeChatInput() {
 
   export function initChatState() {
     window.addEventListener('beforeunload', flushChatPersist);
+    window.addEventListener('settings-applied', event => {
+        if (event?.detail?.persist_thinking_content === false) {
+            stripThinkingFromLoadedTabs();
+        }
+    });
     chat.trashPurgeTimer = setInterval(purgeOldTrash, TRASH_PURGE_CHECK_INTERVAL_MS);
     purgeOldTrash();
 

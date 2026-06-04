@@ -60,6 +60,19 @@ test.describe('Settings - Guided Generation', () => {
     expect(await checkbox.isChecked()).toBe(!initial);
   });
 
+  test('toggle saved thinking history', async ({ page }) => {
+    await openGuidedGenSettings(page);
+
+    const checkbox = page.locator('#settings-persist-thinking-content');
+    const initial = await checkbox.isChecked();
+    await page.evaluate(() => {
+      const cb = document.getElementById('settings-persist-thinking-content');
+      cb.checked = !cb.checked;
+      cb.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(await checkbox.isChecked()).toBe(!initial);
+  });
+
   test('sidebar width slider updates display', async ({ page }) => {
     await openGuidedGenSettings(page);
 

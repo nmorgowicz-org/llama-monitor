@@ -136,6 +136,8 @@ export const settingsState = {
     context_notes_sidebar_expanded: false,
     /** Shared context notes intro visibility */
     context_notes_intro_hidden: false,
+    /** Whether assistant thinking blocks should be restored from saved chat history */
+    persist_thinking_content: false,
     /** Shared custom suggestion categories */
     custom_suggestion_categories: {},
 };

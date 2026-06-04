@@ -233,7 +233,11 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
             if (sidebar) sidebar.scrollTop = Math.max(0, sidebar.scrollHeight);
         });
 
-        await page.locator('#spawn-fit-enable').check();
+        await page.evaluate(() => {
+            const cb = document.getElementById('spawn-fit-enable');
+            cb.checked = true;
+            cb.dispatchEvent(new Event('change', { bubbles: true }));
+        });
         await expect(nextBtn).toBeDisabled();
         await expect(page.locator('#wizard-footer-hint')).toContainText('Enter a fit target in MB');
 
@@ -258,6 +262,34 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         expect(scrollState.mainScrollTop).toBe(0);
         expect(scrollState.sidebarScrollTop).toBe(0);
         await expect(page.locator('#wizard-step-2 .wizard-section-title').first()).toContainText('Configure hardware');
+    });
+
+    test('review step exposes structured output and full sampling defaults', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        await page.evaluate(async () => {
+            const { openSpawnWizard, wizardState } = await import('/js/features/spawn-wizard.js');
+            openSpawnWizard();
+            wizardState.model.source = 'local';
+            wizardState.model.path = '/tmp/Qwen3.6-27B-Instruct-Q4_K_M.gguf';
+            wizardState.model.paramB = 27;
+            wizardState.model.modelBytes = 16 * 1024 * 1024 * 1024;
+        });
+
+        await page.locator('#wizard-next-btn').click();
+        await page.fill('#spawn-model-path', '/tmp/Qwen3.6-27B-Instruct-Q4_K_M.gguf');
+        await page.locator('#wizard-next-btn').click();
+        await page.locator('#wizard-next-btn').click();
+
+        await expect(page.locator('#wizard-step-3')).toHaveClass(/active/);
+        await expect(page.locator('#spawn-top-k')).toBeVisible();
+        await expect(page.locator('#spawn-max-tokens')).toBeVisible();
+        await expect(page.locator('#spawn-output-mode')).toBeVisible();
+
+        await page.selectOption('#spawn-output-mode', 'json_schema');
+        await expect(page.locator('#spawn-json-schema-wrap')).toBeVisible();
+        await expect(page.locator('#spawn-grammar-wrap')).toBeHidden();
     });
 
     test('Error state: no internet (HF search returns empty)', async ({ page }) => {

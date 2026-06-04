@@ -105,6 +105,7 @@ export function collectSettings() {
         enter_to_send: settingsState.enter_to_send !== false,
         context_notes_sidebar_expanded: !!settingsState.context_notes_sidebar_expanded,
         context_notes_intro_hidden: !!settingsState.context_notes_intro_hidden,
+        persist_thinking_content: !!document.getElementById('settings-persist-thinking-content')?.checked,
         custom_suggestion_categories: settingsState.custom_suggestion_categories || {},
         suggestion_prompts: {
             general: document.getElementById('settings-prompt-general')?.value || '',
@@ -299,7 +300,11 @@ export function applySettings(s) {
     settingsState.enter_to_send = s.enter_to_send !== false;
     settingsState.context_notes_sidebar_expanded = !!s.context_notes_sidebar_expanded;
     settingsState.context_notes_intro_hidden = !!s.context_notes_intro_hidden;
+    settingsState.persist_thinking_content = !!s.persist_thinking_content;
     settingsState.custom_suggestion_categories = s.custom_suggestion_categories || {};
+
+    const persistThinkingEl = document.getElementById('settings-persist-thinking-content');
+    if (persistThinkingEl) persistThinkingEl.checked = settingsState.persist_thinking_content;
 
     const dateFmtEl = document.getElementById('chat-date-format');
     if (dateFmtEl) dateFmtEl.value = settingsState.chat_date_format;

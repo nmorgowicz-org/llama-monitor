@@ -174,6 +174,9 @@ pub struct UiSettings {
     /// Shared context notes intro visibility.
     #[serde(default)]
     pub context_notes_intro_hidden: bool,
+    /// Whether assistant thinking blocks should be stored in chat history and restored later.
+    #[serde(default)]
+    pub persist_thinking_content: bool,
     /// Shared custom suggestion categories used by the suggestions workspace.
     #[serde(default)]
     pub custom_suggestion_categories: HashMap<String, CustomSuggestionCategory>,
@@ -378,6 +381,7 @@ impl Default for UiSettings {
             enter_to_send: default_true(),
             context_notes_sidebar_expanded: false,
             context_notes_intro_hidden: false,
+            persist_thinking_content: false,
             custom_suggestion_categories: HashMap::new(),
         }
     }

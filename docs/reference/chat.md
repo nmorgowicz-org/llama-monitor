@@ -523,7 +523,8 @@ Thinking blocks are currently a live-session UI feature, not a durable storage f
 
 - Assistant `thinking_content` can appear in the browser while a reply streams
 - JSON export can include `thinking_content` if it is still present in the in-memory tab object
-- The current SQLite tab/message schema does not store `thinking_content`, so those blocks are not restored after a reload from `chat.db`
+- By default, the app does not restore `thinking_content` from `chat.db`
+- **Settings → Chat → Saved Thinking History** enables opt-in persistence and restore for users who want durable reasoning traces in chat history
 
 ## Guided-Generation Settings Ownership
 

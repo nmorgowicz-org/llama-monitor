@@ -3942,11 +3942,12 @@ pub fn api_routes(
     let chat_storage = state.chat_storage.clone();
     let chat_list_tabs = api_list_tabs(chat_storage.clone(), app_config.clone());
     let chat_create_tab = api_create_tab(chat_storage.clone(), app_config.clone());
-    let chat_get_tab = api_get_tab(chat_storage.clone(), app_config.clone());
-    let chat_put_tab = api_put_tab(chat_storage.clone(), app_config.clone());
+    let chat_get_tab = api_get_tab(state.clone(), chat_storage.clone(), app_config.clone()).boxed();
+    let chat_put_tab = api_put_tab(state.clone(), chat_storage.clone(), app_config.clone()).boxed();
     let chat_delete_tab = api_delete_tab(chat_storage.clone(), app_config.clone());
     let chat_patch_tab_meta = api_patch_tab_meta(chat_storage.clone(), app_config.clone());
-    let chat_append_messages = api_append_messages(chat_storage.clone(), app_config.clone());
+    let chat_append_messages =
+        api_append_messages(state.clone(), chat_storage.clone(), app_config.clone()).boxed();
     let chat_reorder_tabs = api_reorder_tabs(chat_storage.clone(), app_config.clone());
     let chat_search = api_chat_search(chat_storage.clone(), app_config.clone());
     let chat_archive_tab = api_archive_tab(chat_storage.clone(), app_config.clone());
@@ -7331,6 +7332,7 @@ fn api_create_tab(
 
 // GET /api/chat/tabs/:id — full tab with messages
 fn api_get_tab(
+    state: AppState,
     storage: Arc<ChatStorage>,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -7341,14 +7343,22 @@ fn api_get_tab(
         .and_then(
             move |id: String, auth: Option<String>, store: Arc<ChatStorage>| {
                 let cfg = app_config.clone();
+                let state = state.clone();
                 async move {
                     if !check_api_token(&auth, &cfg) {
                         return Ok(unauthorized_api_token());
                     }
                     match store.get_tab(&id) {
-                        Ok(tab) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                            warp::reply::json(&tab),
-                        )),
+                        Ok(mut tab) => {
+                            if !state.ui_settings.lock().unwrap().persist_thinking_content {
+                                for msg in &mut tab.messages {
+                                    msg.thinking_content = None;
+                                }
+                            }
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&tab),
+                            ))
+                        }
                         Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                             warp::reply::json(
                                 &serde_json::json!({"ok":false,"error":e.to_string()}),
@@ -7362,6 +7372,7 @@ fn api_get_tab(
 
 // PUT /api/chat/tabs/:id — full save (meta + replace messages)
 fn api_put_tab(
+    state: AppState,
     storage: Arc<ChatStorage>,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -7376,6 +7387,7 @@ fn api_put_tab(
                   mut tab: crate::chat_storage::ChatTabRow,
                   store: Arc<ChatStorage>| {
                 let cfg = app_config.clone();
+                let state = state.clone();
                 async move {
                     if !check_api_token(&auth, &cfg) {
                         return Ok(unauthorized_api_token());
@@ -7388,13 +7400,20 @@ fn api_put_tab(
                             Some(compute_template_hash(&tab.system_prompt));
                     }
                     let messages = std::mem::take(&mut tab.messages);
+                    let persist_thinking =
+                        state.ui_settings.lock().unwrap().persist_thinking_content;
                     let msg_rows: Vec<crate::chat_storage::MessageRow> = messages
                         .into_iter()
                         .enumerate()
-                        .map(|(seq, m)| crate::chat_storage::MessageRow {
-                            seq: seq as i64,
-                            tab_id: tab.id.clone(),
-                            ..m
+                        .map(|(seq, mut m)| {
+                            if !persist_thinking {
+                                m.thinking_content = None;
+                            }
+                            crate::chat_storage::MessageRow {
+                                seq: seq as i64,
+                                tab_id: tab.id.clone(),
+                                ..m
+                            }
                         })
                         .collect();
                     let result = store
@@ -7485,6 +7504,7 @@ fn api_patch_tab_meta(
 
 // POST /api/chat/tabs/:id/messages — append one or more messages
 fn api_append_messages(
+    state: AppState,
     storage: Arc<ChatStorage>,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -7499,10 +7519,13 @@ fn api_append_messages(
                   body: serde_json::Value,
                   store: Arc<ChatStorage>| {
                 let cfg = app_config.clone();
+                let state = state.clone();
                 async move {
                     if !check_api_token(&auth, &cfg) {
                         return Ok(unauthorized_api_token());
                     }
+                    let persist_thinking =
+                        state.ui_settings.lock().unwrap().persist_thinking_content;
                     let msgs = body["messages"].as_array().cloned().unwrap_or_default();
                     let mut last_id = 0i64;
                     for msg_val in msgs {
@@ -7511,6 +7534,7 @@ fn api_append_messages(
                                 tab_id: id.clone(),
                                 role: "user".into(),
                                 content: "".into(),
+                                thinking_content: None,
                                 id: 0,
                                 timestamp_ms: 0,
                                 input_tokens: None,
@@ -7523,6 +7547,9 @@ fn api_append_messages(
                                 seq: 0,
                             });
                         let mut m = msg;
+                        if !persist_thinking {
+                            m.thinking_content = None;
+                        }
                         m.tab_id = id.clone();
                         match store.append_message(&m) {
                             Ok(row_id) => last_id = row_id,
