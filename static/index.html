@@ -2633,7 +2633,9 @@
                 <span class="wizard-step-sep" aria-hidden="true"></span>
                 <span class="step-badge" data-step="3" title="Step 4: Summary"><span class="step-num">4</span></span>
                 <span class="wizard-step-sep" aria-hidden="true"></span>
-                <span class="step-badge" data-step="4" title="Step 5: Spawn"><span class="step-num">5</span></span>
+                <span class="step-badge" data-step="4" title="Step 5: Parameters"><span class="step-num">5</span></span>
+                <span class="wizard-step-sep" aria-hidden="true"></span>
+                <span class="step-badge" data-step="5" title="Step 6: Spawn"><span class="step-num">6</span></span>
             </div>
             <button type="button" class="wizard-close" id="spawn-wizard-close" aria-label="Close">&times;</button>
         </div>
@@ -3475,11 +3477,6 @@
 
                     <div class="summary-list" id="spawn-summary-list"></div>
                     <div class="summary-warnings" id="spawn-summary-warnings" style="display:none;"></div>
-                    <div class="spawn-save-preset-row" id="spawn-save-preset-row">
-                        <input type="text" id="spawn-preset-name-input" class="spawn-preset-name-input" placeholder="Preset name…" maxlength="80">
-                        <button type="button" class="btn-wizard-secondary" id="spawn-save-preset-btn">Save as Preset</button>
-                        <span id="spawn-saved-preset-name" style="font-size:12px;color:var(--color-success);display:none;"></span>
-                    </div>
                 </div>
                 <div class="wizard-sidebar">
                     <div class="wizard-sidebar-title">Sampling guide</div>
@@ -3492,8 +3489,35 @@
                 </div>
             </div>
 
-            <!-- Step 5: Spawn -->
+            <!-- Step 5: Preset Parameters -->
             <div class="wizard-step" id="wizard-step-4">
+                <div class="wizard-main">
+                    <div>
+                        <div class="wizard-section-title">Preset Parameters</div>
+                        <div class="wizard-section-desc">
+                            Every flag that will be saved with this preset. Save it for quick reuse, then click Next to launch.
+                        </div>
+                    </div>
+                    <!-- Populated by _renderPresetParamsStep() -->
+                    <div id="preset-params-table"></div>
+                    <div class="spawn-save-preset-row" id="spawn-save-preset-row" style="margin-top:14px;">
+                        <input type="text" id="spawn-preset-name-input" class="spawn-preset-name-input" placeholder="Preset name…" maxlength="80">
+                        <button type="button" class="btn-wizard-secondary" id="spawn-save-preset-btn">Save as Preset</button>
+                        <span id="spawn-saved-preset-name" style="font-size:12px;color:var(--color-success);display:none;"></span>
+                    </div>
+                </div>
+                <div class="wizard-sidebar">
+                    <div class="wizard-sidebar-title">About presets</div>
+                    <ul>
+                        <li>A preset saves all these parameters for instant reuse from the setup screen.</li>
+                        <li>Saving is optional — click Next to go straight to launch.</li>
+                        <li>You can save multiple presets for different models or configurations.</li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Step 6: Spawn -->
+            <div class="wizard-step" id="wizard-step-5">
                 <div class="wizard-main">
                     <div>
                         <div class="wizard-section-title">Ready to launch</div>

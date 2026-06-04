@@ -138,7 +138,7 @@ Scenarios:
 
   Spawn Wizard
     spawn-wizard           Wizard step 1 profiles, step 2 HF discover/community picks/quant advisor, step 3 VRAM
-    spawn-wizard-gif       Animated GIF walking through the spawn wizard steps (1→2→3)
+    spawn-wizard-gif       Animated GIF walking through all spawn wizard steps (1→2→3→4→5→6)
     spawn-wizard-hf-download  HF download panel: idle options and simulated progress
 
   Performance & Updates
@@ -3248,21 +3248,60 @@ async function scenarioSpawnWizardGif(ctx, _options) {
         () => document.getElementById('wizard-step-3')?.classList.contains('active'),
         { timeout: 5000 }
     ).catch(() => console.log('[CAPTURE] Step 3 wait timed out; continuing.'));
-    // Wait for renderSummary() to populate the list.
+    // Wait for renderSummary() to populate the list (also applies sampling defaults).
     await sleep(800);
-    // Capture the top of the summary step briefly so the viewer sees the title.
+    // Capture the top of the summary step (sampling + network fields).
     await capture(1000);
-    // Scroll down to show the config summary list — the most informative part.
+    // Scroll down to show the config summary list.
     await page.evaluate(() => {
         const list = document.getElementById('spawn-summary-list');
         if (list) list.scrollIntoView({ behavior: 'instant', block: 'start' });
         else {
-            const body = document.querySelector('.wizard-body');
+            const body = document.querySelector('#wizard-step-3 .wizard-main');
             if (body) body.scrollTop = body.scrollHeight;
         }
     });
     await sleep(300);
-    await capture(3000); // Hold on the summary list so viewer can read key choices.
+    await capture(2500); // Hold on the summary list so viewer can read key choices.
+
+    // ── Step 3 → Step 4: Preset Parameters ───────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-4')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 4 wait timed out; continuing.'));
+    // _renderPresetParamsStep() runs synchronously inside showStep; give the DOM a tick.
+    await sleep(400);
+    // Capture the top of the params page (Model + Hardware sections).
+    await capture(1500);
+    // Scroll to reveal Sampling and Network sections.
+    await page.evaluate(() => {
+        const main = document.querySelector('#wizard-step-4 .wizard-main');
+        if (main) main.scrollTop = 340;
+    });
+    await sleep(250);
+    await capture(1500);
+    // Scroll to the Save Preset row at the bottom.
+    await page.evaluate(() => {
+        const row = document.getElementById('spawn-save-preset-row');
+        if (row) row.scrollIntoView({ behavior: 'instant', block: 'center' });
+        else {
+            const main = document.querySelector('#wizard-step-4 .wizard-main');
+            if (main) main.scrollTop = main.scrollHeight;
+        }
+    });
+    await sleep(250);
+    await capture(2000); // Hold so viewer sees the preset name + Save button.
+
+    // ── Step 4 → Step 5: Ready to Launch ─────────────────────────────────────
+    await page.evaluate(() => document.getElementById('wizard-next-btn')?.click());
+    await page.waitForFunction(
+        () => document.getElementById('wizard-step-5')?.classList.contains('active'),
+        { timeout: 5000 }
+    ).catch(() => console.log('[CAPTURE] Step 5 wait timed out; continuing.'));
+    // Wait for _renderSpawnConfigCard() to populate the card.
+    await sleep(600);
+    await capture(2500); // Hold on the Spawn step — config card + Spawn Server button.
 
     // ── Convert frames → GIF ──────────────────────────────────────────────────
     // Scale to 900 px wide so the GIF fits GitHub README content width without

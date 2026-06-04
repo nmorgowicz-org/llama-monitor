@@ -146,7 +146,7 @@ function formatSpeed(bps) {
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
-const STEP_LABELS = ['Profile', 'Model', 'Hardware', 'Summary', 'Spawn'];
+const STEP_LABELS = ['Profile', 'Model', 'Hardware', 'Summary', 'Parameters', 'Spawn'];
 
 // Exposed for testing/screenshot scripts; internal state is mutable.
 export const wizardState = {
@@ -477,9 +477,11 @@ function cacheDom() {
   dom.fitTargetWrap   = document.getElementById('spawn-fit-target-wrap');
   dom.cacheRamInput   = document.getElementById('spawn-cache-ram');
 
-  // Step 4
+  // Step 4 (Summary)
   dom.summaryList      = document.getElementById('spawn-summary-list');
   dom.summaryWarnings  = document.getElementById('spawn-summary-warnings');
+  // Step 5 (Preset Parameters)
+  dom.presetParamsTable  = document.getElementById('preset-params-table');
   dom.savePresetBtn      = document.getElementById('spawn-save-preset-btn');
   dom.savedPresetName    = document.getElementById('spawn-saved-preset-name');
   dom.presetNameInput    = document.getElementById('spawn-preset-name-input');
@@ -1056,6 +1058,9 @@ function showStep(index) {
     });
   }
   if (index === 4) {
+    _renderPresetParamsStep();
+  }
+  if (index === 5) {
     _renderSpawnConfigCard();
   }
 }
@@ -4171,7 +4176,164 @@ async function runHealthCheck() {
   finally { btn.disabled = false; btn.textContent = orig; }
 }
 
-// ── Spawn config preview card (step 4) ────────────────────────────────────────
+// ── Preset parameters review (step 5) ─────────────────────────────────────────
+
+function _renderPresetParamsStep() {
+  const container = dom.presetParamsTable;
+  if (!container) return;
+
+  // Pre-fill preset name from model filename if empty
+  if (dom.presetNameInput && !dom.presetNameInput.value.trim()) {
+    const m = wizardState.model;
+    const modelFile = (m.path || m.hfRepo || '').split(/[/\\]/).pop() || '';
+    const base = modelFile.replace(/\.gguf$/i, '').replace(/[-_.]/g, ' ').trim();
+    dom.presetNameInput.value = base || 'My Preset';
+  }
+  if (dom.savedPresetName) dom.savedPresetName.style.display = 'none';
+
+  const h = wizardState.hardware, m = wizardState.model;
+  const arch = getEffectiveArch();
+
+  const modelDisplay = m.source === 'hf'
+    ? (m.hfFile ? m.hfFile.split('/').pop() : (m.hfRepo || '—'))
+    : (m.path ? m.path.split(/[\\/]/).pop() || m.path : '—');
+
+  const gpuDisplay = h.gpuLayers === 'manual'
+    ? String(h.gpuLayersManual ?? '—')
+    : h.gpuLayers;
+
+  const kvK = (h.cacheTypeK || 'q8_0').toUpperCase();
+  const kvV = (h.cacheTypeV || 'q8_0').toUpperCase();
+  const fmtSampling = v => v != null ? String(parseFloat(Number(v).toFixed(4))) : '— (server default)';
+
+  const sections = [
+    {
+      label: 'Model',
+      rows: [
+        { label: 'File', value: modelDisplay },
+        ...(m.source === 'hf' ? [{ label: 'HF repo', value: m.hfRepo || '—' }] : []),
+        ...(m.mmprojPath ? [{ label: 'mmproj', value: m.mmprojPath.split(/[\\/]/).pop() || m.mmprojPath }] : []),
+        ...(wizardState.model.chatTemplatePath ? [{ label: 'Chat template', value: wizardState.model.chatTemplatePath.split(/[\\/]/).pop() || wizardState.model.chatTemplatePath }] : []),
+      ],
+    },
+    {
+      label: 'Hardware',
+      rows: [
+        { label: 'GPU layers', value: gpuDisplay },
+        { label: 'Context size', value: `${h.contextSize.toLocaleString()} tokens` },
+        { label: 'Batch / uBatch', value: `${h.batchSize} / ${h.ubatchSize}` },
+        { label: 'Parallel slots', value: String(h.parallelSlots) },
+        { label: 'KV cache K', value: kvK },
+        { label: 'KV cache V', value: kvV },
+        ...(h.kvUnified ? [{ label: 'KV unified', value: 'Yes' }] : []),
+        ...(h.nCpuMoe > 0 && arch.nExperts > 0 ? [{ label: 'MoE CPU offload', value: `${h.nCpuMoe} of ${arch.nExperts} experts` }] : []),
+        ...(h.tensorSplit ? [{ label: 'Tensor split', value: h.tensorSplit }] : []),
+        ...(h.fitTarget ? [{ label: '--fit-target', value: `${h.fitTarget} MB` }] : []),
+        ...(h.cacheRam != null ? [{ label: '--cache-ram', value: h.cacheRam < 0 ? 'no limit' : h.cacheRam === 0 ? 'disabled' : `${h.cacheRam} MiB` }] : []),
+      ],
+    },
+    {
+      label: 'Sampling',
+      rows: [
+        { label: 'Temperature', value: fmtSampling(h.temperature) },
+        { label: 'Top-P', value: fmtSampling(h.topP) },
+        { label: 'Min-P', value: fmtSampling(h.minP) },
+        { label: 'Repeat penalty', value: fmtSampling(h.repeatPenalty) },
+        { label: 'Presence penalty', value: fmtSampling(h.presencePenalty) },
+        { label: 'Seed', value: h.seed != null ? String(h.seed) : '— (random)' },
+      ],
+    },
+  ];
+
+  // Thinking section only when something is set
+  const hasThinking = h.enableThinking != null || h.preserveThinking != null ||
+                      h.reasoningMode != null || h.reasoningBudget != null;
+  if (hasThinking) {
+    const rows = [];
+    if (h.enableThinking != null) rows.push({ label: 'Enable thinking', value: h.enableThinking ? 'Yes' : 'No' });
+    if (h.preserveThinking != null) rows.push({ label: 'Preserve thinking', value: h.preserveThinking ? 'Yes' : 'No' });
+    if (h.reasoningMode) rows.push({ label: 'Reasoning mode', value: h.reasoningMode });
+    if (h.reasoningBudget != null) rows.push({ label: 'Reasoning budget', value: `${h.reasoningBudget} tokens` });
+    if (h.reasoningBudgetMessage) rows.push({ label: 'Budget message', value: h.reasoningBudgetMessage });
+    if (rows.length) sections.push({ label: 'Thinking & Reasoning', rows });
+  }
+
+  sections.push({
+    label: 'Network & Identity',
+    rows: [
+      { label: 'Port', value: String(wizardState.access.port || 8001) },
+      { label: 'Bind host', value: wizardState.access.bindHost === '0.0.0.0' ? '0.0.0.0 (LAN visible)' : '127.0.0.1 only' },
+      { label: 'Alias', value: h.alias || '(derived from filename)' },
+      { label: 'API key', value: wizardState.access.apiKey ? `${wizardState.access.apiKey.slice(0, 4)}…${wizardState.access.apiKey.slice(-4)}` : 'Not set' },
+    ],
+  });
+
+  const specType = dom.specTypeSelect?.value || '';
+  if (specType) {
+    const rows = [{ label: 'Type', value: specType }];
+    if (specType === 'draft-model' && dom.draftModelInput?.value) {
+      rows.push({ label: 'Draft model', value: dom.draftModelInput.value.split(/[\\/]/).pop() || dom.draftModelInput.value });
+    }
+    if (dom.specNgramSizeInput?.value) rows.push({ label: 'N-gram size', value: dom.specNgramSizeInput.value });
+    sections.push({ label: 'Speculative Decoding', rows });
+  }
+
+  if (h.extraArgs) {
+    sections.push({ label: 'Extra', rows: [{ label: 'Extra args', value: h.extraArgs }] });
+  }
+
+  container.innerHTML = '';
+
+  for (const section of sections) {
+    if (!section.rows.length) continue;
+    const block = document.createElement('div');
+    block.className = 'summary-list';
+    block.style.marginTop = '8px';
+
+    const hdr = document.createElement('div');
+    hdr.className = 'summary-list-header';
+    hdr.textContent = section.label;
+    block.appendChild(hdr);
+
+    for (const r of section.rows) {
+      const row = document.createElement('div');
+      row.className = 'summary-row';
+      const lbl = document.createElement('span');
+      lbl.className = 'summary-label';
+      lbl.textContent = r.label;
+      const val = document.createElement('span');
+      val.className = 'summary-value';
+      val.textContent = r.value;
+      row.appendChild(lbl);
+      row.appendChild(val);
+      block.appendChild(row);
+    }
+    container.appendChild(block);
+  }
+
+  // Edit shortcuts
+  const editRow = document.createElement('div');
+  editRow.className = 'summary-edit-row';
+  editRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;padding:0;';
+  [
+    { label: 'Edit model', step: 1 },
+    { label: 'Edit hardware', step: 2 },
+    { label: 'Edit sampling', step: 3, focusId: 'spawn-temperature' },
+  ].forEach(({ label, step, focusId }) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-wizard-tertiary';
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      showStep(step);
+      if (focusId) setTimeout(() => document.getElementById(focusId)?.focus(), 50);
+    });
+    editRow.appendChild(btn);
+  });
+  container.appendChild(editRow);
+}
+
+// ── Spawn config preview card (step 6) ────────────────────────────────────────
 
 async function _renderSpawnConfigCard() {
   const card = document.getElementById('spawn-config-card');
