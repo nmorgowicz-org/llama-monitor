@@ -635,12 +635,11 @@ function bindEvents() {
     wizardState.model._quantSwapRepo = '';
     _lastQuantSearchFile = '';
     _tagsRowOrigin = '';
+    _originResolverPromise = null; // reset in-flight resolver
     onModelPathChanged();
     renderLocalModelHint();
-    // Trigger origin resolver for local models lacking a persisted origin tag.
-    if (!wizardState.model.originRepo) {
-      setTimeout(() => _autoResolveHfOrigin(), 200);
-    }
+    // Origin resolver fires in loadLocalModel; do NOT fire here to avoid double-fire.
+    // loadLocalModel is called asynchronously by onModelPathChanged -> tryIntrospectModel.
   });
 
   dom.importPathInput?.addEventListener('input', () => {
@@ -648,12 +647,10 @@ function bindEvents() {
     wizardState.model.source = 'import';
     wizardState.model.delivery = 'imported_local';
     wizardState.model.localMeta = null;
+    _originResolverPromise = null; // reset in-flight resolver
     onModelPathChanged();
     renderLocalModelHint();
-    // Trigger origin resolver for imported models lacking a persisted origin tag.
-    if (!wizardState.model.originRepo) {
-      setTimeout(() => _autoResolveHfOrigin(), 200);
-    }
+    // Origin resolver fires in loadLocalModel; do NOT fire here to avoid double-fire.
   });
 
   dom.hfRepoInput?.addEventListener('input', () => {
@@ -1020,6 +1017,7 @@ function clearValidationError() {
 let _dlCurrentId = null;
 let _mmprojCompanionId = null;
 let _mmprojCompanionLocalPath = null;
+let _originResolverPromise = null; // in-flight origin resolver to prevent double-fire
 
 function getAuthHeaders() {
   return window.authHeaders ? window.authHeaders() : {};
@@ -1030,34 +1028,6 @@ function getRecommendedQuant(vramGb) {
   if (vramGb <= 16) return 'Q5_K_M';
   if (vramGb <= 24) return 'Q5_K_M';
   return 'Q8_0';
-}
-
-// Persist the HF origin repo for a downloaded local model so the quant-swap
-// discovery can skip the HF search in future sessions.  The tag is stored as
-// "hf_origin:{repoId}" in the model-tags.json file alongside any user tags.
-// If family is provided, also persists a "family:{slug}" tag.
-async function _saveModelOriginTag(localPath, repoId, family) {
-  if (!localPath || !repoId) return;
-  try {
-    const headers = window.authHeaders
-      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
-      : { 'Content-Type': 'application/json' };
-    // Fetch existing tags so we don't wipe user-applied labels.
-    const getResp = await fetch('/api/models/tags', { headers });
-    const existing = getResp.ok
-      ? ((await getResp.json().catch(() => ({}))).tags?.[localPath] || [])
-      : [];
-    const merged = [
-      ...existing.filter(t => !t.startsWith('hf_origin:') && !t.startsWith('family:')),
-      `hf_origin:${repoId}`,
-    ];
-    if (family) merged.push(`family:${family}`);
-    await fetch('/api/models/tags', {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify({ model_path: localPath, tags: merged }),
-    });
-  } catch { /* non-fatal */ }
 }
 
 // Attach HF origin + family tags for a local model (used by auto-resolve and
@@ -1088,6 +1058,8 @@ async function _attachOriginTags(localPath, repoId, family) {
 // Auto-resolve the HF origin of a local model from its filename.
 // Fires silently; if confident, sets originRepo and family, persists tags,
 // and refreshes the UI.  If ambiguous, shows a suggestion row.
+// Returns a promise so callers can await the resolution instead of polling.
+// The module-level _originResolverPromise prevents double-fire.
 async function _autoResolveHfOrigin() {
   const { source, path, modelBytes } = wizardState.model;
   if (source !== 'local' && source !== 'import') return;
@@ -1109,7 +1081,8 @@ async function _autoResolveHfOrigin() {
     if (!data.ok || !data.candidates || !data.candidates.length) return;
 
     if (data.confident) {
-      // Auto-attach the top candidate's origin + family
+      // Auto-attach the top candidate's origin + family (family is already
+      // in the resolve response — backend fetches HF card tags in the same pass)
       const top = data.candidates[0];
       wizardState.model.originRepo = top.repoId;
       wizardState.model.family = top.family || '';
@@ -1122,52 +1095,6 @@ async function _autoResolveHfOrigin() {
       _showHfOriginSuggestion(data.candidates.slice(0, 3), path);
     }
   } catch { /* non-fatal — resolution is a nice-to-have */ }
-}
-
-// Detect the model family for a known HF origin repo and persist it.
-// Uses the /api/hf/meta endpoint to read HF tags and infer the family.
-async function _detectFamilyForOrigin(repoId, modelPath) {
-  if (!repoId || !modelPath) return;
-  try {
-    const headers = window.authHeaders ? window.authHeaders() : {};
-    const metaRes = await fetch(`/api/hf/meta?repo=${encodeURIComponent(repoId)}`, { headers });
-    if (!metaRes.ok) return;
-    const meta = await metaRes.json();
-    const tags = meta.tags || [];
-    // Check base_model tag first
-    const baseModelTag = tags.find(t => {
-      if (!t.startsWith('base_model:')) return false;
-      const rest = t.slice('base_model:'.length);
-      return rest.includes('/'); // skip quantized: and adapter: sub-tags
-    });
-    let family = '';
-    if (baseModelTag) {
-      const baseRepo = baseModelTag.slice('base_model:'.length);
-      family = _inferFamilyFromName(baseRepo);
-    }
-    // Fallback: infer from repo name
-    if (!family) {
-      const repoName = repoId.split('/').slice(-1)[0];
-      family = _inferFamilyFromName(repoName);
-    }
-    if (!family) return;
-
-    // Save the family tag
-    wizardState.model.family = family;
-    const getResp = await fetch('/api/models/tags', { headers });
-    const existing = getResp.ok
-      ? ((await getResp.json().catch(() => ({}))).tags?.[modelPath] || [])
-      : [];
-    const merged = [
-      ...existing.filter(t => !t.startsWith('family:')),
-      `family:${family}`,
-    ];
-    await fetch('/api/models/tags', {
-      method: 'PUT',
-      headers: { ...(window.authHeaders || {}), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model_path: modelPath, tags: merged }),
-    });
-  } catch { /* non-fatal */ }
 }
 
 // Infer model family slug from a name string (mirrors backend heuristics).
@@ -1259,7 +1186,7 @@ function onHfDownloadComplete(downloadId, localPath) {
   wizardState.model.originRepo = downloadedRepo;
   wizardState.model.originFile = downloadedFile;
   // Persist origin so future wizard sessions skip the HF search entirely.
-  _saveModelOriginTag(effectivePath, downloadedRepo);
+  _attachOriginTags(effectivePath, downloadedRepo);
   wizardState.model.localMeta = {
     path: effectivePath,
     filename: effectivePath.split(/[\\/]/).pop() || effectivePath,
@@ -1663,19 +1590,17 @@ async function doIntrospect(path) {
       } catch { /* non-fatal */ }
     }
 
-    // If originRepo is known but family is not, try to detect it from the HF card.
-    if (wizardState.model.originRepo &&
-        !wizardState.model.family &&
-        (wizardState.model.source === 'local' || wizardState.model.source === 'import')) {
-      _detectFamilyForOrigin(wizardState.model.originRepo, path);
-    }
-
     // Auto-resolve HF origin for local models that lack a persisted origin tag.
-    // Fires silently; resolves confidently or shows a suggestion row.
+    // The resolve endpoint already includes family detection (backend fetches
+    // HF card tags in the same pass), so no separate _detectFamilyForOrigin needed.
+    // Returns a promise so autoInstallChatTemplate can await the resolution.
     if (!wizardState.model.originRepo &&
         (wizardState.model.source === 'local' || wizardState.model.source === 'import')) {
       // Defer to avoid blocking the introspect flow; 200ms delay is imperceptible.
-      setTimeout(() => _autoResolveHfOrigin(), 200);
+      _originResolverPromise = (async () => {
+        await new Promise(r => setTimeout(r, 200));
+        return _autoResolveHfOrigin();
+      })();
     }
 
     // Scan directory for companion mmproj file (local models only)
@@ -2021,6 +1946,10 @@ function renderQuantAdvisor(quants, availVram) {
 
 // ── Chat template auto-install ───────────────────────────────────────────────
 
+// Cache of installed community templates keyed by template name.
+// Avoids re-downloading the same template for each model of the same family.
+const _installedTemplateCache = {};
+
 // Community template registry keyed by model family
 const COMMUNITY_TEMPLATES = {
   qwen: {
@@ -2123,17 +2052,26 @@ async function autoInstallChatTemplate() {
   const tpl = family ? COMMUNITY_TEMPLATES[family] : null;
 
   // If no family from fast path, we need to detect it.
-  // For local models, give the origin resolver a brief moment to finish
-  // (it fires 200ms after load and may take a bit more). Then query HF.
+  // For local/import models, await the origin resolver first (it fires from
+  // loadLocalModel and includes family detection in the same pass).
   if (!family) {
     if (source === 'local' || source === 'import') {
       _renderChatTemplateStatus('detecting', null, null, null);
-      // Brief wait to let the async origin resolver set the family tag
-      await new Promise(r => setTimeout(r, 800));
+      // Await the origin resolver promise (it was created in loadLocalModel).
+      // Short timeout: the resolver fires 200ms after load, so 1.5s is generous.
+      const resolveTimeout = new Promise(r => setTimeout(r, 1500));
+      await Promise.race([
+        (_originResolverPromise || Promise.resolve()),
+        resolveTimeout,
+      ]);
+      // After the resolver, check again (family may now be set)
+      family = wizardState.model.family || detectModelFamily(identityName);
     }
-    try {
-      family = await detectModelFamilyAsync(identityName, path, 8000);
-    } catch { /* non-fatal */ }
+    if (!family) {
+      try {
+        family = await detectModelFamilyAsync(identityName, path, 8000);
+      } catch { /* non-fatal */ }
+    }
     // Update wizard state for future use
     if (family) wizardState.model.family = family;
   }
@@ -2158,6 +2096,15 @@ async function autoInstallChatTemplate() {
     return;
   }
 
+  // Cache hit: template already installed for this family
+  const cached = _installedTemplateCache[tplForFamily.name];
+  if (cached) {
+    wizardState.model.chatTemplatePath = cached;
+    wizardState.model.chatTemplateMode = 'auto';
+    _renderChatTemplateStatus('installed', family, tplForFamily, { path: cached, already_existed: true });
+    return;
+  }
+
   _renderChatTemplateStatus('installing', family, tplForFamily, null);
 
   try {
@@ -2172,6 +2119,9 @@ async function autoInstallChatTemplate() {
     if (data.ok && data.path) {
       wizardState.model.chatTemplatePath = data.path;
       wizardState.model.chatTemplateMode = 'auto';
+      // Cache the template path for this family (avoids re-downloading for
+      // other models of the same family in the same session)
+      _installedTemplateCache[tplForFamily.name] = data.path;
       _renderChatTemplateStatus('installed', family, tplForFamily, data);
     } else {
       _renderChatTemplateStatus('error', family, tplForFamily, data);
@@ -2197,7 +2147,9 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       const recommendedBtn = document.createElement('button');
       recommendedBtn.type = 'button';
       recommendedBtn.className = 'btn-wizard-tertiary ct-action-btn';
-      recommendedBtn.textContent = wizardState.model.chatTemplateMode === 'auto' ? 'Using Recommended' : `Use ${tpl.display}`;
+      const isUsing = wizardState.model.chatTemplateMode === 'auto';
+      const familyLabel = family ? ` (${family} family)` : '';
+      recommendedBtn.textContent = isUsing ? `Using Recommended${familyLabel}` : `Use ${tpl.display}${familyLabel}`;
       recommendedBtn.disabled = wizardState.model.chatTemplateMode === 'auto';
       recommendedBtn.addEventListener('click', async () => {
         wizardState.model.chatTemplateMode = 'auto';
@@ -2247,9 +2199,12 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
   }
 
   if (state === 'detecting') {
+    const modelName = (wizardState.model.path || '').split(/[\\/]/).pop() || '';
     if (statusEl) { statusEl.textContent = 'Detecting…'; statusEl.className = 'ct-status ct-installing'; }
     if (bodyEl) {
-      bodyEl.textContent = 'Checking HuggingFace for model family and recommended template…';
+      bodyEl.textContent = modelName
+        ? `Detecting family for ${modelName}…`
+        : 'Checking HuggingFace for model family and recommended template…';
     }
     return;
   }
@@ -3791,15 +3746,15 @@ async function _refreshHwTagsRow() {
       famPill.title = `Detected model family (auto)`;
       pillsWrap.appendChild(famPill);
     }
-    if (cardUrl) {
-      const cardPill = document.createElement('a');
-      cardPill.href = cardUrl;
-      cardPill.target = '_blank';
-      cardPill.rel = 'noopener noreferrer';
+    // Card pill: opens inline model card panel (uses existing wizard-card-panel)
+    if (originRepo) {
+      const cardPill = document.createElement('button');
+      cardPill.type = 'button';
       cardPill.className = 'mm-tag-pill';
-      cardPill.style.cssText = 'font-size:9px;padding:2px 7px;cursor:pointer;text-decoration:none;opacity:0.7;white-space:nowrap;';
+      cardPill.style.cssText = 'font-size:9px;padding:2px 7px;cursor:pointer;text-decoration:none;opacity:0.7;white-space:nowrap;border:none;background:none;font:inherit;';
       cardPill.textContent = '📄 Card';
-      cardPill.title = 'View model card on HuggingFace';
+      cardPill.title = 'View model card inline';
+      cardPill.addEventListener('click', () => openCardPanel(originRepo));
       pillsWrap.appendChild(cardPill);
     }
   }
@@ -4182,7 +4137,7 @@ function _renderQuantSwapActions(quantPath, repoId) {
           wizardState.model.hfFile = '';
           wizardState.model.originRepo = repoId;
           wizardState.model.originFile = quantPath;
-          _saveModelOriginTag(localPath, repoId);
+          _attachOriginTags(localPath, repoId);
           actionsRow.style.display = 'none';
           statusEl.textContent = '✓ Downloaded and selected';
           showToast('Quant downloaded', 'success', quantName);
