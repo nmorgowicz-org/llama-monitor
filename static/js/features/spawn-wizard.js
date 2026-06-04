@@ -3066,19 +3066,16 @@ const HF_TAG_MAP = {
   // Math / STEM
   math: 'math', mathematics: 'math', science: 'math', stem: 'math',
   arithmetic: 'math',
-  // Long context
-  'long-context': 'long-context', long_context: 'long-context',
   // General chat / instruction following
   conversational: 'chat', chat: 'chat', instruct: 'chat',
   'instruction-following': 'chat',
 };
 
-// Non-English two-letter ISO codes → 'multilingual'.  English ('en') is omitted
-// because virtually every model supports it; seeing "multilingual" should only
-// trigger when a model explicitly targets other languages.
+// Two-letter ISO language codes — blocked outright (not mapped to any category).
 const ISO2_LANGS = new Set([
   'zh','ja','ko','ru','es','fr','de','ar','pt','it','nl','pl','sv','tr',
   'hi','vi','uk','cs','ro','hu','da','fi','no','id','th','he','el','bg',
+  'en',
 ]);
 
 // Tags that carry no useful signal for a local model library.
@@ -3127,15 +3124,13 @@ const HF_CATEGORY_LABEL = {
   nsfw: 'NSFW',
   uncensored: 'Uncensored',
   math: 'Math/STEM',
-  'long-context': 'Long context',
   chat: 'Chat',
-  multilingual: 'Multilingual',
 };
 
 // Standard vocabulary always offered in the picker, independent of HF.
 const ALL_KNOWN_TAGS = [
   'coding', 'roleplay', 'nsfw', 'uncensored', 'general', 'art', 'fast', 'default',
-  'vision', 'agentic', 'reasoning', 'math', 'long-context', 'chat', 'multilingual',
+  'vision', 'agentic', 'reasoning', 'math', 'chat',
 ];
 
 // Normalise a raw HF tag string for use as a local library tag:
@@ -3169,7 +3164,7 @@ function _hfTagsToCategories(rawTags) {
   for (const raw of rawTags) {
     const lower = raw.toLowerCase();
     if (_isBlockedHfTag(raw)) continue;
-    if (ISO2_LANGS.has(lower)) { categories.add('multilingual'); continue; }
+    if (ISO2_LANGS.has(lower)) continue;
 
     const cat = HF_TAG_MAP[lower];
     if (cat) {
