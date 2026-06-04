@@ -922,6 +922,32 @@ function getRecommendedQuant(vramGb) {
   return 'Q8_0';
 }
 
+// Persist the HF origin repo for a downloaded local model so the quant-swap
+// discovery can skip the HF search in future sessions.  The tag is stored as
+// "hf_origin:{repoId}" in the model-tags.json file alongside any user tags.
+async function _saveModelOriginTag(localPath, repoId) {
+  if (!localPath || !repoId) return;
+  try {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+    // Fetch existing tags so we don't wipe user-applied labels.
+    const getResp = await fetch('/api/models/tags', { headers });
+    const existing = getResp.ok
+      ? ((await getResp.json().catch(() => ({}))).tags?.[localPath] || [])
+      : [];
+    const merged = [
+      ...existing.filter(t => !t.startsWith('hf_origin:')),
+      `hf_origin:${repoId}`,
+    ];
+    await fetch('/api/models/tags', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ model_path: localPath, tags: merged }),
+    });
+  } catch { /* non-fatal */ }
+}
+
 // Called by hfStartDownload onComplete when download finishes.
 function onHfDownloadComplete(downloadId, localPath) {
   const effectivePath = localPath;
@@ -935,6 +961,8 @@ function onHfDownloadComplete(downloadId, localPath) {
   wizardState.model.path = effectivePath;
   wizardState.model.originRepo = downloadedRepo;
   wizardState.model.originFile = downloadedFile;
+  // Persist origin so future wizard sessions skip the HF search entirely.
+  _saveModelOriginTag(effectivePath, downloadedRepo);
   wizardState.model.localMeta = {
     path: effectivePath,
     filename: effectivePath.split(/[\\/]/).pop() || effectivePath,
@@ -1311,6 +1339,19 @@ async function doIntrospect(path) {
     if (m.n_experts)      wizardState.arch.nExperts      = m.n_experts;
     if (m.n_experts_used) wizardState.arch.nExpertsUsed = m.n_experts_used;
     if (m.mtp_depth)      wizardState.arch.mtpDepth      = m.mtp_depth;
+
+    // Restore HF origin from persisted model tag so quant-swap can skip search.
+    if (!wizardState.model.originRepo &&
+        (wizardState.model.source === 'local' || wizardState.model.source === 'import')) {
+      try {
+        const tagsResp = await fetch('/api/models/tags', { headers });
+        if (tagsResp.ok) {
+          const td = await tagsResp.json().catch(() => ({}));
+          const originTag = (td.tags?.[path] || []).find(t => t.startsWith('hf_origin:'));
+          if (originTag) wizardState.model.originRepo = originTag.slice('hf_origin:'.length);
+        }
+      } catch { /* non-fatal */ }
+    }
 
     // Scan directory for companion mmproj file (local models only)
     if (wizardState.model.source === 'local' || wizardState.model.source === 'import') {
@@ -3003,21 +3044,31 @@ async function _autoDiscoverLocalModelQuants() {
     } else {
       const stem = _modelStemForSearch(filename);
       if (stem.length >= 4) {
+        // Try progressively broader queries: exact stem, stem + GGUF keyword,
+        // then a shorter version without minor version/variant suffixes.
+        const shorter = stem
+          .replace(/-v\d+(?:\.\d+)?(?:-[A-Za-z]+)*$/i, '')
+          .replace(/-MTP$/i, '');
+        const queries = [...new Set([stem, `${stem} GGUF`, shorter])]
+          .filter(q => q.length >= 4);
+
         const headers = window.authHeaders ? window.authHeaders() : {};
-        const res = await fetch('/api/hf/search', {
-          method: 'POST',
-          headers: { ...headers, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: stem, sort: 'downloads', limit: 8 }),
-        });
-        if (res.ok) {
+        for (const query of queries) {
+          const res = await fetch('/api/hf/search', {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, sort: 'downloads', limit: 8 }),
+          });
+          if (!res.ok) continue;
           const sd = await res.json();
-          for (const m of (sd.models || []).slice(0, 4)) {
-            const fd = await _hfFilesPost(m.id);
+          for (const candidate of (sd.models || []).slice(0, 4)) {
+            const fd = await _hfFilesPost(candidate.id);
             if (!fd?.ok) continue;
             const gguf = (fd.files || []).filter(f =>
               !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
-            if (gguf.length >= 2) { repoId = m.id; rawFiles = gguf; break; }
+            if (gguf.length >= 2) { repoId = candidate.id; rawFiles = gguf; break; }
           }
+          if (rawFiles.length >= 2) break; // found — stop trying further queries
         }
       }
     }
@@ -3144,6 +3195,7 @@ function _renderQuantSwapActions(quantPath, repoId) {
           wizardState.model.hfFile = '';
           wizardState.model.originRepo = repoId;
           wizardState.model.originFile = quantPath;
+          _saveModelOriginTag(localPath, repoId);
           actionsRow.style.display = 'none';
           statusEl.textContent = '✓ Downloaded and selected';
           showToast('Quant downloaded', 'success', quantName);
@@ -4059,8 +4111,11 @@ function renderSummary() {
     : (m.path ? m.path.split(/[\\/]/).pop() || m.path : '(none)');
 
   let acquisition = 'Local file';
-  if (m.delivery === 'stream_hf' && m.originRepo) {
-    acquisition = `Stream from HuggingFace · ${m.originRepo}${m.originFile ? ` / ${m.originFile.split('/').pop()}` : ''}`;
+  if (m.delivery === 'stream_hf') {
+    // originRepo is set for normal HF models; hfRepo is set when streaming via quant swap
+    const repo = m.originRepo || m.hfRepo || '';
+    const file = m.originFile || m.hfFile || '';
+    if (repo) acquisition = `Stream from HuggingFace · ${repo}${file ? ` / ${file.split('/').pop()}` : ''}`;
   } else if (m.delivery === 'downloaded_hf' && m.originRepo) {
     acquisition = `Downloaded from HuggingFace · ${m.originRepo}${m.originFile ? ` / ${m.originFile.split('/').pop()}` : ''}`;
   } else if (m.delivery === 'imported_local') {
