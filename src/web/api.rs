@@ -3347,6 +3347,61 @@ fn api_hf_card(
         )
 }
 
+// ── GET /api/hf/meta?repo=owner/model ────────────────────────────────────────
+// Returns tags and gated status for a HF repo.  Used by the tag-suggestion UI
+// in the wizard hardware step and the models library.
+fn api_hf_meta(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "meta")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(warp::query::<std::collections::HashMap<String, String>>())
+        .and_then(
+            move |auth: Option<String>, params: std::collections::HashMap<String, String>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+                    let repo = match params.get("repo") {
+                        Some(r) if !r.is_empty() => r.clone(),
+                        _ => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(
+                                    &serde_json::json!({"ok": false, "error": "missing repo param"}),
+                                ),
+                            ));
+                        }
+                    };
+                    let parts: Vec<&str> = repo.splitn(3, '/').collect();
+                    if parts.len() != 2 || parts.iter().any(|p| p.is_empty() || p.contains("..")) {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": "invalid repo id"}),
+                            ),
+                        ));
+                    }
+                    match crate::hf::hf_get_model_info(&repo).await {
+                        Ok(info) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": true,
+                                "tags": info.tags,
+                                "gated": info.gated,
+                                "private": info.private,
+                            })),
+                        )),
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(
+                                &serde_json::json!({"ok": false, "error": e.to_string()}),
+                            ),
+                        )),
+                    }
+                }
+            },
+        )
+}
+
 // ── GET /api/hf/token ─────────────────────────────────────────────────────────
 // Returns whether an HF token is saved; never returns the token itself.
 fn api_hf_token_get(
@@ -3956,6 +4011,7 @@ pub fn api_routes(
     let hf_token_put_route = api_hf_token_put(app_config.clone());
     let hf_token_delete_route = api_hf_token_delete(app_config.clone());
     let hf_card_route = api_hf_card(app_config.clone());
+    let hf_meta_route = api_hf_meta(app_config.clone());
     let hf_community_picks_route = api_hf_community_picks(state.clone(), app_config.clone());
     let third_party_models_route = api_third_party_models(state.clone(), app_config.clone());
     let model_introspect_route = api_model_introspect(state.clone(), app_config.clone());
@@ -4074,6 +4130,7 @@ pub fn api_routes(
         .or(hf_token_put_route)
         .or(hf_token_delete_route)
         .or(hf_card_route)
+        .or(hf_meta_route)
         .or(hf_community_picks_route)
         .or(third_party_models_route)
         .or(model_introspect_route)

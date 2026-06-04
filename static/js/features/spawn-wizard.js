@@ -629,6 +629,7 @@ function bindEvents() {
     wizardState.model.quantFiles = [];
     wizardState.model._quantSwapRepo = '';
     _lastQuantSearchFile = '';
+    _tagsRowOrigin = '';
     onModelPathChanged();
     renderLocalModelHint();
   });
@@ -760,6 +761,15 @@ function bindEvents() {
   document.getElementById('hw-quant-local-btn')?.addEventListener('click', () => {
     _lastQuantSearchFile = ''; // reset cache so a re-click re-searches
     _autoDiscoverLocalModelQuants();
+  });
+
+  // Library tag picker trigger
+  document.getElementById('hw-tags-add-btn')?.addEventListener('click', e => {
+    _openHwTagPicker(
+      e.currentTarget,
+      wizardState.model.path || '',
+      wizardState.model.originRepo || '',
+    );
   });
 
   // Model card panel
@@ -2873,6 +2883,9 @@ function renderHardwareModelHeader() {
     if (fileEl) fileEl.textContent = hfFile ? hfFile.split('/').pop() : (path.split(/[/\\]/).pop() || '');
   }
 
+  // Library tags row — refresh whenever origin is known (non-blocking async).
+  _refreshHwTagsRow();
+
   // Show "Find on HuggingFace" row for local models that haven't loaded quant files yet.
   // Reset the swap-actions bar whenever we re-render the header.
   const localRow = document.getElementById('hw-quant-local-row');
@@ -3004,6 +3017,280 @@ async function _hfFilesPost(repoId) {
     if (!res.ok) return null;
     return await res.json();
   } catch { return null; }
+}
+
+// ── HF tag → local library tag mapping ───────────────────────────────────────
+
+// Maps raw HF tag strings to a normalised, user-facing category key.
+// Only tags that have meaningful categorisation value are included —
+// infrastructure tags (gguf, transformers, llama.cpp, region:us, etc.) are ignored.
+const HF_TAG_MAP = {
+  // Vision / multimodal
+  vision: 'vision', multimodal: 'vision', 'image-text-to-text': 'vision',
+  image: 'vision', vqa: 'vision', visual: 'vision', 'text-to-image': 'vision',
+  // Agentic / tool use
+  agent: 'agentic', agentic: 'agentic', 'tool-use': 'agentic',
+  'function-calling': 'agentic', tool_use: 'agentic', 'tool_calling': 'agentic',
+  // Coding
+  coder: 'coding', code: 'coding', coding: 'coding',
+  'code-generation': 'coding', devops: 'coding', programming: 'coding',
+  // Reasoning / thinking
+  reasoning: 'reasoning', 'chain-of-thought': 'reasoning',
+  thinking: 'reasoning', cot: 'reasoning', 'step-by-step': 'reasoning',
+  // Roleplay / creative writing
+  roleplay: 'roleplay', creative: 'roleplay', storytelling: 'roleplay',
+  'creative-writing': 'roleplay', fiction: 'roleplay', 'role-playing': 'roleplay',
+  // Math / STEM
+  math: 'math', mathematics: 'math', science: 'math', stem: 'math',
+  arithmetic: 'math', physics: 'math', chemistry: 'math', biology: 'math',
+  // Long context
+  'long-context': 'long-context', long_context: 'long-context',
+  // General chat
+  conversational: 'chat', chat: 'chat', instruct: 'chat',
+  'instruction-following': 'chat',
+  // Multilingual (any 2-letter ISO code that isn't English triggers this)
+};
+// Non-English ISO language codes → multilingual label
+const ISO2_LANGS = new Set(['zh','ja','ko','ru','es','fr','de','ar','pt','it','nl','pl','sv','tr','hi','vi','uk','cs','ro','hu']);
+
+const HF_CATEGORY_LABEL = {
+  vision: 'Vision',
+  agentic: 'Agentic',
+  coding: 'Coding',
+  reasoning: 'Reasoning',
+  roleplay: 'Roleplay',
+  math: 'Math/STEM',
+  'long-context': 'Long context',
+  chat: 'Chat',
+  multilingual: 'Multilingual',
+};
+
+// The full tag vocabulary offered in the picker (superset of KNOWN_TAGS in models.js).
+const ALL_KNOWN_TAGS = [
+  'coding', 'roleplay', 'general', 'art', 'fast', 'default',
+  'vision', 'agentic', 'reasoning', 'math', 'long-context', 'chat', 'multilingual',
+];
+
+// Derive the set of suggested category keys from a raw HF tags array.
+function _hfTagsToCategories(rawTags) {
+  const cats = new Set();
+  for (const t of rawTags) {
+    const cat = HF_TAG_MAP[t.toLowerCase()];
+    if (cat) cats.add(cat);
+    if (ISO2_LANGS.has(t.toLowerCase())) cats.add('multilingual');
+  }
+  return cats;
+}
+
+// Fetch HF model metadata and render the tags row for the hardware step.
+// No-ops if originRepo is unknown or the row element is missing.
+let _tagsRowOrigin = ''; // track which repo is currently loaded in the row
+async function _refreshHwTagsRow() {
+  const row = document.getElementById('hw-tags-row');
+  if (!row) return;
+  const { originRepo, path } = wizardState.model;
+  if (!originRepo) { row.style.display = 'none'; return; }
+  row.style.display = '';
+  if (_tagsRowOrigin === originRepo) return; // already populated for this repo
+  _tagsRowOrigin = originRepo;
+
+  // Load current library tags for this model path.
+  let currentTags = [];
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const r = await fetch('/api/models/tags', { headers });
+    if (r.ok) {
+      const d = await r.json().catch(() => ({}));
+      currentTags = (d.tags?.[path] || []).filter(t => !t.startsWith('hf_origin:'));
+    }
+  } catch { /* non-fatal */ }
+
+  // Fetch HF tags for suggestion.
+  let suggestedCats = new Set();
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const r = await fetch(`/api/hf/meta?repo=${encodeURIComponent(originRepo)}`, { headers });
+    if (r.ok) {
+      const d = await r.json().catch(() => ({}));
+      if (d.ok && d.tags) suggestedCats = _hfTagsToCategories(d.tags);
+    }
+  } catch { /* non-fatal */ }
+
+  _renderHwTagPills(currentTags, suggestedCats, path, originRepo);
+}
+
+function _renderHwTagPills(currentTags, suggestedCats, modelPath, originRepo) {
+  const pillsWrap = document.getElementById('hw-tags-pills');
+  if (!pillsWrap) return;
+  pillsWrap.innerHTML = '';
+
+  if (!currentTags.length) {
+    const hint = document.createElement('span');
+    hint.style.cssText = 'font-size:10px;color:var(--color-text-muted);margin-right:4px;';
+    hint.textContent = 'No tags yet';
+    pillsWrap.appendChild(hint);
+    return;
+  }
+
+  currentTags.forEach(tag => {
+    const pill = document.createElement('span');
+    pill.className = 'mm-tag-pill mm-tag-pill--active';
+    pill.style.cssText = 'font-size:9px;padding:2px 7px;cursor:pointer;';
+    pill.title = `Remove tag "${tag}"`;
+    pill.textContent = tag + ' ×';
+    pill.addEventListener('click', async () => {
+      const newTags = currentTags.filter(t => t !== tag);
+      await _saveHwModelTags(modelPath, newTags);
+      currentTags = newTags;
+      _renderHwTagPills(currentTags, suggestedCats, modelPath, originRepo);
+    });
+    pillsWrap.appendChild(pill);
+  });
+}
+
+async function _saveHwModelTags(modelPath, tags) {
+  try {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+    const r = await fetch('/api/models/tags', {
+      headers,
+      method: 'GET',
+    });
+    const existing = r.ok ? ((await r.json().catch(() => ({}))).tags?.[modelPath] || []) : [];
+    const originTags = existing.filter(t => t.startsWith('hf_origin:'));
+    const merged = [...originTags, ...tags.filter(t => !t.startsWith('hf_origin:'))];
+    await fetch('/api/models/tags', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ model_path: modelPath, tags: merged }),
+    });
+  } catch { /* non-fatal */ }
+}
+
+function _openHwTagPicker(btn, modelPath, originRepo) {
+  // Remove any existing picker.
+  document.getElementById('hw-tag-picker-popup')?.remove();
+
+  const popup = document.createElement('div');
+  popup.id = 'hw-tag-picker-popup';
+  popup.className = 'hw-tag-picker-popup';
+
+  // Fetch current state fresh so the picker reflects reality.
+  const headers = window.authHeaders ? window.authHeaders() : {};
+  Promise.all([
+    fetch('/api/models/tags', { headers }).then(r => r.ok ? r.json().catch(() => ({})) : {}),
+    originRepo
+      ? fetch(`/api/hf/meta?repo=${encodeURIComponent(originRepo)}`, { headers })
+          .then(r => r.ok ? r.json().catch(() => ({})) : {})
+      : Promise.resolve({}),
+  ]).then(([tagsData, metaData]) => {
+    const rawCurrent = (tagsData.tags?.[modelPath] || [])
+      .filter(t => !t.startsWith('hf_origin:'));
+    const suggestedCats = metaData.ok && metaData.tags
+      ? _hfTagsToCategories(metaData.tags)
+      : new Set();
+
+    popup.innerHTML = '';
+
+    // ── Section: HF suggestions ───────────────────────────────────────────────
+    if (suggestedCats.size > 0) {
+      const hdr = document.createElement('div');
+      hdr.className = 'hw-tag-picker-section';
+      hdr.textContent = `Suggested from ${originRepo.split('/')[0]}`;
+      popup.appendChild(hdr);
+
+      const sugRow = document.createElement('div');
+      sugRow.className = 'hw-tag-picker-pills';
+      [...suggestedCats].forEach(cat => {
+        _appendTagPill(sugRow, HF_CATEGORY_LABEL[cat] || cat, cat, rawCurrent, modelPath, originRepo, popup);
+      });
+      popup.appendChild(sugRow);
+    }
+
+    // ── Section: All standard tags ────────────────────────────────────────────
+    const hdr2 = document.createElement('div');
+    hdr2.className = 'hw-tag-picker-section';
+    hdr2.textContent = 'All tags';
+    popup.appendChild(hdr2);
+
+    const allRow = document.createElement('div');
+    allRow.className = 'hw-tag-picker-pills';
+    ALL_KNOWN_TAGS.forEach(tag => {
+      _appendTagPill(allRow, tag, tag, rawCurrent, modelPath, originRepo, popup);
+    });
+    popup.appendChild(allRow);
+
+    // ── Custom tag input ──────────────────────────────────────────────────────
+    const customRow = document.createElement('div');
+    customRow.style.cssText = 'display:flex;gap:5px;margin-top:7px;';
+    const customInput = document.createElement('input');
+    customInput.type = 'text';
+    customInput.placeholder = 'Custom tag…';
+    customInput.style.cssText = 'flex:1;padding:4px 7px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:rgba(28,34,42,0.9);color:var(--color-text-primary);font-size:10px;';
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'btn-wizard-secondary';
+    addBtn.style.cssText = 'font-size:10px;min-height:24px;padding:2px 8px;flex-shrink:0;';
+    addBtn.textContent = 'Add';
+
+    const doAdd = async () => {
+      const val = customInput.value.trim().toLowerCase().replace(/\s+/g, '-');
+      if (!val || rawCurrent.includes(val)) return;
+      rawCurrent.push(val);
+      await _saveHwModelTags(modelPath, rawCurrent);
+      _tagsRowOrigin = ''; // force re-render of pills row
+      await _refreshHwTagsRow();
+      popup.remove();
+      showToast(`Tagged "${val}"`, 'success');
+    };
+    addBtn.addEventListener('click', doAdd);
+    customInput.addEventListener('keydown', e => { if (e.key === 'Enter') doAdd(); });
+    customRow.appendChild(customInput);
+    customRow.appendChild(addBtn);
+    popup.appendChild(customRow);
+  });
+
+  // Position below the + button.
+  document.body.appendChild(popup);
+  const rect = btn.getBoundingClientRect();
+  popup.style.left = `${rect.left}px`;
+  popup.style.top = `${rect.bottom + 4}px`;
+
+  // Close on outside click.
+  setTimeout(() => {
+    const close = e => {
+      if (!popup.contains(e.target) && e.target !== btn) {
+        popup.remove();
+        document.removeEventListener('mousedown', close);
+      }
+    };
+    document.addEventListener('mousedown', close);
+  }, 0);
+}
+
+function _appendTagPill(container, label, tagKey, currentTags, modelPath, originRepo, popup) {
+  const has = currentTags.includes(tagKey);
+  const pill = document.createElement('span');
+  pill.className = 'mm-tag-pill' + (has ? ' mm-tag-pill--active' : '');
+  pill.style.cssText = 'font-size:10px;padding:3px 9px;cursor:pointer;user-select:none;';
+  pill.textContent = label;
+  pill.title = has ? `Remove tag "${tagKey}"` : `Add tag "${tagKey}"`;
+  pill.addEventListener('click', async () => {
+    const newTags = has
+      ? currentTags.filter(t => t !== tagKey)
+      : [...currentTags, tagKey];
+    // Mutate in place so other pills in the same picker stay in sync.
+    currentTags.length = 0;
+    newTags.forEach(t => currentTags.push(t));
+    await _saveHwModelTags(modelPath, newTags);
+    pill.className = 'mm-tag-pill' + (newTags.includes(tagKey) ? ' mm-tag-pill--active' : '');
+    pill.title = newTags.includes(tagKey) ? `Remove tag "${tagKey}"` : `Add tag "${tagKey}"`;
+    // Refresh the pills row in the header.
+    _tagsRowOrigin = '';
+    _refreshHwTagsRow();
+  });
+  container.appendChild(pill);
 }
 
 // ── Local-model quant-swap discovery ─────────────────────────────────────────

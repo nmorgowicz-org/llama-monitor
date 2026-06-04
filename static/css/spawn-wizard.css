@@ -4794,3 +4794,49 @@
   border-color: rgba(245,158,11,0.3);
   color: #92400e;
 }
+
+/* ── Hardware step: HF tag suggestion picker ──────────────────────────────── */
+.hw-tag-picker-popup {
+  position: fixed;
+  z-index: 2200;
+  background: rgba(15, 23, 42, 0.98);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 10px;
+  padding: 10px 12px;
+  min-width: 220px;
+  max-width: 320px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(18px);
+}
+.hw-tag-picker-section {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text-muted);
+  margin: 8px 0 5px;
+}
+.hw-tag-picker-section:first-child { margin-top: 0; }
+.hw-tag-picker-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.hw-tag-picker-pills .mm-tag-pill {
+  font-size: 9px;
+  padding: 2px 7px;
+}
+.hw-tag-picker-pills .mm-tag-pill.mm-tag-pill--active {
+  color: rgba(148, 255, 177, 0.9);
+  background: rgba(148, 255, 177, 0.08);
+  border-color: rgba(148, 255, 177, 0.2);
+}
+[data-theme="light"] .hw-tag-picker-popup {
+  background: rgba(248, 250, 252, 0.99);
+  border-color: rgba(79, 70, 229, 0.18);
+}
+[data-theme="light"] .hw-tag-picker-pills .mm-tag-pill.mm-tag-pill--active {
+  color: rgba(5, 150, 105, 0.9);
+  background: rgba(5, 150, 105, 0.08);
+  border-color: rgba(5, 150, 105, 0.2);
+}

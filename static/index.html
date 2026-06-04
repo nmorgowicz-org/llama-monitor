@@ -3022,6 +3022,12 @@
                         </div>
                         <!-- Download / stream actions shown after picking a new quant for a local model -->
                         <div class="hw-quant-row" id="hw-quant-swap-actions" style="display:none;gap:6px;flex-wrap:wrap;"></div>
+                        <!-- Library tags: shown when HF origin is known; pills + inline picker -->
+                        <div class="hw-quant-row" id="hw-tags-row" style="display:none;flex-wrap:wrap;gap:5px;align-items:center;">
+                            <span class="hw-quant-label" style="flex-shrink:0;">Library tags</span>
+                            <div id="hw-tags-pills" style="display:contents;"></div>
+                            <button type="button" id="hw-tags-add-btn" class="btn-wizard-tertiary" style="font-size:10px;min-height:22px;padding:2px 8px;flex-shrink:0;" title="Add or remove tags for this model in your library">+</button>
+                        </div>
                         <div class="hw-quant-row" id="hw-mmproj-row" style="display:none;">
                             <label for="hw-mmproj-select" class="hw-quant-label" title="Adds ~0.5–1.5 GB VRAM. Required for multimodal inference.">Vision (mmproj)</label>
                             <select id="hw-mmproj-select" class="hw-quant-select" title="Vision projector file. Choose (none) for text-only inference."></select>
