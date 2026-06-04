@@ -638,8 +638,12 @@ function bindEvents() {
     _originResolverPromise = null; // reset in-flight resolver
     onModelPathChanged();
     renderLocalModelHint();
-    // Origin resolver fires in loadLocalModel; do NOT fire here to avoid double-fire.
-    // loadLocalModel is called asynchronously by onModelPathChanged -> tryIntrospectModel.
+    // Start origin resolver immediately so autoInstallChatTemplate can await it.
+    // loadLocalModel also triggers one, but _autoResolveHfOrigin checks for
+    // originRepo and is idempotent — the first call wins, second is a no-op.
+    if (!wizardState.model.originRepo) {
+      _originResolverPromise = _autoResolveHfOrigin();
+    }
   });
 
   dom.importPathInput?.addEventListener('input', () => {
@@ -650,7 +654,10 @@ function bindEvents() {
     _originResolverPromise = null; // reset in-flight resolver
     onModelPathChanged();
     renderLocalModelHint();
-    // Origin resolver fires in loadLocalModel; do NOT fire here to avoid double-fire.
+    // Start origin resolver immediately so autoInstallChatTemplate can await it.
+    if (!wizardState.model.originRepo) {
+      _originResolverPromise = _autoResolveHfOrigin();
+    }
   });
 
   dom.hfRepoInput?.addEventListener('input', () => {
@@ -2053,28 +2060,28 @@ async function autoInstallChatTemplate() {
 
   // If no family from fast path, we need to detect it.
   // For local/import models, await the origin resolver first (it fires from
-  // loadLocalModel and includes family detection in the same pass).
-  if (!family) {
-    if (source === 'local' || source === 'import') {
-      _renderChatTemplateStatus('detecting', null, null, null);
-      // Await the origin resolver promise (it was created in loadLocalModel).
-      // Short timeout: the resolver fires 200ms after load, so 1.5s is generous.
-      const resolveTimeout = new Promise(r => setTimeout(r, 1500));
-      await Promise.race([
-        (_originResolverPromise || Promise.resolve()),
-        resolveTimeout,
-      ]);
-      // After the resolver, check again (family may now be set)
-      family = wizardState.model.family || detectModelFamily(identityName);
-    }
-    if (!family) {
-      try {
-        family = await detectModelFamilyAsync(identityName, path, 8000);
-      } catch { /* non-fatal */ }
-    }
-    // Update wizard state for future use
-    if (family) wizardState.model.family = family;
+  // the model path input handler and includes family detection in the same pass).
+  if (!family && (source === 'local' || source === 'import')) {
+    _renderChatTemplateStatus('detecting', null, null, null);
+    // Await the origin resolver promise (created from model path input handler).
+    // The resolver is idempotent — the one from loadLocalModel will be a no-op.
+    // 1.5s timeout is generous: the HF search takes ~500ms.
+    const resolveTimeout = new Promise(r => setTimeout(r, 1500));
+    await Promise.race([
+      (_originResolverPromise || Promise.resolve()),
+      resolveTimeout,
+    ]);
+    // After the resolver, check again (family may now be set by the resolver).
+    family = wizardState.model.family || detectModelFamily(identityName);
   }
+  // If still no family, query HF directly (for models not covered by origin resolver)
+  if (!family) {
+    try {
+      family = await detectModelFamilyAsync(identityName, path, 8000);
+    } catch { /* non-fatal */ }
+  }
+  // Update wizard state for future use
+  if (family) wizardState.model.family = family;
 
   const tplForFamily = family ? COMMUNITY_TEMPLATES[family] : null;
 
