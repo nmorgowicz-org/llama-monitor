@@ -637,6 +637,10 @@ function bindEvents() {
     _tagsRowOrigin = '';
     onModelPathChanged();
     renderLocalModelHint();
+    // Trigger origin resolver for local models lacking a persisted origin tag.
+    if (!wizardState.model.originRepo) {
+      setTimeout(() => _autoResolveHfOrigin(), 200);
+    }
   });
 
   dom.importPathInput?.addEventListener('input', () => {
@@ -646,6 +650,10 @@ function bindEvents() {
     wizardState.model.localMeta = null;
     onModelPathChanged();
     renderLocalModelHint();
+    // Trigger origin resolver for imported models lacking a persisted origin tag.
+    if (!wizardState.model.originRepo) {
+      setTimeout(() => _autoResolveHfOrigin(), 200);
+    }
   });
 
   dom.hfRepoInput?.addEventListener('input', () => {
@@ -2050,31 +2058,107 @@ function detectModelFamily(name) {
   return null;
 }
 
+// Async family detection that tries multiple sources:
+// 1) Persisted family tag from model-tags.json
+// 2) HF model card base_model tag (via /api/hf/meta)
+// 3) Filename heuristics (as fallback)
+async function detectModelFamilyAsync(identityName, localPath, timeoutMs) {
+  const timeout = timeoutMs || 5000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  const headers = window.authHeaders ? window.authHeaders() : {};
+
+  // 1) Check persisted family tag
+  if (localPath) {
+    try {
+      const resp = await fetch('/api/models/tags', { headers, signal: controller.signal });
+      if (resp.ok) {
+        const td = await resp.json().catch(() => ({}));
+        const tags = td.tags?.[localPath] || [];
+        const familyTag = tags.find(t => t.startsWith('family:'));
+        if (familyTag) return familyTag.slice('family:'.length);
+      }
+    } catch (e) { if (e.name !== 'AbortError') { /* non-fatal */ } }
+  }
+
+  // 2) Check HF model card base_model tag (for locally resolved origins or HF repos)
+  const repoId = identityName || wizardState.model.originRepo;
+  // Only query HF API if repoId looks like an HF repo (not a local file path).
+  // HF repos are "owner/name" — no dots before the slash, no backslashes.
+  const looksLikeHfRepo = repoId && repoId.includes('/') &&
+    !repoId.includes('\\') &&
+    !repoId.split('/')[0].includes('.');
+  if (looksLikeHfRepo) {
+    try {
+      const metaResp = await fetch(`/api/hf/meta?repo=${encodeURIComponent(repoId)}`, { headers, signal: controller.signal });
+      if (metaResp.ok) {
+        const meta = await metaResp.json().catch(() => ({}));
+        const tags = meta.tags || [];
+        const baseModelTag = tags.find(t => {
+          if (!t.startsWith('base_model:')) return false;
+          const rest = t.slice('base_model:'.length);
+          return rest.includes('/');
+        });
+        if (baseModelTag) {
+          const baseRepo = baseModelTag.slice('base_model:'.length);
+          const detected = detectModelFamily(baseRepo);
+          if (detected) return detected;
+        }
+      }
+    } catch (e) { if (e.name !== 'AbortError') { /* non-fatal */ } }
+  }
+
+  clearTimeout(timer);
+
+  // 3) Filename heuristics
+  return detectModelFamily(identityName || localPath || '');
+}
+
 async function autoInstallChatTemplate() {
   const { source, path, hfRepo } = wizardState.model;
   const identityName = source === 'hf' ? hfRepo : path;
-  const family = detectModelFamily(identityName);
+
+  // Fast path: family already known (from wizard state or filename)
+  let family = wizardState.model.family || detectModelFamily(identityName);
   const tpl = family ? COMMUNITY_TEMPLATES[family] : null;
 
+  // If no family from fast path, we need to detect it.
+  // For local models, give the origin resolver a brief moment to finish
+  // (it fires 200ms after load and may take a bit more). Then query HF.
+  if (!family) {
+    if (source === 'local' || source === 'import') {
+      _renderChatTemplateStatus('detecting', null, null, null);
+      // Brief wait to let the async origin resolver set the family tag
+      await new Promise(r => setTimeout(r, 800));
+    }
+    try {
+      family = await detectModelFamilyAsync(identityName, path, 8000);
+    } catch { /* non-fatal */ }
+    // Update wizard state for future use
+    if (family) wizardState.model.family = family;
+  }
+
+  const tplForFamily = family ? COMMUNITY_TEMPLATES[family] : null;
+
   if (wizardState.model.chatTemplateMode === 'custom' && wizardState.model.chatTemplatePath) {
-    _renderChatTemplateStatus('custom', family, tpl, { path: wizardState.model.chatTemplatePath });
+    _renderChatTemplateStatus('custom', family, tplForFamily, { path: wizardState.model.chatTemplatePath });
     return;
   }
 
   if (wizardState.model.chatTemplateMode === 'embedded') {
     wizardState.model.chatTemplatePath = null;
-    _renderChatTemplateStatus('embedded', family, tpl, null);
+    _renderChatTemplateStatus('embedded', family, tplForFamily, null);
     return;
   }
 
-  if (!tpl) {
+  if (!tplForFamily) {
     wizardState.model.chatTemplatePath = null;
     wizardState.model.chatTemplateMode = 'auto';
     _renderChatTemplateStatus('embedded', family, null, null);
     return;
   }
 
-  _renderChatTemplateStatus('installing', family, tpl, null);
+  _renderChatTemplateStatus('installing', family, tplForFamily, null);
 
   try {
     const headers = window.authHeaders
@@ -2082,18 +2166,18 @@ async function autoInstallChatTemplate() {
       : { 'Content-Type': 'application/json' };
     const resp = await fetch('/api/chat-template/install-hf', {
       method: 'POST', headers,
-      body: JSON.stringify({ repo: tpl.repo, file: tpl.file, name: tpl.name }),
+      body: JSON.stringify({ repo: tplForFamily.repo, file: tplForFamily.file, name: tplForFamily.name }),
     });
     const data = resp.ok ? await resp.json() : { ok: false, error: `HTTP ${resp.status}` };
     if (data.ok && data.path) {
       wizardState.model.chatTemplatePath = data.path;
       wizardState.model.chatTemplateMode = 'auto';
-      _renderChatTemplateStatus('installed', family, tpl, data);
+      _renderChatTemplateStatus('installed', family, tplForFamily, data);
     } else {
-      _renderChatTemplateStatus('error', family, tpl, data);
+      _renderChatTemplateStatus('error', family, tplForFamily, data);
     }
   } catch (err) {
-    _renderChatTemplateStatus('error', family, tpl, { error: err.message || String(err) });
+    _renderChatTemplateStatus('error', family, tplForFamily, { error: err.message || String(err) });
   }
 }
 
@@ -2160,6 +2244,14 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       }
     });
     actionsEl.appendChild(uploadBtn);
+  }
+
+  if (state === 'detecting') {
+    if (statusEl) { statusEl.textContent = 'Detecting…'; statusEl.className = 'ct-status ct-installing'; }
+    if (bodyEl) {
+      bodyEl.textContent = 'Checking HuggingFace for model family and recommended template…';
+    }
+    return;
   }
 
   if (state === 'installing') {
