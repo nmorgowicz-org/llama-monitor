@@ -657,15 +657,20 @@ function bindEvents() {
   // Prevent the fit toggle label's click from bubbling to the overlay
   dom.fitEnableLabel?.addEventListener('click', e => e.stopPropagation());
 
-  // When toggles cause layout shifts, gently reset scroll only if there is
-  // actual overflow; this avoids “blank center” when content jumps out of view.
+ // When toggles cause layout shifts, gently reset scroll only if there is
+  // actual overflow; this avoids "blank center" when content jumps out of view.
   const resetHwScroll = () => {
     const main = document.querySelector('#wizard-step-2 .wizard-main');
     const sidebar = document.querySelector('.hw-vram-sidebar');
     if (main && main.scrollHeight > main.clientHeight + 2) main.scrollTop = 0;
     if (sidebar && sidebar.scrollHeight > sidebar.clientHeight + 2) sidebar.scrollTop = 0;
   };
-  dom.fitEnableCheck?.addEventListener('change', resetHwScroll);
+  // kvUnifiedCheck fires before the debounced VRAM update; resetting scroll
+  // here lets it run before the sidebar resizes, preventing blank center.
+  // fitEnableCheck is excluded because its layout shift is already handled by
+  // the onHardwareChange → scheduleVramUpdate → updateVramDisplay pipeline;
+  // resetting scroll before the update completes lets the sidebar resize
+  // push content off-screen again.
   dom.kvUnifiedCheck?.addEventListener('change', resetHwScroll);
 
   dom.gpuLayersSelect?.addEventListener('change', () => {

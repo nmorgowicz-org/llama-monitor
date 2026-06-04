@@ -10,6 +10,7 @@
 //! endpoint reads live bytes without holding the task mutex.
 
 use std::collections::HashMap;
+use std::io::IsTerminal;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -258,7 +259,12 @@ async fn run_download(
     // Stream response body, selecting on the cancel signal for immediate abort.
     let mut stream = resp.bytes_stream();
     let mut written = resume_from;
-    let mut last_log_at = resume_from; // log every ~500 MB
+    let mut last_log_at = resume_from; // log every ~500 MB (non-TTY only)
+
+    // TTY progress bar: track per-session transfer for accurate speed.
+    let is_tty = std::io::stderr().is_terminal();
+    let stream_start = std::time::Instant::now();
+    let mut last_render: Option<std::time::Instant> = None; // None → render on first chunk
 
     // Pin the cancel future once so `notify_one()` is never lost between iterations.
     let cancel_signal = cancel.notified();
@@ -269,6 +275,7 @@ async fn run_download(
             biased;
             _ = &mut cancel_signal => {
                 // cancel_download() already updated status/message; just stop.
+                if is_tty { eprintln!(); } // leave progress bar line
                 return;
             }
             chunk = stream.next() => chunk,
@@ -277,13 +284,36 @@ async fn run_download(
         match chunk {
             Some(Ok(data)) => {
                 if let Err(e) = file.write_all(&data).await {
+                    if is_tty {
+                        eprint!("\r\x1b[K");
+                    }
                     eprintln!("[error] download write error  file={file_path}  error={e}");
                     set_failed(&task, format!("Write error: {e}"));
                     return;
                 }
                 written += data.len() as u64;
                 bytes_atom.store(written, Ordering::Relaxed);
-                if written.saturating_sub(last_log_at) >= 500 * 1024 * 1024 {
+
+                if is_tty {
+                    let should_render = last_render
+                        .map(|t| t.elapsed() >= std::time::Duration::from_millis(200))
+                        .unwrap_or(true);
+                    if should_render {
+                        let elapsed = stream_start.elapsed().as_secs_f64();
+                        let transferred = written.saturating_sub(resume_from);
+                        let speed = if elapsed > 0.1 {
+                            transferred as f64 / elapsed
+                        } else {
+                            0.0
+                        };
+                        eprint!(
+                            "\r\x1b[K{}",
+                            render_progress(&file_path, written, total_expected, speed)
+                        );
+                        let _ = std::io::Write::flush(&mut std::io::stderr());
+                        last_render = Some(std::time::Instant::now());
+                    }
+                } else if written.saturating_sub(last_log_at) >= 500 * 1024 * 1024 {
                     let pct = if total_expected > 0 {
                         format!(" ({:.0}%)", written as f64 / total_expected as f64 * 100.0)
                     } else {
@@ -298,6 +328,9 @@ async fn run_download(
                 }
             }
             Some(Err(e)) => {
+                if is_tty {
+                    eprint!("\r\x1b[K");
+                }
                 eprintln!("[error] download stream error  file={file_path}  error={e}");
                 set_failed(&task, format!("Stream error: {e}"));
                 return;
@@ -309,13 +342,37 @@ async fn run_download(
     let mut t = task.lock().expect("DownloadTask lock poisoned");
     t.status = "completed".into();
     t.message = "Download completed.".into();
-    eprintln!("[info] download completed  file={file_path}  bytes={written}");
+    if is_tty {
+        let elapsed = stream_start.elapsed().as_secs_f64();
+        let transferred = written.saturating_sub(resume_from);
+        let avg_speed = if elapsed > 0.0 {
+            transferred as f64 / elapsed
+        } else {
+            0.0
+        };
+        let elapsed_str = if elapsed < 60.0 {
+            format!("{:.0}s", elapsed)
+        } else {
+            format!("{:.1}m", elapsed / 60.0)
+        };
+        eprintln!(
+            "\r\x1b[K[info] download completed  file={file_path}  {} MB  {elapsed_str}  avg {}",
+            written / 1_048_576,
+            fmt_speed(avg_speed),
+        );
+    } else {
+        eprintln!("[info] download completed  file={file_path}  bytes={written}");
+    }
 }
 
 fn set_failed(task: &Arc<Mutex<DownloadTask>>, msg: String) {
     let mut t = task.lock().expect("DownloadTask lock poisoned");
     // Don't overwrite a cancel that raced us here.
     if t.status != "cancelled" {
+        // Clear any in-progress progress bar line before printing the error.
+        if std::io::stderr().is_terminal() {
+            eprint!("\r\x1b[K");
+        }
         eprintln!(
             "[error] download failed  path={}  reason={msg}",
             t.local_path.display()
@@ -370,6 +427,67 @@ pub fn get_download_status(download_id: &str) -> Option<DownloadStatus> {
         message: t.message.clone(),
         local_path: t.local_path.to_string_lossy().into_owned(),
     })
+}
+
+fn fmt_speed(bps: f64) -> String {
+    if bps >= 1_048_576.0 {
+        format!("{:.1} MB/s", bps / 1_048_576.0)
+    } else if bps >= 1024.0 {
+        format!("{:.0} KB/s", bps / 1024.0)
+    } else if bps > 0.0 {
+        format!("{:.0} B/s", bps)
+    } else {
+        "--".to_string()
+    }
+}
+
+/// Build the one-line TTY progress bar string (no newline, no ANSI prefix).
+fn render_progress(file_path: &str, written: u64, total: u64, bps: f64) -> String {
+    // Show only the filename component, truncated to 30 chars from the right.
+    let fname = file_path.rsplit('/').next().unwrap_or(file_path);
+    let fname: String = if fname.len() > 30 {
+        format!("...{}", &fname[fname.len() - 27..])
+    } else {
+        fname.to_string()
+    };
+
+    let mb = written / 1_048_576;
+    let pct = if total > 0 {
+        format!("{:.1}%", written as f64 / total as f64 * 100.0)
+    } else {
+        "?%".to_string()
+    };
+    let total_mb = if total > 0 {
+        format!("/{}", total / 1_048_576)
+    } else {
+        String::new()
+    };
+
+    const BAR_W: usize = 22;
+    let filled = if total > 0 {
+        ((written as f64 / total as f64 * BAR_W as f64) as usize).min(BAR_W)
+    } else {
+        0
+    };
+    let bar = format!("[{}{}]", "=".repeat(filled), " ".repeat(BAR_W - filled));
+
+    let eta_str = if bps > 0.0 && total > written {
+        let secs = (total - written) as f64 / bps;
+        if secs < 60.0 {
+            format!("  ETA {:.0}s", secs)
+        } else if secs < 3600.0 {
+            format!("  ETA {:.0}m", secs / 60.0)
+        } else {
+            format!("  ETA {:.1}h", secs / 3600.0)
+        }
+    } else {
+        String::new()
+    };
+
+    format!(
+        "{fname} {bar} {pct}  {mb}{total_mb} MB  {}{eta_str}",
+        fmt_speed(bps)
+    )
 }
 
 /// Mark a download as cancelled and signal the streaming loop to stop.

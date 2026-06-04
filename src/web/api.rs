@@ -10163,11 +10163,12 @@ fn api_llama_binary_release(
 
     warp::path!("api" / "llama-binary" / "release")
         .and(warp::get())
-        .and(warp::query::<crate::llama::llama_cpp_downloader::ReleaseQuery>())
+        .and(warp::query::<
+            crate::llama::llama_cpp_downloader::ReleaseQuery,
+        >())
         .and(warp::header::optional::<String>("authorization"))
         .and_then(
-            move |query: crate::llama::llama_cpp_downloader::ReleaseQuery,
-                  auth: Option<String>| {
+            move |query: crate::llama::llama_cpp_downloader::ReleaseQuery, auth: Option<String>| {
                 let cfg = app_config.clone();
                 async move {
                     if !check_api_token(&auth, &cfg) {
@@ -10177,7 +10178,7 @@ fn api_llama_binary_release(
                     let build = query.build;
 
                     // Check per-build cache (5 min)
-                    
+
                     {
                         let guard = RELEASE_SINGLE_CACHE.lock().await;
                         if let Some((ts, ref cached)) = *guard

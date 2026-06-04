@@ -79,11 +79,17 @@ pub async fn get_release_by_tag(client: &Client, tag: &str) -> Result<LlamaCppRe
         .context(format!("Failed to fetch release for tag {}", tag))?;
 
     if !resp.status().is_success() {
-        anyhow::bail!("GitHub API returned {} for release tag {}", resp.status(), tag);
+        anyhow::bail!(
+            "GitHub API returned {} for release tag {}",
+            resp.status(),
+            tag
+        );
     }
 
-    let release: LlamaCppRelease =
-        resp.json().await.context(format!("Failed to parse release JSON for tag {}", tag))?;
+    let release: LlamaCppRelease = resp
+        .json()
+        .await
+        .context(format!("Failed to parse release JSON for tag {}", tag))?;
     Ok(release)
 }
 
