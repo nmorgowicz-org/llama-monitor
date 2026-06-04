@@ -393,9 +393,12 @@
 
  .hw-bar-fill {
     height: 100%;
+    width: 100%;
+    transform: scaleX(0);
+    transform-origin: left center;
     border-radius: 999px;
     background: linear-gradient(90deg, var(--bar-start, #8fbcbb), var(--bar-end, #88c0d1));
-    transition: width 300ms ease, background 300ms ease;
+    transition: transform 300ms ease, background 300ms ease;
     box-shadow:
       0 0 12px color-mix(in srgb, var(--bar-start, #8fbcbb) 70%, transparent),
       0 0 22px color-mix(in srgb, var(--bar-start, #8fbcbb) 30%, transparent);

@@ -433,6 +433,7 @@ export function initSessions() {
     // Initial load
     loadSessions();
 
-    // Poll active session info
-    setInterval(updateActiveSessionInfo, 2000);
+    // Note: periodic polling of active session info removed — the WebSocket
+    // delivers the same data (session_mode, active_session_id, endpoint) on
+    // every tick, so the HTTP poll was redundant.
 }

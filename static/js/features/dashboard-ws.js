@@ -1,6 +1,12 @@
 // ── Dashboard WebSocket Transport ──────────────────────────────────────────────
 // WebSocket creation, onmessage dispatch, and dashboard update logic.
 // Imports state from app-state.js and render functions from dashboard-render.js.
+//
+// POWER OPTIMIZATION: Page Visibility API throttling.
+// When the tab is hidden, we skip the dashboard update entirely — no need to
+// parse JSON and write DOM if the user isn't looking at it. The WebSocket
+// still stays connected and receives data, but we discard the messages until
+// the tab becomes visible again. This saves ~100+ DOM writes per tick.
 
 import { formatMetricAge, formatMetricNumber } from '../core/format.js';
 import { deriveTelemetryGrade, gradeLabel, gradeStatusClass, gradeActionCopy } from '../features/telemetry-grade.js';
@@ -62,6 +68,32 @@ import { hideConnectingState, switchView } from './setup-view.js';
 
 // ── Cached DOM elements (populated at init time to avoid repeated queries) ──
 let cachedElements = null;
+
+// ── Power optimization: Page Visibility API throttling ─────────────────────────
+// When the tab is hidden, skip all dashboard updates (no DOM writes needed) and
+// pause all infinite CSS animations (70+) via the power-saver body class.
+// The GPU poller interval (in main.rs) automatically tracks the configured
+// ws_push_interval_ms setting, so when the user selects "Battery Saver" the
+// GPU hardware reads slow down proportionally.
+// When the tab becomes visible, do one full update to refresh stale state.
+let isTabVisible = true;
+
+document.addEventListener('visibilitychange', () => {
+    const wasVisible = isTabVisible;
+    isTabVisible = !document.hidden;
+
+    // Toggle power-saver class to pause/resume all CSS animations
+    document.body.classList.toggle('power-saver', !isTabVisible);
+
+    if (!wasVisible && isTabVisible) {
+        // Tab just became visible — schedule a refresh so stale data gets updated
+        requestAnimationFrame(() => {
+            if (wsData) {
+                updateDashboard(wsData);
+            }
+        });
+    }
+});
 
 function ensureCachedElements() {
     if (cachedElements) return;
@@ -133,6 +165,9 @@ export function initWebSocket() {
 
 ws.onmessage = e => {
     const d = JSON.parse(e.data);
+    // Keep wsData current even when tab is hidden (needed for refresh on show)
+    setWsData(d);
+    if (!isTabVisible) return; // skip DOM writes while tab is hidden
     updateDashboard(d);
 };
 
@@ -403,6 +438,25 @@ function updateServerState(d) {
     setLastSystemMetrics(d.system || null);
     setLastCapabilities(d.capabilities || null);
     setLastGpuMetrics(d.gpu || {});
+
+    // Sync session port/endpoint from WebSocket data (replaces removed HTTP poll)
+    const ep = d.active_session_endpoint;
+    if (ep) {
+        try {
+            const url = new URL(ep);
+            const port = parseInt(url.port) || 8080;
+            if (sessionState.activeSessionPort !== port) {
+                sessionState.activeSessionPort = port;
+            }
+            // Keep the endpoint input in sync
+            const endpointInput = document.getElementById('server-endpoint');
+            if (endpointInput && endpointInput.value !== ep) {
+                endpointInput.value = ep;
+            }
+        } catch {
+            // ignore parse errors
+        }
+    }
 }
 
 // ── Inference metrics ────────────────────────────────────────────────────────
@@ -456,11 +510,11 @@ function updateInferenceMetrics(d) {
             promptMaxEl.textContent = 'peak ' + monitorState.speedMax.prompt.toFixed(0);
         }
         const promptPct = Math.max((promptDisplayRate / monitorState.speedMax.prompt) * 100, 4);
-        if (promptBar) promptBar.style.width = promptPct + '%';
+        if (promptBar) promptBar.style.transform = 'scaleX(' + (promptPct / 100) + ')';
     } else {
         promptEl.textContent = '\u2014';
         if (promptMaxEl) promptMaxEl.textContent = '';
-        if (promptBar) promptBar.style.width = '0%';
+        if (promptBar) promptBar.style.transform = 'scaleX(0)';
     }
 
     // Generation throughput
@@ -476,11 +530,11 @@ function updateInferenceMetrics(d) {
             genMaxEl.textContent = 'peak ' + monitorState.speedMax.generation.toFixed(0);
         }
         const genPct = Math.max((genDisplayRate / monitorState.speedMax.generation) * 100, 4);
-        if (genBar) genBar.style.width = genPct + '%';
+        if (genBar) genBar.style.transform = 'scaleX(' + (genPct / 100) + ')';
     } else {
         genEl.textContent = '\u2014';
         if (genMaxEl) genMaxEl.textContent = '';
-        if (genBar) genBar.style.width = '0%';
+        if (genBar) genBar.style.transform = 'scaleX(0)';
     }
 
     // Sparklines
@@ -495,10 +549,10 @@ function updateInferenceMetrics(d) {
     if (promptDisplayRate > 0 && genDisplayRate > 0) {
         const ratio = promptDisplayRate / genDisplayRate;
         const ratioPct = Math.min((ratio / 50) * 100, 100);
-        if (ratioBar) ratioBar.style.width = ratioPct + '%';
+        if (ratioBar) ratioBar.style.transform = 'scaleX(' + (ratioPct / 100) + ')';
         if (ratioValue) ratioValue.textContent = ratio.toFixed(1) + ':1';
     } else {
-        if (ratioBar) ratioBar.style.width = '0%';
+        if (ratioBar) ratioBar.style.transform = 'scaleX(0)';
         if (ratioValue) ratioValue.textContent = '\u2014';
     }
 

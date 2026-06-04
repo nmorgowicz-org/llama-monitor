@@ -92,9 +92,21 @@ function pushSparklinePoint(name, value) {
     }
 }
 
+/** Last sparkline data snapshot for change detection */
+var lastSparklineSnapshots = {};
+
 function renderSparkline(id, points, className, isBlocked) {
     const svg = document.getElementById(id);
     if (!svg || !points || points.length < 2) return;
+
+    // POWER OPT: skip rebuild if data hasn't changed
+    const key = id + ':' + className;
+    const lastSnapshot = lastSparklineSnapshots[key];
+    if (lastSnapshot && lastSnapshot.length === points.length && lastSnapshot[lastSnapshot.length - 1] === points[points.length - 1]) {
+        return;
+    }
+    lastSparklineSnapshots[key] = [...points];
+
     svg.style.color = getInferenceSparklineColor(className);
     const width = 120;
     const height = 28;
@@ -414,7 +426,7 @@ function renderSlotUtilization(l) {
     const utilBar = document.getElementById('m-slot-util-bar');
     const utilValue = document.getElementById('m-slot-util');
     if (!l || !l.slots_processing !== undefined && l.slots_idle !== undefined) {
-        if (utilBar) utilBar.style.width = '0%';
+        if (utilBar) utilBar.style.transform = 'scaleX(0)';
         if (utilValue) utilValue.textContent = '\u2014';
         return;
     }
@@ -422,12 +434,12 @@ function renderSlotUtilization(l) {
     const idle = l.slots_idle || 0;
     const total = processing + idle;
     if (total === 0) {
-        if (utilBar) utilBar.style.width = '0%';
+        if (utilBar) utilBar.style.transform = 'scaleX(0)';
         if (utilValue) utilValue.textContent = '\u2014';
         return;
     }
     const utilPct = Math.round((processing / total) * 100);
-    if (utilBar) utilBar.style.width = utilPct + '%';
+    if (utilBar) utilBar.style.transform = 'scaleX(' + (utilPct / 100) + ')';
     if (utilValue) utilValue.textContent = utilPct + '%';
 }
 
@@ -682,9 +694,10 @@ function setVizContent(container, html) {
 function renderHwBar(container, pct, tone, isAlert) {
     if (!container) return;
     const bgCls = isAlert ? 'hw-bar-bg is-hot' : 'hw-bar-bg';
+    const scale = (pct / 100).toFixed(4);
     setVizContent(container,
         '<div class="' + bgCls + '" style="--pct:' + pct.toFixed(1) + '%;--bar-start:' + tone.start + ';--bar-end:' + tone.end + ';">' +
-          '<div class="hw-bar-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + tone.start + ';--bar-end:' + tone.end + '"></div>' +
+          '<div class="hw-bar-fill" style="transform:scaleX(' + scale + ');--bar-start:' + tone.start + ';--bar-end:' + tone.end + '"></div>' +
           '<div class="hw-bar-cap"></div>' +
         '</div>');
 }
@@ -704,6 +717,9 @@ function renderHwSparkline(container, history) {
     setVizContent(container, svg);
 }
 
+/** Last hardware sparkline data snapshot for change detection */
+var lastHwSparklineSnapshots = {};
+
 function renderHwMetricSparkline(svgId, history, color, show) {
     const svg = document.getElementById(svgId);
     if (!svg) return;
@@ -711,6 +727,14 @@ function renderHwMetricSparkline(svgId, history, color, show) {
         svg.style.visibility = (show && history && history.length >= 2) ? '' : 'hidden';
         return;
     }
+
+    // POWER OPT: skip rebuild if data hasn't changed
+    const lastHwSnap = lastHwSparklineSnapshots[svgId];
+    if (lastHwSnap && lastHwSnap.length === history.length && lastHwSnap[lastHwSnap.length - 1] === history[history.length - 1]) {
+        return;
+    }
+    lastHwSparklineSnapshots[svgId] = [...history];
+
     svg.style.visibility = '';
     svg.style.color = color;
     const width = 120;

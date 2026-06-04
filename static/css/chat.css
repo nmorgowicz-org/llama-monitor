@@ -1633,9 +1633,12 @@
 }
 .csp-item-ctx-fill {
   height: 100%;
+  width: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
   border-radius: 2px;
   background: var(--color-success);
-  transition: width 500ms ease, background 500ms ease;
+  transition: transform 500ms ease, background 500ms ease;
 }
 .csp-item[data-ctx="medium"] .csp-item-ctx-fill { background: var(--color-warning); }
 .csp-item[data-ctx="high"]   .csp-item-ctx-fill { background: #f97316; }
@@ -2060,9 +2063,11 @@
 }
 .chat-telemetry-mini-fill {
   height: 100%;
-  width: 0%;
+  width: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
   border-radius: inherit;
-  transition: width 240ms ease;
+  transition: transform 240ms ease;
 }
 .chat-telemetry-mini-fill.prompt-bar {
   background: linear-gradient(90deg, rgba(125, 211, 252, 0.38), #7dd3fc);
@@ -2842,9 +2847,11 @@
 }
 .ctx-pressure-fill {
   height: 100%;
-  width: 0%;
+  width: 100%;
+  transform: scaleX(0);
+  transform-origin: left center;
   background: rgba(136, 192, 208, 0.5);
-  transition: width 0.6s ease, background-color 0.6s ease;
+  transition: transform 0.6s ease, background-color 0.6s ease;
   border-radius: 0 1px 1px 0;
 }
 .ctx-pressure-fill.ctx-pressure-medium {

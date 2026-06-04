@@ -34,7 +34,7 @@ use crate::config::{
 };
 use crate::web::auth::AuthManager;
 
-const GPU_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const GPU_POLL_INTERVAL: Duration = Duration::from_millis(500); // fallback; dynamic interval reads ws_push_interval_ms
 const SYSTEM_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 fn main() -> Result<()> {
@@ -201,7 +201,20 @@ fn main() -> Result<()> {
                         Err(e) => eprintln!("[error] GPU metrics: {e}"),
                     };
                 }
-                thread::sleep(GPU_POLL_INTERVAL);
+                // POWER OPT: track the WS push interval so we don't poll GPU faster
+                // than we send data to the browser. Minimum 200ms to avoid hammering
+                // the GPU driver.
+                let poll_ms = {
+                    let settings = match s.ui_settings.lock() {
+                        Ok(g) => g,
+                        Err(_) => {
+                            thread::sleep(GPU_POLL_INTERVAL);
+                            continue;
+                        }
+                    };
+                    (settings.ws_push_interval_ms.max(200) / 2).max(200)
+                };
+                thread::sleep(Duration::from_millis(poll_ms));
             }
         });
     }

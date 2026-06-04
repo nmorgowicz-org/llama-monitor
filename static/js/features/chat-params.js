@@ -790,7 +790,7 @@ function updateCtxPressureBar(pct) {
     if (!bar || !fill) return;
     if (!pct || pct <= 0) { bar.style.display = 'none'; return; }
     bar.style.display = 'block';
-    fill.style.width = Math.min(pct, 100) + '%';
+    fill.style.transform = 'scaleX(' + Math.min(pct, 100) / 100 + ')';
     fill.className = 'ctx-pressure-fill' +
         (pct >= 90 ? ' ctx-pressure-critical' :
          pct >= 75 ? ' ctx-pressure-high' :
@@ -938,13 +938,13 @@ export function refreshChatTelemetry() {
         const promptPct = monitorState.speedMax.prompt > 0 && promptDisplayRate > 0
             ? Math.max(4, (promptDisplayRate / monitorState.speedMax.prompt) * 100)
             : 0;
-        promptBar.style.width = promptPct + '%';
+        promptBar.style.transform = 'scaleX(' + (promptPct / 100) + ')';
     }
     if (genBar) {
         const genPct = monitorState.speedMax.generation > 0 && genDisplayRate > 0
             ? Math.max(4, (genDisplayRate / monitorState.speedMax.generation) * 100)
             : 0;
-        genBar.style.width = genPct + '%';
+        genBar.style.transform = 'scaleX(' + (genPct / 100) + ')';
     }
 
     const capacity = hasActiveEndpoint ? (l?.context_capacity_tokens || l?.kv_cache_max || 0) : 0;

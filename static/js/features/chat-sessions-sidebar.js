@@ -306,7 +306,7 @@ function _buildSessionItem(tab, isActive) {
 
     const ctxFill = el.querySelector('.csp-item-ctx-fill');
     if (ctxFill) {
-        ctxFill.style.width = ctxPct.toFixed(1) + '%';
+        ctxFill.style.transform = 'scaleX(' + (ctxPct / 100) + ')';
     }
 
     if (tab.active_template_id) {

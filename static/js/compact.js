@@ -38,7 +38,7 @@ function setBar(id, pct, maxVal) {
     const bar = document.getElementById(id);
     if (!bar) return;
     const p = Math.min(100, Math.max(0, (pct / maxVal) * 100));
-    bar.style.width = p + '%';
+    bar.style.transform = 'scaleX(' + (p / 100) + ')';
 }
 
 function updateStatus(running) {

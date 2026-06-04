@@ -78,11 +78,9 @@
             </feMerge>
           </filter>
 
-          <!-- Animated pulse glow — breathing glow via animated stdDeviation -->
+          <!-- Sparkline dot glow — static blur (SMIL <animate> removed to save GPU cycles) -->
           <filter id="spark-pulse-glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="1.5" result="blur">
-              <animate attributeName="stdDeviation" values="1;2;1" dur="2.5s" repeatCount="indefinite"/>
-            </feGaussianBlur>
+            <feGaussianBlur stdDeviation="1.5" result="blur"/>
             <feMerge>
               <feMergeNode in="blur"/>
               <feMergeNode in="SourceGraphic"/>

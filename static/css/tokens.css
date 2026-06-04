@@ -4,6 +4,17 @@
  *            --font-body, --font-mono, --text-*, --radius-*, --gap-*,
  *            --gradient-primary, --shadow-surface, --border-subtle
  */
+
+/* POWER OPT: pause all infinite animations when tab is hidden.
+ * The body.power-saver class is toggled by the Page Visibility API in dashboard-ws.js.
+ * This prevents 70+ infinite CSS animations from consuming GPU cycles while the user
+ * isn't looking at the tab. */
+body.power-saver *,
+body.power-saver *::before,
+body.power-saver *::after {
+  animation-play-state: paused !important;
+}
+
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap');
 
 :root {
