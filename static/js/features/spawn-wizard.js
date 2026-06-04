@@ -3024,16 +3024,33 @@ async function _hfFilesPost(repoId) {
 // Maps raw HF tag strings to a normalised, user-facing category key.
 // Only tags that have meaningful categorisation value are included —
 // infrastructure tags (gguf, transformers, llama.cpp, region:us, etc.) are ignored.
+// ── HF tag normalisation: curated map + block-list + pass-through ─────────────
+//
+// Architecture: three-tier system so we never need to pre-map every domain tag.
+//
+//  Tier 1 — Curated map: well-known HF tags → our 9 normalised category keys.
+//            Covers the most common cross-model categories (vision, agentic…).
+//
+//  Tier 2 — Block-list: infrastructure / noise tags that carry no useful signal
+//            for a local model library.  Every tag that survives this AND is not
+//            in Tier 1 passes through as-is to Tier 3.
+//
+//  Tier 3 — Pass-through: domain tags not in either list (medical, legal, biomed,
+//            translation, cybersecurity, …) are shown verbatim after normalisation.
+//            No code change needed when new HF domains appear.
+
 const HF_TAG_MAP = {
   // Vision / multimodal
   vision: 'vision', multimodal: 'vision', 'image-text-to-text': 'vision',
   image: 'vision', vqa: 'vision', visual: 'vision', 'text-to-image': 'vision',
+  'image-to-text': 'vision', 'video-text-to-text': 'vision',
   // Agentic / tool use
   agent: 'agentic', agentic: 'agentic', 'tool-use': 'agentic',
-  'function-calling': 'agentic', tool_use: 'agentic', 'tool_calling': 'agentic',
+  'function-calling': 'agentic', tool_use: 'agentic', tool_calling: 'agentic',
   // Coding
   coder: 'coding', code: 'coding', coding: 'coding',
   'code-generation': 'coding', devops: 'coding', programming: 'coding',
+  'code-llm': 'coding',
   // Reasoning / thinking
   reasoning: 'reasoning', 'chain-of-thought': 'reasoning',
   thinking: 'reasoning', cot: 'reasoning', 'step-by-step': 'reasoning',
@@ -3042,16 +3059,53 @@ const HF_TAG_MAP = {
   'creative-writing': 'roleplay', fiction: 'roleplay', 'role-playing': 'roleplay',
   // Math / STEM
   math: 'math', mathematics: 'math', science: 'math', stem: 'math',
-  arithmetic: 'math', physics: 'math', chemistry: 'math', biology: 'math',
+  arithmetic: 'math',
   // Long context
   'long-context': 'long-context', long_context: 'long-context',
-  // General chat
+  // General chat / instruction following
   conversational: 'chat', chat: 'chat', instruct: 'chat',
   'instruction-following': 'chat',
-  // Multilingual (any 2-letter ISO code that isn't English triggers this)
 };
-// Non-English ISO language codes → multilingual label
-const ISO2_LANGS = new Set(['zh','ja','ko','ru','es','fr','de','ar','pt','it','nl','pl','sv','tr','hi','vi','uk','cs','ro','hu']);
+
+// Non-English two-letter ISO codes → 'multilingual'.  English ('en') is omitted
+// because virtually every model supports it; seeing "multilingual" should only
+// trigger when a model explicitly targets other languages.
+const ISO2_LANGS = new Set([
+  'zh','ja','ko','ru','es','fr','de','ar','pt','it','nl','pl','sv','tr',
+  'hi','vi','uk','cs','ro','hu','da','fi','no','id','th','he','el','bg',
+]);
+
+// Tags that carry no useful signal for a local model library.
+// Anything matching these patterns is silently dropped before pass-through.
+const HF_TAG_BLOCKLIST = new Set([
+  // File / library format
+  'gguf','safetensors','pytorch','tflite','onnx','mlx','coreml','openvino',
+  'ggml','llamafile',
+  // Serving infrastructure
+  'transformers','llama.cpp','text-generation-inference','vllm',
+  'unsloth','ctransformers','ggerganov','endpoints_compatible',
+  'text-generation','text2text-generation','fill-mask','token-classification',
+  // Training / alignment methodology (not a use-case)
+  'lora','qlora','sft','rlhf','dpo','ppo','orpo','grpo','kto',
+  'generated_from_trainer','adapter','merge','mergekit','finetuned',
+  // Quantisation method tags (already captured by wizard hardware step)
+  'imatrix','awq','gptq','eetq','exl2','nvfp4','fp8','int4','int8',
+  // Model-card boilerplate
+  'autotrain_compatible','has_space','not-for-all-audiences',
+]);
+
+// Regex patterns for tags that are always noise regardless of exact value.
+const HF_TAG_BLOCK_PATTERNS = [
+  /^base_model:/,      // base_model:owner/repo
+  /^dataset:/,         // dataset:owner/dataset
+  /^license:/,         // license:apache-2.0 etc.
+  /^region:/,          // region:us
+  /^doi:/,
+  /^arxiv:/,
+  /^\d/,               // tags starting with a digit (version numbers etc.)
+  /^[a-z]{2,3}_[A-Z]{2}$/,   // locale codes: zh_CN, pt_BR
+  /^[a-z]{2}_[a-z]{2}$/,     // locale codes: zh_cn
+];
 
 const HF_CATEGORY_LABEL = {
   vision: 'Vision',
@@ -3065,21 +3119,64 @@ const HF_CATEGORY_LABEL = {
   multilingual: 'Multilingual',
 };
 
-// The full tag vocabulary offered in the picker (superset of KNOWN_TAGS in models.js).
+// Standard vocabulary always offered in the picker, independent of HF.
 const ALL_KNOWN_TAGS = [
   'coding', 'roleplay', 'general', 'art', 'fast', 'default',
   'vision', 'agentic', 'reasoning', 'math', 'long-context', 'chat', 'multilingual',
 ];
 
-// Derive the set of suggested category keys from a raw HF tags array.
+// Normalise a raw HF tag string for use as a local library tag:
+// lowercase, spaces/& stripped to hyphens, trailing hyphens removed.
+function _normaliseTag(raw) {
+  return raw
+    .toLowerCase()
+    .replace(/[&/\\]/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+// Returns true if the tag should be silently dropped.
+function _isBlockedHfTag(raw) {
+  const lower = raw.toLowerCase();
+  if (HF_TAG_BLOCKLIST.has(lower)) return true;
+  if (HF_TAG_BLOCK_PATTERNS.some(re => re.test(raw))) return true;
+  return false;
+}
+
+// Analyse raw HF tags and return:
+//   { categories: Set<string>, passthrough: string[] }
+// categories — matched curated keys (vision, agentic …)
+// passthrough — normalised tags that are not blocked and not mapped to a category;
+//               these are shown verbatim in the "From this model" picker section.
 function _hfTagsToCategories(rawTags) {
-  const cats = new Set();
-  for (const t of rawTags) {
-    const cat = HF_TAG_MAP[t.toLowerCase()];
-    if (cat) cats.add(cat);
-    if (ISO2_LANGS.has(t.toLowerCase())) cats.add('multilingual');
+  const categories = new Set();
+  const passthroughSet = new Set();
+
+  for (const raw of rawTags) {
+    const lower = raw.toLowerCase();
+    if (_isBlockedHfTag(raw)) continue;
+    if (ISO2_LANGS.has(lower)) { categories.add('multilingual'); continue; }
+
+    const cat = HF_TAG_MAP[lower];
+    if (cat) {
+      categories.add(cat);
+    } else {
+      // Pass-through: normalise and keep if it's a non-trivial string
+      const norm = _normaliseTag(raw);
+      if (norm.length >= 2 && !ALL_KNOWN_TAGS.includes(norm)) {
+        passthroughSet.add(norm);
+      }
+    }
   }
-  return cats;
+
+  // Remove passthrough entries that are already covered by a category label
+  for (const cat of categories) {
+    const label = _normaliseTag(HF_CATEGORY_LABEL[cat] || cat);
+    passthroughSet.delete(label);
+  }
+
+  return { categories, passthrough: [...passthroughSet] };
 }
 
 // Fetch HF model metadata and render the tags row for the hardware step.
@@ -3107,19 +3204,22 @@ async function _refreshHwTagsRow() {
 
   // Fetch HF tags for suggestion.
   let suggestedCats = new Set();
+  let passthroughTags = [];
   try {
     const headers = window.authHeaders ? window.authHeaders() : {};
     const r = await fetch(`/api/hf/meta?repo=${encodeURIComponent(originRepo)}`, { headers });
     if (r.ok) {
       const d = await r.json().catch(() => ({}));
-      if (d.ok && d.tags) suggestedCats = _hfTagsToCategories(d.tags);
+      if (d.ok && d.tags) {
+        ({ categories: suggestedCats, passthrough: passthroughTags } = _hfTagsToCategories(d.tags));
+      }
     }
   } catch { /* non-fatal */ }
 
-  _renderHwTagPills(currentTags, suggestedCats, path, originRepo);
+  _renderHwTagPills(currentTags, suggestedCats, passthroughTags, path, originRepo);
 }
 
-function _renderHwTagPills(currentTags, suggestedCats, modelPath, originRepo) {
+function _renderHwTagPills(currentTags, suggestedCats, passthroughTags, modelPath, originRepo) {
   const pillsWrap = document.getElementById('hw-tags-pills');
   if (!pillsWrap) return;
   pillsWrap.innerHTML = '';
@@ -3142,7 +3242,7 @@ function _renderHwTagPills(currentTags, suggestedCats, modelPath, originRepo) {
       const newTags = currentTags.filter(t => t !== tag);
       await _saveHwModelTags(modelPath, newTags);
       currentTags = newTags;
-      _renderHwTagPills(currentTags, suggestedCats, modelPath, originRepo);
+      _renderHwTagPills(currentTags, suggestedCats, passthroughTags, modelPath, originRepo);
     });
     pillsWrap.appendChild(pill);
   });
@@ -3187,13 +3287,15 @@ function _openHwTagPicker(btn, modelPath, originRepo) {
   ]).then(([tagsData, metaData]) => {
     const rawCurrent = (tagsData.tags?.[modelPath] || [])
       .filter(t => !t.startsWith('hf_origin:'));
-    const suggestedCats = metaData.ok && metaData.tags
-      ? _hfTagsToCategories(metaData.tags)
-      : new Set();
+    let suggestedCats = new Set();
+    let passthroughTags = [];
+    if (metaData.ok && metaData.tags) {
+      ({ categories: suggestedCats, passthrough: passthroughTags } = _hfTagsToCategories(metaData.tags));
+    }
 
     popup.innerHTML = '';
 
-    // ── Section: HF suggestions ───────────────────────────────────────────────
+    // ── Section: Curated HF suggestions ──────────────────────────────────────
     if (suggestedCats.size > 0) {
       const hdr = document.createElement('div');
       hdr.className = 'hw-tag-picker-section';
@@ -3208,7 +3310,24 @@ function _openHwTagPicker(btn, modelPath, originRepo) {
       popup.appendChild(sugRow);
     }
 
-    // ── Section: All standard tags ────────────────────────────────────────────
+    // ── Section: Pass-through domain tags (medical, legal, biomed, …) ────────
+    // These are HF tags that didn't map to a curated category but aren't noise.
+    // Shown here so they can be applied without needing the custom input.
+    if (passthroughTags.length > 0) {
+      const hdr = document.createElement('div');
+      hdr.className = 'hw-tag-picker-section';
+      hdr.textContent = 'From this model';
+      popup.appendChild(hdr);
+
+      const ptRow = document.createElement('div');
+      ptRow.className = 'hw-tag-picker-pills';
+      passthroughTags.forEach(tag => {
+        _appendTagPill(ptRow, tag, tag, rawCurrent, modelPath, originRepo, popup);
+      });
+      popup.appendChild(ptRow);
+    }
+
+    // ── Section: Standard vocabulary ─────────────────────────────────────────
     const hdr2 = document.createElement('div');
     hdr2.className = 'hw-tag-picker-section';
     hdr2.textContent = 'All tags';
@@ -3216,7 +3335,9 @@ function _openHwTagPicker(btn, modelPath, originRepo) {
 
     const allRow = document.createElement('div');
     allRow.className = 'hw-tag-picker-pills';
-    ALL_KNOWN_TAGS.forEach(tag => {
+    // Exclude tags already shown in the HF or pass-through sections to avoid duplication.
+    const shownKeys = new Set([...suggestedCats, ...passthroughTags]);
+    ALL_KNOWN_TAGS.filter(t => !shownKeys.has(t)).forEach(tag => {
       _appendTagPill(allRow, tag, tag, rawCurrent, modelPath, originRepo, popup);
     });
     popup.appendChild(allRow);
