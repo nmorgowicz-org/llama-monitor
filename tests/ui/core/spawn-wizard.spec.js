@@ -163,6 +163,56 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         await expect(overlay).not.toBeVisible({ timeout: 2000 });
     });
 
+    test('Hardware auto-fit toggle keeps step content visible after layout changes', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        await page.evaluate(async () => {
+            const { openSpawnWizard, wizardState } = await import('/js/features/spawn-wizard.js');
+            openSpawnWizard();
+            wizardState.model.source = 'local';
+            wizardState.model.path = '/tmp/Qwen3.6-27B-Instruct-Q4_K_M.gguf';
+            wizardState.model.paramB = 27;
+            wizardState.model.modelBytes = 16 * 1024 * 1024 * 1024;
+        });
+
+        await page.locator('.profile-card[data-profile="advanced"]').click();
+        await page.locator('#wizard-next-btn').click();
+        await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
+
+        await page.fill('#spawn-model-path', '/tmp/Qwen3.6-27B-Instruct-Q4_K_M.gguf');
+        await page.locator('#wizard-next-btn').click();
+        await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
+
+        await page.evaluate(() => {
+            const main = document.querySelector('#wizard-step-2 .wizard-main');
+            const sidebar = document.querySelector('#wizard-step-2 .hw-vram-sidebar');
+            if (main) main.scrollTop = Math.max(0, main.scrollHeight);
+            if (sidebar) sidebar.scrollTop = Math.max(0, sidebar.scrollHeight);
+        });
+
+        await page.locator('#spawn-fit-enable').check();
+        await page.waitForTimeout(400);
+
+        const scrollState = await page.evaluate(() => {
+            const main = document.querySelector('#wizard-step-2 .wizard-main');
+            const sidebar = document.querySelector('#wizard-step-2 .hw-vram-sidebar');
+            const step = document.getElementById('wizard-step-2');
+            return {
+                stepActive: !!step?.classList.contains('active'),
+                mainScrollTop: main?.scrollTop ?? null,
+                sidebarScrollTop: sidebar?.scrollTop ?? null,
+                mainHasContent: (main?.scrollHeight || 0) > (main?.clientHeight || 0),
+            };
+        });
+
+        expect(scrollState.stepActive).toBe(true);
+        expect(scrollState.mainHasContent).toBe(true);
+        expect(scrollState.mainScrollTop).toBe(0);
+        expect(scrollState.sidebarScrollTop).toBe(0);
+        await expect(page.locator('#wizard-step-2 .wizard-section-title').first()).toContainText('Configure hardware');
+    });
+
     test('Error state: no internet (HF search returns empty)', async ({ page }) => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');

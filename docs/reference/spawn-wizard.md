@@ -404,6 +404,10 @@ Run `llama-server --print-model-metadata` on a local GGUF file and return parsed
 
 When the wizard opens and no `llama-server` binary is found at the configured path, a banner is shown before the wizard steps begin.
 
+After the binary is installed, the nav bar shows a version pill (e.g. "llama.cpp · b9512"). Clicking the pill opens the version modal — a release picker with the last 8 builds and a release notes panel. Any build can be installed from here, including older ones.
+
+![Llama.cpp Version Modal](../screenshots/llama-updater-version-modal.png)
+
 #### GET /api/llama-binary/platform-info
 Returns instant (no network) platform and backend metadata.
 

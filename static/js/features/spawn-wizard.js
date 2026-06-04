@@ -220,6 +220,7 @@ export const wizardState = {
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 
 let dom = {};
+let pendingHardwareScrollReset = false;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -663,21 +664,13 @@ function bindEvents() {
   // Prevent the fit toggle label's click from bubbling to the overlay
   dom.fitEnableLabel?.addEventListener('click', e => e.stopPropagation());
 
- // When toggles cause layout shifts, gently reset scroll only if there is
-  // actual overflow; this avoids "blank center" when content jumps out of view.
-  const resetHwScroll = () => {
-    const main = document.querySelector('#wizard-step-2 .wizard-main');
-    const sidebar = document.querySelector('.hw-vram-sidebar');
-    if (main && main.scrollHeight > main.clientHeight + 2) main.scrollTop = 0;
-    if (sidebar && sidebar.scrollHeight > sidebar.clientHeight + 2) sidebar.scrollTop = 0;
+  // These toggles can change the step layout enough to leave the scrollable
+  // columns pointed at empty space after the VRAM sidebar re-renders.
+  const requestHardwareScrollReset = () => {
+    pendingHardwareScrollReset = true;
   };
-  // kvUnifiedCheck fires before the debounced VRAM update; resetting scroll
-  // here lets it run before the sidebar resizes, preventing blank center.
-  // fitEnableCheck is excluded because its layout shift is already handled by
-  // the onHardwareChange → scheduleVramUpdate → updateVramDisplay pipeline;
-  // resetting scroll before the update completes lets the sidebar resize
-  // push content off-screen again.
-  dom.kvUnifiedCheck?.addEventListener('change', resetHwScroll);
+  dom.kvUnifiedCheck?.addEventListener('change', requestHardwareScrollReset);
+  dom.fitEnableCheck?.addEventListener('change', requestHardwareScrollReset);
 
   dom.gpuLayersSelect?.addEventListener('change', () => {
     wizardState.hardware.gpuLayers = dom.gpuLayersSelect.value;
@@ -2387,6 +2380,16 @@ export function scheduleVramUpdate() {
   vramDebounce = setTimeout(updateVramDisplay, 250);
 }
 
+function maybeResetHardwareStepScroll() {
+  if (!pendingHardwareScrollReset || wizardState.currentStep !== 2) return;
+  pendingHardwareScrollReset = false;
+
+  const main = document.querySelector('#wizard-step-2 .wizard-main');
+  const sidebar = document.querySelector('#wizard-step-2 .hw-vram-sidebar');
+  if (main && main.scrollHeight > main.clientHeight + 2) main.scrollTop = 0;
+  if (sidebar && sidebar.scrollHeight > sidebar.clientHeight + 2) sidebar.scrollTop = 0;
+}
+
 // ── Animated VRAM display ─────────────────────────────────────────────────────
 
 function getEffectiveArch() {
@@ -2693,6 +2696,8 @@ function updateVramDisplay() {
       if (dom.ramPanel) dom.ramPanel.classList.toggle('over-budget', isOver);
     }
   }
+
+  maybeResetHardwareStepScroll();
 }
 
 function setSegWidth(el, frac) {
