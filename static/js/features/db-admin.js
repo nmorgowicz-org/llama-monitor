@@ -4,6 +4,8 @@
 const dbAdminLog = [];
 let dbAdminOverlay = null;
 let dbAdminToken = null;
+let dbStatsInterval = null;
+let dbAdminInitializedData = false;
 
 async function ensureDbAdminToken() {
     if (dbAdminToken) return;
@@ -24,16 +26,12 @@ export function initDbAdmin() {
     dbAdminOverlay = document.getElementById('db-admin-modal');
     if (!dbAdminOverlay) return;
 
-    // Load admin token and initial stats
-    ensureDbAdminToken();
-    loadDbStats();
-
     // Close handlers
     document.getElementById('db-admin-modal-close')?.addEventListener('click', closeDbAdminModal);
 
     // Open from settings Chat tab
     document.getElementById('settings-open-db-admin-btn')?.addEventListener('click', () => {
-        dbAdminOverlay?.classList.add('active');
+        openDbAdminModal();
     });
     dbAdminOverlay?.addEventListener('click', (e) => {
         if (e.target === dbAdminOverlay) closeDbAdminModal();
@@ -100,12 +98,34 @@ export function initDbAdmin() {
         }
     });
 
-    // Auto-refresh stats every 30 seconds
-    setInterval(loadDbStats, 30000);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopDbStatsPolling();
+        } else if (dbAdminOverlay?.classList.contains('active')) {
+            startDbStatsPolling();
+            loadDbStats();
+        }
+    });
+}
+
+function openDbAdminModal() {
+    if (!dbAdminOverlay) return;
+    dbAdminOverlay.classList.add('active');
+
+    if (!dbAdminInitializedData) {
+        dbAdminInitializedData = true;
+        ensureDbAdminToken();
+    }
+
+    loadDbStats();
+    loadBackups();
+    loadIndexes();
+    startDbStatsPolling();
 }
 
 function closeDbAdminModal() {
     if (!dbAdminOverlay) return;
+    stopDbStatsPolling();
     const modal = dbAdminOverlay.querySelector('.db-admin-modal');
     if (modal) {
         modal.classList.add('closing');
@@ -116,6 +136,20 @@ function closeDbAdminModal() {
     } else {
         dbAdminOverlay.classList.remove('active');
     }
+}
+
+function startDbStatsPolling() {
+    if (dbStatsInterval || document.hidden) return;
+    dbStatsInterval = setInterval(() => {
+        if (!dbAdminOverlay?.classList.contains('active')) return;
+        loadDbStats();
+    }, 30000);
+}
+
+function stopDbStatsPolling() {
+    if (!dbStatsInterval) return;
+    clearInterval(dbStatsInterval);
+    dbStatsInterval = null;
 }
 
 function switchTab(tabName) {

@@ -10,6 +10,7 @@ import { showToast } from './toast.js';
 let _currentBuild = null;
 let _latestBuild  = null;
 let _updating     = false;
+let _versionCheckTimer = null;
 
 export function initLlamaUpdater() {
   const pill = document.getElementById('llama-pill');
@@ -25,8 +26,37 @@ export function initLlamaUpdater() {
     });
   }
 
-  checkVersion();
-  setInterval(checkVersion, 30 * 60 * 1000);
+  // Delay the startup check slightly so it does not compete with first-paint
+  // work, and stop the background timer while the tab is hidden.
+  setTimeout(() => {
+    if (!document.hidden) {
+      checkVersion();
+      ensureVersionPolling();
+    }
+  }, 2000);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      stopVersionPolling();
+      return;
+    }
+    checkVersion();
+    ensureVersionPolling();
+  });
+}
+
+function ensureVersionPolling() {
+  if (_versionCheckTimer) return;
+  _versionCheckTimer = setInterval(() => {
+    if (document.hidden) return;
+    checkVersion();
+  }, 30 * 60 * 1000);
+}
+
+function stopVersionPolling() {
+  if (!_versionCheckTimer) return;
+  clearInterval(_versionCheckTimer);
+  _versionCheckTimer = null;
 }
 
 async function checkVersion() {

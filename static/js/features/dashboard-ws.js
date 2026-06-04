@@ -69,6 +69,7 @@ import { hideConnectingState, switchView } from './setup-view.js';
 // ── Cached DOM elements (populated at init time to avoid repeated queries) ──
 let cachedElements = null;
 let dashboardSocket = null;
+let overlayStateObserver = null;
 
 // ── Badge change detection — skip DOM writes when badge content is unchanged ──
 let prevBadgeState = { server: null, chat: null, logs: null };
@@ -81,6 +82,53 @@ let prevBadgeState = { server: null, chat: null, logs: null };
 // GPU hardware reads slow down proportionally.
 // When the tab becomes visible, do one full update to refresh stale state.
 let isTabVisible = true;
+
+function isElementActuallyVisible(el) {
+    if (!el) return false;
+    const style = getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+}
+
+function hasBlockingOverlayOpen() {
+    const candidates = [
+        ...document.querySelectorAll(
+            '.modal-overlay.open, .modal-overlay.active, .modal-overlay[style*="display: block"], .modal-overlay[style*="display:block"], .keyboard-shortcut-overlay.open, .keyboard-shortcut-overlay.active, #release-notes-panel.open'
+        ),
+        document.getElementById('command-palette-overlay'),
+    ].filter(isElementActuallyVisible);
+
+    return candidates.length > 0;
+}
+
+function isBackgroundUiSuspended() {
+    return !isTabVisible || hasBlockingOverlayOpen();
+}
+
+function syncBackgroundPowerState() {
+    document.body.classList.toggle('power-saver', !isTabVisible);
+    document.body.classList.toggle('background-paused', hasBlockingOverlayOpen());
+}
+
+function ensureOverlayStateObserver() {
+    if (overlayStateObserver || !document.body) return;
+    let scheduled = false;
+    const scheduleSync = () => {
+        if (scheduled) return;
+        scheduled = true;
+        requestAnimationFrame(() => {
+            scheduled = false;
+            syncBackgroundPowerState();
+        });
+    };
+
+    overlayStateObserver = new MutationObserver(scheduleSync);
+    overlayStateObserver.observe(document.body, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'aria-hidden', 'inert'],
+    });
+    scheduleSync();
+}
 
 function sendWsClientState() {
     if (!dashboardSocket || dashboardSocket.readyState !== WebSocket.OPEN) return;
@@ -108,8 +156,8 @@ document.addEventListener('visibilitychange', () => {
     const wasVisible = isTabVisible;
     isTabVisible = !document.hidden;
 
-    // Toggle power-saver class to pause/resume all CSS animations
-    document.body.classList.toggle('power-saver', !isTabVisible);
+    // Toggle background power classes to pause/resume animation work
+    syncBackgroundPowerState();
     sendWsClientState();
 
     if (!wasVisible && isTabVisible) {
@@ -186,6 +234,7 @@ function ensureCachedElements() {
 // ── WebSocket setup ───────────────────────────────────────────────────────────
 
 export function initWebSocket() {
+    ensureOverlayStateObserver();
     const ws = new WebSocket(
         (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'
     );
@@ -237,38 +286,42 @@ function updateDashboard(d) {
     const inMonitorView = isMonitorViewActive();
     const activeTab = currentMonitorTab();
 
-    // Endpoint health strip
-    if (inMonitorView) updateEndpointStrip(d);
-
-    // Agent status
-    if (inMonitorView) updateAgentStatus(d);
-
     // Attach/Detach buttons and server header
     updateAttachDetach(d);
 
-    // Server state
+    // Keep session/runtime state current even when the setup flow is on-screen.
+    // The setup path and blocking modal flows still need state sync, but they
+    // do not need the hidden background surfaces to keep re-rendering 2x/sec.
     updateServerState(d);
+
+    if (!inMonitorView || hasBlockingOverlayOpen()) {
+        return;
+    }
+
+    // Endpoint health strip
+    updateEndpointStrip(d);
+
+    // Agent status
+    updateAgentStatus(d);
 
     // Inference metrics
     updateInferenceMetrics(d);
-    if (inMonitorView && activeTab === 'chat') {
+    if (activeTab === 'chat') {
         refreshChatTelemetry();
     }
-    if (inMonitorView) {
-        refreshTopCockpit();
-    }
+    refreshTopCockpit();
 
     // GPU card
-    if (inMonitorView && activeTab === 'server') updateGpuCard(d);
+    if (activeTab === 'server') updateGpuCard(d);
 
     // System card
-    if (inMonitorView && activeTab === 'server') updateSystemCard(d);
+    if (activeTab === 'server') updateSystemCard(d);
 
     // Logs
-    if (inMonitorView && activeTab === 'logs') updateLogs(d);
+    if (activeTab === 'logs') updateLogs(d);
 
     // Badges
-    if (inMonitorView) updateBadges(d);
+    updateBadges(d);
 }
 
 // ── Endpoint health strip ────────────────────────────────────────────────────

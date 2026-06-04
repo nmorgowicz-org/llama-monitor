@@ -7,6 +7,7 @@ import { showToast } from './toast.js';
 let initialized = false;
 let currentEffectiveType = null;
 let hasShownSuggestion = false;
+let networkCheckTimer = null;
 
 // ── Network Quality Detection ─────────────────────────────────────────────────
 
@@ -152,6 +153,8 @@ function suggestPollingAdjustment(networkInfo) {
 let lastAutoInterval = null;
 
 function onNetworkChange() {
+    if (document.hidden) return;
+
     const networkInfo = getNetworkInfo();
     const wasSlow = isSlowNetwork({ effectiveType: currentEffectiveType || '4g' });
     const isNowSlow = isSlowNetwork(networkInfo);
@@ -179,6 +182,17 @@ function onNetworkChange() {
     if (isNowSlow && !wasSlow) {
         suggestPollingAdjustment(networkInfo);
     }
+}
+
+function startNetworkMonitoring() {
+    if (networkCheckTimer) return;
+    networkCheckTimer = setInterval(onNetworkChange, 30000);
+}
+
+function stopNetworkMonitoring() {
+    if (!networkCheckTimer) return;
+    clearInterval(networkCheckTimer);
+    networkCheckTimer = null;
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -219,6 +233,17 @@ export function initNetworkDetection() {
         }
     });
 
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopNetworkMonitoring();
+            return;
+        }
+        onNetworkChange();
+        startNetworkMonitoring();
+    });
+
     // Periodic check (every 30s) for browsers that don't fire change events
-    setInterval(onNetworkChange, 30000);
+    if (!document.hidden) {
+        startNetworkMonitoring();
+    }
 }

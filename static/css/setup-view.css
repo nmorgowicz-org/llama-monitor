@@ -1091,7 +1091,6 @@
   height: 600px;
   border-radius: 50%;
   filter: blur(80px);
-  animation: bg-drift 20s ease-in-out infinite;
 }
 
 .setup-bg::before {
@@ -1129,7 +1128,6 @@
 }
 
 .setup-logo {
-  animation: logo-breathe 4s ease-in-out infinite;
   filter: drop-shadow(0 0 20px rgba(99, 102, 241, 0.3));
 }
 
@@ -1196,14 +1194,6 @@
   display: flex;
   justify-content: center;
   color: var(--color-primary-light);
-}
-
-.setup-card-attach .setup-card-icon {
-  animation: icon-pulse 3s ease-in-out infinite;
-}
-
-.setup-card-spawn .setup-card-icon {
-  animation: icon-shimmer 6s ease-in-out infinite;
 }
 
 @keyframes icon-pulse {
@@ -2180,7 +2170,6 @@ body.setup-active .sidebar-nav {
   background: radial-gradient(circle, rgba(99, 102, 241, 0.12), transparent 70%);
   top: -180px;
   left: -100px;
-  animation: orb-drift-a 22s ease-in-out infinite;
 }
 
 .setup-orb-2 {
@@ -2189,8 +2178,6 @@ body.setup-active .sidebar-nav {
   background: radial-gradient(circle, rgba(6, 182, 212, 0.09), transparent 70%);
   bottom: -120px;
   right: -80px;
-  animation: orb-drift-b 28s ease-in-out infinite;
-  animation-delay: -10s;
 }
 
 .setup-orb-3 {
@@ -2199,8 +2186,6 @@ body.setup-active .sidebar-nav {
   background: radial-gradient(circle, rgba(236, 72, 153, 0.07), transparent 70%);
   top: 45%;
   left: 55%;
-  animation: orb-drift-c 34s ease-in-out infinite;
-  animation-delay: -17s;
 }
 
 [data-theme="light"] .setup-orb-1,
@@ -2258,7 +2243,6 @@ body.setup-active .sidebar-nav {
 }
 
 .setup-logo {
-  animation: logo-breathe 4s ease-in-out infinite;
   filter: drop-shadow(0 0 18px rgba(99, 102, 241, 0.35));
   flex-shrink: 0;
 }

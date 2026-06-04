@@ -15,6 +15,26 @@ body.power-saver *::after {
   animation-play-state: paused !important;
 }
 
+/* POWER OPT: when a blocking modal/panel is open, pause decorative animation
+ * on background app surfaces while leaving the foreground dialog responsive. */
+body.background-paused .top-nav-bar *,
+body.background-paused .top-nav-bar *::before,
+body.background-paused .top-nav-bar *::after,
+body.background-paused .sidebar-nav *,
+body.background-paused .sidebar-nav *::before,
+body.background-paused .sidebar-nav *::after,
+body.background-paused #view-setup *,
+body.background-paused #view-setup *::before,
+body.background-paused #view-setup *::after,
+body.background-paused #view-monitor *,
+body.background-paused #view-monitor *::before,
+body.background-paused #view-monitor *::after,
+body.background-paused .chat-sessions-panel *,
+body.background-paused .chat-sessions-panel *::before,
+body.background-paused .chat-sessions-panel *::after {
+  animation-play-state: paused !important;
+}
+
 /* POWER OPT: honour the OS "Reduce Motion" accessibility preference.
  * Disables decorative animations for users who have motion reduction enabled —
  * also the right thing to do for battery life on Apple Silicon. */
