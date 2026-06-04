@@ -3058,7 +3058,11 @@ const HF_TAG_MAP = {
   roleplay: 'roleplay', creative: 'roleplay', storytelling: 'roleplay',
   'creative-writing': 'roleplay', fiction: 'roleplay', 'role-playing': 'roleplay',
   // NSFW / adult content — 'not-for-all-audiences' is HF boilerplate for the same thing
-  nsfw: 'nsfw', 'not-for-all-audiences': 'nsfw', adult: 'nsfw',
+  nsfw: 'nsfw', 'not-for-all-audiences': 'nsfw', adult: 'nsfw', explicit: 'nsfw',
+  // Uncensored / guardrails removed — technique varies but concept is the same
+  uncensored: 'uncensored', decensored: 'uncensored', abliterated: 'uncensored',
+  heretic: 'uncensored', jailbreak: 'uncensored', 'no-refusals': 'uncensored',
+  unfiltered: 'uncensored',
   // Math / STEM
   math: 'math', mathematics: 'math', science: 'math', stem: 'math',
   arithmetic: 'math',
@@ -3121,6 +3125,7 @@ const HF_CATEGORY_LABEL = {
   reasoning: 'Reasoning',
   roleplay: 'Roleplay',
   nsfw: 'NSFW',
+  uncensored: 'Uncensored',
   math: 'Math/STEM',
   'long-context': 'Long context',
   chat: 'Chat',
@@ -3129,7 +3134,7 @@ const HF_CATEGORY_LABEL = {
 
 // Standard vocabulary always offered in the picker, independent of HF.
 const ALL_KNOWN_TAGS = [
-  'coding', 'roleplay', 'nsfw', 'general', 'art', 'fast', 'default',
+  'coding', 'roleplay', 'nsfw', 'uncensored', 'general', 'art', 'fast', 'default',
   'vision', 'agentic', 'reasoning', 'math', 'long-context', 'chat', 'multilingual',
 ];
 
