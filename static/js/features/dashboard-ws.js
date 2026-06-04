@@ -68,6 +68,10 @@ import { hideConnectingState, switchView } from './setup-view.js';
 
 // ── Cached DOM elements (populated at init time to avoid repeated queries) ──
 let cachedElements = null;
+let dashboardSocket = null;
+
+// ── Badge change detection — skip DOM writes when badge content is unchanged ──
+let prevBadgeState = { server: null, chat: null, logs: null };
 
 // ── Power optimization: Page Visibility API throttling ─────────────────────────
 // When the tab is hidden, skip all dashboard updates (no DOM writes needed) and
@@ -78,12 +82,35 @@ let cachedElements = null;
 // When the tab becomes visible, do one full update to refresh stale state.
 let isTabVisible = true;
 
+function sendWsClientState() {
+    if (!dashboardSocket || dashboardSocket.readyState !== WebSocket.OPEN) return;
+    try {
+        dashboardSocket.send(JSON.stringify({
+            type: 'client-visibility',
+            visible: isTabVisible,
+        }));
+    } catch {
+        // Ignore transient send failures; the next state change will retry.
+    }
+}
+
+function currentMonitorTab() {
+    const activePage = document.querySelector('.page.active');
+    if (!activePage || !activePage.id) return 'server';
+    return activePage.id.replace(/^page-/, '');
+}
+
+function isMonitorViewActive() {
+    return setupViewState.view === 'monitor';
+}
+
 document.addEventListener('visibilitychange', () => {
     const wasVisible = isTabVisible;
     isTabVisible = !document.hidden;
 
     // Toggle power-saver class to pause/resume all CSS animations
     document.body.classList.toggle('power-saver', !isTabVisible);
+    sendWsClientState();
 
     if (!wasVisible && isTabVisible) {
         // Tab just became visible — schedule a refresh so stale data gets updated
@@ -162,6 +189,7 @@ export function initWebSocket() {
     const ws = new WebSocket(
         (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'
     );
+    dashboardSocket = ws;
 
 ws.onmessage = e => {
     const d = JSON.parse(e.data);
@@ -170,6 +198,10 @@ ws.onmessage = e => {
     if (!isTabVisible) return; // skip DOM writes while tab is hidden
     updateDashboard(d);
 };
+
+    ws.onopen = () => {
+        sendWsClientState();
+    };
 
 // Poll context card after chat tabs load
 window.onChatTabsLoaded = () => {
@@ -181,6 +213,7 @@ window.onChatTabsLoaded = () => {
     ws.onerror = e => console.error('WebSocket error:', e);
 
     ws.onclose = () => {
+        if (dashboardSocket === ws) dashboardSocket = null;
         ensureCachedElements();
         if (cachedElements.statusText) cachedElements.statusText.textContent = 'Disconnected';
         sessionState.prevLogLen = 0;
@@ -201,12 +234,14 @@ function updateDashboard(d) {
     // Derive and store telemetry grade for consumption by all dashboard components
     const grade = deriveTelemetryGrade(d);
     window.__telemetryGrade = grade;
+    const inMonitorView = isMonitorViewActive();
+    const activeTab = currentMonitorTab();
 
     // Endpoint health strip
-    updateEndpointStrip(d);
+    if (inMonitorView) updateEndpointStrip(d);
 
     // Agent status
-    updateAgentStatus(d);
+    if (inMonitorView) updateAgentStatus(d);
 
     // Attach/Detach buttons and server header
     updateAttachDetach(d);
@@ -216,20 +251,24 @@ function updateDashboard(d) {
 
     // Inference metrics
     updateInferenceMetrics(d);
-    refreshChatTelemetry();
-    refreshTopCockpit();
+    if (inMonitorView && activeTab === 'chat') {
+        refreshChatTelemetry();
+    }
+    if (inMonitorView) {
+        refreshTopCockpit();
+    }
 
     // GPU card
-    updateGpuCard(d);
+    if (inMonitorView && activeTab === 'server') updateGpuCard(d);
 
     // System card
-    updateSystemCard(d);
+    if (inMonitorView && activeTab === 'server') updateSystemCard(d);
 
     // Logs
-    updateLogs(d);
+    if (inMonitorView && activeTab === 'logs') updateLogs(d);
 
     // Badges
-    updateBadges(d);
+    if (inMonitorView) updateBadges(d);
 }
 
 // ── Endpoint health strip ────────────────────────────────────────────────────
@@ -700,41 +739,49 @@ function updateLogs(d) {
 
 function updateBadges(d) {
     const isAttached = d.session_mode === 'attach' && d.active_session_endpoint;
-
-    // Server badge
-    const badgeParts = [];
-    if (isAttached) {
-        const gpuEntries = Object.entries(d.gpu || {});
-        if (gpuEntries.length > 0) badgeParts.push('GPU ' + Math.max(...gpuEntries.map(([,m]) => m.temp)).toFixed(0) + 'C');
-    }
     const ce = cachedElements;
-    const badgeServer = ce.badgeServer;
-    if (badgeServer) badgeServer.textContent = badgeParts.length ? ' ' + badgeParts.join(' \u00b7 ') : '';
 
-    // Chat badge
-    const badgeChat = ce.badgeChat;
+    // Server badge \u2014 GPU temp changes infrequently; skip write when unchanged
+    const gpuEntries = Object.entries(d.gpu || {});
+    const serverText = (isAttached && gpuEntries.length > 0)
+        ? ' GPU ' + Math.max(...gpuEntries.map(([,m]) => m.temp)).toFixed(0) + 'C'
+        : '';
+    if (serverText !== prevBadgeState.server) {
+        prevBadgeState.server = serverText;
+        const badgeServer = ce.badgeServer;
+        if (badgeServer) badgeServer.textContent = serverText;
+    }
+
+    // Chat badge \u2014 message count rarely changes between ticks
     const tab = activeChatTab();
     const msgCount = tab ? tab.messages.filter(m => m.role !== 'system').length : 0;
-    if (badgeChat) {
-        if (msgCount > 0) {
-            badgeChat.textContent = ' ' + msgCount + ' msg';
-            badgeChat.style.display = '';
-        } else {
-            badgeChat.textContent = '';
-            badgeChat.style.display = 'none';
+    if (msgCount !== prevBadgeState.chat) {
+        prevBadgeState.chat = msgCount;
+        const badgeChat = ce.badgeChat;
+        if (badgeChat) {
+            if (msgCount > 0) {
+                badgeChat.textContent = ' ' + msgCount + ' msg';
+                badgeChat.style.display = '';
+            } else {
+                badgeChat.textContent = '';
+                badgeChat.style.display = 'none';
+            }
         }
     }
 
-    // Logs badge
-    const badgeLogs = ce.badgeLogs;
+    // Logs badge \u2014 count only changes when new logs arrive
     const logs = d.logs || [];
-    if (badgeLogs) {
-        if (logs.length > 0) {
-            badgeLogs.textContent = ' ' + logs.length;
-            badgeLogs.style.display = '';
-        } else {
-            badgeLogs.textContent = '';
-            badgeLogs.style.display = 'none';
+    if (logs.length !== prevBadgeState.logs) {
+        prevBadgeState.logs = logs.length;
+        const badgeLogs = ce.badgeLogs;
+        if (badgeLogs) {
+            if (logs.length > 0) {
+                badgeLogs.textContent = ' ' + logs.length;
+                badgeLogs.style.display = '';
+            } else {
+                badgeLogs.textContent = '';
+                badgeLogs.style.display = 'none';
+            }
         }
     }
 }

@@ -144,6 +144,14 @@ function renderLiveSparkline(id, points) {
         svg.innerHTML = '';
         return;
     }
+
+    // POWER OPT: skip rebuild if data hasn't changed
+    const key = id + ':live';
+    const lastSnap = lastSparklineSnapshots[key];
+    if (lastSnap && lastSnap.length === points.length && lastSnap[lastSnap.length - 1] === points[points.length - 1]) {
+        return;
+    }
+    lastSparklineSnapshots[key] = [...points];
     svg.style.color = getInferenceSparklineColor('live-output');
     const width = 120;
     const height = 28;
@@ -772,10 +780,11 @@ function renderHwMetricSparkline(svgId, history, color, show) {
 function renderHwStacked(container, pct, tone, isAlert) {
     if (!container) return;
     const bgCls = isAlert ? 'hw-stacked-bg is-hot' : 'hw-stacked-bg';
+    const scale = (pct / 100).toFixed(4);
     setVizContent(container,
         '<div class="' + bgCls + '" style="--pct:' + pct.toFixed(1) + '%;--bar-start:' + tone.start + ';--bar-end:' + tone.end + ';">' +
-          '<div class="hw-stacked-fill" style="width:' + pct.toFixed(1) + '%;--bar-start:' + tone.start + ';--bar-end:' + tone.end + '"></div>' +
-          '<div class="hw-stacked-free" style="width:' + (100 - pct).toFixed(1) + '%"></div>' +
+          '<div class="hw-stacked-fill" style="transform:scaleX(' + scale + ');--bar-start:' + tone.start + ';--bar-end:' + tone.end + '"></div>' +
+          '<div class="hw-stacked-free"></div>' +
           '<div class="hw-bar-cap"></div>' +
         '</div>');
 }
@@ -945,6 +954,9 @@ function buildSparklineSVG(points, cssClass, color) {
         '</svg>';
 }
 
+/** Last GPU metric snapshot for change detection — skip full card rebuild when metrics are stable */
+var lastGpuSnapshot = null;
+
 var gpuHistory = { load: [], power: [], vramPct: [], sclk: [], mclk: [] };
 function pushGpuHistory(key, value) {
     if (!Number.isFinite(value)) return;
@@ -1088,6 +1100,11 @@ function renderGpuCard(gpuMap, visible, grade) {
 
     // Use first GPU (most common case)
     var _loop = entries[0];
+    // POWER OPT: skip full rebuild when GPU values AND viz prefs haven't changed
+    var gpuKey = _loop[0];
+    var gpuSnap = JSON.stringify([gpuKey, _loop[1].load, _loop[1].power_consumption, _loop[1].vram_used, _loop[1].temp, _loop[1].sclk_mhz, _loop[1].mclk_mhz, vizPrefs.gpu.load, vizPrefs.gpu.power, vizPrefs.gpu.vram, vizPrefs.gpu.clocks]);
+    if (gpuSnap === lastGpuSnapshot) return;
+    lastGpuSnapshot = gpuSnap;
     var name = _loop[0];
     var m = _loop[1];
 

@@ -15,6 +15,29 @@ body.power-saver *::after {
   animation-play-state: paused !important;
 }
 
+/* POWER OPT: honour the OS "Reduce Motion" accessibility preference.
+ * Disables decorative animations for users who have motion reduction enabled —
+ * also the right thing to do for battery life on Apple Silicon. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Shared compositing-only pulse used by multiple card glow pseudo-elements */
+@keyframes opacity-pulse {
+  0%, 100% { opacity: 0.35; }
+  50%       { opacity: 1; }
+}
+@keyframes opacity-pulse-slow {
+  0%, 100% { opacity: 0.25; }
+  50%       { opacity: 0.8; }
+}
+
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code:wght@400;500;600&display=swap');
 
 :root {

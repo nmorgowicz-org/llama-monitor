@@ -1,5 +1,6 @@
 use futures_util::{SinkExt, StreamExt};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 use warp::Filter;
 use warp::ws::{Message, Ws};
@@ -9,6 +10,7 @@ use crate::state::AppState;
 const WS_PUSH_INTERVAL_DEFAULT_MS: u64 = 500;
 const WS_PUSH_INTERVAL_MIN_MS: u64 = 200;
 const WS_PUSH_INTERVAL_MAX_MS: u64 = 10000;
+const WS_PUSH_INTERVAL_HIDDEN_MS: u64 = 5000;
 const MAX_WS_CONNECTIONS: usize = 50;
 
 static WS_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
@@ -39,7 +41,9 @@ pub fn ws_route(
             let state = state.clone();
             async move {
                 let (mut ws_tx, mut ws_rx) = socket.split();
+                let client_visible = Arc::new(AtomicBool::new(true));
 
+                let update_visible = Arc::clone(&client_visible);
                 let update_task = tokio::spawn(async move {
                     let mut last_interval_ms = WS_PUSH_INTERVAL_DEFAULT_MS;
                     loop {
@@ -56,7 +60,12 @@ pub fn ws_route(
                         if current_ms != last_interval_ms {
                             last_interval_ms = current_ms;
                         }
-                        tokio::time::sleep(Duration::from_millis(last_interval_ms)).await;
+                        let effective_interval_ms = if update_visible.load(Ordering::Relaxed) {
+                            last_interval_ms
+                        } else {
+                            last_interval_ms.max(WS_PUSH_INTERVAL_HIDDEN_MS)
+                        };
+                        tokio::time::sleep(Duration::from_millis(effective_interval_ms)).await;
 
                         let running = *state.server_running.lock().unwrap();
                         let local_running = *state.local_server_running.lock().unwrap();
@@ -147,7 +156,21 @@ pub fn ws_route(
                     }
                 });
 
-                while let Some(_msg) = ws_rx.next().await {}
+                while let Some(msg) = ws_rx.next().await {
+                    let Ok(msg) = msg else { break };
+                    if !msg.is_text() {
+                        continue;
+                    }
+                    let Ok(text) = msg.to_str() else { continue };
+                    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+                        continue;
+                    };
+                    if value.get("type").and_then(|v| v.as_str()) == Some("client-visibility")
+                        && let Some(visible) = value.get("visible").and_then(|v| v.as_bool())
+                    {
+                        client_visible.store(visible, Ordering::Relaxed);
+                    }
+                }
                 update_task.abort();
                 WS_CONNECTIONS.fetch_sub(1, Ordering::Relaxed);
             }

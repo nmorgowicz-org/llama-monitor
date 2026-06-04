@@ -404,12 +404,18 @@
       0 0 22px color-mix(in srgb, var(--bar-start, #8fbcbb) 30%, transparent);
     position: relative;
     overflow: hidden;
-    animation: hw-bar-glow 3s ease-in-out infinite;
   }
 
-  @keyframes hw-bar-glow {
-    0%, 100% { box-shadow: 0 0 8px var(--bar-start, #8fbcbb); }
-    50% { box-shadow: 0 0 16px var(--bar-start, #8fbcbb); }
+  /* hw-bar-glow replaced: static shadow + compositing-only opacity pulse on ::before */
+  .hw-bar-fill::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: 0 0 16px var(--bar-start, #8fbcbb);
+    animation: opacity-pulse 3s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 0;
   }
 
   .hw-bar-fill::after {

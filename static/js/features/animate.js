@@ -1,8 +1,15 @@
 // ── Animate ───────────────────────────────────────────────────────────────────
 // Number counting animation for smooth value transitions.
 
+// Cancel any in-progress rAF loop before starting a new one so two calls
+// 500ms apart (one tick) don't pile up overlapping writes to the same element.
+const activeAnimations = new WeakMap();
+
 export function animateNumber(element, from, to, duration = 300, decimals = 1, suffix = '') {
     if (!element) return;
+
+    const prev = activeAnimations.get(element);
+    if (prev) cancelAnimationFrame(prev);
 
     const startTime = performance.now();
     const diff = to - from;
@@ -18,11 +25,15 @@ export function animateNumber(element, from, to, duration = 300, decimals = 1, s
         element.textContent = current.toFixed(decimals) + suffix;
 
         if (progress < 1) {
-            requestAnimationFrame(update);
+            const id = requestAnimationFrame(update);
+            activeAnimations.set(element, id);
+        } else {
+            activeAnimations.delete(element);
         }
     }
 
-    requestAnimationFrame(update);
+    const id = requestAnimationFrame(update);
+    activeAnimations.set(element, id);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
