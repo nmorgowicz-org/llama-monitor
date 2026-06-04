@@ -49,6 +49,13 @@ pub struct LlamaCppAsset {
     pub browser_download_url: String,
 }
 
+/// Query parameter for the single-release endpoint.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReleaseQuery {
+    /// Build number (e.g. 9479 for b9479).
+    pub build: u64,
+}
+
 /// Status of an in-progress llama.cpp download.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize)]
@@ -59,9 +66,30 @@ pub struct LlamaCppDownloadStatus {
     pub progress: f64,
 }
 
-/// List recent releases from ggerganov/llama.cpp.
+/// Fetch a specific release from ggml-org/llama.cpp by tag (e.g. "b9479").
+pub async fn get_release_by_tag(client: &Client, tag: &str) -> Result<LlamaCppRelease> {
+    let url = format!(
+        "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/{}",
+        tag
+    );
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .context(format!("Failed to fetch release for tag {}", tag))?;
+
+    if !resp.status().is_success() {
+        anyhow::bail!("GitHub API returned {} for release tag {}", resp.status(), tag);
+    }
+
+    let release: LlamaCppRelease =
+        resp.json().await.context(format!("Failed to parse release JSON for tag {}", tag))?;
+    Ok(release)
+}
+
+/// List recent releases from ggml-org/llama.cpp.
 pub async fn list_releases(client: &Client) -> Result<Vec<LlamaCppRelease>> {
-    let url = "https://api.github.com/repos/ggerganov/llama.cpp/releases?per_page=20";
+    let url = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=20";
     let resp = client
         .get(url)
         .send()

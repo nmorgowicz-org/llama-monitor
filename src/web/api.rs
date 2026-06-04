@@ -2427,7 +2427,10 @@ fn build_arch_from_body(
     }
 }
 
-// ── Phase 2: POST /api/benchmark ─────────────────────────────────────────────
+// ── Phase 2: POST /api/benchmark (with 15-second cooldown) ────────────────────
+
+static BENCHMARK_LAST_TS: std::sync::LazyLock<std::sync::Mutex<u64>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(0u64));
 
 fn api_benchmark(
     state: AppState,
@@ -2447,6 +2450,29 @@ fn api_benchmark(
                     // Auth
                     if !check_api_token(&auth, &cfg) {
                         return Ok(unauthorized_api_token());
+                    }
+
+                    // Cooldown to prevent repeated heavy loads on the running llama-server.
+                    {
+                        let now = std::time::SystemTime::UNIX_EPOCH
+                            .elapsed()
+                            .unwrap_or_default()
+                            .as_secs();
+                        let mut last = BENCHMARK_LAST_TS.lock().unwrap();
+                        if now.saturating_sub(*last) < 15 {
+                            let remaining = 15 - (now.saturating_sub(*last));
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                                Box::new(warp::reply::with_status(
+                                    warp::reply::json(&serde_json::json!({
+                                        "ok": false,
+                                        "error": "Benchmark rate limited. Try again in 15 seconds.",
+                                        "seconds_remaining": remaining
+                                    })),
+                                    StatusCode::TOO_MANY_REQUESTS,
+                                )),
+                            );
+                        }
+                        *last = now;
                     }
 
                     // Ensure a server is running
@@ -2784,8 +2810,9 @@ fn api_set_metal_gpu_limit(
         .and_then(move |auth: Option<String>, body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
-                if !check_api_token(&auth, &cfg) {
-                    return Ok(unauthorized_api_token());
+                // Use db-admin-token: this changes a system-level parameter (iogpu.wired_limit_mb).
+                if !check_db_admin_token(&auth, &cfg) {
+                    return Ok(unauthorized_db_admin_token());
                 }
 
                 let limit_mb = match body["limit_mb"].as_u64() {
@@ -2889,8 +2916,9 @@ fn api_set_metal_gpu_limit(
         .and_then(move |auth: Option<String>, _body: serde_json::Value| {
             let cfg = app_config.clone();
             async move {
-                if !check_api_token(&auth, &cfg) {
-                    return Ok(unauthorized_api_token());
+                // Use db-admin-token: this changes a system-level parameter.
+                if !check_db_admin_token(&auth, &cfg) {
+                    return Ok(unauthorized_db_admin_token());
                 }
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
@@ -4066,6 +4094,7 @@ pub fn api_routes(
     let llama_binary_routes = api_llama_binary_version(app_config.clone())
         .or(api_llama_binary_latest(app_config.clone()))
         .or(api_llama_binary_releases(app_config.clone()))
+        .or(api_llama_binary_release(app_config.clone()))
         .or(api_llama_binary_platform_info(app_config.clone()))
         .or(api_llama_binary_update(app_config.clone()));
 
@@ -10120,6 +10149,89 @@ fn api_llama_binary_releases(
                 }
             }
         })
+}
+
+/// GET /api/llama-binary/release?build=XXXXX — fetches a specific release by build number
+fn api_llama_binary_release(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    use std::sync::LazyLock;
+    use tokio::sync::Mutex;
+
+    static RELEASE_SINGLE_CACHE: LazyLock<Mutex<Option<(std::time::Instant, serde_json::Value)>>> =
+        LazyLock::new(|| Mutex::new(None));
+
+    warp::path!("api" / "llama-binary" / "release")
+        .and(warp::get())
+        .and(warp::query::<crate::llama::llama_cpp_downloader::ReleaseQuery>())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(
+            move |query: crate::llama::llama_cpp_downloader::ReleaseQuery,
+                  auth: Option<String>| {
+                let cfg = app_config.clone();
+                async move {
+                    if !check_api_token(&auth, &cfg) {
+                        return Ok(unauthorized_api_token());
+                    }
+
+                    let build = query.build;
+
+                    // Check per-build cache (5 min)
+                    
+                    {
+                        let guard = RELEASE_SINGLE_CACHE.lock().await;
+                        if let Some((ts, ref cached)) = *guard
+                            && ts.elapsed() < std::time::Duration::from_secs(5 * 60)
+                        {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(cached),
+                            ));
+                        }
+                    }
+
+                    let client = match reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(20))
+                        .user_agent("llama-monitor")
+                        .build()
+                    {
+                        Ok(c) => c,
+                        Err(e) => {
+                            return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&serde_json::json!({
+                                    "error": format!("Failed to create HTTP client: {}", e)
+                                })),
+                            ));
+                        }
+                    };
+
+                    let tag = format!("b{}", build);
+                    match crate::llama::llama_cpp_downloader::get_release_by_tag(&client, &tag)
+                        .await
+                    {
+                        Ok(release) => {
+                            let result = serde_json::json!({
+                                "tag": release.tag_name,
+                                "build": build,
+                                "published_at": release.published_at,
+                                "body": release.body,
+                            });
+                            {
+                                let mut guard = RELEASE_SINGLE_CACHE.lock().await;
+                                *guard = Some((std::time::Instant::now(), result.clone()));
+                            }
+                            Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                                warp::reply::json(&result),
+                            ))
+                        }
+                        Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "error": format!("Failed to fetch release: {}", e)
+                            })),
+                        )),
+                    }
+                }
+            },
+        )
 }
 
 /// GET /api/llama-binary/platform-info — returns platform/backend info for the download UI

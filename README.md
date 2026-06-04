@@ -1,6 +1,6 @@
 # Llama Monitor
 
-Monitoring-first web dashboard for [llama.cpp](https://github.com/ggml-org/llama.cpp) servers. It tracks inference throughput, context pressure, GPU/system telemetry, remote-agent health, and multi-session state in one UI, with chat tools layered on top when you want to work from the same surface.
+Monitoring-first web dashboard for [llama.cpp](https://github.com/ggml-org/llama.cpp). Track inference throughput, context pressure, GPU/system telemetry, and multi-session state in one UI, with chat tools layered on top when you want to work from the same surface.
 
 ## Quick Start
 
@@ -13,71 +13,69 @@ Monitoring-first web dashboard for [llama.cpp](https://github.com/ggml-org/llama
 
 ### Live Monitoring Cockpit
 
-The top nav and Server tab show throughput, context pressure, request activity, slot state, and model/runtime details as your endpoint works. Local sessions read host telemetry directly; remote sessions gain the same depth through the remote agent.
+Top nav and Server tab show throughput, context pressure, request activity, slot state, and model/runtime details in real time. Local sessions read host telemetry directly; remote sessions gain the same depth via the remote agent.
 
 ![Inference Metrics](docs/screenshots/inference-metrics.gif)
 
-### Remote Host Telemetry
+### GPU & System Telemetry
 
-Attach to a remote llama.cpp server, then add the companion remote agent when you need GPU, CPU, RAM, and host-health metrics from that machine. The header Agent flow and runtime configuration panel handle install, start, update, and repair actions.
+Real-time GPU utilization, temperature, memory, and power, plus CPU and system-level metrics. Designed for local-first and secure remote setups.
 
 ![GPU & System Metrics](docs/screenshots/gpu-metrics.gif)
 
-### Multi-Session Chat Workspace
+### Chat Workspace & Focus Mode
 
-Chat tabs, prompt controls, telemetry overlays, and logs live next to the monitoring dashboard so you can inspect behavior and interact with the model from the same app.
+Chat tabs, prompt controls, telemetry overlays, and logs live next to the monitoring dashboard. Focus mode hides all chrome for a distraction-free view.
+
+- Multi-session chats with full history and search
+- Per-tab prompt and sampling controls
+- Focus Mode: hide nav, sidebars, and chrome
 
 ![Chat Interface](docs/screenshots/chat-chat.png)
-
-### Focus Mode
-
-One click hides the nav, sidebars, and chrome — leaving just the message thread. Hover the top edge, click the button again, or press ⌘⇧F to return.
-
 ![Focus Mode](docs/screenshots/chat-focus-mode.png)
 
-### Guided Generation
+### Guided Generation & Prompt Tooling
 
-A per-tab notes sidebar, AI-generated suggestions, quick guide flows, and director/surprise tools let you steer the next reply without rebuilding the whole prompt stack.
+A per-tab notes sidebar, AI-generated suggestions, quick guide flows, and director/surprise tools help you steer replies without rebuilding the prompt stack. Full prompt-debug inspector included.
 
 ![Suggestions Results](docs/screenshots/guided-gen-suggestions-results.png)
-
-### Personas & Prompt Tooling
-
-Manage built-in and custom personas, explicit-policy variants, and outbound prompt inspection from the same workspace.
-
 ![Prompt Debug Inspector](docs/screenshots/panels-prompt-debug.png)
 
 ### TLS, ACME & mTLS
 
-Built-in TLS with ACME (Let’s Encrypt) and mTLS for remote agents. Choose No HTTPS, Self-Signed, Bring Your Own Key, or fully automated ACME with DNS-01 and renewal. Optional, flexible, and designed for local-first and production deployments.
+Built-in TLS with ACME (Let’s Encrypt) and mTLS for remote agents. Choose No HTTPS, Self-Signed, Bring Your Own Key, or fully automated ACME with DNS-01 and renewal. Optional, flexible, and designed for both local-first and production deployments.
+
+- Token-protected API endpoints
+- In-place token rotation from the UI
+- Certificate lifecycle controls
 
 ![Security & Certificates](docs/screenshots/tls-certificates-tab.png)
 
-### Security & Token Rotation
-
-Token-protected endpoints for API access, database administration, and remote agents. Rotate tokens in-place from the UI (Settings → Security & Certificates) when credentials are suspected to be exposed or as part of routine hardening.
-
 ### Spawn Local Server
 
-A 5-step wizard for downloading, configuring, and launching a llama-server instance. Pick a hardware profile, select a model from HuggingFace or local storage, tune VRAM parameters with a live breakdown bar, review the full config summary, and launch — no CLI flags required.
+An integrated wizard for discovering, downloading, configuring, and launching a llama-server instance. No CLI flags required.
+
+- **Hardware profiles**: Quick / Balanced / Workstation / Advanced
+- **Model sources**:
+  - HuggingFace search and curated community picks
+  - Third-party import (Ollama, LM Studio, Jan, GPT4All, HF cache)
+  - Local GGUF files with VRAM estimates
+- **VRAM-aware tuning**: live breakdown bar (weights · KV cache · mmproj · MTP · overhead) with auto-size and quant-compare
+- **Speculative decoding**: N-gram, MTP, and draft-model modes
+- **llama.cpp binary management**: auto-download, install, and update the llama.cpp runtime
 
 ![Spawn Wizard Flow](docs/screenshots/spawn-wizard-flow.gif)
 
-**What's included:**
-- Profile selection: Quick / Balanced / Workstation / Advanced presets for GPU layers, batch, and fit granularity
-- HuggingFace integration: search, browse community picks, list GGUF files, and stream downloads with resume support
-- Third-party model import: scan Ollama, LM Studio, and common directories for local GGUF files
-- VRAM estimator: animated breakdown bar (weights · KV cache · mmproj · MTP · overhead) with fit/tight/risk thresholds; auto-sizes context to fill available memory
-- Speculative decoding: N-gram, MTP (built-in draft heads), and draft-model modes
-- Summary review with health checks: VRAM fit, context vs training size, MoE offload impact, network exposure warnings
+**Details**:
+[Spawn Wizard](docs/reference/spawn-wizard.md) ·
+[VRAM Estimator](docs/reference/vram-estimator.md)
 
 ---
 
 **Monitoring reference**: [Dashboard Capabilities](docs/reference/dashboard.md)  
 **Remote telemetry setup**: [Remote Agent](docs/reference/remote-agent.md)  
 **Chat and guided generation**: [Chat](docs/reference/chat.md)  
-**TLS / ACME / mTLS**: [TLS Architecture](docs/reference/tls-architecture.md)  
-**Spawn Wizard reference**: [Spawn Wizard](docs/reference/spawn-wizard.md) · [VRAM Estimator](docs/reference/vram-estimator.md)
+**TLS / ACME / mTLS**: [TLS Architecture](docs/reference/tls-architecture.md)
 
 ## Supported Hardware
 
@@ -100,9 +98,11 @@ cargo build --release
 
 ## Documentation
 
-- [Dashboard Capabilities](docs/reference/dashboard.md) — Monitoring surfaces, telemetry, refresh behavior
+- [Dashboard Capabilities](docs/reference/dashboard.md) — Monitoring, telemetry, refresh behavior
 - [Remote Agent](docs/reference/remote-agent.md) — Remote host telemetry, SSH setup, agent lifecycle
-- [Chat](docs/reference/chat.md) — Chat tabs, personas, guided generation, prompt tooling
+- [Chat](docs/reference/chat.md) — Chat tabs, guided generation, prompt tooling
+- [Spawn Wizard](docs/reference/spawn-wizard.md) — Server spawning, model discovery, VRAM tuning
+- [VRAM Estimator](docs/reference/vram-estimator.md) — Architecture-aware VRAM heuristics
 - [Real-Time Communication](docs/reference/realtime-communication.md) — WebSocket schema, polling, network detection
 - [API Reference](docs/reference/api.md) — REST endpoints
 - [CLI Reference](docs/reference/cli-flags.md) — Supported flags

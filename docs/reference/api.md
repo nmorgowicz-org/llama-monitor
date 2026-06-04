@@ -1658,3 +1658,177 @@ Without a valid token, endpoints return 401 with `{ "ok": false, "error": "unaut
 - Returns mTLS certificate status (CA, server, client).
 
 For full details on the remote agent flow, see [Remote Agent](remote-agent.md).
+
+## Spawn Wizard (V2)
+
+Endpoints supporting the spawn wizard, VRAM estimation, and model discovery.
+
+All require `api-token` unless noted.
+
+### `POST /api/vram/estimate`
+Quick VRAM estimate for a given configuration.
+
+### `POST /api/vram/estimate-breakdown`
+Full VRAM breakdown: weights, KV cache, mmproj, MTP, overhead, free.
+
+### `POST /api/vram/auto-size`
+Compute an optimal configuration (context, KV quant, MoE tuning) for the given hardware.
+
+### `POST /api/vram/quant-compare`
+Pre-download quant comparison table (Quant Advisor).
+
+### `POST /api/model-defaults`
+Model-family sampling presets used by the spawn wizard and preset editor.
+
+### `POST /api/moe-tune`
+Suggest MoE CPU expert offload settings for a model.
+
+### `POST /api/benchmark`
+Run a short inference benchmark against the currently running llama-server.
+
+- Requires: `api-token`.
+- Behavior:
+  - Sends a fixed prompt via streaming chat.
+  - Measures time to first token, generation speed, and overall latency.
+  - Classifies performance (e.g., Great / Tight / Slow) and returns tuning suggestions.
+- Cooldown: 15 seconds between calls (rate-limited with 429 if too soon).
+
+### `POST /api/model/introspect`
+Run `llama-server --print-model-metadata` on a local GGUF file (or use cache).
+
+- Requires: `api-token`.
+- Caches result in `model-cache/<sha256>.json`; cache hit returns `"cached": true`.
+- Timeout: 30 seconds.
+
+### `POST /api/third-party-models`
+Scan local model directories (Ollama, LM Studio, Jan, GPT4All, HF cache, etc.).
+
+- Requires: `api-token`.
+
+### `POST /api/spawn-wizard/import-launch-file`
+Parse a third-party launch script file and extract potential preset values.
+
+- Requires: `api-token`.
+
+### `GET /api/chat-template/fetch`
+Fetch a chat template URL and return its content.
+
+- Requires: `api-token`.
+- Query: `url` parameter.
+
+### `POST /api/chat-template/upload`
+Upload a local chat template file to be used by presets.
+
+- Requires: `api-token`.
+
+### `POST /api/chat-template/install-hf`
+Install a chat template from HF.
+
+- Requires: `api-token`.
+
+## HuggingFace Integration
+
+All endpoints require `api-token` unless noted.
+
+### `POST /api/hf/search`
+Search the HuggingFace Hub for GGUF models.
+
+- Rate limit: 10 requests per 60 seconds.
+- Sort options: `downloads` (default), `likes`, `trending`, `recent`.
+
+### `POST /api/hf/author-models`
+List GGUF models for a specific author.
+
+### `GET /api/hf/community-picks`
+Return the curated community picks list (used by the wizard’s discover panel).
+
+- Read: no auth (public).
+- Update: `api-token` via `PUT` (if configured).
+
+### `GET /api/hf/quantizers`
+Return the tracked list of quantizer authors.
+
+### `PUT /api/hf/quantizers`
+Update quantizer author list.
+
+### `POST /api/hf/files`
+List GGUF files in a repo with sizes and quant labels.
+
+### `POST /api/hf/download`
+Start a streaming HF model download.
+
+- Auth: `api-token`.
+- Limits:
+  - 10-second cooldown between starts.
+  - Max 5 concurrent downloads.
+  - Path traversal protection (reject `..`, leading `/`, leading `\`).
+  - `local_path` validated inside `models_dir`.
+
+### `GET /api/models/download/:id/status`
+Poll download progress.
+
+### `POST /api/models/download/:id/cancel`
+Cancel an active download.
+
+### `GET /api/hf/card`
+Fetch raw model card markdown by `repo` param.
+
+- Auth: no auth (public).
+- Used for in-app model card display.
+
+### `GET /api/hf/token`
+Check if HF token is set (masked).
+
+### `PUT /api/hf/token`
+Set/update HF token (written to `hf-token` with mode 600).
+
+### `DELETE /api/hf/token`
+Remove stored HF token.
+
+### `GET /api/hf/download-dir`
+Return effective models download directory.
+
+## System and Hardware
+
+### `POST /api/system/set-metal-gpu-limit`
+( macOS only ) Adjust Metal GPU wired memory limit via `sysctl iogpu.wired_limit_mb`.
+
+- Auth: `db-admin-token` (elevated, system-level change).
+- Requires: macOS with administrator privileges (triggers a password prompt via `osascript`).
+- Request: `{ "limit_mb": 40960 }`
+- If not on macOS, returns:
+  `{ "ok": false, "error": "Metal GPU limit tuning is only available on macOS." }`
+
+## Llama.cpp Binary Management
+
+Endpoints to manage llama-server binary.
+
+### `GET /api/llama-binary/platform-info`
+Return current platform and backend information.
+
+- Auth: `api-token`.
+
+### `GET /api/llama-binary/latest`
+Return the latest available llama.cpp release.
+
+- Auth: `api-token`.
+
+### `GET /api/llama-binary/releases`
+Return a list of recent llama.cpp releases.
+
+- Auth: `api-token`.
+
+### `GET /api/llama-binary/version`
+Return the currently installed llama-server binary version.
+
+- Auth: `api-token`.
+
+### `POST /api/llama-binary/update`
+Download and install a specific llama.cpp release.
+
+- Auth: `api-token`.
+- Request: `{ "version": "b5700", "backend": "metal" }`
+- Behavior:
+  - Downloads release archive to `bin/`.
+  - Applies `chmod 755` on Unix.
+  - Copies all files (CUDA/Vulkan/SYCL builds require co-located libs).

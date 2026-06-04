@@ -365,8 +365,8 @@ The harness spawns a fresh `target/release/llama-monitor` binary on a temporary 
 | `smoke` | Startup smoke validation | no screenshots unless the scenario is extended |
 
 **Output directory convention:**
-- `docs/screenshots/` — promoted hero shots used directly in `README.md`
-- `docs/screenshots/artifacts/` — raw harness output for stills, GIFs, reference-doc images, and debugging
+- `docs/screenshots/` — promoted screenshots referenced in `README.md` or `docs/reference/`
+- `docs/screenshots/artifacts/` — raw harness output, `.gitignore`d; used to validate UI/UX before promoting to `docs/screenshots/`
 
 ### Running Captures
 
@@ -431,7 +431,7 @@ SCREENSHOT_PORT=8902 node tests/ui/capture.mjs --scenario chat-history-qa
 1. **Always rebuild release before running captures** when any `static/` file has changed. The harness runs `target/release/llama-monitor`, not the dev build.
 2. **Do not create new one-off screenshot scripts.** Add scenarios to `tests/ui/capture.mjs` instead.
 3. **Fix broken selectors in the same PR as the rename.** When an element ID changes (e.g., `#btn-system-prompt` → `#btn-behavior`), update `capture.mjs` at the same time to keep the harness green.
-4. **Promote screenshots from `artifacts/` to `docs/screenshots/` explicitly** when linking them in the README. Copy the file; do not change the artifacts path in the scenario.
+4. **Promote screenshots from `artifacts/` to `docs/screenshots/` explicitly** when they are referenced in `README.md` or `docs/reference/`. Copy the file; do not change the artifacts path in the scenario.
 5. **Prefer updating existing scenario functions** over adding new ones for incremental changes to an existing feature area.
 6. **Log geometry/state for invisible surfaces.** If a popup, hovercard, or panel isn't appearing, add a `console.log` with element geometry before calling `captureShot`. Do not skip the capture silently.
 7. **Document new scenarios** in both the `printUsage()` block and `tests/ui/README.md`.

@@ -136,7 +136,9 @@ async function loadReleaseList() {
       sep.className = 'llama-version-pinned-sep';
       sep.textContent = '— installed —';
       listEl.appendChild(sep);
-      const pinnedRow = buildReleaseRow({ build: _currentBuild, tag: `b${_currentBuild}`, published_at: '', body: '' }, false);
+      // Fetch release info for the pinned build (age + release notes)
+      const pinnedRelease = await fetchReleaseInfo(_currentBuild, headers);
+      const pinnedRow = buildReleaseRow(pinnedRelease, false);
       listEl.appendChild(pinnedRow);
     }
 
@@ -309,6 +311,19 @@ async function installRelease(btn, release) {
     if (verSpan) verSpan.textContent = `llama.cpp · b${_currentBuild ?? '?'}`;
   } finally {
     _updating = false;
+  }
+}
+
+async function fetchReleaseInfo(build, headers) {
+  try {
+    const resp = await fetch(`/api/llama-binary/release?build=${build}`, { headers });
+    if (!resp.ok) return { build, tag: `b${build}`, published_at: '', body: '' };
+    const data = await resp.json();
+    return data.error
+      ? { build, tag: `b${build}`, published_at: '', body: '' }
+      : data;
+  } catch {
+    return { build, tag: `b${build}`, published_at: '', body: '' };
   }
 }
 
