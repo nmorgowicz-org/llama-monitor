@@ -3057,6 +3057,8 @@ const HF_TAG_MAP = {
   // Roleplay / creative writing
   roleplay: 'roleplay', creative: 'roleplay', storytelling: 'roleplay',
   'creative-writing': 'roleplay', fiction: 'roleplay', 'role-playing': 'roleplay',
+  // NSFW / adult content — 'not-for-all-audiences' is HF boilerplate for the same thing
+  nsfw: 'nsfw', 'not-for-all-audiences': 'nsfw', adult: 'nsfw',
   // Math / STEM
   math: 'math', mathematics: 'math', science: 'math', stem: 'math',
   arithmetic: 'math',
@@ -3085,18 +3087,20 @@ const HF_TAG_BLOCKLIST = new Set([
   'transformers','llama.cpp','text-generation-inference','vllm',
   'unsloth','ctransformers','ggerganov','endpoints_compatible',
   'text-generation','text2text-generation','fill-mask','token-classification',
+  // Frontend clients (not model capabilities)
+  'sillytavern','openwebui','open-webui','koboldcpp','ollama-library',
   // Training / alignment methodology (not a use-case)
   'lora','qlora','sft','rlhf','dpo','ppo','orpo','grpo','kto',
   'generated_from_trainer','adapter','merge','mergekit','finetuned',
   // Quantisation method tags (already captured by wizard hardware step)
   'imatrix','awq','gptq','eetq','exl2','nvfp4','fp8','int4','int8',
   // Model-card boilerplate
-  'autotrain_compatible','has_space','not-for-all-audiences',
+  'autotrain_compatible','has_space',
 ]);
 
 // Regex patterns for tags that are always noise regardless of exact value.
 const HF_TAG_BLOCK_PATTERNS = [
-  /^base_model:/,      // base_model:owner/repo
+  /^base_model:/,      // base_model:owner/repo — parsed separately for inheritance
   /^dataset:/,         // dataset:owner/dataset
   /^license:/,         // license:apache-2.0 etc.
   /^region:/,          // region:us
@@ -3105,6 +3109,9 @@ const HF_TAG_BLOCK_PATTERNS = [
   /^\d/,               // tags starting with a digit (version numbers etc.)
   /^[a-z]{2,3}_[A-Z]{2}$/,   // locale codes: zh_CN, pt_BR
   /^[a-z]{2}_[a-z]{2}$/,     // locale codes: zh_cn
+  // Model family identifiers: llama3, llama-3, mistral7b, qwen3_6, gemma2, phi3…
+  // Match known family names immediately followed by a digit or version separator.
+  /^(llama|mistral|qwen|gemma|phi|falcon|gpt|bloom|mpt|opt|yi|deepseek|starcoder|codellama|vicuna|alpaca|wizardlm|orca|openchat|solar|nous|hermes|dolphin|beluga|airoboros|guanaco|koala|zephyr|stablelm|openhermes|chatml|neural|magnum|euryale|midnight|psyfighter|noromaid|lumimaid)[-_]?\d/i,
 ];
 
 const HF_CATEGORY_LABEL = {
@@ -3113,6 +3120,7 @@ const HF_CATEGORY_LABEL = {
   coding: 'Coding',
   reasoning: 'Reasoning',
   roleplay: 'Roleplay',
+  nsfw: 'NSFW',
   math: 'Math/STEM',
   'long-context': 'Long context',
   chat: 'Chat',
@@ -3121,7 +3129,7 @@ const HF_CATEGORY_LABEL = {
 
 // Standard vocabulary always offered in the picker, independent of HF.
 const ALL_KNOWN_TAGS = [
-  'coding', 'roleplay', 'general', 'art', 'fast', 'default',
+  'coding', 'roleplay', 'nsfw', 'general', 'art', 'fast', 'default',
   'vision', 'agentic', 'reasoning', 'math', 'long-context', 'chat', 'multilingual',
 ];
 
@@ -3179,6 +3187,41 @@ function _hfTagsToCategories(rawTags) {
   return { categories, passthrough: [...passthroughSet] };
 }
 
+// Fetch tags for a HF repo and, if it has a base_model: tag pointing to a
+// non-quantized source, merge that source's tags too (one level only).
+// Quantizers like bartowski often strip use-case tags, but the base model keeps them.
+// Returns { categories: Set, passthrough: string[] }.
+async function _fetchHfTagsWithBaseModel(repoId) {
+  const headers = window.authHeaders ? window.authHeaders() : {};
+  let rawTags = [];
+  try {
+    const r = await fetch(`/api/hf/meta?repo=${encodeURIComponent(repoId)}`, { headers });
+    if (r.ok) {
+      const d = await r.json().catch(() => ({}));
+      if (d.ok && d.tags) rawTags = d.tags;
+    }
+  } catch { /* non-fatal */ }
+
+  // Look for base_model:owner/repo (not base_model:quantized: or base_model:adapter:)
+  const baseTag = rawTags.find(t => {
+    if (!t.startsWith('base_model:')) return false;
+    const rest = t.slice('base_model:'.length);
+    return !rest.startsWith('quantized:') && !rest.startsWith('adapter:') && rest.includes('/');
+  });
+  if (baseTag) {
+    const baseRepo = baseTag.slice('base_model:'.length);
+    try {
+      const r = await fetch(`/api/hf/meta?repo=${encodeURIComponent(baseRepo)}`, { headers });
+      if (r.ok) {
+        const d = await r.json().catch(() => ({}));
+        if (d.ok && d.tags) rawTags = [...rawTags, ...d.tags];
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  return _hfTagsToCategories(rawTags);
+}
+
 // Fetch HF model metadata and render the tags row for the hardware step.
 // No-ops if originRepo is unknown or the row element is missing.
 let _tagsRowOrigin = ''; // track which repo is currently loaded in the row
@@ -3202,18 +3245,12 @@ async function _refreshHwTagsRow() {
     }
   } catch { /* non-fatal */ }
 
-  // Fetch HF tags for suggestion.
+  // Fetch HF tags (including base model tags if the GGUF repo stripped them).
   let suggestedCats = new Set();
   let passthroughTags = [];
   try {
-    const headers = window.authHeaders ? window.authHeaders() : {};
-    const r = await fetch(`/api/hf/meta?repo=${encodeURIComponent(originRepo)}`, { headers });
-    if (r.ok) {
-      const d = await r.json().catch(() => ({}));
-      if (d.ok && d.tags) {
-        ({ categories: suggestedCats, passthrough: passthroughTags } = _hfTagsToCategories(d.tags));
-      }
-    }
+    ({ categories: suggestedCats, passthrough: passthroughTags } =
+      await _fetchHfTagsWithBaseModel(originRepo));
   } catch { /* non-fatal */ }
 
   _renderHwTagPills(currentTags, suggestedCats, passthroughTags, path, originRepo);
@@ -3280,18 +3317,11 @@ function _openHwTagPicker(btn, modelPath, originRepo) {
   const headers = window.authHeaders ? window.authHeaders() : {};
   Promise.all([
     fetch('/api/models/tags', { headers }).then(r => r.ok ? r.json().catch(() => ({})) : {}),
-    originRepo
-      ? fetch(`/api/hf/meta?repo=${encodeURIComponent(originRepo)}`, { headers })
-          .then(r => r.ok ? r.json().catch(() => ({})) : {})
-      : Promise.resolve({}),
-  ]).then(([tagsData, metaData]) => {
+    originRepo ? _fetchHfTagsWithBaseModel(originRepo).catch(() => ({ categories: new Set(), passthrough: [] })) : Promise.resolve({ categories: new Set(), passthrough: [] }),
+  ]).then(([tagsData, hfResult]) => {
     const rawCurrent = (tagsData.tags?.[modelPath] || [])
       .filter(t => !t.startsWith('hf_origin:'));
-    let suggestedCats = new Set();
-    let passthroughTags = [];
-    if (metaData.ok && metaData.tags) {
-      ({ categories: suggestedCats, passthrough: passthroughTags } = _hfTagsToCategories(metaData.tags));
-    }
+    const { categories: suggestedCats, passthrough: passthroughTags } = hfResult;
 
     popup.innerHTML = '';
 
