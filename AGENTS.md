@@ -360,7 +360,7 @@ The harness spawns a fresh `target/release/llama-monitor` binary on a temporary 
 | `spawn-wizard-gif` | Animated GIF of the full spawn wizard flow (900px scaled, ~18s) | `docs/screenshots/artifacts/` |
 | `tls` | TLS/ACME settings panels: all four TLS modes, certificates tab, DB admin section | `docs/screenshots/artifacts/` |
 | `tune-panel` | Server tuning panel | `docs/screenshots/artifacts/` |
-| `llama-updater` | llama-server binary updater pill and release notes | `docs/screenshots/artifacts/` |
+| `llama-updater` | llama-server binary updater pill, version modal with release notes, and app release notes | `docs/screenshots/artifacts/` |
 | `chat-history-qa` | Chat history Q&A panel | `docs/screenshots/artifacts/` |
 | `smoke` | Startup smoke validation | no screenshots unless the scenario is extended |
 
