@@ -3906,6 +3906,66 @@ fn api_model_introspect(
         })
 }
 
+// ── POST /api/models/gguf-meta ─────────────────────────────────────────────
+// Reads GGUF header metadata for a local file and returns the architecture.
+// Lightweight — only reads the KV header, never touches tensor data.
+fn api_models_gguf_meta(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "gguf-meta")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let model_path = body["model_path"].as_str().unwrap_or("").trim().to_string();
+                if model_path.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Missing 'model_path' field"
+                        })),
+                    ));
+                }
+
+                let meta = match crate::llama::gguf_meta::read_gguf_metadata(std::path::Path::new(&model_path)) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!("Failed to read GGUF metadata: {}", e)
+                            })),
+                        ));
+                    }
+                };
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                    warp::reply::json(&serde_json::json!({
+                        "ok": true,
+                        "architecture": meta.architecture,
+                        "param_count": meta.param_count,
+                        "block_count": meta.block_count,
+                        "head_count": meta.head_count,
+                        "head_count_kv": meta.head_count_kv,
+                        "key_length": meta.key_length,
+                        "context_length": meta.context_length,
+                        "embedding_length": meta.embedding_length,
+                        "feed_forward_length": meta.feed_forward_length,
+                        "expert_count": meta.expert_count,
+                        "expert_used_count": meta.expert_used_count,
+                        "mtp_depth": meta.mtp_depth,
+                    })),
+                ))
+            }
+        })
+}
+
 pub fn api_routes(
     state: AppState,
     app_config: Arc<AppConfig>,
@@ -4113,7 +4173,8 @@ pub fn api_routes(
     let hf_resolve_origin_route = api_hf_resolve_origin(app_config.clone());
     let hf_community_picks_route = api_hf_community_picks(state.clone(), app_config.clone());
     let third_party_models_route = api_third_party_models(state.clone(), app_config.clone());
-    let model_introspect_route = api_model_introspect(state.clone(), app_config.clone());
+                  let model_introspect_route = api_model_introspect(state.clone(), app_config.clone());
+    let models_gguf_meta_route = api_models_gguf_meta(app_config.clone());
     let vram_quant_compare_route = api_vram_quant_compare(state.clone(), app_config.clone());
     let vram_auto_size_route = api_vram_auto_size(state.clone(), app_config.clone());
     let set_metal_gpu_limit_route = api_set_metal_gpu_limit(state.clone(), app_config.clone());
@@ -4133,7 +4194,8 @@ pub fn api_routes(
         .or(refresh_models)
         .or(delete_model_file)
         .or(get_model_tags)
-        .or(put_model_tags);
+        .or(put_model_tags)
+        .or(models_gguf_meta_route);
     let config_routes = get_gpu_env
         .or(put_gpu_env)
         .or(get_settings_full)

@@ -1998,17 +1998,29 @@ function _applyCustomChatTemplate(path) {
 
 function detectModelFamily(name) {
   const lower = (name || '').toLowerCase();
-  if (lower.includes('qwen')) return 'qwen';
+  if (lower.includes('qwen') || lower.includes('qwopus')) return 'qwen';
   if (lower.includes('llama-3') || lower.includes('llama3') || lower.match(/llama.?3/)) return 'llama3';
   if (lower.includes('gemma')) return 'gemma';
   if (lower.includes('mistral') || lower.includes('mixtral')) return 'mistral';
   return null;
 }
 
+// Map GGUF general.architecture values to community template family keys
+// (e.g. "qwen3_6" → "qwen", "llama" → "llama3" if LLaMA 3+)
+function _ggufArchToFamily(arch) {
+  const a = arch.toLowerCase();
+  if (a.includes('qwen')) return 'qwen';
+  if (a.includes('gemma')) return 'gemma';
+  if (a.includes('mistral') || a.includes('mixtral')) return 'mistral';
+  if (a.includes('llama')) return 'llama3';
+  return null;
+}
+
 // Async family detection that tries multiple sources:
 // 1) Persisted family tag from model-tags.json
-// 2) HF model card base_model tag (via /api/hf/meta)
-// 3) Filename heuristics (as fallback)
+// 2) GGUF metadata general.architecture (for local models — reads file header, instant)
+// 3) HF model card base_model tag (via /api/hf/meta)
+// 4) Filename heuristics (as fallback)
 async function detectModelFamilyAsync(identityName, localPath, timeoutMs) {
   const timeout = timeoutMs || 5000;
   const controller = new AbortController();
@@ -2024,6 +2036,26 @@ async function detectModelFamilyAsync(identityName, localPath, timeoutMs) {
         const tags = td.tags?.[localPath] || [];
         const familyTag = tags.find(t => t.startsWith('family:'));
         if (familyTag) return familyTag.slice('family:'.length);
+      }
+    } catch (e) { if (e.name !== 'AbortError') { /* non-fatal */ } }
+  }
+
+  // 2) Read GGUF metadata for local models — architecture field is authoritative
+  if (localPath) {
+    try {
+      const metaResp = await fetch('/api/models/gguf-meta', {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({ model_path: localPath }),
+      });
+      if (metaResp.ok) {
+        const meta = await metaResp.json().catch(() => ({}));
+        if (meta.ok && meta.architecture) {
+          const arch = meta.architecture.toLowerCase();
+          const family = _ggufArchToFamily(arch);
+          if (family) return family;
+        }
       }
     } catch (e) { if (e.name !== 'AbortError') { /* non-fatal */ } }
   }
@@ -2212,8 +2244,69 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       } catch {
         // uploadChatTemplateFromBrowser already surfaced the error
       }
-    });
+                 });
     actionsEl.appendChild(uploadBtn);
+
+    // Force family override — lets user manually pick a family when auto-detection fails
+    const forceFamilyWrap = document.createElement('div');
+    forceFamilyWrap.className = 'ct-force-family-wrap';
+    forceFamilyWrap.style.display = 'flex';
+    forceFamilyWrap.style.alignItems = 'center';
+    forceFamilyWrap.style.gap = '6px';
+    forceFamilyWrap.style.marginTop = '6px';
+
+    const forceFamilyLabel = document.createElement('span');
+    forceFamilyLabel.style.fontSize = '10px';
+    forceFamilyLabel.style.fontWeight = '600';
+    forceFamilyLabel.style.color = 'var(--color-text-muted)';
+    forceFamilyLabel.style.textTransform = 'uppercase';
+    forceFamilyLabel.style.letterSpacing = '0.06em';
+    forceFamilyLabel.textContent = 'Force family';
+
+    const forceFamilySelect = document.createElement('select');
+    forceFamilySelect.className = 'ct-force-family-select';
+    forceFamilySelect.style.fontSize = '11px';
+    forceFamilySelect.style.padding = '3px 6px';
+    forceFamilySelect.style.borderRadius = '4px';
+    forceFamilySelect.style.border = '1px solid rgba(99,102,241,0.2)';
+    forceFamilySelect.style.background = 'var(--color-surface-elevated)';
+    forceFamilySelect.style.color = 'var(--color-text)';
+    forceFamilySelect.title = 'Override the auto-detected model family to force a specific chat template';
+
+    const currentFamily = wizardState.model.family || '';
+    const families = Object.keys(COMMUNITY_TEMPLATES);
+
+    const autoOpt = document.createElement('option');
+    autoOpt.value = '';
+    autoOpt.textContent = 'auto-detect';
+    if (!currentFamily) autoOpt.selected = true;
+
+    const autoLabel = document.createElement('optgroup');
+    autoLabel.label = 'Detection';
+    autoLabel.appendChild(autoOpt);
+
+    families.forEach(fam => {
+      const tpl = COMMUNITY_TEMPLATES[fam];
+      const opt = document.createElement('option');
+      opt.value = fam;
+      opt.textContent = `${fam} — ${tpl.display}`;
+      if (currentFamily === fam) opt.selected = true;
+      autoLabel.appendChild(opt);
+    });
+
+    forceFamilySelect.appendChild(autoLabel);
+    forceFamilySelect.addEventListener('change', () => {
+      const chosen = forceFamilySelect.value;
+      wizardState.model.family = chosen || null;
+      if (chosen && COMMUNITY_TEMPLATES[chosen]) {
+        wizardState.model.chatTemplateMode = 'auto';
+        autoInstallChatTemplate();
+      }
+    });
+
+    forceFamilyWrap.appendChild(forceFamilyLabel);
+    forceFamilyWrap.appendChild(forceFamilySelect);
+    actionsEl.appendChild(forceFamilyWrap);
   }
 
   if (state === 'detecting') {
