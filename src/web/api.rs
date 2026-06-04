@@ -3449,6 +3449,55 @@ fn api_hf_meta(
         )
 }
 
+// ── POST /api/hf/resolve-origin ───────────────────────────────────────────────
+// Resolves the HF origin of a local GGUF file from its filename.
+// Searches HF, scores candidates, returns ranked list with family + card URL.
+fn api_hf_resolve_origin(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "resolve-origin")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::safe_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let filename = body["filename"].as_str().unwrap_or("").trim().to_string();
+                let size_bytes: u64 = body["size_bytes"].as_u64().unwrap_or(0);
+
+                if filename.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(
+                            &serde_json::json!({"ok": false, "error": "filename is required"}),
+                        ),
+                    ));
+                }
+
+                match crate::hf::hf_resolve_origin(&filename, size_bytes).await {
+                    Ok(result) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": true,
+                            "confident": result.confident,
+                            "candidates": result.candidates,
+                            "model_stem": result.model_stem,
+                            "errors": result.errors,
+                        })),
+                    )),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": e,
+                        })),
+                    )),
+                }
+            }
+        })
+}
+
 // ── GET /api/hf/token ─────────────────────────────────────────────────────────
 // Returns whether an HF token is saved; never returns the token itself.
 fn api_hf_token_get(
@@ -4060,6 +4109,7 @@ pub fn api_routes(
     let hf_token_delete_route = api_hf_token_delete(app_config.clone());
     let hf_card_route = api_hf_card(app_config.clone());
     let hf_meta_route = api_hf_meta(app_config.clone());
+    let hf_resolve_origin_route = api_hf_resolve_origin(app_config.clone());
     let hf_community_picks_route = api_hf_community_picks(state.clone(), app_config.clone());
     let third_party_models_route = api_third_party_models(state.clone(), app_config.clone());
     let model_introspect_route = api_model_introspect(state.clone(), app_config.clone());
@@ -4180,6 +4230,7 @@ pub fn api_routes(
         .or(hf_token_delete_route)
         .or(hf_card_route)
         .or(hf_meta_route)
+        .or(hf_resolve_origin_route)
         .or(hf_community_picks_route)
         .or(third_party_models_route)
         .or(model_introspect_route)
@@ -9164,7 +9215,6 @@ fn api_spawn_session_with_preset(
                         spec_ngram_map_k4v_size_n: preset.spec_ngram_map_k4v_size_n,
                         spec_ngram_map_k4v_size_m: preset.spec_ngram_map_k4v_size_m,
                         spec_ngram_map_k4v_min_hits: preset.spec_ngram_map_k4v_min_hits,
-                        ..Default::default()
                     },
                     kv_unified: preset.kv_unified,
                     cache_idle_slots: preset.cache_idle_slots,

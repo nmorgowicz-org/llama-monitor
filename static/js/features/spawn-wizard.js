@@ -1027,7 +1027,8 @@ function getRecommendedQuant(vramGb) {
 // Persist the HF origin repo for a downloaded local model so the quant-swap
 // discovery can skip the HF search in future sessions.  The tag is stored as
 // "hf_origin:{repoId}" in the model-tags.json file alongside any user tags.
-async function _saveModelOriginTag(localPath, repoId) {
+// If family is provided, also persists a "family:{slug}" tag.
+async function _saveModelOriginTag(localPath, repoId, family) {
   if (!localPath || !repoId) return;
   try {
     const headers = window.authHeaders
@@ -1039,15 +1040,201 @@ async function _saveModelOriginTag(localPath, repoId) {
       ? ((await getResp.json().catch(() => ({}))).tags?.[localPath] || [])
       : [];
     const merged = [
-      ...existing.filter(t => !t.startsWith('hf_origin:')),
+      ...existing.filter(t => !t.startsWith('hf_origin:') && !t.startsWith('family:')),
       `hf_origin:${repoId}`,
     ];
+    if (family) merged.push(`family:${family}`);
     await fetch('/api/models/tags', {
       method: 'PUT',
       headers,
       body: JSON.stringify({ model_path: localPath, tags: merged }),
     });
   } catch { /* non-fatal */ }
+}
+
+// Attach HF origin + family tags for a local model (used by auto-resolve and
+// the suggestion picker).  Replaces any stale origin/family tags.
+async function _attachOriginTags(localPath, repoId, family) {
+  if (!localPath || !repoId) return;
+  try {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+    const getResp = await fetch('/api/models/tags', { headers });
+    const existing = getResp.ok
+      ? ((await getResp.json().catch(() => ({}))).tags?.[localPath] || [])
+      : [];
+    const merged = [
+      ...existing.filter(t => !t.startsWith('hf_origin:') && !t.startsWith('family:')),
+      `hf_origin:${repoId}`,
+    ];
+    if (family) merged.push(`family:${family}`);
+    await fetch('/api/models/tags', {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ model_path: localPath, tags: merged }),
+    });
+  } catch { /* non-fatal */ }
+}
+
+// Auto-resolve the HF origin of a local model from its filename.
+// Fires silently; if confident, sets originRepo and family, persists tags,
+// and refreshes the UI.  If ambiguous, shows a suggestion row.
+async function _autoResolveHfOrigin() {
+  const { source, path, modelBytes } = wizardState.model;
+  if (source !== 'local' && source !== 'import') return;
+  if (wizardState.model.originRepo) return; // already known
+  const filename = (path || '').split(/[\\/]/).pop() || '';
+  if (!filename || filename.length < 8) return;
+
+  try {
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+    const res = await fetch('/api/hf/resolve-origin', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ filename, size_bytes: modelBytes || 0 }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.ok || !data.candidates || !data.candidates.length) return;
+
+    if (data.confident) {
+      // Auto-attach the top candidate's origin + family
+      const top = data.candidates[0];
+      wizardState.model.originRepo = top.repoId;
+      wizardState.model.family = top.family || '';
+      wizardState.model.cardUrl = top.cardUrl || `https://huggingface.co/${top.repoId}`;
+      await _attachOriginTags(path, top.repoId, top.family);
+      _tagsRowOrigin = ''; // force refresh
+      _refreshHwTagsRow();
+    } else {
+      // Show suggestion row for user to confirm
+      _showHfOriginSuggestion(data.candidates.slice(0, 3), path);
+    }
+  } catch { /* non-fatal — resolution is a nice-to-have */ }
+}
+
+// Detect the model family for a known HF origin repo and persist it.
+// Uses the /api/hf/meta endpoint to read HF tags and infer the family.
+async function _detectFamilyForOrigin(repoId, modelPath) {
+  if (!repoId || !modelPath) return;
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const metaRes = await fetch(`/api/hf/meta?repo=${encodeURIComponent(repoId)}`, { headers });
+    if (!metaRes.ok) return;
+    const meta = await metaRes.json();
+    const tags = meta.tags || [];
+    // Check base_model tag first
+    const baseModelTag = tags.find(t => {
+      if (!t.startsWith('base_model:')) return false;
+      const rest = t.slice('base_model:'.length);
+      return rest.includes('/'); // skip quantized: and adapter: sub-tags
+    });
+    let family = '';
+    if (baseModelTag) {
+      const baseRepo = baseModelTag.slice('base_model:'.length);
+      family = _inferFamilyFromName(baseRepo);
+    }
+    // Fallback: infer from repo name
+    if (!family) {
+      const repoName = repoId.split('/').slice(-1)[0];
+      family = _inferFamilyFromName(repoName);
+    }
+    if (!family) return;
+
+    // Save the family tag
+    wizardState.model.family = family;
+    const getResp = await fetch('/api/models/tags', { headers });
+    const existing = getResp.ok
+      ? ((await getResp.json().catch(() => ({}))).tags?.[modelPath] || [])
+      : [];
+    const merged = [
+      ...existing.filter(t => !t.startsWith('family:')),
+      `family:${family}`,
+    ];
+    await fetch('/api/models/tags', {
+      method: 'PUT',
+      headers: { ...(window.authHeaders || {}), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model_path: modelPath, tags: merged }),
+    });
+  } catch { /* non-fatal */ }
+}
+
+// Infer model family slug from a name string (mirrors backend heuristics).
+function _inferFamilyFromName(name) {
+  const lower = name.toLowerCase();
+  if (lower.includes('qwen3.6') || lower.includes('qwen3_6') || lower.includes('qwen36')) return 'qwen3.6';
+  if (lower.includes('qwen3.5') || lower.includes('qwen3_5') || lower.includes('qwen35')) return 'qwen3.5';
+  if (lower.includes('qwen3') || lower.includes('qwen-3') || lower.includes('qwen_3')) return 'qwen3';
+  if (lower.includes('qwen2.5') || lower.includes('qwen2_5') || lower.includes('qwen25')) return 'qwen2.5';
+  if (lower.includes('qwen')) return 'qwen';
+  if (lower.includes('gemma-3') || lower.includes('gemma_3') || lower.includes('gemma3')) return 'gemma3';
+  if (lower.includes('gemma-2') || lower.includes('gemma_2') || lower.includes('gemma2')) return 'gemma2';
+  if (lower.includes('gemma')) return 'gemma';
+  if (lower.includes('llama-3.3') || lower.includes('llama3_3') || lower.includes('llama33')) return 'llama3.3';
+  if (lower.includes('llama-3.1') || lower.includes('llama3_1') || lower.includes('llama31')) return 'llama3.1';
+  if (lower.includes('llama-3') || lower.includes('llama3')) return 'llama3';
+  if (lower.includes('llama')) return 'llama';
+  if (lower.includes('mistral-large')) return 'mistral-large';
+  if (lower.includes('mistral-nemo') || lower.includes('nemo')) return 'mistral-nemo';
+  if (lower.includes('mistral') || lower.includes('mixtral')) return 'mistral';
+  if (lower.includes('deepseek')) return 'deepseek';
+  if (lower.includes('phi')) return 'phi';
+  return '';
+}
+
+// Show a "suggested origin" row for local models whose HF origin was not
+// resolved with high confidence.  Renders candidate pills the user can click.
+function _showHfOriginSuggestion(candidates, modelPath) {
+  // Remove any existing suggestion row
+  _removeHfOriginSuggestion();
+
+  const row = document.getElementById('hw-quant-local-row');
+  if (!row) return;
+
+  const suggestionRow = document.createElement('div');
+  suggestionRow.id = 'hw-origin-suggestion-row';
+  suggestionRow.className = 'hw-quant-row';
+  suggestionRow.style.cssText = 'flex-wrap:wrap;gap:5px;align-items:center;';
+
+  const label = document.createElement('span');
+  label.className = 'hw-quant-label';
+  label.style.cssText = 'font-size:10px;flex-shrink:0;';
+  label.textContent = 'Suggested HF origin:';
+  suggestionRow.appendChild(label);
+
+  candidates.forEach((c, i) => {
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'btn-wizard-tertiary';
+    pill.style.cssText = 'font-size:9px;min-height:20px;padding:2px 8px;cursor:pointer;border-radius:4px;border:1px solid rgba(255,255,255,0.12);background:rgba(80,120,200,0.15);color:var(--color-text-primary);white-space:nowrap;';
+    const shortName = c.repoId.split('/').slice(-1)[0];
+    pill.textContent = `${shortName}`;
+    pill.title = `${c.repoId}\n${c.reason}\n${c.family ? 'Family: ' + c.family : ''}${c.cardUrl ? '\n' + c.cardUrl : ''}`;
+    if (i === 0) {
+      // Highlight the top candidate
+      pill.style.borderColor = 'rgba(100,160,255,0.35)';
+      pill.style.background = 'rgba(80,120,200,0.25)';
+    }
+    pill.addEventListener('click', async () => {
+      wizardState.model.originRepo = c.repoId;
+      wizardState.model.family = c.family || '';
+      wizardState.model.cardUrl = c.cardUrl || `https://huggingface.co/${c.repoId}`;
+      await _attachOriginTags(modelPath, c.repoId, c.family);
+      _tagsRowOrigin = ''; // force refresh
+      _refreshHwTagsRow();
+      _removeHfOriginSuggestion();
+    });
+    suggestionRow.appendChild(pill);
+  });
+
+  row.appendChild(suggestionRow);
+}
+
+function _removeHfOriginSuggestion() {
+  document.getElementById('hw-origin-suggestion-row')?.remove();
 }
 
 // Called by hfStartDownload onComplete when download finishes.
@@ -1453,10 +1640,34 @@ async function doIntrospect(path) {
         const tagsResp = await fetch('/api/models/tags', { headers });
         if (tagsResp.ok) {
           const td = await tagsResp.json().catch(() => ({}));
-          const originTag = (td.tags?.[path] || []).find(t => t.startsWith('hf_origin:'));
-          if (originTag) wizardState.model.originRepo = originTag.slice('hf_origin:'.length);
+          const modelTags = td.tags?.[path] || [];
+          const originTag = modelTags.find(t => t.startsWith('hf_origin:'));
+          if (originTag) {
+            wizardState.model.originRepo = originTag.slice('hf_origin:'.length);
+            // Also restore family and card URL
+            const familyTag = modelTags.find(t => t.startsWith('family:'));
+            if (familyTag) wizardState.model.family = familyTag.slice('family:'.length);
+            if (wizardState.model.originRepo) {
+              wizardState.model.cardUrl = `https://huggingface.co/${wizardState.model.originRepo}`;
+            }
+          }
         }
       } catch { /* non-fatal */ }
+    }
+
+    // If originRepo is known but family is not, try to detect it from the HF card.
+    if (wizardState.model.originRepo &&
+        !wizardState.model.family &&
+        (wizardState.model.source === 'local' || wizardState.model.source === 'import')) {
+      _detectFamilyForOrigin(wizardState.model.originRepo, path);
+    }
+
+    // Auto-resolve HF origin for local models that lack a persisted origin tag.
+    // Fires silently; resolves confidently or shows a suggestion row.
+    if (!wizardState.model.originRepo &&
+        (wizardState.model.source === 'local' || wizardState.model.source === 'import')) {
+      // Defer to avoid blocking the introspect flow; 200ms delay is imperceptible.
+      setTimeout(() => _autoResolveHfOrigin(), 200);
     }
 
     // Scan directory for companion mmproj file (local models only)
@@ -3448,20 +3659,22 @@ let _tagsRowOrigin = ''; // track which repo is currently loaded in the row
 async function _refreshHwTagsRow() {
   const row = document.getElementById('hw-tags-row');
   if (!row) return;
-  const { originRepo, path } = wizardState.model;
+  const { originRepo, path, cardUrl, family } = wizardState.model;
   if (!originRepo) { row.style.display = 'none'; return; }
   row.style.display = '';
   if (_tagsRowOrigin === originRepo) return; // already populated for this repo
   _tagsRowOrigin = originRepo;
 
-  // Load current library tags for this model path.
+  // Load current library tags for this model path — exclude system tags.
   let currentTags = [];
   try {
     const headers = window.authHeaders ? window.authHeaders() : {};
     const r = await fetch('/api/models/tags', { headers });
     if (r.ok) {
       const d = await r.json().catch(() => ({}));
-      currentTags = (d.tags?.[path] || []).filter(t => !t.startsWith('hf_origin:'));
+      currentTags = (d.tags?.[path] || []).filter(
+        t => !t.startsWith('hf_origin:') && !t.startsWith('family:')
+      );
     }
   } catch { /* non-fatal */ }
 
@@ -3474,6 +3687,30 @@ async function _refreshHwTagsRow() {
   } catch { /* non-fatal */ }
 
   _renderHwTagPills(currentTags, suggestedCats, passthroughTags, path, originRepo);
+
+  // Append family + card link pills
+  const pillsWrap = document.getElementById('hw-tags-pills');
+  if (pillsWrap) {
+    if (family) {
+      const famPill = document.createElement('span');
+      famPill.className = 'mm-tag-pill';
+      famPill.style.cssText = 'font-size:9px;padding:2px 7px;opacity:0.6;white-space:nowrap;';
+      famPill.textContent = `family: ${family}`;
+      famPill.title = `Detected model family (auto)`;
+      pillsWrap.appendChild(famPill);
+    }
+    if (cardUrl) {
+      const cardPill = document.createElement('a');
+      cardPill.href = cardUrl;
+      cardPill.target = '_blank';
+      cardPill.rel = 'noopener noreferrer';
+      cardPill.className = 'mm-tag-pill';
+      cardPill.style.cssText = 'font-size:9px;padding:2px 7px;cursor:pointer;text-decoration:none;opacity:0.7;white-space:nowrap;';
+      cardPill.textContent = '📄 Card';
+      cardPill.title = 'View model card on HuggingFace';
+      pillsWrap.appendChild(cardPill);
+    }
+  }
 }
 
 function _renderHwTagPills(currentTags, suggestedCats, passthroughTags, modelPath, originRepo) {

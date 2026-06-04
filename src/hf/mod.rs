@@ -1025,6 +1025,342 @@ pub fn hf_start_download(
         .map_err(|e| format!("Failed to start download: {e}"))
 }
 
+// ── Resolve HF origin from a local GGUF filename ─────────────────────────────
+
+/// Candidate returned by `hf_resolve_origin`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HfResolveCandidate {
+    /// HF repo ID (e.g. "bartowski/Llama-3.3-70B-Instruct-GGUF")
+    pub repo_id: String,
+    /// Confidence score 0.0–1.0
+    pub confidence: f64,
+    /// Brief reason for the score (for UI tooltips)
+    pub reason: String,
+    /// First few tags from the HF model card (empty if fetch failed)
+    pub preview_tags: Vec<String>,
+    /// Model card URL (always populated when repo_id is known)
+    pub card_url: String,
+    /// Detected model family slug (e.g. "qwen3.6", "llama3.3", "gemma4")
+    pub family: String,
+}
+
+/// Result of resolving a local model's HF origin.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HfResolveResult {
+    /// Whether the top candidate is confident enough to auto-attach
+    pub confident: bool,
+    /// Ranked candidates
+    pub candidates: Vec<HfResolveCandidate>,
+    /// The model stem used for resolution (for transparency)
+    pub model_stem: String,
+    /// Errors encountered (empty on full success)
+    pub errors: Vec<String>,
+}
+
+/// Extract the model stem from a GGUF filename, stripping quant suffix and
+/// .gguf extension.  Mirrors the JS `_modelStemForSearch` logic.
+/// E.g. "Llama-3.3-70B-Instruct-Q4_K_M.gguf" → "Llama-3.3-70B-Instruct"
+fn resolve_model_stem(filename: &str) -> String {
+    let mut stem = filename
+        .strip_suffix(".gguf")
+        .unwrap_or(filename)
+        .to_string();
+    // Strip quant suffix: last token after '-' that starts with Q, I, BF, or UD
+    if let Some(pos) = stem.rfind('-') {
+        let suffix = &stem[pos + 1..];
+        if matches!(suffix.chars().next(), Some('Q' | 'I' | 'B' | 'U')) && suffix.len() > 2 {
+            stem = stem[..pos].to_string();
+        }
+    }
+    // Strip trailing -v1, -v2, -v1.1, -MTP, etc.
+    stem = stem.strip_suffix("-MTP").unwrap_or(&stem).to_string();
+    // Strip trailing -vN or -vN.N
+    if let Some(pos) = stem.rfind("-v") {
+        let after = &stem[pos + 2..];
+        if after.is_empty() || after.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+            stem = stem[..pos].to_string();
+        }
+    }
+    stem
+}
+
+/// Attempt to resolve the HF origin of a local GGUF file from its filename.
+/// Searches HF for matching repos, scores them by filename/filename/param-match,
+/// and returns ranked candidates.  Sets `confident=true` only when the top
+/// candidate's score is >= 0.8.
+pub async fn hf_resolve_origin(filename: &str, size_bytes: u64) -> Result<HfResolveResult, String> {
+    let stem = resolve_model_stem(filename);
+    let mut errors = Vec::new();
+
+    // Build query with the stem
+    let queries: Vec<String> = [
+        stem.clone(),
+        format!("{stem} GGUF"),
+        stem.replace("Instruct", ""), // broader variant
+    ]
+    .iter()
+    .filter(|q| q.len() >= 4)
+    .cloned()
+    .collect::<std::collections::BTreeSet<_>>()
+    .into_iter()
+    .collect();
+
+    // Search HF for matching repos
+    let mut candidates: Vec<(String, u64, Vec<String>)> = Vec::new();
+    let _token = hf_load_token();
+
+    for query in &queries {
+        if !candidates.is_empty() {
+            break; // already found matches
+        }
+        let params = HfSearchParams {
+            query: query.clone(),
+            author: None,
+            sort: HfSort::Downloads,
+            limit: 10,
+            cursor: None,
+        };
+        let result = hf_search_models(&params).await;
+        match result {
+            Ok((items, _)) => {
+                for item in items {
+                    if !item.id.contains("GGUF")
+                        && !item.tags.iter().any(|t| t.eq_ignore_ascii_case("gguf"))
+                    {
+                        continue;
+                    }
+                    if !candidates.iter().any(|(id, _, _)| id == &item.id) {
+                        candidates.push((item.id.clone(), item.downloads, item.tags));
+                    }
+                }
+            }
+            Err(e) => errors.push(e),
+        }
+    }
+
+    // If no candidates at all, return early
+    if candidates.is_empty() {
+        return Ok(HfResolveResult {
+            confident: false,
+            candidates: Vec::new(),
+            model_stem: stem.clone(),
+            errors,
+        });
+    }
+
+    // Score and rank candidates
+    let mut scored: Vec<HfResolveCandidate> = Vec::new();
+    for (repo_id, downloads, raw_tags) in &candidates {
+        let score =
+            score_resolve_candidate(repo_id, &stem, filename, size_bytes, *downloads, raw_tags);
+        if score > 0.1 {
+            // Fetch model info for tags and family detection (non-blocking best-effort)
+            let repo_name = repo_id.split('/').next_back().unwrap_or(repo_id);
+            let (preview_tags, family) = match hf_get_model_info(repo_id).await {
+                Ok(info) => {
+                    let preview_tags: Vec<String> = info.tags.iter().take(6).cloned().collect();
+                    let family = detect_model_family(&info, repo_name);
+                    (preview_tags, family)
+                }
+                Err(_) => (Vec::new(), infer_family_from_name(repo_name)),
+            };
+            scored.push(HfResolveCandidate {
+                repo_id: repo_id.clone(),
+                confidence: (score * 100.0).round() / 100.0, // round to 2 decimals
+                reason: derive_resolve_reason(&score),
+                preview_tags,
+                card_url: format!("https://huggingface.co/{repo_id}"),
+                family,
+            });
+        }
+    }
+
+    scored.sort_by(|a, b| {
+        b.confidence
+            .partial_cmp(&a.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let confident = scored.first().is_some_and(|c| c.confidence >= 0.8);
+
+    Ok(HfResolveResult {
+        confident,
+        candidates: scored,
+        model_stem: stem,
+        errors,
+    })
+}
+
+fn score_resolve_candidate(
+    repo_id: &str,
+    stem: &str,
+    filename: &str,
+    _size_bytes: u64,
+    downloads: u64,
+    raw_tags: &[String],
+) -> f64 {
+    let filename_lower = filename.to_ascii_lowercase();
+    let stem_lower = stem.to_ascii_lowercase();
+    let mut score = 0.0;
+
+    // 1. Stem match in repo name (strongest signal)
+    let stem_parts: Vec<&str> = stem_lower.split('-').filter(|p| !p.is_empty()).collect();
+    let repo_name_lower = repo_id
+        .split('/')
+        .next_back()
+        .unwrap_or(repo_id)
+        .to_ascii_lowercase();
+    let mut matched_parts = 0;
+    for part in &stem_parts {
+        if part.len() > 2 && repo_name_lower.contains(part) {
+            matched_parts += 1;
+        }
+    }
+    if matched_parts > 0 {
+        let ratio = matched_parts as f64 / stem_parts.len() as f64;
+        score += 0.4 * ratio;
+        if matched_parts == stem_parts.len() {
+            score += 0.15; // perfect stem match bonus
+        }
+    }
+
+    // 2. Filename token match (moderate signal)
+    // Check if any token from filename appears in the repo name
+    let file_tokens: Vec<&str> = filename_lower
+        .split(['-', '.', '_'])
+        .filter(|t| t.len() > 2 && !t.chars().all(|c| c.is_ascii_digit()))
+        .collect();
+    let mut file_matches = 0;
+    for token in &file_tokens {
+        if repo_name_lower.contains(token) {
+            file_matches += 1;
+        }
+    }
+    if file_matches > 0 {
+        score += 0.15 * (file_matches as f64 / file_tokens.len().max(1) as f64);
+    }
+
+    // 3. Parameter count match from tags (strong signal if present)
+    let param_b = infer_param_b_from_name(&filename_lower);
+    if param_b > 0.0 {
+        let param_str = format!("{}", param_b as u64);
+        for tag in raw_tags {
+            let tag_lower = tag.to_ascii_lowercase();
+            if tag_lower.starts_with("parameter_size:") && tag_lower.contains(&param_str) {
+                score += 0.2;
+                break;
+            }
+        }
+        // Also check if param appears in the repo name
+        if repo_name_lower.contains(&param_str) {
+            score += 0.1;
+        }
+    }
+
+    // 4. Popularity tiebreaker (weak signal, prevents obscure repos from winning)
+    if downloads > 1000 && score > 0.0 {
+        score += 0.05;
+    }
+
+    score.clamp(0.0, 1.0)
+}
+
+fn derive_resolve_reason(score: &f64) -> String {
+    if *score >= 0.9 {
+        "Strong match — stem, params, and filename tokens all align".to_string()
+    } else if *score >= 0.8 {
+        "High confidence — stem and most tokens match".to_string()
+    } else if *score >= 0.6 {
+        "Likely match — stem aligns, some uncertainty".to_string()
+    } else if *score >= 0.4 {
+        "Possible match — partial stem alignment".to_string()
+    } else {
+        "Weak match — low confidence".to_string()
+    }
+}
+
+/// Detect the base model family from HF model info (tags + repo name).
+/// Returns a lowercase slug like "qwen3.6", "llama3.3", "gemma4", "mistral", etc.
+/// Empty string if family cannot be determined.
+fn detect_model_family(info: &HfModelInfo, repo_name: &str) -> String {
+    // 1. Check base_model tag from cardData
+    for tag in &info.tags {
+        let tag_lower = tag.to_ascii_lowercase();
+        if let Some(rest) = tag_lower.strip_prefix("base_model:") {
+            // e.g. "base_model:Qwen/Qwen3.6-27B" or "base_model:meta-llama/Llama-3.3-70B-Instruct"
+            return infer_family_from_name(rest);
+        }
+    }
+
+    // 2. Fall back to repo name heuristics
+    infer_family_from_name(repo_name)
+}
+
+/// Infer model family slug from a name string (repo ID, model name, etc.).
+fn infer_family_from_name(name: &str) -> String {
+    let lower = name.to_ascii_lowercase();
+
+    // Check in order from most specific to most general
+    if lower.contains("qwen3.6") || lower.contains("qwen3_6") || lower.contains("qwen36") {
+        return "qwen3.6".to_string();
+    }
+    if lower.contains("qwen3.5") || lower.contains("qwen3_5") || lower.contains("qwen35") {
+        return "qwen3.5".to_string();
+    }
+    if lower.contains("qwen3") || lower.contains("qwen-3") || lower.contains("qwen_3") {
+        return "qwen3".to_string();
+    }
+    if lower.contains("qwen2.5") || lower.contains("qwen2_5") || lower.contains("qwen25") {
+        return "qwen2.5".to_string();
+    }
+    if lower.contains("qwen") {
+        return "qwen".to_string();
+    }
+    if lower.contains("gemma-3") || lower.contains("gemma_3") || lower.contains("gemma3") {
+        return "gemma3".to_string();
+    }
+    if lower.contains("gemma-2") || lower.contains("gemma_2") || lower.contains("gemma2") {
+        return "gemma2".to_string();
+    }
+    if lower.contains("gemma") {
+        return "gemma".to_string();
+    }
+    if lower.contains("llama-3.3") || lower.contains("llama3_3") || lower.contains("llama33") {
+        return "llama3.3".to_string();
+    }
+    if lower.contains("llama-3.1") || lower.contains("llama3_1") || lower.contains("llama31") {
+        return "llama3.1".to_string();
+    }
+    if lower.contains("llama-3") || lower.contains("llama3") {
+        return "llama3".to_string();
+    }
+    if lower.contains("llama") {
+        return "llama".to_string();
+    }
+    if lower.contains("mistral-large") {
+        return "mistral-large".to_string();
+    }
+    if lower.contains("mistral-nemo") || lower.contains("nemo") {
+        return "mistral-nemo".to_string();
+    }
+    if lower.contains("mistral") || lower.contains("mixtral") {
+        return "mistral".to_string();
+    }
+    if lower.contains("deepseek") {
+        return "deepseek".to_string();
+    }
+    if lower.contains("phi") {
+        return "phi".to_string();
+    }
+    if lower.contains("yi") && lower.contains("model") {
+        return "yi".to_string();
+    }
+
+    String::new()
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
