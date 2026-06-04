@@ -626,6 +626,9 @@ function bindEvents() {
     if (wizardState.model.localMeta?.path && wizardState.model.localMeta.path !== wizardState.model.path) {
       wizardState.model.localMeta = null;
     }
+    wizardState.model.quantFiles = [];
+    wizardState.model._quantSwapRepo = '';
+    _lastQuantSearchFile = '';
     onModelPathChanged();
     renderLocalModelHint();
   });
@@ -719,7 +722,7 @@ function bindEvents() {
     if (wizardState.currentStep === 3) renderSummary();
   });
 
-  // Hardware step quant swap
+  // Hardware step quant swap (HF models and local-model quant discovery)
   document.getElementById('hw-quant-select')?.addEventListener('change', e => {
     const fpath = e.target.value;
     const qf = wizardState.model.quantFiles?.find(q => (q.path || q.name) === fpath);
@@ -733,10 +736,30 @@ function bindEvents() {
         renderMtpSection();
       }
       scheduleVramUpdate();
-      // Refresh the download panel if it's already visible
-      const panel = document.getElementById('hf-download-panel');
-      if (panel && panel.style.display !== 'none') hfShowDownloadPanel(panel, fpath.split('/').pop());
+      // For local models with quant-swap repo: show download / stream actions.
+      const isLocalSwap = (wizardState.model.source === 'local' || wizardState.model.source === 'import')
+        && wizardState.model._quantSwapRepo;
+      if (isLocalSwap) {
+        // Only show actions when the user picks a quant that differs from their current local file.
+        const currentFile = (wizardState.model.path || '').split(/[\\/]/).pop() || '';
+        const pickedFile = fpath.split('/').pop() || fpath;
+        if (pickedFile.toLowerCase() !== currentFile.toLowerCase()) {
+          _renderQuantSwapActions(fpath, wizardState.model._quantSwapRepo);
+        } else {
+          const actionsRow = document.getElementById('hw-quant-swap-actions');
+          if (actionsRow) actionsRow.style.display = 'none';
+        }
+      } else {
+        const panel = document.getElementById('hf-download-panel');
+        if (panel && panel.style.display !== 'none') hfShowDownloadPanel(panel, fpath.split('/').pop());
+      }
     }
+  });
+
+  // Local-model quant swap trigger
+  document.getElementById('hw-quant-local-btn')?.addEventListener('click', () => {
+    _lastQuantSearchFile = ''; // reset cache so a re-click re-searches
+    _autoDiscoverLocalModelQuants();
   });
 
   // Model card panel
@@ -1306,10 +1329,14 @@ async function doIntrospect(path) {
             wizardState.model.mmprojFiles = found.map(e => ({
               path: e.path, name: e.name, size: e.size || 0, is_mmproj: true,
             }));
-            if (found.length === 1) {
-              wizardState.model.mmprojPath = found[0].path;
-              wizardState.model.mmprojHfFile = found[0].path;
-              wizardState.arch.mmprojBytes = found[0].size || 0;
+            // Pick best-matching mmproj by name proximity; avoids auto-selecting
+            // a companion file from a different model in the same directory.
+            const modelFilename = path.split(/[\\/]/).pop() || '';
+            const bestMmproj = _bestMmprojForModel(modelFilename, wizardState.model.mmprojFiles);
+            if (bestMmproj) {
+              wizardState.model.mmprojPath = bestMmproj.path;
+              wizardState.model.mmprojHfFile = bestMmproj.path;
+              wizardState.arch.mmprojBytes = bestMmproj.size || 0;
             }
             // Re-render the mmproj section if hardware step is active
             if (wizardState.currentStep === 2) renderMmprojSection();
@@ -2804,6 +2831,45 @@ function renderHardwareModelHeader() {
     const fileEl = document.getElementById('hw-model-file');
     if (fileEl) fileEl.textContent = hfFile ? hfFile.split('/').pop() : (path.split(/[/\\]/).pop() || '');
   }
+
+  // Show "Find on HuggingFace" row for local models that haven't loaded quant files yet.
+  // Reset the swap-actions bar whenever we re-render the header.
+  const localRow = document.getElementById('hw-quant-local-row');
+  if (localRow) {
+    const isLocal = source === 'local' || source === 'import';
+    const hasQuants = quantFiles && quantFiles.length > 1;
+    localRow.style.display = (isLocal && !hasQuants) ? '' : 'none';
+  }
+  const actionsRow = document.getElementById('hw-quant-swap-actions');
+  if (actionsRow && actionsRow.style.display !== 'none') {
+    // Keep visible only if user already selected a swap target
+  }
+}
+
+// ── Hardware step: mmproj name-matching helper ────────────────────────────────
+
+// Return the mmproj file whose name shares the longest common prefix (after
+// stripping quant suffix and normalising to alphanumeric) with the model stem.
+// Returns null if the best match is shorter than 5 normalised characters —
+// that threshold prevents grabbing a completely unrelated model's mmproj.
+function _bestMmprojForModel(modelFilename, files) {
+  if (!files.length) return null;
+  const stem = _modelStemForSearch(modelFilename)
+    .toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!stem) return files.length === 1 ? files[0] : null;
+  let best = null, bestScore = -1;
+  for (const f of files) {
+    const base = (f.path || f.name || '').split(/[\\/]/).pop() || '';
+    const fstem = _modelStemForSearch(base)
+      .toLowerCase().replace(/[^a-z0-9]/g, '');
+    let score = 0;
+    for (let i = 0; i < Math.min(stem.length, fstem.length); i++) {
+      if (stem[i] === fstem[i]) score++;
+      else break;
+    }
+    if (score > bestScore) { bestScore = score; best = f; }
+  }
+  return bestScore >= 5 ? best : null;
 }
 
 // ── Hardware step: mmproj section ────────────────────────────────────────────
@@ -2860,14 +2926,20 @@ function renderMmprojSection() {
   const active = wizardState.model.mmprojPath || wizardState.model.mmprojHfFile;
   if (active) select.value = active;
 
-  // Auto-select first file if nothing selected yet
+  // Auto-select using name proximity to the model file rather than
+  // alphabetical order — avoids grabbing a different model's mmproj.
   if (!select.value && files.length) {
-    select.value = files[0].path || files[0].name || '';
-    wizardState.model.mmprojPath = select.value;
-    wizardState.model.mmprojHfFile = select.value;
-    const f = files[0];
-    wizardState.arch.mmprojBytes = f.size ? Number(f.size) : 0;
-    scheduleVramUpdate();
+    const modelFilename = (wizardState.model.path || wizardState.model.hfFile || '')
+      .split(/[\\/]/).pop() || '';
+    const best = _bestMmprojForModel(modelFilename, files);
+    if (best) {
+      const bestPath = best.path || best.name || '';
+      select.value = bestPath;
+      wizardState.model.mmprojPath = bestPath;
+      wizardState.model.mmprojHfFile = bestPath;
+      wizardState.arch.mmprojBytes = best.size ? Number(best.size) : 0;
+      scheduleVramUpdate();
+    }
   }
 }
 
@@ -2891,6 +2963,212 @@ async function _hfFilesPost(repoId) {
     if (!res.ok) return null;
     return await res.json();
   } catch { return null; }
+}
+
+// ── Local-model quant-swap discovery ─────────────────────────────────────────
+
+// Extract a short quant label from a GGUF filename, e.g. "Q4_K_M" or "IQ3_M".
+function _extractQuantLabel(filename) {
+  const fname = (filename.split('/').pop() || filename).replace(/\.gguf$/i, '');
+  const m = fname.match(/[-_]((?:UD-)?(?:IQ|Q)\d[\w.]*|BF16|F16|FP16|FP32)(?:[-_.]|$)/i);
+  return m ? m[1].toUpperCase() : fname;
+}
+
+let _lastQuantSearchFile = ''; // prevent redundant searches
+let _quantSwapSearching = false;
+
+async function _autoDiscoverLocalModelQuants() {
+  if (_quantSwapSearching) return;
+  const { source, path, originRepo } = wizardState.model;
+  if (source !== 'local' && source !== 'import') return;
+
+  const filename = (path || '').split(/[\\/]/).pop() || '';
+  if (!filename || filename === _lastQuantSearchFile) return;
+  _lastQuantSearchFile = filename;
+  _quantSwapSearching = true;
+
+  const statusEl = document.getElementById('hw-quant-local-status');
+  const btn = document.getElementById('hw-quant-local-btn');
+  if (statusEl) statusEl.textContent = 'Searching HuggingFace…';
+  if (btn) btn.disabled = true;
+
+  try {
+    let repoId = originRepo || '';
+    let rawFiles = [];
+
+    if (repoId) {
+      const data = await _hfFilesPost(repoId);
+      if (data?.ok) rawFiles = (data.files || []).filter(f =>
+        !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
+    } else {
+      const stem = _modelStemForSearch(filename);
+      if (stem.length >= 4) {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const res = await fetch('/api/hf/search', {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: stem, sort: 'downloads', limit: 8 }),
+        });
+        if (res.ok) {
+          const sd = await res.json();
+          for (const m of (sd.models || []).slice(0, 4)) {
+            const fd = await _hfFilesPost(m.id);
+            if (!fd?.ok) continue;
+            const gguf = (fd.files || []).filter(f =>
+              !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
+            if (gguf.length >= 2) { repoId = m.id; rawFiles = gguf; break; }
+          }
+        }
+      }
+    }
+
+    if (rawFiles.length >= 2 && repoId) {
+      wizardState.model.quantFiles = rawFiles.map(f => ({
+        path: f.rfilename || f.path || '',
+        name: f.rfilename || f.path || '',
+        size: f.size || 0,
+        label: _extractQuantLabel(f.rfilename || f.path || ''),
+      }));
+      wizardState.model._quantSwapRepo = repoId;
+
+      // Pre-select the entry matching the currently loaded local file.
+      const currentLower = filename.toLowerCase();
+      const match = rawFiles.find(f =>
+        (f.rfilename || f.path || '').split('/').pop().toLowerCase() === currentLower);
+      if (match) wizardState.model.hfFile = match.rfilename || match.path || '';
+
+      if (statusEl) statusEl.textContent = `${rawFiles.length} quants found`;
+      setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
+      renderHardwareModelHeader();
+    } else {
+      if (statusEl) statusEl.textContent = 'Not found — enter repo manually:';
+      _showQuantSwapManualInput();
+    }
+  } catch {
+    if (statusEl) statusEl.textContent = 'Search failed';
+  } finally {
+    _quantSwapSearching = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+function _showQuantSwapManualInput() {
+  const row = document.getElementById('hw-quant-local-row');
+  if (!row) return;
+  const btn = row.querySelector('#hw-quant-local-btn');
+  if (!btn) return;
+
+  const wrap = document.createElement('span');
+  wrap.style.cssText = 'display:flex;gap:5px;align-items:center;flex:1;';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'owner/repo-GGUF';
+  input.style.cssText = 'flex:1;padding:4px 8px;border-radius:5px;border:1px solid rgba(255,255,255,0.1);background:rgba(28,34,42,0.9);color:var(--color-text-primary);font-size:10px;min-width:0;';
+  const goBtn = document.createElement('button');
+  goBtn.type = 'button';
+  goBtn.className = 'btn-wizard-tertiary';
+  goBtn.style.cssText = 'font-size:10px;min-height:22px;padding:2px 8px;flex-shrink:0;';
+  goBtn.textContent = 'Load';
+  wrap.appendChild(input);
+  wrap.appendChild(goBtn);
+  btn.replaceWith(wrap);
+
+  const statusEl = document.getElementById('hw-quant-local-status');
+
+  const doFetch = async () => {
+    const repoId = input.value.trim();
+    if (!repoId) return;
+    goBtn.disabled = true;
+    if (statusEl) statusEl.textContent = 'Loading…';
+    const data = await _hfFilesPost(repoId);
+    goBtn.disabled = false;
+    if (!data?.ok) { if (statusEl) statusEl.textContent = 'Repo not found'; return; }
+    const rawFiles = (data.files || []).filter(f =>
+      !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
+    if (!rawFiles.length) { if (statusEl) statusEl.textContent = 'No GGUFs found'; return; }
+    wizardState.model.quantFiles = rawFiles.map(f => ({
+      path: f.rfilename || f.path || '',
+      name: f.rfilename || f.path || '',
+      size: f.size || 0,
+      label: _extractQuantLabel(f.rfilename || f.path || ''),
+    }));
+    wizardState.model._quantSwapRepo = repoId;
+    if (statusEl) statusEl.textContent = '';
+    renderHardwareModelHeader();
+  };
+  goBtn.addEventListener('click', doFetch);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') doFetch(); });
+}
+
+function _renderQuantSwapActions(quantPath, repoId) {
+  const actionsRow = document.getElementById('hw-quant-swap-actions');
+  if (!actionsRow) return;
+  const quantName = quantPath.split('/').pop() || quantPath;
+
+  actionsRow.innerHTML = '';
+  actionsRow.style.display = '';
+
+  const dlBtn = document.createElement('button');
+  dlBtn.type = 'button';
+  dlBtn.className = 'btn-wizard-secondary';
+  dlBtn.style.cssText = 'font-size:10px;min-height:24px;padding:3px 10px;';
+  dlBtn.textContent = `⬇ Download ${quantName}`;
+
+  const streamBtn = document.createElement('button');
+  streamBtn.type = 'button';
+  streamBtn.className = 'btn-wizard-tertiary';
+  streamBtn.style.cssText = 'font-size:10px;min-height:24px;padding:3px 10px;';
+  streamBtn.textContent = '▶ Stream from HF';
+
+  const statusEl = document.createElement('span');
+  statusEl.style.cssText = 'font-size:10px;color:var(--color-text-muted);margin-left:4px;';
+
+  dlBtn.addEventListener('click', () => {
+    dlBtn.disabled = true; streamBtn.disabled = true;
+    statusEl.textContent = 'Starting download…';
+    const dlPanel = document.getElementById('hf-download-panel');
+    if (dlPanel) {
+      // Temporarily set hfRepo so hfStartDownload resolves the URL correctly.
+      const prevRepo = wizardState.model.hfRepo;
+      wizardState.model.hfRepo = repoId;
+      hfShowDownloadPanel(dlPanel, quantName);
+      hfStartDownload({
+        repoId,
+        filePath: quantPath,
+        panelEl: dlPanel,
+        onComplete: (_id, localPath) => {
+          wizardState.model.source = 'local';
+          wizardState.model.delivery = 'downloaded_hf';
+          wizardState.model.path = localPath;
+          wizardState.model.hfRepo = '';
+          wizardState.model.hfFile = '';
+          wizardState.model.originRepo = repoId;
+          wizardState.model.originFile = quantPath;
+          actionsRow.style.display = 'none';
+          statusEl.textContent = '✓ Downloaded and selected';
+          showToast('Quant downloaded', 'success', quantName);
+        },
+        onValidationError: msg => { statusEl.textContent = msg; dlBtn.disabled = false; streamBtn.disabled = false; },
+        onClearValidationError: () => {},
+      });
+      if (!prevRepo) wizardState.model.hfRepo = '';
+    }
+  });
+
+  streamBtn.addEventListener('click', () => {
+    wizardState.model.source = 'hf';
+    wizardState.model.hfRepo = repoId;
+    wizardState.model.hfFile = quantPath;
+    wizardState.model.delivery = 'stream_hf';
+    wizardState.model.path = '';
+    actionsRow.style.display = 'none';
+    showToast('Switched to HF stream', 'success', quantName);
+    scheduleVramUpdate();
+  });
+
+  actionsRow.appendChild(dlBtn);
+  actionsRow.appendChild(streamBtn);
+  actionsRow.appendChild(statusEl);
 }
 
 // Search HF for the first GGUF repo that contains an mmproj file matching this model.

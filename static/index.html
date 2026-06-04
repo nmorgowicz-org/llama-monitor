@@ -3014,6 +3014,14 @@
                             <label for="hw-quant-select" class="hw-quant-label">Quantization</label>
                             <select id="hw-quant-select" class="hw-quant-select" title="Swap quantization to compare VRAM impact"></select>
                         </div>
+                        <!-- Local-model quant discovery: shown when no quantFiles are loaded yet -->
+                        <div class="hw-quant-row" id="hw-quant-local-row" style="display:none;">
+                            <span class="hw-quant-label">Swap quant</span>
+                            <button type="button" id="hw-quant-local-btn" class="btn-wizard-tertiary" style="font-size:10px;min-height:22px;padding:3px 10px;" title="Find other quantizations for this model on HuggingFace">Find on HuggingFace…</button>
+                            <span id="hw-quant-local-status" style="font-size:10px;color:var(--color-text-muted);flex:1;margin-left:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
+                        </div>
+                        <!-- Download / stream actions shown after picking a new quant for a local model -->
+                        <div class="hw-quant-row" id="hw-quant-swap-actions" style="display:none;gap:6px;flex-wrap:wrap;"></div>
                         <div class="hw-quant-row" id="hw-mmproj-row" style="display:none;">
                             <label for="hw-mmproj-select" class="hw-quant-label" title="Adds ~0.5–1.5 GB VRAM. Required for multimodal inference.">Vision (mmproj)</label>
                             <select id="hw-mmproj-select" class="hw-quant-select" title="Vision projector file. Choose (none) for text-only inference."></select>
