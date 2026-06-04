@@ -131,6 +131,8 @@ pub struct ModelPreset {
     pub kv_unified: Option<bool>,
     #[serde(default)]
     pub cache_idle_slots: Option<bool>,
+    #[serde(default)]
+    pub cache_ram_mib: Option<i32>,
     // Fit
     #[serde(default)]
     pub fit_enabled: Option<bool>,

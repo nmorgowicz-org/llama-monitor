@@ -1726,7 +1726,54 @@ fn api_chat_template_upload(
         })
 }
 
-// 4) POST /api/chat-template/install-hf
+// 4) GET /api/chat-template/dir
+fn api_chat_template_dir(
+    _state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "chat-template" / "dir")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let Some(home) = dirs::home_dir() else {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Could not determine home directory"
+                        })),
+                    ));
+                };
+
+                let dir = home
+                    .join(".config")
+                    .join("llama-monitor")
+                    .join("chat-templates");
+                if let Err(e) = std::fs::create_dir_all(&dir) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("Failed to create template directory: {e}")
+                        })),
+                    ));
+                }
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "path": dir.to_string_lossy().to_string()
+                    }),
+                )))
+            }
+        })
+}
+
+// 5) POST /api/chat-template/install-hf
 // Downloads a Jinja template from HuggingFace and saves it with a stable name.
 // Returns the cached path immediately if the file already exists.
 fn api_chat_template_install_hf(
@@ -3992,6 +4039,7 @@ pub fn api_routes(
         api_spawn_wizard_import_launch_file(state.clone(), app_config.clone());
     let chat_template_fetch = api_chat_template_fetch(state.clone(), app_config.clone());
     let chat_template_upload = api_chat_template_upload(state.clone(), app_config.clone());
+    let chat_template_dir = api_chat_template_dir(state.clone(), app_config.clone());
     let chat_template_install_hf = api_chat_template_install_hf(state.clone(), app_config.clone());
     let vram_estimate = api_vram_estimate(state.clone(), app_config.clone());
     let vram_estimate_breakdown = api_vram_estimate_breakdown(state.clone(), app_config.clone());
@@ -4111,6 +4159,7 @@ pub fn api_routes(
     let phase0_routes = spawn_wizard_import
         .or(chat_template_fetch)
         .or(chat_template_upload)
+        .or(chat_template_dir)
         .or(chat_template_install_hf)
         .or(vram_estimate)
         .or(vram_estimate_breakdown)
@@ -9058,6 +9107,7 @@ fn api_spawn_session_with_preset(
 
                 let config = crate::llama::server::ServerConfig {
                     model_path: preset.model_path.clone(),
+                    hf_repo: preset.hf_repo.clone(),
                     context_size: preset.context_size,
                     ctk: preset.ctk.clone(),
                     ctv: preset.ctv.clone(),
@@ -9073,6 +9123,7 @@ fn api_spawn_session_with_preset(
                     top_k: preset.top_k,
                     min_p: preset.min_p,
                     repeat_penalty: preset.repeat_penalty,
+                    presence_penalty: preset.presence_penalty,
                     n_cpu_moe: preset.n_cpu_moe,
                     gpu_layers: preset.gpu_layers,
                     mlock: preset.mlock,
@@ -9089,14 +9140,59 @@ fn api_spawn_session_with_preset(
                         draft_min: preset.draft_min,
                         draft_max: preset.draft_max,
                         spec_ngram_size: preset.spec_ngram_size,
+                        spec_type: preset.spec_type.clone(),
+                        spec_default: preset.spec_default,
+                        spec_draft_n_max: preset.spec_draft_n_max,
+                        spec_draft_n_min: preset.spec_draft_n_min,
+                        spec_draft_p_split: preset.spec_draft_p_split,
+                        spec_draft_p_min: preset.spec_draft_p_min,
+                        spec_draft_ngl: preset.spec_draft_ngl,
+                        spec_draft_device: preset.spec_draft_device.clone(),
+                        spec_draft_cpu_moe: preset.spec_draft_cpu_moe,
+                        spec_draft_n_cpu_moe: preset.spec_draft_n_cpu_moe,
+                        spec_draft_type_k: preset.spec_draft_type_k.clone(),
+                        spec_draft_type_v: preset.spec_draft_type_v.clone(),
+                        spec_ngram_mod_n_min: preset.spec_ngram_mod_n_min,
+                        spec_ngram_mod_n_max: preset.spec_ngram_mod_n_max,
+                        spec_ngram_mod_n_match: preset.spec_ngram_mod_n_match,
+                        spec_ngram_simple_size_n: preset.spec_ngram_simple_size_n,
+                        spec_ngram_simple_size_m: preset.spec_ngram_simple_size_m,
+                        spec_ngram_simple_min_hits: preset.spec_ngram_simple_min_hits,
+                        spec_ngram_map_k_size_n: preset.spec_ngram_map_k_size_n,
+                        spec_ngram_map_k_size_m: preset.spec_ngram_map_k_size_m,
+                        spec_ngram_map_k_min_hits: preset.spec_ngram_map_k_min_hits,
+                        spec_ngram_map_k4v_size_n: preset.spec_ngram_map_k4v_size_n,
+                        spec_ngram_map_k4v_size_m: preset.spec_ngram_map_k4v_size_m,
+                        spec_ngram_map_k4v_min_hits: preset.spec_ngram_map_k4v_min_hits,
                         ..Default::default()
                     },
+                    kv_unified: preset.kv_unified,
+                    cache_idle_slots: preset.cache_idle_slots,
+                    cache_ram_mib: preset.cache_ram_mib,
+                    fit_enabled: preset.fit_enabled,
+                    fit_ctx: preset.fit_ctx,
+                    fit_target: preset.fit_target.clone(),
+                    fit_print: preset.fit_print,
+                    ignore_eos: preset.ignore_eos,
                     seed: preset.seed,
                     system_prompt_file: preset.system_prompt_file.clone(),
                     extra_args: preset.extra_args.clone(),
                     bind_host: preset.bind_host.clone(),
+                    chat_template_file: preset.chat_template_file.clone(),
+                    mmproj: preset.mmproj.clone(),
+                    grammar: preset.grammar.clone(),
+                    json_schema: preset.json_schema.clone(),
+                    cache_type_k: preset.cache_type_k.clone(),
+                    cache_type_v: preset.cache_type_v.clone(),
+                    max_tokens: preset.max_tokens,
                     api_key: preset.api_key.clone(),
                     alias: preset.alias.clone(),
+                    benchmark_mode: preset.benchmark_mode,
+                    enable_thinking: preset.enable_thinking,
+                    preserve_thinking: preset.preserve_thinking,
+                    reasoning: preset.reasoning.clone(),
+                    reasoning_budget: preset.reasoning_budget,
+                    reasoning_budget_message: preset.reasoning_budget_message.clone(),
                     ..Default::default()
                 };
 

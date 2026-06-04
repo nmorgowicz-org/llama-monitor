@@ -3,7 +3,7 @@
 
 import { sessionState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
-import { openDeferredFileBrowser } from './file-browser-launcher.js';
+import { openDeferredFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
 import { applySettings, saveSettings } from './settings.js';
 import { showToast } from './toast.js';
 
@@ -12,7 +12,14 @@ import { showToast } from './toast.js';
 function setVal(id, v) { document.getElementById(id).value = v ?? ''; }
 function setChk(id, v) { document.getElementById(id).checked = !!v; }
 function setOpt(id, v) { document.getElementById(id).value = v || ''; }
-function numOrEmpty(id, v) { document.getElementById(id).value = v != null ? v : ''; }
+function formatNumberForInput(v) {
+    if (v == null || v === '') return '';
+    const n = typeof v === 'number' ? v : Number(v);
+    if (!Number.isFinite(n)) return String(v);
+    if (Number.isInteger(n)) return String(n);
+    return n.toFixed(12).replace(/\.?0+$/, '');
+}
+function numOrEmpty(id, v) { document.getElementById(id).value = formatNumberForInput(v); }
 function intOrNull(id) { const v = document.getElementById(id).value; return v !== '' ? parseInt(v) : null; }
 function floatOrNull(id) { const v = document.getElementById(id).value; return v !== '' ? parseFloat(v) : null; }
 function strVal(id) { return document.getElementById(id).value.trim(); }
@@ -179,8 +186,10 @@ export function openPresetModal(mode) {
         _toggleSpecFields(specType);
         // Context extras
         setChk('modal-kv-unified', p.kv_unified ?? false);
+        numOrEmpty('modal-cache-ram-mib', p.cache_ram_mib);
         // Model extras
         setVal('modal-mmproj', p.mmproj || '');
+        setVal('modal-chat-template-file', p.chat_template_file || '');
         // Advanced
         setOpt('modal-bind-host', p.bind_host || '');
         setVal('modal-api-key', p.api_key || '');
@@ -188,7 +197,7 @@ export function openPresetModal(mode) {
         numOrEmpty('modal-seed', p.seed);
         setChk('modal-ignore-eos', p.ignore_eos ?? false);
         setChk('modal-fit-enabled', p.fit_enabled ?? false);
-        setOpt('modal-fit-target', p.fit_target || '');
+        setVal('modal-fit-target', p.fit_target || '');
         _toggleFitTarget(p.fit_enabled ?? false);
         setVal('modal-system-prompt-file', p.system_prompt_file);
         setVal('modal-extra-args', p.extra_args);
@@ -435,6 +444,7 @@ function _buildFormPreset(existing) {
         hf_repo: modelSource.hf_repo,
         alias: strVal('modal-alias') || null,
         mmproj: strVal('modal-mmproj') || null,
+        chat_template_file: strVal('modal-chat-template-file') || null,
         gpu_layers: intOrNull('modal-gpu-layers'),
         no_mmap: document.getElementById('modal-no-mmap').checked,
         mlock: document.getElementById('modal-mlock').checked,
@@ -443,6 +453,7 @@ function _buildFormPreset(existing) {
         ctv: strVal('modal-ctv') || 'f16',
         flash_attn: strVal('modal-flash-attn'),
         kv_unified: document.getElementById('modal-kv-unified').checked || null,
+        cache_ram_mib: intOrNull('modal-cache-ram-mib'),
         batch_size: parseInt(document.getElementById('modal-batch-size').value) || 2048,
         ubatch_size: parseInt(document.getElementById('modal-ubatch-size').value) || 2048,
         parallel_slots: parseInt(document.getElementById('modal-parallel-slots').value) || 1,
@@ -486,10 +497,10 @@ function _buildFormPreset(existing) {
 }
 
 const CHANGE_LABELS = {
-    name: 'Name', model_path: 'Model (local path or HF repo)', hf_repo: 'HuggingFace Repo', alias: 'Server Alias', mmproj: 'Multimodal Projector',
+    name: 'Name', model_path: 'Model (local path or HF repo)', hf_repo: 'HuggingFace Repo', alias: 'Server Alias', mmproj: 'Multimodal Projector', chat_template_file: 'Chat Template File',
     gpu_layers: 'GPU Layers', no_mmap: 'no-mmap', mlock: 'mlock',
     context_size: 'Context Size', ctk: 'KV Key Type', ctv: 'KV Value Type',
-    flash_attn: 'Flash Attn', kv_unified: 'KV Unified',
+    flash_attn: 'Flash Attn', kv_unified: 'KV Unified', cache_ram_mib: 'Prefix Cache RAM',
     fit_enabled: 'Fit to VRAM', fit_target: 'Fit Target',
     batch_size: 'Batch Size', ubatch_size: 'Micro-batch', parallel_slots: 'Parallel Slots',
     temperature: 'Temperature', top_p: 'Top-P', top_k: 'Top-K',
@@ -509,7 +520,11 @@ const CHANGE_LABELS = {
 
 function _buildChangeSummary(existing, incoming) {
     const changes = [];
-    const fmt = v => v == null || v === '' ? '(none)' : String(v);
+    const fmt = v => {
+        if (v == null || v === '') return '(none)';
+        if (typeof v === 'number') return formatNumberForInput(v);
+        return String(v);
+    };
     for (const key of Object.keys(CHANGE_LABELS)) {
         const prev = existing[key] ?? null;
         const next = incoming[key] ?? null;
@@ -851,6 +866,26 @@ export function initPresets() {
     });
     document.getElementById('preset-browse-model-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-model-path', 'gguf'));
     document.getElementById('preset-browse-mmproj-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-mmproj', 'gguf'));
+    document.getElementById('preset-browse-chat-template-btn')?.addEventListener('click', async () => {
+        try {
+            await openChatTemplateLibraryBrowser('modal-chat-template-file');
+        } catch (err) {
+            showToast('Template library unavailable: ' + (err.message || String(err)), 'error');
+        }
+    });
+    document.getElementById('preset-upload-chat-template-btn')?.addEventListener('click', async () => {
+        try {
+            const uploaded = await uploadChatTemplateFromBrowser();
+            if (!uploaded?.path) return;
+            setVal('modal-chat-template-file', uploaded.path);
+            showToast('Template uploaded', 'success', uploaded.filename || 'Saved to template library');
+        } catch {
+            // uploadChatTemplateFromBrowser already surfaced the error
+        }
+    });
+    document.getElementById('preset-clear-chat-template-btn')?.addEventListener('click', () => {
+        setVal('modal-chat-template-file', '');
+    });
     document.getElementById('preset-browse-draft-model-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-draft-model', 'gguf'));
 
     // Fit-to-VRAM toggle shows/hides fit target

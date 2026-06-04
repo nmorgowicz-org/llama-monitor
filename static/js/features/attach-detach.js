@@ -61,6 +61,7 @@ export function getConfig() {
         spec_draft_n_max: p.spec_draft_n_max ?? null,
         seed: p.seed ?? null,
         mmproj: p.mmproj || null,
+        chat_template_file: p.chat_template_file || null,
         alias: p.alias || null,
         max_tokens: p.max_tokens ?? null,
         ignore_eos: !!p.ignore_eos,

@@ -751,6 +751,7 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
         spec_ngram_map_k4v_min_hits,
         kv_unified,
         cache_idle_slots,
+        cache_ram_mib: None,
         fit_enabled,
         fit_ctx,
         fit_target,

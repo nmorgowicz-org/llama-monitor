@@ -2184,6 +2184,16 @@
                                     <button type="button" class="btn-sm btn-preset" id="preset-browse-mmproj-btn" title="Browse filesystem for .mmproj.gguf files">Browse</button>
                                 </div>
                             </div>
+                            <div class="pe-field">
+                                <label class="pe-label" for="modal-chat-template-file" title="Path to a chat template file. Wizard-created presets can auto-install one for models that need a custom template.">Chat Template File (--chat-template-file)</label>
+                                <div class="pe-input-row">
+                                    <input type="text" class="pe-input" id="modal-chat-template-file" placeholder="/path/to/chat_template.jinja">
+                                    <button type="button" class="btn-sm btn-preset" id="preset-browse-chat-template-btn" title="Choose an existing template from the local template library">Library</button>
+                                    <button type="button" class="btn-sm btn-preset" id="preset-upload-chat-template-btn" title="Upload a new Jinja template from your browser">Upload</button>
+                                    <button type="button" class="btn-sm btn-preset" id="preset-clear-chat-template-btn" title="Clear chat template override and use the model default">Clear</button>
+                                </div>
+                                <div class="pe-field-hint">Leave blank to use the model's embedded template or the wizard's recommended community override.</div>
+                            </div>
                             <div class="pe-row">
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-gpu-layers" title="Number of layers to offload to GPU. 99 = all layers. Lower values keep some layers on CPU to save VRAM.">GPU Layers (-ngl)</label>
@@ -2271,12 +2281,12 @@
                                 </label>
                             </div>
                             <div class="pe-field" id="modal-fit-target-wrap" style="display:none;">
-                                <label class="pe-label" for="modal-fit-target" title="What to optimize when fitting: maximize context, maximize speed, or balance both.">Fit Target</label>
-                                <select class="pe-select" id="modal-fit-target">
-                                    <option value="">balance (default)</option>
-                                    <option value="ctx">maximize context</option>
-                                    <option value="speed">maximize speed</option>
-                                </select>
+                                <label class="pe-label" for="modal-fit-target" title="Passes --fit-target with a memory budget in MB, matching the spawn wizard hardware step.">Fit Target MB (--fit-target)</label>
+                                <input type="number" class="pe-input" id="modal-fit-target" min="512" step="256" placeholder="2048">
+                            </div>
+                            <div class="pe-field">
+                                <label class="pe-label" for="modal-cache-ram-mib" title="-cram / --cache-ram. Maximum KV prefix-cache size in MiB. 0 disables it, -1 removes the limit, empty uses llama-server defaults.">Prefix Cache RAM (-cram)</label>
+                                <input type="number" class="pe-input" id="modal-cache-ram-mib" min="-1" step="256" placeholder="8192 (default)">
                             </div>
                         </div>
                     </div>
@@ -2954,7 +2964,9 @@
                             <span class="ct-label">Chat Template</span>
                             <span class="ct-status" id="ct-status"></span>
                         </div>
+                        <input type="hidden" id="spawn-chat-template-path">
                         <div class="ct-body" id="ct-body"></div>
+                        <div class="ct-actions" id="ct-actions"></div>
                     </div>
 
                     <!-- Quant advisor (shown after model + param count known) -->

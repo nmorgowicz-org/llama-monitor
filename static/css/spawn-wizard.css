@@ -4266,6 +4266,17 @@
   color: var(--color-text-muted, #94a3b8);
   line-height: 1.5;
 }
+.ct-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ct-action-btn {
+  font-size: 11px;
+  min-height: 24px;
+  padding: 3px 10px;
+}
 .ct-body strong { color: var(--color-text, #e2e8f0); }
 .ct-hf-link { color: #818cf8; text-decoration: none; }
 .ct-hf-link:hover { text-decoration: underline; }

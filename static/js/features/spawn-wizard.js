@@ -10,7 +10,7 @@
 //  - Auto-size button pulls backend recommendation
 //  - Step validation before advancing
 
-import { openDeferredFileBrowser } from './file-browser-launcher.js';
+import { openDeferredFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
 import { showToast } from './toast.js';
 import { switchView } from './setup-view.js';
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
@@ -170,6 +170,7 @@ export const wizardState = {
     quantFiles: [],      // GGUF files from HF repo for hardware-step quant swap
     mmprojFiles: [],     // mmproj files found in HF repo
     chatTemplatePath: null,  // local path to installed .jinja template (null = use embedded)
+    chatTemplateMode: 'auto', // 'auto' | 'custom' | 'embedded'
   },
   // Architecture from introspection (or heuristic)
   arch: {
@@ -655,6 +656,12 @@ function bindEvents() {
   dom.hfRepoInput?.addEventListener('blur', () => triggerHfFileFetch());
   dom.hfRepoInput?.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); triggerHfFileFetch(); }
+  });
+
+  document.getElementById('spawn-chat-template-path')?.addEventListener('input', (e) => {
+    const value = e.target.value.trim();
+    if (!value) return;
+    _applyCustomChatTemplate(value);
   });
 
   // Hardware fields
@@ -1807,6 +1814,22 @@ const COMMUNITY_TEMPLATES = {
   },
 };
 
+function _chatTemplateDisplayName(path) {
+  if (!path) return 'Embedded (from model file)';
+  return path.split(/[\\/]/).pop() || path;
+}
+
+function _applyCustomChatTemplate(path) {
+  wizardState.model.chatTemplatePath = path || null;
+  wizardState.model.chatTemplateMode = path ? 'custom' : 'embedded';
+  const hiddenInput = document.getElementById('spawn-chat-template-path');
+  if (hiddenInput) hiddenInput.value = path || '';
+  const identityName = wizardState.model.source === 'hf' ? wizardState.model.hfRepo : wizardState.model.path;
+  const family = detectModelFamily(identityName);
+  const tpl = family ? COMMUNITY_TEMPLATES[family] : null;
+  _renderChatTemplateStatus(path ? 'custom' : 'embedded', family, tpl, { path });
+}
+
 function detectModelFamily(name) {
   const lower = (name || '').toLowerCase();
   if (lower.includes('qwen')) return 'qwen';
@@ -1822,9 +1845,21 @@ async function autoInstallChatTemplate() {
   const family = detectModelFamily(identityName);
   const tpl = family ? COMMUNITY_TEMPLATES[family] : null;
 
+  if (wizardState.model.chatTemplateMode === 'custom' && wizardState.model.chatTemplatePath) {
+    _renderChatTemplateStatus('custom', family, tpl, { path: wizardState.model.chatTemplatePath });
+    return;
+  }
+
+  if (wizardState.model.chatTemplateMode === 'embedded') {
+    wizardState.model.chatTemplatePath = null;
+    _renderChatTemplateStatus('embedded', family, tpl, null);
+    return;
+  }
+
   if (!tpl) {
     wizardState.model.chatTemplatePath = null;
-    _renderChatTemplateStatus(family ? 'none-known' : 'no-family', family, null, null);
+    wizardState.model.chatTemplateMode = 'auto';
+    _renderChatTemplateStatus('embedded', family, null, null);
     return;
   }
 
@@ -1841,6 +1876,7 @@ async function autoInstallChatTemplate() {
     const data = resp.ok ? await resp.json() : { ok: false, error: `HTTP ${resp.status}` };
     if (data.ok && data.path) {
       wizardState.model.chatTemplatePath = data.path;
+      wizardState.model.chatTemplateMode = 'auto';
       _renderChatTemplateStatus('installed', family, tpl, data);
     } else {
       _renderChatTemplateStatus('error', family, tpl, data);
@@ -1854,15 +1890,65 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
   const section = document.getElementById('chat-template-section');
   const statusEl = document.getElementById('ct-status');
   const bodyEl = document.getElementById('ct-body');
+  const actionsEl = document.getElementById('ct-actions');
   if (!section) return;
 
-  if (state === 'no-family') { section.style.display = 'none'; return; }
   section.style.display = '';
 
-  if (state === 'none-known') {
-    if (statusEl) { statusEl.textContent = 'Embedded'; statusEl.className = 'ct-status ct-neutral'; }
-    if (bodyEl) bodyEl.textContent = `Using template embedded in model file. No community fix available for ${family || 'this'} yet.`;
-    return;
+  if (actionsEl) {
+    actionsEl.innerHTML = '';
+
+    if (tpl) {
+      const recommendedBtn = document.createElement('button');
+      recommendedBtn.type = 'button';
+      recommendedBtn.className = 'btn-wizard-tertiary ct-action-btn';
+      recommendedBtn.textContent = wizardState.model.chatTemplateMode === 'auto' ? 'Using Recommended' : `Use ${tpl.display}`;
+      recommendedBtn.disabled = wizardState.model.chatTemplateMode === 'auto';
+      recommendedBtn.addEventListener('click', async () => {
+        wizardState.model.chatTemplateMode = 'auto';
+        await autoInstallChatTemplate();
+      });
+      actionsEl.appendChild(recommendedBtn);
+    }
+
+    const embeddedBtn = document.createElement('button');
+    embeddedBtn.type = 'button';
+    embeddedBtn.className = 'btn-wizard-tertiary ct-action-btn';
+    embeddedBtn.textContent = 'Use Embedded';
+    embeddedBtn.disabled = wizardState.model.chatTemplateMode === 'embedded' && !wizardState.model.chatTemplatePath;
+    embeddedBtn.addEventListener('click', () => {
+      _applyCustomChatTemplate(null);
+    });
+    actionsEl.appendChild(embeddedBtn);
+
+    const libraryBtn = document.createElement('button');
+    libraryBtn.type = 'button';
+    libraryBtn.className = 'btn-wizard-tertiary ct-action-btn';
+    libraryBtn.textContent = 'Choose Existing';
+    libraryBtn.addEventListener('click', async () => {
+      try {
+        await openChatTemplateLibraryBrowser('spawn-chat-template-path');
+      } catch (err) {
+        showToast('Template library unavailable: ' + (err.message || String(err)), 'error');
+      }
+    });
+    actionsEl.appendChild(libraryBtn);
+
+    const uploadBtn = document.createElement('button');
+    uploadBtn.type = 'button';
+    uploadBtn.className = 'btn-wizard-tertiary ct-action-btn';
+    uploadBtn.textContent = 'Upload .jinja';
+    uploadBtn.addEventListener('click', async () => {
+      try {
+        const uploaded = await uploadChatTemplateFromBrowser();
+        if (!uploaded?.path) return;
+        _applyCustomChatTemplate(uploaded.path);
+        showToast('Template uploaded', 'success', uploaded.filename || 'Saved to template library');
+      } catch {
+        // uploadChatTemplateFromBrowser already surfaced the error
+      }
+    });
+    actionsEl.appendChild(uploadBtn);
   }
 
   if (state === 'installing') {
@@ -1874,6 +1960,16 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       nameEl.textContent = tpl.display;
       bodyEl.appendChild(nameEl);
       bodyEl.appendChild(document.createTextNode(' — downloading…'));
+    }
+    return;
+  }
+
+  if (state === 'embedded') {
+    if (statusEl) { statusEl.textContent = 'Embedded'; statusEl.className = 'ct-status ct-neutral'; }
+    if (bodyEl) {
+      bodyEl.textContent = family && tpl
+        ? 'Using the template embedded in the model file instead of the recommended community override.'
+        : 'Using template embedded in model file. You can choose an existing Jinja or upload a new one here.';
     }
     return;
   }
@@ -1895,6 +1991,23 @@ function _renderChatTemplateStatus(state, family, tpl, data) {
       bodyEl.appendChild(nameEl);
       bodyEl.appendChild(descEl);
       bodyEl.appendChild(link);
+    }
+    return;
+  }
+
+  if (state === 'custom') {
+    if (statusEl) {
+      statusEl.textContent = 'Custom';
+      statusEl.className = 'ct-status ct-ok';
+    }
+    if (bodyEl) {
+      bodyEl.textContent = '';
+      const nameEl = document.createElement('strong');
+      nameEl.textContent = _chatTemplateDisplayName(data?.path || wizardState.model.chatTemplatePath);
+      const descEl = document.createElement('span');
+      descEl.textContent = ' — using your selected template from the local template library.';
+      bodyEl.appendChild(nameEl);
+      bodyEl.appendChild(descEl);
     }
     return;
   }
@@ -2485,8 +2598,11 @@ function maybeResetHardwareStepScroll() {
 
   const main = document.querySelector('#wizard-step-2 .wizard-main');
   const sidebar = document.querySelector('#wizard-step-2 .hw-vram-sidebar');
-  if (main && main.scrollHeight > main.clientHeight + 2) main.scrollTop = 0;
-  if (sidebar && sidebar.scrollHeight > sidebar.clientHeight + 2) sidebar.scrollTop = 0;
+  // When a toggle hides part of the hardware form, the column can shrink from
+  // scrollable to non-scrollable in the same frame. Reset unconditionally so we
+  // never leave the viewport stranded at a stale offset showing blank space.
+  if (main) main.scrollTop = 0;
+  if (sidebar) sidebar.scrollTop = 0;
 }
 
 // ── Animated VRAM display ─────────────────────────────────────────────────────
@@ -4986,46 +5102,10 @@ async function saveAsPreset() {
 }
 
 function buildPresetPayload() {
-  const h = wizardState.hardware, m = wizardState.model;
-  const gpuLayers = h.gpuLayers === 'manual' ? (h.gpuLayersManual ?? -1) : (h.gpuLayers === 'all' ? -1 : null);
+  const spawnPayload = buildSpawnPayload();
   return {
     name: 'Spawn Wizard Preset',
-    model_path: m.source !== 'hf' ? (m.path || '') : '',
-    hf_repo: m.source === 'hf' ? (m.hfRepo || null) : null,
-    bind_host: wizardState.access.bindHost || '127.0.0.1',
-    gpu_layers: gpuLayers,
-    context_size: h.contextSize,
-    batch_size: h.batchSize,
-    ubatch_size: h.ubatchSize,
-    parallel_slots: h.parallelSlots,
-    ctk: h.cacheTypeK || '',
-    ctv: h.cacheTypeV || '',
-    n_cpu_moe: h.nCpuMoe || null,
-    tensor_split: h.tensorSplit || '',
-    no_mmap: true,
-    ngram_spec: false,
-    spec_type: dom.specTypeSelect?.value || '',
-    draft_model: (dom.draftModelInput?.value || '').trim() || '',
-    spec_ngram_size: (dom.specNgramSizeInput?.value || '').trim() || null,
-    draft_min: (dom.draftMinInput?.value || '').trim() || null,
-    draft_max: (dom.draftMaxInput?.value || '').trim() || null,
-    kv_unified: h.kvUnified || false,
-    temperature: h.temperature != null ? h.temperature : null,
-    top_p: h.topP != null ? h.topP : null,
-    top_k: h.topK != null ? h.topK : null,
-    min_p: h.minP != null ? h.minP : null,
-    repeat_penalty: h.repeatPenalty != null ? h.repeatPenalty : null,
-    presence_penalty: h.presencePenalty != null ? h.presencePenalty : null,
-    seed: h.seed != null ? h.seed : null,
-    enable_thinking: h.enableThinking,
-    preserve_thinking: h.preserveThinking,
-    reasoning: h.reasoningMode || null,
-    reasoning_budget: h.reasoningBudget,
-    reasoning_budget_message: h.reasoningBudgetMessage || null,
-    api_key: wizardState.access.apiKey || null,
-    mmproj: m.mmprojPath && m.mmprojPath.startsWith('/') ? m.mmprojPath : null,
-    alias: h.alias || null,
-    extra_args: h.extraArgs || '',
+    ...spawnPayload,
   };
 }
 
