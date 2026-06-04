@@ -539,7 +539,7 @@ mod tests {
 
     #[test]
     fn gemma4_exposes_three_presets() {
-        let presets = get_model_presets("gemma-4-27b-it", 0, &[]);
+        let presets = get_model_presets("gemma-4-26b-it", 0, &[]);
         assert_eq!(presets.len(), 3);
         assert_eq!(presets[0].name, "General");
         assert_eq!(presets[1].name, "Creative / Roleplay");
