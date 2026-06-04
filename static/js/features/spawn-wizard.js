@@ -375,6 +375,7 @@ function cacheDom() {
   dom.steps      = dom.overlay?.querySelectorAll('.wizard-step[id^="wizard-step-"]');
   dom.backBtn  = document.getElementById('wizard-back-btn');
   dom.nextBtn  = document.getElementById('wizard-next-btn');
+  dom.footerHint = document.getElementById('wizard-footer-hint');
 
   // Step 1
   dom.profileCards  = dom.overlay?.querySelectorAll('.profile-card[data-profile]');
@@ -526,7 +527,6 @@ function cacheDom() {
 
 function bindEvents() {
   dom.closeBtn?.addEventListener('click', closeSpawnWizard);
-  dom.overlay?.addEventListener('click', e => { if (e.target === dom.overlay) closeSpawnWizard(); });
   bindCtxQuickPicks();
   document.addEventListener('keydown', e => {
     if (!dom.overlay?.classList.contains('open')) return;
@@ -563,6 +563,7 @@ function bindEvents() {
       dom.profileCards.forEach(c => c.classList.remove('selected'));
       card.classList.add('selected');
       persistProfile(); applyProfileVisibility();
+      refreshStepGuardrails();
     });
     card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); } });
   });
@@ -574,6 +575,7 @@ function bindEvents() {
       dom.usecaseCards.forEach(c => c.classList.remove('selected'));
       card.classList.add('selected');
       updateVramDisplay();
+      refreshStepGuardrails();
     });
     card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); } });
   });
@@ -593,6 +595,7 @@ function bindEvents() {
       renderLocalModelHint();
       clearValidationError();
       if (card.dataset.source === 'import') loadThirdPartyModels();
+      refreshStepGuardrails();
     });
     card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); } });
   });
@@ -644,6 +647,11 @@ function bindEvents() {
     renderLocalModelHint();
   });
 
+  dom.hfRepoInput?.addEventListener('input', () => {
+    wizardState.model.hfRepo = dom.hfRepoInput.value.trim();
+    if (!wizardState.model.hfRepo) wizardState.model.hfFile = '';
+    refreshStepGuardrails();
+  });
   dom.hfRepoInput?.addEventListener('blur', () => triggerHfFileFetch());
   dom.hfRepoInput?.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); triggerHfFileFetch(); }
@@ -675,6 +683,7 @@ function bindEvents() {
   dom.gpuLayersSelect?.addEventListener('change', () => {
     wizardState.hardware.gpuLayers = dom.gpuLayersSelect.value;
     if (dom.gpuLayersManualWrap) dom.gpuLayersManualWrap.style.display = dom.gpuLayersSelect.value === 'manual' ? '' : 'none';
+    refreshStepGuardrails();
   });
   dom.specTypeSelect?.addEventListener('change', () => {
     const v = dom.specTypeSelect.value;
@@ -682,6 +691,7 @@ function bindEvents() {
     if (dom.draftModelWrap) dom.draftModelWrap.style.display = v === 'draft-model' ? '' : 'none';
     if (dom.specNgramWrap) dom.specNgramWrap.style.display = isNgram ? '' : 'none';
     _updateSpecHint(v);
+    refreshStepGuardrails();
   });
 
   // MoE slider
@@ -706,14 +716,17 @@ function bindEvents() {
     const parsed = parseInt(dom.portInput.value, 10);
     wizardState.access.port = Number.isFinite(parsed) && parsed > 0 ? parsed : 8001;
     if (wizardState.currentStep === 3) renderSummary();
+    refreshStepGuardrails();
   });
   dom.bindHostSelect?.addEventListener('change', () => {
     wizardState.access.bindHost = dom.bindHostSelect.value || '127.0.0.1';
     if (wizardState.currentStep === 3) renderSummary();
+    refreshStepGuardrails();
   });
   dom.apiKeyInput?.addEventListener('input', () => {
     wizardState.access.apiKey = (dom.apiKeyInput.value || '').trim();
     if (wizardState.currentStep === 3) renderSummary();
+    refreshStepGuardrails();
   });
 
   // Hardware step quant swap (HF models and local-model quant discovery)
@@ -747,6 +760,7 @@ function bindEvents() {
         const panel = document.getElementById('hf-download-panel');
         if (panel && panel.style.display !== 'none') hfShowDownloadPanel(panel, fpath.split('/').pop());
       }
+      refreshStepGuardrails();
     }
   });
 
@@ -795,6 +809,7 @@ async function refreshHfTokenState() {
     wizardState.model.hfTokenSet = !!data.set;
     _updateWizardHfTokenUI(!!data.set);
   } catch {}
+  refreshStepGuardrails();
 }
 
 function _updateWizardHfTokenUI(isSet) {
@@ -873,23 +888,98 @@ function renderLocalModelHint() {
   }
 }
 
+function getStepGuardState(step = wizardState.currentStep) {
+  const info = (message) => ({ canProceed: true, tone: 'info', message, focusEl: null });
+  const error = (message, focusEl = null) => ({ canProceed: false, tone: 'error', message, focusEl });
+  const warning = (message) => ({ canProceed: true, tone: 'warning', message, focusEl: null });
+
+  if (step === 0) {
+    return info('Choose a profile and use case. You can change both later before launching.');
+  }
+
+  if (step === 1) {
+    const { source, path, hfRepo, hfFile } = wizardState.model;
+    if (source === 'local') {
+      return path
+        ? info('Local model selected. Continue to tune hardware and context settings.')
+        : error('Choose a local GGUF file to continue.', dom.modelPathInput);
+    }
+    if (source === 'import') {
+      return path
+        ? info('Imported model selected. Continue to tune hardware and context settings.')
+        : error('Pick an imported model or paste a GGUF path to continue.', dom.importPathInput);
+    }
+    if (!hfRepo) {
+      return error('Enter a Hugging Face repo ID or pick a discover result to continue.', dom.hfRepoInput);
+    }
+    if (!hfFile) {
+      return error('Choose a GGUF file from the selected Hugging Face repo to continue.', dom.hfFileList || dom.hfRepoInput);
+    }
+    return info('Hugging Face model selected. Continue to review its hardware fit.');
+  }
+
+  if (step === 2) {
+    if (wizardState.hardware.gpuLayers === 'manual' && wizardState.hardware.gpuLayersManual == null) {
+      return error('Enter a GPU layer count or switch GPU layers back to Auto.', dom.gpuLayersManualInput);
+    }
+    if (dom.fitEnableCheck?.checked && !dom.fitTargetInput?.value.trim()) {
+      return error('Enter a fit target in MB or turn Auto-fit context to memory off.', dom.fitTargetInput);
+    }
+    if ((dom.specTypeSelect?.value || '') === 'draft-model' && !dom.draftModelInput?.value.trim()) {
+      return error('Enter a draft model path to use draft-model speculative decoding.', dom.draftModelInput);
+    }
+    return info('Review the VRAM estimate and adjust context, KV cache, or auto-size before continuing.');
+  }
+
+  if (step === 3) {
+    if (wizardState.access.bindHost === '0.0.0.0' && !wizardState.access.apiKey) {
+      return warning('This server will be LAN-visible without an API key. Add one unless you intentionally want an open endpoint.');
+    }
+    return info('Review defaults and network exposure. Continue when this matches how you want the server to start.');
+  }
+
+  if (step === 4) {
+    return info('Saving a preset is optional. Click Next when you are ready to launch.');
+  }
+
+  if (step === 5) {
+    return info('Spawn starts the server with the configuration shown above.');
+  }
+
+  return info('');
+}
+
+function refreshStepGuardrails() {
+  const state = getStepGuardState();
+  if (dom.nextBtn) {
+    const isFinalStep = wizardState.currentStep >= STEP_LABELS.length - 1;
+    dom.nextBtn.disabled = !isFinalStep && !state.canProceed;
+    dom.nextBtn.title = !state.canProceed ? state.message : '';
+    dom.nextBtn.setAttribute('aria-disabled', String(dom.nextBtn.disabled));
+  }
+  if (dom.footerHint) {
+    dom.footerHint.textContent = state.message || '';
+    dom.footerHint.classList.remove('is-warning', 'is-error');
+    if (state.tone === 'warning') dom.footerHint.classList.add('is-warning');
+    if (state.tone === 'error') dom.footerHint.classList.add('is-error');
+  }
+}
+
 // ── Validation ────────────────────────────────────────────────────────────────
 
 function validateStep(step) {
-  if (step === 1) {
-    const { source, path, hfRepo, hfFile } = wizardState.model;
-    if (source === 'local' || source === 'import') {
-      if (!path) { showValidationError('Select or enter a model path.'); return false; }
-    } else if (source === 'hf') {
-      if (!hfRepo) { showValidationError('Enter a HuggingFace repo ID (e.g. bartowski/Llama-3.3-70B-…).'); return false; }
-      if (!hfFile) { showValidationError('Select a GGUF file from the list.'); return false; }
-    }
+  const state = getStepGuardState(step);
+  if (!state.canProceed) {
+    showValidationError(state.message, state.focusEl);
+    refreshStepGuardrails();
+    return false;
   }
   clearValidationError();
+  refreshStepGuardrails();
   return true;
 }
 
-function showValidationError(msg) {
+function showValidationError(msg, focusEl = null) {
   const stepEl = document.getElementById(`wizard-step-${wizardState.currentStep}`);
   if (!stepEl) return;
   let el = stepEl.querySelector('.wizard-validation-error');
@@ -901,11 +991,13 @@ function showValidationError(msg) {
   }
   el.textContent = msg;
   el.style.display = '';
+  focusEl?.focus?.();
   el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function clearValidationError() {
   dom.overlay?.querySelectorAll('.wizard-validation-error').forEach(el => { el.style.display = 'none'; });
+  refreshStepGuardrails();
 }
 
 // ── HF download panel (wizard-specific wrappers) ─────────────────────────────
@@ -996,6 +1088,7 @@ function onHfDownloadComplete(downloadId, localPath) {
   updateModelInputVisibility();
   updateSelectedModelDisplay();
   renderLocalModelHint();
+  refreshStepGuardrails();
 }
 
 async function _startCompanionMmprojDownload(repo, mmprojHfPath, modelHfPath) {
@@ -1045,6 +1138,7 @@ function hfSearchForWizard({ query, author, sort, limit }) {
       fetchHfFiles(m.id);
       if (m.param_b > 0) triggerQuantAdvisor();
       clearValidationError();
+      refreshStepGuardrails();
     },
   });
 }
@@ -1117,6 +1211,7 @@ function showStep(index) {
   if (index === 5) {
     _renderSpawnConfigCard();
   }
+  refreshStepGuardrails();
 }
 
 // ── KV cache options from llama-server capabilities ──────────────────────────
@@ -1266,6 +1361,7 @@ function onModelPathChanged() {
   if (wizardState.model.paramB > 0) triggerQuantAdvisor();
   scheduleVramUpdate();
   autoInstallChatTemplate();
+  refreshStepGuardrails();
 }
 
 function inferParamBFromName(name) {
@@ -2209,6 +2305,7 @@ async function fetchHfFiles(repo) {
       if (wizardState.model.paramB > 0) triggerQuantAdvisor();
       scheduleVramUpdate();
       autoInstallChatTemplate();
+      refreshStepGuardrails();
     },
   });
 }
@@ -2335,6 +2432,7 @@ function selectImportedModel(m) {
   // Trigger arch inference + introspection using the model name for heuristics.
   onModelPathChanged();
   renderLocalModelHint();
+  refreshStepGuardrails();
 }
 
 // ── Hardware change ───────────────────────────────────────────────────────────
@@ -2344,6 +2442,7 @@ let vramDebounce = null;
 function onHardwareChange() {
   readHardwareState();
   scheduleVramUpdate();
+  refreshStepGuardrails();
 }
 
 function readHardwareState() {

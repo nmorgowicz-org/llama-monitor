@@ -163,6 +163,46 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         await expect(overlay).not.toBeVisible({ timeout: 2000 });
     });
 
+    test('Spawn wizard ignores backdrop clicks so progress is not lost', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        await page.evaluate(async () => {
+            const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+            openSpawnWizard();
+        });
+
+        const overlay = page.locator('#spawn-wizard-overlay');
+        await expect(overlay).toHaveClass(/open/);
+
+        await page.locator('#spawn-wizard-overlay').click({ position: { x: 8, y: 8 } });
+
+        await expect(overlay).toHaveClass(/open/);
+        await expect(page.locator('#wizard-step-0')).toHaveClass(/active/);
+    });
+
+    test('Model step disables Next until a model is selected', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        await page.evaluate(async () => {
+            const { openSpawnWizard } = await import('/js/features/spawn-wizard.js');
+            openSpawnWizard();
+        });
+
+        await page.locator('#wizard-next-btn').click();
+        await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
+
+        const nextBtn = page.locator('#wizard-next-btn');
+        await expect(nextBtn).toBeDisabled();
+        await expect(page.locator('#wizard-footer-hint')).toContainText('Choose a local GGUF file');
+
+        await page.fill('#spawn-model-path', '/tmp/Qwen3.6-27B-Instruct-Q4_K_M.gguf');
+
+        await expect(nextBtn).toBeEnabled();
+        await expect(page.locator('#wizard-footer-hint')).toContainText('Local model selected');
+    });
+
     test('Hardware auto-fit toggle keeps step content visible after layout changes', async ({ page }) => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');
@@ -184,6 +224,8 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         await page.locator('#wizard-next-btn').click();
         await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
 
+        const nextBtn = page.locator('#wizard-next-btn');
+
         await page.evaluate(() => {
             const main = document.querySelector('#wizard-step-2 .wizard-main');
             const sidebar = document.querySelector('#wizard-step-2 .hw-vram-sidebar');
@@ -192,6 +234,11 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         });
 
         await page.locator('#spawn-fit-enable').check();
+        await expect(nextBtn).toBeDisabled();
+        await expect(page.locator('#wizard-footer-hint')).toContainText('Enter a fit target in MB');
+
+        await page.fill('#spawn-fit-target', '2048');
+        await expect(nextBtn).toBeEnabled();
         await page.waitForTimeout(400);
 
         const scrollState = await page.evaluate(() => {
