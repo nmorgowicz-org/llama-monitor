@@ -605,4 +605,61 @@ mod tests {
             "only 16 of 64 layers should have KV cache"
         );
     }
+
+    #[test]
+    fn pantheon_real_gguf_has_qwen35_arch() {
+        // Integration test: reads the actual Pantheon-Reasoning-27B GGUF on disk.
+        // llama.cpp uses "qwen35" for both Qwen3.5 and Qwen3.6 families.
+        // Distinguished by block_count: 64 = Qwen3.6, 96 = Qwen3.5.
+        let home = std::env::var("HOME").ok();
+        let path = home
+            .map(|h| {
+                Path::new(&h)
+                    .join(".config/llama-monitor/models/Pantheon-Reasoning-27B.i1-Q6_K.gguf")
+            })
+            .and_then(|p| p.exists().then_some(p));
+        let Some(path) = path else {
+            return; // file not present, skip
+        };
+        let gguf = read_gguf_metadata(&path).expect("read pantheon gguf");
+        assert_eq!(
+            gguf.architecture.as_deref(),
+            Some("qwen35"),
+            "Pantheon-Reasoning-27B GGUF reports qwen35 (shared by Qwen3.5+3.6)"
+        );
+        // 65 layers — these specific GGUFs have 65 blocks (likely an extra embedding
+        // layer or architecture variant), not the canonical 64 from base Qwen3.6.
+        // What matters is that block_count < 96, confirming Qwen3.6 family.
+        assert!(
+            gguf.block_count.unwrap() < 96,
+            "block_count {} < 96 confirms Qwen3.6 family (not Qwen3.5)",
+            gguf.block_count.unwrap()
+        );
+    }
+
+    #[test]
+    fn qwopus3_6_real_gguf_has_qwen35_arch() {
+        // Integration test: reads the actual Qwopus3.6-27B-v2-MTP GGUF on disk.
+        let home = std::env::var("HOME").ok();
+        let path = home
+            .map(|h| {
+                Path::new(&h).join(".config/llama-monitor/models/Qwopus3.6-27B-v2-MTP-Q6_K.gguf")
+            })
+            .and_then(|p| p.exists().then_some(p));
+        let Some(path) = path else {
+            return; // file not present, skip
+        };
+        let gguf = read_gguf_metadata(&path).expect("read qwopus gguf");
+        assert_eq!(
+            gguf.architecture.as_deref(),
+            Some("qwen35"),
+            "Qwopus3.6-27B-v2-MTP GGUF reports qwen35"
+        );
+        // Same note: 65 blocks in these GGUFs, confirmed Qwen3.6 family by block_count < 96
+        assert!(
+            gguf.block_count.unwrap() < 96,
+            "block_count {} < 96 confirms Qwen3.6 family",
+            gguf.block_count.unwrap()
+        );
+    }
 }

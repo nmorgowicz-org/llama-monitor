@@ -2382,25 +2382,48 @@ fn api_vram_auto_size(
                 }
 
                 // Read GGUF metadata to get authoritative architecture family
-                // (e.g. "qwen3_6" even if the filename says "Qwopus3.6")
-                let gguf_arch = body["model_path"]
-                    .as_str()
-                    .and_then(|path_str| {
-                        let path = std::path::Path::new(path_str);
-                        path.exists()
-                            .then(|| crate::llama::gguf_meta::read_gguf_metadata(path))
-                            .transpose()
-                            .ok()
-                            .flatten()
-                            .and_then(|m| m.architecture)
-                    })
-                    .unwrap_or_else(|| body["gguf_arch"].as_str().unwrap_or("").to_string());
+                // (e.g. "qwen35" even if the filename says "Pantheon-Reasoning-27B")
+                let gguf_read = body["model_path"].as_str().and_then(|path_str| {
+                    let path = std::path::Path::new(path_str);
+                    path.exists()
+                        .then(|| crate::llama::gguf_meta::read_gguf_metadata(path))
+                        .transpose()
+                        .ok()
+                        .flatten()
+                });
 
-                // Inject gguf_arch into body so build_arch_from_body can use it
+                // Resolve gguf_arch: prefer GGUF file's general.architecture,
+                // then fall back to body field, then empty string.
+                // "qwen35" is shared by Qwen3.5 and Qwen3.6 — we distinguish via block_count.
+                let (gguf_arch, gguf_block_count) = match &gguf_read {
+                    Some(meta) => {
+                        let arch = meta
+                            .architecture
+                            .as_deref()
+                            .unwrap_or(body["gguf_arch"].as_str().unwrap_or(""))
+                            .to_string();
+                        let bc = meta.block_count;
+                        (arch, bc)
+                    }
+                    None => (body["gguf_arch"].as_str().unwrap_or("").to_string(), None),
+                };
+
+                // Map qwen35 to the correct heuristic name using block_count:
+                // Qwen3.6 family: ~64 layers (some GGUFs report 65 from extra
+                // embedding layers). Qwen3.5 family: 96 layers.
+                // Threshold at 75: anything below = Qwen3.6, above = Qwen3.5.
+                let resolved_arch = if gguf_arch == "qwen35" {
+                    match gguf_block_count {
+                        Some(bc) if bc >= 75 => "qwen3_5".to_string(),
+                        _ => "qwen3_6".to_string(),
+                    }
+                } else {
+                    gguf_arch.clone()
+                };
+
+                // Inject resolved arch into body so build_arch_from_body can use it
                 let mut enriched_body = body.clone();
-                if !gguf_arch.is_empty() {
-                    enriched_body["gguf_arch"] = serde_json::json!(gguf_arch);
-                }
+                enriched_body["gguf_arch"] = serde_json::json!(resolved_arch);
 
                 let arch = build_arch_from_body(&enriched_body, &model_name, param_b);
 
@@ -2438,6 +2461,10 @@ fn gguf_arch_to_heuristic_name(gguf_arch: &str) -> String {
     match a.as_str() {
         "qwen3_6" | "qwen3.6" => "qwen3.6-model".into(),
         "qwen3_5" | "qwen3.5" => "qwen3.5-model".into(),
+        // "qwen35" is shared by Qwen3.5 and Qwen3.6 in llama.cpp GGUF.
+        // Without block_count we can't distinguish them. Default to qwen3.6
+        // since renamed 27B finetunes (Pantheon, Qwopus) are qwen3.6 derivatives.
+        "qwen35" => "qwen3.6-model".into(),
         "qwen3_coder_next" | "qwen3-coder-next" => "qwen3-coder-next-model".into(),
         "gemma4" | "gemma-4" => "gemma4-12b".into(),
         "gemma3" | "gemma-3" => "gemma3-27b".into(),
