@@ -2389,8 +2389,8 @@
                                      <input type="number" class="pe-input" id="modal-reasoning-budget" step="1024" placeholder="16384">
                                  </div>
                                  <div class="pe-field">
-                                     <label class="pe-label" for="modal-reasoning-budget-message" title="Text that appears after the reasoning block and before the final answer. Helps the model separate its thinking from its answer. Default: 'Final Answer:'">Reasoning Budget Message</label>
-                                     <input type="text" class="pe-input" id="modal-reasoning-budget-message" placeholder="Final Answer:">
+                                 <label class="pe-label" for="modal-reasoning-budget-message" title="Text that appears after the reasoning block and before the final answer. Helps the model separate its thinking from its answer.">Reasoning Budget Message</label>
+                                  <textarea class="pe-input" id="modal-reasoning-budget-message" rows="2" title="The &#92;n at the start is intentional — it inserts a line break before the final answer."></textarea>
                                  </div>
                              </div>
                         </div>
@@ -2601,13 +2601,14 @@
                                 <input type="text" class="pe-input" id="modal-system-prompt-file" placeholder="/path/to/system.txt">
                             </div>
                             <div class="pe-field">
-                                <label class="pe-label" for="modal-structured-output-mode" title="Force the model to produce output matching a specific format instead of free-form text. Useful for agents, data extraction, or when your app needs a predictable response shape. Leave on Freeform for normal chatting.">Response Shaping <span class="info-tip" title="Force the model to produce structured output instead of free text. Useful for agents and data extraction.">i</span></label>
-                                <select class="pe-select" id="modal-structured-output-mode" title="Force the model to produce output matching a specific format instead of free-form text. Useful for agents, data extraction, or when your app needs a predictable response shape. Leave on Freeform for normal chatting.">
-                                    <option value="">Freeform</option>
-                                    <option value="grammar">GBNF Grammar</option>
-                                    <option value="json_schema">JSON Schema</option>
-                                </select>
-                                <div class="pe-field-hint">Use this when your app needs the model to return a specific format instead of free-text. JSON Schema is easier; GBNF grammar gives finer control.</div>
+                                <label class="pe-label" for="modal-structured-output-mode" title="DO NOT change from Freeform unless you specifically need GBNF grammar or JSON schema output. Changing this will break normal chat behavior.">Response Shaping <span class="info-tip" title="Force the model to produce structured output instead of free text. Useful for agents and data extraction.">i</span></label>
+                                 <select class="pe-select" id="modal-structured-output-mode" title="DO NOT change from Freeform unless you specifically need GBNF grammar or JSON schema output. Changing this will break normal chat behavior.">
+
+                                     <option value="">Freeform</option>
+                                     <option value="grammar">GBNF Grammar</option>
+                                     <option value="json_schema">JSON Schema</option>
+                                 </select>
+                                 <div class="pe-field-hint pe-field-warning">⚠ Leave on <strong>Freeform</strong> unless you specifically need structured output. GBNF grammar and JSON schema will break normal chat behavior.</div>
                             </div>
                             <div class="pe-field" id="modal-grammar-wrap" style="display:none;">
                                 <label class="pe-label" for="modal-grammar" title="A GBNF grammar defines rules for what the model can generate — like a custom language. The model can only produce tokens that match your rules. Find community grammars at https://github.com/ggml-org/llama.cpp/tree/master/grammars.">Grammar (--grammar)</label>
@@ -3471,33 +3472,46 @@
                                  <input type="number" id="spawn-reasoning-budget" min="-1" step="1024" placeholder="16384">
                              </div>
                              <div class="sampling-field">
-                                 <label for="spawn-reasoning-budget-message" title="Text that appears after the reasoning block and before the final answer. Helps the model separate its thinking from its answer.">Budget message</label>
-                                 <input type="text" id="spawn-reasoning-budget-message" placeholder="Final Answer:">
+                                   <label for="spawn-reasoning-budget-message" title="Text that appears after the reasoning block and before the final answer. Helps the model separate its thinking from its answer.">Budget message</label>
+                                      <textarea id="spawn-reasoning-budget-message" rows="2" title="The &#92;n at the start is intentional — it inserts a line break before the final answer."></textarea>
                              </div>
                         </div>
                     </div>
 
                     <div class="sampling-params-section" style="margin-top:14px;">
-                        <div class="hw-section-divider">Response shaping <span class="info-tip" title="Force the model to produce structured output instead of free text. Useful for agents and data extraction.">i</span></div>
-                        <div class="sampling-params-grid">
-                            <div class="sampling-field">
-                                <label for="spawn-output-mode" title="Force the model to produce output matching a specific format instead of free-form text. Useful for agents, data extraction, or when your app needs a predictable response shape. Leave on freeform for normal chatting.">Output mode</label>
-                                <select id="spawn-output-mode" title="Force the model to produce output matching a specific format instead of free-form text. Useful for agents, data extraction, or when your app needs a predictable response shape. Leave on freeform for normal chatting.">
-                                    <option value="">freeform</option>
-                                    <option value="grammar">GBNF grammar</option>
-                                    <option value="json_schema">JSON schema</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="sampling-field" id="spawn-grammar-wrap" style="display:none;margin-top:10px;">
-                            <label for="spawn-grammar" title="A GBNF grammar defines rules for what the model can generate — like a custom language. The model can only produce tokens that match your rules. Find community grammars at https://github.com/ggml-org/llama.cpp/tree/master/grammars.">Grammar</label>
-                            <textarea id="spawn-grammar" rows="6" placeholder="root ::= object&#10;object ::= &quot;{&quot; ws &quot;}&quot;"></textarea>
-                        </div>
-                        <div class="sampling-field" id="spawn-json-schema-wrap" style="display:none;margin-top:10px;">
-                            <label for="spawn-json-schema" title="A JSON Schema defines the shape of the JSON the model returns (field names, types, required fields). Llama-server converts this to a grammar behind the scenes. Easier to write than raw GBNF for most cases.">JSON schema</label>
-                            <textarea id="spawn-json-schema" rows="8" placeholder="{&#10;  &quot;type&quot;: &quot;object&quot;,&#10;  &quot;properties&quot;: {&#10;    &quot;answer&quot;: { &quot;type&quot;: &quot;string&quot; }&#10;  },&#10;  &quot;required&quot;: [&quot;answer&quot;]&#10;}"></textarea>
-                        </div>
-                        <div class="field-hint" style="margin-top:6px;">JSON Schema is easier and works well for most app use cases. GBNF grammar gives finer control but is harder to write. Find ready-made grammars at llama.cpp's GitHub.</div>
+                        <div class="hw-section-divider hw-section-collapsible" id="hw-section-response-shaping">
+                             Response shaping <span class="info-tip" title="Force the model to produce structured output instead of free text. Useful for agents and data extraction.">i</span>
+                             <span class="hw-section-toggle" id="hw-toggle-response-shaping">▸</span>
+                         </div>
+
+                         <div class="hw-section-body" id="hw-body-response-shaping" style="display:none;">
+                             <div class="hw-row">
+                                 <div class="hw-field">
+                                     <label for="spawn-output-mode" title="DO NOT change from freeform unless you specifically need GBNF grammar or JSON schema output. Changing this will break normal chat behavior.">Output mode</label>
+                                     <select id="spawn-output-mode" title="DO NOT change from freeform unless you specifically need GBNF grammar or JSON schema output. Changing this will break normal chat behavior.">
+                                         <option value="">freeform</option>
+                                         <option value="grammar">GBNF grammar</option>
+                                         <option value="json_schema">JSON schema</option>
+                                     </select>
+                                 </div>
+                             </div>
+
+                             <div class="hw-row hw-row-collapsed" id="spawn-grammar-row" style="display:none;">
+                                 <div class="hw-field">
+                                     <label for="spawn-grammar" title="A GBNF grammar defines rules for what the model can generate — like a custom language. The model can only produce tokens that match your rules. Find community grammars at https://github.com/ggml-org/llama.cpp/tree/master/grammars.">Grammar</label>
+                                     <textarea id="spawn-grammar" class="hw-textarea" rows="3" title="GBNF grammar"></textarea>
+                                 </div>
+                             </div>
+
+                             <div class="hw-row hw-row-collapsed" id="spawn-json-schema-row" style="display:none;">
+                                 <div class="hw-field">
+                                     <label for="spawn-json-schema" title="A JSON Schema defines the shape of the JSON the model returns (field names, types, required fields). Llama-server converts this to a grammar behind the scenes. Easier to write than raw GBNF for most cases.">JSON schema</label>
+                                     <textarea id="spawn-json-schema" class="hw-textarea" rows="3" title="JSON Schema"></textarea>
+                                 </div>
+                             </div>
+
+                             <div class="field-hint hw-field-warning" style="margin-top:6px;">⚠ Leave on <strong>freeform</strong> unless you specifically need structured output. GBNF grammar and JSON schema will break normal chat behavior.</div>
+                         </div>
                     </div>
 
                     <div class="sampling-params-section" style="margin-top:14px;">

@@ -551,8 +551,9 @@ function cacheDom() {
 
 function bindEvents() {
   dom.closeBtn?.addEventListener('click', closeSpawnWizard);
-  bindCtxQuickPicks();
-  document.addEventListener('keydown', e => {
+   bindCtxQuickPicks();
+   bindSectionToggles();
+   document.addEventListener('keydown', e => {
     if (!dom.overlay?.classList.contains('open')) return;
     if (e.key === 'Escape') {
       // Close any open browse dropdown first; only close wizard if none were open
@@ -4919,6 +4920,23 @@ async function triggerAutoSize() {
   } finally {
     btn.disabled = false; btn.textContent = origText;
   }
+}
+
+// ── Collapsible hardware sections ─────────────────────────────────────────────
+
+function bindSectionToggles() {
+   // Response shaping section — collapsed by default
+   const divider = document.getElementById('hw-section-response-shaping');
+   const toggle  = document.getElementById('hw-toggle-response-shaping');
+   const body    = document.getElementById('hw-body-response-shaping');
+   if (!divider || !body) return;
+
+   divider.style.cursor = 'pointer';
+   divider.addEventListener('click', () => {
+       const collapsed = body.style.display === 'none';
+       body.style.display = collapsed ? '' : 'none';
+       if (toggle) toggle.textContent = collapsed ? '▾' : '▸';
+   });
 }
 
 // ── Context quick-picks ───────────────────────────────────────────────────────

@@ -3654,6 +3654,28 @@
   color: #ef4444;
 }
 
+/* ── Collapsible hardware sections ──────────────────────────────────────────── */
+.hw-section-collapsible {
+  cursor: pointer;
+  user-select: none;
+}
+.hw-section-toggle {
+  margin-left: auto;
+  font-size: 14px;
+  opacity: 0.6;
+  transition: transform 0.15s ease;
+}
+.hw-section-body {
+  padding-top: 6px;
+}
+
+/* ── Field warning styling ────────────────────────────────────────────────── */
+.hw-field-warning,
+.pe-field-warning {
+  color: #ef4444;
+  font-weight: 500;
+}
+
 /* ── Binary prerequisite banner ─────────────────────────────────────────────── */
 .wizard-prereq {
   display: flex;
