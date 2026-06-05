@@ -380,7 +380,7 @@ use crate::gpu::env::{self as gpu_env, GPU_ARCHITECTURES, GpuEnv};
 use crate::lhm;
 
 use crate::lhm_persistence as lhm_persist;
-use crate::llama::server::{self, ServerConfig};
+use crate::llama::server::ServerConfig;
 use crate::models;
 use crate::presets::{self, ModelPreset};
 use crate::remote_ssh::{self, SshConnection};
@@ -4168,8 +4168,6 @@ pub fn api_routes(
     auth_manager: AuthManager,
     _bind_host: String,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    let start = api_start(state.clone(), app_config.clone());
-    let stop = api_stop(state.clone(), app_config.clone());
     let kill_llama = api_kill_llama(state.clone(), app_config.clone());
     let get_presets = api_get_presets(state.clone(), app_config.clone());
     let create_preset = api_create_preset(state.clone(), app_config.clone());
@@ -4377,7 +4375,7 @@ pub fn api_routes(
     let set_metal_gpu_limit_route = api_set_metal_gpu_limit(state.clone(), app_config.clone());
 
     // Group routes to avoid compiler overflow on long .or() chains
-    let server_routes = start.or(stop).or(kill_llama).or(attach).or(detach);
+    let server_routes = kill_llama.or(attach).or(detach);
     let preset_routes = get_presets
         .or(create_preset)
         .or(update_preset)
@@ -5667,71 +5665,6 @@ fn api_remote_agent_tls_status(
                 "server_cert_present": server_present,
                 "client_cert_present": client_present,
             }))) as Box<dyn warp::reply::Reply>
-        })
-}
-
-fn api_start(
-    state: AppState,
-    app_config: Arc<AppConfig>,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("api" / "start")
-        .and(warp::post())
-        .and(warp::header::optional::<String>("authorization"))
-        .and(warp::body::json())
-        .and_then(move |auth: Option<String>, config: ServerConfig| {
-            let state = state.clone();
-            let app_config = app_config.clone();
-            async move {
-                if !check_api_token(&auth, &app_config) {
-                    return Ok(unauthorized_api_token());
-                }
-                let ui = state.ui_settings.lock().unwrap().clone();
-                let mut eff_config = (*app_config).clone();
-                if !ui.llama_server_path.is_empty() {
-                    eff_config.llama_server_path = PathBuf::from(&ui.llama_server_path);
-                }
-                if !ui.llama_server_cwd.is_empty() {
-                    eff_config.llama_server_cwd = PathBuf::from(&ui.llama_server_cwd);
-                }
-                match server::start_server(&state, config, &eff_config).await {
-                    Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({"ok": true})),
-                    )),
-                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": e.to_string()}),
-                        ),
-                    )),
-                }
-            }
-        })
-}
-
-fn api_stop(
-    state: AppState,
-    app_config: Arc<AppConfig>,
-) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("api" / "stop")
-        .and(warp::post())
-        .and(warp::header::optional::<String>("authorization"))
-        .and_then(move |auth: Option<String>| {
-            let state = state.clone();
-            let app_config = app_config.clone();
-            async move {
-                if !check_api_token(&auth, &app_config) {
-                    return Ok(unauthorized_api_token());
-                }
-                match server::stop_server(&state).await {
-                    Ok(()) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(&serde_json::json!({"ok": true})),
-                    )),
-                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::json(
-                            &serde_json::json!({"ok": false, "error": e.to_string()}),
-                        ),
-                    )),
-                }
-            }
         })
 }
 
@@ -9395,6 +9328,8 @@ fn api_spawn_session_with_preset(
 
                     state.set_active_session(&session_id);
 
+                    // TODO: apply ui_settings overrides for llama_server_path / llama_server_cwd
+                    // (V1 endpoint does this; parity needed if someone set a custom server path/CWD)
                     match crate::llama::server::start_server(&state, config, &app_config).await {
                         Ok(()) => {
                             state.update_session_status(&session_id, SessionStatus::Running);
@@ -9535,6 +9470,8 @@ fn api_spawn_session_with_preset(
                     ..Default::default()
                 };
 
+                // TODO: apply ui_settings overrides for llama_server_path / llama_server_cwd
+                // (V1 endpoint does this; parity needed if someone set a custom server path/CWD)
                 match crate::llama::server::start_server(&state, config, &app_config).await {
                     Ok(()) => {
                         state.update_session_status(&session_id, SessionStatus::Running);
@@ -9821,7 +9758,7 @@ fn api_detach(
 }
 
 fn api_kill_llama(
-    _state: AppState,
+    state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -9837,6 +9774,7 @@ fn api_kill_llama(
         .and(warp::body::json::<serde_json::Value>())
         .and(with_app_config(app_config))
         .and_then(move |auth: Option<String>, body: serde_json::Value, cfg: Arc<AppConfig>| {
+            let state = state.clone();
             async move {
                 // Require db-admin-token (elevated operation).
                 let bearer = auth.and_then(|v| v.strip_prefix("Bearer ").map(str::to_string));
@@ -9886,7 +9824,15 @@ fn api_kill_llama(
 
                 LAST_KILL.store(now, Ordering::Release);
 
-                // Inline kill logic (platform-specific).
+                // Kill the tracked child process and clear in-memory state
+                // (server_child, local_server_running, server_config, llama_metrics).
+                // Platform-specific pkill/taskkill below is a fallback if the child
+                // reference was already lost.
+                if let Err(e) = crate::llama::server::stop_server(&state).await {
+                    state.push_log(format!("[monitor] stop_server fallback: {}", e));
+                }
+
+                // Inline kill logic (platform-specific, fallback).
                 #[cfg(target_os = "windows")]
                 {
                     use std::process::Command;

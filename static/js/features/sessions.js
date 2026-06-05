@@ -7,7 +7,9 @@ import { doAttach, doStart } from './attach-detach.js';
 import { openDeferredFileBrowser } from './file-browser-launcher.js';
 import { loadPresets } from './presets.js';
 import { saveSettings } from './settings.js';
-import { showConnectingState } from './setup-view.js';
+import { setTuneConfig, showTunePanel } from './tune-panel.js';
+import { waitForSpawnReadiness } from './spawn-readiness.js';
+import { showConnectingState, switchView } from './setup-view.js';
 import { showToast } from './toast.js';
 
 // ── Load ───────────────────────────────────────────────────────────────────────
@@ -334,6 +336,23 @@ export async function saveSession(event) {
         loadSessions();
         updateActiveSessionInfo();
         showToast(mode === 'attach' ? 'Attached to endpoint' : 'Session created', 'success');
+
+        // Switch to monitor view for both spawn and attach, matching doAttach/doStart behavior
+        if (mode === 'spawn') {
+            // Wait for the spawned server to become reachable
+            const port = parseInt(target, 10) || 8001;
+            try {
+                await waitForSpawnReadiness(port);
+            } catch {
+                // Non-fatal — switch view anyway; the WebSocket will start pushing data once ready
+            }
+            showTunePanel();
+            switchView('monitor');
+        } else {
+            // attach mode — already reachable (backend health-checks before accepting)
+            showTunePanel();
+            switchView('monitor');
+        }
     } else {
         showToast('Failed to create session: ' + data.error, 'error');
     }

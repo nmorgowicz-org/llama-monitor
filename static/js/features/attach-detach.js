@@ -8,6 +8,7 @@ import { hideConnectingState, saveLastSessionData, showConnectingState, switchVi
 import { setTuneConfig, showTunePanel, hideTunePanel } from './tune-panel.js';
 import { hideDisconnectedBanner } from './chat-transport.js';
 import { monitorState } from '../core/app-state.js';
+import { waitForSpawnReadiness } from './spawn-readiness.js';
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,15 @@ export function getConfig() {
 
 // ── Start / Stop ───────────────────────────────────────────────────────────────
 
+// Fetch the db-admin-token needed for V2 spawn endpoints.
+async function _fetchDbAdminToken() {
+    const tokenResp = await fetch('/api/db/admin-token', {
+        headers: window.authHeaders ? window.authHeaders() : {},
+    });
+    const tokenData = tokenResp.ok ? await tokenResp.json().catch(() => ({})) : {};
+    return tokenData.token || null;
+}
+
 export async function doStart() {
     const config = getConfig();
     if (!config.model_path && !config.hf_repo) {
@@ -89,11 +99,20 @@ export async function doStart() {
     try {
         await doKillLlamaInternal();
 
-        const resp = await fetch('/api/start', {
+        // V2 spawn endpoint requires db-admin-token
+        const adminToken = await _fetchDbAdminToken();
+        if (!adminToken) {
+            showToast('Failed: authentication required', 'error');
+            hideConnectingState();
+            return;
+        }
+
+        const resp = await fetch('/api/sessions/spawn', {
             method: 'POST',
-            headers: window.authHeaders
-                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
-                : { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${adminToken}`,
+            },
             body: JSON.stringify(config),
         });
 
@@ -112,6 +131,9 @@ export async function doStart() {
             return;
         }
 
+        // Wait for the spawned server to become reachable
+        await waitForSpawnReadiness(config.port);
+
         setTuneConfig(config);
         switchView('monitor');
         hideConnectingState();
@@ -129,12 +151,15 @@ export async function doStop() {
     const btnStop = document.getElementById('btn-stop');
     if (btnStop) btnStop.disabled = true;
 
-    await fetch('/api/stop', {
-            method: 'POST',
-            headers: window.authHeaders ? window.authHeaders() : {},
-        });
+    // V2: kill-llama kills the tracked child process and clears in-memory state
     await doKillLlamaInternal();
     hideTunePanel();
+
+    // Switch back to setup/welcome view
+    if (document.body.classList.contains('setup-active') === false) {
+        // Only switch view if we're in the monitor
+        switchView('setup');
+    }
     if (btnStop) btnStop.disabled = false;
 }
 

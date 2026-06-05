@@ -34,6 +34,7 @@
   filter: blur(60px);
   pointer-events: none;
   z-index: 0;
+  animation: spawn-ambient-drift 8s ease-in-out infinite;
 }
 
 @keyframes spawn-ambient-drift {
@@ -96,6 +97,7 @@
   pointer-events: none;
   z-index: 1;
   opacity: 0.6;
+  animation: spawn-border-breathe 3s ease-in-out infinite;
 }
 
 @keyframes spawn-border-breathe {
