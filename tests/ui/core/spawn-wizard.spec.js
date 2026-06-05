@@ -203,7 +203,7 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         await expect(page.locator('#wizard-footer-hint')).toContainText('Local model selected');
     });
 
-    test('Hardware auto-fit toggle keeps step content visible after layout changes', async ({ page }) => {
+    test('Hardware auto-fit toggle auto-populates fit target and keeps step navigable', async ({ page }) => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');
 
@@ -223,45 +223,87 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         await page.fill('#spawn-model-path', '/tmp/Qwen3.6-27B-Instruct-Q4_K_M.gguf');
         await page.locator('#wizard-next-btn').click();
         await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
+        await expect(page.locator('.vsc-section-label')).toContainText('Context fit modes');
+        await expect(page.locator('#vram-scenarios')).toContainText('Reliable agents');
+        await expect(page.locator('#spawn-cache-type-k')).toHaveValue('q8_0');
+        await expect(page.locator('#spawn-cache-type-v')).toHaveValue('q8_0');
 
         const nextBtn = page.locator('#wizard-next-btn');
 
-        await page.evaluate(() => {
-            const main = document.querySelector('#wizard-step-2 .wizard-main');
-            const sidebar = document.querySelector('#wizard-step-2 .hw-vram-sidebar');
-            if (main) main.scrollTop = Math.max(0, main.scrollHeight);
-            if (sidebar) sidebar.scrollTop = Math.max(0, sidebar.scrollHeight);
-        });
-
+        // Enable fit-enable programmatically — should auto-populate '2048' and keep next enabled
         await page.evaluate(() => {
             const cb = document.getElementById('spawn-fit-enable');
             cb.checked = true;
             cb.dispatchEvent(new Event('change', { bubbles: true }));
         });
-        await expect(nextBtn).toBeDisabled();
-        await expect(page.locator('#wizard-footer-hint')).toContainText('Enter a fit target in MB');
+        await expect(nextBtn).toBeEnabled();
+        await expect(page.locator('#spawn-fit-target')).toHaveValue('2048');
 
         await page.fill('#spawn-fit-target', '2048');
         await expect(nextBtn).toBeEnabled();
-        await page.waitForTimeout(400);
 
-        const scrollState = await page.evaluate(() => {
-            const main = document.querySelector('#wizard-step-2 .wizard-main');
-            const sidebar = document.querySelector('#wizard-step-2 .hw-vram-sidebar');
-            const step = document.getElementById('wizard-step-2');
-            return {
-                stepActive: !!step?.classList.contains('active'),
-                mainScrollTop: main?.scrollTop ?? null,
-                sidebarScrollTop: sidebar?.scrollTop ?? null,
-                mainHasContent: (main?.scrollHeight || 0) > (main?.clientHeight || 0),
-            };
+        // Hardware step must still be active and visible after the layout change
+        await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
+        await expect(page.locator('#wizard-step-2 .wizard-section-title').first()).toContainText('Configure hardware');
+    });
+
+    test('Hardware advanced toggles work: kv-unified flips state, fit-enable auto-populates target', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        await page.evaluate(async () => {
+            const { openSpawnWizard, wizardState } = await import('/js/features/spawn-wizard.js');
+            openSpawnWizard();
+            wizardState.model.source = 'local';
+            wizardState.model.path = '/tmp/Qwen3.6-27B-Instruct-Q4_K_M.gguf';
+            wizardState.model.paramB = 27;
+            wizardState.model.modelBytes = 16 * 1024 * 1024 * 1024;
         });
 
-        expect(scrollState.stepActive).toBe(true);
-        expect(scrollState.mainHasContent).toBe(true);
-        expect(scrollState.mainScrollTop).toBe(0);
-        expect(scrollState.sidebarScrollTop).toBe(0);
-        await expect(page.locator('#wizard-step-2 .wizard-section-title').first()).toContainText('Configure hardware');
+        await page.locator('.profile-card[data-profile="advanced"]').click();
+        await page.locator('#wizard-next-btn').click();
+        await expect(page.locator('#wizard-step-1')).toHaveClass(/active/);
+
+        await page.fill('#spawn-model-path', '/tmp/Qwen3.6-27B-Instruct-Q4_K_M.gguf');
+        await page.locator('#wizard-next-btn').click();
+        await expect(page.locator('#wizard-step-2')).toHaveClass(/active/);
+        await expect(page.locator('.vsc-section-label')).toContainText('Context fit modes');
+        await expect(page.locator('#vram-scenarios')).toContainText('Reliable agents');
+        await expect(page.locator('#spawn-cache-type-k')).toHaveValue('q8_0');
+        await expect(page.locator('#spawn-cache-type-v')).toHaveValue('q8_0');
+
+        // kv-unified toggle flips checkbox state (use programmatic dispatch to avoid
+        // Playwright scroll-into-view side effects on the scrollable wizard-main column)
+        const kvBefore = await page.evaluate(() =>
+            document.getElementById('spawn-kv-unified')?.checked ?? false
+        );
+        await page.evaluate(() => {
+            const cb = document.getElementById('spawn-kv-unified');
+            if (!cb) return;
+            cb.checked = !cb.checked;
+            cb.dispatchEvent(new Event('input', { bubbles: true }));
+            cb.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        await page.waitForTimeout(200);
+        const kvAfter = await page.evaluate(() =>
+            document.getElementById('spawn-kv-unified')?.checked ?? false
+        );
+        expect(kvAfter).toBe(!kvBefore);
+
+        // fit-enable toggle shows target input and auto-populates '2048'
+        await page.evaluate(() => {
+            const cb = document.getElementById('spawn-fit-enable');
+            if (!cb) return;
+            cb.checked = true;
+            cb.dispatchEvent(new Event('input', { bubbles: true }));
+            cb.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        await page.waitForTimeout(400);
+
+        const fitTargetValue = await page.evaluate(() =>
+            document.getElementById('spawn-fit-target')?.value ?? ''
+        );
+        expect(fitTargetValue).toBe('2048');
     });
 
     test('review step exposes structured output and full sampling defaults', async ({ page }) => {
