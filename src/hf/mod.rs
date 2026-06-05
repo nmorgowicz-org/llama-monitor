@@ -153,6 +153,7 @@ impl QuantProvider {
             "davidau" | "davidau-hf" => QuantProvider::Community,
             "mudler" => QuantProvider::Community,
             "jackrong" => QuantProvider::Community,
+            "prithivmlmods" => QuantProvider::Community,
             _ => QuantProvider::Community,
         }
     }
@@ -357,6 +358,13 @@ pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
             username: "Jackrong".into(),
             display_name: "Jackrong".into(),
             description: "GGUF releases, often larger models.".into(),
+            quant_style: "standard",
+            note: None,
+        },
+        KnownQuantizer {
+            username: "prithivMLmods".into(),
+            display_name: "prithivMLmods".into(),
+            description: "Wide coverage of recent models, high-quality GGUF quants.".into(),
             quant_style: "standard",
             note: None,
         },
@@ -1488,6 +1496,7 @@ mod tests {
         assert!(usernames.contains(&"mudler"));
         assert!(usernames.contains(&"Jackrong"));
         assert!(usernames.contains(&"llmfan46"));
+        assert!(usernames.contains(&"prithivMLmods"));
     }
 
     #[test]
