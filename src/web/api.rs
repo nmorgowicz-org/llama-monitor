@@ -4059,6 +4059,36 @@ fn api_models_gguf_meta(
                     }
                 };
 
+                // Resolve n_attn_layers from heuristic (not stored in GGUF format).
+                // This is critical for hybrid DeltaNet models (Qwen3.5, Qwen3.6) where
+                // only a subset of layers use traditional KV cache.
+                let n_attn_layers = meta.architecture.as_ref().and_then(|arch_str| {
+                    let heuristic_name = gguf_arch_to_heuristic_name(arch_str);
+                    // Qwen3.5 vs Qwen3.6 disambiguation via block_count
+                    let resolved = if arch_str.eq_ignore_ascii_case("qwen35") {
+                        if let Some(bc) = meta.block_count {
+                            if bc >= 75 {
+                                "qwen3_5".to_string()
+                            } else {
+                                heuristic_name
+                            }
+                        } else {
+                            heuristic_name
+                        }
+                    } else {
+                        heuristic_name
+                    };
+                    let param_b = meta.param_count.map(|p| p as f64 / 1e9).unwrap_or(0.0);
+                    let arch = crate::llama::vram_estimator::ModelArch::from_name_and_params(
+                        &resolved, param_b,
+                    );
+                    if arch.n_attn_layers < arch.n_layers {
+                        Some(arch.n_attn_layers)
+                    } else {
+                        None
+                    }
+                });
+
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
                     &serde_json::json!({
                         "ok": true,
@@ -4074,6 +4104,7 @@ fn api_models_gguf_meta(
                         "expert_count": meta.expert_count,
                         "expert_used_count": meta.expert_used_count,
                         "mtp_depth": meta.mtp_depth,
+                        "n_attn_layers": n_attn_layers,
                     }),
                 )))
             }
