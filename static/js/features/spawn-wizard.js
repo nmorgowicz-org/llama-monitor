@@ -1334,7 +1334,7 @@ function showStep(index) {
   if (index === 2) {
     // Entering hardware step — refresh VRAM, then render model context + new sections
     updateCtxModelMaxHint();
-    Promise.all([fetchGpuVram(), fetchSystemRam()]).then(() => {
+    Promise.all([fetchGpuVram(), fetchMetalGpuLimit(), fetchSystemRam()]).then(() => {
       scheduleVramUpdate();
       renderHardwareModelHeader();
       _populateKvCacheOptions();
@@ -1355,7 +1355,7 @@ function showStep(index) {
   }
   if (index === 3) {
     refreshHfTokenState().finally(() => {
-      fetchGpuVram().then(() => estimateVramFull().then(() => renderSummary()));
+      Promise.all([fetchGpuVram(), fetchMetalGpuLimit()]).then(() => estimateVramFull().then(() => renderSummary()));
     });
   }
   if (index === 4) {
@@ -1584,9 +1584,9 @@ async function doIntrospect(path) {
   try {
     const headers = window.authHeaders ? { ...window.authHeaders(), 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
     const resp = await fetch('/api/model/introspect', { method: 'POST', headers, body: JSON.stringify({ model_path: path }) });
-    if (!resp.ok) return;
+    if (!resp.ok) return false;
     const data = await resp.json();
-    if (!data.ok || !data.metadata) return;
+    if (!data.ok || !data.metadata) return false;
 
     const m = data.metadata;
 
@@ -1686,7 +1686,10 @@ async function doIntrospect(path) {
 
     scheduleVramUpdate();
     if (wizardState.model.paramB > 0) triggerQuantAdvisor();
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ── GPU VRAM query ────────────────────────────────────────────────────────────
@@ -1798,6 +1801,18 @@ async function fetchGpuVram() {
       cachedVram = totalVram;
       wizardState.vram.available = totalVram;
     }
+  } catch {}
+}
+
+async function fetchMetalGpuLimit() {
+  if (!isUnifiedMemory()) return;
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const resp = await fetch('/api/system/metal-gpu-limit', { headers });
+    if (!resp.ok) return;
+    const data = await resp.json().catch(() => ({}));
+    if (!data.ok) return;
+    cachedMetalGpuLimitMb = Number(data.limit_mb || 0);
   } catch {}
 }
 
@@ -3061,6 +3076,54 @@ function getEffectiveArch() {
   return a;
 }
 
+function getSizingArch() {
+  const base = getEffectiveArch();
+  const arch = { ...base };
+  const hasSelectedMmproj = !!(wizardState.model.mmprojPath || wizardState.model.mmprojHfFile);
+
+  // Size against the current wizard choices, not just what the model could support.
+  arch.mtpDepth = wizardState.hardware.mtpEnabled ? (base.mtpDepth || 0) : 0;
+  arch.mmprojBytes = hasSelectedMmproj ? (base.mmprojBytes || 0) : 0;
+
+  return arch;
+}
+
+function clampAutoSizeResultToSizingMath(result, arch, modelBytes, availVram) {
+  if (!result || !modelBytes || !availVram) return { result, adjusted: false };
+
+  const fitGran = 1024;
+  const slots = wizardState.hardware.parallelSlots || 1;
+  const headroom = computeHeadroom(availVram);
+  const nCpuMoe = result.n_cpu_moe ?? wizardState.hardware.nCpuMoe ?? 0;
+  const maxCtx = maxContext(
+    modelBytes,
+    arch,
+    result.kv_quant_k || 'q8_0',
+    result.kv_quant_v || 'q8_0',
+    slots,
+    result.ubatch_size || wizardState.hardware.ubatchSize || 512,
+    nCpuMoe,
+    availVram,
+    fitGran,
+    headroom,
+  );
+  const modelCap = wizardState.model.nCtxTrain || 0;
+  const safeCap = modelCap > 0 ? Math.min(maxCtx, modelCap) : maxCtx;
+  if (!safeCap || result.context_size <= safeCap) return { result, adjusted: false };
+
+  return {
+    result: {
+      ...result,
+      context_size: safeCap,
+      warnings: [
+        ...(result.warnings || []),
+        `Adjusted to ${formatCtx(safeCap)} so auto-size matches the hardware-step fit math.`,
+      ],
+    },
+    adjusted: true,
+  };
+}
+
 function buildHeuristicArch(name, paramB) {
   const lower = (name || '').toLowerCase();
 
@@ -3181,7 +3244,7 @@ function updateVramDisplay() {
   if (!dom.vramPanel) return;
 
   const hw = wizardState.hardware;
-  const arch = getEffectiveArch();
+  const arch = getSizingArch();
   const modelBytes = getModelBytes();
 
   // Compute breakdown
@@ -3369,7 +3432,7 @@ function setSegWidth(el, frac) {
 }
 
 function updateMoeSliderVisuals() {
-  const arch = getEffectiveArch();
+  const arch = getSizingArch();
   const n = arch.nExperts || 0;
   if (!n) return;
   const cpu = wizardState.hardware.nCpuMoe || 0;
@@ -4752,9 +4815,15 @@ async function applyMetalGpuLimit(limitMb) {
   btn.textContent = 'Applying…';
 
   try {
-    const headers = window.authHeaders
-      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
-      : { 'Content-Type': 'application/json' };
+    const tokenResp = await fetch('/api/db/admin-token', {
+      headers: window.authHeaders ? window.authHeaders() : {},
+    });
+    const tokenData = tokenResp.ok ? await tokenResp.json().catch(() => ({})) : {};
+    const adminToken = tokenData.token;
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(adminToken ? { 'Authorization': `Bearer ${adminToken}` } : {}),
+    };
 
     const resp = await fetch('/api/system/set-metal-gpu-limit', {
       method: 'POST',
@@ -4767,6 +4836,7 @@ async function applyMetalGpuLimit(limitMb) {
       const gb = Math.round((data.limit_mb || limitMb) / 1024);
       showToast(`Metal GPU limit set to ${gb} GB — saved to /etc/sysctl.conf, survives reboots.`, 'success');
       await fetchGpuVram();
+      await fetchMetalGpuLimit();
       scheduleVramUpdate();
     } else {
       const msg = data.error || 'Failed to apply Metal GPU limit.';
@@ -4839,9 +4909,14 @@ async function triggerAutoSize() {
   if (dom.vramAutosizeNote) dom.vramAutosizeNote.textContent = '';
 
   try {
+    const modelPath = wizardState.model.path || '';
+    if (modelPath) {
+      await doIntrospect(modelPath);
+    }
+
     const availVram = effectiveAvailBytes();
     const modelBytes = getModelBytes();
-    const arch = getEffectiveArch();
+    const arch = getSizingArch();
 
     const headers = window.authHeaders
       ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
@@ -4878,7 +4953,7 @@ async function triggerAutoSize() {
     const data = await resp.json();
     if (!data.ok || !data.result) { showToast('Auto-size: no result', 'warning'); return; }
 
-    const r = data.result;
+    const { result: r, adjusted } = clampAutoSizeResultToSizingMath(data.result, arch, modelBytes, availVram);
 
     // Apply recommended settings
     wizardState.hardware.contextSize = r.context_size;
@@ -4906,7 +4981,7 @@ async function triggerAutoSize() {
     if (r.n_cpu_moe != null && dom.nCpuMoeInput) dom.nCpuMoeInput.value = r.n_cpu_moe;
     if (r.n_cpu_moe != null && dom.moeOffloadSlider) dom.moeOffloadSlider.value = r.n_cpu_moe;
 
-    const note = `Set: ${formatCtx(r.context_size)} ctx · ${r.kv_quant_k.toUpperCase()} KV · ubatch ${r.ubatch_size}`;
+    const note = `${adjusted ? 'Adjusted:' : 'Set:'} ${formatCtx(r.context_size)} ctx · ${r.kv_quant_k.toUpperCase()} KV · ubatch ${r.ubatch_size}`;
     if (dom.vramAutosizeNote) dom.vramAutosizeNote.textContent = note;
 
     updateVramDisplay();
@@ -5325,7 +5400,7 @@ function renderSummary() {
   }
 
   const m = wizardState.model, hw = wizardState.hardware;
-  const arch = getEffectiveArch();
+  const arch = getSizingArch();
   const availVram = effectiveAvailBytes();
   const modelBytes = getModelBytes();
 
@@ -5763,7 +5838,7 @@ function _renderPresetParamsStep() {
   if (dom.savedPresetName) dom.savedPresetName.style.display = 'none';
 
   const h = wizardState.hardware, m = wizardState.model;
-  const arch = getEffectiveArch();
+  const arch = getSizingArch();
 
   const modelDisplay = m.source === 'hf'
     ? (m.hfFile ? m.hfFile.split('/').pop() : (m.hfRepo || '—'))

@@ -1126,10 +1126,14 @@ function renderGpuCard(gpuMap, visible, grade) {
     }
     if (tempValue) tempValue.textContent = temp + '\u00B0';
 
+    var hasMetalCap = Number(m.metal_gpu_limit_mb || 0) > 0;
+    var effectiveVramTotalMb = hasMetalCap ? Number(m.metal_gpu_limit_mb) : m.vram_total;
+    var totalUnifiedGb = m.vram_total > 0 ? (m.vram_total / 1024).toFixed(0) : '0';
+
     // Push history
     pushGpuHistory('load', m.load);
     pushGpuHistory('power', m.power_consumption);
-    var vramPct = m.vram_total > 0 ? (m.vram_used / m.vram_total) * 100 : 0;
+    var vramPct = effectiveVramTotalMb > 0 ? (m.vram_used / effectiveVramTotalMb) * 100 : 0;
     pushGpuHistory('vramPct', vramPct);
     pushGpuHistory('sclk', m.sclk_mhz);
     pushGpuHistory('mclk', m.mclk_mhz);
@@ -1166,8 +1170,8 @@ function renderGpuCard(gpuMap, visible, grade) {
     var vramViz = document.getElementById('gpu-vram-viz');
     var vramVal = document.getElementById('gpu-vram-value');
     var vramStyle = vizPrefs.gpu.vram;
-    var vramGb = m.vram_total > 0 ? (m.vram_used / 1024).toFixed(1) : '0';
-    var vramTotalGb = m.vram_total > 0 ? (m.vram_total / 1024).toFixed(0) : '0';
+    var vramGb = effectiveVramTotalMb > 0 ? (m.vram_used / 1024).toFixed(1) : '0';
+    var vramTotalGb = effectiveVramTotalMb > 0 ? (effectiveVramTotalMb / 1024).toFixed(0) : '0';
     var vramTone = getMetricTone('memory');
     var vramColor = vramTone.line;
     if (vramStyle === 'ring') renderHwRing(vramViz, vramPct, vramTone, false);
@@ -1175,7 +1179,14 @@ function renderGpuCard(gpuMap, visible, grade) {
     else if (vramStyle === 'stacked') renderHwStacked(vramViz, vramPct, vramTone, false);
     else renderHwBar(vramViz, vramPct, vramTone, false);
     renderHwMetricSparkline('gpu-vram-spark', gpuHistory.vramPct, vramColor, vramStyle !== 'sparkline');
-    if (vramVal) vramVal.textContent = vramGb + ' / ' + vramTotalGb + ' GB';
+    if (vramVal) {
+        vramVal.textContent = hasMetalCap
+            ? vramGb + ' / ' + vramTotalGb + ' GB cap'
+            : vramGb + ' / ' + vramTotalGb + ' GB';
+        vramVal.title = hasMetalCap
+            ? 'Metal GPU memory cap ' + vramTotalGb + ' GB (of ' + totalUnifiedGb + ' GB unified memory total)'
+            : '';
+    }
 
     // Clocks
     var clocksViz = document.getElementById('gpu-clocks-viz');
