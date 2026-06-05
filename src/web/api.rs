@@ -9761,11 +9761,6 @@ fn api_kill_llama(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    static LAST_KILL: AtomicU64 = AtomicU64::new(0);
-
     let app_config = app_config.clone();
 
     warp::path!("api" / "kill-llama")
@@ -9802,27 +9797,6 @@ fn api_kill_llama(
                         ),
                     ));
                 }
-
-                // Cooldown: 30 seconds between kills.
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                let last = LAST_KILL.load(Ordering::Acquire);
-                if now - last < 30 {
-                    let remaining = 30 - (now - last);
-                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                        warp::reply::with_status(
-                            warp::reply::json(&serde_json::json!({
-                                "error": "too soon; please wait",
-                                "seconds_remaining": remaining
-                            })),
-                            warp::http::StatusCode::TOO_MANY_REQUESTS,
-                        ),
-                    ));
-                }
-
-                LAST_KILL.store(now, Ordering::Release);
 
                 // Kill the tracked child process and clear in-memory state
                 // (server_child, local_server_running, server_config, llama_metrics).

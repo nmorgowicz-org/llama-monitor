@@ -2436,8 +2436,8 @@
                                      <input type="number" class="pe-input" id="modal-reasoning-budget" step="1024" placeholder="16384">
                                  </div>
                                  <div class="pe-field">
-                                 <label class="pe-label" for="modal-reasoning-budget-message" title="Text that appears after the reasoning block and before the final answer. Helps the model separate its thinking from its answer.">Reasoning Budget Message</label>
-                                  <textarea class="pe-input" id="modal-reasoning-budget-message" rows="2" title="The &#92;n at the start is intentional — it inserts a line break before the final answer."></textarea>
+                                 <label class="pe-label" for="modal-reasoning-budget-message" title="Text that appears after the reasoning block and before the final answer. Use \n for a newline. Example: \nFinal Answer:">Reasoning Budget Message</label>
+                                  <input type="text" class="pe-input" id="modal-reasoning-budget-message" placeholder="\nFinal Answer:">
                                  </div>
                              </div>
                         </div>
@@ -3574,8 +3574,8 @@
                                  <input type="number" id="spawn-reasoning-budget" min="-1" step="1024" placeholder="16384">
                              </div>
                              <div class="sampling-field">
-                                   <label for="spawn-reasoning-budget-message" title="Text that appears after the reasoning block and before the final answer. Helps the model separate its thinking from its answer.">Budget message</label>
-                                      <textarea id="spawn-reasoning-budget-message" rows="2" title="The &#92;n at the start is intentional — it inserts a line break before the final answer."></textarea>
+                                   <label for="spawn-reasoning-budget-message" title="Text that appears after the reasoning block and before the final answer. Use \n for a newline before the answer. Example: \nFinal Answer:">Budget message</label>
+                                      <input type="text" id="spawn-reasoning-budget-message" placeholder="\nFinal Answer:">
                              </div>
                         </div>
                     </div>

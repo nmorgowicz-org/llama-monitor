@@ -5684,7 +5684,7 @@ function _syncThinkingFields() {
   const budgetEl = document.getElementById('spawn-reasoning-budget');
   if (budgetEl) budgetEl.value = h.reasoningBudget != null ? String(h.reasoningBudget) : '';
   const msgEl = document.getElementById('spawn-reasoning-budget-message');
-  if (msgEl) msgEl.value = h.reasoningBudgetMessage || '';
+  if (msgEl) msgEl.value = (h.reasoningBudgetMessage || '').replace(/\n/g, '\\n');
 }
 
 function _bindThinkingFields() {
@@ -5726,14 +5726,21 @@ function _bindThinkingFields() {
           wizardState.hardware.reasoningBudget = 16384;
         }
         if (msgEl && !msgEl.value) {
-          msgEl.value = '\nFinal Answer:';
+          msgEl.value = '\\nFinal Answer:';
           wizardState.hardware.reasoningBudgetMessage = '\nFinal Answer:';
         }
       }
     });
   }
   bindInput('spawn-reasoning-budget', 'reasoningBudget', true);
-  bindInput('spawn-reasoning-budget-message', 'reasoningBudgetMessage');
+  const bmEl = document.getElementById('spawn-reasoning-budget-message');
+  if (bmEl && !bmEl.dataset.bound) {
+    bmEl.dataset.bound = '1';
+    bmEl.addEventListener('input', () => {
+      const raw = bmEl.value.trim();
+      wizardState.hardware.reasoningBudgetMessage = raw === '' ? null : raw.replace(/\\n/g, '\n');
+    });
+  }
 }
 
 function _bindSamplingFields() {

@@ -179,7 +179,7 @@ export function openPresetModal(mode) {
         setOpt('modal-preserve-thinking', p.preserve_thinking == null ? '' : String(!!p.preserve_thinking));
         setOpt('modal-reasoning', p.reasoning || '');
         numOrEmpty('modal-reasoning-budget', p.reasoning_budget);
-        setVal('modal-reasoning-budget-message', p.reasoning_budget_message || '');
+        setVal('modal-reasoning-budget-message', (p.reasoning_budget_message || '').replace(/\n/g, '\\n'));
         // GPU
         setVal('modal-tensor-split', p.tensor_split);
         setOpt('modal-split-mode', p.split_mode);
@@ -493,7 +493,7 @@ function _buildFormPreset(existing) {
         preserve_thinking: nullableBoolOpt('modal-preserve-thinking'),
         reasoning: strVal('modal-reasoning') || null,
         reasoning_budget: intOrNull('modal-reasoning-budget'),
-        reasoning_budget_message: document.getElementById('modal-reasoning-budget-message').value || null,
+        reasoning_budget_message: (document.getElementById('modal-reasoning-budget-message').value || '').replace(/\\n/g, '\n') || null,
         tensor_split: strVal('modal-tensor-split'),
         split_mode: strVal('modal-split-mode'),
         main_gpu: intOrNull('modal-main-gpu'),
@@ -795,7 +795,7 @@ async function _suggestGenerationDefaults(modelPath) {
         fill('modal-reasoning-budget', defaults.reasoning_budget ?? null);
         const msgEl = document.getElementById('modal-reasoning-budget-message');
         if (msgEl && msgEl.value === '' && defaults.reasoning_budget_message != null) {
-            msgEl.value = defaults.reasoning_budget_message;
+            msgEl.value = defaults.reasoning_budget_message.replace(/\n/g, '\\n');
         }
         _renderGenerationPresetPills(d.presets || []);
     } catch (_) {
@@ -854,7 +854,7 @@ function _applyGenerationPreset(preset) {
     setOpt('modal-preserve-thinking', preset.preserve_thinking == null ? '' : String(!!preset.preserve_thinking));
     setOpt('modal-reasoning', preset.reasoning ? 'on' : 'off');
     numOrEmpty('modal-reasoning-budget', preset.reasoning_budget);
-    setVal('modal-reasoning-budget-message', preset.reasoning_budget_message || '');
+    setVal('modal-reasoning-budget-message', (preset.reasoning_budget_message || '').replace(/\n/g, '\\n'));
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────────
