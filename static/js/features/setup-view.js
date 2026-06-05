@@ -4,6 +4,7 @@
 import { setupViewState, chat, sessionState } from '../core/app-state.js';
 import { doAttachFromSetup } from './attach-detach.js';
 import { escapeHtml } from '../core/format.js';
+import { quickStartSession } from './sessions.js';
 
 function setAttachButtonLabel(button, label) {
     if (!button) return;
@@ -359,6 +360,9 @@ export function renderRecentEndpoints(sessions, activeId) {
     spawnList.innerHTML = '';
 
     const buildCard = (session) => {
+        const isAttach = session.mode && session.mode.Attach;
+        const isSpawn = session.mode && session.mode.Spawn;
+
         const card = document.createElement('div');
         card.className = 'setup-endpoint-card';
         if (activeId && session.id === activeId) {
@@ -367,10 +371,10 @@ export function renderRecentEndpoints(sessions, activeId) {
 
         let endpoint = '';
         let apiKey = '';
-        if (session.mode && session.mode.Attach) {
+        if (isAttach) {
             endpoint = session.mode.Attach.endpoint;
             apiKey = session.mode.Attach.api_key || '';
-        } else if (session.mode && session.mode.Spawn) {
+        } else if (isSpawn) {
             endpoint = 'http://127.0.0.1:' + session.mode.Spawn.port;
             apiKey = session.mode.Spawn.api_key || '';
         }
@@ -408,7 +412,7 @@ export function renderRecentEndpoints(sessions, activeId) {
         }
         if (lastConnected !== 'Never') metaParts.push(lastConnected);
         if (connectCount > 0) metaParts.push(connectCount + 'x');
-        if (session.mode?.Spawn) {
+        if (isSpawn) {
             metaParts.unshift('Local spawn session');
             if (session.mode.Spawn.bind_host === '0.0.0.0') metaParts.push('LAN visible');
             if (session.mode.Spawn.api_key) metaParts.push('API key saved');
@@ -423,21 +427,44 @@ export function renderRecentEndpoints(sessions, activeId) {
 
         const connectBtn = document.createElement('button');
         connectBtn.className = 'setup-endpoint-connect';
-        connectBtn.textContent = activeId && session.id === activeId
-            ? 'Resume'
-            : (session.last_connected_at ? 'Reconnect' : 'Connect');
+
+        const doConnect = () => {
+            if (isSpawn) {
+                // Use spawn-session flow (Resume / Start) instead of Attach
+                if (session.preset_id) {
+                    quickStartSession(session.id);
+                } else {
+                    // Fallback: attach via URL if no preset_id (edge case)
+                    console.warn('[setup-view] Spawn session missing preset_id; falling back to attach', session.id);
+                    const urlInput = document.getElementById('setup-endpoint-url');
+                    if (urlInput) urlInput.value = endpoint;
+                    const apiKeyInput = document.getElementById('setup-endpoint-api-key');
+                    if (apiKeyInput) apiKeyInput.value = apiKey;
+                    doAttachFromSetup();
+                }
+            } else {
+                // Attach session: populate left-side form and attach
+                const urlInput = document.getElementById('setup-endpoint-url');
+                if (urlInput) urlInput.value = endpoint;
+                const apiKeyInput = document.getElementById('setup-endpoint-api-key');
+                if (apiKeyInput) apiKeyInput.value = apiKey;
+                doAttachFromSetup();
+            }
+        };
+
+        if (isSpawn) {
+            // Spawn sessions: always show "Resume" (they are local, not remote)
+            connectBtn.textContent = 'Resume';
+        } else {
+            connectBtn.textContent = activeId && session.id === activeId
+                ? 'Resume'
+                : (session.last_connected_at ? 'Reconnect' : 'Connect');
+        }
 
         card.appendChild(statusDot);
         card.appendChild(infoWrap);
         card.appendChild(connectBtn);
 
-        const doConnect = () => {
-            const urlInput = document.getElementById('setup-endpoint-url');
-            if (urlInput) urlInput.value = endpoint;
-            const apiKeyInput = document.getElementById('setup-endpoint-api-key');
-            if (apiKeyInput) apiKeyInput.value = apiKey;
-            doAttachFromSetup();
-        };
         connectBtn.addEventListener('click', (e) => { e.stopPropagation(); doConnect(); });
         card.addEventListener('click', doConnect);
 

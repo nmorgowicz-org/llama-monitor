@@ -9584,10 +9584,46 @@ fn api_attach(
                 };
 
                 // Extract optional API key for remote server authentication
-                let api_key: Option<String> = payload.get("api_key")
+                let caller_api_key: Option<String> = payload.get("api_key")
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
                     .map(|s| s.to_string());
+
+               // If caller did not send an api_key, check if a Spawn session for
+                // this localhost:port already has one — allow attach to use it.
+                let (api_key, _spawn_match_id) = {
+                    let mut effective_key = caller_api_key.clone();
+                    let mut match_id = None;
+
+                    if effective_key.is_none()
+                        && let Ok(parsed) = url::Url::parse(&endpoint)
+                        && let Some(host) = parsed.host_str()
+                        && let Some(port_num) = parsed.port()
+                        && (host == "127.0.0.1" || host == "localhost") {
+                            let sessions = state.sessions.lock().unwrap();
+                            if let Some(s) = sessions.iter().find(|sess| {
+                                if let crate::state::SessionMode::Spawn {
+                                    port,
+                                    api_key: sess_key,
+                                    ..
+                                } = &sess.mode {
+                                    *port == port_num && sess_key.is_some()
+                                } else {
+                                    false
+                                }
+                            }) {
+                                if let crate::state::SessionMode::Spawn {
+                                    api_key: sess_key,
+                                    ..
+                                } = &s.mode {
+                                    effective_key = sess_key.clone();
+                                }
+                                match_id = Some(s.id.clone());
+                            }
+                    }
+
+                    (effective_key, match_id)
+                };
 
                 // Pre-attach health check
                 let client = match reqwest::Client::builder()
@@ -9639,21 +9675,44 @@ fn api_attach(
                 }
                 let metrics_available = metrics_req.send().await.is_ok();
 
-                // Check if there's already an attach session for this endpoint
+               // Check if there's already an attach session for this endpoint
                 let existing_session_id = {
                     let sessions = state.sessions.lock().unwrap();
-                    sessions.iter().find(|s| {
+                    // Prefer existing Attach session for this endpoint
+                    let mut id = sessions.iter().find(|s| {
                         if let crate::state::SessionMode::Attach { endpoint: ep, .. } = &s.mode {
                             *ep == endpoint
                         } else {
                             false
                         }
-                    }).map(|s| s.id.clone())
+                    }).map(|s| s.id.clone());
+
+                    // If no Attach, see if this endpoint matches a Spawn session's
+                    // localhost:port — reuse that Spawn session instead of
+                    // creating a new Attach session.
+                    if id.is_none()
+                        && let Ok(parsed) = url::Url::parse(&endpoint)
+                        && let Some(host) = parsed.host_str()
+                        && let Some(port_num) = parsed.port()
+                        && (host == "127.0.0.1" || host == "localhost") {
+                            id = sessions.iter().find(|s| {
+                                if let crate::state::SessionMode::Spawn {
+                                    port,
+                                    ..
+                                } = &s.mode {
+                                    *port == port_num
+                                } else {
+                                    false
+                                }
+                            }).map(|s| s.id.clone());
+                    }
+
+                    id
                 };
 
                 let session_id = if let Some(id) = existing_session_id {
-                    // Reuse existing session
-                    eprintln!("[info] Reusing existing attach session for {}", endpoint);
+                    // Reuse existing session (Attach or matched Spawn)
+                    eprintln!("[info] Reusing existing session for {}", endpoint);
                     id
                 } else {
                     // Create new session

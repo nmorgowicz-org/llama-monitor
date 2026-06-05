@@ -3227,15 +3227,7 @@
                             <div class="hardware-field">
                                 <label for="spawn-threads-batch" title="-tb: CPU thread count for batch/prompt processing. Defaults to -t value if blank.">Batch Threads (-tb)</label>
                                 <input type="number" id="spawn-threads-batch" min="1" max="64" placeholder="default" title="CPU thread count for batch processing (-tb). Blank = same as -t.">
-                                <div class="field-hint">Prompt processing threads. Blank = inherit from -t.</div>
-                            </div>
-                            <div class="hardware-field" style="grid-column: 1/-1; display:flex; align-items:center; gap:12px; padding:4px 0;">
-                                <label class="kv-unified-toggle" title="Lock the model in RAM, preventing macOS from swapping it to disk. Improves performance. Skip if you're above ~70% unified memory usage.">
-                                    <input type="checkbox" id="spawn-mlock">
-                                    <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
-                                    <span class="kv-unified-text">mlock</span>
-                                </label>
-                                <span class="field-hint" style="margin:0;">Pins model in RAM — prevents macOS from evicting it under memory pressure.</span>
+                                <div class="field-hint" id="spawn-threads-batch-hint">Prompt processing threads. Blank = inherit from -t.</div>
                             </div>
                          <div class="hardware-field">
                                  <label for="spawn-n-cpu-moe" title="For Mixture-of-Experts models: how many expert layers to keep in VRAM. 0 = auto. Higher = faster but uses more VRAM. Lower = saves VRAM but runs some experts on CPU.">MoE CPU experts (n_cpu_moe)</label>
@@ -3266,6 +3258,18 @@
                                     </div>
                                 </div>
                                 <div class="field-hint">--fit on --fit-target &lt;MB&gt; — shrinks context until the model fits in the specified memory budget.</div>
+                            </div>
+                        </div>
+                        <div class="kv-inline-row">
+                            <div class="kv-inline-field" style="flex:1 1 auto;">
+                                <label class="kv-unified-toggle" title="Lock the model in RAM, preventing macOS from swapping it to disk. Improves performance. Skip if you're above ~70% unified memory usage.">
+                                    <input type="checkbox" id="spawn-mlock">
+                                    <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
+                                    <span class="kv-unified-text">mlock</span>
+                                </label>
+                            </div>
+                            <div class="kv-inline-field" style="flex:999 1 320px;">
+                                <div class="field-hint" style="margin:0;">Pins model in RAM and helps avoid swap pressure evicting it mid-run.</div>
                             </div>
                         </div>
 

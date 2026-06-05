@@ -500,6 +500,7 @@ function cacheDom() {
   dom.kvUnifiedLabel  = dom.kvUnifiedCheck?.closest('label');
   dom.flashAttnSelect    = document.getElementById('spawn-flash-attn');
   dom.mlockCheck         = document.getElementById('spawn-mlock');
+  dom.mlockLabel         = dom.mlockCheck?.closest('label');
   dom.prioSelect         = document.getElementById('spawn-prio');
   dom.threadsInput       = document.getElementById('spawn-threads');
   dom.threadsBatchInput  = document.getElementById('spawn-threads-batch');
@@ -731,6 +732,7 @@ function bindEvents() {
   });
 
   bindHardwareToggleSwitch(dom.kvUnifiedLabel, dom.kvUnifiedCheck);
+  bindHardwareToggleSwitch(dom.mlockLabel, dom.mlockCheck);
   bindHardwareToggleSwitch(dom.fitEnableLabel, dom.fitEnableCheck);
 
   dom.gpuLayersSelect?.addEventListener('change', () => {
@@ -3655,11 +3657,34 @@ function renderScenarioCards(modelBytes, arch, availVram) {
 function _refreshThreadsHint() {
   const pCores = lastSystemMetrics?.p_cores || 0;
   const hintEl = document.getElementById('spawn-threads-hint');
-  if (!hintEl) return;
+  const batchHintEl = document.getElementById('spawn-threads-batch-hint');
+  if (!hintEl && !batchHintEl && !dom.threadsInput && !dom.threadsBatchInput) return;
   if (pCores > 0) {
-    hintEl.textContent = `Apple Silicon detected: ${pCores} P-cores. Apple recommends 1 (GPU handles compute) or ≤${pCores} threads. Blank = server default.`;
+    if (hintEl) {
+      hintEl.textContent = `Apple Silicon detected: ${pCores} P-cores. Apple recommends 1 for -t on Metal, or at most ${pCores}. Blank = server default.`;
+    }
+    if (batchHintEl) {
+      batchHintEl.textContent = `Prompt processing can use more CPU. Recommended: ${pCores} for -tb, or leave blank to inherit -t.`;
+    }
+    if (dom.threadsInput && !dom.threadsInput.value) {
+      dom.threadsInput.placeholder = '1 recommended';
+    }
+    if (dom.threadsBatchInput && !dom.threadsBatchInput.value) {
+      dom.threadsBatchInput.placeholder = `${pCores} recommended`;
+    }
   } else {
-    hintEl.textContent = 'Blank = server default (-t). Sets CPU threads for inference. Do not exceed physical P-core count.';
+    if (hintEl) {
+      hintEl.textContent = 'Blank = server default (-t). Sets CPU threads for inference. Do not exceed physical P-core count.';
+    }
+    if (batchHintEl) {
+      batchHintEl.textContent = 'Prompt processing threads. Blank = inherit from -t.';
+    }
+    if (dom.threadsInput && !dom.threadsInput.value) {
+      dom.threadsInput.placeholder = 'default';
+    }
+    if (dom.threadsBatchInput && !dom.threadsBatchInput.value) {
+      dom.threadsBatchInput.placeholder = 'default';
+    }
   }
 }
 
