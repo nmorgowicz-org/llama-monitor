@@ -2395,7 +2395,7 @@ fn api_vram_auto_size(
                 // Resolve gguf_arch: prefer GGUF file's general.architecture,
                 // then fall back to body field, then empty string.
                 // "qwen35" is shared by Qwen3.5 and Qwen3.6 — we distinguish via block_count.
-                let (gguf_arch, gguf_block_count) = match &gguf_read {
+                let (gguf_arch, gguf_block_count, gguf_context_length) = match &gguf_read {
                     Some(meta) => {
                         let arch = meta
                             .architecture
@@ -2403,9 +2403,14 @@ fn api_vram_auto_size(
                             .unwrap_or(body["gguf_arch"].as_str().unwrap_or(""))
                             .to_string();
                         let bc = meta.block_count;
-                        (arch, bc)
+                        let ctx = meta.context_length;
+                        (arch, bc, ctx)
                     }
-                    None => (body["gguf_arch"].as_str().unwrap_or("").to_string(), None),
+                    None => (
+                        body["gguf_arch"].as_str().unwrap_or("").to_string(),
+                        None,
+                        None,
+                    ),
                 };
 
                 // Map qwen35 to the correct heuristic name using block_count:
@@ -2424,6 +2429,9 @@ fn api_vram_auto_size(
                 // Inject resolved arch into body so build_arch_from_body can use it
                 let mut enriched_body = body.clone();
                 enriched_body["gguf_arch"] = serde_json::json!(resolved_arch);
+
+                // Also cap auto-size at the model's training context length
+                let context_cap = gguf_context_length.map(|c| c as u64);
 
                 let arch = build_arch_from_body(&enriched_body, &model_name, param_b);
 
@@ -2445,8 +2453,21 @@ fn api_vram_auto_size(
                     is_unified_memory,
                 );
 
+                // Cap the recommended context at the model's training context length.
+                // Scenario cards still show VRAM-limited maxes — the user can override
+                // via RoPE/YaRN scaling.
+                let capped_result = if let Some(cap) = context_cap {
+                    let mut r = result;
+                    if r.context_size > cap {
+                        r.context_size = cap;
+                    }
+                    r
+                } else {
+                    result
+                };
+
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                    &serde_json::json!({ "ok": true, "result": result }),
+                    &serde_json::json!({ "ok": true, "result": capped_result }),
                 )))
             }
         })
