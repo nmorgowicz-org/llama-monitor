@@ -2381,7 +2381,28 @@ fn api_vram_auto_size(
                     ));
                 }
 
-                let arch = build_arch_from_body(&body, &model_name, param_b);
+                // Read GGUF metadata to get authoritative architecture family
+                // (e.g. "qwen3_6" even if the filename says "Qwopus3.6")
+                let gguf_arch = body["model_path"]
+                    .as_str()
+                    .and_then(|path_str| {
+                        let path = std::path::Path::new(path_str);
+                        path.exists()
+                            .then(|| crate::llama::gguf_meta::read_gguf_metadata(path))
+                            .transpose()
+                            .ok()
+                            .flatten()
+                            .and_then(|m| m.architecture)
+                    })
+                    .unwrap_or_else(|| body["gguf_arch"].as_str().unwrap_or("").to_string());
+
+                // Inject gguf_arch into body so build_arch_from_body can use it
+                let mut enriched_body = body.clone();
+                if !gguf_arch.is_empty() {
+                    enriched_body["gguf_arch"] = serde_json::json!(gguf_arch);
+                }
+
+                let arch = build_arch_from_body(&enriched_body, &model_name, param_b);
 
                 // If model_size_bytes is not given, estimate from param_b + quant
                 let quant_hint = body["quant"].as_str().unwrap_or("q4_k_m");
@@ -2408,15 +2429,42 @@ fn api_vram_auto_size(
         })
 }
 
+/// Map a GGUF architecture string (e.g. "qwen3_6") to a heuristic name for
+/// `from_name_and_params`. This ensures that renamed finetunes (e.g. "Qwopus3.6"
+/// or "Pantheon-27B") get the correct hybrid-DeltaNet / sliding-window heuristic
+/// regardless of filename.
+fn gguf_arch_to_heuristic_name(gguf_arch: &str) -> String {
+    let a = gguf_arch.to_ascii_lowercase();
+    match a.as_str() {
+        "qwen3_6" | "qwen3.6" => "qwen3.6-model".into(),
+        "qwen3_5" | "qwen3.5" => "qwen3.5-model".into(),
+        "qwen3_coder_next" | "qwen3-coder-next" => "qwen3-coder-next-model".into(),
+        "gemma4" | "gemma-4" => "gemma4-12b".into(),
+        "gemma3" | "gemma-3" => "gemma3-27b".into(),
+        // For all other architectures, pass through — from_name_and_params
+        // falls through to standard_heuristic which is correct for llama, mistral, etc.
+        other => other.to_string(),
+    }
+}
+
 /// Build a `ModelArch` from a JSON request body, falling back to heuristics
 /// when introspection fields are absent.
+///
+/// When `gguf_arch` is present in the body, it is used as the authoritative
+/// source for the heuristic name instead of the filename (which can be misleading
+/// for renamed finetunes like "Qwopus3.6").
 fn build_arch_from_body(
     body: &serde_json::Value,
     model_name: &str,
     param_b: f64,
 ) -> crate::llama::vram_estimator::ModelArch {
+    // Prefer GGUF architecture string over filename for the heuristic.
+    let heuristic_name = body["gguf_arch"]
+        .as_str()
+        .map(gguf_arch_to_heuristic_name)
+        .unwrap_or_else(|| model_name.to_string());
     let heuristic =
-        crate::llama::vram_estimator::ModelArch::from_name_and_params(model_name, param_b);
+        crate::llama::vram_estimator::ModelArch::from_name_and_params(&heuristic_name, param_b);
 
     let n_layers = body["n_layers"]
         .as_u64()

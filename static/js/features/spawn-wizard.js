@@ -3078,10 +3078,10 @@ function buildHeuristicArch(name, paramB) {
     };
   }
 
-  // ── Qwen3.6 family: hybrid DeltaNet, 1/4 attn layers ─────────────────────
-  // Covers: Qwen3.6-27B (dense), Qwen3.6-35B-A3B (MoE), davidau 40B expansion,
-  // and all finetunes/distillations that mention Qwen3.6 in the name.
-  if (lower.includes('qwen3.6') || lower.includes('qwen3-6')) {
+// ── Qwen3.6 family: hybrid DeltaNet, 1/4 attn layers ─────────────────────
+   // Covers: Qwen3.6-27B (dense), Qwen3.6-35B-A3B (MoE), davidau 40B expansion,
+   // Qwopus3.6 derivatives, and all finetunes/distillations that mention Qwen3.6.
+   if (lower.includes('qwen3.6') || lower.includes('qwen3-6') || lower.includes('qwopus3.6') || lower.includes('qwopus3-6') || lower.includes('qwopus36')) {
     const nLayers = paramB > 35 ? 96 : 64;
     const nAttnLayers = Math.floor(nLayers / 4); // exactly 1:3 attn:deltanet ratio
     const nDeltanet = nLayers - nAttnLayers;

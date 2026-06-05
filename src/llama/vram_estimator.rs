@@ -433,7 +433,13 @@ impl ModelArch {
         // 35B-A3B (MoE): 40 layers, 2 KV heads, 256 experts, 9 active.
         //   "A3B" = 3B active PARAMETERS, not 3 experts.
         // davidau 40B expansion: 96 layers, 4 KV heads.
-        if lower.contains("qwen3.6") || lower.contains("qwen3-6") {
+        // Also covers Qwopus3.6 and other Qwen3.6 derivatives.
+        if lower.contains("qwen3.6")
+            || lower.contains("qwen3-6")
+            || lower.contains("qwopus3.6")
+            || lower.contains("qwopus3-6")
+            || lower.contains("qwopus36")
+        {
             let is_35b_a3b = lower.contains("35b-a3b") || lower.contains("35b_a3b");
             let mut arch = if is_35b_a3b {
                 Self::qwen36_35b_a3b_arch()
