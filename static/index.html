@@ -2714,75 +2714,52 @@
             <div class="wizard-step active" id="wizard-step-0">
                 <div class="wizard-main">
                     <div>
-                        <div class="wizard-section-title">Choose your setup profile</div>
-                        <div class="wizard-section-desc">
-                            This controls how much detail and control you’ll see in the next steps.
-                        </div>
+                        <div class="wizard-section-title">Setup profile</div>
                     </div>
                     <div class="profile-cards">
                         <div class="profile-card" data-profile="quick">
                             <div class="profile-card-radio">⚡</div>
-                            <div class="profile-card-body">
-                                <div class="profile-card-name">Quick</div>
-                                <div class="profile-card-desc">
-                                    Fully auto-tuned. Best for most users — we pick safe defaults based on your hardware.
-                                </div>
-                            </div>
+                            <div class="profile-card-name">Quick</div>
                         </div>
                         <div class="profile-card selected" data-profile="balanced">
                             <div class="profile-card-radio">⚖️</div>
-                            <div class="profile-card-body">
-                                <div class="profile-card-name">Balanced</div>
-                                <div class="profile-card-desc">
-                                    Guided tuning with sensible defaults. Recommended for most setups.
-                                </div>
-                            </div>
+                            <div class="profile-card-name">Balanced</div>
                         </div>
                         <div class="profile-card" data-profile="advanced">
                             <div class="profile-card-radio">🛠️</div>
-                            <div class="profile-card-body">
-                                <div class="profile-card-name">Advanced</div>
-                                <div class="profile-card-desc">
-                                    Full control over all parameters, including MoE tuning, KV cache quant, and multi-GPU.
-                                </div>
-                            </div>
+                            <div class="profile-card-name">Advanced</div>
                         </div>
                     </div>
+                    <div class="profile-seg-hint" id="profile-seg-hint">Guided tuning with sensible defaults. Recommended for most setups.</div>
 
                     <!-- Use-case selector: affects KV quant recommendations and warnings -->
-                    <div class="wizard-section-title" style="margin-top:18px;">What are you running this for?</div>
+                    <div class="wizard-section-title">What are you running this for?</div>
                     <div class="usecase-cards">
                         <div class="usecase-card" data-usecase="agentic" tabindex="0" role="button">
                             <span class="usecase-icon">🤖</span>
                             <div class="usecase-body">
                                 <div class="usecase-name">Agentic / RAG</div>
-                                <div class="usecase-desc">Tool calling, multi-step agents, retrieval pipelines. Needs coherent long context — q8_0 KV minimum.</div>
+                                <div class="usecase-desc">Tool calling, agents, retrieval. q8_0 KV minimum for coherent context.</div>
                             </div>
                         </div>
                         <div class="usecase-card selected" data-usecase="general" tabindex="0" role="button">
                             <span class="usecase-icon">💬</span>
                             <div class="usecase-body">
                                 <div class="usecase-name">General chat</div>
-                                <div class="usecase-desc">Everyday conversation, summarization, coding help. Balanced quality and context.</div>
+                                <div class="usecase-desc">Conversation, summarization, coding. Balanced quality and context.</div>
                             </div>
                         </div>
                         <div class="usecase-card" data-usecase="roleplay" tabindex="0" role="button">
                             <span class="usecase-icon">🎭</span>
                             <div class="usecase-body">
                                 <div class="usecase-name">Roleplay / creative</div>
-                                <div class="usecase-desc">Fiction, roleplay, long narrative sessions. Context beats precision — q4_0 KV accepted.</div>
+                                <div class="usecase-desc">Fiction, long narratives. Context beats precision — q4_0 KV accepted.</div>
                             </div>
                         </div>
                     </div>
                 </div>
                 <div class="wizard-sidebar">
-                    <div class="wizard-sidebar-title">Need to know</div>
-                    <ul>
-                        <li>Quick hides advanced fields.</li>
-                        <li>Balanced shows core settings.</li>
-                        <li>Advanced exposes everything.</li>
-                    </ul>
-                    <div class="wizard-sidebar-title" style="margin-top:14px;">Use case matters</div>
+                    <div class="wizard-sidebar-title">Use case matters</div>
                     <ul>
                         <li><strong>Agentic:</strong> q8_0 KV minimum for coherent chains.</li>
                         <li><strong>General:</strong> q8_0 KV recommended.</li>
@@ -3080,11 +3057,13 @@
                                 <span id="ctx-model-max-hint" class="ctx-model-max-hint" style="display:none;" title="Maximum context this model was trained on — going beyond this degrades quality"></span>
                             </div>
                             <input type="number" id="spawn-context-size" min="512" step="512" value="8192" title="Type any value. Smaller = less VRAM used by KV cache.">
+                            <div class="field-hint ctx-primary-hint">Primary tradeoff: more context uses more KV memory. Stay within model max for best quality; go beyond it only if you plan to extend with RoPE/YaRN.</div>
                             <div class="ctx-quick-picks" id="ctx-quick-picks">
+                                <button type="button" class="ctx-pick" data-ctx="32768"  title="32k — solid default for general chat">32k <span class="ctx-pick-tag">Chat</span></button>
                                 <button type="button" class="ctx-pick" data-ctx="65536"  title="65k — Roleplay / RP with lorebooks">65k <span class="ctx-pick-tag">RP</span></button>
                                 <button type="button" class="ctx-pick" data-ctx="131072" title="131k — Minimum for agentic work">131k <span class="ctx-pick-tag">Agent</span></button>
-                                <button type="button" class="ctx-pick" data-ctx="204800" title="200k — Large agentic context">200k</button>
-                                <button type="button" class="ctx-pick" data-ctx="262144" title="256k — Full model max">256k</button>
+                                <button type="button" class="ctx-pick" data-ctx="204800" title="200k — large context if your model and VRAM can support it">200k <span class="ctx-pick-tag">Large</span></button>
+                                <button type="button" class="ctx-pick" data-ctx="262144" title="256k — full Qwen training context when available">256k <span class="ctx-pick-tag">Max</span></button>
                                 <button type="button" class="ctx-pick ctx-pick-model-max" id="ctx-pick-model-max" style="display:none;" title="This model's training context limit">— <span class="ctx-pick-tag">Model max</span></button>
                             </div>
                         </div>
@@ -3095,7 +3074,7 @@
                         <div class="kv-inline-field">
                             <label for="spawn-cache-type-k" class="kv-inline-label">K cache <span class="kv-inline-hint">quant</span></label>
                             <select id="spawn-cache-type-k" title="KV key quantization (q8_0 recommended for quality; q4_0 saves ~2× VRAM on cache)">
-                                <option value="">f16 — lossless</option>
+                                <option value="f16">f16 — lossless</option>
                                 <option value="q8_0" selected>q8_0 — recommended</option>
                                 <option value="q4_0">q4_0 — saves VRAM</option>
                             </select>
@@ -3103,7 +3082,7 @@
                         <div class="kv-inline-field">
                             <label for="spawn-cache-type-v" class="kv-inline-label">V cache <span class="kv-inline-hint">quant</span></label>
                             <select id="spawn-cache-type-v" title="KV value quantization (can set lower than K to save VRAM with minimal quality impact)">
-                                <option value="">f16 — lossless</option>
+                                <option value="f16">f16 — lossless</option>
                                 <option value="q8_0" selected>q8_0 — recommended</option>
                                 <option value="q4_0">q4_0 — saves VRAM</option>
                             </select>
@@ -3349,10 +3328,19 @@
                             <span class="vleg-item"><span class="vleg-dot seg-free" id="vleg-free-dot"></span><span id="vleg-free-label">Free —</span></span>
                         </div>
 
-                        <!-- Scenario cards — KV precision presets -->
+                        <div class="ctx-rail-summary" id="ctx-rail-summary">
+                            <div class="ctx-rail-summary-row">
+                                <span class="ctx-rail-summary-label">Current context</span>
+                                <span class="ctx-rail-summary-value" id="ctx-rail-summary-value">8k</span>
+                            </div>
+                            <div class="ctx-rail-summary-status" id="ctx-rail-summary-status">Within trained context</div>
+                            <div class="ctx-rail-summary-note" id="ctx-rail-summary-note">Stay within model max for best quality. Use a custom value above it only if you intend to extend context with RoPE/YaRN.</div>
+                        </div>
+
+                        <!-- Scenario cards — context-oriented presets -->
                         <div class="vsc-section-header">
-                            <span class="vsc-section-label">KV cache precision</span>
-                            <span class="vsc-section-hint">Click to apply — sets quant + fills context to its max</span>
+                            <span class="vsc-section-label">Context fit modes</span>
+                            <span class="vsc-section-hint">Pick an outcome. We adjust KV cache precision for you — not model quantization.</span>
                         </div>
                         <div class="vram-scenarios" id="vram-scenarios">
                             <!-- populated by JS -->

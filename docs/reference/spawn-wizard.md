@@ -78,17 +78,18 @@ Shows the selected repo (`owner/model-name`) and selected quant. If multiple GGU
 |---------|----|---------|-------|
 | GPU layers | `spawn-gpu-layers` | Auto | Auto / All / Manual |
 | Layers count | `spawn-gpu-layers-manual` | — | Shown only when Manual selected |
-| Context size | `spawn-context-size` | 8192 | Quick-pick buttons: 65k, 131k, 200k, 256k |
+| Context size | `spawn-context-size` | 8192 | Primary tuning control. Quick-pick buttons: 32k Chat, 65k RP, 131k Agent, 200k Large, Model max |
 | KV cache (K) | `spawn-cache-type-k` | q8_0 | f16 / q8_0 / q4_0 |
 | KV cache (V) | `spawn-cache-type-v` | q8_0 | f16 / q8_0 / q4_0 |
 | KV Unified | `spawn-kv-unified` | unchecked | `--kv-unified` flag |
 
-#### KV Cache Scenarios
-Three cards show the context/quality tradeoff for the current VRAM budget:
-- **Max coherence** — q8_0/q8_0 KV
-- **Max context** — q4_0/q4_0 KV
+#### Context Fit Modes
+The right rail leads with a **Current context** summary and model-max status, then shows outcome-oriented presets:
+- **Reliable agents** — high-precision KV cache (`q8_0/q8_0`)
+- **More context** — lower-precision KV cache (`q4_0/q4_0`)
+- **Full precision** — lossless KV cache (`f16/f16`)
 
-Selecting a card applies its KV quant and triggers auto-size.
+Selecting a mode applies its KV quant preset and fills `Context size` to the maximum that fits that mode. The raw K/V cache dropdowns remain available underneath for advanced users and continue to populate from llama-server capabilities.
 
 #### VRAM Breakdown Bar
 Animated stacked bar updated live as controls change. Segments:
@@ -143,7 +144,7 @@ Shown automatically when the model has `mtp_depth > 0` (detected from GGUF metad
 
 Shows a human-readable review of all selected parameters. Health checks:
 - VRAM fit status
-- Context fit relative to training context (`n_ctx_train`); warns when n_ctx > n_ctx_train and suggests YaRN
+- Context fit relative to training context (`n_ctx_train`); the hardware step highlights whether the current value is within model max, at model max, or extended beyond it, and warns when n_ctx > n_ctx_train with a YaRN suggestion
 - MoE CPU offload impact on generation speed
 - KV quant quality warnings for agentic use cases
 - Network exposure warnings when the user selects `0.0.0.0`, especially if no API key is set
