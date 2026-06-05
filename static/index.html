@@ -1459,7 +1459,34 @@
 
         <!-- Page: Logs -->
         <div class="page" id="page-logs">
-            <div class="log-panel" id="log-panel" style="flex:1;"></div>
+            <div class="log-toolbar" id="log-toolbar">
+                <div class="log-toolbar-left">
+                    <span class="log-count-badge" id="log-count-badge">0 lines</span>
+                </div>
+                <div class="log-toolbar-right">
+                    <button class="log-tool-btn" id="log-cmd-btn" title="Show the llama-server command used to spawn this session">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+                        <span>Command</span>
+                    </button>
+                    <button class="log-tool-btn" id="log-scroll-lock-btn" title="Pause auto-scroll" aria-pressed="false">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+                        <span>Auto-scroll</span>
+                    </button>
+                    <button class="log-tool-btn" id="log-copy-btn" title="Copy all log lines to clipboard">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                        <span>Copy</span>
+                    </button>
+                </div>
+            </div>
+            <div class="log-cmd-panel" id="log-cmd-panel" aria-hidden="true">
+                <div class="log-cmd-label">Spawn command</div>
+                <pre class="log-cmd-pre" id="log-cmd-pre"></pre>
+                <button class="log-tool-btn log-cmd-copy" id="log-cmd-copy-btn">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    Copy command
+                </button>
+            </div>
+            <div class="log-panel" id="log-panel"></div>
             <div class="logs-empty-state" id="logs-empty-state">
                 <div class="logs-empty-content">
                     <div class="logs-empty-ambient logs-empty-ambient-a"></div>
@@ -2315,6 +2342,26 @@
                                     <input type="number" class="pe-input" id="modal-parallel-slots" value="1">
                                 </div>
                             </div>
+                            <div class="pe-row pe-row-3">
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-prio" title="--prio: inference thread scheduling priority. 2 (High) is recommended for dedicated inference machines on Mac. 0 = Normal (OS default). Do not use 3 (Realtime) unless this machine does nothing else.">Thread Priority (--prio)</label>
+                                    <select class="pe-select" id="modal-prio">
+                                        <option value="">(default)</option>
+                                        <option value="0">0 — Normal</option>
+                                        <option value="1">1 — Medium</option>
+                                        <option value="2">2 — High (recommended for Mac)</option>
+                                        <option value="3">3 — Realtime (dedicated server only)</option>
+                                    </select>
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-threads" title="-t: CPU thread count for inference. On Apple Silicon, Apple recommends 1 (Metal GPU handles compute). Do not exceed physical P-core count. Blank = server default.">Threads (-t)</label>
+                                    <input type="number" class="pe-input" id="modal-threads" min="1" max="64" placeholder="default">
+                                </div>
+                                <div class="pe-field">
+                                    <label class="pe-label" for="modal-threads-batch" title="-tb: CPU thread count for batch/prompt processing. Defaults to -t value if blank.">Batch Threads (-tb)</label>
+                                    <input type="number" class="pe-input" id="modal-threads-batch" min="1" max="64" placeholder="default">
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -2535,10 +2582,18 @@
                             </div>
                             <!-- MTP depth: visible when draft-mtp is selected -->
                             <div id="spec-mtp-wrap" style="display:none;">
-                                <div class="pe-row">
+                                <div class="pe-row pe-row-3">
                                     <div class="pe-field">
                                         <label class="pe-label" for="modal-spec-draft-n-max" title="MTP depth: how many tokens ahead each MTP head predicts simultaneously. 2 is the recommended default for Qwen3 and DeepSeek V3. Higher may help dense models but costs VRAM. Requires --parallel 1 (set automatically).">MTP Depth (--spec-draft-n-max)</label>
                                         <input type="number" class="pe-input" id="modal-spec-draft-n-max" min="1" max="8" placeholder="2">
+                                    </div>
+                                    <div class="pe-field">
+                                        <label class="pe-label" for="modal-spec-draft-n-min" title="Minimum draft tokens to propose before verification. Keeps MTP engaged on short outputs. Default: 1.">Min Draft Tokens (--spec-draft-n-min)</label>
+                                        <input type="number" class="pe-input" id="modal-spec-draft-n-min" min="1" max="8" placeholder="1">
+                                    </div>
+                                    <div class="pe-field">
+                                        <label class="pe-label" for="modal-spec-draft-p-min" title="Minimum token probability to attempt draft verification. If the model is uncertain, skips drafting. Range 0–1. Default: 0.9 for draft-mtp.">Min Accept Prob (--spec-draft-p-min)</label>
+                                        <input type="number" class="pe-input" id="modal-spec-draft-p-min" min="0" max="1" step="0.05" placeholder="0.9">
                                     </div>
                                 </div>
                             </div>
@@ -3105,8 +3160,16 @@
                              </label>
                             <div class="hw-mtp-depth-row" id="hw-mtp-depth-row">
                                 <div class="hw-mtp-depth-inline">
-                                    <label for="hw-mtp-depth" class="hw-mtp-depth-label" title="How many tokens the MTP heads predict ahead simultaneously per step. 2 is the recommended default. Higher = slightly faster but costs more VRAM.">Draft tokens/step</label>
+                                    <label for="hw-mtp-depth" class="hw-mtp-depth-label" title="How many tokens the MTP heads predict ahead simultaneously per step. 2 is the recommended default. Higher = slightly faster but costs more VRAM.">Draft tokens/step (n-max)</label>
                                      <input type="number" id="hw-mtp-depth" min="1" max="4" value="2" class="hw-mtp-depth-input" title="How many tokens ahead to predict each step. 2 is the recommended default.">
+                                </div>
+                                <div class="hw-mtp-depth-inline" style="margin-top:6px;">
+                                    <label for="spawn-spec-draft-n-min" class="hw-mtp-depth-label" title="Minimum draft tokens to propose before verification. Helps keep MTP engaged on short outputs. Default: 1.">Min draft tokens (n-min)</label>
+                                    <input type="number" id="spawn-spec-draft-n-min" min="1" max="8" placeholder="1" class="hw-mtp-depth-input" title="Minimum draft tokens before verification step.">
+                                </div>
+                                <div class="hw-mtp-depth-inline" style="margin-top:6px;">
+                                    <label for="spawn-spec-draft-p-min" class="hw-mtp-depth-label" title="Minimum token probability to attempt speculative verification. If the model is very uncertain, skip drafting. Range 0–1. Default: 0.9 for MTP.">Min accept prob (p-min)</label>
+                                    <input type="number" id="spawn-spec-draft-p-min" min="0" max="1" step="0.05" placeholder="0.9" class="hw-mtp-depth-input" title="Minimum token probability threshold for draft acceptance. 0.9 recommended for MTP.">
                                 </div>
                                 <div class="field-hint">Uses <code>--spec-type draft-mtp,ngram-mod</code>, sets <code>--spec-draft-n-max</code>, forces <code>--parallel 1</code>. Value 2 ≈ +50–200% generation speed on dense models. +1.5% VRAM per head.</div>
                             </div>
@@ -3132,8 +3195,47 @@
                              </div>
                             <div class="hardware-field">
                                 <label for="spawn-ubatch-size">Ubatch size</label>
-                                <input type="number" id="spawn-ubatch-size" min="64" max="4096" step="64" value="512" title="Micro-batch size for prompt processing">
-                                <div class="field-hint">512 = default · 1024–2048 = faster prompt processing.</div>
+                                <input type="number" id="spawn-ubatch-size" min="64" max="4096" step="64" value="2048" title="Micro-batch size for prompt processing">
+                                <div class="field-hint">2048 recommended for Apple Silicon (faster prompt processing).</div>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-flash-attn" title="Flash Attention reduces memory per token and speeds up prefill. Highly recommended — required for KV cache quantization.">Flash Attn (-fa)</label>
+                                <select id="spawn-flash-attn">
+                                    <option value="">(server default)</option>
+                                    <option value="auto">auto</option>
+                                    <option value="on" selected>on — recommended</option>
+                                    <option value="off">off</option>
+                                </select>
+                                <div class="field-hint">Required for KV cache quantization. Recommended on Apple Silicon.</div>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-prio" title="--prio: inference thread priority. 2 (High) is recommended for dedicated inference machines. 0 = Normal. Do not use 3 (Realtime) unless this is the only process running.">Thread Priority (--prio)</label>
+                                <select id="spawn-prio">
+                                    <option value="">(default)</option>
+                                    <option value="0">0 — Normal</option>
+                                    <option value="1">1 — Medium</option>
+                                    <option value="2">2 — High (recommended)</option>
+                                    <option value="3">3 — Realtime (dedicated only)</option>
+                                </select>
+                                <div class="field-hint">Higher priority reduces inference interruptions. 2 recommended for Mac.</div>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-threads" title="-t: CPU thread count for inference. On Apple Silicon, Apple recommends 1 (Metal GPU handles compute). Never exceed your chip's P-core count. Leave blank for server default.">Threads (-t)</label>
+                                <input type="number" id="spawn-threads" min="1" max="64" placeholder="default" title="CPU thread count for inference (-t). Blank = server default.">
+                                <div class="field-hint" id="spawn-threads-hint">Blank = server default. Do not exceed physical P-core count.</div>
+                            </div>
+                            <div class="hardware-field">
+                                <label for="spawn-threads-batch" title="-tb: CPU thread count for batch/prompt processing. Defaults to -t value if blank.">Batch Threads (-tb)</label>
+                                <input type="number" id="spawn-threads-batch" min="1" max="64" placeholder="default" title="CPU thread count for batch processing (-tb). Blank = same as -t.">
+                                <div class="field-hint">Prompt processing threads. Blank = inherit from -t.</div>
+                            </div>
+                            <div class="hardware-field" style="grid-column: 1/-1; display:flex; align-items:center; gap:12px; padding:4px 0;">
+                                <label class="kv-unified-toggle" title="Lock the model in RAM, preventing macOS from swapping it to disk. Improves performance. Skip if you're above ~70% unified memory usage.">
+                                    <input type="checkbox" id="spawn-mlock">
+                                    <span class="kv-unified-track"><span class="kv-unified-thumb"></span></span>
+                                    <span class="kv-unified-text">mlock</span>
+                                </label>
+                                <span class="field-hint" style="margin:0;">Pins model in RAM — prevents macOS from evicting it under memory pressure.</span>
                             </div>
                          <div class="hardware-field">
                                  <label for="spawn-n-cpu-moe" title="For Mixture-of-Experts models: how many expert layers to keep in VRAM. 0 = auto. Higher = faster but uses more VRAM. Lower = saves VRAM but runs some experts on CPU.">MoE CPU experts (n_cpu_moe)</label>

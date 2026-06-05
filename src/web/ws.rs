@@ -121,11 +121,13 @@ pub fn ws_route(
                             let session_kind = state.current_session_kind();
                             let (system_reason, gpu_reason, cpu_temp_reason) =
                                 state.calculate_availability_reasons();
+                            let last_spawn_cmd = state.last_spawn_cmd.lock().unwrap().clone();
                             serde_json::json!({
                                 "gpu": gpu,
                                 "llama": llama,
                                 "system": system,
                                 "logs": logs,
+                                "last_spawn_cmd": last_spawn_cmd,
                                 "server_running": running,
                                 "local_server_running": local_running,
                                 "session_mode": session_mode,

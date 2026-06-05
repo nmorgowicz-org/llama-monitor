@@ -758,25 +758,111 @@ function updateSystemCard(d) {
 
 // ── Logs ─────────────────────────────────────────────────────────────────────
 
+let logAutoScroll = true; // true = follow tail; false = user has scrolled up
+
+function _parseLogLevel(line) {
+    // llama.cpp v2 format: "INFO  [component] message" or "WARN [...]" etc.
+    const levelMatch = line.match(/^(INFO|WARN|ERROR|DEBUG|VERB|FATAL)\b/i);
+    if (levelMatch) return levelMatch[1].toUpperCase();
+    // Legacy format: starts with timestamp + level, e.g. "2024-01-01T... INFO ..."
+    const tsFmt = line.match(/^\d{4}-\d{2}-\d{2}T\S+\s+(INFO|WARN|ERROR|DEBUG)\b/i);
+    if (tsFmt) return tsFmt[1].toUpperCase();
+    return 'OTHER';
+}
+
+function _levelClass(level) {
+    if (level === 'WARN')  return 'log-warn';
+    if (level === 'ERROR' || level === 'FATAL') return 'log-error';
+    if (level === 'DEBUG' || level === 'VERB')  return 'log-debug';
+    return 'log-info';
+}
+
+function _renderLogLine(line) {
+    const div = document.createElement('div');
+    div.className = 'log-line ' + _levelClass(_parseLogLevel(line));
+    div.textContent = line;
+    return div;
+}
+
+function _initLogScrollTracking(el) {
+    if (el._logScrollBound) return;
+    el._logScrollBound = true;
+    el.addEventListener('scroll', () => {
+        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+        if (!atBottom && logAutoScroll) {
+            logAutoScroll = false;
+            _syncLogScrollLockBtn();
+        } else if (atBottom && !logAutoScroll) {
+            logAutoScroll = true;
+            _syncLogScrollLockBtn();
+        }
+    }, { passive: true });
+}
+
+function _syncLogScrollLockBtn() {
+    const btn = document.getElementById('log-scroll-lock-btn');
+    if (!btn) return;
+    btn.setAttribute('aria-pressed', String(logAutoScroll));
+    btn.classList.toggle('log-tool-btn--locked', !logAutoScroll);
+}
+
+function _initLogToolbar(el) {
+    const copyBtn = document.getElementById('log-copy-btn');
+    if (copyBtn && !copyBtn._logBound) {
+        copyBtn._logBound = true;
+        copyBtn.addEventListener('click', () => {
+            const text = (copyBtn._currentLogs || []).join('\n');
+            navigator.clipboard?.writeText(text).then(() => {
+                const span = copyBtn.querySelector('span');
+                const orig = span?.textContent;
+                if (span) span.textContent = 'Copied!';
+                setTimeout(() => { if (span) span.textContent = orig; }, 1500);
+            });
+        });
+    }
+    const scrollBtn = document.getElementById('log-scroll-lock-btn');
+    if (scrollBtn && !scrollBtn._logBound) {
+        scrollBtn._logBound = true;
+        scrollBtn.addEventListener('click', () => {
+            logAutoScroll = !logAutoScroll;
+            _syncLogScrollLockBtn();
+            if (logAutoScroll && el) el.scrollTop = el.scrollHeight;
+        });
+    }
+    const cmdBtn = document.getElementById('log-cmd-btn');
+    const cmdPanel = document.getElementById('log-cmd-panel');
+    if (cmdBtn && cmdPanel && !cmdBtn._logBound) {
+        cmdBtn._logBound = true;
+        cmdBtn.addEventListener('click', () => {
+            const open = cmdPanel.getAttribute('aria-hidden') === 'false';
+            cmdPanel.setAttribute('aria-hidden', String(open));
+            cmdPanel.classList.toggle('open', !open);
+            cmdBtn.classList.toggle('log-tool-btn--active', !open);
+        });
+    }
+    const cmdCopyBtn = document.getElementById('log-cmd-copy-btn');
+    if (cmdCopyBtn && !cmdCopyBtn._logBound) {
+        cmdCopyBtn._logBound = true;
+        cmdCopyBtn.addEventListener('click', () => {
+            const pre = document.getElementById('log-cmd-pre');
+            const text = pre?.textContent || '';
+            if (!text) return;
+            navigator.clipboard?.writeText(text).then(() => {
+                const orig = cmdCopyBtn.textContent;
+                cmdCopyBtn.textContent = 'Copied!';
+                setTimeout(() => { cmdCopyBtn.textContent = orig; }, 1500);
+            });
+        });
+    }
+}
+
 function updateLogs(d) {
     const logs = d.logs || [];
-    const isAttached = d.session_mode === 'attach' && d.active_session_endpoint;
     const emptyState = document.getElementById('logs-empty-state');
     const logsPage = document.getElementById('page-logs');
+    const el = cachedElements.logPanel;
 
-    if (logs.length !== sessionState.prevLogLen) {
-        const el = cachedElements.logPanel;
-        const wasAtBottom = el && (el.scrollHeight - el.scrollTop - el.clientHeight < 40);
-
-        if (el) {
-            el.textContent = logs.join('\n');
-            if (wasAtBottom) el.scrollTop = el.scrollHeight;
-        }
-
-        sessionState.prevLogLen = logs.length;
-    }
-
-    // Show empty state whenever there are no logs (attach or spawn mode).
+    // Show/hide empty state
     if (emptyState) {
         if (logs.length === 0) {
             emptyState.classList.add('visible');
@@ -785,6 +871,47 @@ function updateLogs(d) {
             emptyState.classList.remove('visible');
             logsPage?.classList.remove('logs-empty-mode');
         }
+    }
+
+    if (!el) return;
+
+    _initLogScrollTracking(el);
+    _initLogToolbar(el);
+
+    // Update copy button's closure with current logs
+    const copyBtn = document.getElementById('log-copy-btn');
+    if (copyBtn) copyBtn._currentLogs = logs;
+
+    const prevLen = sessionState.prevLogLen;
+
+    if (logs.length < prevLen) {
+        // Log buffer was cleared/rotated — full re-render
+        el.innerHTML = '';
+        sessionState.prevLogLen = 0;
+    }
+
+    if (logs.length !== sessionState.prevLogLen) {
+        const newLines = logs.slice(sessionState.prevLogLen);
+        const frag = document.createDocumentFragment();
+        for (const line of newLines) {
+            frag.appendChild(_renderLogLine(line));
+        }
+        el.appendChild(frag);
+        sessionState.prevLogLen = logs.length;
+
+        if (logAutoScroll) el.scrollTop = el.scrollHeight;
+    }
+
+    // Update count badge
+    const badge = document.getElementById('log-count-badge');
+    if (badge) badge.textContent = logs.length === 0 ? '' : `${logs.length} line${logs.length === 1 ? '' : 's'}`;
+
+    // Update spawn command display if present in payload
+    if (d.last_spawn_cmd !== undefined) {
+        const pre = document.getElementById('log-cmd-pre');
+        const cmdBtn = document.getElementById('log-cmd-btn');
+        if (pre) pre.textContent = d.last_spawn_cmd || '(no spawn command recorded — attach mode or server not yet started)';
+        if (cmdBtn) cmdBtn.style.display = d.last_spawn_cmd ? '' : 'none';
     }
 }
 

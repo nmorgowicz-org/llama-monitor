@@ -4533,6 +4533,8 @@ pub fn api_routes(
         .or(tls_routes)
         .or(llama_binary_routes)
         .or(phase0_routes)
+        .or(api_debug_spawn_cmd(state.clone(), app_config.clone()))
+        .or(api_debug_logs(state.clone(), app_config.clone()))
         .or(api_self_update(app_config.clone()))
 }
 
@@ -11121,6 +11123,56 @@ fn api_llama_binary_update(
                         "sha256": sha256_hex,
                     }),
                 )))
+            }
+        })
+}
+
+// ── Debug endpoints ──────────────────────────────────────────────────────────
+
+fn api_debug_spawn_cmd(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "debug" / "spawn-cmd")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let state = state.clone();
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        unauthorized_api_token(),
+                    );
+                }
+                let cmd = state.last_spawn_cmd.lock().unwrap().clone();
+                Ok(Box::new(warp::reply::json(
+                    &serde_json::json!({ "ok": true, "cmd": cmd }),
+                )) as Box<dyn warp::reply::Reply>)
+            }
+        })
+}
+
+fn api_debug_logs(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "debug" / "logs")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let state = state.clone();
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(
+                        unauthorized_api_token(),
+                    );
+                }
+                let logs: Vec<String> = state.server_logs.lock().unwrap().iter().cloned().collect();
+                Ok(Box::new(warp::reply::json(
+                    &serde_json::json!({ "ok": true, "count": logs.len(), "logs": logs }),
+                )) as Box<dyn warp::reply::Reply>)
             }
         })
 }
