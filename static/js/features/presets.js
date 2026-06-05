@@ -165,6 +165,9 @@ export function openPresetModal(mode) {
         setVal('modal-batch-size', p.batch_size || 2048);
         setVal('modal-ubatch-size', p.ubatch_size || p.batch_size || 2048);
         setVal('modal-parallel-slots', p.parallel_slots || 1);
+        setOpt('modal-prio', p.prio != null ? String(p.prio) : '');
+        numOrEmpty('modal-threads', p.threads);
+        numOrEmpty('modal-threads-batch', p.threads_batch);
         // Generation
         numOrEmpty('modal-temperature', p.temperature);
         numOrEmpty('modal-top-p', p.top_p);
@@ -196,6 +199,8 @@ export function openPresetModal(mode) {
         numOrEmpty('modal-draft-min', p.draft_min);
         numOrEmpty('modal-draft-max', p.draft_max);
         numOrEmpty('modal-spec-draft-n-max', p.spec_draft_n_max);
+        numOrEmpty('modal-spec-draft-n-min', p.spec_draft_n_min);
+        numOrEmpty('modal-spec-draft-p-min', p.spec_draft_p_min);
         setVal('modal-draft-model', p.draft_model);
         _toggleSpecFields(specType);
         // Context extras
@@ -475,6 +480,9 @@ function _buildFormPreset(existing) {
         batch_size: parseInt(document.getElementById('modal-batch-size').value) || 2048,
         ubatch_size: parseInt(document.getElementById('modal-ubatch-size').value) || 2048,
         parallel_slots: parseInt(document.getElementById('modal-parallel-slots').value) || 1,
+        prio: intOrNull('modal-prio'),
+        threads: intOrNull('modal-threads'),
+        threads_batch: intOrNull('modal-threads-batch'),
         temperature: floatOrNull('modal-temperature'),
         top_p: floatOrNull('modal-top-p'),
         top_k: intOrNull('modal-top-k'),
@@ -501,6 +509,8 @@ function _buildFormPreset(existing) {
         draft_min: intOrNull('modal-draft-min'),
         draft_max: intOrNull('modal-draft-max'),
         spec_draft_n_max: intOrNull('modal-spec-draft-n-max'),
+        spec_draft_n_min: intOrNull('modal-spec-draft-n-min'),
+        spec_draft_p_min: floatOrNull('modal-spec-draft-p-min'),
         draft_model: strVal('modal-draft-model'),
         bind_host: strVal('modal-bind-host') || null,
         api_key: strVal('modal-api-key') || null,
@@ -523,6 +533,7 @@ const CHANGE_LABELS = {
     flash_attn: 'Flash Attn', kv_unified: 'KV Unified', cache_ram_mib: 'Prefix Cache RAM',
     fit_enabled: 'Fit to VRAM', fit_target: 'Fit Target',
     batch_size: 'Batch Size', ubatch_size: 'Micro-batch', parallel_slots: 'Parallel Slots',
+    prio: 'Thread Priority', threads: 'Threads (-t)', threads_batch: 'Batch Threads (-tb)',
     temperature: 'Temperature', top_p: 'Top-P', top_k: 'Top-K',
     min_p: 'Min-P', repeat_penalty: 'Repeat Penalty', presence_penalty: 'Presence Penalty',
     enable_thinking: 'Thinking Mode', preserve_thinking: 'Preserve Thinking',
@@ -532,7 +543,8 @@ const CHANGE_LABELS = {
     threads: 'Threads', threads_batch: 'Threads Batch', n_cpu_moe: 'CPU MoE Threads',
     rope_scaling: 'RoPE Scaling', rope_freq_base: 'RoPE Freq Base', rope_freq_scale: 'RoPE Freq Scale',
     spec_type: 'Speculative Mode', spec_ngram_size: 'N-gram Size',
-    draft_min: 'Draft Min', draft_max: 'Draft Max', spec_draft_n_max: 'MTP Depth', draft_model: 'Draft Model',
+    draft_min: 'Draft Min', draft_max: 'Draft Max', spec_draft_n_max: 'MTP Depth',
+    spec_draft_n_min: 'MTP Draft N Min', spec_draft_p_min: 'MTP Draft P Min', draft_model: 'Draft Model',
     bind_host: 'Bind Host', api_key: 'API Key', max_tokens: 'Max Tokens',
     seed: 'Seed', ignore_eos: 'Ignore EOS',
     system_prompt_file: 'System Prompt File', grammar: 'Grammar', json_schema: 'JSON Schema', extra_args: 'Extra Args',

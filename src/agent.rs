@@ -450,6 +450,8 @@ pub async fn run_agent_server(app_config: Arc<AppConfig>) -> Result<()> {
             ram_total_gb: 0.0,
             ram_used_gb: 0.0,
             motherboard: String::new(),
+            p_cores: 0,
+            e_cores: 0,
         }));
 
     {
@@ -1595,6 +1597,15 @@ fn remote_agent_url_for_active_session(
     state: &AppState,
     configured_url: Option<&str>,
 ) -> Option<String> {
+    // When a local session is active (Spawn or localhost Attach), never poll the remote
+    // agent for metrics — it would overwrite local gpu/system data with remote data.
+    {
+        let active_id = state.active_session_id.lock().unwrap().clone();
+        if !active_id.is_empty() && state.active_session_uses_local_metrics() {
+            return None;
+        }
+    }
+
     if let Some(url) = configured_url.filter(|url| !url.trim().is_empty()) {
         return Some(url.trim().to_string());
     }

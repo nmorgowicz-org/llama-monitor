@@ -14,7 +14,7 @@ import { openDeferredFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemp
 import { showToast } from './toast.js';
 import { switchView } from './setup-view.js';
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
-import { lastCapabilities } from '../core/app-state.js';
+import { lastCapabilities, lastSystemMetrics } from '../core/app-state.js';
 import {
   HF_DISCOVER_CATEGORIES,
   hfSearch,
@@ -188,17 +188,24 @@ export const wizardState = {
   hardware: {
     gpuLayers: 'auto', gpuLayersManual: null,
     contextSize: 8192,
-    batchSize: 2048, ubatchSize: 512,
+    batchSize: 2048, ubatchSize: 2048,
     parallelSlots: 1,
     cacheTypeK: 'q8_0', cacheTypeV: 'q8_0',
     nCpuMoe: 0,
     tensorSplit: '',
     fitTarget: '',
     cacheRam: null,
-    kvUnified: false,
+    kvUnified: true,
+    flashAttn: 'on',
+    mlock: false,
+    prio: null,
+    threads: null,
+    threadsBatch: null,
     // MTP
     mtpEnabled: true,
     mtpDraftNMax: 2,
+    mtpDraftNMin: null,
+    mtpDraftPMin: null,
     // Sampling (null = use llama-server default)
     temperature: null,
     topP: null,
@@ -491,6 +498,13 @@ function cacheDom() {
   dom.draftMaxInput      = document.getElementById('spawn-draft-max');
   dom.kvUnifiedCheck  = document.getElementById('spawn-kv-unified');
   dom.kvUnifiedLabel  = dom.kvUnifiedCheck?.closest('label');
+  dom.flashAttnSelect    = document.getElementById('spawn-flash-attn');
+  dom.mlockCheck         = document.getElementById('spawn-mlock');
+  dom.prioSelect         = document.getElementById('spawn-prio');
+  dom.threadsInput       = document.getElementById('spawn-threads');
+  dom.threadsBatchInput  = document.getElementById('spawn-threads-batch');
+  dom.specDraftNMinInput = document.getElementById('spawn-spec-draft-n-min');
+  dom.specDraftPMinInput = document.getElementById('spawn-spec-draft-p-min');
   dom.fitEnableCheck  = document.getElementById('spawn-fit-enable');
   dom.fitEnableLabel  = dom.fitEnableCheck?.closest('label');
   dom.fitTargetWrap   = document.getElementById('spawn-fit-target-wrap');
@@ -707,7 +721,10 @@ function bindEvents() {
     dom.batchSizeInput, dom.ubatchSizeInput, dom.parallelSlotsInput,
     dom.cacheTypeKSelect, dom.cacheTypeVSelect, dom.nCpuMoeInput,
     dom.tensorSplitInput, dom.specTypeSelect, dom.draftModelInput,
-    dom.kvUnifiedCheck, dom.fitEnableCheck, dom.fitTargetInput, dom.cacheRamInput,
+    dom.kvUnifiedCheck, dom.flashAttnSelect, dom.mlockCheck, dom.prioSelect,
+    dom.threadsInput, dom.threadsBatchInput,
+    dom.fitEnableCheck, dom.fitTargetInput, dom.cacheRamInput,
+    dom.specDraftNMinInput, dom.specDraftPMinInput,
   ].forEach(el => {
     el?.addEventListener('input', onHardwareChange);
     el?.addEventListener('change', onHardwareChange);
@@ -1339,6 +1356,8 @@ function showStep(index) {
       renderHardwareModelHeader();
       _populateKvCacheOptions();
     });
+    // Auto-hint thread count from system P-core count (Apple Silicon)
+    _refreshThreadsHint();
     renderMmprojSection();
     renderMtpSection();
     _updateSpecHint(dom.specTypeSelect?.value || '');
@@ -2976,7 +2995,7 @@ function readHardwareState() {
   }
   if (dom.contextSizeInput) { const v = Number(dom.contextSizeInput.value); h.contextSize = v > 0 ? v : 8192; }
   if (dom.batchSizeInput)   { const v = Number(dom.batchSizeInput.value);   h.batchSize   = v > 0 ? v : 2048; }
-  if (dom.ubatchSizeInput)  { const v = Number(dom.ubatchSizeInput.value);  h.ubatchSize  = v > 0 ? v : 512;  }
+  if (dom.ubatchSizeInput)  { const v = Number(dom.ubatchSizeInput.value);  h.ubatchSize  = v > 0 ? v : 2048; }
   if (dom.parallelSlotsInput) { const v = Number(dom.parallelSlotsInput.value); h.parallelSlots = v > 0 ? v : 1; }
   if (dom.cacheTypeKSelect) h.cacheTypeK = dom.cacheTypeKSelect.value || 'q8_0';
   if (dom.cacheTypeVSelect) h.cacheTypeV = dom.cacheTypeVSelect.value || 'q8_0';
@@ -2993,6 +3012,13 @@ function readHardwareState() {
     h.fitTarget = dom.fitTargetInput.value.trim() || '';
   }
   if (dom.kvUnifiedCheck) h.kvUnified = dom.kvUnifiedCheck.checked;
+  if (dom.flashAttnSelect) h.flashAttn = dom.flashAttnSelect.value || '';
+  if (dom.mlockCheck) h.mlock = dom.mlockCheck.checked;
+  if (dom.prioSelect) { const v = dom.prioSelect.value; h.prio = v !== '' ? Number(v) : null; }
+  if (dom.threadsInput) { const v = dom.threadsInput.value; h.threads = v !== '' ? Number(v) : null; }
+  if (dom.threadsBatchInput) { const v = dom.threadsBatchInput.value; h.threadsBatch = v !== '' ? Number(v) : null; }
+  if (dom.specDraftNMinInput) { const v = dom.specDraftNMinInput.value; h.mtpDraftNMin = v !== '' ? Number(v) : null; }
+  if (dom.specDraftPMinInput) { const v = dom.specDraftPMinInput.value; h.mtpDraftPMin = v !== '' ? parseFloat(v) : null; }
   if (dom.cacheRamInput) {
     const v = dom.cacheRamInput.value.trim();
     h.cacheRam = v !== '' ? parseInt(v, 10) : null;
@@ -3101,7 +3127,7 @@ function clampAutoSizeResultToSizingMath(result, arch, modelBytes, availVram) {
     result.kv_quant_k || 'q8_0',
     result.kv_quant_v || 'q8_0',
     slots,
-    result.ubatch_size || wizardState.hardware.ubatchSize || 512,
+    result.ubatch_size || wizardState.hardware.ubatchSize || 2048,
     nCpuMoe,
     availVram,
     fitGran,
@@ -3294,6 +3320,7 @@ function updateVramDisplay() {
     const ratio = availVram > 0 ? total / availVram : 0;
     dom.vramBar.classList.toggle('tight', ratio >= 0.88 && ratio < 1.0);
     dom.vramBar.classList.toggle('over', ratio >= 1.0);
+    dom.vramBar.classList.toggle('has-data', total > 0);
   }
 
   // Update legend labels
@@ -3624,6 +3651,17 @@ function renderScenarioCards(modelBytes, arch, availVram) {
 }
 
 // ── Hardware step: model header + quant swap ─────────────────────────────────
+
+function _refreshThreadsHint() {
+  const pCores = lastSystemMetrics?.p_cores || 0;
+  const hintEl = document.getElementById('spawn-threads-hint');
+  if (!hintEl) return;
+  if (pCores > 0) {
+    hintEl.textContent = `Apple Silicon detected: ${pCores} P-cores. Apple recommends 1 (GPU handles compute) or ≤${pCores} threads. Blank = server default.`;
+  } else {
+    hintEl.textContent = 'Blank = server default (-t). Sets CPU threads for inference. Do not exceed physical P-core count.';
+  }
+}
 
 function renderHardwareModelHeader() {
   const header = document.getElementById('hw-model-header');
@@ -5437,6 +5475,10 @@ function renderSummary() {
     { label: 'Batch / ubatch', value: `${hw.batchSize} / ${hw.ubatchSize}` },
     ...(hw.fitTarget ? [{ label: '--fit-target', value: String(hw.fitTarget) }] : []),
   ];
+  if (hw.flashAttn && hw.flashAttn !== 'auto') rows.push({ label: 'Flash Attn', value: hw.flashAttn });
+  if (hw.kvUnified) rows.push({ label: 'KV unified', value: 'Yes' });
+  if (hw.mlock) rows.push({ label: 'mlock', value: 'Yes' });
+  if (hw.prio != null) rows.push({ label: 'Priority', value: ['Normal', 'Medium', 'High', 'Realtime'][hw.prio] ?? String(hw.prio) });
   if (hw.nCpuMoe > 0 && arch.nExperts > 0) rows.push({ label: 'MoE CPU offload', value: `${hw.nCpuMoe} of ${arch.nExperts} experts` });
   if (hw.tensorSplit) rows.push({ label: 'Tensor split', value: hw.tensorSplit });
   if (arch.mmprojBytes > 0) rows.push({ label: 'mmproj', value: formatGB(arch.mmprojBytes) });
@@ -5462,7 +5504,6 @@ function renderSummary() {
     if (specType === 'draft-model' && dom.draftModelInput?.value) sv += ` (${dom.draftModelInput.value.split(/[\\/]/).pop()})`;
     rows.push({ label: 'Speculative', value: sv });
   }
-  if (hw.kvUnified) rows.push({ label: 'KV unified', value: 'Yes' });
   if (hw.fitTarget) rows.push({ label: '--fit-target', value: `${hw.fitTarget} MB` });
   if (hw.cacheRam !== null && hw.cacheRam !== undefined) {
     const cramDisplay = hw.cacheRam < 0 ? 'no limit' : hw.cacheRam === 0 ? 'disabled' : `${hw.cacheRam} MiB`;
@@ -5871,7 +5912,10 @@ function _renderPresetParamsStep() {
         { label: 'Parallel slots', value: String(h.parallelSlots) },
         { label: 'KV cache K', value: kvK },
         { label: 'KV cache V', value: kvV },
+        ...(h.flashAttn && h.flashAttn !== 'auto' ? [{ label: 'Flash Attn', value: h.flashAttn }] : []),
         ...(h.kvUnified ? [{ label: 'KV unified', value: 'Yes' }] : []),
+        ...(h.mlock ? [{ label: 'mlock', value: 'Yes' }] : []),
+        ...(h.prio != null ? [{ label: 'Priority', value: ['Normal', 'Medium', 'High', 'Realtime'][h.prio] ?? String(h.prio) }] : []),
         ...(h.nCpuMoe > 0 && arch.nExperts > 0 ? [{ label: 'MoE CPU offload', value: `${h.nCpuMoe} of ${arch.nExperts} experts` }] : []),
         ...(h.tensorSplit ? [{ label: 'Tensor split', value: h.tensorSplit }] : []),
         ...(h.fitTarget ? [{ label: '--fit-target', value: `${h.fitTarget} MB` }] : []),
@@ -6204,8 +6248,15 @@ function buildSpawnPayload() {
     ngram_spec: false,
     spec_type: specType,
     spec_draft_n_max: mtpActive ? (h.mtpDraftNMax || 2) : undefined,
+    spec_draft_n_min: mtpActive && h.mtpDraftNMin != null ? h.mtpDraftNMin : undefined,
+    spec_draft_p_min: mtpActive && h.mtpDraftPMin != null ? h.mtpDraftPMin : undefined,
     draft_model: (dom.draftModelInput?.value || '').trim() || '',
     kv_unified: h.kvUnified || null,
+    flash_attn: h.flashAttn || '',
+    mlock: h.mlock || false,
+    prio: h.prio != null ? h.prio : null,
+    threads: h.threads != null ? h.threads : null,
+    threads_batch: h.threadsBatch != null ? h.threadsBatch : null,
     fit_enabled: h.fitTarget ? true : null,
     fit_target: h.fitTarget || null,
     cache_ram_mib: (h.cacheRam !== null && h.cacheRam !== undefined) ? h.cacheRam : null,

@@ -18,6 +18,12 @@ pub struct SystemMetrics {
     pub ram_used_gb: f64,
     #[serde(default)]
     pub motherboard: String,
+    /// Performance-core count (Apple Silicon only; 0 = unknown/not applicable).
+    #[serde(default)]
+    pub p_cores: u32,
+    /// Efficiency-core count (Apple Silicon only; 0 = unknown/not applicable).
+    #[serde(default)]
+    pub e_cores: u32,
 }
 
 pub fn get_system_metrics() -> SystemMetrics {
@@ -30,6 +36,7 @@ pub fn get_system_metrics() -> SystemMetrics {
     let cpu_clock_mhz = get_cpu_clock(&sys);
     let (ram_total_gb, ram_used_gb) = get_ram_info(&sys);
     let motherboard = get_motherboard();
+    let (p_cores, e_cores) = get_core_counts();
 
     SystemMetrics {
         cpu_name,
@@ -40,7 +47,30 @@ pub fn get_system_metrics() -> SystemMetrics {
         ram_total_gb,
         ram_used_gb,
         motherboard,
+        p_cores,
+        e_cores,
     }
+}
+
+#[cfg(target_os = "macos")]
+fn get_core_counts() -> (u32, u32) {
+    fn sysctl_u32(key: &str) -> u32 {
+        std::process::Command::new("sysctl")
+            .args(["-n", key])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0)
+    }
+    let p = sysctl_u32("hw.perflevel0.physicalcpu");
+    let e = sysctl_u32("hw.perflevel1.physicalcpu");
+    (p, e)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn get_core_counts() -> (u32, u32) {
+    (0, 0)
 }
 
 #[cfg(target_os = "windows")]

@@ -509,6 +509,7 @@ pub struct AppState {
     pub chat_storage: Arc<ChatStorage>,
     pub tls_config: Arc<Mutex<TLSConfig>>,
     pub monitor_inference_gate: Arc<tokio::sync::Semaphore>,
+    pub last_spawn_cmd: Arc<Mutex<String>>,
 }
 
 impl AppState {
@@ -581,6 +582,8 @@ impl AppState {
                 ram_total_gb: 0.0,
                 ram_used_gb: 0.0,
                 motherboard: "Unknown".to_string(),
+                p_cores: 0,
+                e_cores: 0,
             })),
             sessions: Arc::new(Mutex::new(sessions)),
             active_session_id: Arc::new(Mutex::new(active_session_id)),
@@ -599,6 +602,7 @@ impl AppState {
             chat_storage,
             tls_config: Arc::new(Mutex::new(tls_config)),
             monitor_inference_gate: Arc::new(tokio::sync::Semaphore::new(1)),
+            last_spawn_cmd: Arc::new(Mutex::new(String::new())),
         };
 
         // Prune old inactive sessions on startup (older than 7 days)
@@ -608,6 +612,10 @@ impl AppState {
     }
 
     pub fn push_log(&self, line: String) {
+        // Filter high-frequency poll noise that clutters the console
+        if line.contains("srv update_slots") && line.contains("all slots are idle") {
+            return;
+        }
         let mut logs = self.server_logs.lock().unwrap();
         if logs.len() >= MAX_LOG_LINES {
             logs.pop_front();

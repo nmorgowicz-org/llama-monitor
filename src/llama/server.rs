@@ -653,6 +653,26 @@ pub async fn start_server(
         cmd.arg(arg);
     }
 
+    // Record the full spawn command for debugging (available at /api/debug/spawn-cmd).
+    {
+        fn shell_quote(s: &std::ffi::OsStr) -> String {
+            let s = s.to_string_lossy();
+            if s.contains(' ') || s.contains('"') || s.contains('\'') || s.is_empty() {
+                format!("\"{}\"", s.replace('"', "\\\""))
+            } else {
+                s.into_owned()
+            }
+        }
+        let mut parts = vec![shell_quote(cmd.as_std().get_program())];
+        for arg in cmd.as_std().get_args() {
+            parts.push(shell_quote(arg));
+        }
+        let cmd_str = parts.join(" \\\n  ");
+        if let Ok(mut lock) = state.last_spawn_cmd.lock() {
+            *lock = cmd_str;
+        }
+    }
+
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
 
