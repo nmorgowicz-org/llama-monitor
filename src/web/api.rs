@@ -3933,7 +3933,9 @@ fn api_models_gguf_meta(
                     ));
                 }
 
-                let meta = match crate::llama::gguf_meta::read_gguf_metadata(std::path::Path::new(&model_path)) {
+                let meta = match crate::llama::gguf_meta::read_gguf_metadata(std::path::Path::new(
+                    &model_path,
+                )) {
                     Ok(m) => m,
                     Err(e) => {
                         return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -3945,8 +3947,8 @@ fn api_models_gguf_meta(
                     }
                 };
 
-                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
-                    warp::reply::json(&serde_json::json!({
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
                         "ok": true,
                         "architecture": meta.architecture,
                         "param_count": meta.param_count,
@@ -3960,8 +3962,8 @@ fn api_models_gguf_meta(
                         "expert_count": meta.expert_count,
                         "expert_used_count": meta.expert_used_count,
                         "mtp_depth": meta.mtp_depth,
-                    })),
-                ))
+                    }),
+                )))
             }
         })
 }
@@ -4173,7 +4175,7 @@ pub fn api_routes(
     let hf_resolve_origin_route = api_hf_resolve_origin(app_config.clone());
     let hf_community_picks_route = api_hf_community_picks(state.clone(), app_config.clone());
     let third_party_models_route = api_third_party_models(state.clone(), app_config.clone());
-                  let model_introspect_route = api_model_introspect(state.clone(), app_config.clone());
+    let model_introspect_route = api_model_introspect(state.clone(), app_config.clone());
     let models_gguf_meta_route = api_models_gguf_meta(app_config.clone());
     let vram_quant_compare_route = api_vram_quant_compare(state.clone(), app_config.clone());
     let vram_auto_size_route = api_vram_auto_size(state.clone(), app_config.clone());
