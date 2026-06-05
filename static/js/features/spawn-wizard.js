@@ -5,7 +5,7 @@
 //  - Use-case selector (agentic / general / roleplay)
 //  - Pre-download quant advisor with size + max-context table
 //  - Architecture-aware VRAM breakdown (live animated bar)
-//  - Scenario cards (q8_0 KV / q4_0 KV / f16 KV max context)
+//  - Context fit modes that translate KV cache precision into plain-language outcomes
 //  - MoE expert offload slider with live feedback
 //  - Auto-size button pulls backend recommendation
 //  - Step validation before advancing
@@ -87,10 +87,16 @@ function maxContext(modelBytes, arch, ctk, ctv, slots, ubatch, nCpuMoe, availVra
   if (fixed >= usable) return 0;
   const kvBudget = usable - fixed;
 
+  // Hybrid DeltaNet: only nAttnLayers use KV cache (not all nLayers).
+  // kvBytes() already does this; mirror the same logic here so maxContext
+  // and the VRAM bar agree on how many layers store KV.
+  const effectiveLayers = (arch.nAttnLayers && arch.nAttnLayers < arch.nLayers)
+    ? arch.nAttnLayers : arch.nLayers;
+
   // Standard full-attention: solve directly
   if (!arch.localAttnWindow) {
     const s  = Math.max(slots, 1);
-    const kv = arch.nLayers * arch.nKvHeads * arch.headDim * s * (kvBpe(ctk) + kvBpe(ctv));
+    const kv = effectiveLayers * arch.nKvHeads * arch.headDim * s * (kvBpe(ctk) + kvBpe(ctv));
     if (kv <= 0) return 0;
     const ctx = Math.floor(kvBudget / kv);
     const g   = fitGran || 1024;
@@ -226,6 +232,7 @@ export const wizardState = {
 
 let dom = {};
 let pendingHardwareScrollReset = false;
+let pendingHardwareScrollRestore = null;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -238,6 +245,7 @@ export function initSpawnWizard() {
   bindWizardHfToken();
   restoreProfile();
   applyProfileVisibility();
+  updateProfileHint();
 
   // HF discover pills
   const discoverPillsEl = document.getElementById('hf-discover-pills');
@@ -431,6 +439,9 @@ function cacheDom() {
   dom.vLegFreeLabel     = document.getElementById('vleg-free-label');
   dom.vLegFreeDot       = document.getElementById('vleg-free-dot');
   dom.vramScenarios   = document.getElementById('vram-scenarios');
+  dom.ctxRailSummaryValue  = document.getElementById('ctx-rail-summary-value');
+  dom.ctxRailSummaryStatus = document.getElementById('ctx-rail-summary-status');
+  dom.ctxRailSummaryNote   = document.getElementById('ctx-rail-summary-note');
   dom.moeOffloadPanel   = document.getElementById('moe-offload-panel');
   dom.moeOffloadSlider  = document.getElementById('moe-offload-slider');
   dom.moeOffloadSubtitle= document.getElementById('moe-offload-subtitle');
@@ -479,6 +490,7 @@ function cacheDom() {
   dom.draftMinInput      = document.getElementById('spawn-draft-min');
   dom.draftMaxInput      = document.getElementById('spawn-draft-max');
   dom.kvUnifiedCheck  = document.getElementById('spawn-kv-unified');
+  dom.kvUnifiedLabel  = dom.kvUnifiedCheck?.closest('label');
   dom.fitEnableCheck  = document.getElementById('spawn-fit-enable');
   dom.fitEnableLabel  = dom.fitEnableCheck?.closest('label');
   dom.fitTargetWrap   = document.getElementById('spawn-fit-target-wrap');
@@ -567,13 +579,14 @@ function bindEvents() {
     }
   });
 
-  // Profile cards
+  // Profile cards (segmented control)
   dom.profileCards?.forEach(card => {
     card.setAttribute('tabindex', '0'); card.setAttribute('role', 'button');
     card.addEventListener('click', () => {
       wizardState.profile = card.dataset.profile;
       dom.profileCards.forEach(c => c.classList.remove('selected'));
       card.classList.add('selected');
+      updateProfileHint();
       persistProfile(); applyProfileVisibility();
       refreshStepGuardrails();
     });
@@ -699,16 +712,8 @@ function bindEvents() {
     el?.addEventListener('change', onHardwareChange);
   });
 
-  // Prevent the fit toggle label's click from bubbling to the overlay
-  dom.fitEnableLabel?.addEventListener('click', e => e.stopPropagation());
-
-  // These toggles can change the step layout enough to leave the scrollable
-  // columns pointed at empty space after the VRAM sidebar re-renders.
-  const requestHardwareScrollReset = () => {
-    pendingHardwareScrollReset = true;
-  };
-  dom.kvUnifiedCheck?.addEventListener('change', requestHardwareScrollReset);
-  dom.fitEnableCheck?.addEventListener('change', requestHardwareScrollReset);
+  bindHardwareToggleSwitch(dom.kvUnifiedLabel, dom.kvUnifiedCheck);
+  bindHardwareToggleSwitch(dom.fitEnableLabel, dom.fitEnableCheck);
 
   dom.gpuLayersSelect?.addEventListener('change', () => {
     wizardState.hardware.gpuLayers = dom.gpuLayersSelect.value;
@@ -1425,6 +1430,17 @@ function restoreProfile() {
   } catch {}
   dom.profileCards?.forEach(c => c.classList.toggle('selected', c.dataset.profile === wizardState.profile));
 }
+const PROFILE_HINTS = {
+  quick:    'Fully auto-tuned — we pick safe defaults based on your hardware. No knobs to turn.',
+  balanced: 'Guided tuning with sensible defaults. Recommended for most setups.',
+  advanced: 'Full control over all parameters, including MoE tuning, KV cache quant, and multi-GPU.',
+};
+
+function updateProfileHint() {
+  const el = document.getElementById('profile-seg-hint');
+  if (el) el.textContent = PROFILE_HINTS[wizardState.profile] ?? '';
+}
+
 function applyProfileVisibility() {
   const isAdv = wizardState.profile === 'advanced';
   const isQ   = wizardState.profile === 'quick';
@@ -2922,6 +2938,14 @@ function selectImportedModel(m) {
 let vramDebounce = null;
 
 function onHardwareChange() {
+  if (wizardState.currentStep === 2 && !pendingHardwareScrollReset) {
+    const main = document.querySelector('#wizard-step-2 .wizard-main');
+    const sidebar = document.querySelector('#wizard-step-2 .hw-vram-sidebar');
+    pendingHardwareScrollRestore = {
+      main: main?.scrollTop ?? 0,
+      sidebar: sidebar?.scrollTop ?? 0,
+    };
+  }
   readHardwareState();
   scheduleVramUpdate();
   refreshStepGuardrails();
@@ -2945,6 +2969,9 @@ function readHardwareState() {
   if (dom.fitEnableCheck) {
     const enabled = dom.fitEnableCheck.checked;
     if (dom.fitTargetWrap) dom.fitTargetWrap.style.display = enabled ? '' : 'none';
+    if (enabled && dom.fitTargetInput && !dom.fitTargetInput.value.trim()) {
+      dom.fitTargetInput.value = '2048';
+    }
     h.fitTarget = enabled && dom.fitTargetInput ? (dom.fitTargetInput.value.trim() || '') : '';
   } else if (dom.fitTargetInput) {
     h.fitTarget = dom.fitTargetInput.value.trim() || '';
@@ -2972,6 +2999,54 @@ function maybeResetHardwareStepScroll() {
   // never leave the viewport stranded at a stale offset showing blank space.
   if (main) main.scrollTop = 0;
   if (sidebar) sidebar.scrollTop = 0;
+}
+
+function maybeRestoreHardwareStepScroll() {
+  if (!pendingHardwareScrollRestore || wizardState.currentStep !== 2) return;
+
+  const snapshot = pendingHardwareScrollRestore;
+  pendingHardwareScrollRestore = null;
+
+  const restore = () => {
+    if (wizardState.currentStep !== 2) return;
+
+    const focused = document.activeElement;
+    if (focused === dom.kvUnifiedCheck || focused === dom.fitEnableCheck) {
+      focused.blur?.();
+    }
+
+    const main = document.querySelector('#wizard-step-2 .wizard-main');
+    const sidebar = document.querySelector('#wizard-step-2 .hw-vram-sidebar');
+    if (main) {
+      const maxScroll = Math.max(0, main.scrollHeight - main.clientHeight);
+      main.scrollTop = Math.min(snapshot.main, maxScroll);
+    }
+    if (sidebar) {
+      const maxScroll = Math.max(0, sidebar.scrollHeight - sidebar.clientHeight);
+      sidebar.scrollTop = Math.min(snapshot.sidebar, maxScroll);
+    }
+  };
+
+  requestAnimationFrame(() => {
+    restore();
+    requestAnimationFrame(restore);
+  });
+}
+
+function bindHardwareToggleSwitch(labelEl, inputEl) {
+  if (!labelEl || !inputEl) return;
+
+  labelEl.addEventListener('pointerdown', e => {
+    e.preventDefault();
+  });
+
+  labelEl.addEventListener('click', e => {
+    if (e.target === inputEl) return;
+    e.preventDefault();
+    inputEl.checked = !inputEl.checked;
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+  });
 }
 
 // ── Animated VRAM display ─────────────────────────────────────────────────────
@@ -3282,6 +3357,7 @@ function updateVramDisplay() {
   }
 
   maybeResetHardwareStepScroll();
+  maybeRestoreHardwareStepScroll();
 }
 
 function setSegWidth(el, frac) {
@@ -3318,7 +3394,44 @@ function updateMoeSliderVisuals() {
   }
 }
 
-// ── Scenario cards ────────────────────────────────────────────────────────────
+// ── Context fit modes ────────────────────────────────────────────────────────
+
+function updateContextRailSummary() {
+  if (!dom.ctxRailSummaryValue || !dom.ctxRailSummaryStatus || !dom.ctxRailSummaryNote) return;
+
+  const currentCtx = wizardState.hardware.contextSize || 8192;
+  const nCtxTrain = wizardState.model.nCtxTrain || 0;
+  const target = CTX_TARGETS[wizardState.useCase] || 0;
+
+  dom.ctxRailSummaryValue.textContent = formatCtx(currentCtx);
+  dom.ctxRailSummaryStatus.classList.remove('warning');
+
+  if (nCtxTrain && currentCtx > nCtxTrain) {
+    dom.ctxRailSummaryStatus.textContent = 'Extended beyond trained context';
+    dom.ctxRailSummaryStatus.classList.add('warning');
+    dom.ctxRailSummaryNote.textContent = `Model max is ${formatCtx(nCtxTrain)}. This can still fit in memory, but quality may degrade unless you intentionally extend context with RoPE/YaRN.`;
+    return;
+  }
+
+  if (nCtxTrain && currentCtx === nCtxTrain) {
+    dom.ctxRailSummaryStatus.textContent = 'At model max';
+    dom.ctxRailSummaryNote.textContent = 'You are using the model’s full trained context. Going higher is possible only as an advanced extension with RoPE/YaRN.';
+    return;
+  }
+
+  if (nCtxTrain) {
+    dom.ctxRailSummaryStatus.textContent = 'Within trained context';
+    dom.ctxRailSummaryNote.textContent = currentCtx < target
+      ? `Use-case target is ${formatCtx(target)}. Lower values save memory, but leave less room for long chats, retrieval, or tool loops.`
+      : `Model max is ${formatCtx(nCtxTrain)}. Use a custom value above that only if you intentionally want extended context with RoPE/YaRN.`;
+    return;
+  }
+
+  dom.ctxRailSummaryStatus.textContent = 'Training max unavailable';
+  dom.ctxRailSummaryNote.textContent = currentCtx < target
+    ? `Use-case target is ${formatCtx(target)}. Larger contexts use more KV memory.`
+    : 'Larger contexts use more KV memory. Stay conservative unless you know the model’s training limit.';
+}
 
 function renderScenarioCards(modelBytes, arch, availVram) {
   if (!dom.vramScenarios || !availVram || !modelBytes) return;
@@ -3333,51 +3446,75 @@ function renderScenarioCards(modelBytes, arch, availVram) {
   const nCtxTrain = wizardState.model.nCtxTrain || 0;
   const currentCtx = hw.contextSize || 8192;
 
-  // Pre-compute so each card reuses the value without a second call.
+  updateContextRailSummary();
+
   const q8Max = maxContext(modelBytes, arch, 'q8_0', 'q8_0', slots, ubatch, nCpuMoe, availVram, fitGran, headroom);
   const q4Max = maxContext(modelBytes, arch, 'q4_0', 'q4_0', slots, ubatch, nCpuMoe, availVram, fitGran, headroom);
 
   const scenarios = [
-    { quant: 'q8_0', kk: 'q8_0', kv: 'q8_0', desc: uc === 'agentic' ? 'Required for agentic use' : 'Balanced quality', rec: uc !== 'roleplay' },
-    { quant: 'q4_0', kk: 'q4_0', kv: 'q4_0', desc: uc === 'agentic' ? 'Not recommended for agents' : 'More context, great for RP', rec: uc === 'roleplay', warnAgentic: uc === 'agentic' },
-    { quant: 'f16',  kk: 'f16',  kv: 'f16',  desc: 'Full precision, VRAM-heavy', rec: false },
+    {
+      key: 'q8_0',
+      mode: 'Reliable agents',
+      detail: 'High-precision KV cache',
+      kk: 'q8_0',
+      kv: 'q8_0',
+      desc: uc === 'roleplay' ? 'Best long-context quality with less headroom for very large transcripts.' : 'Best long-context quality for tools, retrieval, and multi-step work.',
+      rec: uc !== 'roleplay',
+    },
+    {
+      key: 'q4_0',
+      mode: 'More context',
+      detail: 'Lower-precision KV cache',
+      kk: 'q4_0',
+      kv: 'q4_0',
+      desc: uc === 'agentic' ? 'Fits more tokens, but lower cache precision can hurt tool-call coherence.' : 'Fits the most context if you care more about length than cache quality.',
+      rec: uc === 'roleplay',
+      warnAgentic: uc === 'agentic',
+    },
+    {
+      key: 'f16',
+      mode: 'Full precision',
+      detail: 'Lossless KV cache',
+      kk: 'f16',
+      kv: 'f16',
+      desc: 'Uses the most KV memory. Best reserved for comparison or when you want the most exact cache.',
+      rec: false,
+    },
   ];
 
   dom.vramScenarios.innerHTML = '';
-  const activeQuant = hw.cacheTypeK || 'q8_0';
+  const activeQuant = hw.cacheTypeK === '' ? 'f16' : (hw.cacheTypeK || 'q8_0');
 
   for (const s of scenarios) {
     const vramCtx = s.kk === 'q8_0' ? q8Max : s.kk === 'q4_0' ? q4Max
       : maxContext(modelBytes, arch, s.kk, s.kv, slots, ubatch, nCpuMoe, availVram, fitGran, headroom);
     const cappedByModel = nCtxTrain > 0 && vramCtx > nCtxTrain;
     const ctx = cappedByModel ? nCtxTrain : vramCtx;
+    const selectable = ctx > 0;
 
     const card = document.createElement('div');
-    const isActive = s.kk === activeQuant;
+    const isActive = s.key === activeQuant;
     card.className = 'vram-scenario-card' + (s.rec ? ' scenario-rec' : '') + (isActive ? ' selected' : '');
     card.setAttribute('tabindex', '0');
     card.setAttribute('role', 'button');
-    card.setAttribute('aria-label', `${s.quant} KV: ${formatCtx(ctx)} tokens — ${s.desc}`);
+    card.setAttribute('aria-label', `${s.mode}: ${formatCtx(ctx)} tokens — ${s.desc}`);
 
-    const selectable = ctx > 0;
-
-    // When model is the bottleneck (not VRAM), quality is the differentiator.
     let desc = s.desc;
     if (cappedByModel) {
-      if (s.quant === 'q8_0') desc = 'Best quality — VRAM headroom to spare';
-      else if (s.quant === 'q4_0') desc = 'Good quality — most VRAM headroom';
-      else if (s.quant === 'f16') desc = 'Full precision — uses most VRAM';
+      if (s.key === 'q8_0') desc = 'Best long-context quality. VRAM is no longer the limit.';
+      else if (s.key === 'q4_0') desc = 'More headroom, but the model max is already the real ceiling.';
+      else if (s.key === 'f16') desc = 'Full precision cache. Context is capped by the model, not VRAM.';
     }
 
     const limitNote = cappedByModel ? '<span class="vsc-limit-note">model max</span>' : '';
-    // Warn when this card can't accommodate the user's current context setting.
     const ctxWontFit = selectable && !cappedByModel && ctx < currentCtx;
     const ctxWarnNote = ctxWontFit ? `<span class="vsc-warn">⚠ won't fit your ${formatCtx(currentCtx)} ctx</span>` : '';
 
     // All values are internal constants — no user input reaches this template.
     // eslint-disable-next-line no-unsanitized/property
     card.innerHTML = `
-      <div class="vsc-quant-name">${s.quant.toUpperCase()} KV</div>
+      <div class="vsc-mode-name">${s.mode}</div>
+      <div class="vsc-mode-detail">${s.detail}</div>
       <div class="vsc-ctx-row">
         <span class="vsc-ctx">${selectable ? formatCtx(ctx) : '—'}</span>
         ${selectable ? '<span class="vsc-ctx-unit">tokens</span>' : ''}
@@ -3386,8 +3523,9 @@ function renderScenarioCards(modelBytes, arch, availVram) {
       <div class="vsc-desc">${desc}</div>
       ${s.rec ? '<span class="vsc-rec-badge">★ Recommended</span>' : ''}
       ${isActive ? '<span class="vsc-active-badge">✓ Active</span>' : ''}
-      ${s.warnAgentic ? '<span class="vsc-warn">⚠ Not for agents</span>' : ''}
+      ${s.warnAgentic ? '<span class="vsc-warn">⚠ Not ideal for tool-heavy agents</span>' : ''}
       ${ctxWarnNote}
+      <span class="vsc-footnote">KV cache: ${s.kk}/${s.kv}</span>
     `;
 
     if (selectable) {
@@ -3409,7 +3547,12 @@ function renderScenarioCards(modelBytes, arch, availVram) {
         updateVramDisplay();
       };
       card.addEventListener('click', e => { e.stopPropagation(); applyScenario(); });
-      card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); applyScenario(); } });
+      card.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          applyScenario();
+        }
+      });
     }
 
     dom.vramScenarios.appendChild(card);
@@ -4886,13 +5029,13 @@ function showCtxFitWarning(ctx, useCase, manualSet = false) {
     strong.textContent = `Can't reach ${need} for agentic work`;
     el.appendChild(strong);
     el.appendChild(document.createTextNode(
-      ` — auto-sized to ${got} at q8_0 KV. Try Q4_K_M or IQ3_XXS to shrink weights, or switch to a 27B model. You can also override by typing a custom value or picking 200k/256k above.`
+      ` — auto-sized to ${got} with the high-precision cache mode. Try a smaller model quant like Q4_K_M or IQ3_XXS to shrink weights, or override by typing a custom value.`
     ));
   } else if (useCase === 'roleplay') {
     strong.textContent = `Below ${need} RP target`;
     el.appendChild(strong);
     el.appendChild(document.createTextNode(
-      ` — auto-sized to ${got}. Switch KV cache to q4_0 to halve KV memory, or use a smaller quant.`
+      ` — auto-sized to ${got}. Try the More context mode or use a smaller model quant if long transcripts matter more than cache precision.`
     ));
   } else {
     el.appendChild(document.createTextNode(

@@ -379,108 +379,88 @@
    Profile Cards (Step 1)
    ========================================================================== */
 
+/* Profile: segmented control */
 .profile-cards {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  flex-direction: row;
+  gap: 3px;
+  padding: 3px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-base);
 }
 
 .profile-card {
   position: relative;
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
-  align-items: flex-start;
-  gap: 12px;
-  padding: 16px 16px 14px;
-  border-radius: var(--radius-base);
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: calc(var(--radius-base) - 2px);
   cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.04), transparent 22%),
-    linear-gradient(145deg, rgba(40, 48, 58, 0.96), rgba(27, 33, 41, 0.99));
-  box-shadow:
-    0 10px 28px rgba(0, 0, 0, 0.3),
-    0 2px 8px rgba(0, 0, 0, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  transition: all 200ms ease;
+  border: 1px solid transparent;
+  background: transparent;
+  box-shadow: none;
+  transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
   overflow: hidden;
 }
 
-.profile-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(136, 192, 209, 0.3), transparent);
-  opacity: 0;
-  transition: opacity 200ms ease;
-}
+.profile-card::before { display: none; }
 
 .profile-card:hover {
-  border-color: rgba(99, 102, 241, 0.35);
-  box-shadow:
-    0 14px 34px rgba(0, 0, 0, 0.36),
-    0 0 26px rgba(99, 102, 241, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  transform: translateY(-2px);
+  background: rgba(99, 102, 241, 0.09);
+  border-color: rgba(99, 102, 241, 0.25);
+  box-shadow: none;
+  transform: none;
 }
 
-.profile-card:hover::before {
-  opacity: 1;
-}
+.profile-card:hover::before { opacity: 0; }
 
 .profile-card.selected {
-  border-color: rgba(99, 102, 241, 0.6);
-  box-shadow:
-    0 14px 34px rgba(0, 0, 0, 0.36),
-    0 0 32px rgba(99, 102, 241, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  background:
-    radial-gradient(circle at top right, rgba(99, 102, 241, 0.1), transparent 22%),
-    linear-gradient(145deg, rgba(40, 48, 58, 0.99), rgba(27, 33, 41, 1));
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.55);
+  box-shadow: 0 0 14px rgba(99, 102, 241, 0.14);
 }
 
-.profile-card.selected::before {
-  opacity: 1;
-  background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.6), transparent);
-}
+.profile-card.selected::before { display: none; }
 
 .profile-card-radio {
-  width: 36px;
-  height: 36px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  font-size: 18px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.22);
-  transition: all 180ms ease;
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+  /* Reset heavy circle styling */
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
 }
 
 .profile-card.selected .profile-card-radio {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(6, 182, 212, 0.16));
-  border-color: rgba(99, 102, 241, 0.6);
-  box-shadow: 0 0 16px rgba(99, 102, 241, 0.2);
-}
-
-.profile-card-body {
-  min-width: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
 }
 
 .profile-card-name {
   font-size: var(--text-sm);
-  font-weight: 700;
+  font-weight: 600;
   color: var(--color-text-primary);
-  margin-bottom: 3px;
+  margin-bottom: 0;
 }
 
-.profile-card-desc {
+.profile-card-desc { display: none; }
+
+.profile-seg-hint {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
-  line-height: 1.55;
+  line-height: 1.5;
+  min-height: 1.5em;
+  padding: 0 2px;
 }
 
 /* ==========================================================================
@@ -1663,7 +1643,30 @@
     inset 0 1px 2px rgba(0, 0, 0, 0.03);
 }
 
-[data-theme="light"] .profile-card,
+/* Profile cards are now a segmented control — light theme resets */
+[data-theme="light"] .profile-cards {
+  background: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .profile-card {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+[data-theme="light"] .profile-card:hover {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.3);
+  box-shadow: none;
+}
+
+[data-theme="light"] .profile-card.selected {
+  background: rgba(99, 102, 241, 0.14);
+  border-color: rgba(99, 102, 241, 0.45);
+  box-shadow: none;
+}
+
 [data-theme="light"] .model-source-card {
   background:
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.5), transparent 22%),
@@ -1675,20 +1678,11 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
-[data-theme="light"] .profile-card:hover,
 [data-theme="light"] .model-source-card:hover {
   border-color: rgba(99, 102, 241, 0.3);
   box-shadow:
     0 12px 30px rgba(15, 23, 42, 0.1),
     0 0 24px rgba(99, 102, 241, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.7);
-}
-
-[data-theme="light"] .profile-card.selected {
-  border-color: rgba(99, 102, 241, 0.45);
-  box-shadow:
-    0 12px 30px rgba(15, 23, 42, 0.1),
-    0 0 28px rgba(99, 102, 241, 0.1),
     inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
@@ -2381,16 +2375,18 @@
 
 .usecase-cards {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 8px;
-  margin-top: 6px;
+  margin-top: 0;
 }
 
 .usecase-card {
+  flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: 6px;
+  padding: 12px 12px;
   border-radius: 10px;
   border: 1.5px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.03);
@@ -2866,6 +2862,55 @@
   color: var(--text-muted, #64748b);
 }
 
+.ctx-rail-summary {
+  margin-top: 14px;
+  margin-bottom: 10px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid rgba(255,255,255,0.07);
+}
+
+.ctx-rail-summary-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ctx-rail-summary-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted, #94a3b8);
+}
+
+.ctx-rail-summary-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text, #f1f5f9);
+  font-variant-numeric: tabular-nums;
+}
+
+.ctx-rail-summary-status {
+  margin-top: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.ctx-rail-summary-status.warning {
+  color: #fbbf24;
+}
+
+.ctx-rail-summary-note {
+  margin-top: 5px;
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--text-muted, #94a3b8);
+}
+
 .vram-scenarios {
   display: flex;
   gap: 8px;
@@ -2904,13 +2949,19 @@
   border-color: rgba(99,102,241,0.5);
 }
 
-/* KV quant name — headline of the card */
-.vsc-quant-name {
+/* Outcome mode name — headline of the card */
+.vsc-mode-name {
   font-size: 13px;
   font-weight: 700;
   color: var(--text, #f1f5f9);
   letter-spacing: 0.02em;
-  margin-bottom: 4px;
+  margin-bottom: 3px;
+}
+
+.vsc-mode-detail {
+  font-size: 10px;
+  color: var(--text-muted, #94a3b8);
+  margin-bottom: 5px;
 }
 
 /* Context number row */
@@ -2941,7 +2992,7 @@
 .vsc-desc {
   font-size: 10px;
   color: var(--text-muted, #94a3b8);
-  margin-bottom: 2px;
+  margin-bottom: 3px;
 }
 
 .vsc-rec-badge {
@@ -2979,6 +3030,13 @@
   margin-top: 4px;
   font-size: 10px;
   color: #fbbf24;
+}
+
+.vsc-footnote {
+  display: block;
+  margin-top: 4px;
+  font-size: 9px;
+  color: #94a3b8;
 }
 
 /* Context counter animation */
@@ -3249,13 +3307,20 @@
 [data-theme="light"] .vram-panel-total { color: #1e293b; }
 [data-theme="light"] .vram-bar { background: rgba(0,0,0,0.06); }
 [data-theme="light"] .vleg-item { color: #475569; }
+[data-theme="light"] .ctx-rail-summary {
+  background: rgba(255,255,255,0.7);
+  border-color: rgba(17,24,39,0.1);
+}
+[data-theme="light"] .ctx-rail-summary-value,
+[data-theme="light"] .vsc-mode-name,
+[data-theme="light"] .vsc-ctx { color: #1e293b; }
+[data-theme="light"] .ctx-rail-summary-status { color: #334155; }
 [data-theme="light"] .vram-scenario-card {
   border-color: rgba(17,24,39,0.1);
   background: rgba(255,255,255,0.7);
 }
-[data-theme="light"] .vsc-quant-name { color: #1e293b; }
-[data-theme="light"] .vsc-ctx        { color: #1e293b; }
 [data-theme="light"] .vsc-ctx-unit   { color: #64748b; }
+[data-theme="light"] .vsc-mode-detail,
 [data-theme="light"] .vsc-desc       { color: #64748b; }
 [data-theme="light"] .kv-unified-track { background: rgba(0,0,0,0.1); border-color: rgba(0,0,0,0.15); }
 [data-theme="light"] .kv-unified-thumb { background: rgba(0,0,0,0.35); }
@@ -3477,7 +3542,16 @@
 
 /* ── Context quick-picks ─────────────────────────────────────────────────── */
 
-.hardware-field-ctx { gap: 6px; }
+.hardware-field-ctx {
+  gap: 6px;
+  /* The context field has 4 children (label row, input, hint, quick-picks) so it
+   * needs more subgrid rows than the default span 3. */
+  grid-row: span 5;
+}
+
+.ctx-primary-hint {
+  margin-top: 2px;
+}
 
 /* Context label row: label + model-max hint inline */
 .ctx-label-row {
@@ -4334,24 +4408,8 @@
 
 /* ── Selected-state checkmark badge on cards ─────────────────────────────── */
 
+/* Profile card uses segmented control — selected state via background, no badge needed */
 .profile-card { position: relative; }
-.profile-card.selected::after {
-  content: '✓';
-  position: absolute;
-  top: 8px;
-  right: 10px;
-  font-size: 9px;
-  font-weight: 800;
-  line-height: 17px;
-  text-align: center;
-  color: #a5b4fc;
-  background: rgba(99, 102, 241, 0.18);
-  border: 1px solid rgba(99, 102, 241, 0.4);
-  border-radius: 50%;
-  width: 17px;
-  height: 17px;
-  display: block;
-}
 
 .model-source-card { position: relative; }
 .model-source-card.selected::after {
