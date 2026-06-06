@@ -467,11 +467,13 @@ impl ModelArch {
         // ── Gemma 4 family (separate from Gemma 3) ───────────────────────────────
         // Different from Gemma 3: 1024-token sliding window (vs 512),
         // global layers use 512 head_dim + fewer KV heads (4/2 vs 16/8 local).
+        // E2B/E4B: 35/42 dense layers, 512-token sliding window.
+        // 12B unified: 48 dense layers, 1024-token sliding window.
         // 31B dense: 60 layers, 10 global, 50 local.
-        // 26B-A4B MoE: 30 layers, 128 experts, 9 active.
+        // 26B-A4B MoE: 30 layers, 128 experts, 8 routed + 1 shared active.
         let is_gemma4 = lower.contains("gemma-4") || lower.contains("gemma4");
         if is_gemma4 {
-            let mut arch = Self::gemma4_heuristic(param_b);
+            let mut arch = Self::gemma4_heuristic(&lower, param_b);
             if lower.contains("mtp") || lower.contains("multi-token") {
                 arch.mtp_depth = 1;
             }
@@ -619,27 +621,44 @@ impl ModelArch {
     /// Key differences from Gemma 3:
     ///   - Sliding window: 1024 tokens (Gemma 3 used 512)
     ///   - Global layers: fewer KV heads but wider head_dim (512 vs 256)
-    ///   - Different layer counts per size tier
+    ///   - Different layer counts and attention patterns per size tier
     ///
-    /// Confirmed from https://kaitchup.substack.com/p/gemma-4-31b-and-26b-a4b-architecture
-    ///   31B dense:  60 total, 10 global (4 KV heads, 512 dim) + 50 local (16 KV heads, 256 dim)
-    ///   26B-A4B:    30 total,  5 global (2 KV heads, 512 dim) + 25 local ( 8 KV heads, 256 dim)
-    fn gemma4_heuristic(param_b: f64) -> Self {
-        let (n_layers, global_kv_heads, local_kv_heads, n_experts, n_experts_used) =
-            if param_b < 10.0 {
-                // Small variants (E2B, E4B): architecture not publicly confirmed.
-                // Using conservative estimate; sliding window stays 512 for these.
-                (30u32, 4u32, 8u32, 0u32, 0u32)
-            } else if param_b < 30.0 {
-                // 26B-A4B MoE: 30 layers, 128 total experts, 8 routed + 1 shared = 9 active.
-                // "A4B" = 4B active PARAMETERS, not 4 experts.
-                (30, 2, 8, 128, 9)
-            } else {
-                // 31B dense (and 27B): 60 layers, dense (no MoE).
-                (60, 4, 16, 0, 0)
-            };
-        let global_layers = n_layers / 6; // 5 local : 1 global pattern
-        let local_attn_window = if param_b < 10.0 { 512 } else { 1024 };
+    /// Source: https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-unquantized
+    fn gemma4_heuristic(name: &str, param_b: f64) -> Self {
+        let named_e2b = name.contains("e2b");
+        let named_e4b = name.contains("e4b");
+        let named_12b = name.contains("12b");
+        let named_26b_a4b =
+            name.contains("26b-a4b") || name.contains("26b_a4b") || name.contains("a4b");
+        let named_31b = name.contains("31b");
+        let has_named_size = named_e2b || named_e4b || named_12b || named_26b_a4b || named_31b;
+
+        let is_e2b = named_e2b || (!has_named_size && param_b < 6.0);
+        let is_e4b = named_e4b || (!has_named_size && !is_e2b && param_b < 10.0);
+        let is_12b = named_12b || (!has_named_size && !is_e2b && !is_e4b && param_b < 20.0);
+
+        let (
+            n_layers,
+            global_layers,
+            global_kv_heads,
+            local_kv_heads,
+            local_attn_window,
+            n_experts,
+            n_experts_used,
+        ) = if is_e2b {
+            (35u32, 7u32, 1u32, 1u32, 512u32, 0u32, 0u32)
+        } else if is_e4b {
+            (42, 7, 2, 2, 512, 0, 0)
+        } else if is_12b {
+            (48, 8, 1, 8, 1024, 0, 0)
+        } else if named_26b_a4b || (!has_named_size && param_b < 30.0) {
+            // "A4B" is active parameter count. Eight routed experts plus one shared
+            // expert contribute per token.
+            (30, 5, 2, 8, 1024, 128, 9)
+        } else {
+            (60, 10, 4, 16, 1024, 0, 0)
+        };
+
         Self {
             n_layers,
             n_kv_heads: global_kv_heads, // KV heads for global (full-context) layers
@@ -1312,14 +1331,13 @@ pub fn auto_size(
     }
 
     if arch.is_moe() && n_cpu_moe > 0 {
-        let expert_fraction = (arch.n_experts - n_cpu_moe as u32) as f64 / arch.n_experts as f64;
-        let speed_penalty = 1.0 - expert_fraction;
+        let cpu_layers = (n_cpu_moe as u32).min(arch.n_layers);
+        let gpu_layers = arch.n_layers.saturating_sub(cpu_layers);
+        let cpu_fraction = cpu_layers as f64 / arch.n_layers.max(1) as f64;
         notes.push(format!(
-            "MoE: {} of {} experts in VRAM, {} on CPU (~{:.0}% generation speed reduction).",
-            arch.n_experts - n_cpu_moe as u32,
-            arch.n_experts,
-            n_cpu_moe,
-            speed_penalty * 60.0
+            "MoE: expert tensors for {gpu_layers} of {} layers in VRAM, {cpu_layers} layers on CPU (~{:.0}% generation speed reduction).",
+            arch.n_layers,
+            cpu_fraction * 60.0
         ));
     }
     if arch.mtp_depth > 0 {
@@ -1479,8 +1497,8 @@ fn build_scenarios(
     }
 
     // For MoE: add a "tight-fit" scenario with more CPU offload for extended context
-    if arch.is_moe() && arch.n_experts > 0 {
-        let aggressive_cpu = ((arch.n_experts as f64 * 0.75) as i32).min(arch.n_experts as i32 - 1);
+    if arch.is_moe() && arch.n_layers > 1 {
+        let aggressive_cpu = ((arch.n_layers as f64 * 0.75) as i32).min(arch.n_layers as i32 - 1);
         let ctx = max_context(
             model_size_bytes,
             arch,
@@ -1514,7 +1532,7 @@ fn build_scenarios(
             vram_total_gb: bd.total_bytes as f64 / 1e9,
             recommended: false,
             warning: Some(format!(
-                "{aggressive_cpu} experts on CPU — slower generation"
+                "Expert tensors from {aggressive_cpu} layers on CPU — slower generation"
             )),
             note: format!("{} tokens", format_ctx(ctx)),
         });
@@ -1563,6 +1581,7 @@ pub struct QuantOption {
 pub fn quant_comparison_table(
     param_b: f64,
     arch: &ModelArch,
+    model_name: &str,
     available_vram_bytes: u64,
     _use_case: UseCase,
     parallel_slots: u32,
@@ -1578,11 +1597,19 @@ pub fn quant_comparison_table(
     let mut best_quant: Option<String> = None;
     let mut best_score = 0u64;
     let headroom = compute_headroom(available_vram_bytes, is_unified_memory);
+    let lower_name = model_name.to_ascii_lowercase();
+    let is_gemma4_qat = (lower_name.contains("gemma-4") || lower_name.contains("gemma4"))
+        && lower_name.contains("qat");
 
     for &q_name in &show_quants {
         let qi = match find_quant(q_name) {
             Some(qi) => qi,
             None => continue,
+        };
+        let quality = if is_gemma4_qat && q_name == "q4_0" {
+            QuantQuality::Excellent
+        } else {
+            qi.quality
         };
 
         // Skip large-MoE-only quants for dense or small models
@@ -1630,10 +1657,18 @@ pub fn quant_comparison_table(
         if qi.large_moe_only {
             notes.push("Designed for large MoE models; poor for dense".into());
         }
-        match qi.quality {
+        if is_gemma4_qat && q_name == "q4_0" {
+            notes.push(
+                "Official Gemma 4 QAT target; preserves near-BF16 quality at 4-bit weights".into(),
+            );
+        }
+        match quality {
             QuantQuality::Reference => notes.push("Bit-accurate reference quality".into()),
             QuantQuality::Excellent => {
-                notes.push("Near-lossless; essentially equivalent to F16 for most tasks".into())
+                if !(is_gemma4_qat && q_name == "q4_0") {
+                    notes
+                        .push("Near-lossless; essentially equivalent to F16 for most tasks".into());
+                }
             }
             QuantQuality::VeryGood => {}
             QuantQuality::Good => {}
@@ -1652,7 +1687,7 @@ pub fn quant_comparison_table(
 
         // Score for recommendation: balance of quality × context × fits
         let score = if fits {
-            max_q8.min(128_000) * quality_weight(qi.quality)
+            max_q8.min(128_000) * quality_weight(quality)
         } else {
             0
         };
@@ -1668,13 +1703,23 @@ pub fn quant_comparison_table(
             fits_vram: fits,
             max_ctx_q8: max_q8,
             max_ctx_q4: max_q4,
-            quality: qi.quality,
+            quality,
             is_imatrix: qi.is_imatrix,
             large_moe_only: qi.large_moe_only,
             recommended: false, // filled in below
-            quality_label: quality_label(qi.quality),
+            quality_label: quality_label(quality),
             notes,
         });
+    }
+
+    // Gemma 4 QAT is explicitly trained for Q4_0. Prefer that target whenever it
+    // fits instead of allowing a generic higher-bit option to win a tied score.
+    if is_gemma4_qat
+        && options
+            .iter()
+            .any(|opt| opt.quant == "q4_0" && opt.fits_vram)
+    {
+        best_quant = Some("q4_0".into());
     }
 
     // Mark recommended
@@ -1934,6 +1979,7 @@ mod tests {
         let opts = quant_comparison_table(
             27.0,
             &arch,
+            "Qwen3.6-27B-Q4_K_M.gguf",
             32 * 1024 * 1024 * 1024,
             UseCase::General,
             1,
@@ -2177,6 +2223,37 @@ mod tests {
             arch.local_kv_heads, 8,
             "Gemma4-26B-A4B local layers have 8 KV heads"
         );
+    }
+
+    #[test]
+    fn gemma4_12b_is_dense_unified_architecture() {
+        let arch = ModelArch::from_name_and_params("gemma-4-12B-it-qat-Q4_0.gguf", 11.95);
+        assert!(!arch.is_moe(), "Gemma4-12B is dense, not the 26B MoE");
+        assert_eq!(arch.n_layers, 48);
+        assert_eq!(arch.n_global_attn_layers, 8);
+        assert_eq!(arch.n_kv_heads, 1);
+        assert_eq!(arch.local_kv_heads, 8);
+        assert_eq!(arch.head_dim, 256);
+        assert_eq!(arch.global_head_dim, 512);
+        assert_eq!(arch.local_attn_window, 1024);
+    }
+
+    #[test]
+    fn gemma4_qat_q4_0_is_recommended_as_near_reference_quality() {
+        let arch = ModelArch::from_name_and_params("gemma-4-12B-it-qat-Q4_0.gguf", 11.95);
+        let opts = quant_comparison_table(
+            11.95,
+            &arch,
+            "gemma-4-12B-it-qat-Q4_0.gguf",
+            16 * 1024 * 1024 * 1024,
+            UseCase::General,
+            1,
+            false,
+        );
+        let q4 = opts.iter().find(|o| o.quant == "q4_0").unwrap();
+        assert_eq!(q4.quality, QuantQuality::Excellent);
+        assert!(q4.recommended);
+        assert!(q4.notes.iter().any(|n| n.contains("QAT target")));
     }
 
     #[test]

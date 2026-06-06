@@ -258,10 +258,16 @@ pub fn predict_perf_hints(
         });
     }
 
-    // 2. 256-dim heads (Qwen3.5/3.6): quantized KV is a slow path on Metal at
-    //    moderate context. Prefer f16 KV when the context is small enough to fit.
+    // 2. Qwen3.5/3.6 hybrid attention with 256-dim heads: quantized KV is a slow
+    //    path on Metal at moderate context. Gemma 4 also uses 256-dim local heads,
+    //    but does not share this measured Qwen-specific behavior.
     let kv_is_quantized = ctk != "f16" || ctv != "f16";
-    if is_unified_memory && arch.head_dim >= 256 && context_size <= 32_768 && kv_is_quantized {
+    if is_unified_memory
+        && arch.is_hybrid_attn()
+        && arch.head_dim >= 256
+        && context_size <= 32_768
+        && kv_is_quantized
+    {
         out.push(BenchmarkSuggestion {
             label: "Use f16 KV cache at this context".to_string(),
             description:
@@ -1283,5 +1289,24 @@ mod tests {
         assert_eq!(arch.n_layers, 64, "n_layers from introspection");
         assert_eq!(arch.n_kv_heads, 4, "n_kv_heads from introspection");
         assert_eq!(arch.n_attn_layers, 16, "only 16 of 64 layers use KV cache");
+    }
+
+    #[test]
+    fn perf_hints_do_not_apply_qwen_kv_advice_to_gemma4() {
+        let arch =
+            crate::llama::vram_estimator::ModelArch::from_name_and_params("gemma-4-31B", 31.0);
+        let hints = predict_perf_hints(&arch, 16_384, "q8_0", "q8_0", true, None, false);
+        assert!(
+            !hints.iter().any(|h| h.param == "ctk"),
+            "Gemma 4 should not receive the Qwen-specific f16 KV recommendation"
+        );
+    }
+
+    #[test]
+    fn perf_hints_keep_qwen_hybrid_kv_advice() {
+        let arch =
+            crate::llama::vram_estimator::ModelArch::from_name_and_params("Qwen3.6-27B", 27.0);
+        let hints = predict_perf_hints(&arch, 16_384, "q8_0", "q8_0", true, None, false);
+        assert!(hints.iter().any(|h| h.param == "ctk"));
     }
 }

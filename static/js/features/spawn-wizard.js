@@ -56,12 +56,14 @@ function kvBytes(arch, ctx, slots, ctk, ctv) {
   if (arch.localAttnWindow > 0 && arch.nGlobalAttnLayers < arch.nLayers) {
     const globalL = arch.nGlobalAttnLayers;
     const localL  = arch.nLayers - globalL;
-    const hd = arch.headDim, window = arch.localAttnWindow;
+    const localHd = arch.headDim;
+    const globalHd = arch.globalHeadDim || localHd;
+    const window = arch.localAttnWindow;
     const gkv = arch.nKvHeads, lkv = arch.localKvHeads || 1;
     const gCtx = ctx * s;
     const lCtx = Math.min(ctx, window) * s;
-    return (globalL * gkv * hd * gCtx * (k + v)) +
-           (localL  * lkv * hd * lCtx * (k + v));
+    return (globalL * gkv * globalHd * gCtx * (k + v)) +
+           (localL  * lkv * localHd * lCtx * (k + v));
   }
   return effectiveLayers * arch.nKvHeads * arch.headDim * ctx * s * (k + v);
 }
@@ -1162,6 +1164,7 @@ function _inferFamilyFromName(name) {
   if (lower.includes('qwen3') || lower.includes('qwen-3') || lower.includes('qwen_3')) return 'qwen3';
   if (lower.includes('qwen2.5') || lower.includes('qwen2_5') || lower.includes('qwen25')) return 'qwen2.5';
   if (lower.includes('qwen')) return 'qwen';
+  if (lower.includes('gemma-4') || lower.includes('gemma_4') || lower.includes('gemma4')) return 'gemma4';
   if (lower.includes('gemma-3') || lower.includes('gemma_3') || lower.includes('gemma3')) return 'gemma3';
   if (lower.includes('gemma-2') || lower.includes('gemma_2') || lower.includes('gemma2')) return 'gemma2';
   if (lower.includes('gemma')) return 'gemma';
@@ -1895,6 +1898,10 @@ async function loadQuantAdvisor() {
       n_layers: wizardState.arch.nLayers || undefined,
       n_kv_heads: wizardState.arch.nKvHeads || undefined,
       head_dim: wizardState.arch.headDim || undefined,
+      global_head_dim: buildHeuristicArch(
+        wizardState.model.path || wizardState.model.hfRepo || '',
+        paramB,
+      ).globalHeadDim || undefined,
       n_experts: wizardState.arch.nExperts || undefined,
       mtp_depth: wizardState.arch.mtpDepth || undefined,
     };
@@ -2847,7 +2854,10 @@ async function fetchHfFiles(repo) {
           path: el.dataset.filename,
           name: el.dataset.filename,
           size: el.dataset.size ? Number(el.dataset.size) : 0,
+          label: el.dataset.label || '',
           is_mmproj: el.dataset.mmproj === '1',
+          is_recommended_mmproj: el.dataset.recommendedMmproj === '1',
+          mmproj_recommendation: el.dataset.mmprojRecommendation || '',
         };
         if (f.is_mmproj) wizardState.model.mmprojFiles.push(f);
         else wizardState.model.quantFiles.push(f);
@@ -3209,11 +3219,42 @@ function buildHeuristicArch(name, paramB) {
     };
   }
 
-  // Gemma-4 MoE (e.g. Gemma-4-26B-A4B) is both Gemma alternating attention AND MoE
-  const isGemma = lower.includes('gemma-3') || lower.includes('gemma3') ||
-                  lower.includes('gemma-4') || lower.includes('gemma4');
+  const isGemma4 = lower.includes('gemma-4') || lower.includes('gemma4');
+  if (isGemma4) {
+    const namedE2B = lower.includes('e2b');
+    const namedE4B = lower.includes('e4b');
+    const named12B = lower.includes('12b');
+    const named26BA4B = lower.includes('26b-a4b') || lower.includes('26b_a4b') || lower.includes('a4b');
+    const named31B = lower.includes('31b');
+    const hasNamedSize = namedE2B || namedE4B || named12B || named26BA4B || named31B;
+    const isE2B = namedE2B || (!hasNamedSize && paramB < 6);
+    const isE4B = namedE4B || (!hasNamedSize && !isE2B && paramB < 10);
+    const is12B = named12B || (!hasNamedSize && !isE2B && !isE4B && paramB < 20);
+    let cfg;
+    if (isE2B) cfg = [35, 7, 1, 1, 512, 0, 0];
+    else if (isE4B) cfg = [42, 7, 2, 2, 512, 0, 0];
+    else if (is12B) cfg = [48, 8, 1, 8, 1024, 0, 0];
+    else if (named26BA4B || (!hasNamedSize && paramB < 30)) cfg = [30, 5, 2, 8, 1024, 128, 9];
+    else cfg = [60, 10, 4, 16, 1024, 0, 0];
+    return {
+      nLayers: wizardState.arch.nLayers || cfg[0],
+      nKvHeads: wizardState.arch.nKvHeads || cfg[2],
+      headDim: wizardState.arch.headDim || 256,
+      globalHeadDim: 512,
+      nGlobalAttnLayers: cfg[1],
+      localAttnWindow: cfg[4],
+      localKvHeads: cfg[3],
+      nExperts: wizardState.arch.nExperts || cfg[5],
+      nExpertsUsed: wizardState.arch.nExpertsUsed || cfg[6],
+      expertFraction: 0.65,
+      mtpDepth: wizardState.arch.mtpDepth || 0,
+      mmprojBytes: wizardState.arch.mmprojBytes || 0,
+      paramB,
+    };
+  }
 
-  if (isGemma) {
+  const isGemma3 = lower.includes('gemma-3') || lower.includes('gemma3');
+  if (isGemma3) {
     const n = paramB < 5 ? [34, 4, 256] : paramB < 14 ? [52, 8, 256] : [62, 16, 256];
     const globalL = Math.round(n[0] / 6);
     return {
@@ -3994,6 +4035,35 @@ function renderHardwareModelHeader() {
 
 // ── Hardware step: mmproj name-matching helper ────────────────────────────────
 
+function _mmprojQuantLabel(file) {
+  if (file.label) return String(file.label).toUpperCase();
+  const name = (file.path || file.name || '').toUpperCase();
+  if (name.includes('BF16')) return 'BF16';
+  if (/(?:^|[-_.])F16(?:[-_.]|$)/.test(name)) return 'F16';
+  if (name.includes('Q8_0')) return 'Q8_0';
+  if (name.includes('F32')) return 'F32';
+  return '';
+}
+
+function _preferredMmprojQuant(modelFilename = '') {
+  const family = wizardState.model.family
+    || _inferFamilyFromName(wizardState.model.hfRepo || '')
+    || _inferFamilyFromName(modelFilename);
+  if (family === 'qwen3.5' || family === 'qwen3.6') return 'F16';
+  if (family === 'gemma4') return 'F16';
+  return '';
+}
+
+function _isRecommendedMmproj(file, modelFilename = '') {
+  if (file.is_recommended_mmproj) return true;
+  const preferred = _preferredMmprojQuant(modelFilename);
+  return !!preferred && _mmprojQuantLabel(file) === preferred;
+}
+
+function _mmprojPracticalRank(file) {
+  return { F16: 0, BF16: 1, Q8_0: 2, F32: 3 }[_mmprojQuantLabel(file)] ?? 4;
+}
+
 // Return the mmproj file whose name shares the longest common prefix (after
 // stripping quant suffix and normalising to alphanumeric) with the model stem.
 // Returns null if the best match is shorter than 5 normalised characters —
@@ -4003,7 +4073,7 @@ function _bestMmprojForModel(modelFilename, files) {
   const stem = _modelStemForSearch(modelFilename)
     .toLowerCase().replace(/[^a-z0-9]/g, '');
   if (!stem) return files.length === 1 ? files[0] : null;
-  let best = null, bestScore = -1;
+  let best = null, bestScore = -1, bestRecommended = false, bestQuantRank = Infinity;
   for (const f of files) {
     const base = (f.path || f.name || '').split(/[\\/]/).pop() || '';
     const fstem = _modelStemForSearch(base)
@@ -4013,9 +4083,20 @@ function _bestMmprojForModel(modelFilename, files) {
       if (stem[i] === fstem[i]) score++;
       else break;
     }
-    if (score > bestScore) { bestScore = score; best = f; }
+    const recommended = _isRecommendedMmproj(f, modelFilename);
+    const quantRank = _mmprojPracticalRank(f);
+    if (score > bestScore
+      || (score === bestScore && recommended && !bestRecommended)
+      || (score === bestScore && recommended === bestRecommended && quantRank < bestQuantRank)) {
+      bestScore = score;
+      bestRecommended = recommended;
+      bestQuantRank = quantRank;
+      best = f;
+    }
   }
-  return bestScore >= 5 ? best : null;
+  if (bestScore >= 5) return best;
+  const recommended = files.filter(f => _isRecommendedMmproj(f, modelFilename));
+  return recommended.length === 1 ? recommended[0] : null;
 }
 
 // ── Hardware step: mmproj section ────────────────────────────────────────────
@@ -4040,10 +4121,13 @@ function renderMmprojSection() {
 
   const select = document.getElementById('hw-mmproj-select');
   if (!select) return;
+  const modelFilename = (wizardState.model.path || wizardState.model.hfFile || '')
+    .split(/[\\/]/).pop() || '';
+  const populationKey = `${files.length}:${_preferredMmprojQuant(modelFilename)}`;
 
   // Re-populate if the file list changed (e.g. after a companion download)
-  if (select.dataset.populated !== String(files.length)) {
-    select.dataset.populated = String(files.length);
+  if (select.dataset.populated !== populationKey) {
+    select.dataset.populated = populationKey;
     select.innerHTML = '';
     const noneOpt = document.createElement('option');
     noneOpt.value = ''; noneOpt.textContent = '(none — text-only)';
@@ -4054,7 +4138,11 @@ function renderMmprojSection() {
       const opt = document.createElement('option');
       opt.value = fpath;
       const sizeStr = f.size ? ` · ${formatBytes(f.size)}` : '';
-      opt.textContent = fname + sizeStr;
+      const recommended = _isRecommendedMmproj(f, modelFilename);
+      opt.textContent = fname + sizeStr + (recommended ? ' · Recommended' : '');
+      if (recommended) {
+        opt.title = f.mmproj_recommendation || `${_mmprojQuantLabel(f)} is preferred for this model family`;
+      }
       if (fpath === (wizardState.model.mmprojPath || wizardState.model.mmprojHfFile)) opt.selected = true;
       select.appendChild(opt);
     });
@@ -4075,8 +4163,6 @@ function renderMmprojSection() {
   // Auto-select using name proximity to the model file rather than
   // alphabetical order — avoids grabbing a different model's mmproj.
   if (!select.value && files.length) {
-    const modelFilename = (wizardState.model.path || wizardState.model.hfFile || '')
-      .split(/[\\/]/).pop() || '';
     const best = _bestMmprojForModel(modelFilename, files);
     if (best) {
       const bestPath = best.path || best.name || '';
@@ -4885,7 +4971,8 @@ function _renderMmprojDownloadFromHf(row) {
   row.appendChild(panel);
 
   const originRepo = wizardState.model.originRepo || '';
-  const modelFilename = (wizardState.model.path || '').split(/[\\/]/).pop() || '';
+  const modelFilename = (wizardState.model.path || wizardState.model.hfFile || '')
+    .split(/[\\/]/).pop() || '';
 
   if (originRepo) {
     // Already know the repo — go straight to the fetch form, which auto-fetches
@@ -4923,7 +5010,9 @@ function _renderMmprojDownloadFromHf(row) {
         btn.style.cssText = 'min-height:26px;padding:4px 10px;font-size:10px;text-align:left;';
         const fname = (f.rfilename || f.path || '').split('/').pop();
         const sizeStr = f.size ? ` · ${formatBytes(f.size)}` : '';
-        btn.textContent = `⬇ ${fname}${sizeStr}`;
+        const recommended = _isRecommendedMmproj(f, modelFilename);
+        btn.textContent = `⬇ ${fname}${sizeStr}${recommended ? ' · Recommended' : ''}`;
+        if (recommended) btn.title = f.mmproj_recommendation || 'Preferred projector format for this model family';
         btn.addEventListener('click', () => _downloadMmprojFromHf(result.repoId, f, wizardState.model.path || wizardState.model.hfFile, statusEl));
         listEl.appendChild(btn);
       });
@@ -5005,7 +5094,11 @@ function _showMmprojHfFetchForm(row, panel, prefill = '') {
       btn.style.cssText = 'min-height:26px;padding:4px 10px;font-size:10px;text-align:left;';
       const fname = (f.rfilename || f.path || '').split('/').pop();
       const sizeStr = f.size ? ` · ${formatBytes(f.size)}` : '';
-      btn.textContent = `⬇ ${fname}${sizeStr}`;
+      const modelFilename = (wizardState.model.path || wizardState.model.hfFile || '')
+        .split(/[\\/]/).pop() || '';
+      const recommended = _isRecommendedMmproj(f, modelFilename);
+      btn.textContent = `⬇ ${fname}${sizeStr}${recommended ? ' · Recommended' : ''}`;
+      if (recommended) btn.title = f.mmproj_recommendation || 'Preferred projector format for this model family';
       btn.addEventListener('click', () => _downloadMmprojFromHf(repoId, f, wizardState.model.path || wizardState.model.hfFile, statusEl));
       listEl.appendChild(btn);
     });
@@ -5289,6 +5382,7 @@ async function triggerAutoSize() {
       n_layers:              arch.nLayers    || undefined,
       n_kv_heads:            arch.nKvHeads   || undefined,
       head_dim:              arch.headDim    || undefined,
+      global_head_dim:       arch.globalHeadDim || undefined,
       n_attn_layers:         arch.nAttnLayers || undefined,
       linear_attn_state_bytes: arch.linearAttnStateBytes || undefined,
       n_global_attn_layers:  arch.nGlobalAttnLayers || undefined,

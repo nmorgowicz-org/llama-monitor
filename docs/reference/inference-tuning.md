@@ -79,12 +79,47 @@ size, so a smaller quant is the only loader-independent way to speed up dense de
 | Q5_K_M | ~5.7 | very good | Good default when VRAM allows |
 | **Q4_K_M** | ~4.8 | **good** | **The default sweet spot for most models** |
 | Q4_K_S | ~4.5 | good- | Squeeze a model into tight VRAM |
+| Q4_0 | ~4.5 | acceptable normally | **Preferred for official Gemma 4 QAT checkpoints** |
 | IQ3 / Q3_K | ~3.4 | noticeable loss | Last resort to fit |
 | **MXFP4** | ~4.25 | native for gpt-oss | Use the official gpt-oss MXFP4 builds |
 
 **MLX quant note:** MLX 4-bit ≈ llama.cpp Q4 in bytes, therefore ≈ the same
 decode speed. The *format* is not a speedup; only fewer *bits* are. See
 [Loader choice](#loader-choice-llamacpp-vs-mlx).
+
+### Gemma 4 QAT
+
+Google's Gemma 4 QAT checkpoints were trained to preserve near-BF16 quality when
+converted to **Q4_0**. This changes the quality/size trade-off, not the runtime
+architecture:
+
+- Prefer the official `*-qat-q4_0-gguf` file when choosing a compact Gemma 4.
+  The quant advisor recognizes `gemma-4` + `qat` names and rates Q4_0 as the
+  high-quality target instead of applying the generic Q4_0 quality penalty.
+- Unsloth's QAT GGUF repositories currently expose a QAT-derived
+  `UD-Q4_K_XL` model plus separate multimodal projectors. Use the exact file size
+  for VRAM planning; no QAT-specific llama-server flag is required.
+- Prefer the matching **F16 mmproj** for Gemma 4 when it is available. This is
+  Unsloth's documented llama.cpp default for both normal and QAT repositories;
+  the QAT model does not require a different projector precision. Compatibility
+  still comes first: use the projector produced for the same Gemma 4 variant and
+  revision rather than borrowing an F16 projector from another model.
+- QAT applies to **model weights**, not `-ctk` / `-ctv`. Choose KV precision from
+  context and measured throughput exactly as for the non-QAT model.
+- Gemma 4's MTP assistant is a separate matching draft checkpoint. A base QAT
+  GGUF does not by itself mean MTP is active; enable speculative decoding only
+  after supplying the compatible draft model.
+
+Approximate official Q4_0 load footprints, including Google's 20% loading
+allowance but excluding context KV and runtime-specific extras:
+
+| Model | Q4_0 memory | Architecture |
+|---|---:|---|
+| Gemma 4 E2B | 2.9 GB | dense, 128K context |
+| Gemma 4 E4B | 4.5 GB | dense, 128K context |
+| Gemma 4 12B | 6.7 GB | dense unified multimodal, 256K context |
+| Gemma 4 26B-A4B | 14.4 GB | MoE, 256K context |
+| Gemma 4 31B | 17.5 GB | dense, 256K context |
 
 ---
 
@@ -163,10 +198,11 @@ gracefully — it pages to SSD and collapses. See [VRAM estimator](vram-estimato
 |---|---|---|---|---|
 | Qwen3.6-35B-A3B (MoE) | ✅ | **Q4_K_M, q8 KV @131k / f16 KV @≤32k** | 30–70 t/s | **Best all-round pick.** MTP on. |
 | gpt-oss-20b (MoE) | ✅ easily | MXFP4 (native) | very fast | Great light/coding model. |
-| Gemma 4 26B-A4B (MoE) | ✅ | Q4_K_M, f16 KV | fast | Cheap KV (sliding window). |
+| Gemma 4 12B (dense) | ✅ easily | **QAT Q4_0**, f16 KV | fast | Strong compact multimodal/agentic option. |
+| Gemma 4 26B-A4B (MoE) | ✅ | **QAT Q4_0**, f16 KV | fast | Cheap KV; ample unified-memory headroom. |
 | Qwen3-Coder (30B-A3B class, MoE) | ✅ | Q4_K_M | fast | Coder-tuned MoE. |
 | Qwen3.6-27B (dense) | ✅ | Q5_K_S/Q4_K_M, **f16 KV ≤32k** | ~17 t/s (≤7 at depth) | Quality model, but slow; MTP helps. |
-| Gemma 4 31B (dense) | ✅ | Q4_K_M | ~12–16 t/s | Dense; cheap KV softens long ctx. |
+| Gemma 4 31B (dense) | ✅ | **QAT Q4_0** | ~12–16 t/s | Dense; QAT improves 4-bit quality and cheap KV softens long ctx. |
 | Llama 3.3 70B (dense) | ✅ Q4 (~40 GB) | Q4_K_M, q8 KV | ~8–10 t/s | Batch only; painful interactive. |
 | gpt-oss-120b (MoE) | ❌ (~63 GB + KV) | — | — | No room for KV/OS on 64 GB. |
 | Qwen3.5-122B-A10B (MoE) | ❌ at Q4 (~65 GB) | — | — | Needs 128 GB. |
@@ -276,13 +312,15 @@ generalize to new releases.
   quantized-KV is a slow path on Metal (prefer f16 KV when it fits). All ship MTP
   GGUFs — always enable `--spec-type draft-mtp`. MoE variants (A3B/A10B) are the
   right pick on every platform for speed.
-- **Gemma 4 (dense 31B & 26B-A4B MoE):** alternating **local/global attention**
+- **Gemma 4 (E2B, E4B, dense 12B/31B, and 26B-A4B MoE):** alternating **local/global attention**
   (sliding-window local layers + sparse full-context global layers,
   `global_head_dim = 512`) makes the KV cache **much cheaper at long context** than
-  a same-size Qwen/Llama. Consequence: Gemma can hold larger contexts in the same
-  memory, and the dense 31B is more tolerable at depth than a dense Qwen 27B even
-  though raw decode is similar (~12–16 t/s on M5 Max, fast on a 5090). The 26B-A4B
-  MoE is the fast option and fits a 5080's 16 GB at Q4. The app's
+  a same-size Qwen/Llama. The 12B, 26B-A4B, and 31B support 256K context; E2B/E4B
+  support 128K. The QAT releases make Q4_0 the preferred quality/size choice.
+  The dense 31B is more tolerable at depth than a dense Qwen 27B even though raw
+  decode is similar (~12–16 t/s on M5 Max, fast on a 5090). The 26B-A4B MoE is
+  the fast option, but its 14.4 GB Q4_0 load estimate leaves limited room for KV
+  and multimodal overhead on a 16 GB GPU. The app's
   [VRAM estimator](vram-estimator.md) models Gemma's two attention regimes
   explicitly — trust its long-context numbers over the generic formula.
 - **gpt-oss (20b & 120b, MoE, native MXFP4):** always use the official **MXFP4**
@@ -301,8 +339,9 @@ generalize to new releases.
 
 | Model | 5080 (16 GB) | 5090 (32 GB) |
 |---|---|---|
-| Gemma 4 26B-A4B (MoE) | ✅ Q4 fits, fast | ✅ Q5/Q6, very fast |
-| Gemma 4 31B (dense) | ❌ partial offload (slow) | ✅ Q4 (~18 GB), fast |
+| Gemma 4 12B (dense) | ✅ QAT Q4_0, roomy | ✅ QAT Q4_0, very fast |
+| Gemma 4 26B-A4B (MoE) | ⚠️ QAT Q4_0 is tight after KV/mmproj | ✅ QAT Q4_0, very fast |
+| Gemma 4 31B (dense) | ❌ full GPU fit | ✅ QAT Q4_0 (~17.5 GB), fast |
 | gpt-oss-20b (MoE) | ✅ MXFP4 | ✅ MXFP4, very fast |
 | gpt-oss-120b (MoE) | `--n-cpu-moe` high + ≥128 GB RAM | `--n-cpu-moe` moderate + ≥128 GB RAM |
 | Qwen3.5-122B-A10B (MoE) | `--n-cpu-moe` high + ≥128 GB RAM | `--n-cpu-moe` + ≥128 GB RAM |
@@ -393,5 +432,10 @@ MTP / speculative decoding:
 - [Run Qwen3.6 MTP in llama.cpp — flag change writeup (mer.vin)](https://mer.vin/2026/05/run-qwen-3-6-mtp-in-llama-cpp-faster-local-inference-with-built-in-speculative-decoding/)
 - [MTP + llama.cpp with Qwen3.6-27B step-by-step (Dre Dyson)](https://dredyson.com/mtp-llama-cpp-with-qwen3-6-27b-a-complete-beginners-step-by-step-guide-to-speculative-decoding-turboquant-and-running-multiple-models-on-limited-gpu-vram/)
 - [MLX + native MTP speculative decoding, 18 t/s on a 27B (vinoth12940)](https://vinoth12940.github.io/blog/articles/genai-20260519-local-mtp-speculative-decoding/)
+
+Gemma 4 QAT:
+- [Gemma 4 QAT launch (Google)](https://blog.google/innovation-and-ai/technology/developers-tools/quantization-aware-training-gemma-4/)
+- [Gemma 4 model and QAT deployment overview (Google AI)](https://ai.google.dev/gemma/docs/core)
+- [Gemma 4 QAT guide (Unsloth)](https://unsloth.ai/docs/models/gemma-4/qat)
 
 Related internal docs: [vram-estimator.md](vram-estimator.md) · [cli-flags.md](cli-flags.md) · [spawn-wizard.md](spawn-wizard.md)

@@ -226,6 +226,10 @@ pub struct HfGgufFile {
     pub is_imatrix: bool,
     /// mmproj companion hint: true if this looks like a vision projector.
     pub is_mmproj: bool,
+    /// True when this projector's quant matches the preferred format for the model family.
+    pub is_recommended_mmproj: bool,
+    /// Short explanation for the family-specific projector recommendation.
+    pub mmproj_recommendation: String,
 }
 
 /// High-level model info from HF (for the model info endpoint).
@@ -323,7 +327,7 @@ pub fn known_gguf_quantizers() -> Vec<KnownQuantizer> {
             display_name: "Unsloth".into(),
             description: "UD (Unsloth Dynamic) quants — mixed bpw per layer. Excellent quality/size. Also does fine-tuning and finetune-GGUF releases.".into(),
             quant_style: "ud",
-            note: Some("UD-* files are dynamic quants; look for BF16 mmproj companions".into()),
+            note: Some("UD-* files are dynamic quants; projector recommendations depend on the model family".into()),
         },
         KnownQuantizer {
             username: "lmstudio-community".into(),
@@ -748,6 +752,19 @@ pub async fn hf_list_gguf_files(repo_id: &str) -> Result<Vec<HfGgufFile>, String
     let repo_owner = repo_id.split('/').next().unwrap_or("");
     let _provider = QuantProvider::from_username(repo_owner);
 
+    let family = {
+        let from_repo = infer_family_from_name(repo_id);
+        if from_repo.is_empty() {
+            info.siblings
+                .iter()
+                .map(|s| infer_family_from_name(&s.rfilename))
+                .find(|candidate| !candidate.is_empty())
+                .unwrap_or_default()
+        } else {
+            from_repo
+        }
+    };
+    let mmproj_preference = mmproj_preference_for_family(&family);
     let mut result: Vec<HfGgufFile> = info
         .siblings
         .iter()
@@ -758,27 +775,85 @@ pub async fn hf_list_gguf_files(repo_id: &str) -> Result<Vec<HfGgufFile>, String
             let is_imatrix = matches!(quant_type, QuantFileType::Imatrix);
             let is_mmproj = name.to_ascii_lowercase().contains("mmproj")
                 || name.to_ascii_lowercase().contains("projector");
+            let label = infer_quant_label(name);
+            let is_recommended_mmproj =
+                is_mmproj && mmproj_preference.is_some_and(|preference| preference.label == label);
             HfGgufFile {
                 path: name.to_string(),
                 size: sizes.get(name).copied().unwrap_or(0),
-                label: infer_quant_label(name),
+                label,
                 quant_type,
                 is_imatrix,
                 is_mmproj,
+                is_recommended_mmproj,
+                mmproj_recommendation: if is_recommended_mmproj {
+                    mmproj_preference
+                        .map(|preference| preference.reason.to_string())
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                },
             }
         })
         .collect();
 
-    // Sort: mmproj last, then by quant quality (higher quality first), then by size desc
+    // Sort main model files first. Within projector files, put the family-specific
+    // recommendation ahead of generic precision ordering.
     result.sort_by(|a, b| {
-        // mmproj files go at the end
         a.is_mmproj
             .cmp(&b.is_mmproj)
-            .then_with(|| sort_rank_quant_label(&a.label).cmp(&sort_rank_quant_label(&b.label)))
+            .then_with(|| b.is_recommended_mmproj.cmp(&a.is_recommended_mmproj))
+            .then_with(|| {
+                let a_rank = if a.is_mmproj {
+                    sort_rank_mmproj_label(&a.label)
+                } else {
+                    sort_rank_quant_label(&a.label)
+                };
+                let b_rank = if b.is_mmproj {
+                    sort_rank_mmproj_label(&b.label)
+                } else {
+                    sort_rank_quant_label(&b.label)
+                };
+                a_rank.cmp(&b_rank)
+            })
             .then_with(|| b.size.cmp(&a.size))
     });
 
     Ok(result)
+}
+
+#[derive(Clone, Copy)]
+struct MmprojPreference {
+    label: &'static str,
+    reason: &'static str,
+}
+
+fn mmproj_preference_for_family(family: &str) -> Option<MmprojPreference> {
+    match family {
+        "qwen3.5" => Some(MmprojPreference {
+            label: "F16",
+            reason: "F16 is the documented llama.cpp projector default for Qwen 3.5",
+        }),
+        "qwen3.6" => Some(MmprojPreference {
+            label: "F16",
+            reason: "F16 is the practical default; upstream publishes F16 and BF16 without an optimization claim",
+        }),
+        "gemma4" => Some(MmprojPreference {
+            label: "F16",
+            reason: "F16 is the documented llama.cpp projector default for Gemma 4",
+        }),
+        _ => None,
+    }
+}
+
+fn sort_rank_mmproj_label(label: &str) -> u8 {
+    match label.to_ascii_uppercase().as_str() {
+        "F16" => 0,
+        "BF16" => 1,
+        "Q8_0" => 2,
+        "F32" => 3,
+        _ => 4,
+    }
 }
 
 /// Fetch file sizes from the HF tree API.
@@ -1326,6 +1401,9 @@ fn infer_family_from_name(name: &str) -> String {
     if lower.contains("qwen") {
         return "qwen".to_string();
     }
+    if lower.contains("gemma-4") || lower.contains("gemma_4") || lower.contains("gemma4") {
+        return "gemma4".to_string();
+    }
     if lower.contains("gemma-3") || lower.contains("gemma_3") || lower.contains("gemma3") {
         return "gemma3".to_string();
     }
@@ -1390,6 +1468,29 @@ mod tests {
         assert_eq!(infer_quant_label("Qwen3.6-27B-UD-Q4_K_M.gguf"), "Q4_K_M");
         assert_eq!(infer_quant_label("model-Q5_K_XL.gguf"), "Q5_K_XL");
         assert_eq!(infer_quant_label("model-IQ2_XXS.gguf"), "IQ2_XXS");
+    }
+
+    #[test]
+    fn test_infer_gemma4_family() {
+        assert_eq!(
+            infer_family_from_name("unsloth/gemma-4-31B-it-qat-GGUF"),
+            "gemma4"
+        );
+        assert_eq!(
+            infer_family_from_name("google/gemma_4_12B_it_qat_q4_0_gguf"),
+            "gemma4"
+        );
+    }
+
+    #[test]
+    fn test_mmproj_preferences_are_family_specific() {
+        let qwen = mmproj_preference_for_family("qwen3.6").expect("Qwen preference");
+        assert_eq!(qwen.label, "F16");
+
+        let gemma = mmproj_preference_for_family("gemma4").expect("Gemma preference");
+        assert_eq!(gemma.label, "F16");
+
+        assert!(mmproj_preference_for_family("llama3").is_none());
     }
 
     #[test]
@@ -1505,6 +1606,12 @@ mod tests {
         assert!(sort_rank_quant_label("Q8_0") < sort_rank_quant_label("Q4_K_M"));
         assert!(sort_rank_quant_label("Q4_K_M") < sort_rank_quant_label("Q3_K_M"));
         assert!(sort_rank_quant_label("Q3_K_M") < sort_rank_quant_label("IQ2_XXS"));
+    }
+
+    #[test]
+    fn test_mmproj_sort_prefers_practical_precision_over_f32() {
+        assert!(sort_rank_mmproj_label("F16") < sort_rank_mmproj_label("BF16"));
+        assert!(sort_rank_mmproj_label("BF16") < sort_rank_mmproj_label("F32"));
     }
 
     #[test]

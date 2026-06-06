@@ -2049,7 +2049,8 @@ fn api_vram_estimate(
                 // model_size_bytes is provided explicitly).
                 let model = body["model"].as_str().unwrap_or("").to_string();
                 let context_length = body["context_length"].as_u64().unwrap_or(4096);
-                // n_cpu_moe: number of MoE experts to keep on CPU (0 = all on GPU).
+                // n_cpu_moe: number of transformer layers whose expert tensors stay
+                // on CPU (0 = all expert tensors on GPU).
                 let n_cpu_moe = body["n_cpu_moe"].as_i64().map(|v| v as i32);
 
                 // model_size_bytes can be supplied explicitly (e.g. for HF models where
@@ -2316,6 +2317,7 @@ fn api_vram_quant_compare(
                 let table = crate::llama::vram_estimator::quant_comparison_table(
                     param_b,
                     &arch,
+                    &model_name,
                     available_vram_bytes,
                     use_case,
                     parallel_slots,
@@ -2526,6 +2528,10 @@ fn build_arch_from_body(
         .as_u64()
         .map(|v| v as u32)
         .unwrap_or(heuristic.head_dim);
+    let global_head_dim = body["global_head_dim"]
+        .as_u64()
+        .map(|v| v as u32)
+        .unwrap_or(heuristic.global_head_dim);
     let n_experts = body["n_experts"]
         .as_u64()
         .map(|v| v as u32)
@@ -2579,7 +2585,7 @@ fn build_arch_from_body(
         n_experts,
         n_experts_used: n_exp_used,
         expert_fraction: expert_frac,
-        global_head_dim: heuristic.global_head_dim,
+        global_head_dim,
         mtp_depth,
         mmproj_bytes,
         param_b,

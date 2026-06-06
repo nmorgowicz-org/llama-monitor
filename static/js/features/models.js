@@ -14,6 +14,7 @@ import {
     hfHideDownloadPanel,
     hfRenderDiscoverPills,
     hfLoadQuickPicks,
+    getRecommendedMmproj,
 } from './hf-browse.js';
 
 const PREFS_KEY = 'llama-monitor-models-prefs';
@@ -1541,6 +1542,7 @@ async function detectMmprojCompanion(repoId) {
 
         hfState.mmprojFiles = mmprojFiles;
         section.style.display = '';
+        const recommendedMmproj = getRecommendedMmproj(mmprojFiles);
 
         // Render mmproj options
         content.innerHTML = '';
@@ -1574,7 +1576,10 @@ async function detectMmprojCompanion(repoId) {
             const opt = document.createElement('option');
             opt.value = fpath;
             const sizeStr = f.size ? ' · ' + formatBytes(f.size) : '';
-            opt.textContent = fname + sizeStr;
+            opt.textContent = fname + sizeStr + (f.is_recommended_mmproj ? ' · Recommended' : '');
+            if (f.is_recommended_mmproj) {
+                opt.title = f.mmproj_recommendation || 'Preferred projector format for this model family';
+            }
             if (fpath === hfState.mmprojPath) opt.selected = true;
             select.appendChild(opt);
         });
@@ -1593,10 +1598,10 @@ async function detectMmprojCompanion(repoId) {
                 hfState.mmprojPath = '';
                 hfState.mmprojBytes = 0;
             } else if (!select.value && mmprojFiles.length) {
-                select.value = mmprojFiles[0].path || mmprojFiles[0].name || '';
+                const preferred = recommendedMmproj || mmprojFiles[0];
+                select.value = preferred.path || preferred.name || '';
                 hfState.mmprojPath = select.value;
-                const f = mmprojFiles[0];
-                hfState.mmprojBytes = f.size ? Number(f.size) : 0;
+                hfState.mmprojBytes = preferred.size ? Number(preferred.size) : 0;
             }
             scheduleVramUpdate(hfState.selectedFile);
         });
@@ -1606,7 +1611,11 @@ async function detectMmprojCompanion(repoId) {
         // Hint
         const hint = document.createElement('div');
         hint.style.cssText = 'font-size:11px; color:var(--color-text-muted,#94a3b8); margin-left:22px; line-height:1.5;';
-        hint.textContent = 'Adds ~' + (mmprojFiles[0]?.size ? formatBytes(mmprojFiles[0].size) : '0.5–1.5 GB') + ' VRAM. Required for multimodal inference.';
+        const sizeFile = recommendedMmproj || mmprojFiles[0];
+        const recommendation = recommendedMmproj?.mmproj_recommendation
+            ? recommendedMmproj.mmproj_recommendation + '. '
+            : '';
+        hint.textContent = recommendation + 'Adds ~' + (sizeFile?.size ? formatBytes(sizeFile.size) : '0.5–1.5 GB') + ' VRAM. Required for multimodal inference.';
         content.appendChild(hint);
 
     } catch {

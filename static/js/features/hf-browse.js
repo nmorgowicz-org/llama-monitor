@@ -317,6 +317,10 @@ function _makeLoadMoreBtn(onClick) {
 //   onOpenCardPanel                     – (repoId) => void
 //   onSelectFile                        – (file, repoId) => void
 
+export function getRecommendedMmproj(files) {
+  return (files || []).find(file => file.is_mmproj && file.is_recommended_mmproj) || null;
+}
+
 export async function hfListFiles({
   repoId,
   container,
@@ -362,6 +366,12 @@ export async function hfListFiles({
       item.setAttribute('role', 'button');
       item.dataset.filename = fname;
       item.dataset.size = file.size || '';
+      item.dataset.label = file.label || '';
+      if (file.is_mmproj) item.dataset.mmproj = '1';
+      if (file.is_recommended_mmproj) item.dataset.recommendedMmproj = '1';
+      if (file.mmproj_recommendation) {
+        item.dataset.mmprojRecommendation = file.mmproj_recommendation;
+      }
 
       const nameSpan = document.createElement('span');
       nameSpan.className = 'hf-file-name';
@@ -373,7 +383,11 @@ export async function hfListFiles({
       if (file.size) parts.push(formatBytes(file.size));
       if (file.label) {
         parts.push(file.label);
-        if (vramGb > 0 && file.label === getRecommendedQuant(vramGb)) parts.push('\u2713 Recommended');
+        if (file.is_recommended_mmproj) {
+          parts.push('\u2713 Family recommended');
+        } else if (!file.is_mmproj && vramGb > 0 && file.label === getRecommendedQuant(vramGb)) {
+          parts.push('\u2713 Recommended');
+        }
       }
       metaSpan.textContent = parts.join(' \u00b7 ');
 
@@ -397,6 +411,13 @@ export async function hfListFiles({
         b.textContent = 'mmproj';
         b.title = 'Vision projector — load alongside the main model for multimodal inference';
         nameSpan.appendChild(b);
+        if (file.is_recommended_mmproj) {
+          const recommended = document.createElement('span');
+          recommended.className = 'hf-file-badge hf-file-badge-recommended';
+          recommended.textContent = 'recommended';
+          recommended.title = file.mmproj_recommendation || 'Preferred projector format for this model family';
+          nameSpan.appendChild(recommended);
+        }
       }
 
       item.appendChild(nameSpan);

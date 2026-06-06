@@ -72,6 +72,29 @@ The core tuning step. Populated using `POST /api/vram/auto-size` after model sel
 #### Model Header
 Shows the selected repo (`owner/model-name`) and selected quant. If multiple GGUF files exist in the repo, a **Quantization** dropdown lets the user swap without leaving the step. A **Vision (mmproj)** dropdown appears when mmproj files are detected in the repo.
 
+Projector choices are ranked only after matching the selected model's filename/stem.
+The wizard marks and auto-selects these family-specific formats when available:
+
+| Model family | Preferred mmproj | Basis |
+|---|---|---|
+| Qwen 3.5 | F16 | Unsloth's documented llama.cpp vision default |
+| Qwen 3.6 | F16 | Practical default; upstream publishes F16 and BF16 without claiming one is optimized |
+| Gemma 4, including QAT | F16 | Unsloth's documented llama.cpp vision default |
+| Other / unknown | None | Preserve compatibility without making an unsupported family claim |
+
+Without a family-specific rule, compatible projectors are ordered by the
+practical fallback `F16`, `BF16`, `Q8_0`, then `F32`, but no option receives a
+family recommendation badge.
+
+The recommendation applies to projector precision, not compatibility. Always use a
+projector produced for the same model architecture and revision; do not mix a
+recommended F16/BF16 projector from a different family.
+
+Upstream references:
+[Qwen 3.5 llama.cpp guide](https://unsloth.ai/docs/models/qwen3.5),
+[Gemma 4 llama.cpp guide](https://unsloth.ai/docs/models/gemma-4), and
+[Qwen 3.6 GGUF files](https://huggingface.co/unsloth/Qwen3.6-27B-GGUF/tree/main).
+
 #### Main Hardware Grid
 
 | Control | ID | Default | Notes |
@@ -307,7 +330,9 @@ List GGUF files in a repo.
       "label": "Q4_K_M",
       "quant_type": "standard",
       "is_imatrix": false,
-      "is_mmproj": false
+      "is_mmproj": false,
+      "is_recommended_mmproj": false,
+      "mmproj_recommendation": ""
     }
   ]
 }
@@ -315,6 +340,8 @@ List GGUF files in a repo.
 
 - `quant_type`: `"standard"` | `"imatrix"` | `"unsloth_dynamic"`
 - `label`: normalized quant type extracted from filename (e.g. `"Q4_K_M"`, `"IQ3_S"`)
+- `is_recommended_mmproj`: true when an mmproj matches the known family preference
+- `mmproj_recommendation`: user-facing reason for that family preference, otherwise empty
 
 ### Download
 

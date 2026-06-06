@@ -39,6 +39,71 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         expect(Array.isArray(data.models)).toBe(true);
     });
 
+    test('HF file browser marks the family-recommended mmproj', async ({ page }) => {
+        await page.route('**/api/hf/files', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                ok: true,
+                files: [
+                    {
+                        path: 'gemma-4-31B-it-Q4_0.gguf',
+                        size: 17_400_000_000,
+                        label: 'Q4_0',
+                        quant_type: 'standard',
+                        is_mmproj: false,
+                        is_recommended_mmproj: false,
+                        mmproj_recommendation: '',
+                    },
+                    {
+                        path: 'mmproj-F16.gguf',
+                        size: 741_000_000,
+                        label: 'F16',
+                        quant_type: 'standard',
+                        is_mmproj: true,
+                        is_recommended_mmproj: true,
+                        mmproj_recommendation: 'F16 is the documented llama.cpp projector default for Gemma 4',
+                    },
+                    {
+                        path: 'mmproj-F32.gguf',
+                        size: 1_480_000_000,
+                        label: 'F32',
+                        quant_type: 'standard',
+                        is_mmproj: true,
+                        is_recommended_mmproj: false,
+                        mmproj_recommendation: '',
+                    },
+                ],
+            }),
+        }));
+
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+        await page.evaluate(async () => {
+            const container = document.createElement('div');
+            container.id = 'test-hf-files';
+            document.body.appendChild(container);
+            const { hfListFiles } = await import('/js/features/hf-browse.js');
+            await hfListFiles({
+                repoId: 'unsloth/gemma-4-31B-it-qat-GGUF',
+                container,
+                vramGb: 32,
+            });
+        });
+
+        const recommended = page.locator('#test-hf-files .hf-file-item', {
+            hasText: 'mmproj-F16.gguf',
+        });
+        await expect(recommended).toContainText('Family recommended');
+        await expect(recommended.locator('.hf-file-badge-recommended')).toHaveAttribute(
+            'title',
+            /documented llama\.cpp projector default for Gemma 4/
+        );
+        await expect(page.locator('#test-hf-files .hf-file-item', {
+            hasText: 'mmproj-F32.gguf',
+        })).not.toContainText('Family recommended');
+    });
+
     test('Third-party models endpoint responds', async ({ page }) => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');

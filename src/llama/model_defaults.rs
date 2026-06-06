@@ -235,6 +235,7 @@ pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -
     if (lower.contains("gemma-4") || lower.contains("gemma4"))
         && (lower.contains("2b")
             || lower.contains("4b")
+            || lower.contains("12b")
             || lower.contains("15b")
             || lower.contains("26b")
             || lower.contains("31b"))
@@ -390,6 +391,7 @@ pub fn get_model_defaults(name_or_repo: &str, _size_bytes: u64, tags: &[String])
     else if (lower.contains("gemma-4") || lower.contains("gemma4"))
         && (lower.contains("2b")
             || lower.contains("4b")
+            || lower.contains("12b")
             || lower.contains("15b")
             || lower.contains("26b")
             || lower.contains("31b"))
@@ -492,6 +494,15 @@ mod tests {
         assert_eq!(d.top_k, 64);
         assert_eq!(d.min_p, 0.0);
         assert_eq!(d.repeat_penalty, 1.0);
+    }
+
+    #[test]
+    fn gemma4_12b_uses_google_defaults() {
+        let d = get_model_defaults("gemma-4-12B-it-qat-Q4_0.gguf", 6_700_000_000, &[]);
+        assert_eq!(d.temperature, 1.0);
+        assert_eq!(d.top_p, 0.95);
+        assert_eq!(d.top_k, 64);
+        assert_eq!(d.enable_thinking, Some(true));
     }
 
     #[test]
