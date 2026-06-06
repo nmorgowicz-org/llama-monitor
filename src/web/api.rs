@@ -3063,6 +3063,33 @@ fn api_set_metal_gpu_limit(
         })
 }
 
+fn api_get_system_info(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "system" / "info")
+        .and(warp::get())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let cfg = app_config.clone();
+            let state = state.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+                let metrics = state.system_metrics.lock().unwrap().clone();
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "p_cores": metrics.p_cores,
+                        "e_cores": metrics.e_cores,
+                        "cpu_name": metrics.cpu_name,
+                    }),
+                )))
+            }
+        })
+}
+
 #[cfg(target_os = "macos")]
 fn api_get_metal_gpu_limit(
     _state: AppState,
@@ -4371,6 +4398,7 @@ pub fn api_routes(
     let models_gguf_meta_route = api_models_gguf_meta(app_config.clone());
     let vram_quant_compare_route = api_vram_quant_compare(state.clone(), app_config.clone());
     let vram_auto_size_route = api_vram_auto_size(state.clone(), app_config.clone());
+    let get_system_info_route = api_get_system_info(state.clone(), app_config.clone());
     let get_metal_gpu_limit_route = api_get_metal_gpu_limit(state.clone(), app_config.clone());
     let set_metal_gpu_limit_route = api_set_metal_gpu_limit(state.clone(), app_config.clone());
 
@@ -4494,6 +4522,7 @@ pub fn api_routes(
         .or(model_introspect_route)
         .or(vram_quant_compare_route)
         .or(vram_auto_size_route)
+        .or(get_system_info_route)
         .or(get_metal_gpu_limit_route)
         .or(set_metal_gpu_limit_route);
 

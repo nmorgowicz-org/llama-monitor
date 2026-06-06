@@ -261,6 +261,7 @@ export function openPresetModal(mode) {
 
     // Apple Silicon-aware hints for Threads fields
     _refreshPresetThreadsHints();
+    if (!lastSystemMetrics) _fetchSystemInfoAndRefreshPresetHints();
 }
 
 export function closePresetModal() {
@@ -1012,3 +1013,17 @@ function _refreshPresetThreadsHints() {
   }
 }
 window.__refreshPresetEditorHints = _refreshPresetThreadsHints;
+
+async function _fetchSystemInfoAndRefreshPresetHints() {
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const res = await fetch('/api/system/info', { headers });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.ok && data.p_cores > 0) {
+      const { setLastSystemMetrics } = await import('../core/app-state.js');
+      setLastSystemMetrics({ p_cores: data.p_cores, e_cores: data.e_cores, cpu_name: data.cpu_name });
+      _refreshPresetThreadsHints();
+    }
+  } catch { /* non-fatal */ }
+}

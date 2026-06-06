@@ -1360,9 +1360,9 @@ function showStep(index) {
     });
     // Auto-hint thread count from system P-core count (Apple Silicon)
     _refreshThreadsHint();
-    // If metrics not ready yet, retry once shortly so Apple Silicon hints take effect.
+    // When no active session the WS doesn't broadcast system metrics — fetch directly.
     if (!lastSystemMetrics) {
-      setTimeout(() => { if (wizardState.currentStep === 2) _refreshThreadsHint(); }, 1500);
+      _fetchSystemInfoAndRefreshHints();
     }
     renderMmprojSection();
     renderMtpSection();
@@ -3715,6 +3715,22 @@ function _refreshThreadsHint() {
   }
 }
 window.__refreshSpawnWizardHints = _refreshThreadsHint;
+
+async function _fetchSystemInfoAndRefreshHints() {
+  try {
+    const headers = window.authHeaders ? window.authHeaders() : {};
+    const res = await fetch('/api/system/info', { headers });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.ok && data.p_cores > 0) {
+      // Populate lastSystemMetrics with at minimum the core counts so hints work.
+      // Use setLastSystemMetrics from app-state so the live binding updates.
+      const { setLastSystemMetrics } = await import('../core/app-state.js');
+      setLastSystemMetrics({ p_cores: data.p_cores, e_cores: data.e_cores, cpu_name: data.cpu_name });
+      _refreshThreadsHint();
+    }
+  } catch { /* non-fatal */ }
+}
 
 function renderHardwareModelHeader() {
   const header = document.getElementById('hw-model-header');
