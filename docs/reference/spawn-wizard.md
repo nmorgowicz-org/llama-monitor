@@ -114,8 +114,8 @@ Recommendation thresholds (from `full_estimate`):
 
 #### MTP Section
 Shown automatically when the model has `mtp_depth > 0` (detected from GGUF metadata or architecture heuristics). Controls:
-- **Enable MTP acceleration** checkbox — adds `--spec-type draft-mtp,ngram-mod`
-- **Draft tokens/step** (`hw-mtp-depth`) — sets `--spec-draft-n-max`; forces `--parallel 1`; typical speedup 50–200% on dense models
+- **Enable MTP (experimental)** checkbox — adds `--spec-type draft-mtp,ngram-mod`. It defaults off on Apple Metal because current llama.cpp builds can lose throughput there; other backends keep the opt-out default.
+- **Draft tokens/step** (`hw-mtp-depth`) — sets `--spec-draft-n-max` and forces `--parallel 1`. Benchmark enabled versus disabled because results vary by model, backend, context length, and acceptance rate.
 
 #### Advanced Options Grid
 
@@ -132,8 +132,8 @@ Shown automatically when the model has `mtp_depth > 0` (detected from GGUF metad
 | Mode | Flag | Notes |
 |------|------|-------|
 | None | — | Disabled |
-| N-gram | `--spec-type ngram-mod` | Zero VRAM overhead; ~10–30% speedup |
-| MTP + N-gram | `--spec-type draft-mtp,ngram-mod` | Built-in MTP heads; ~50–200% on dense |
+| N-gram | `--spec-type ngram-mod` | Zero model-memory overhead; workload-dependent speedup |
+| MTP + N-gram | `--spec-type draft-mtp,ngram-mod` | Built-in MTP heads; benchmark per backend, especially on Metal |
 | Draft model | `--spec-type draft-model` | Separate small draft model path required |
 
 ---

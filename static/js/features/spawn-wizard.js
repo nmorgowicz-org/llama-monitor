@@ -4926,6 +4926,7 @@ function renderMtpSection() {
     if (!checkbox.dataset.bound) {
       checkbox.dataset.bound = '1';
       checkbox.addEventListener('change', () => {
+        _mtpUserConfigured = true;
         wizardState.hardware.mtpEnabled = checkbox.checked;
         // MTP requires parallel=1 — update state
         if (checkbox.checked) wizardState.hardware.parallelSlots = 1;
@@ -5165,7 +5166,7 @@ async function triggerAutoSize() {
 // ── Collapsible hardware sections ─────────────────────────────────────────────
 
 function bindSectionToggles() {
-   // Response shaping section — collapsed by default
+   // Response shaping is visible by default for review-step discoverability.
    const divider = document.getElementById('hw-section-response-shaping');
    const toggle  = document.getElementById('hw-toggle-response-shaping');
    const body    = document.getElementById('hw-body-response-shaping');
@@ -6604,6 +6605,7 @@ function _closeCardPanel() {
 let _binaryReady  = false;
 let _platformInfo = null;   // cached result of /api/llama-binary/platform-info
 let _selectedBackend = null;
+let _mtpUserConfigured = false;
 
 async function _checkBinaryPrereq() {
   if (!dom.binaryPrereq) return;
@@ -6621,6 +6623,18 @@ async function _checkBinaryPrereq() {
 
     if (_selectedBackend === null && _platformInfo) {
       _selectedBackend = _platformInfo.auto_backend;
+    }
+
+    // MTP performance is backend-dependent. Metal can regress even with high
+    // draft acceptance, so require an explicit opt-in on Apple Silicon.
+    if (!_mtpUserConfigured) {
+      wizardState.hardware.mtpEnabled = _platformInfo?.auto_backend !== 'metal';
+      const mtpCheck = document.getElementById('hw-use-mtp');
+      const mtpDepthRow = document.getElementById('hw-mtp-depth-row');
+      if (mtpCheck) mtpCheck.checked = wizardState.hardware.mtpEnabled;
+      if (mtpDepthRow) {
+        mtpDepthRow.style.display = wizardState.hardware.mtpEnabled ? '' : 'none';
+      }
     }
 
     // For unified memory (Apple Silicon): default --cache-ram to 0 on first load.

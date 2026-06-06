@@ -306,6 +306,35 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         expect(fitTargetValue).toBe('2048');
     });
 
+    test('MTP requires explicit opt-in on Apple Metal', async ({ page }) => {
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+
+        const autoBackend = await page.evaluate(async () => {
+            const headers = window.authHeaders ? window.authHeaders() : {};
+            const resp = await fetch('/api/llama-binary/platform-info', { headers });
+            const data = await resp.json();
+            return data.auto_backend;
+        });
+
+        await page.evaluate(async () => {
+            const { openSpawnWizard, wizardState } = await import('/js/features/spawn-wizard.js');
+            openSpawnWizard();
+            wizardState.model.source = 'local';
+            wizardState.model.path = '/tmp/Qwen3.6-27B-MTP-Q4_K_M.gguf';
+            wizardState.model.paramB = 27;
+            wizardState.model.modelBytes = 16 * 1024 * 1024 * 1024;
+            wizardState.arch.mtpDepth = 1;
+        });
+
+        await page.locator('#wizard-next-btn').click();
+        await page.fill('#spawn-model-path', '/tmp/Qwen3.6-27B-MTP-Q4_K_M.gguf');
+        await page.locator('#wizard-next-btn').click();
+
+        await expect(page.locator('#hw-mtp-section')).toBeVisible();
+        await expect(page.locator('#hw-use-mtp')).toBeChecked({ checked: autoBackend !== 'metal' });
+    });
+
     test('review step exposes structured output and full sampling defaults', async ({ page }) => {
         await page.goto('/');
         await page.waitForLoadState('networkidle');

@@ -440,8 +440,8 @@ function _toggleSpecFields(specType) {
         'ngram-simple': 'Lightest-weight option. Scans recent history for matching n-grams. Good for single-slot use.',
         'ngram-map-k': 'Hash-map based pattern matching. Works well for repetitive content like code or structured data.',
         'ngram-map-k4v': 'Experimental. Tracks up to 4 candidate tokens per n-gram key. May outperform ngram-map-k on long repetitive content.',
-        'draft-mtp,ngram-mod': 'Recommended for Qwen3, DeepSeek V3, and other models with built-in MTP heads. MTP handles main predictions; ngram-mod fills gaps. Forces --parallel 1.',
-        'draft-mtp': 'Pure MTP — uses built-in prediction heads with no n-gram fallback. Forces --parallel 1.',
+        'draft-mtp,ngram-mod': 'For models with built-in MTP heads. MTP handles main predictions; ngram-mod fills gaps. Forces --parallel 1. Benchmark on your backend; MTP can reduce throughput on Metal.',
+        'draft-mtp': 'Pure MTP with no n-gram fallback. Forces --parallel 1. Benchmark on your backend; MTP can reduce throughput on Metal.',
         'draft-model': 'Needs a separate draft model (same family, smaller size). Highest potential speedup but requires downloading and managing an additional file.',
     };
     if (hint) {
