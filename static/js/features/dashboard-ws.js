@@ -527,9 +527,17 @@ function updateServerState(d) {
 
     setLastServerState(d.server_running);
     setLastLlamaMetrics(d.llama);
+    const prevSystemMetrics = lastSystemMetrics;
     setLastSystemMetrics(d.system || null);
     setLastCapabilities(d.capabilities || null);
     setLastGpuMetrics(d.gpu || {});
+
+    // If system metrics just became available or changed (e.g., pCores known),
+    // notify consumers that need to update hints (spawn wizard, preset editor, etc.)
+    if (d.system && (!prevSystemMetrics || prevSystemMetrics.p_cores == null)) {
+      window.__refreshSpawnWizardHints?.();
+      window.__refreshPresetEditorHints?.();
+    }
 
     // Sync session port/endpoint from WebSocket data (replaces removed HTTP poll)
     const ep = d.active_session_endpoint;

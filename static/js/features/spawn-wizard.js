@@ -3655,14 +3655,75 @@ function renderScenarioCards(modelBytes, arch, availVram) {
 // ── Hardware step: model header + quant swap ─────────────────────────────────
 
 function _refreshThreadsHint() {
-  const pCores = lastSystemMetrics?.p_cores || 0;
   const hintEl = document.getElementById('spawn-threads-hint');
   const batchHintEl = document.getElementById('spawn-threads-batch-hint');
+
+  // Use metrics if already loaded; treat undefined as "not ready yet"
+  const metrics = lastSystemMetrics;
+  const pCores = (metrics?.p_cores != null ? metrics.p_cores : null) || 0;
+  const metricsReady = metrics != null;
+
   if (!hintEl && !batchHintEl && !dom.threadsInput && !dom.threadsBatchInput) return;
-  if (pCores > 0) {
+
+  // Apple Silicon + P-cores known: apply strong recommendations.
+  if (pCores > 0 && metricsReady) {
     if (hintEl) {
-      hintEl.textContent = `Apple Silicon detected: ${pCores} P-cores. Apple recommends 1 for -t on Metal, or at most ${pCores}. Blank = server default.`;
+      hintEl.textContent =
+        `Apple Silicon detected: ${pCores} P-cores. Apple recommends 1 for -t on Metal, or at most ${pCores}. Blank = server default.`;
     }
+    if (batchHintEl) {
+      batchHintEl.textContent =
+        `Prompt processing can use more CPU. Recommended: ${pCores} for -tb, or leave blank to inherit -t.`;
+    }
+    if (dom.threadsInput && !dom.threadsInput.value) {
+      dom.threadsInput.placeholder = '1 recommended';
+    }
+    if (dom.threadsBatchInput && !dom.threadsBatchInput.value) {
+      dom.threadsBatchInput.placeholder = `${pCores} recommended`;
+    }
+    return;
+  }
+
+  // Metrics not ready yet: don’t hard-lock the generic hint; keep placeholders neutral
+  // until we learn pCores when metrics arrive.
+  if (!metricsReady) {
+    if (hintEl) {
+      hintEl.textContent = 'Blank = server default (-t). Apple Silicon-specific guidance loads automatically when available.';
+    }
+    if (batchHintEl) {
+      batchHintEl.textContent = 'Prompt processing threads. Blank = inherit from -t.';
+    }
+    if (dom.threadsInput && !dom.threadsInput.value) {
+      dom.threadsInput.placeholder = 'default';
+    }
+    if (dom.threadsBatchInput && !dom.threadsBatchInput.value) {
+      dom.threadsBatchInput.placeholder = 'default';
+    }
+    return;
+  }
+
+  // Non-Apple Silicon / no P-cores: generic hint.
+  if (hintEl) {
+    hintEl.textContent = 'Blank = server default (-t). Sets CPU threads for inference. Do not exceed physical P-core count.';
+  }
+  if (batchHintEl) {
+    batchHintEl.textContent = 'Prompt processing threads. Blank = inherit from -t.';
+  }
+  if (dom.threadsInput && !dom.threadsInput.value) {
+    dom.threadsInput.placeholder = 'default';
+  }
+  if (dom.threadsBatchInput && !dom.threadsBatchInput.value) {
+    dom.threadsBatchInput.placeholder = 'default';
+  }
+}
+
+// Global hook called when system metrics change (from dashboard-ws)
+// Keeps Apple Silicon hints in sync if metrics load after step 2 is opened.
+window.__refreshSpawnWizardHints = function () {
+  if (wizardState.currentStep === 2) {
+    _refreshThreadsHint();
+  }
+};
     if (batchHintEl) {
       batchHintEl.textContent = `Prompt processing can use more CPU. Recommended: ${pCores} for -tb, or leave blank to inherit -t.`;
     }

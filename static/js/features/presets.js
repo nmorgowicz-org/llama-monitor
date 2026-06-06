@@ -1,7 +1,7 @@
 // ── Presets ────────────────────────────────────────────────────────────────────
 // Preset CRUD: load, save, copy, delete, reset. Modal management.
 
-import { sessionState } from '../core/app-state.js';
+import { sessionState, lastSystemMetrics } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { openDeferredFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
 import { applySettings, saveSettings } from './settings.js';
@@ -258,6 +258,9 @@ export function openPresetModal(mode) {
     document.querySelector('.preset-nav-item[data-section="model"]')?.click();
     const body = modal.querySelector('.modal-body');
     if (body) body.scrollTop = 0;
+
+    // Apple Silicon-aware hints for Threads fields
+    _refreshPresetThreadsHints();
 }
 
 export function closePresetModal() {
@@ -977,3 +980,49 @@ export function initPresets() {
     // Initial load
     loadPresets();
 }
+
+// ── Apple Silicon-aware Threads hints in preset editor ─────────────────────────
+
+function _refreshPresetThreadsHints() {
+  const modal = document.getElementById('preset-modal');
+  if (!modal || !modal.classList.contains('open')) return;
+
+  const metrics = lastSystemMetrics;
+  const pCores = (metrics?.p_cores != null ? metrics.p_cores : null) || 0;
+  const metricsReady = metrics != null;
+
+  const threadsInput = document.getElementById('modal-threads');
+  const batchThreadsInput = document.getElementById('modal-threads-batch');
+  if (!threadsInput && !batchThreadsInput) return;
+
+  if (pCores > 0 && metricsReady) {
+    // Apple Silicon detected: adjust placeholders and hints.
+    if (threadsInput && !threadsInput.value) {
+      threadsInput.placeholder = '1 recommended';
+    }
+    if (batchThreadsInput && !batchThreadsInput.value) {
+      batchThreadsInput.placeholder = `${pCores} recommended`;
+    }
+  } else if (!metricsReady) {
+    // Metrics not ready yet: keep placeholders neutral.
+    if (threadsInput && !threadsInput.value) {
+      threadsInput.placeholder = 'default';
+    }
+    if (batchThreadsInput && !batchThreadsInput.value) {
+      batchThreadsInput.placeholder = 'default';
+    }
+  } else {
+    // Non-Apple Silicon / no P-cores: default placeholders.
+    if (threadsInput && !threadsInput.value) {
+      threadsInput.placeholder = 'default';
+    }
+    if (batchThreadsInput && !batchThreadsInput.value) {
+      batchThreadsInput.placeholder = 'default';
+    }
+  }
+}
+
+// Global hook: called when system metrics change (from dashboard-ws)
+window.__refreshPresetEditorHints = function () {
+  _refreshPresetThreadsHints();
+};
