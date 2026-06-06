@@ -4196,58 +4196,78 @@ function _renderHwTagPills(currentTags, suggestedCats, passthroughTags, modelPat
     hint.style.cssText = 'font-size:10px;color:var(--color-text-muted);margin-right:4px;';
     hint.textContent = 'No tags yet';
     pillsWrap.appendChild(hint);
-
-    // Small "Pull from HF" pill when HF origin is known (and we have HF-suggested tags).
-    if (originRepo && (suggestedCats.size > 0 || (passthroughTags && passthroughTags.length > 0))) {
-      const pullBtn = document.createElement('button');
-      pullBtn.type = 'button';
-      pullBtn.className = 'mm-tag-pill';
-      pullBtn.style.cssText =
-        'font-size:9px;padding:2px 7px;cursor:pointer;text-decoration:none;opacity:0.75;white-space:nowrap;border:none;background:none;font:inherit;display:inline-flex;align-items:center;gap:4px;';
-      pullBtn.textContent = '⎇ Pull from HF';
-      pullBtn.title = 'Pull library tags from this model\'s HuggingFace card';
-
-      pullBtn.addEventListener('click', async () => {
-        try {
-          // Re-fetch HF suggestions directly from card + base model.
-          const hfResult = await _fetchHfTagsWithBaseModel(originRepo);
-          const cats = Array.from(hfResult.categories || []);
-          const pass = Array.from(hfResult.passthrough || []);
-          const toApply = [...new Set([...cats, ...pass])];
-
-          if (!toApply.length) return;
-
-          // Save as library tags for this model.
-          await _saveHwModelTags(modelPath, toApply);
-
-          // Invalidate cached row so _refreshHwTagsRow reloads current tags.
-          _tagsRowOrigin = '';
-          await _refreshHwTagsRow();
-        } catch {
-          // Non-fatal: silently fail; user can open the picker instead.
-        }
+  } else {
+    // Render existing tag pills
+    currentTags.forEach(tag => {
+      const pill = document.createElement('span');
+      pill.className = 'mm-tag-pill mm-tag-pill--active';
+      pill.style.cssText = 'font-size:9px;padding:2px 7px;cursor:pointer;';
+      pill.title = `Remove tag "${tag}"`;
+      pill.textContent = tag + ' ×';
+      pill.addEventListener('click', async () => {
+        const newTags = currentTags.filter(t => t !== tag);
+        await _saveHwModelTags(modelPath, newTags);
+        _tagsRowOrigin = '';
+        await _refreshHwTagsRow();
       });
-
-      pillsWrap.appendChild(pullBtn);
-    }
-
-    return;
+      pillsWrap.appendChild(pill);
+    });
   }
 
-  currentTags.forEach(tag => {
-    const pill = document.createElement('span');
-    pill.className = 'mm-tag-pill mm-tag-pill--active';
-    pill.style.cssText = 'font-size:9px;padding:2px 7px;cursor:pointer;';
-    pill.title = `Remove tag "${tag}"`;
-    pill.textContent = tag + ' ×';
-    pill.addEventListener('click', async () => {
-      const newTags = currentTags.filter(t => t !== tag);
-      await _saveHwModelTags(modelPath, newTags);
-      currentTags = newTags;
-      _renderHwTagPills(currentTags, suggestedCats, passthroughTags, modelPath, originRepo);
+  // "Sync with HF" pill: shown whenever HF origin is known and HF offers tags.
+  // This lets the user pull new tags OR refresh/remove tags the author changed.
+  if (originRepo && (suggestedCats.size > 0 || (passthroughTags && passthroughTags.length > 0))) {
+    const syncBtn = document.createElement('button');
+    syncBtn.type = 'button';
+    syncBtn.className = 'mm-tag-pill';
+    syncBtn.style.cssText =
+      'font-size:9px;padding:2px 7px;cursor:pointer;text-decoration:none;opacity:0.75;white-space:nowrap;border:none;background:none;font:inherit;display:inline-flex;align-items:center;gap:4px;';
+    syncBtn.textContent = '⎇ Sync with HF';
+    syncBtn.title = 'Sync library tags with this model\'s HuggingFace card';
+
+    syncBtn.addEventListener('click', async () => {
+      try {
+        const hfResult = await _fetchHfTagsWithBaseModel(originRepo);
+        const cats = Array.from(hfResult.categories || []);
+        const pass = Array.from(hfResult.passthrough || []);
+        const hfSet = new Set([...cats, ...pass]);
+
+        // Re-read current tags to ensure we’re in sync.
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const r = await fetch('/api/models/tags', { headers });
+        const td = r.ok ? await r.json().catch(() => ({})) : {};
+        const allCurrent = (td.tags?.[modelPath] || []).filter(
+          t => !t.startsWith('hf_origin:')
+        );
+
+        // Sync logic:
+        // - Keep all core / user-friendly tags (ALL_KNOWN_TAGS).
+        // - Keep any HF tags still present on the card.
+        // - Drop any tag not in HF and not in ALL_KNOWN_TAGS
+        //   so that removed / outdated tags are cleaned up.
+        const newTags = allCurrent.filter(tag => {
+          const inHf = hfSet.has(tag);
+          const inCore = ALL_KNOWN_TAGS.includes(tag);
+          return inHf || inCore;
+        });
+
+        // Add any HF tags not yet present.
+        for (const t of hfSet) {
+          if (!newTags.includes(t)) newTags.push(t);
+        }
+
+        if (newTags.length === 0) return;
+
+        await _saveHwModelTags(modelPath, newTags);
+        _tagsRowOrigin = '';
+        await _refreshHwTagsRow();
+      } catch {
+        // Non-fatal: user can still use the manual tag picker.
+      }
     });
-    pillsWrap.appendChild(pill);
-  });
+
+    pillsWrap.appendChild(syncBtn);
+  }
 }
 
 async function _saveHwModelTags(modelPath, tags) {
