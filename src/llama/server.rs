@@ -612,6 +612,10 @@ pub async fn start_server(
     }
     if let Some(v) = config.cache_idle_slots {
         if v {
+            // --cache-idle-slots requires --kv-unified; auto-enable if not explicitly set
+            if config.kv_unified.is_none() {
+                cmd.arg("--kv-unified");
+            }
             cmd.arg("--cache-idle-slots");
         } else {
             cmd.arg("--no-cache-idle-slots");
