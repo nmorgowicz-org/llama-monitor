@@ -135,6 +135,7 @@ export async function doStart() {
         await waitForSpawnReadiness(config.port);
 
         setTuneConfig(config);
+        setHeaderMode('Spawn:' + config.port);
         switchView('monitor');
         hideConnectingState();
         showTunePanel();
@@ -154,6 +155,7 @@ export async function doStop() {
     // V2: kill-llama kills the tracked child process and clears in-memory state
     await doKillLlamaInternal();
     hideTunePanel();
+    setHeaderMode(null);
 
     // Switch back to setup/welcome view
     if (document.body.classList.contains('setup-active') === false) {
@@ -359,6 +361,26 @@ export function doStartFromSetup() {
 
 // ── Button init ────────────────────────────────────────────────────────────────
 
+// Update the server header visibility based on session mode.
+// Call this whenever session mode changes (spawn, attach, detach, init).
+export function setHeaderMode(mode) {
+    const serverHeader = document.getElementById('server-header');
+    const btnAttach = document.getElementById('btn-attach');
+    const btnDetach = document.getElementById('btn-detach');
+    if (!serverHeader) return;
+    if (mode && mode.startsWith('Spawn:')) {
+        serverHeader.style.display = 'none';
+    } else if (mode && mode.startsWith('Attach:')) {
+        serverHeader.style.display = '';
+        if (btnAttach) btnAttach.style.display = 'none';
+        if (btnDetach) btnDetach.style.display = 'inline-block';
+    } else {
+        serverHeader.style.display = '';
+        if (btnAttach) btnAttach.style.display = 'inline-block';
+        if (btnDetach) btnDetach.style.display = 'none';
+    }
+}
+
 export async function initAttachDetachButtons() {
     try {
         const headers = window.authHeaders ? window.authHeaders() : {};
@@ -368,19 +390,7 @@ export async function initAttachDetachButtons() {
             return;
         }
         const data = await resp.json();
-        const btnAttach = document.getElementById('btn-attach');
-        const btnDetach = document.getElementById('btn-detach');
-        const headerActions = document.querySelector('.dashboard-header-actions');
-        if (data && data.mode && data.mode.startsWith('Spawn:')) {
-            // Spawn session — endpoint is implicit from spawn config; hide the attach/detach UI entirely
-            if (headerActions) headerActions.style.display = 'none';
-        } else if (data && data.mode && data.mode.startsWith('Attach:') && btnAttach && btnDetach) {
-            btnAttach.style.display = 'none';
-            btnDetach.style.display = 'inline-block';
-        } else if (btnAttach && btnDetach) {
-            btnAttach.style.display = 'inline-block';
-            btnDetach.style.display = 'none';
-        }
+        setHeaderMode(data?.mode ?? null);
     } catch (err) {
         console.error('Failed to initialize attach/detach buttons:', err);
     }

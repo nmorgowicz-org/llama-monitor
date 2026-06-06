@@ -3,7 +3,7 @@
 
 import { sessionState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
-import { doAttach, doStart } from './attach-detach.js';
+import { doAttach, doStart, setHeaderMode } from './attach-detach.js';
 import { openDeferredFileBrowser } from './file-browser-launcher.js';
 import { loadPresets } from './presets.js';
 import { saveSettings } from './settings.js';
@@ -346,10 +346,12 @@ export async function saveSession(event) {
             } catch {
                 // Non-fatal — switch view anyway; the WebSocket will start pushing data once ready
             }
+            setHeaderMode('Spawn:' + (parseInt(target, 10) || 8001));
             showTunePanel();
             switchView('monitor');
         } else {
             // attach mode — already reachable (backend health-checks before accepting)
+            setHeaderMode('Attach:' + target);
             showTunePanel();
             switchView('monitor');
         }

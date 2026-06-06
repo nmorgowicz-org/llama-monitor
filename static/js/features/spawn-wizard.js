@@ -14,6 +14,7 @@ import { openDeferredFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemp
 import { showToast } from './toast.js';
 import { switchView } from './setup-view.js';
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
+import { setHeaderMode } from './attach-detach.js';
 import { lastCapabilities, lastSystemMetrics } from '../core/app-state.js';
 import {
   HF_DISCOVER_CATEGORIES,
@@ -6377,6 +6378,7 @@ async function spawnServer() {
     setTuneConfig(payload);
     setTimeout(() => {
       closeSpawnWizard();
+      setHeaderMode('Spawn:' + (payload.port || 8001));
       if (document.body.classList.contains('setup-active')) {
         switchView('monitor');
       }
