@@ -5,6 +5,140 @@ import { setupViewState, chat, sessionState } from '../core/app-state.js';
 import { doAttachFromSetup } from './attach-detach.js';
 import { escapeHtml } from '../core/format.js';
 import { quickStartSession } from './sessions.js';
+// ── Memory bar ────────────────────────────────────────────────────────────────
+// Same Metal cap logic as effectiveAvailBytes() in spawn-wizard.js.
+
+const _MEM_OS_RESERVE = 512 * 1024 * 1024; // 512 MB
+
+function _metalCap(totalBytes, metalGpuLimitMb) {
+    if (metalGpuLimitMb > 0) return metalGpuLimitMb * 1024 * 1024;
+    const fraction = totalBytes <= 36 * 1024 ** 3 ? 2 / 3 : 3 / 4;
+    return Math.floor(totalBytes * fraction);
+}
+
+function _fmtGb(bytes) {
+    const gb = bytes / 1024 ** 3;
+    return gb >= 10 ? gb.toFixed(0) : gb.toFixed(1);
+}
+
+export async function fetchAndRenderMemoryBar() {
+    const bar = document.getElementById('setup-mem-bar');
+    if (!bar) return;
+    try {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const [sysResp, gpuResp] = await Promise.all([
+            fetch('/metrics/system', { headers }),
+            fetch('/metrics/gpu', { headers }),
+        ]);
+
+        let totalBytes = 0;
+        let metalGpuLimitMb = 0;
+        let isUnified = false;
+        let vramUsedBytes = 0;
+
+        if (sysResp.ok) {
+            const d = await sysResp.json();
+            totalBytes = (d.ram_total_gb || 0) * 1024 ** 3;
+        }
+
+        if (gpuResp.ok) {
+            const data = await gpuResp.json();
+            const gpus = Array.isArray(data) ? data : (data.gpus ? data.gpus : Object.values(data));
+            for (const g of gpus) {
+                const tMb = g.vram_total_mb || g.total_mb || g.total_memory_mb || g.vram_total || 0;
+                const uMb = g.vram_used_mb || g.used_mb || g.vram_used || 0;
+                if (g.metal_gpu_limit_mb !== undefined) {
+                    isUnified = true;
+                    metalGpuLimitMb = g.metal_gpu_limit_mb || 0;
+                    if (!totalBytes) totalBytes = tMb * 1024 * 1024;
+                } else {
+                    totalBytes = totalBytes || tMb * 1024 * 1024;
+                    vramUsedBytes += uMb * 1024 * 1024;
+                }
+            }
+        }
+
+        if (!totalBytes) return;
+
+        let availBytes, fillPct, availLabel, totalLabel;
+
+        if (isUnified) {
+            const cap = _metalCap(totalBytes, metalGpuLimitMb);
+            availBytes = Math.max(0, Math.min(cap, totalBytes) - _MEM_OS_RESERVE);
+            fillPct = Math.round((availBytes / totalBytes) * 100);
+            availLabel = _fmtGb(availBytes) + ' GB available for inference';
+            totalLabel = _fmtGb(totalBytes) + ' GB unified';
+        } else {
+            availBytes = Math.max(0, totalBytes - vramUsedBytes);
+            fillPct = Math.round((availBytes / totalBytes) * 100);
+            availLabel = _fmtGb(availBytes) + ' GB VRAM free';
+            totalLabel = _fmtGb(totalBytes) + ' GB total';
+        }
+
+        const fill = document.getElementById('setup-mem-bar-fill');
+        if (fill) fill.style.width = fillPct + '%';
+        const availEl = document.getElementById('setup-mem-bar-avail');
+        if (availEl) availEl.textContent = availLabel;
+        const totalEl = document.getElementById('setup-mem-bar-total');
+        if (totalEl) totalEl.textContent = totalLabel;
+        bar.style.display = '';
+    } catch {
+        // leave bar hidden if metrics unavailable
+    }
+}
+
+// ── Drop zone ─────────────────────────────────────────────────────────────────
+
+export function initSetupDropZone() {
+    const zone = document.getElementById('setup-drop-zone');
+    if (!zone) return;
+
+    zone.addEventListener('dragover', e => {
+        const items = Array.from(e.dataTransfer?.items || []);
+        const hasGguf = items.some(i => i.kind === 'file');
+        if (!hasGguf) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        zone.classList.add('is-over');
+    });
+
+    zone.addEventListener('dragleave', e => {
+        if (!zone.contains(e.relatedTarget)) zone.classList.remove('is-over');
+    });
+
+    zone.addEventListener('drop', async e => {
+        e.preventDefault();
+        zone.classList.remove('is-over');
+        const file = e.dataTransfer?.files?.[0];
+        if (!file || !file.name.toLowerCase().endsWith('.gguf')) return;
+
+        // Try to resolve the full filesystem path from the known models library
+        try {
+            const headers = window.authHeaders ? window.authHeaders() : {};
+            const resp = await fetch('/api/models', { headers });
+            if (resp.ok) {
+                const models = await resp.json();
+                const match = models.find(m =>
+                    (m.path || '').split(/[/\\]/).pop() === file.name
+                );
+                if (match) {
+                    import('./spawn-wizard.js').then(({ openSpawnWizard }) =>
+                        openSpawnWizard({ localPath: match.path, localModel: match })
+                    );
+                    return;
+                }
+            }
+        } catch {}
+
+        // File not in library — open wizard on the model step so user can browse
+        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard({}));
+    });
+
+    // Also open wizard on click (as an explicit affordance)
+    zone.addEventListener('click', () =>
+        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard({}))
+    );
+}
 
 function setAttachButtonLabel(button, label) {
     if (!button) return;
@@ -200,6 +334,13 @@ export function renderLaunchGrid() {
     }
     // Stamp last-launched timestamps if session data is already available
     _applyLastLaunchedToCards();
+    // Memory bar and drop zone: init once (idempotent after first call)
+    if (!document.getElementById('setup-drop-zone')?._dzInited) {
+        initSetupDropZone();
+        const dz = document.getElementById('setup-drop-zone');
+        if (dz) dz._dzInited = true;
+    }
+    fetchAndRenderMemoryBar();
 }
 
 function _buildLaunchCard(preset, activePresetId) {

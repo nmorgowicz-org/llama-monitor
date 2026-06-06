@@ -279,6 +279,23 @@
                             <div class="launch-card-skeleton"></div>
                         </div>
 
+                        <!-- Memory bar (populated by JS after /metrics fetch) -->
+                        <div id="setup-mem-bar" class="setup-mem-bar" style="display:none;" aria-label="Inference memory budget">
+                            <div class="setup-mem-bar-track" aria-hidden="true">
+                                <div class="setup-mem-bar-fill" id="setup-mem-bar-fill"></div>
+                            </div>
+                            <div class="setup-mem-bar-labels">
+                                <span id="setup-mem-bar-avail"></span>
+                                <span id="setup-mem-bar-total"></span>
+                            </div>
+                        </div>
+
+                        <!-- Drop zone: drag a local .gguf to quick-configure -->
+                        <div id="setup-drop-zone" class="setup-drop-zone" title="Drop a .gguf model file to open the configuration wizard">
+                            <svg class="setup-drop-zone-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            <span class="setup-drop-zone-label">Drop a <code>.gguf</code> to configure</span>
+                        </div>
+
                     </div>
                 </div>
 
@@ -2576,7 +2593,7 @@
                                          <option value="ngram-map-k4v">ngram-map-k4v — experimental: 4 values/key, complex repetition patterns</option>
                                      </optgroup>
                                      <optgroup label="MTP — Multi-Token Prediction (requires model with MTP heads)">
-                                         <option value="draft-mtp,ngram-mod">draft-mtp + ngram-mod — MTP with n-gram fallback (recommended)</option>
+                                         <option value="draft-mtp,ngram-mod">draft-mtp + ngram-mod — MTP with n-gram fallback</option>
                                          <option value="draft-mtp">draft-mtp — pure MTP, no n-gram fallback</option>
                                      </optgroup>
                                      <optgroup label="Draft model (requires separate small model file)">
@@ -3178,11 +3195,11 @@
 
                     <!-- MTP section (shown for models with MTP heads) -->
                     <div class="hw-mtp-section" id="hw-mtp-section" style="display:none;">
-                        <div class="hw-section-divider">Multi-Token Prediction (MTP) <span class="info-tip" title="Built-in prediction heads in the model that guess multiple tokens ahead at once. Faster than n-gram for models that support it.">i</span></div>
+                        <div class="hw-section-divider">Multi-Token Prediction (MTP) <span class="info-tip" title="Built-in prediction heads guess multiple tokens ahead. Throughput depends on the model, backend, context, and draft acceptance; benchmark before relying on it.">i</span></div>
                         <div class="hw-mtp-content">
-                            <label class="hw-toggle-label" title="Uses the model's built-in Multi-Token Prediction heads to guess ahead, then verifies in one pass. No extra model needed.">
-                                 <input type="checkbox" id="hw-use-mtp" checked>
-                                 Enable MTP acceleration
+                            <label class="hw-toggle-label" title="Uses the model's built-in Multi-Token Prediction heads to guess ahead, then verifies in one pass. No extra model needed. Disabled by default on Apple Metal because current llama.cpp builds can lose throughput there.">
+                                 <input type="checkbox" id="hw-use-mtp">
+                                 Enable MTP (experimental)
                              </label>
                             <div class="hw-mtp-depth-row" id="hw-mtp-depth-row">
                                 <div class="hw-mtp-depth-inline">
@@ -3197,7 +3214,7 @@
                                     <label for="spawn-spec-draft-p-min" class="hw-mtp-depth-label" title="Minimum token probability to attempt speculative verification. If the model is very uncertain, skip drafting. Range 0–1. Default: 0.9 for MTP.">Min accept prob (p-min)</label>
                                     <input type="number" id="spawn-spec-draft-p-min" min="0" max="1" step="0.05" placeholder="0.9" class="hw-mtp-depth-input" title="Minimum token probability threshold for draft acceptance. 0.9 recommended for MTP.">
                                 </div>
-                                <div class="field-hint">Uses <code>--spec-type draft-mtp,ngram-mod</code>, sets <code>--spec-draft-n-max</code>, forces <code>--parallel 1</code>. Value 2 ≈ +50–200% generation speed on dense models. +1.5% VRAM per head.</div>
+                                <div class="field-hint">Uses <code>--spec-type draft-mtp,ngram-mod</code>, sets <code>--spec-draft-n-max</code>, and forces <code>--parallel 1</code>. Gains vary by model and backend; current Metal builds can be slower with MTP even at high acceptance. Benchmark enabled versus disabled. Adds about 1.5% model memory per head.</div>
                             </div>
                         </div>
                     </div>
@@ -3303,7 +3320,7 @@
                         <div class="wizard-section-title" style="margin-top:14px;">Speculative decoding <span class="info-tip" title="Speeds up generation by predicting tokens ahead and verifying in one pass. N-gram methods work on any model; MTP needs a model with prediction heads; draft-model needs a second small model file.">i</span></div>
                         <div class="hardware-grid">
                             <div class="hardware-field" style="grid-column: 1/-1;">
-                                 <label for="spawn-spec-type" title="How the model predicts tokens ahead. N-gram works on any model for ~10–30% speedup. MTP needs a model with built-in prediction heads for the biggest gains. Draft model needs a second small GGUF file.">Mode</label>
+                                 <label for="spawn-spec-type" title="How the model predicts tokens ahead. N-gram works on any model. MTP needs built-in prediction heads and can help or hurt depending on the backend. Draft model needs a second small GGUF file.">Mode</label>
                                  <select id="spawn-spec-type">
                                      <option value="">None — disabled</option>
                                      <optgroup label="N-gram methods (no extra files required)">
@@ -3313,7 +3330,7 @@
                                          <option value="ngram-map-k4v">ngram-map-k4v — experimental: 4 values/key, complex repetition patterns</option>
                                      </optgroup>
                                      <optgroup label="MTP — Multi-Token Prediction (requires model with MTP heads)">
-                                         <option value="draft-mtp,ngram-mod">draft-mtp + ngram-mod — MTP with n-gram fallback (recommended)</option>
+                                         <option value="draft-mtp,ngram-mod">draft-mtp + ngram-mod — MTP with n-gram fallback</option>
                                          <option value="draft-mtp">draft-mtp — pure MTP, no n-gram fallback</option>
                                      </optgroup>
                                      <optgroup label="Draft model (requires separate small model file)">
@@ -3326,8 +3343,8 @@
                                     <span data-spec="ngram-simple" style="display:none;">Minimal-overhead n-gram: looks up last n-gram in history. Lightweight and safe for most models.</span>
                                     <span data-spec="ngram-map-k" style="display:none;">Hash-map patterns: strong for repetitive or code-heavy content where longer sequences recur.</span>
                                     <span data-spec="ngram-map-k4v" style="display:none;">Experimental: 4 values per key for complex repetition patterns. Best for very repetitive or structured outputs.</span>
-                                    <span data-spec="draft-mtp,ngram-mod" style="display:none;">MTP plus n-gram fallback: best for models with built-in MTP heads (Qwen3, DeepSeek, etc.). Requires <code>--parallel 1</code>. The MTP section above auto-selects this when enabled.</span>
-                                    <span data-spec="draft-mtp" style="display:none;">Pure MTP: uses built-in prediction heads only. Requires <code>--parallel 1</code>. Use if you want MTP without n-gram fallback.</span>
+                                    <span data-spec="draft-mtp,ngram-mod" style="display:none;">MTP plus n-gram fallback for models with built-in prediction heads. Requires <code>--parallel 1</code>. Benchmark against MTP disabled; current Metal builds can be slower.</span>
+                                    <span data-spec="draft-mtp" style="display:none;">Pure MTP with built-in prediction heads only. Requires <code>--parallel 1</code>. Benchmark against MTP disabled; current Metal builds can be slower.</span>
                                     <span data-spec="draft-model" style="display:none;">Separate small draft model (1–3B) proposes tokens; main model verifies. Highest theoretical speedup (~2–3×) but requires an extra model file.</span>
                                 </div>
                             </div>
@@ -3613,10 +3630,10 @@
                     <div class="sampling-params-section" style="margin-top:14px;">
                         <div class="hw-section-divider hw-section-collapsible" id="hw-section-response-shaping">
                              Response shaping <span class="info-tip" title="Force the model to produce structured output instead of free text. Useful for agents and data extraction.">i</span>
-                             <span class="hw-section-toggle" id="hw-toggle-response-shaping">▸</span>
+                             <span class="hw-section-toggle" id="hw-toggle-response-shaping">▾</span>
                          </div>
 
-                         <div class="hw-section-body" id="hw-body-response-shaping" style="display:none;">
+                         <div class="hw-section-body" id="hw-body-response-shaping">
                              <div class="hw-row">
                                  <div class="hardware-field">
                                      <label for="spawn-output-mode" title="DO NOT change from freeform unless you specifically need GBNF grammar or JSON schema output. Changing this will break normal chat behavior.">Output mode</label>
@@ -3628,14 +3645,14 @@
                                  </div>
                              </div>
 
-                             <div class="hw-row hw-row-collapsed" id="spawn-grammar-row" style="display:none;">
+                             <div class="hw-row hw-row-collapsed" id="spawn-grammar-wrap" style="display:none;">
                                  <div class="hw-field">
                                      <label for="spawn-grammar" title="A GBNF grammar defines rules for what the model can generate — like a custom language. The model can only produce tokens that match your rules. Find community grammars at https://github.com/ggml-org/llama.cpp/tree/master/grammars.">Grammar</label>
                                      <textarea id="spawn-grammar" class="hw-textarea" rows="3" title="GBNF grammar"></textarea>
                                  </div>
                              </div>
 
-                             <div class="hw-row hw-row-collapsed" id="spawn-json-schema-row" style="display:none;">
+                             <div class="hw-row hw-row-collapsed" id="spawn-json-schema-wrap" style="display:none;">
                                  <div class="hw-field">
                                      <label for="spawn-json-schema" title="A JSON Schema defines the shape of the JSON the model returns (field names, types, required fields). Llama-server converts this to a grammar behind the scenes. Easier to write than raw GBNF for most cases.">JSON schema</label>
                                      <textarea id="spawn-json-schema" class="hw-textarea" rows="3" title="JSON Schema"></textarea>

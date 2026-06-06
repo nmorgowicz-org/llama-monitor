@@ -2723,6 +2723,98 @@ body.setup-active .sidebar-nav {
   margin-top: 2px;
 }
 
+/* ── Memory bar ─────────────────────────────────────────────────────────────── */
+
+.setup-mem-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 4px 4px;
+}
+
+.setup-mem-bar-track {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.setup-mem-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-accent, #6366f1) 0%, var(--color-accent-light, #818cf8) 100%);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+.setup-mem-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--color-text-muted, rgba(255, 255, 255, 0.45));
+}
+
+[data-theme="light"] .setup-mem-bar-track {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+/* ── Drop zone ───────────────────────────────────────────────────────────────── */
+
+.setup-drop-zone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 14px 12px;
+  border: 1.5px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 12px;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  user-select: none;
+}
+
+.setup-drop-zone:hover {
+  border-color: rgba(99, 102, 241, 0.5);
+  color: rgba(255, 255, 255, 0.6);
+  background: rgba(99, 102, 241, 0.04);
+}
+
+.setup-drop-zone.is-over {
+  border-color: var(--color-accent, #6366f1);
+  color: var(--color-accent-light, #818cf8);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.setup-drop-zone-icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.setup-drop-zone code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+[data-theme="light"] .setup-drop-zone {
+  border-color: rgba(0, 0, 0, 0.12);
+  color: rgba(0, 0, 0, 0.35);
+}
+
+[data-theme="light"] .setup-drop-zone:hover {
+  border-color: rgba(99, 102, 241, 0.5);
+  color: rgba(0, 0, 0, 0.6);
+  background: rgba(99, 102, 241, 0.04);
+}
+
+[data-theme="light"] .setup-drop-zone code {
+  background: rgba(0, 0, 0, 0.06);
+}
+
 .launch-chip {
   font-size: 10px;
   font-weight: 600;
