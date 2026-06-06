@@ -214,24 +214,32 @@ test.describe('pin and favorite tabs', () => {
   });
 
   test('toggle pin button toggles pinned state', async ({ page }) => {
-    // Hover first item to reveal actions, then click pin
-    const firstItem = page.locator('#csp-list .csp-item').first();
-    await firstItem.hover();
-    await page.waitForTimeout(200);
-    const pinButton = firstItem.locator('button[data-action="pin"]');
+    const item = page.locator('#csp-list .csp-item').first();
+
+    // Hover first item to reveal actions
+    await item.hover();
+    await page.waitForTimeout(150);
+    const pinButton = item.locator('button[data-action="pin"]');
     await expect(pinButton).toBeVisible();
 
     // Initially unpinned (⊙)
     const initialText = await pinButton.textContent();
     expect(initialText).toContain('⊙');
 
-    // Pin it → button shows pin emoji, title="Unpin"
+    // Pin it → title="Unpin"
     await pinButton.click();
-    await expect(pinButton).toHaveAttribute('title', 'Unpin');
+    // After pinning, sidebar may reorder or re-render; re-locate and re-hover
+    const pinnedItem = page.locator('#csp-list .csp-item', { hasText: '⊙' }).first()
+      || page.locator('#csp-list .csp-item').first();
+    await pinnedItem.hover();
+    await page.waitForTimeout(150);
+    const pinAfter = pinnedItem.locator('button[data-action="pin"]');
+    await expect(pinAfter).toBeVisible();
+    await expect(pinAfter).toHaveAttribute('title', 'Unpin');
 
-    // Unpin → button title="Pin"
-    await pinButton.click();
-    await expect(pinButton).toHaveAttribute('title', 'Pin');
+    // Unpin → title="Pin"
+    await pinAfter.click({ force: true }); // actions row can be under hover overlay
+    await expect(pinAfter).toHaveAttribute('title', 'Pin');
   });
 
  test('pinned tabs appear before unpinned tabs', async ({ page }) => {
