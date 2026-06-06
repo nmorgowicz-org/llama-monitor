@@ -1360,6 +1360,10 @@ function showStep(index) {
     });
     // Auto-hint thread count from system P-core count (Apple Silicon)
     _refreshThreadsHint();
+    // If metrics not ready yet, retry once shortly so Apple Silicon hints take effect.
+    if (!lastSystemMetrics) {
+      setTimeout(() => { if (wizardState.currentStep === 2) _refreshThreadsHint(); }, 1500);
+    }
     renderMmprojSection();
     renderMtpSection();
     _updateSpecHint(dom.specTypeSelect?.value || '');
@@ -3657,15 +3661,11 @@ function renderScenarioCards(modelBytes, arch, availVram) {
 function _refreshThreadsHint() {
   const hintEl = document.getElementById('spawn-threads-hint');
   const batchHintEl = document.getElementById('spawn-threads-batch-hint');
-
-  // Use metrics if already loaded; treat undefined as "not ready yet"
-  const metrics = lastSystemMetrics;
-  const pCores = (metrics?.p_cores != null ? metrics.p_cores : null) || 0;
-  const metricsReady = metrics != null;
-
   if (!hintEl && !batchHintEl && !dom.threadsInput && !dom.threadsBatchInput) return;
 
-  // Apple Silicon + P-cores known: apply strong recommendations.
+  const pCores = lastSystemMetrics?.p_cores || 0;
+  const metricsReady = lastSystemMetrics != null;
+
   if (pCores > 0 && metricsReady) {
     if (hintEl) {
       hintEl.textContent =
@@ -3684,11 +3684,9 @@ function _refreshThreadsHint() {
     return;
   }
 
-  // Metrics not ready yet: don’t hard-lock the generic hint; keep placeholders neutral
-  // until we learn pCores when metrics arrive.
   if (!metricsReady) {
     if (hintEl) {
-      hintEl.textContent = 'Blank = server default (-t). Apple Silicon-specific guidance loads automatically when available.';
+      hintEl.textContent = 'Blank = server default (-t). Apple Silicon guidance loads automatically.';
     }
     if (batchHintEl) {
       batchHintEl.textContent = 'Prompt processing threads. Blank = inherit from -t.';
@@ -3714,38 +3712,6 @@ function _refreshThreadsHint() {
   }
   if (dom.threadsBatchInput && !dom.threadsBatchInput.value) {
     dom.threadsBatchInput.placeholder = 'default';
-  }
-}
-
-// Global hook called when system metrics change (from dashboard-ws)
-// Keeps Apple Silicon hints in sync if metrics load after step 2 is opened.
-window.__refreshSpawnWizardHints = function () {
-  if (wizardState.currentStep === 2) {
-    _refreshThreadsHint();
-  }
-};
-    if (batchHintEl) {
-      batchHintEl.textContent = `Prompt processing can use more CPU. Recommended: ${pCores} for -tb, or leave blank to inherit -t.`;
-    }
-    if (dom.threadsInput && !dom.threadsInput.value) {
-      dom.threadsInput.placeholder = '1 recommended';
-    }
-    if (dom.threadsBatchInput && !dom.threadsBatchInput.value) {
-      dom.threadsBatchInput.placeholder = `${pCores} recommended`;
-    }
-  } else {
-    if (hintEl) {
-      hintEl.textContent = 'Blank = server default (-t). Sets CPU threads for inference. Do not exceed physical P-core count.';
-    }
-    if (batchHintEl) {
-      batchHintEl.textContent = 'Prompt processing threads. Blank = inherit from -t.';
-    }
-    if (dom.threadsInput && !dom.threadsInput.value) {
-      dom.threadsInput.placeholder = 'default';
-    }
-    if (dom.threadsBatchInput && !dom.threadsBatchInput.value) {
-      dom.threadsBatchInput.placeholder = 'default';
-    }
   }
 }
 

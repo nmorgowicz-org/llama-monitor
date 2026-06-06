@@ -988,7 +988,7 @@ function _refreshPresetThreadsHints() {
   if (!modal || !modal.classList.contains('open')) return;
 
   const metrics = lastSystemMetrics;
-  const pCores = (metrics?.p_cores != null ? metrics.p_cores : null) || 0;
+  const pCores = metrics?.p_cores || 0;
   const metricsReady = metrics != null;
 
   const threadsInput = document.getElementById('modal-threads');
@@ -996,23 +996,13 @@ function _refreshPresetThreadsHints() {
   if (!threadsInput && !batchThreadsInput) return;
 
   if (pCores > 0 && metricsReady) {
-    // Apple Silicon detected: adjust placeholders and hints.
     if (threadsInput && !threadsInput.value) {
       threadsInput.placeholder = '1 recommended';
     }
     if (batchThreadsInput && !batchThreadsInput.value) {
       batchThreadsInput.placeholder = `${pCores} recommended`;
     }
-  } else if (!metricsReady) {
-    // Metrics not ready yet: keep placeholders neutral.
-    if (threadsInput && !threadsInput.value) {
-      threadsInput.placeholder = 'default';
-    }
-    if (batchThreadsInput && !batchThreadsInput.value) {
-      batchThreadsInput.placeholder = 'default';
-    }
   } else {
-    // Non-Apple Silicon / no P-cores: default placeholders.
     if (threadsInput && !threadsInput.value) {
       threadsInput.placeholder = 'default';
     }
@@ -1021,8 +1011,3 @@ function _refreshPresetThreadsHints() {
     }
   }
 }
-
-// Global hook: called when system metrics change (from dashboard-ws)
-window.__refreshPresetEditorHints = function () {
-  _refreshPresetThreadsHints();
-};
