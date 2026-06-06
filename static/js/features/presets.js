@@ -212,6 +212,7 @@ export function openPresetModal(mode) {
         setVal('modal-chat-template-file', p.chat_template_file || '');
         // Advanced
         setOpt('modal-bind-host', p.bind_host || '');
+        numOrEmpty('modal-port', p.port);
         setVal('modal-api-key', p.api_key || '');
         numOrEmpty('modal-max-tokens', p.max_tokens);
         numOrEmpty('modal-seed', p.seed);
@@ -516,6 +517,7 @@ function _buildFormPreset(existing) {
         spec_draft_p_min: floatOrNull('modal-spec-draft-p-min'),
         draft_model: strVal('modal-draft-model'),
         bind_host: strVal('modal-bind-host') || null,
+        port: intOrNull('modal-port'),
         api_key: strVal('modal-api-key') || null,
         max_tokens: intOrNull('modal-max-tokens'),
         seed: intOrNull('modal-seed'),
@@ -548,7 +550,7 @@ const CHANGE_LABELS = {
     spec_type: 'Speculative Mode', spec_ngram_size: 'N-gram Size',
     draft_min: 'Draft Min', draft_max: 'Draft Max', spec_draft_n_max: 'MTP Depth',
     spec_draft_n_min: 'MTP Draft N Min', spec_draft_p_min: 'MTP Draft P Min', draft_model: 'Draft Model',
-    bind_host: 'Bind Host', api_key: 'API Key', max_tokens: 'Max Tokens',
+    bind_host: 'Bind Host', port: 'Port', api_key: 'API Key', max_tokens: 'Max Tokens',
     seed: 'Seed', ignore_eos: 'Ignore EOS',
     system_prompt_file: 'System Prompt File', grammar: 'Grammar', json_schema: 'JSON Schema', extra_args: 'Extra Args',
 };

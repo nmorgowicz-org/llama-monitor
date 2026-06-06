@@ -233,6 +233,7 @@ export const wizardState = {
   },
   vram: { available: 0 },
   spawn: { inFlight: false, error: '' },
+  savedPresetId: null, // ID of preset saved from this wizard run (to avoid duplicates)
 };
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
@@ -5555,12 +5556,16 @@ function renderSummary() {
   _syncSamplingFields();
 
   // Pre-fill preset name input if empty
-  if (dom.presetNameInput && !dom.presetNameInput.value.trim()) {
-    const m = wizardState.model;
-    const modelFile = (m.path || m.hfRepo || '').split(/[/\\]/).pop() || '';
-    const base = modelFile.replace(/\.gguf$/i, '').replace(/[-_.]/g, ' ').trim();
-    dom.presetNameInput.value = base || 'My Preset';
-  }
+   if (dom.presetNameInput && !dom.presetNameInput.value.trim()) {
+     const m = wizardState.model;
+     const ctx = wizardState.hardware.contextSize || 0;
+     const modelFile = (m.path || m.hfRepo || '').split(/[/\\]/).pop() || '';
+     const base = (modelFile || '').replace(/\.gguf$/i, '').trim();
+     const name = base && ctx
+       ? base + '-' + formatCtx(ctx).toLowerCase()
+       : base || 'My Preset';
+     dom.presetNameInput.value = name;
+   }
 
   const m = wizardState.model, hw = wizardState.hardware;
   const arch = getSizingArch();
@@ -5944,25 +5949,89 @@ async function saveAsPreset() {
     showToast('Enter a preset name first', 'warn');
     return;
   }
-  const payload = buildPresetPayload(); payload.name = name;
+
+  const payload = buildPresetPayload();
+  payload.name = name;
+
   const btn = dom.savePresetBtn;
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
   try {
-    const headers = window.authHeaders ? { ...window.authHeaders(), 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
-    const resp = await fetch('/api/presets', { method: 'POST', headers, body: JSON.stringify(payload) });
-    if (!resp.ok) { showToast('Save preset failed: ' + await resp.text().catch(()=>''), 'error'); return; }
+    const headers = window.authHeaders
+      ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+      : { 'Content-Type': 'application/json' };
+
+    let isUpdate = Boolean(wizardState.savedPresetId);
+
+    // If we have a saved preset ID, decide whether to update it or create new.
+    // If config has significantly diverged (different model or context size),
+    // we still update in-place but let the user rename if desired.
+    if (isUpdate) {
+      try {
+        const r = await fetch(`/api/presets/${wizardState.savedPresetId}`, { headers });
+        const existing = r.ok ? await r.json().catch(() => null) : null;
+        if (existing && (
+              existing.model_path !== payload.model_path ||
+              (existing.context_size || 0) !== (payload.context_size || 0)
+            )) {
+          // Config diverged — we’ll still update the existing preset (user can rename),
+          // but we hint that it’s been changed.
+          isUpdate = true;
+        }
+      } catch {
+        // If we can’t read it, proceed to update anyway.
+      }
+    }
+
+    let resp;
+    if (isUpdate) {
+      // Update existing preset
+      resp = await fetch(`/api/presets/${wizardState.savedPresetId}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(payload),
+      });
+    } else {
+      // Create new preset
+      resp = await fetch('/api/presets', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload),
+      });
+    }
+
+    if (!resp.ok) {
+      showToast('Save preset failed: ' + await resp.text().catch(() => ''), 'error');
+      return;
+    }
+
+    // If this was the first save, store the preset id so next saves update the same preset.
+    if (!wizardState.savedPresetId) {
+      try {
+        const data = await resp.json().catch(() => ({}));
+        if (data.id) wizardState.savedPresetId = data.id;
+      } catch {
+        // non-fatal
+      }
+    }
+
     // Refresh the setup view preset dropdown
     import('./presets.js').then(({ loadPresets }) => loadPresets().then(() => {
       import('./setup-view.js').then(({ syncSetupPresetSelect }) => syncSetupPresetSelect());
     }));
-    showToast(`Preset "${name}" saved`, 'success');
+
+    const verb = isUpdate ? 'updated' : 'saved';
+    showToast(`Preset "${name}" ${verb}`, 'success');
     if (dom.savedPresetName) {
-      dom.savedPresetName.textContent = `✓ Saved as "${name}"`;
+      dom.savedPresetName.textContent = `✓ ${isUpdate ? 'Updated' : 'Saved'} as "${name}"`;
       dom.savedPresetName.style.display = '';
     }
     if (nameInput) nameInput.value = '';
-  } catch (err) { showToast('Save preset failed: ' + (err.message || String(err)), 'error'); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = 'Save as Preset'; } }
+  } catch (err) {
+    showToast('Save preset failed: ' + (err.message || String(err)), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Save as Preset'; }
+  }
 }
 
 function buildPresetPayload() {
@@ -6001,13 +6070,17 @@ function _renderPresetParamsStep() {
   const container = dom.presetParamsTable;
   if (!container) return;
 
-  // Pre-fill preset name from model filename if empty
-  if (dom.presetNameInput && !dom.presetNameInput.value.trim()) {
-    const m = wizardState.model;
-    const modelFile = (m.path || m.hfRepo || '').split(/[/\\]/).pop() || '';
-    const base = modelFile.replace(/\.gguf$/i, '').replace(/[-_.]/g, ' ').trim();
-    dom.presetNameInput.value = base || 'My Preset';
-  }
+ // Pre-fill preset name from model filename if empty
+   if (dom.presetNameInput && !dom.presetNameInput.value.trim()) {
+     const m = wizardState.model;
+     const ctx = wizardState.hardware.contextSize || 0;
+     const modelFile = (m.path || m.hfRepo || '').split(/[/\\]/).pop() || '';
+     const base = (modelFile || '').replace(/\.gguf$/i, '').trim();
+     const name = base && ctx
+       ? base + '-' + formatCtx(ctx).toLowerCase()
+       : base || 'My Preset';
+     dom.presetNameInput.value = name;
+   }
   if (dom.savedPresetName) dom.savedPresetName.style.display = 'none';
 
   const h = wizardState.hardware, m = wizardState.model;

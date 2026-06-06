@@ -2659,6 +2659,10 @@
                                     </select>
                                 </div>
                                 <div class="pe-field">
+                                    <label class="pe-label" for="modal-port" title="TCP port llama-server listens on. Default 8001. Change if you run multiple servers simultaneously.">Port</label>
+                                    <input type="number" class="pe-input" id="modal-port" min="1024" max="65535" step="1" placeholder="8001">
+                                </div>
+                                <div class="pe-field">
                                     <label class="pe-label" for="modal-api-key" title="API key required by clients to connect to this server. Leave empty for no authentication.">API Key</label>
                                     <input type="text" class="pe-input" id="modal-api-key" placeholder="(none)">
                                 </div>

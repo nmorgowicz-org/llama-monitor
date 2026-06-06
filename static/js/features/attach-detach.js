@@ -26,7 +26,7 @@ export function getConfig() {
         batch_size: p.batch_size || 2048,
         ubatch_size: p.ubatch_size || p.batch_size || 2048,
         no_mmap: !!p.no_mmap,
-        port: parseInt(document.getElementById('port').value) || 8001,
+        port: p.port || 8001,
         ngram_spec: !!p.ngram_spec,
         parallel_slots: p.parallel_slots || 1,
         // Generation

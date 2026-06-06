@@ -154,6 +154,8 @@ pub struct ModelPreset {
     pub extra_args: String,
     #[serde(default)]
     pub bind_host: Option<String>,
+    #[serde(default)]
+    pub port: Option<u16>,
 
     // Spawn V2: extended fields
     #[serde(default)]
