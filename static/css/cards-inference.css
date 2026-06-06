@@ -56,7 +56,93 @@
   flex-wrap: wrap;
 }
 
-/* Two-zone control bar layout */
+/* ── Control bar preset zone ─────────────────────────────────────────────────── */
+
+.control-bar-preset-zone {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-md);
+}
+
+.preset-inline-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.preset-overflow-wrap {
+  position: relative;
+}
+
+.preset-overflow-trigger {
+  font-size: 1.1rem;
+  letter-spacing: 0.1em;
+  padding: 6px 10px;
+  min-height: 34px;
+  line-height: 1;
+}
+
+.preset-overflow-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 300;
+  min-width: 170px;
+  background: var(--surface-card-elevated, #1e2130);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-card);
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.48),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.preset-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: calc(var(--radius-card) - 4px);
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-weight: 540;
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.preset-overflow-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.preset-overflow-item svg {
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+
+.preset-overflow-danger {
+  color: var(--color-danger, #f87171);
+}
+
+.preset-overflow-danger:hover {
+  background: rgba(248, 113, 113, 0.1);
+  color: var(--color-danger, #f87171);
+}
+
+.preset-overflow-sep {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.07);
+  margin: 3px 5px;
+}
+
+/* ── Two-zone control bar layout ─────────────────────────────────────────────── */
 .control-bar {
   display: flex;
   align-items: center;

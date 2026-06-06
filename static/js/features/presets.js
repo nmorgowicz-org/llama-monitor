@@ -17,7 +17,8 @@ function formatNumberForInput(v) {
     const n = typeof v === 'number' ? v : Number(v);
     if (!Number.isFinite(n)) return String(v);
     if (Number.isInteger(n)) return String(n);
-    return n.toFixed(12).replace(/\.?0+$/, '');
+    // toPrecision(6) removes float32 noise (e.g. 0.949999988079 → 0.95)
+    return String(parseFloat(n.toPrecision(6)));
 }
 function numOrEmpty(id, v) { document.getElementById(id).value = formatNumberForInput(v); }
 function intOrNull(id) { const v = document.getElementById(id).value; return v !== '' ? parseInt(v) : null; }
@@ -501,8 +502,6 @@ function _buildFormPreset(existing) {
         tensor_split: strVal('modal-tensor-split'),
         split_mode: strVal('modal-split-mode'),
         main_gpu: intOrNull('modal-main-gpu'),
-        threads: intOrNull('modal-threads'),
-        threads_batch: intOrNull('modal-threads-batch'),
         n_cpu_moe: intOrNull('modal-n-cpu-moe'),
         rope_scaling: strVal('modal-rope-scaling'),
         rope_freq_base: floatOrNull('modal-rope-freq-base'),
@@ -544,7 +543,7 @@ const CHANGE_LABELS = {
     reasoning: 'Reasoning', reasoning_budget: 'Reasoning Budget',
     reasoning_budget_message: 'Reasoning Budget Message',
     tensor_split: 'Tensor Split', split_mode: 'Split Mode', main_gpu: 'Main GPU',
-    threads: 'Threads', threads_batch: 'Threads Batch', n_cpu_moe: 'CPU MoE Threads',
+    n_cpu_moe: 'CPU MoE Threads',
     rope_scaling: 'RoPE Scaling', rope_freq_base: 'RoPE Freq Base', rope_freq_scale: 'RoPE Freq Scale',
     spec_type: 'Speculative Mode', spec_ngram_size: 'N-gram Size',
     draft_min: 'Draft Min', draft_max: 'Draft Max', spec_draft_n_max: 'MTP Depth',
@@ -564,8 +563,12 @@ function _buildChangeSummary(existing, incoming) {
     for (const key of Object.keys(CHANGE_LABELS)) {
         const prev = existing[key] ?? null;
         const next = incoming[key] ?? null;
-        if (JSON.stringify(prev) !== JSON.stringify(next)) {
-            changes.push({ label: CHANGE_LABELS[key], from: fmt(prev), to: fmt(next) });
+        // Compare formatted representations so float32 noise (0.949999... vs 0.95) doesn't
+        // produce a false-positive change that shows as "0.95 → 0.95" in the summary.
+        const fPrev = fmt(prev);
+        const fNext = fmt(next);
+        if (fPrev !== fNext) {
+            changes.push({ label: CHANGE_LABELS[key], from: fPrev, to: fNext });
         }
     }
     return changes;
@@ -863,16 +866,40 @@ function _applyGenerationPreset(preset) {
 
 // ── Init ───────────────────────────────────────────────────────────────────────
 
+function _closeOverflowMenu() {
+    const m = document.getElementById('preset-overflow-menu');
+    const b = document.getElementById('preset-overflow-btn');
+    if (m) m.hidden = true;
+    if (b) b.setAttribute('aria-expanded', 'false');
+}
+
 export function initPresets() {
     // Init preset editor nav
     initPresetEditorNav();
 
-    // Bind preset action buttons
-    document.getElementById('preset-new-btn')?.addEventListener('click', () => openPresetModal('new'));
+    // Bind preset action buttons (Edit is inline; New/Copy/Delete/Reset are in the overflow menu)
+    document.getElementById('preset-new-btn')?.addEventListener('click', () => { _closeOverflowMenu(); openPresetModal('new'); });
     document.getElementById('preset-edit-btn')?.addEventListener('click', () => openPresetModal('edit'));
-    document.getElementById('preset-copy-btn')?.addEventListener('click', copyPreset);
-    document.getElementById('preset-delete-btn')?.addEventListener('click', deletePreset);
-    document.getElementById('preset-reset-btn')?.addEventListener('click', resetPresets);
+    document.getElementById('preset-copy-btn')?.addEventListener('click', () => { _closeOverflowMenu(); copyPreset(); });
+    document.getElementById('preset-delete-btn')?.addEventListener('click', () => { _closeOverflowMenu(); deletePreset(); });
+    document.getElementById('preset-reset-btn')?.addEventListener('click', () => { _closeOverflowMenu(); resetPresets(); });
+
+    // Overflow menu toggle
+    const overflowBtn = document.getElementById('preset-overflow-btn');
+    const overflowMenu = document.getElementById('preset-overflow-menu');
+    if (overflowBtn && overflowMenu) {
+        overflowBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const open = !overflowMenu.hidden;
+            overflowMenu.hidden = open;
+            overflowBtn.setAttribute('aria-expanded', String(!open));
+        });
+        document.addEventListener('click', (e) => {
+            if (!overflowMenu.hidden && !document.getElementById('preset-overflow-wrap')?.contains(e.target)) {
+                _closeOverflowMenu();
+            }
+        });
+    }
 
     // Bind preset modal buttons
     document.getElementById('preset-modal-close')?.addEventListener('click', closePresetModal);

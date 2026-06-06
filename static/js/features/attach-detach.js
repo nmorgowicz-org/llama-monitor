@@ -370,7 +370,11 @@ export async function initAttachDetachButtons() {
         const data = await resp.json();
         const btnAttach = document.getElementById('btn-attach');
         const btnDetach = document.getElementById('btn-detach');
-        if (data && data.mode && data.mode.startsWith('Attach:') && btnAttach && btnDetach) {
+        const headerActions = document.querySelector('.dashboard-header-actions');
+        if (data && data.mode && data.mode.startsWith('Spawn:')) {
+            // Spawn session — endpoint is implicit from spawn config; hide the attach/detach UI entirely
+            if (headerActions) headerActions.style.display = 'none';
+        } else if (data && data.mode && data.mode.startsWith('Attach:') && btnAttach && btnDetach) {
             btnAttach.style.display = 'none';
             btnDetach.style.display = 'inline-block';
         } else if (btnAttach && btnDetach) {
@@ -419,6 +423,12 @@ export function initAttachDetach() {
     const btnSwitchModel = document.getElementById('btn-switch-model');
     if (btnSwitchModel) btnSwitchModel.addEventListener('click', () => {
         import('./models.js').then(({ openModelsModalForSwitch }) => openModelsModalForSwitch());
+    });
+
+    // Bind control bar spawn button — opens wizard from monitor view
+    const btnControlSpawn = document.getElementById('btn-control-spawn');
+    if (btnControlSpawn) btnControlSpawn.addEventListener('click', () => {
+        import('./spawn-wizard.js').then(({ openSpawnWizard }) => openSpawnWizard());
     });
 
     // Bind logs empty state button — opens wizard

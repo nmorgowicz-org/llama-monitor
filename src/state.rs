@@ -613,7 +613,7 @@ impl AppState {
 
     pub fn push_log(&self, line: String) {
         // Filter high-frequency poll noise that clutters the console
-        if line.contains("srv update_slots") && line.contains("all slots are idle") {
+        if line.contains("update_slots") && line.contains("all slots are idle") {
             return;
         }
         let mut logs = self.server_logs.lock().unwrap();
