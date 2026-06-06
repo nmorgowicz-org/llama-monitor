@@ -1011,3 +1011,4 @@ function _refreshPresetThreadsHints() {
     }
   }
 }
+window.__refreshPresetEditorHints = _refreshPresetThreadsHints;

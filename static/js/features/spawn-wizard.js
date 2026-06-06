@@ -2028,7 +2028,7 @@ const _installedTemplateCache = {};
 // Community template registry keyed by model family
 const COMMUNITY_TEMPLATES = {
   qwen: {
-    name: 'qwen-fixed',
+    name: 'qwen-froggeric-fixed',
     display: "froggeric's Fixed Template",
     repo: 'froggeric/Qwen-Fixed-Chat-Templates',
     file: 'chat_template.jinja',
@@ -3714,6 +3714,7 @@ function _refreshThreadsHint() {
     dom.threadsBatchInput.placeholder = 'default';
   }
 }
+window.__refreshSpawnWizardHints = _refreshThreadsHint;
 
 function renderHardwareModelHeader() {
   const header = document.getElementById('hw-model-header');
@@ -4174,10 +4175,46 @@ function _renderHwTagPills(currentTags, suggestedCats, passthroughTags, modelPat
   pillsWrap.innerHTML = '';
 
   if (!currentTags.length) {
+    // "No tags yet" hint
     const hint = document.createElement('span');
     hint.style.cssText = 'font-size:10px;color:var(--color-text-muted);margin-right:4px;';
     hint.textContent = 'No tags yet';
     pillsWrap.appendChild(hint);
+
+    // Small "Pull from HF" pill when HF origin is known (and we have HF-suggested tags).
+    if (originRepo && (suggestedCats.size > 0 || (passthroughTags && passthroughTags.length > 0))) {
+      const pullBtn = document.createElement('button');
+      pullBtn.type = 'button';
+      pullBtn.className = 'mm-tag-pill';
+      pullBtn.style.cssText =
+        'font-size:9px;padding:2px 7px;cursor:pointer;text-decoration:none;opacity:0.75;white-space:nowrap;border:none;background:none;font:inherit;display:inline-flex;align-items:center;gap:4px;';
+      pullBtn.textContent = '⎇ Pull from HF';
+      pullBtn.title = 'Pull library tags from this model\'s HuggingFace card';
+
+      pullBtn.addEventListener('click', async () => {
+        try {
+          // Re-fetch HF suggestions directly from card + base model.
+          const hfResult = await _fetchHfTagsWithBaseModel(originRepo);
+          const cats = Array.from(hfResult.categories || []);
+          const pass = Array.from(hfResult.passthrough || []);
+          const toApply = [...new Set([...cats, ...pass])];
+
+          if (!toApply.length) return;
+
+          // Save as library tags for this model.
+          await _saveHwModelTags(modelPath, toApply);
+
+          // Invalidate cached row so _refreshHwTagsRow reloads current tags.
+          _tagsRowOrigin = '';
+          await _refreshHwTagsRow();
+        } catch {
+          // Non-fatal: silently fail; user can open the picker instead.
+        }
+      });
+
+      pillsWrap.appendChild(pullBtn);
+    }
+
     return;
   }
 
