@@ -479,20 +479,27 @@ function updateAttachDetach(d) {
     const btnDetachTop = ce.btnDetachTop;
     const historicBadge = ce.historicBadge;
 
+    const isSpawn = d.session_mode === 'spawn';
     const isAttach = d.session_mode === 'attach' && d.active_session_endpoint;
 
-    if (isAttach) {
+    if (isSpawn) {
+        // Spawn mode: server header is irrelevant — URL is implicit from config
         if (serverHeader) serverHeader.style.display = 'none';
+        btnAttach.style.display = 'none';
+        btnDetach.style.display = 'none';
+        if (btnDetachTop) btnDetachTop.style.display = 'none';
+    } else if (isAttach) {
+        // Attach mode: show header so user can see the connected endpoint
+        if (serverHeader) serverHeader.style.display = '';
         btnAttach.style.display = 'none';
         btnDetach.style.display = 'inline-block';
         if (btnDetachTop) btnDetachTop.style.display = 'inline-block';
-
         if (typeof setupViewState !== 'undefined' && setupViewState.view === 'setup') {
-            // TODO: import from setup-view.js when that module is extracted
             hideConnectingState();
             switchView('monitor');
         }
     } else {
+        // No active session: show header with Attach button
         if (serverHeader) serverHeader.style.display = '';
         btnAttach.style.display = 'inline-block';
         btnDetach.style.display = 'none';

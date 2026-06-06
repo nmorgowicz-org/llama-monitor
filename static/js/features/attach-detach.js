@@ -269,8 +269,7 @@ export async function doAttach() {
             showToast(data.warning, 'warning');
         }
 
-        const serverHeader = document.getElementById('server-header');
-        if (serverHeader) serverHeader.style.display = 'none';
+        setHeaderMode('Attach:' + (document.getElementById('server-endpoint')?.value?.trim() || ''));
 
         monitorState.speedMax = { prompt: 0, generation: 0 };
         hideDisconnectedBanner();
