@@ -2408,6 +2408,94 @@ body.setup-active .sidebar-nav {
   margin: 8px 0;
 }
 
+/* ── Spawn running banner ──────────────────────────────────────────────────── */
+
+.setup-spawn-running-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  background: rgba(34, 197, 94, 0.06);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: 8px;
+}
+
+.setup-spawn-running-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+  animation: setup-spawn-pulse 2s ease-in-out infinite;
+}
+
+@keyframes setup-spawn-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.setup-spawn-running-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.setup-spawn-running-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.setup-spawn-running-endpoint {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  flex-shrink: 0;
+}
+
+.setup-spawn-running-btn {
+  font-size: 11px;
+  font-weight: 600;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  border-radius: 5px;
+  padding: 4px 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.setup-spawn-running-btn:hover {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+[data-theme="light"] .setup-spawn-running-strip {
+  background: rgba(22, 163, 74, 0.05);
+  border-color: rgba(22, 163, 74, 0.2);
+}
+
+[data-theme="light"] .setup-spawn-running-dot {
+  background: #16a34a;
+  box-shadow: 0 0 6px rgba(22, 163, 74, 0.5);
+}
+
+[data-theme="light"] .setup-spawn-running-btn {
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.06);
+  border-color: rgba(22, 163, 74, 0.2);
+}
+
 .setup-btn-connect {
   display: inline-flex;
   align-items: center;

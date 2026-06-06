@@ -471,6 +471,32 @@ function updateAgentStatus(d) {
 
 // ── Attach/Detach buttons ────────────────────────────────────────────────────
 
+function _updateSetupRunningStrip(isRunning, endpoint) {
+    const strip = document.getElementById('setup-spawn-running-strip');
+    if (!strip) return;
+    if (!isRunning) {
+        strip.style.display = 'none';
+        return;
+    }
+    const nameEl = document.getElementById('setup-spawn-running-name');
+    const endpointEl = document.getElementById('setup-spawn-running-endpoint');
+    const btn = document.getElementById('setup-spawn-running-btn');
+
+    if (nameEl) {
+        const presetName = document.getElementById('preset-select')?.selectedOptions[0]?.text || 'Server';
+        nameEl.textContent = presetName;
+    }
+    if (endpointEl && endpoint) {
+        const port = endpoint.split(':').pop();
+        endpointEl.textContent = ':' + port;
+    }
+    if (btn && !btn._bound) {
+        btn._bound = true;
+        btn.addEventListener('click', () => switchView('monitor'));
+    }
+    strip.style.display = '';
+}
+
 function updateAttachDetach(d) {
     const ce = cachedElements;
     const serverHeader = ce.serverHeader;
@@ -481,6 +507,9 @@ function updateAttachDetach(d) {
 
     const isSpawn = d.session_mode === 'spawn';
     const isAttach = d.session_mode === 'attach' && d.active_session_endpoint;
+
+    // Welcome screen running-server banner
+    _updateSetupRunningStrip(isSpawn && d.server_running, d.active_session_endpoint);
 
     if (isSpawn) {
         // Spawn mode: server header is irrelevant — URL is implicit from config

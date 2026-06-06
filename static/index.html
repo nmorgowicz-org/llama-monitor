@@ -273,6 +273,16 @@
                             Local Server
                         </div>
 
+                        <!-- Running server banner (shown when a spawn session is active) -->
+                        <div id="setup-spawn-running-strip" class="setup-spawn-running-strip" style="display:none;" role="status">
+                            <span class="setup-spawn-running-dot" aria-hidden="true"></span>
+                            <span class="setup-spawn-running-text">
+                                <span class="setup-spawn-running-name" id="setup-spawn-running-name"></span>
+                                <span class="setup-spawn-running-endpoint" id="setup-spawn-running-endpoint"></span>
+                            </span>
+                            <button class="setup-spawn-running-btn" id="setup-spawn-running-btn" type="button">View monitor →</button>
+                        </div>
+
                         <!-- Preset cards grid (populated by renderLaunchGrid) -->
                         <div class="launch-grid" id="setup-launch-grid">
                             <div class="launch-card-skeleton"></div>
