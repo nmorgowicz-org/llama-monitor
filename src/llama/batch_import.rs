@@ -761,6 +761,7 @@ fn build_preset_from_args(args: &[String]) -> ModelPreset {
         system_prompt_file: String::new(),
         extra_args: extra_args.trim().to_string(),
         bind_host: None,
+        port: None,
         hf_repo: None,
         chat_template_file: None,
         mmproj: None,
