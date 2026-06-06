@@ -113,11 +113,11 @@ fn base_args(
         "-r".into(),
         "1".into(),
     ];
-    if let Some(n) = n_cpu_moe {
-        if n > 0 {
-            args.push("--n-cpu-moe".into());
-            args.push(n.to_string());
-        }
+    if let Some(n) = n_cpu_moe
+        && n > 0
+    {
+        args.push("--n-cpu-moe".into());
+        args.push(n.to_string());
     }
     args
 }

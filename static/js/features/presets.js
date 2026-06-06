@@ -1115,7 +1115,6 @@ export function initPresets() {
     });
 
     // Bind preset form submit
-    const presetForm = document.getElementById('preset-form');
     if (presetForm) presetForm.addEventListener('submit', savePreset);
 
     // Bind setup view link

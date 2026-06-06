@@ -3470,7 +3470,7 @@ function updateVramDisplay() {
 
   // Compute breakdown (layer-based MoE offload — see moeWeightSplit)
   const nCpuMoe = hw.nCpuMoe || 0;
-  const { vram: weightVram } = moeWeightSplit(modelBytes, arch, nCpuMoe);
+  const { vram: weightVram, ram: ramBytes } = moeWeightSplit(modelBytes, arch, nCpuMoe);
   const kv          = kvBytes(arch, hw.contextSize, hw.parallelSlots, hw.cacheTypeK, hw.cacheTypeV);
   const mmproj      = arch.mmprojBytes || 0;
   const mtp         = mtpBytes(modelBytes, arch.mtpDepth || 0);
