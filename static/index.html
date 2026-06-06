@@ -362,31 +362,24 @@
                         <div class="preset-inline-actions">
                             <button class="btn-sm btn-preset" id="preset-edit-btn" title="Edit selected preset">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                                Edit
+                                <span class="preset-btn-label">Edit</span>
                             </button>
-                            <div class="preset-overflow-wrap" id="preset-overflow-wrap">
-                                <button class="btn-sm btn-preset preset-overflow-trigger" id="preset-overflow-btn" title="More preset actions" aria-expanded="false" aria-haspopup="menu">···</button>
-                                <div class="preset-overflow-menu" id="preset-overflow-menu" role="menu" hidden>
-                                    <button class="preset-overflow-item" id="preset-new-btn" role="menuitem">
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                        New preset
-                                    </button>
-                                    <button class="preset-overflow-item" id="preset-copy-btn" role="menuitem">
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                                        Duplicate
-                                    </button>
-                                    <div class="preset-overflow-sep" role="separator" aria-hidden="true"></div>
-                                    <button class="preset-overflow-item preset-overflow-danger" id="preset-delete-btn" role="menuitem">
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                                        Delete
-                                    </button>
-                                    <div class="preset-overflow-sep" role="separator" aria-hidden="true"></div>
-                                    <button class="preset-overflow-item" id="preset-reset-btn" role="menuitem">
-                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/></svg>
-                                        Reset all to defaults
-                                    </button>
-                                </div>
-                            </div>
+                            <button class="btn-sm btn-preset" id="preset-new-btn" title="New configuration">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                <span class="preset-btn-label">New</span>
+                            </button>
+                            <button class="btn-sm btn-preset" id="preset-copy-btn" title="Duplicate preset">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                                <span class="preset-btn-label">Dup</span>
+                            </button>
+                            <button class="btn-sm btn-preset btn-preset--danger" id="preset-delete-btn" title="Delete preset">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                                <span class="preset-btn-label">Del</span>
+                            </button>
+                            <button class="btn-sm btn-preset" id="preset-reset-btn" title="Reset to defaults">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/></svg>
+                                <span class="preset-btn-label">Reset</span>
+                            </button>
                         </div>
                     </div>
                     <div class="control-bar-divider" aria-hidden="true"></div>

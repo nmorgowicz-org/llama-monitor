@@ -63,6 +63,14 @@
   align-items: center;
   gap: var(--gap-md);
   min-width: 0; /* allow flex shrink so select can fill remaining space */
+  container-type: inline-size;
+  container-name: preset-zone;
+}
+
+@container preset-zone (max-width: 480px) {
+  .preset-btn-label {
+    display: none;
+  }
 }
 
 .preset-inline-actions {
@@ -72,18 +80,17 @@
   flex-shrink: 0;
 }
 
-.preset-overflow-wrap {
-  position: relative;
+.btn-preset--danger {
+  color: var(--color-danger, #ef4444);
 }
 
-.preset-overflow-trigger {
-  font-size: 1.1rem;
-  letter-spacing: 0.1em;
-  padding: 6px 10px;
-  min-height: 34px;
-  line-height: 1;
+.btn-preset--danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: var(--color-danger, #ef4444);
 }
 
+/* ── Removed: preset overflow dropdown (replaced by inline icon buttons) ── */
 .preset-overflow-menu {
   position: absolute;
   top: calc(100% + 6px);

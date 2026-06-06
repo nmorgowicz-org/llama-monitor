@@ -877,40 +877,16 @@ function _applyGenerationPreset(preset) {
 
 // ── Init ───────────────────────────────────────────────────────────────────────
 
-function _closeOverflowMenu() {
-    const m = document.getElementById('preset-overflow-menu');
-    const b = document.getElementById('preset-overflow-btn');
-    if (m) m.hidden = true;
-    if (b) b.setAttribute('aria-expanded', 'false');
-}
-
 export function initPresets() {
     // Init preset editor nav
     initPresetEditorNav();
 
-    // Bind preset action buttons (Edit is inline; New/Copy/Delete/Reset are in the overflow menu)
-    document.getElementById('preset-new-btn')?.addEventListener('click', () => { _closeOverflowMenu(); openPresetModal('new'); });
+    // Bind preset action buttons (all inline — no overflow menu)
     document.getElementById('preset-edit-btn')?.addEventListener('click', () => openPresetModal('edit'));
-    document.getElementById('preset-copy-btn')?.addEventListener('click', () => { _closeOverflowMenu(); copyPreset(); });
-    document.getElementById('preset-delete-btn')?.addEventListener('click', () => { _closeOverflowMenu(); deletePreset(); });
-    document.getElementById('preset-reset-btn')?.addEventListener('click', () => { _closeOverflowMenu(); resetPresets(); });
-
-    // Overflow menu toggle
-    const overflowBtn = document.getElementById('preset-overflow-btn');
-    const overflowMenu = document.getElementById('preset-overflow-menu');
-    if (overflowBtn && overflowMenu) {
-        overflowBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const open = !overflowMenu.hidden;
-            overflowMenu.hidden = open;
-            overflowBtn.setAttribute('aria-expanded', String(!open));
-        });
-        document.addEventListener('click', (e) => {
-            if (!overflowMenu.hidden && !document.getElementById('preset-overflow-wrap')?.contains(e.target)) {
-                _closeOverflowMenu();
-            }
-        });
-    }
+    document.getElementById('preset-new-btn')?.addEventListener('click', () => openPresetModal('new'));
+    document.getElementById('preset-copy-btn')?.addEventListener('click', () => copyPreset());
+    document.getElementById('preset-delete-btn')?.addEventListener('click', () => deletePreset());
+    document.getElementById('preset-reset-btn')?.addEventListener('click', () => resetPresets());
 
     // Bind preset modal buttons
     document.getElementById('preset-modal-close')?.addEventListener('click', closePresetModal);
