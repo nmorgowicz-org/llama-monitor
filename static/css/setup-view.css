@@ -1914,58 +1914,6 @@ body.setup-active .sidebar-nav {
     background: var(--bg-button-hover, rgba(255, 255, 255, 0.08));
 }
 
-/* Spawn launch history rows (compact, no status dot/URL) */
-.setup-spawn-history-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
-    background: var(--bg-card, rgba(255, 255, 255, 0.03));
-    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
-    border-radius: 6px;
-    cursor: pointer;
-    transition: border-color 0.15s, background 0.15s;
-}
-
-.setup-spawn-history-row:hover {
-    border-color: var(--border-focus, rgba(99, 102, 241, 0.3));
-    background: var(--bg-card-hover, rgba(255, 255, 255, 0.06));
-}
-
-.setup-spawn-history-name {
-    flex: 1;
-    min-width: 0;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--fg-primary, var(--color-text-primary));
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.setup-spawn-history-time {
-    font-size: 11px;
-    color: var(--fg-muted, var(--color-text-muted));
-    flex-shrink: 0;
-}
-
-.setup-spawn-history-btn {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--fg-primary, var(--color-text-primary));
-    background: var(--bg-button, rgba(255, 255, 255, 0.04));
-    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
-    border-radius: 4px;
-    padding: 4px 10px;
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: background 0.15s;
-}
-
-.setup-spawn-history-btn:hover {
-    background: var(--bg-button-hover, rgba(255, 255, 255, 0.08));
-}
-
 /* Manual attach section */
 .setup-endpoint-manual {
     border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
@@ -2759,6 +2707,13 @@ body.setup-active .sidebar-nav {
 .launch-card-model--empty {
   font-style: italic;
   opacity: 0.45;
+}
+
+.launch-card-last-launched {
+  font-size: 11px;
+  color: var(--fg-muted, var(--color-text-muted));
+  opacity: 0.65;
+  margin-top: 2px;
 }
 
 .launch-card-chips {

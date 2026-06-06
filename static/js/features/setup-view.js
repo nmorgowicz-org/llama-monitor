@@ -120,6 +120,26 @@ function animateSetupCardsEnter() {
 
 let _attachDrawerOpen = false;
 
+// Map of preset_id → last_connected_at (ms), populated by renderRecentEndpoints
+const _spawnLastLaunched = new Map();
+
+function _applyLastLaunchedToCards() {
+    document.querySelectorAll('.launch-card[data-preset-id]').forEach(card => {
+        const presetId = card.dataset.presetId;
+        const ts = _spawnLastLaunched.get(presetId);
+        let el = card.querySelector('.launch-card-last-launched');
+        if (!ts) { if (el) el.remove(); return; }
+        if (!el) {
+            el = document.createElement('div');
+            el.className = 'launch-card-last-launched';
+            const modelEl = card.querySelector('.launch-card-model');
+            if (modelEl) modelEl.after(el);
+            else card.querySelector('.launch-card-chips')?.before(el);
+        }
+        el.textContent = 'Last launched · ' + formatRelativeTime(ts);
+    });
+}
+
 export function toggleAttachDrawer(forceOpen) {
     const drawer = document.getElementById('setup-attach-drawer');
     if (!drawer) return;
@@ -178,6 +198,8 @@ export function renderLaunchGrid() {
         newCard.style.animationDelay = `${presets.length * 55}ms`;
         grid.appendChild(newCard);
     }
+    // Stamp last-launched timestamps if session data is already available
+    _applyLastLaunchedToCards();
 }
 
 function _buildLaunchCard(preset, activePresetId) {
@@ -336,11 +358,9 @@ export async function loadRecentSessions() {
 export function renderRecentEndpoints(sessions, activeId) {
     const list = document.getElementById('setup-endpoint-list');
     const container = document.getElementById('setup-recent-endpoints');
-    const spawnList = document.getElementById('setup-spawn-session-list');
-    const spawnContainer = document.getElementById('setup-recent-spawn-sessions');
     const attachBtn = document.getElementById('setup-attach-btn');
     const lastSession = setupViewState.lastSessionData || loadLastSessionData();
-    if (!list || !container || !spawnList || !spawnContainer) return;
+    if (!list || !container) return;
 
     const allSessions = Array.isArray(sessions) ? sessions : [];
     const attachSessions = allSessions.filter(session => !!session.mode?.Attach);
@@ -348,16 +368,24 @@ export function renderRecentEndpoints(sessions, activeId) {
 
     if (!allSessions.length) {
         container.style.display = 'none';
-        spawnContainer.style.display = 'none';
         setAttachButtonLabel(attachBtn, 'Attach');
         return;
     }
 
     container.style.display = attachSessions.length ? '' : 'none';
-    spawnContainer.style.display = spawnSessions.length ? '' : 'none';
     // Don't clobber the Connect button label — it's fixed in the two-pane layout
     list.innerHTML = '';
-    spawnList.innerHTML = '';
+
+    // Build last-launched map and stamp preset cards
+    _spawnLastLaunched.clear();
+    for (const session of spawnSessions) {
+        if (!session.preset_id || !session.last_connected_at) continue;
+        const ts = session.last_connected_at * 1000;
+        if (ts > (_spawnLastLaunched.get(session.preset_id) || 0)) {
+            _spawnLastLaunched.set(session.preset_id, ts);
+        }
+    }
+    _applyLastLaunchedToCards();
 
     const buildCard = (session) => {
         const isAttach = session.mode && session.mode.Attach;
@@ -472,54 +500,6 @@ export function renderRecentEndpoints(sessions, activeId) {
     };
 
     attachSessions.forEach(session => list.appendChild(buildCard(session)));
-
-    // Spawn history: deduplicate by preset_id (most recent per preset), limit 3
-    const buildSpawnHistoryRow = (session) => {
-        const row = document.createElement('div');
-        row.className = 'setup-spawn-history-row';
-        row.title = 'Re-launch this configuration';
-
-        const nameEl = document.createElement('div');
-        nameEl.className = 'setup-spawn-history-name';
-        nameEl.textContent = session.name || 'Unnamed configuration';
-
-        const timeEl = document.createElement('div');
-        timeEl.className = 'setup-spawn-history-time';
-        timeEl.textContent = session.last_connected_at
-            ? formatRelativeTime(session.last_connected_at * 1000)
-            : 'Never launched';
-
-        const launchBtn = document.createElement('button');
-        launchBtn.className = 'setup-spawn-history-btn';
-        launchBtn.textContent = 'Launch';
-
-        const doLaunch = () => {
-            if (session.preset_id) {
-                quickStartSession(session.id);
-            } else {
-                console.warn('[setup-view] Spawn history row missing preset_id', session.id);
-            }
-        };
-        launchBtn.addEventListener('click', (e) => { e.stopPropagation(); doLaunch(); });
-        row.addEventListener('click', doLaunch);
-
-        row.appendChild(nameEl);
-        row.appendChild(timeEl);
-        row.appendChild(launchBtn);
-        return row;
-    };
-
-    const seenPresets = new Set();
-    const dedupedSpawn = [];
-    // Sessions arrive newest-first from the API; maintain that order
-    for (const session of spawnSessions) {
-        const key = session.preset_id || session.id;
-        if (seenPresets.has(key)) continue;
-        seenPresets.add(key);
-        dedupedSpawn.push(session);
-        if (dedupedSpawn.length >= 3) break;
-    }
-    dedupedSpawn.forEach(session => spawnList.appendChild(buildSpawnHistoryRow(session)));
 
     // Live health-check attach sessions that aren't already confirmed Running
     attachSessions.forEach((session, i) => {
