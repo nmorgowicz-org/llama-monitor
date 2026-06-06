@@ -1,7 +1,7 @@
 // ── Attach / Detach / Start / Stop ─────────────────────────────────────────────
 // LLM lifecycle: start, stop, attach, detach, kill.
 
-import { sessionState } from '../core/app-state.js';
+import { sessionState, setupViewState } from '../core/app-state.js';
 import { updateActiveSessionInfo } from './sessions.js';
 import { showToast } from './toast.js';
 import { hideConnectingState, saveLastSessionData, showConnectingState, switchView, restorePreviousPosition } from './setup-view.js';
@@ -390,6 +390,12 @@ export async function initAttachDetachButtons() {
         }
         const data = await resp.json();
         setHeaderMode(data?.mode ?? null);
+        // If a session is already running, restore the monitor view instead of
+        // leaving the user stranded on the welcome screen after a hard refresh.
+        if (data?.status === 'Running' && setupViewState.view === 'setup') {
+            switchView('monitor');
+            showTunePanel();
+        }
     } catch (err) {
         console.error('Failed to initialize attach/detach buttons:', err);
     }
