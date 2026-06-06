@@ -61,8 +61,9 @@
 .control-bar-preset-zone {
   display: flex;
   align-items: center;
-  gap: var(--gap-md);
-  min-width: 0; /* allow flex shrink so select can fill remaining space */
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
   container-type: inline-size;
   container-name: preset-zone;
 }
@@ -76,8 +77,9 @@
 .preset-inline-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   flex-shrink: 0;
+  padding-left: 2px;
 }
 
 .btn-preset--danger {
@@ -248,6 +250,30 @@
   font-weight: 650;
 }
 
+.control-bar-preset-zone .preset-label,
+.preset-label-hint {
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  display: inline-flex;
+  align-items: center;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  .preset-label-hint {
+    display: none;
+  }
+}
+
 .modal-help {
   margin: 0;
   color: var(--color-text-muted);
@@ -265,10 +291,48 @@
   width: min(420px, 62vw);
 }
 
+.preset-selector,
 #preset-select {
   flex: 1;
-  min-width: 0;
-  width: 0; /* allow flex shrink below intrinsic content width */
+  min-width: 130px;
+  width: auto;
+  padding: 7px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  background:
+    linear-gradient(180deg, rgba(26, 32, 50, 0.98), rgba(11, 16, 26, 1));
+  color: var(--color-text-primary);
+  appearance: none;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  box-shadow:
+    0 0 16px rgba(99, 102, 241, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%238b8ff7' stroke-width='1.4' fill='none'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 26px;
+  font-weight: 640;
+  letter-spacing: 0.015em;
+}
+
+.preset-selector:hover,
+.preset-selector:focus,
+#preset-select:hover,
+#preset-select:focus {
+  border-color: rgba(99, 102, 241, 0.7);
+  box-shadow:
+    0 0 20px rgba(99, 102, 241, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+@media (max-width: 640px) {
+  .preset-selector,
+  #preset-select {
+    min-width: 100px;
+  }
 }
 
 .metric-section {

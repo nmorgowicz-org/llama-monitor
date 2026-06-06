@@ -366,9 +366,8 @@
                     <div class="control-bar-divider" aria-hidden="true"></div>
                     <!-- Zone 2: Preset selection + management -->
                     <div class="control-bar-zone control-bar-quick-zone control-bar-preset-zone">
-                        <label class="preset-label">Preset
-                            <select id="preset-select"></select>
-                        </label>
+                        <div class="preset-label preset-label-hint">Preset</div>
+                        <select id="preset-select" class="preset-selector"></select>
                         <div class="preset-inline-actions">
                             <button class="btn-sm btn-preset" id="preset-edit-btn" title="Edit selected preset">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -377,18 +376,6 @@
                             <button class="btn-sm btn-preset" id="preset-new-btn" title="New configuration">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                                 <span class="preset-btn-label">New</span>
-                            </button>
-                            <button class="btn-sm btn-preset" id="preset-copy-btn" title="Duplicate preset">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                                <span class="preset-btn-label">Dup</span>
-                            </button>
-                            <button class="btn-sm btn-preset btn-preset--danger" id="preset-delete-btn" title="Delete preset">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                                <span class="preset-btn-label">Del</span>
-                            </button>
-                            <button class="btn-sm btn-preset" id="preset-reset-btn" title="Reset to defaults">
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.51"/></svg>
-                                <span class="preset-btn-label">Reset</span>
                             </button>
                         </div>
                     </div>
@@ -2306,6 +2293,14 @@
                                 <label class="pe-label" for="modal-context-size" title="Maximum context length in tokens. Larger values use more VRAM. Auto-enables YaRN scaling above 262144.">Context Size (-c)</label>
                                 <input type="number" class="pe-input" id="modal-context-size" value="128000">
                             </div>
+                            <!-- Performance advisor: config-time hints (dense vs MoE, KV, MTP) -->
+                            <div class="wizard-advisor" id="preset-advisor" style="display:none;">
+                                <div class="wizard-advisor-header">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></svg>
+                                    <span>Performance advisor</span>
+                                </div>
+                                <div class="tune-suggestions" id="preset-advisor-cards"></div>
+                            </div>
                             <div class="pe-row pe-row-3">
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-ctk" title="KV cache key quantization. q8_0 is the best quality-per-byte for keys. f16 = lossless. q4_0/iq4_nl = 4-bit for aggressive VRAM savings.">KV Key Type (-ctk)</label>
@@ -2538,6 +2533,10 @@
                                 <div class="pe-field">
                                     <label class="pe-label" for="modal-n-cpu-moe" title="CPU threads for MoE expert layers. Useful for hybrid GPU+CPU MoE models.">CPU MoE (-n-cpu-moe)</label>
                                     <input type="number" class="pe-input" id="modal-n-cpu-moe" placeholder="auto">
+                                    <div class="moe-autotune" id="preset-moe-autotune">
+                                        <button type="button" class="moe-autotune-btn" id="preset-moe-autotune-verify" title="Run llama-bench to find the fastest n_cpu_moe empirically. Requires the server to be stopped.">⚡ Auto-tune offload (sweep)</button>
+                                        <span class="moe-autotune-status" id="preset-moe-autotune-status"></span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -2736,7 +2735,11 @@
             <div class="preset-editor-footer">
                 <button type="button" class="btn btn-modal-cancel" id="preset-modal-cancel">Cancel</button>
                 <button type="button" class="btn btn-modal-cancel" id="preset-modal-back" style="display:none;">← Back</button>
-                <button type="button" class="btn btn-modal-danger" id="preset-modal-delete" style="display:none;" title="Delete this preset">Delete preset</button>
+                <button type="button" class="btn btn-modal-danger" id="preset-modal-delete" title="Delete this preset">Delete preset</button>
+                <button type="button" class="btn btn-modal-save" id="preset-modal-duplicate" title="Duplicate this preset">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                    Duplicate
+                </button>
                 <button type="submit" class="btn btn-modal-save" id="btn-modal-save">Save</button>
             </div>
         </form>
@@ -3279,6 +3282,11 @@
                                  <label for="spawn-n-cpu-moe" title="For Mixture-of-Experts models: how many expert layers to keep in VRAM. 0 = auto. Higher = faster but uses more VRAM. Lower = saves VRAM but runs some experts on CPU.">MoE CPU experts (n_cpu_moe)</label>
                                  <input type="number" id="spawn-n-cpu-moe" min="0" placeholder="Auto">
                                  <div class="field-hint">Higher = more VRAM, faster. Lower = more CPU, slower.</div>
+                                 <div class="moe-autotune" id="spawn-moe-autotune" style="display:none;">
+                                     <button type="button" class="moe-autotune-btn" id="spawn-moe-autotune-btn" title="Compute the best n_cpu_moe that fits VRAM (instant estimate)">⚡ Auto-tune offload</button>
+                                     <button type="button" class="moe-autotune-verify" id="spawn-moe-autotune-verify" title="Run llama-bench to confirm the fastest offload empirically. Requires the server to be stopped.">Verify with sweep</button>
+                                     <span class="moe-autotune-status" id="spawn-moe-autotune-status"></span>
+                                 </div>
                              </div>
                              <div class="hardware-field">
                                  <label for="spawn-tensor-split" title="How to split the model across multiple GPUs. e.g. '1,1' = equal split across 2 GPUs. Leave empty for single GPU. Only useful if you have multiple GPUs.">Tensor split</label>
@@ -3438,6 +3446,25 @@
                             <span id="spawn-vram-pill"></span>
                         </div>
                     </div>
+
+                    <!-- Performance advisor: config-time hints (dense vs MoE, KV, MTP) -->
+                    <div class="wizard-advisor" id="wizard-advisor" style="display:none;">
+                        <div class="wizard-advisor-header">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></svg>
+                            <span>Performance advisor</span>
+                        </div>
+                        <div class="tune-suggestions" id="wizard-advisor-cards"></div>
+                    </div>
+
+                    <!-- Depth sweep: measure decode at several context depths (server must be stopped) -->
+                    <details class="depth-sweep" id="wizard-depth-sweep" style="display:none;">
+                        <summary class="depth-sweep-summary">Depth sweep <span class="depth-sweep-hint">measure speed vs context length</span></summary>
+                        <div class="depth-sweep-body">
+                            <button type="button" class="depth-sweep-btn" id="wizard-depth-sweep-btn" title="Runs llama-bench at several context depths. The server must be stopped; takes a few minutes.">Run depth sweep</button>
+                            <span class="depth-sweep-status" id="wizard-depth-sweep-status"></span>
+                            <div class="depth-sweep-results" id="wizard-depth-sweep-results"></div>
+                        </div>
+                    </details>
                 </div>
                 <div class="hw-vram-sidebar">
                     <!-- ── Animated VRAM breakdown (sticky sidebar) ──────────────── -->

@@ -4,6 +4,7 @@
 //       results → applyAndRetune() → running → results (updated)
 
 import { showToast } from './toast.js';
+import { renderSuggestionCards, suggestionPatch } from './tuning-cards.js';
 
 // Last config used to spawn/start the server. Apply mutations build on this.
 let _tuneConfig = null;
@@ -137,57 +138,13 @@ function _renderResults(data) {
 function _renderSuggestions(suggestions) {
   const container = document.getElementById('tune-suggestions');
   if (!container) return;
-  container.replaceChildren();
-
-  // Filter out suggestions whose param is already set to the target value
-  const applicable = suggestions.filter(s => !_isAlreadyApplied(s));
-
-  if (applicable.length === 0) {
-    const msg = document.createElement('p');
-    msg.className = 'tune-no-suggestions';
-    msg.textContent = applicable.length === 0 && suggestions.length === 0
+  renderSuggestionCards(container, suggestions, {
+    onApply: _applyAndRetune,
+    config: _tuneConfig,
+    emptyMessage: (suggestions && suggestions.length === 0)
       ? 'Your config looks well-tuned for this hardware.'
-      : 'No further automatic suggestions — all recommended settings are already applied.';
-    container.appendChild(msg);
-    return;
-  }
-
-  applicable.forEach(suggestion => {
-    const card = document.createElement('div');
-    card.className = 'tune-suggestion-card';
-
-    const body = document.createElement('div');
-    body.className = 'tune-suggestion-body';
-
-    const label = document.createElement('div');
-    label.className = 'tune-suggestion-label';
-    label.textContent = suggestion.label;
-
-    const desc = document.createElement('div');
-    desc.className = 'tune-suggestion-desc';
-    desc.textContent = suggestion.description;
-
-    body.appendChild(label);
-    body.appendChild(desc);
-
-    const btn = document.createElement('button');
-    btn.className = 'tune-suggestion-apply';
-    btn.type = 'button';
-    btn.textContent = 'Apply →';
-    btn.addEventListener('click', () => _applyAndRetune(suggestion, card));
-
-    card.appendChild(body);
-    card.appendChild(btn);
-    container.appendChild(card);
+      : 'No further automatic suggestions — all recommended settings are already applied.',
   });
-}
-
-function _isAlreadyApplied(suggestion) {
-  if (!_tuneConfig) return false;
-  const current = _tuneConfig[suggestion.param];
-  if (current === undefined || current === null) return false;
-  // Loose comparison: "on" == "on", 8192 == 8192
-  return String(current) === String(suggestion.value);
 }
 
 // Poll /api/sessions/active until status === "Running" or timeout expires.
@@ -221,8 +178,8 @@ async function _applyAndRetune(suggestion, cardEl) {
   if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = 'Applying…'; }
   if (rerunBtn) rerunBtn.disabled = true;
 
-  // Mutate a copy of the config
-  const newConfig = { ..._tuneConfig, [suggestion.param]: suggestion.value };
+  // Mutate a copy of the config (supports multi-field patches)
+  const newConfig = { ..._tuneConfig, ...suggestionPatch(suggestion) };
   _tuneConfig = newConfig;
 
   // Show running state with "Restarting…" hint

@@ -22,14 +22,16 @@ pub struct MoeTuningSuggestion {
     pub note: String,
 }
 
-/// Generate MoE tuning suggestion.
+/// Generate MoE tuning suggestion. `n_moe_layers` is the model's transformer
+/// layer count — `--n-cpu-moe N` offloads the experts of the first N layers, so
+/// the recommendation is expressed in layers (0..n_moe_layers), matching llama.cpp.
 pub fn suggest_moe_tuning(
     model_size_bytes: u64,
     available_vram_bytes: u64,
-    total_experts: u64,
+    n_moe_layers: u64,
 ) -> MoeTuningSuggestion {
     // Conservative default when info is missing
-    if total_experts == 0 || available_vram_bytes == 0 || model_size_bytes == 0 {
+    if n_moe_layers == 0 || available_vram_bytes == 0 || model_size_bytes == 0 {
         return MoeTuningSuggestion {
             recommended_n_cpu_moe: 2,
             note: "Limited information provided; using a conservative MoE setting. Adjust based on observed VRAM usage.".into(),
@@ -38,25 +40,26 @@ pub fn suggest_moe_tuning(
 
     // Rough heuristic:
     // - If VRAM >= model_size * 1.2, keep all experts in VRAM (n_cpu_moe=0).
-    // - If VRAM is between 0.6 and 1.2 of model_size, offload some.
-    // - If VRAM is very low, offload more to CPU.
+    // - If VRAM is between 0.6 and 1.2 of model_size, offload some layers.
+    // - If VRAM is very low, offload more layers to CPU.
     let ratio = available_vram_bytes as f64 / model_size_bytes as f64;
 
     let recommended = if ratio >= 1.2 {
         0
     } else if ratio >= 0.8 {
-        (total_experts as f64 * 0.25) as i32
+        (n_moe_layers as f64 * 0.25) as i32
     } else if ratio >= 0.5 {
-        (total_experts as f64 * 0.5) as i32
+        (n_moe_layers as f64 * 0.5) as i32
     } else {
-        (total_experts as f64 * 0.75) as i32
+        (n_moe_layers as f64 * 0.75) as i32
     };
 
-    let recommended = recommended.min(total_experts as i32);
+    let recommended = recommended.min(n_moe_layers as i32);
 
     let note = format!(
-        "Based on available VRAM, keeping {} experts in VRAM is recommended for a balance of speed and memory usage.",
-        total_experts.saturating_sub(recommended as u64)
+        "Based on available VRAM, keeping {} of {} MoE layers in VRAM is recommended for a balance of speed and memory usage.",
+        n_moe_layers.saturating_sub(recommended as u64),
+        n_moe_layers
     );
 
     MoeTuningSuggestion {
@@ -74,9 +77,15 @@ pub struct BenchmarkSuggestion {
     /// One-line explanation of why this helps.
     pub description: String,
     /// The config field name that should be changed, e.g. "flash_attn".
+    /// Empty string = informational-only card (no Apply button).
     pub param: String,
     /// The value to set, serialized as JSON (string, number, or bool).
     pub value: serde_json::Value,
+    /// Optional multi-field patch applied together (e.g. ctk + ctv, or
+    /// spec_type + spec_draft_n_max). When present the frontend merges every key
+    /// into the config; `param`/`value` still name a representative field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub patch: Option<serde_json::Value>,
 }
 
 /// Run a short benchmark on the running llama-server.
@@ -108,7 +117,7 @@ pub fn classify_benchmark_result(
     ttft_ms: f64,
     model_size_bytes: Option<u64>,
     available_vram_bytes: Option<u64>,
-    total_experts: u64,
+    n_moe_layers: u64,
 ) -> BenchmarkResult {
     let mut hints: Vec<String> = Vec::new();
     let mut suggestions: Vec<BenchmarkSuggestion> = Vec::new();
@@ -136,6 +145,7 @@ pub fn classify_benchmark_result(
                 .to_string(),
             param: "flash_attn".to_string(),
             value: serde_json::json!("on"),
+            patch: None,
         });
     }
 
@@ -147,6 +157,7 @@ pub fn classify_benchmark_result(
             description: "If you don't need very long context, reducing to 8 192 tokens can noticeably speed things up.".to_string(),
             param: "context_size".to_string(),
             value: serde_json::json!(8192),
+            patch: None,
         });
     }
 
@@ -159,10 +170,11 @@ pub fn classify_benchmark_result(
                 .to_string(),
             param: "batch_size".to_string(),
             value: serde_json::json!(4096),
+            patch: None,
         });
     }
 
-    if total_experts > 0 {
+    if n_moe_layers > 0 {
         let (model_size, vram) = match (model_size_bytes, available_vram_bytes) {
             (Some(m), Some(v)) => (m, v),
             _ => {
@@ -180,17 +192,18 @@ pub fn classify_benchmark_result(
             }
         };
 
-        let moe = suggest_moe_tuning(model_size, vram, total_experts);
+        let moe = suggest_moe_tuning(model_size, vram, n_moe_layers);
         if moe.recommended_n_cpu_moe > 0 {
             hints.push(format!(
                 "For MoE models, try increasing n_cpu_moe to {} within available VRAM.",
                 moe.recommended_n_cpu_moe
             ));
             suggestions.push(BenchmarkSuggestion {
-                label: format!("Offload {} MoE experts to CPU", moe.recommended_n_cpu_moe),
+                label: format!("Offload {} MoE layers to CPU", moe.recommended_n_cpu_moe),
                 description: moe.note.clone(),
                 param: "n_cpu_moe".to_string(),
                 value: serde_json::json!(moe.recommended_n_cpu_moe),
+                patch: None,
             });
         }
     }
@@ -203,6 +216,79 @@ pub fn classify_benchmark_result(
         hints,
         suggestions,
     }
+}
+
+/// Predictive, config-time advisory hints surfaced in the Spawn Wizard and Preset
+/// Editor — *before* a benchmark is run. Each returned suggestion reuses the same
+/// `{label, description, param, value, patch}` contract as benchmark suggestions so
+/// the frontend's one-click Apply path is identical. Advisory-only cards (no
+/// applicable change) use an empty `param`.
+///
+/// Emitted, when applicable:
+/// - dense model > ~14B on unified memory → "bandwidth-bound; an MoE is ~3× faster"
+///   (informational only — there is nothing to toggle).
+/// - Qwen-style 256-dim heads at ≤32k context with quantized KV on unified memory →
+///   switch KV to f16 (faster on Metal, avoids the quantized-KV slow path).
+/// - an MTP draft model is available but draft-mtp speculative decoding is off →
+///   enable it.
+pub fn predict_perf_hints(
+    arch: &vram_estimator::ModelArch,
+    context_size: u64,
+    ctk: &str,
+    ctv: &str,
+    is_unified_memory: bool,
+    spec_type: Option<&str>,
+    has_mtp_model: bool,
+) -> Vec<BenchmarkSuggestion> {
+    let mut out: Vec<BenchmarkSuggestion> = Vec::new();
+
+    // 1. Dense + large + unified memory → bandwidth ceiling; MoE is the real fix.
+    if !arch.is_moe() && arch.param_b > 14.0 && is_unified_memory {
+        out.push(BenchmarkSuggestion {
+            label: "Dense model is bandwidth-bound on this Mac".to_string(),
+            description: format!(
+                "A dense ~{:.0}B model is limited by memory bandwidth on Apple Silicon, so decode \
+                 stays slow no matter the loader. A similar-quality MoE (e.g. an A3B variant) keeps \
+                 only a few billion params active per token and typically runs ~3× faster.",
+                arch.param_b
+            ),
+            param: String::new(), // informational only
+            value: serde_json::Value::Null,
+            patch: None,
+        });
+    }
+
+    // 2. 256-dim heads (Qwen3.5/3.6): quantized KV is a slow path on Metal at
+    //    moderate context. Prefer f16 KV when the context is small enough to fit.
+    let kv_is_quantized = ctk != "f16" || ctv != "f16";
+    if is_unified_memory && arch.head_dim >= 256 && context_size <= 32_768 && kv_is_quantized {
+        out.push(BenchmarkSuggestion {
+            label: "Use f16 KV cache at this context".to_string(),
+            description:
+                "This architecture uses 256-dim attention heads, where quantized KV is a slower path \
+                 on Metal. At ≤32k context, f16 KV is faster and still fits in unified memory."
+                    .to_string(),
+            param: "ctk".to_string(),
+            value: serde_json::json!("f16"),
+            patch: Some(serde_json::json!({ "ctk": "f16", "ctv": "f16" })),
+        });
+    }
+
+    // 3. MTP available but not enabled → free ~1.4–2× decode, no quality change.
+    if has_mtp_model && spec_type != Some("draft-mtp") {
+        out.push(BenchmarkSuggestion {
+            label: "Enable MTP speculative decoding".to_string(),
+            description:
+                "An MTP draft model is available. Multi-Token Prediction gives ~1.4–2× faster \
+                 generation with no change in output quality."
+                    .to_string(),
+            param: "spec_type".to_string(),
+            value: serde_json::json!("draft-mtp"),
+            patch: Some(serde_json::json!({ "spec_type": "draft-mtp", "spec_draft_n_max": 3 })),
+        });
+    }
+
+    out
 }
 
 /// Re-export convenience for API layer.

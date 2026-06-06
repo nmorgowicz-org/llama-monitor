@@ -14,6 +14,7 @@ import { openDeferredFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemp
 import { showToast } from './toast.js';
 import { switchView } from './setup-view.js';
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
+import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune, requestDepthSweep, renderDepthSweep } from './tuning-cards.js';
 import { setHeaderMode } from './attach-detach.js';
 import { lastCapabilities, lastSystemMetrics } from '../core/app-state.js';
 import {
@@ -66,8 +67,12 @@ function kvBytes(arch, ctx, slots, ctk, ctv) {
 }
 
 function moeWeightSplit(modelBytes, arch, nCpuMoe) {
-  if (!arch.nExperts || nCpuMoe <= 0) return { vram: modelBytes, ram: 0 };
-  const cpuRatio = Math.min(nCpuMoe, arch.nExperts) / arch.nExperts;
+  // --n-cpu-moe N offloads the experts of N transformer layers, so the offload
+  // fraction is N / (layer count) — not N / (experts per layer). Mirrors
+  // moe_weight_split() in vram_estimator.rs.
+  const moeLayers = arch.nLayers || 0;
+  if (!arch.nExperts || moeLayers <= 0 || nCpuMoe <= 0) return { vram: modelBytes, ram: 0 };
+  const cpuRatio = Math.min(nCpuMoe, moeLayers) / moeLayers;
   const expertFrac = arch.expertFraction ?? 0.65;
   const ram = Math.round(modelBytes * expertFrac * cpuRatio);
   return { vram: modelBytes - ram, ram };
@@ -758,6 +763,13 @@ function bindEvents() {
     updateMoeSliderVisuals();
     scheduleVramUpdate();
   });
+
+  // MoE offload auto-tuner
+  document.getElementById('spawn-moe-autotune-btn')?.addEventListener('click', () => autoTuneWizard(false));
+  document.getElementById('spawn-moe-autotune-verify')?.addEventListener('click', () => autoTuneWizard(true));
+
+  // Depth sweep
+  document.getElementById('wizard-depth-sweep-btn')?.addEventListener('click', runDepthSweep);
 
   // Auto-size button
   dom.vramAutosizeBtn?.addEventListener('click', triggerAutoSize);
@@ -1699,9 +1711,9 @@ async function doIntrospect(path) {
       } catch { /* browse may be rate-limited; skip silently */ }
     }
 
-    // Update MoE slider max if we got expert count
+    // Update MoE slider max — n_cpu_moe counts layers, so the max is the layer count
     if (wizardState.arch.nExperts > 0 && dom.moeOffloadSlider) {
-      dom.moeOffloadSlider.max = wizardState.arch.nExperts;
+      dom.moeOffloadSlider.max = wizardState.arch.nLayers || wizardState.arch.nExperts;
     }
 
       // Store the model's training context ceiling for UX warnings
@@ -3273,6 +3285,181 @@ function guessQuantFromName(name) {
   return 'q4_k_m'; // reasonable default
 }
 
+// ── Performance advisor (config-time hints) ───────────────────────────────────
+let _advisorTimer = null;
+let _advisorSeq = 0;
+
+// Map an advisor suggestion's patch onto the wizard controls. We drive the real
+// DOM inputs and dispatch their events so existing handlers keep wizardState in
+// sync, then refresh the advice.
+function applyWizardSuggestion(suggestion) {
+  const patch = suggestionPatch(suggestion);
+  const map = {
+    ctk: { id: 'spawn-cache-type-k', evt: 'change' },
+    ctv: { id: 'spawn-cache-type-v', evt: 'change' },
+    context_size: { id: 'spawn-context-size', evt: 'input' },
+    spec_draft_n_max: { id: 'hw-mtp-depth', evt: 'input' },
+  };
+  Object.entries(patch).forEach(([k, v]) => {
+    if (k === 'spec_type') {
+      const useMtp = String(v).includes('draft-mtp');
+      const cb = document.getElementById('hw-use-mtp');
+      if (cb && cb.checked !== useMtp) {
+        cb.checked = useMtp;
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      return;
+    }
+    const m = map[k];
+    const el = m && document.getElementById(m.id);
+    if (!el) return;
+    el.value = String(v);
+    el.dispatchEvent(new Event(m.evt, { bubbles: true }));
+  });
+  updateAdvisor();
+  showToast('Applied', 'success', suggestion.label);
+}
+
+// Auto-tune n_cpu_moe: instant estimate, or empirical llama-bench sweep (verify).
+async function autoTuneWizard(verify) {
+  const statusEl = document.getElementById('spawn-moe-autotune-status');
+  const arch = getSizingArch();
+  const hw = wizardState.hardware;
+  const m = wizardState.model;
+  const body = {
+    name: (m.path || m.hfRepo || '').split('/').pop() || '',
+    param_b: arch.paramB || m.paramB || 0,
+    model_size_bytes: getModelBytes(),
+    available_vram_bytes: effectiveAvailBytes(),
+    ubatch_size: hw.ubatchSize || 2048,
+    verify: !!verify,
+  };
+  if (verify) {
+    if (!m.path) { showToast('Verify needs a local model file', 'warn'); return; }
+    body.model_path = m.path;
+    body.ngl = 99;
+    body.ctk = hw.cacheTypeK;
+    body.ctv = hw.cacheTypeV;
+    body.flash_attn = hw.flashAttn === 'on';
+  }
+  if (statusEl) {
+    statusEl.textContent = verify
+      ? 'Running sweep… this can take a few minutes'
+      : 'Estimating…';
+  }
+  try {
+    const data = await requestNcpuMoeTune(body);
+    if (data.error) { if (statusEl) statusEl.textContent = data.error; return; }
+    const rec = data.recommended_n_cpu_moe;
+    const input = document.getElementById('spawn-n-cpu-moe');
+    if (input) {
+      input.value = String(rec);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    if (statusEl) {
+      statusEl.textContent = data.verified ? `Verified best: ${rec} (measured)` : `Estimated: ${rec}`;
+    }
+  } catch {
+    if (statusEl) statusEl.textContent = 'Auto-tune failed';
+  }
+}
+
+// Depth sweep: measure decode/prefill at several context depths via llama-bench.
+async function runDepthSweep() {
+  const statusEl = document.getElementById('wizard-depth-sweep-status');
+  const resultsEl = document.getElementById('wizard-depth-sweep-results');
+  const hw = wizardState.hardware;
+  const m = wizardState.model;
+  if (!m.path || !m.path.toLowerCase().endsWith('.gguf')) {
+    showToast('Depth sweep needs a local .gguf file', 'warn');
+    return;
+  }
+  const ctx = hw.contextSize || 32768;
+  const depths = [0, 16384, 32768, 65536, 131072].filter((d) => d === 0 || d < ctx);
+  const body = {
+    model_path: m.path,
+    ngl: 99,
+    ctk: hw.cacheTypeK,
+    ctv: hw.cacheTypeV,
+    flash_attn: hw.flashAttn === 'on',
+    n_cpu_moe: hw.nCpuMoe || null,
+    depths,
+  };
+  if (statusEl) statusEl.textContent = 'Running… llama-bench reloads per depth, so this can take several minutes.';
+  if (resultsEl) resultsEl.replaceChildren();
+  try {
+    const data = await requestDepthSweep(body);
+    if (data.error) { if (statusEl) statusEl.textContent = data.error; return; }
+    if (statusEl) statusEl.textContent = '';
+    renderDepthSweep(resultsEl, data.points || []);
+  } catch {
+    if (statusEl) statusEl.textContent = 'Depth sweep failed';
+  }
+}
+
+function updateAdvisor() {
+  const box = document.getElementById('wizard-advisor');
+  const cards = document.getElementById('wizard-advisor-cards');
+  if (!box || !cards) return;
+
+  clearTimeout(_advisorTimer);
+  _advisorTimer = setTimeout(async () => {
+    const arch = getSizingArch();
+    const baseArch = getEffectiveArch(); // capability arch — mtpDepth not zeroed when MTP is off
+    const hw = wizardState.hardware;
+    const m = wizardState.model;
+
+    // Show the n_cpu_moe auto-tuner only for MoE models.
+    const moeBox = document.getElementById('spawn-moe-autotune');
+    if (moeBox) moeBox.style.display = (arch.nExperts || 0) > 0 ? '' : 'none';
+
+    // Depth sweep is available once a local .gguf is selected.
+    const sweepBox = document.getElementById('wizard-depth-sweep');
+    if (sweepBox) {
+      const localGguf = !!(m.path && m.path.toLowerCase().endsWith('.gguf'));
+      sweepBox.style.display = localGguf ? '' : 'none';
+    }
+
+    const name = (m.path || m.hfFile || m.hfRepo || m.originFile || '').split('/').pop() || '';
+    const paramB = arch.paramB || m.paramB || 0;
+    if (!name && !paramB) { box.style.display = 'none'; return; }
+
+    const hasMtp = (baseArch.mtpDepth || 0) > 0 || /mtp/i.test(name);
+    const body = {
+      name,
+      param_b: paramB,
+      context_size: hw.contextSize,
+      ctk: hw.cacheTypeK,
+      ctv: hw.cacheTypeV,
+      is_unified: isUnifiedMemory(),
+      spec_type: hw.mtpEnabled ? 'draft-mtp' : null,
+      has_mtp: hasMtp,
+    };
+
+    const seq = ++_advisorSeq;
+    try {
+      const headers = window.authHeaders
+        ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+        : { 'Content-Type': 'application/json' };
+      const r = await fetch('/api/advise', { method: 'POST', headers, body: JSON.stringify(body) });
+      if (seq !== _advisorSeq) return; // a newer recompute superseded this one
+      const data = await r.json();
+      const suggestions = (data && data.suggestions) || [];
+      const cfgView = {
+        ctk: hw.cacheTypeK,
+        ctv: hw.cacheTypeV,
+        context_size: hw.contextSize,
+        spec_type: hw.mtpEnabled ? 'draft-mtp' : '',
+        spec_draft_n_max: hw.mtpDraftNMax,
+      };
+      renderSuggestionCards(cards, suggestions, { onApply: applyWizardSuggestion, config: cfgView });
+      box.style.display = cards.childElementCount ? '' : 'none';
+    } catch {
+      box.style.display = 'none';
+    }
+  }, 250);
+}
+
 function updateVramDisplay() {
   const availVram = effectiveAvailBytes();
   if (!dom.vramPanel) return;
@@ -3281,13 +3468,9 @@ function updateVramDisplay() {
   const arch = getSizingArch();
   const modelBytes = getModelBytes();
 
-  // Compute breakdown
+  // Compute breakdown (layer-based MoE offload — see moeWeightSplit)
   const nCpuMoe = hw.nCpuMoe || 0;
-  const expertFrac = arch.expertFraction || 0.65;
-  const nExperts = arch.nExperts || 0;
-  const cpuRatio = nExperts > 0 ? Math.min(nCpuMoe, nExperts) / nExperts : 0;
-  const ramBytes = Math.round(modelBytes * expertFrac * cpuRatio);
-  const weightVram = modelBytes - ramBytes;
+  const { vram: weightVram } = moeWeightSplit(modelBytes, arch, nCpuMoe);
   const kv          = kvBytes(arch, hw.contextSize, hw.parallelSlots, hw.cacheTypeK, hw.cacheTypeV);
   const mmproj      = arch.mmprojBytes || 0;
   const mtp         = mtpBytes(modelBytes, arch.mtpDepth || 0);
@@ -3357,7 +3540,7 @@ function updateVramDisplay() {
   if (arch.nExperts > 1) {
     if (dom.moeOffloadPanel) dom.moeOffloadPanel.style.display = '';
     if (dom.moeOffloadSlider) {
-      dom.moeOffloadSlider.max = arch.nExperts;
+      dom.moeOffloadSlider.max = arch.nLayers || arch.nExperts;
       dom.moeOffloadSlider.value = nCpuMoe;
     }
     updateMoeSliderVisuals();
@@ -3367,6 +3550,9 @@ function updateVramDisplay() {
 
   // Render scenario cards
   renderScenarioCards(modelBytes, arch, availVram);
+
+  // Config-time performance advisor (dense-vs-MoE, KV type, MTP)
+  updateAdvisor();
 
   // Legacy VRAM pill (backward compat)
   if (dom.vramPill || dom.vramEstimateText) {
@@ -3468,7 +3654,8 @@ function setSegWidth(el, frac) {
 
 function updateMoeSliderVisuals() {
   const arch = getSizingArch();
-  const n = arch.nExperts || 0;
+  if (!(arch.nExperts > 0)) return; // not a MoE model
+  const n = arch.nLayers || 0;
   if (!n) return;
   const cpu = wizardState.hardware.nCpuMoe || 0;
   const gpu = n - cpu;
@@ -5611,7 +5798,7 @@ function renderSummary() {
   if (hw.kvUnified) rows.push({ label: 'KV unified', value: 'Yes' });
   if (hw.mlock) rows.push({ label: 'mlock', value: 'Yes' });
   if (hw.prio != null) rows.push({ label: 'Priority', value: ['Normal', 'Medium', 'High', 'Realtime'][hw.prio] ?? String(hw.prio) });
-  if (hw.nCpuMoe > 0 && arch.nExperts > 0) rows.push({ label: 'MoE CPU offload', value: `${hw.nCpuMoe} of ${arch.nExperts} experts` });
+  if (hw.nCpuMoe > 0 && arch.nExperts > 0) rows.push({ label: 'MoE CPU offload', value: `${hw.nCpuMoe} of ${arch.nLayers} layers` });
   if (hw.tensorSplit) rows.push({ label: 'Tensor split', value: hw.tensorSplit });
   if (arch.mmprojBytes > 0) rows.push({ label: 'mmproj', value: formatGB(arch.mmprojBytes) });
   if (arch.mtpDepth > 0) {
@@ -6123,7 +6310,7 @@ function _renderPresetParamsStep() {
         ...(h.kvUnified ? [{ label: 'KV unified', value: 'Yes' }] : []),
         ...(h.mlock ? [{ label: 'mlock', value: 'Yes' }] : []),
         ...(h.prio != null ? [{ label: 'Priority', value: ['Normal', 'Medium', 'High', 'Realtime'][h.prio] ?? String(h.prio) }] : []),
-        ...(h.nCpuMoe > 0 && arch.nExperts > 0 ? [{ label: 'MoE CPU offload', value: `${h.nCpuMoe} of ${arch.nExperts} experts` }] : []),
+        ...(h.nCpuMoe > 0 && arch.nExperts > 0 ? [{ label: 'MoE CPU offload', value: `${h.nCpuMoe} of ${arch.nLayers} layers` }] : []),
         ...(h.tensorSplit ? [{ label: 'Tensor split', value: h.tensorSplit }] : []),
         ...(h.fitTarget ? [{ label: '--fit-target', value: `${h.fitTarget} MB` }] : []),
         ...(h.cacheRam != null ? [{ label: '--cache-ram', value: h.cacheRam < 0 ? 'no limit' : h.cacheRam === 0 ? 'disabled' : `${h.cacheRam} MiB` }] : []),

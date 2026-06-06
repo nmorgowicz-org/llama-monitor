@@ -871,9 +871,13 @@ pub fn moe_weight_split(model_size_bytes: u64, arch: &ModelArch, n_cpu_moe: i32)
     if !arch.is_moe() || n_cpu_moe <= 0 {
         return (model_size_bytes, 0);
     }
-    let total_experts = arch.n_experts as f64;
-    let cpu_experts = (n_cpu_moe as f64).min(total_experts);
-    let cpu_ratio = cpu_experts / total_experts;
+    // `--n-cpu-moe N` keeps the experts of the first N transformer layers on the
+    // CPU, so the offloaded fraction is N / (MoE layer count) — NOT N / (experts
+    // per layer). n_layers is the right denominator (≈ the MoE layer count; a few
+    // models have a handful of dense layers, which this slightly over-counts).
+    let moe_layers = arch.n_layers.max(1) as f64;
+    let cpu_layers = (n_cpu_moe as f64).min(moe_layers);
+    let cpu_ratio = cpu_layers / moe_layers;
     let expert_frac = arch.expert_fraction.clamp(0.3, 0.99);
 
     let cpu_bytes = (model_size_bytes as f64 * expert_frac * cpu_ratio) as u64;
@@ -1367,7 +1371,10 @@ fn best_kv_quant_for_use_case(use_case: UseCase) -> (String, String) {
     }
 }
 
-fn find_min_cpu_moe_to_fit_weights(
+/// Find the smallest `--n-cpu-moe` value whose weight footprint fits in VRAM.
+/// Reused by the auto-size flow and the Spawn Wizard / Preset Editor auto-tuner
+/// so the instant estimate always agrees with the animated VRAM bar.
+pub fn find_min_cpu_moe_to_fit_weights(
     model_size_bytes: u64,
     arch: &ModelArch,
     available_vram_bytes: u64,
@@ -1379,7 +1386,8 @@ fn find_min_cpu_moe_to_fit_weights(
             + mtp_overhead_bytes(model_size_bytes, arch.mtp_depth),
     );
 
-    let max_cpu = arch.n_experts as i32;
+    // `--n-cpu-moe` counts layers, so the maximum is the layer count.
+    let max_cpu = arch.n_layers as i32;
 
     // Binary search: find the smallest n_cpu_moe where vram fits.
     let mut lo: i32 = 0;
@@ -1867,6 +1875,7 @@ mod tests {
     #[test]
     fn moe_weight_split_proportional() {
         let arch = ModelArch {
+            n_layers: 8, // Mixtral-8x7B has 32 layers; use 8 here so n_cpu_moe=4 = half
             n_experts: 8,
             expert_fraction: 0.65,
             ..Default::default()
@@ -1876,7 +1885,7 @@ mod tests {
         assert_eq!(vram0, model);
         assert_eq!(ram0, 0);
 
-        let (vram4, ram4) = moe_weight_split(model, &arch, 4); // half on CPU
+        let (vram4, ram4) = moe_weight_split(model, &arch, 4); // 4 of 8 layers = half on CPU
         assert!(ram4 > 0 && vram4 < model);
         assert_eq!(vram4 + ram4, model);
         // ~32.5% of model should be on CPU (0.65 expert frac × 0.5 cpu ratio)

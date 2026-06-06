@@ -6,6 +6,7 @@ import { escapeHtml } from '../core/format.js';
 import { openDeferredFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
 import { applySettings, saveSettings } from './settings.js';
 import { showToast } from './toast.js';
+import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune } from './tuning-cards.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -130,6 +131,112 @@ export async function loadPresets(selectId) {
 }
 
 // ── Modal ──────────────────────────────────────────────────────────────────────
+
+// ── Performance advisor (config-time hints) ──────────────────────────────────
+let _presetAdvisorTimer = null;
+let _presetAdvisorSeq = 0;
+let _presetIsUnified = null; // cached platform check
+
+async function _ensureUnifiedFlag() {
+    if (_presetIsUnified !== null) return _presetIsUnified;
+    try {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const r = await fetch('/api/llama-binary/platform-info', { headers });
+        const d = r.ok ? await r.json() : null;
+        _presetIsUnified = d?.auto_backend === 'metal';
+    } catch { _presetIsUnified = false; }
+    return _presetIsUnified;
+}
+
+function _parseParamB(name) {
+    const m = /(\d+(?:\.\d+)?)\s*b\b/i.exec(name || '');
+    return m ? parseFloat(m[1]) : 0;
+}
+
+function applyPresetSuggestion(suggestion) {
+    const patch = suggestionPatch(suggestion);
+    const map = { ctk: 'modal-ctk', ctv: 'modal-ctv', context_size: 'modal-context-size', spec_type: 'modal-spec-type' };
+    Object.entries(patch).forEach(([k, v]) => {
+        const id = map[k];
+        const el = id && document.getElementById(id);
+        if (!el) return; // spec_draft_n_max has no direct preset field; spec-type drives MTP
+        el.value = String(v);
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    updatePresetAdvisor();
+    showToast('Applied', 'success', suggestion.label);
+}
+
+export function updatePresetAdvisor() {
+    const box = document.getElementById('preset-advisor');
+    const cards = document.getElementById('preset-advisor-cards');
+    if (!box || !cards) return;
+    clearTimeout(_presetAdvisorTimer);
+    _presetAdvisorTimer = setTimeout(async () => {
+        const isUnified = await _ensureUnifiedFlag();
+        const modelVal = document.getElementById('modal-model-path')?.value.trim() || '';
+        const name = modelVal.split(/[/\\]/).pop() || '';
+        if (!name) { box.style.display = 'none'; return; }
+        const ctk = document.getElementById('modal-ctk')?.value || 'q8_0';
+        const ctv = document.getElementById('modal-ctv')?.value || 'q8_0';
+        const ctx = parseInt(document.getElementById('modal-context-size')?.value) || 8192;
+        const specType = document.getElementById('modal-spec-type')?.value || '';
+        const body = {
+            name,
+            param_b: _parseParamB(name),
+            context_size: ctx,
+            ctk, ctv,
+            is_unified: isUnified,
+            spec_type: specType || null,
+            has_mtp: /mtp/i.test(name),
+        };
+        const seq = ++_presetAdvisorSeq;
+        try {
+            const headers = window.authHeaders
+                ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+                : { 'Content-Type': 'application/json' };
+            const r = await fetch('/api/advise', { method: 'POST', headers, body: JSON.stringify(body) });
+            if (seq !== _presetAdvisorSeq) return;
+            const data = await r.json();
+            const suggestions = (data && data.suggestions) || [];
+            const cfgView = { ctk, ctv, context_size: ctx, spec_type: specType };
+            renderSuggestionCards(cards, suggestions, { onApply: applyPresetSuggestion, config: cfgView });
+            box.style.display = cards.childElementCount ? '' : 'none';
+        } catch { box.style.display = 'none'; }
+    }, 250);
+}
+
+// Empirically auto-tune n_cpu_moe for the preset's model via llama-bench.
+async function autoTunePreset() {
+    const statusEl = document.getElementById('preset-moe-autotune-status');
+    const modelVal = document.getElementById('modal-model-path')?.value.trim() || '';
+    if (!modelVal.toLowerCase().endsWith('.gguf')) {
+        // The sweep launches llama-bench on a local file, not an HF repo id.
+        showToast('Sweep needs a local .gguf model file', 'warn');
+        return;
+    }
+    const body = {
+        name: modelVal.split(/[/\\]/).pop() || '',
+        param_b: _parseParamB(modelVal),
+        model_path: modelVal,
+        ngl: 99,
+        ctk: document.getElementById('modal-ctk')?.value || 'q8_0',
+        ctv: document.getElementById('modal-ctv')?.value || 'q8_0',
+        flash_attn: (document.getElementById('modal-flash-attn')?.value || 'on') !== 'off',
+        verify: true,
+    };
+    if (statusEl) statusEl.textContent = 'Running sweep… this can take a few minutes';
+    try {
+        const data = await requestNcpuMoeTune(body);
+        if (data.error) { if (statusEl) statusEl.textContent = data.error; return; }
+        const rec = data.recommended_n_cpu_moe;
+        const input = document.getElementById('modal-n-cpu-moe');
+        if (input) { input.value = String(rec); input.dispatchEvent(new Event('change', { bubbles: true })); }
+        if (statusEl) statusEl.textContent = `Best: ${rec} (measured)`;
+    } catch {
+        if (statusEl) statusEl.textContent = 'Auto-tune failed';
+    }
+}
 
 export function openPresetModal(mode) {
     const modal = document.getElementById('preset-modal');
@@ -264,6 +371,9 @@ export function openPresetModal(mode) {
     // Apple Silicon-aware hints for Threads fields
     _refreshPresetThreadsHints();
     if (!lastSystemMetrics) _fetchSystemInfoAndRefreshPresetHints();
+
+    // Config-time performance advisor
+    updatePresetAdvisor();
 }
 
 export function closePresetModal() {
@@ -881,17 +991,67 @@ export function initPresets() {
     // Init preset editor nav
     initPresetEditorNav();
 
-    // Bind preset action buttons (all inline — no overflow menu)
+    // Bind preset action buttons (toolbar — minimal)
     document.getElementById('preset-edit-btn')?.addEventListener('click', () => openPresetModal('edit'));
     document.getElementById('preset-new-btn')?.addEventListener('click', () => openPresetModal('new'));
-    document.getElementById('preset-copy-btn')?.addEventListener('click', () => copyPreset());
-    document.getElementById('preset-delete-btn')?.addEventListener('click', () => deletePreset());
-    document.getElementById('preset-reset-btn')?.addEventListener('click', () => resetPresets());
+
+    // Refresh the performance advisor as the preset form changes
+    const presetForm = document.getElementById('preset-form');
+    if (presetForm) {
+        presetForm.addEventListener('input', () => updatePresetAdvisor());
+        presetForm.addEventListener('change', () => updatePresetAdvisor());
+    }
+
+    // MoE offload auto-tuner (empirical sweep)
+    document.getElementById('preset-moe-autotune-verify')?.addEventListener('click', autoTunePreset);
 
     // Bind preset modal buttons
     document.getElementById('preset-modal-close')?.addEventListener('click', closePresetModal);
     document.getElementById('preset-modal-cancel')?.addEventListener('click', closePresetModal);
     document.getElementById('preset-modal-back')?.addEventListener('click', _hideSummary);
+
+    // Duplicate preset from within the modal
+    document.getElementById('preset-modal-duplicate')?.addEventListener('click', async () => {
+        const id = document.getElementById('modal-preset-id').value;
+        const p = sessionState.presets.find(pr => pr.id === id);
+        if (!p) {
+            showToast('No preset selected', 'warn');
+            return;
+        }
+        try {
+            const auth = window.authHeaders ? window.authHeaders() : {};
+            const [presetsResp, settingsResp] = await Promise.all([
+                fetch('/api/presets', { headers: auth }),
+                fetch('/api/settings', { headers: auth }),
+            ]);
+
+            sessionState.presets = await presetsResp.json();
+            const preset = sessionState.presets.find(pr => pr.id === id);
+            if (!preset) {
+                showToast('Preset not found', 'error');
+                return;
+            }
+
+            const copy = { ...preset, id: null, name: preset.name + ' (copy)' };
+            const resp = await fetch('/api/presets', {
+                method: 'POST',
+                headers: { ...auth, 'Content-Type': 'application/json' },
+                body: JSON.stringify(copy),
+            });
+
+            if (!resp.ok) {
+                const err = await resp.text().catch(() => 'Unknown error');
+                showToast('Copy failed: ' + err, 'error');
+                return;
+            }
+
+            const data = await resp.json();
+            await loadPresets(data.preset?.id || null);
+            showToast('Preset duplicated', 'success');
+        } catch (err) {
+            showToast('Copy failed: ' + err.message, 'error');
+        }
+    });
 
     // Delete preset from within the modal (only visible in edit mode)
     document.getElementById('preset-modal-delete')?.addEventListener('click', async () => {

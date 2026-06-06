@@ -1,4 +1,5 @@
 pub mod batch_import;
+pub mod bench_runner;
 pub mod gguf_meta;
 pub mod llama_cpp_downloader;
 pub mod metrics;

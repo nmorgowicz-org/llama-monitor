@@ -90,6 +90,7 @@ pub const FEATURES_TELEMETRY_GRADE_JS: &str =
     include_str!("../../static/js/features/telemetry-grade.js");
 pub const FEATURES_TOAST_JS: &str = include_str!("../../static/js/features/toast.js");
 pub const FEATURES_TUNE_PANEL_JS: &str = include_str!("../../static/js/features/tune-panel.js");
+pub const FEATURES_TUNING_CARDS_JS: &str = include_str!("../../static/js/features/tuning-cards.js");
 pub const FEATURES_UPDATES_JS: &str = include_str!("../../static/js/features/updates.js");
 pub const FEATURES_USER_MENU_JS: &str = include_str!("../../static/js/features/user-menu.js");
 pub const FEATURES_WORKSPACE_COMMAND_PALETTE_JS: &str =

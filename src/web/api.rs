@@ -2934,12 +2934,18 @@ fn api_moe_tune(
 
                 let model_size_bytes = body["model_size_bytes"].as_u64().unwrap_or(0);
                 let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
-                let total_experts: u64 = body["total_experts"].as_u64().unwrap_or(8);
+                // `--n-cpu-moe` is layer-based; prefer n_moe_layers/n_layers, fall back
+                // to the legacy total_experts key for older callers.
+                let n_moe_layers: u64 = body["n_moe_layers"]
+                    .as_u64()
+                    .or_else(|| body["n_layers"].as_u64())
+                    .or_else(|| body["total_experts"].as_u64())
+                    .unwrap_or(0);
 
                 let suggestion = crate::llama::spawn_wizard::suggest_moe_tuning(
                     model_size_bytes,
                     available_vram_bytes,
-                    total_experts,
+                    n_moe_layers,
                 );
 
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
@@ -2948,6 +2954,225 @@ fn api_moe_tune(
                         "note": suggestion.note,
                     }),
                 )))
+            }
+        })
+}
+
+// ── Config-time performance advisor ───────────────────────────────────────────
+// Predictive hints (dense-vs-MoE, KV type, MTP) for the Spawn Wizard / Preset
+// Editor, computed from the model architecture before any benchmark is run.
+fn api_advise(
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "advise")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::hf_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let name = body["name"].as_str().unwrap_or("");
+                let param_b = body["param_b"].as_f64().unwrap_or(0.0);
+                let context_size = body["context_size"].as_u64().unwrap_or(8192);
+                let ctk = body["ctk"].as_str().unwrap_or("q8_0");
+                let ctv = body["ctv"].as_str().unwrap_or("q8_0");
+                let is_unified = body["is_unified"].as_bool().unwrap_or(false);
+                let spec_type = body["spec_type"].as_str();
+                let has_mtp = body["has_mtp"].as_bool().unwrap_or(false);
+
+                let arch =
+                    crate::llama::vram_estimator::ModelArch::from_name_and_params(name, param_b);
+                let suggestions = crate::llama::spawn_wizard::predict_perf_hints(
+                    &arch,
+                    context_size,
+                    ctk,
+                    ctv,
+                    is_unified,
+                    spec_type,
+                    has_mtp,
+                );
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({ "suggestions": suggestions }),
+                )))
+            }
+        })
+}
+
+// ── n_cpu_moe auto-tuner (estimate + optional empirical verify) ────────────────
+fn api_tune_ncpumoe(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "tune" / "ncpumoe")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::hf_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let state = state.clone();
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let name = body["name"].as_str().unwrap_or("");
+                let param_b = body["param_b"].as_f64().unwrap_or(0.0);
+                let model_size_bytes = body["model_size_bytes"].as_u64().unwrap_or(0);
+                let available_vram_bytes = body["available_vram_bytes"].as_u64().unwrap_or(0);
+                let ubatch_size = body["ubatch_size"].as_u64().unwrap_or(512) as u32;
+                let verify = body["verify"].as_bool().unwrap_or(false);
+
+                let arch =
+                    crate::llama::vram_estimator::ModelArch::from_name_and_params(name, param_b);
+
+                // Instant estimate — same fit-search the VRAM bar uses, so they agree.
+                let recommended =
+                    crate::llama::vram_estimator::find_min_cpu_moe_to_fit_weights(
+                        model_size_bytes,
+                        &arch,
+                        available_vram_bytes,
+                        ubatch_size,
+                    );
+
+                if !verify {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "recommended_n_cpu_moe": recommended,
+                            "verified": false,
+                        })),
+                    ));
+                }
+
+                // Empirical verify needs the GPU free — refuse while a server runs.
+                let running = state.server_running.lock().map(|g| *g).unwrap_or(false);
+                if running {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "recommended_n_cpu_moe": recommended,
+                            "verified": false,
+                            "error": "Stop the running server before verifying — llama-bench needs the GPU.",
+                        })),
+                    ));
+                }
+
+                let model_path = body["model_path"].as_str().unwrap_or("").to_string();
+                let ngl = body["ngl"].as_i64().unwrap_or(99) as i32;
+                let ctk = body["ctk"].as_str().unwrap_or("q8_0").to_string();
+                let ctv = body["ctv"].as_str().unwrap_or("q8_0").to_string();
+                let flash_attn = body["flash_attn"].as_bool().unwrap_or(true);
+
+                // Probe a layer-space ladder (what llama.cpp actually consumes) plus
+                // the instant estimate; measure real decode and pick the fastest.
+                let nl = arch.n_layers.max(1) as i32;
+                let mut candidates: Vec<i32> =
+                    vec![0, nl / 4, nl / 2, (nl * 3) / 4, nl, recommended];
+                candidates.retain(|&c| (0..=nl).contains(&c));
+                candidates.sort_unstable();
+                candidates.dedup();
+
+                let bench_bin = crate::llama::bench_runner::llama_bench_path(
+                    &cfg.llama_server_path,
+                );
+                let probes = crate::llama::bench_runner::probe_ncpumoe(
+                    &bench_bin,
+                    &cfg.llama_server_cwd,
+                    &model_path,
+                    ngl,
+                    flash_attn,
+                    &ctk,
+                    &ctv,
+                    &candidates,
+                )
+                .await;
+
+                let best = probes
+                    .iter()
+                    .filter(|p| p.tg_tps > 0.0)
+                    .max_by(|a, b| a.tg_tps.partial_cmp(&b.tg_tps).unwrap());
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "recommended_n_cpu_moe": best.map(|b| b.n_cpu_moe).unwrap_or(recommended),
+                        "verified": true,
+                        "estimate": recommended,
+                        "probes": probes,
+                    }),
+                )))
+            }
+        })
+}
+
+// ── Offline depth sweep via llama-bench ───────────────────────────────────────
+fn api_bench_sweep(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "bench" / "sweep")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and(super::hf_json_body::<serde_json::Value>())
+        .and_then(move |auth: Option<String>, body: serde_json::Value| {
+            let state = state.clone();
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                // llama-bench needs the GPU to itself.
+                let running = state.server_running.lock().map(|g| *g).unwrap_or(false);
+                if running {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "error": "Stop the running server before a depth sweep — llama-bench needs the GPU.",
+                        })),
+                    ));
+                }
+
+                let model_path = body["model_path"].as_str().unwrap_or("").to_string();
+                if model_path.is_empty() {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "error": "model_path required" })),
+                    ));
+                }
+                let ngl = body["ngl"].as_i64().unwrap_or(99) as i32;
+                let ctk = body["ctk"].as_str().unwrap_or("q8_0").to_string();
+                let ctv = body["ctv"].as_str().unwrap_or("q8_0").to_string();
+                let flash_attn = body["flash_attn"].as_bool().unwrap_or(true);
+                let n_cpu_moe = body["n_cpu_moe"].as_i64().map(|n| n as i32);
+                let depths: Vec<u64> = body["depths"]
+                    .as_array()
+                    .map(|a| a.iter().filter_map(|v| v.as_u64()).collect())
+                    .filter(|v: &Vec<u64>| !v.is_empty())
+                    .unwrap_or_else(|| vec![0, 16384, 32768]);
+
+                let bench_bin =
+                    crate::llama::bench_runner::llama_bench_path(&cfg.llama_server_path);
+                match crate::llama::bench_runner::run_sweep(
+                    &bench_bin,
+                    &cfg.llama_server_cwd,
+                    &model_path,
+                    ngl,
+                    flash_attn,
+                    &ctk,
+                    &ctv,
+                    &depths,
+                    n_cpu_moe,
+                )
+                .await
+                {
+                    Ok(points) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "points": points })),
+                    )),
+                    Err(e) => Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({ "error": e })),
+                    )),
+                }
             }
         })
 }
@@ -4380,6 +4605,9 @@ pub fn api_routes(
     let benchmark_route = api_benchmark(state.clone(), app_config.clone());
     let model_defaults_route = api_model_defaults(state.clone(), app_config.clone());
     let moe_tune_route = api_moe_tune(state.clone(), app_config.clone());
+    let advise_route = api_advise(app_config.clone());
+    let tune_ncpumoe_route = api_tune_ncpumoe(state.clone(), app_config.clone());
+    let bench_sweep_route = api_bench_sweep(state.clone(), app_config.clone());
     let hf_search_route = api_hf_search(state.clone(), app_config.clone());
     let hf_files_route = api_hf_files(state.clone(), app_config.clone());
     let hf_download_route = api_hf_download(state.clone(), app_config.clone());
@@ -4505,6 +4733,9 @@ pub fn api_routes(
         .or(benchmark_route)
         .or(model_defaults_route)
         .or(moe_tune_route)
+        .or(advise_route)
+        .or(tune_ncpumoe_route)
+        .or(bench_sweep_route)
         .or(hf_search_route)
         .or(hf_files_route)
         .or(hf_download_route)
@@ -12034,6 +12265,10 @@ mod tests {
         ),
         // MoE tuning
         (route_moe_tune, "POST", "/api/moe-tune", Some("{}")),
+        // Inference tuning advisor / bench
+        (route_advise, "POST", "/api/advise", Some("{}")),
+        (route_tune_ncpumoe, "POST", "/api/tune/ncpumoe", Some("{}")),
+        (route_bench_sweep, "POST", "/api/bench/sweep", Some("{}")),
         // HuggingFace
         (route_hf_search, "POST", "/api/hf/search", Some("{}")),
         (route_hf_files, "POST", "/api/hf/files", Some("{}")),

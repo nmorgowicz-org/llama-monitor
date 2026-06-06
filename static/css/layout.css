@@ -664,7 +664,6 @@
 }
 
 #server-endpoint,
-#preset-select,
 .modal-field input,
 .modal-field select,
 .modal-field textarea,
@@ -701,7 +700,6 @@
 }
 
 #server-endpoint:focus,
-#preset-select:focus,
 .modal-field input:focus,
 .modal-field select:focus,
 .modal-field textarea:focus,
