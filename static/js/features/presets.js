@@ -621,6 +621,15 @@ export async function savePreset(event) {
                 if (cancel) cancel.style.display = 'none';
                 saveBtn.textContent = 'Confirm Save';
                 saveBtn.dataset.confirmed = 'yes';
+
+                // If user edits any field after seeing the summary, reset so the
+                // next Save click rebuilds the summary with all accumulated changes.
+                const form = document.getElementById('preset-form');
+                if (form) {
+                    const resetOnEdit = () => { _hideSummary(); form.removeEventListener('input', resetOnEdit); form.removeEventListener('change', resetOnEdit); };
+                    form.addEventListener('input', resetOnEdit);
+                    form.addEventListener('change', resetOnEdit);
+                }
             }
             return;
         }
