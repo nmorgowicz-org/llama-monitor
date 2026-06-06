@@ -472,7 +472,54 @@ export function renderRecentEndpoints(sessions, activeId) {
     };
 
     attachSessions.forEach(session => list.appendChild(buildCard(session)));
-    spawnSessions.forEach(session => spawnList.appendChild(buildCard(session)));
+
+    // Spawn history: deduplicate by preset_id (most recent per preset), limit 3
+    const buildSpawnHistoryRow = (session) => {
+        const row = document.createElement('div');
+        row.className = 'setup-spawn-history-row';
+        row.title = 'Re-launch this configuration';
+
+        const nameEl = document.createElement('div');
+        nameEl.className = 'setup-spawn-history-name';
+        nameEl.textContent = session.name || 'Unnamed configuration';
+
+        const timeEl = document.createElement('div');
+        timeEl.className = 'setup-spawn-history-time';
+        timeEl.textContent = session.last_connected_at
+            ? formatRelativeTime(session.last_connected_at * 1000)
+            : 'Never launched';
+
+        const launchBtn = document.createElement('button');
+        launchBtn.className = 'setup-spawn-history-btn';
+        launchBtn.textContent = 'Launch';
+
+        const doLaunch = () => {
+            if (session.preset_id) {
+                quickStartSession(session.id);
+            } else {
+                console.warn('[setup-view] Spawn history row missing preset_id', session.id);
+            }
+        };
+        launchBtn.addEventListener('click', (e) => { e.stopPropagation(); doLaunch(); });
+        row.addEventListener('click', doLaunch);
+
+        row.appendChild(nameEl);
+        row.appendChild(timeEl);
+        row.appendChild(launchBtn);
+        return row;
+    };
+
+    const seenPresets = new Set();
+    const dedupedSpawn = [];
+    // Sessions arrive newest-first from the API; maintain that order
+    for (const session of spawnSessions) {
+        const key = session.preset_id || session.id;
+        if (seenPresets.has(key)) continue;
+        seenPresets.add(key);
+        dedupedSpawn.push(session);
+        if (dedupedSpawn.length >= 3) break;
+    }
+    dedupedSpawn.forEach(session => spawnList.appendChild(buildSpawnHistoryRow(session)));
 
     // Live health-check attach sessions that aren't already confirmed Running
     attachSessions.forEach((session, i) => {
