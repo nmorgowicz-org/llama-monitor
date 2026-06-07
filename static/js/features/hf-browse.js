@@ -365,6 +365,7 @@ export async function hfListFiles({
       item.setAttribute('tabindex', '0');
       item.setAttribute('role', 'button');
       item.dataset.filename = fname;
+      item.dataset.repoId = file.repo_id || repoId;
       item.dataset.size = file.size || '';
       item.dataset.label = file.label || '';
       if (file.is_mmproj) item.dataset.mmproj = '1';
@@ -424,7 +425,7 @@ export async function hfListFiles({
       item.appendChild(metaSpan);
 
       const selectFile = () => {
-        if (onSelectFile) onSelectFile(file, repoId);
+        if (onSelectFile) onSelectFile(file, file.repo_id || repoId);
       };
       item.addEventListener('click', selectFile);
       item.addEventListener('keydown', e => {
@@ -486,7 +487,7 @@ export async function hfStartDownload({
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.ok) {
       if (onValidationError) onValidationError(data.error || 'Download failed to start.');
-      return;
+      return null;
     }
 
     const downloadId = data.download_id;
@@ -495,9 +496,33 @@ export async function hfStartDownload({
     if (fileEl) fileEl.textContent = filePath.split('/').pop();
     _dlSetState(panelEl, 'progress');
     hfPollDownload(downloadId, panelEl, { onComplete, onValidationError, onClearValidationError });
+    return data;
   } catch (err) {
     if (btn) { btn.disabled = false; }
     if (onValidationError) onValidationError(err.message || 'Download request failed.');
+    return null;
+  }
+}
+
+export async function hfStartCompanionDownload({ repoId, filePath, saveAs }) {
+  if (!repoId || !filePath) return null;
+  try {
+    const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
+    const res = await fetch('/api/hf/download', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        repo_id: repoId,
+        file_path: filePath,
+        save_as: saveAs || undefined,
+        companion: true,
+        resume: true,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return res.ok && data.ok ? data : null;
+  } catch {
+    return null;
   }
 }
 

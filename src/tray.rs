@@ -109,7 +109,7 @@ pub fn run_tray(state: AppState, port: u16) -> anyhow::Result<()> {
     };
 
     #[cfg(feature = "webview-popover")]
-    let (resize_tx, resize_rx) = mpsc::channel();
+    let (popover_tx, popover_rx) = mpsc::channel();
     let tray_start_failed = Arc::new(AtomicBool::new(false));
 
     let app: Box<dyn winit::application::ApplicationHandler + 'static> = Box::new(TrayApp {
@@ -123,9 +123,9 @@ pub fn run_tray(state: AppState, port: u16) -> anyhow::Result<()> {
         #[cfg(feature = "webview-popover")]
         popover: None,
         #[cfg(feature = "webview-popover")]
-        resize_tx,
+        popover_tx,
         #[cfg(feature = "webview-popover")]
-        resize_rx,
+        popover_rx,
         tray_start_failed: Arc::clone(&tray_start_failed),
         #[cfg(all(target_os = "linux", feature = "webview-popover"))]
         gtk_ready,
@@ -149,9 +149,9 @@ struct TrayApp {
     #[cfg(feature = "webview-popover")]
     popover: Option<Popover>,
     #[cfg(feature = "webview-popover")]
-    resize_tx: Sender<PopoverResize>,
+    popover_tx: Sender<PopoverMessage>,
     #[cfg(feature = "webview-popover")]
-    resize_rx: Receiver<PopoverResize>,
+    popover_rx: Receiver<PopoverMessage>,
     tray_start_failed: Arc<AtomicBool>,
     #[cfg(all(target_os = "linux", feature = "webview-popover"))]
     gtk_ready: bool,
@@ -170,9 +170,10 @@ struct Popover {
 
 #[cfg(feature = "webview-popover")]
 #[derive(serde::Deserialize)]
-struct PopoverResize {
-    width: f64,
-    height: f64,
+#[serde(tag = "action", rename_all = "snake_case")]
+enum PopoverMessage {
+    Resize { width: f64, height: f64 },
+    Close,
 }
 
 impl ApplicationHandler for TrayApp {
@@ -183,9 +184,27 @@ impl ApplicationHandler for TrayApp {
     fn window_event(
         &mut self,
         _event_loop: &dyn ActiveEventLoop,
-        _id: WindowId,
-        _event: WindowEvent,
+        id: WindowId,
+        event: WindowEvent,
     ) {
+        #[cfg(all(not(target_os = "linux"), feature = "webview-popover"))]
+        {
+            let is_popover = self
+                .popover
+                .as_ref()
+                .is_some_and(|popover| popover.window.id() == id);
+            if is_popover {
+                match event {
+                    WindowEvent::CloseRequested | WindowEvent::Focused(false) => {
+                        self.close_popover();
+                    }
+                    WindowEvent::Destroyed => {
+                        self.popover.take();
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 
     fn new_events(&mut self, event_loop: &dyn ActiveEventLoop, _cause: winit::event::StartCause) {
@@ -262,12 +281,20 @@ impl ApplicationHandler for TrayApp {
         #[cfg(feature = "webview-popover")]
         {
             let mut latest = None;
-            while let Ok(resize) = self.resize_rx.try_recv() {
-                latest = Some(resize);
+            let mut close_requested = false;
+            while let Ok(message) = self.popover_rx.try_recv() {
+                match message {
+                    PopoverMessage::Resize { width, height } => {
+                        latest = Some((width, height));
+                    }
+                    PopoverMessage::Close => close_requested = true,
+                }
             }
 
-            if let Some(resize) = latest {
-                self.resize_popover(resize.width, resize.height);
+            if close_requested {
+                self.close_popover();
+            } else if let Some((width, height)) = latest {
+                self.resize_popover(width, height);
             }
         }
     }
@@ -300,7 +327,7 @@ impl TrayApp {
                 .as_secs()
         );
         let proxy = event_loop.create_proxy();
-        let resize_tx = self.resize_tx.clone();
+        let popover_tx = self.popover_tx.clone();
 
         #[cfg(target_os = "linux")]
         {
@@ -321,8 +348,8 @@ impl TrayApp {
 
             let webview = match wry::WebViewBuilder::new()
                 .with_ipc_handler(move |request| {
-                    if let Ok(resize) = serde_json::from_str::<PopoverResize>(request.body()) {
-                        let _ = resize_tx.send(resize);
+                    if let Ok(message) = serde_json::from_str::<PopoverMessage>(request.body()) {
+                        let _ = popover_tx.send(message);
                         proxy.wake_up();
                     }
                 })
@@ -369,8 +396,8 @@ impl TrayApp {
         #[cfg(not(target_os = "linux"))]
         let webview_builder = wry::WebViewBuilder::new()
             .with_ipc_handler(move |request| {
-                if let Ok(resize) = serde_json::from_str::<PopoverResize>(request.body()) {
-                    let _ = resize_tx.send(resize);
+                if let Ok(message) = serde_json::from_str::<PopoverMessage>(request.body()) {
+                    let _ = popover_tx.send(message);
                     proxy.wake_up();
                 }
             })
@@ -404,6 +431,10 @@ impl TrayApp {
 
     #[cfg(feature = "webview-popover")]
     fn close_popover(&mut self) {
+        if let Some(ref tray) = self.tray {
+            let _ = tray.set_visible(true);
+        }
+
         #[cfg(target_os = "linux")]
         if let Some(popover) = self.popover.take() {
             popover.window.close();
@@ -583,5 +614,31 @@ impl TrayState {
         }
 
         lines.join("\n")
+    }
+}
+
+#[cfg(all(test, feature = "webview-popover"))]
+mod tests {
+    use super::PopoverMessage;
+
+    #[test]
+    fn parses_popover_resize_message() {
+        let message: PopoverMessage =
+            serde_json::from_str(r#"{"action":"resize","width":240,"height":180}"#).unwrap();
+
+        match message {
+            PopoverMessage::Resize { width, height } => {
+                assert_eq!(width, 240.0);
+                assert_eq!(height, 180.0);
+            }
+            PopoverMessage::Close => panic!("expected resize message"),
+        }
+    }
+
+    #[test]
+    fn parses_popover_close_message() {
+        let message: PopoverMessage = serde_json::from_str(r#"{"action":"close"}"#).unwrap();
+
+        assert!(matches!(message, PopoverMessage::Close));
     }
 }

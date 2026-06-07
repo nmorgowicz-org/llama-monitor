@@ -573,6 +573,7 @@ fn scan_jan(out: &mut Vec<ThirdPartyModel>) {
 // Windows: %LOCALAPPDATA%\nomic.ai\GPT4All
 
 fn scan_gpt4all(out: &mut Vec<ThirdPartyModel>) {
+    #[cfg(not(target_os = "windows"))]
     let home = match dirs::home_dir() {
         Some(h) => h,
         None => return,

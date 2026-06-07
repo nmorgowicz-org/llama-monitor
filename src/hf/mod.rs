@@ -214,6 +214,9 @@ pub struct SimpleModelInfo {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct HfGgufFile {
+    /// Repo that owns this file. Companion projectors may come from a linked
+    /// static-quant repo rather than the requested imatrix repo.
+    pub repo_id: String,
     /// Path within the repo (e.g. "model-Q4_K_M.gguf").
     pub path: String,
     /// File size in bytes (0 if unknown). Fetched from HF tree API.
@@ -732,13 +735,27 @@ fn infer_param_b_from_name(name: &str) -> f64 {
 /// without a token, or rate limiting).
 pub async fn hf_list_gguf_files(repo_id: &str) -> Result<Vec<HfGgufFile>, String> {
     let token = hf_load_token();
+    let mut result = list_repo_gguf_files(repo_id, token.clone()).await?;
 
-    // First try the HF tree API for real sizes
+    if !result.iter().any(|file| file.is_mmproj)
+        && let Some(companion_repo) = find_mmproj_companion_repo(repo_id, token.as_deref()).await
+        && let Ok(companion_files) = list_repo_gguf_files(&companion_repo, token).await
+    {
+        result.extend(companion_files.into_iter().filter(|file| file.is_mmproj));
+        sort_gguf_files(&mut result);
+    }
+
+    Ok(result)
+}
+
+async fn list_repo_gguf_files(
+    repo_id: &str,
+    token: Option<String>,
+) -> Result<Vec<HfGgufFile>, String> {
     let sizes = fetch_file_sizes(repo_id, token.as_deref())
         .await
         .unwrap_or_default();
 
-    // Then get the file list from hf-hub
     let api = ApiBuilder::new()
         .with_token(token)
         .build()
@@ -779,6 +796,7 @@ pub async fn hf_list_gguf_files(repo_id: &str) -> Result<Vec<HfGgufFile>, String
             let is_recommended_mmproj =
                 is_mmproj && mmproj_preference.is_some_and(|preference| preference.label == label);
             HfGgufFile {
+                repo_id: repo_id.to_string(),
                 path: name.to_string(),
                 size: sizes.get(name).copied().unwrap_or(0),
                 label,
@@ -797,6 +815,11 @@ pub async fn hf_list_gguf_files(repo_id: &str) -> Result<Vec<HfGgufFile>, String
         })
         .collect();
 
+    sort_gguf_files(&mut result);
+    Ok(result)
+}
+
+fn sort_gguf_files(result: &mut [HfGgufFile]) {
     // Sort main model files first. Within projector files, put the family-specific
     // recommendation ahead of generic precision ordering.
     result.sort_by(|a, b| {
@@ -818,8 +841,148 @@ pub async fn hf_list_gguf_files(repo_id: &str) -> Result<Vec<HfGgufFile>, String
             })
             .then_with(|| b.size.cmp(&a.size))
     });
+}
 
-    Ok(result)
+async fn find_mmproj_companion_repo(repo_id: &str, token: Option<&str>) -> Option<String> {
+    let readme = fetch_repo_readme(repo_id, token).await.unwrap_or_default();
+    for candidate in extract_static_quant_repos(&readme, repo_id) {
+        if repo_contains_mmproj(&candidate, token).await {
+            return Some(candidate);
+        }
+    }
+
+    // mradermacher pairs weighted `-i1-GGUF` repositories with static
+    // `-GGUF` repositories. Verify the target before using this fallback.
+    if let Some(candidate) = mradermacher_static_repo(repo_id)
+        && repo_contains_mmproj(&candidate, token).await
+    {
+        return Some(candidate);
+    }
+
+    // Variant repos occasionally advertise a static sibling that does not
+    // actually contain the shared projector. For Qwen 3.5 variants, fall back
+    // to canonical same-architecture repos and verify each one.
+    for candidate in qwen35_arch_companion_repos(repo_id) {
+        if repo_contains_mmproj(&candidate, token).await {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+async fn fetch_repo_readme(repo_id: &str, token: Option<&str>) -> Result<String> {
+    let url = format!("https://huggingface.co/{repo_id}/raw/main/README.md");
+    let mut req = HF_HTTP_CLIENT.get(url);
+    if let Some(token) = token {
+        req = req.bearer_auth(token);
+    }
+    let resp = req.send().await.context("Failed to fetch HF model card")?;
+    if !resp.status().is_success() {
+        anyhow::bail!("HF model card returned {}", resp.status());
+    }
+    resp.text().await.context("Failed to read HF model card")
+}
+
+fn extract_static_quant_repos(readme: &str, current_repo: &str) -> Vec<String> {
+    let mut repos = Vec::new();
+
+    for line in readme.lines() {
+        let lower = line.to_ascii_lowercase();
+        if !lower.contains("static") || (!lower.contains("quant") && !lower.contains("mmproj")) {
+            continue;
+        }
+
+        for suffix in line.split("huggingface.co/").skip(1) {
+            let candidate: String = suffix
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
+                .collect();
+            let candidate = candidate.trim_end_matches('/');
+            if candidate != current_repo
+                && is_valid_repo_id(candidate)
+                && !repos.iter().any(|repo| repo == candidate)
+            {
+                repos.push(candidate.to_string());
+            }
+        }
+    }
+
+    repos
+}
+
+fn is_valid_repo_id(repo_id: &str) -> bool {
+    let mut parts = repo_id.split('/');
+    matches!(
+        (parts.next(), parts.next(), parts.next()),
+        (Some(owner), Some(repo), None) if !owner.is_empty() && !repo.is_empty()
+    )
+}
+
+fn mradermacher_static_repo(repo_id: &str) -> Option<String> {
+    let (owner, name) = repo_id.split_once('/')?;
+    if !owner.eq_ignore_ascii_case("mradermacher") {
+        return None;
+    }
+    let static_name = name.strip_suffix("-i1-GGUF")?;
+    Some(format!("{owner}/{static_name}-GGUF"))
+}
+
+fn qwen35_arch_companion_repos(repo_id: &str) -> Vec<String> {
+    let Some((owner, name)) = repo_id.split_once('/') else {
+        return Vec::new();
+    };
+    if !owner.eq_ignore_ascii_case("mradermacher") {
+        return Vec::new();
+    }
+
+    let Some(name) = name
+        .strip_suffix("-i1-GGUF")
+        .or_else(|| name.strip_suffix("-GGUF"))
+    else {
+        return Vec::new();
+    };
+    let tokens: Vec<&str> = name.split('-').collect();
+    if !tokens
+        .first()
+        .is_some_and(|token| token.eq_ignore_ascii_case("Qwen3.5"))
+    {
+        return Vec::new();
+    }
+
+    let Some(total_index) = tokens.iter().position(|token| {
+        token
+            .strip_suffix('B')
+            .or_else(|| token.strip_suffix('b'))
+            .is_some_and(|value| value.parse::<u32>().is_ok())
+    }) else {
+        return Vec::new();
+    };
+    let mut end = total_index + 1;
+    if tokens.get(end).is_some_and(|token| {
+        token
+            .strip_prefix('A')
+            .or_else(|| token.strip_prefix('a'))
+            .and_then(|value| value.strip_suffix('B').or_else(|| value.strip_suffix('b')))
+            .is_some_and(|value| value.parse::<u32>().is_ok())
+    }) {
+        end += 1;
+    }
+
+    let architecture = tokens[..end].join("-");
+    vec![
+        format!("mradermacher/{architecture}-GGUF"),
+        format!("unsloth/{architecture}-GGUF"),
+    ]
+}
+
+async fn repo_contains_mmproj(repo_id: &str, token: Option<&str>) -> bool {
+    fetch_file_sizes(repo_id, token).await.is_ok_and(|files| {
+        files.keys().any(|path| {
+            let lower = path.to_ascii_lowercase();
+            lower.contains("mmproj") || lower.contains("projector")
+        })
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -1615,6 +1778,44 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_static_quant_repo_from_mradermacher_card() {
+        let readme = r#"
+static quants are available at https://huggingface.co/mradermacher/Qwen3.5-122B-A10B-REAP-20-GGUF
+
+This is a vision model - mmproj files (if any) will be in the static repository.
+"#;
+        assert_eq!(
+            extract_static_quant_repos(readme, "mradermacher/Qwen3.5-122B-A10B-REAP-20-i1-GGUF"),
+            vec!["mradermacher/Qwen3.5-122B-A10B-REAP-20-GGUF"]
+        );
+    }
+
+    #[test]
+    fn test_mradermacher_static_repo_fallback() {
+        assert_eq!(
+            mradermacher_static_repo("mradermacher/Qwen3.5-122B-A10B-REAP-20-i1-GGUF").as_deref(),
+            Some("mradermacher/Qwen3.5-122B-A10B-REAP-20-GGUF")
+        );
+        assert!(mradermacher_static_repo("other/model-i1-GGUF").is_none());
+    }
+
+    #[test]
+    fn test_qwen35_arch_companion_repo_fallbacks() {
+        assert_eq!(
+            qwen35_arch_companion_repos("mradermacher/Qwen3.5-122B-A10B-REAP-20-i1-GGUF"),
+            vec![
+                "mradermacher/Qwen3.5-122B-A10B-GGUF",
+                "unsloth/Qwen3.5-122B-A10B-GGUF"
+            ]
+        );
+        assert_eq!(
+            qwen35_arch_companion_repos("mradermacher/Qwen3.5-27B-heretic-i1-GGUF"),
+            vec!["mradermacher/Qwen3.5-27B-GGUF", "unsloth/Qwen3.5-27B-GGUF"]
+        );
+        assert!(qwen35_arch_companion_repos("other/Qwen3.5-27B-i1-GGUF").is_empty());
+    }
+
+    #[test]
     fn test_simple_model_info_serde_default() {
         let json = r#"{"id":"test/model"}"#;
         let info: SimpleModelInfo = serde_json::from_str(json).expect("should deserialize");
@@ -1629,6 +1830,7 @@ mod tests {
         let json = r#"{"path":"file.gguf"}"#;
         let f: HfGgufFile = serde_json::from_str(json).expect("should deserialize");
         assert_eq!(f.path, "file.gguf");
+        assert!(f.repo_id.is_empty());
         assert_eq!(f.size, 0);
     }
 }

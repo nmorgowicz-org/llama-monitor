@@ -1,6 +1,12 @@
 /* eslint-disable no-unsanitized/property */
 /* Reason: all content is server metrics; no user input flows into this page. */
-document.getElementById('compact-close').addEventListener('click', () => window.close());
+document.getElementById('compact-close').addEventListener('click', () => {
+    if (window.ipc?.postMessage) {
+        window.ipc.postMessage(JSON.stringify({ action: 'close' }));
+        return;
+    }
+    window.close();
+});
 
 const PORT = window.__COMPACT_PORT__;
 let ws = null;
@@ -108,7 +114,10 @@ window.getContentDimensions = function() {
 function reportPopoverSize() {
     if (!window.ipc || !window.ipc.postMessage) return;
     requestAnimationFrame(function() {
-        window.ipc.postMessage(JSON.stringify(window.getContentDimensions()));
+        window.ipc.postMessage(JSON.stringify({
+            action: 'resize',
+            ...window.getContentDimensions(),
+        }));
     });
 }
 

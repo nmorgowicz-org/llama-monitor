@@ -7,6 +7,7 @@ import { showToast } from './toast.js';
 import {
     hfSearch,
     hfListFiles,
+    hfStartCompanionDownload,
     hfStartDownload,
     hfPollDownload,
     hfCancelDownload,
@@ -38,6 +39,7 @@ let hfState = {
     nCtxTrain: 0,
     mmprojFiles: [],
     mmprojPath: '',
+    mmprojRepoId: '',
     mmprojBytes: 0,
     // Active filters (mirrors Quick Start behavior)
     activeAuthor: null,          // e.g. "bartowski"
@@ -1095,6 +1097,10 @@ async function onHfModelSelected(model, filelistContainer, downloadPanel) {
     hfState.selectedRepoId = model.id;
     hfState.selectedFile = null;
     hfState.paramB = model.param_b || 0;
+    hfState.mmprojFiles = [];
+    hfState.mmprojPath = '';
+    hfState.mmprojRepoId = '';
+    hfState.mmprojBytes = 0;
     hfHideDownloadPanel(downloadPanel);
     hideQuantAdvisor();
     hideMmprojSection();
@@ -1151,10 +1157,11 @@ async function onHfFileSelected(file, repoId, downloadPanel) {
     }
     const newBtn = document.getElementById('mm-hf-dlp-download-btn');
     if (newBtn) {
-        newBtn.onclick = () => {
-            hfStartDownload({
+        newBtn.onclick = async () => {
+            const modelFilePath = file.path || file.name;
+            const started = await hfStartDownload({
                 repoId,
-                filePath: file.path || file.name,
+                filePath: modelFilePath,
                 panelEl: downloadPanel,
                 onComplete: (downloadId, localPath) => {
                     hfState.currentDownloadId = downloadId;
@@ -1166,6 +1173,16 @@ async function onHfFileSelected(file, repoId, downloadPanel) {
                     showToast(msg || 'Download failed', 'error');
                 },
             });
+            if (!started || !hfState.mmprojPath) return;
+
+            const companion = await hfStartCompanionDownload({
+                repoId: hfState.mmprojRepoId || repoId,
+                filePath: hfState.mmprojPath,
+                saveAs: deriveMmprojSaveName(modelFilePath, hfState.mmprojPath),
+            });
+            if (!companion) {
+                showToast('Model download started, but the mmproj download could not start.', 'error');
+            }
         };
     }
 
@@ -1511,6 +1528,13 @@ function updateCtxTrainWarning() {
 
 // ── mmproj companion detection (wizard-style) ────────────────────────────────
 
+function deriveMmprojSaveName(modelPath, mmprojPath) {
+    const modelBase = (modelPath.split('/').pop() || modelPath).replace(/\.gguf$/i, '');
+    const stem = modelBase.replace(/-?(Q\d[\w.]*|IQ\d[\w.]*|BF16|F16)$/i, '');
+    const mmprojBase = mmprojPath.split('/').pop() || mmprojPath;
+    return `${stem}-${mmprojBase}`;
+}
+
 async function detectMmprojCompanion(repoId) {
     const section = document.getElementById('mm-mmproj-section');
     const content = document.getElementById('mm-mmproj-content');
@@ -1575,6 +1599,7 @@ async function detectMmprojCompanion(repoId) {
             const fname = fpath.split('/').pop();
             const opt = document.createElement('option');
             opt.value = fpath;
+            opt.dataset.repoId = f.repo_id || repoId;
             const sizeStr = f.size ? ' · ' + formatBytes(f.size) : '';
             opt.textContent = fname + sizeStr + (f.is_recommended_mmproj ? ' · Recommended' : '');
             if (f.is_recommended_mmproj) {
@@ -1588,6 +1613,7 @@ async function detectMmprojCompanion(repoId) {
             const fpath = select.value;
             hfState.mmprojPath = fpath;
             const f = mmprojFiles.find(x => (x.path || x.name) === fpath);
+            hfState.mmprojRepoId = f?.repo_id || repoId;
             hfState.mmprojBytes = f?.size ? Number(f.size) : 0;
             scheduleVramUpdate(hfState.selectedFile);
         });
@@ -1596,11 +1622,13 @@ async function detectMmprojCompanion(repoId) {
             select.style.display = check.checked ? '' : 'none';
             if (!check.checked) {
                 hfState.mmprojPath = '';
+                hfState.mmprojRepoId = '';
                 hfState.mmprojBytes = 0;
             } else if (!select.value && mmprojFiles.length) {
                 const preferred = recommendedMmproj || mmprojFiles[0];
                 select.value = preferred.path || preferred.name || '';
                 hfState.mmprojPath = select.value;
+                hfState.mmprojRepoId = preferred.repo_id || repoId;
                 hfState.mmprojBytes = preferred.size ? Number(preferred.size) : 0;
             }
             scheduleVramUpdate(hfState.selectedFile);

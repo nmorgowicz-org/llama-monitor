@@ -98,6 +98,9 @@ Included alongside capabilities in the WebSocket message and `/api/capabilities`
 | `"Headless"` | No graphical session; tray not available |
 | `"Failed"` | Tray initialization failed |
 
+In desktop mode, clicking the tray icon toggles the compact metrics popover. The popover closes
+when its X button is clicked or when focus moves to another app or window.
+
 ---
 
 ## Status Pill Mapping

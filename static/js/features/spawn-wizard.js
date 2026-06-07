@@ -7229,6 +7229,18 @@ async function openCardPanel(repoId) {
 
 function _closeCardPanel() {
   if (!dom.cardPanel) return;
+
+  // Move focus out before hiding so it's not trapped inside aria-hidden
+  const wasFocused = document.activeElement;
+  if (dom.cardPanel.contains(wasFocused)) {
+    wasFocused.blur();
+    // Restore focus to a neutral ancestor (hardware step)
+    const step = document.getElementById('wizard-step-2');
+    if (step && step.focus) {
+      step.focus({ preventScroll: true });
+    }
+  }
+
   dom.cardPanel.classList.remove('open');
   dom.cardPanel.setAttribute('aria-hidden', 'true');
 }

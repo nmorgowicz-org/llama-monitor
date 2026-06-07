@@ -784,11 +784,26 @@
   border-top: 1px dashed rgba(255, 255, 255, 0.08);
 }
 
-/* Give MoE autotune area more room within compact hardware fields */
+/* Keep the MoE hint and actions in the field's third subgrid row. */
 
-.hardware-field .moe-autotune {
-  margin-top: 10px;
-  margin-bottom: 6px;
+.hardware-field-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hardware-field-details .moe-autotune {
+  width: 100%;
+  margin: 0;
+}
+
+.hardware-field-details .moe-autotune-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .advanced-only.visible {

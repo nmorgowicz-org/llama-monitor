@@ -3104,7 +3104,7 @@
             </div>
 
             <!-- Step 3: Hardware -->
-            <div class="wizard-step" id="wizard-step-2">
+            <div class="wizard-step" id="wizard-step-2" tabindex="-1">
                 <div class="wizard-main">
                     <div>
                         <div class="wizard-section-title">Configure hardware</div>
@@ -3278,16 +3278,20 @@
                                 <input type="number" id="spawn-threads-batch" min="1" max="64" placeholder="default" title="CPU thread count for batch processing (-tb). Blank = same as -t.">
                                 <div class="field-hint" id="spawn-threads-batch-hint">Prompt processing threads. Blank = inherit from -t.</div>
                             </div>
-                         <div class="hardware-field">
-                                 <label for="spawn-n-cpu-moe" title="For Mixture-of-Experts models: how many expert layers to keep in VRAM. 0 = auto. Higher = faster but uses more VRAM. Lower = saves VRAM but runs some experts on CPU.">MoE CPU experts (n_cpu_moe)</label>
-                                 <input type="number" id="spawn-n-cpu-moe" min="0" placeholder="Auto">
-                                 <div class="field-hint">Higher = more VRAM, faster. Lower = more CPU, slower.</div>
-                                 <div class="moe-autotune" id="spawn-moe-autotune" style="display:none;">
-                                     <button type="button" class="moe-autotune-btn" id="spawn-moe-autotune-btn" title="Compute the best n_cpu_moe that fits VRAM (instant estimate)">⚡ Auto-tune offload</button>
-                                     <button type="button" class="moe-autotune-verify" id="spawn-moe-autotune-verify" title="Run llama-bench to confirm the fastest offload empirically. Requires the server to be stopped.">Verify with sweep</button>
-                                     <span class="moe-autotune-status" id="spawn-moe-autotune-status"></span>
-                                 </div>
-                             </div>
+                            <div class="hardware-field">
+                                <label for="spawn-n-cpu-moe" title="For Mixture-of-Experts models: how many expert layers to keep in VRAM. 0 = auto. Higher = faster but uses more VRAM. Lower = saves VRAM but runs some experts on CPU.">MoE CPU experts (n_cpu_moe)</label>
+                                <input type="number" id="spawn-n-cpu-moe" min="0" placeholder="Auto">
+                                <div class="hardware-field-details">
+                                    <div class="field-hint">Higher = more VRAM, faster. Lower = more CPU, slower.</div>
+                                    <div class="moe-autotune" id="spawn-moe-autotune" style="display:none;">
+                                        <div class="moe-autotune-row">
+                                            <button type="button" class="moe-autotune-btn" id="spawn-moe-autotune-btn" title="Compute the best n_cpu_moe that fits VRAM (instant estimate)">⚡ Auto-tune offload</button>
+                                            <button type="button" class="moe-autotune-verify" id="spawn-moe-autotune-verify" title="Run llama-bench to confirm the fastest offload empirically. Requires the server to be stopped.">Verify with sweep</button>
+                                        </div>
+                                        <div class="moe-autotune-status" id="spawn-moe-autotune-status"></div>
+                                    </div>
+                                </div>
+                            </div>
                              <div class="hardware-field">
                                  <label for="spawn-tensor-split" title="How to split the model across multiple GPUs. e.g. '1,1' = equal split across 2 GPUs. Leave empty for single GPU. Only useful if you have multiple GPUs.">Tensor split</label>
                                  <input type="text" id="spawn-tensor-split" placeholder="e.g. 1,1">

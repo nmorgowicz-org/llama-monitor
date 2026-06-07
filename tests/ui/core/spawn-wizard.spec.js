@@ -47,6 +47,7 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
                 ok: true,
                 files: [
                     {
+                        repo_id: 'unsloth/gemma-4-31B-it-qat-GGUF',
                         path: 'gemma-4-31B-it-Q4_0.gguf',
                         size: 17_400_000_000,
                         label: 'Q4_0',
@@ -56,6 +57,7 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
                         mmproj_recommendation: '',
                     },
                     {
+                        repo_id: 'unsloth/gemma-4-31B-it-qat-GGUF',
                         path: 'mmproj-F16.gguf',
                         size: 741_000_000,
                         label: 'F16',
@@ -65,6 +67,7 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
                         mmproj_recommendation: 'F16 is the documented llama.cpp projector default for Gemma 4',
                     },
                     {
+                        repo_id: 'unsloth/gemma-4-31B-it-qat-GGUF',
                         path: 'mmproj-F32.gguf',
                         size: 1_480_000_000,
                         label: 'F32',
@@ -102,6 +105,44 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
         await expect(page.locator('#test-hf-files .hf-file-item', {
             hasText: 'mmproj-F32.gguf',
         })).not.toContainText('Family recommended');
+    });
+
+    test('HF file browser selects a linked mmproj from its owning repo', async ({ page }) => {
+        await page.route('**/api/hf/files', route => route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                ok: true,
+                files: [{
+                    repo_id: 'mradermacher/model-GGUF',
+                    path: 'mmproj-F16.gguf',
+                    size: 1_000_000_000,
+                    label: 'F16',
+                    quant_type: 'standard',
+                    is_mmproj: true,
+                    is_recommended_mmproj: true,
+                    mmproj_recommendation: 'F16 is recommended',
+                }],
+            }),
+        }));
+
+        await page.goto('/');
+        await page.waitForLoadState('networkidle');
+        const selectedRepo = await page.evaluate(async () => {
+            const container = document.createElement('div');
+            document.body.appendChild(container);
+            const { hfListFiles } = await import('/js/features/hf-browse.js');
+            return new Promise(resolve => {
+                hfListFiles({
+                    repoId: 'mradermacher/model-i1-GGUF',
+                    container,
+                    vramGb: 32,
+                    onSelectFile: (_file, repoId) => resolve(repoId),
+                }).then(() => container.querySelector('.hf-file-item').click());
+            });
+        });
+
+        expect(selectedRepo).toBe('mradermacher/model-GGUF');
     });
 
     test('Third-party models endpoint responds', async ({ page }) => {
@@ -369,6 +410,27 @@ test.describe('Spawn Wizard - Phase 3 + Phase 4', () => {
             document.getElementById('spawn-fit-target')?.value ?? ''
         );
         expect(fitTargetValue).toBe('2048');
+
+        const moeLayout = await page.evaluate(() => {
+            const field = document.getElementById('spawn-n-cpu-moe')?.closest('.hardware-field');
+            const hint = field?.querySelector('.field-hint');
+            const actions = document.getElementById('spawn-moe-autotune');
+            if (!field || !hint || !actions) return null;
+
+            actions.style.display = 'block';
+            const fieldRect = field.getBoundingClientRect();
+            const hintRect = hint.getBoundingClientRect();
+            const actionsRect = actions.getBoundingClientRect();
+            return {
+                hintBottom: hintRect.bottom,
+                actionsTop: actionsRect.top,
+                actionsBottom: actionsRect.bottom,
+                fieldBottom: fieldRect.bottom,
+            };
+        });
+        expect(moeLayout).not.toBeNull();
+        expect(moeLayout.actionsTop).toBeGreaterThanOrEqual(moeLayout.hintBottom);
+        expect(moeLayout.fieldBottom).toBeGreaterThanOrEqual(moeLayout.actionsBottom);
     });
 
     test('MTP requires explicit opt-in on Apple Metal', async ({ page }) => {

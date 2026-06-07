@@ -70,7 +70,7 @@ When selected, the wizard immediately scans known tool directories and renders d
 The core tuning step. Populated using `POST /api/vram/auto-size` after model selection.
 
 #### Model Header
-Shows the selected repo (`owner/model-name`) and selected quant. If multiple GGUF files exist in the repo, a **Quantization** dropdown lets the user swap without leaving the step. A **Vision (mmproj)** dropdown appears when projector files are detected. For imatrix repositories whose model card links to a separate static-quant repository, the wizard follows that link and lists the static repository's projector files automatically.
+Shows the selected repo (`owner/model-name`) and selected quant. If multiple GGUF files exist in the repo, a **Quantization** dropdown lets the user swap without leaving the step. A **Vision (mmproj)** dropdown appears when projector files are detected. For imatrix repositories whose model card links to a separate static-quant repository, the wizard follows that link and lists its projector files automatically. If a Qwen 3.5 variant's linked static repo has no projector, the wizard checks verified same-architecture repositories from mradermacher and then Unsloth.
 
 To change the HuggingFace repo after initial selection:
 - Click the small ✎ icon next to the repo label.
