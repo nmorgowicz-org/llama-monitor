@@ -257,5 +257,18 @@ Common issues:
     - Device CA is present in the agent’s `cas/` directory.
     - Certificate includes "agent-client" role marker.
 
+## DB Admin & Security
+
+The Security & Certificates panel includes a DB Admin section for high-impact operations protected by the db-admin-token (e.g., database backups and restores).
+
+- View or regenerate the db-admin-token.
+- Perform DB backups, restores, and advanced operations via the UI or API.
+
+These operations require:
+- Proper authentication (api-token and/or db-admin-token).
+- Confirmation for destructive actions to prevent accidental use.
+
+![DB Admin Section](../screenshots/tls-db-admin-section.png)
+
 For deeper technical details and code references, see:
 - docs/archive/security/20260516-tls_acme_implementation.md

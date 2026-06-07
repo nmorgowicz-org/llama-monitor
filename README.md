@@ -34,20 +34,28 @@ Chat tabs, prompt controls, telemetry overlays, and logs live next to the monito
 ![Chat Interface](docs/screenshots/chat-chat.png)
 ![Focus Mode](docs/screenshots/chat-focus-mode.png)
 
+### Chat History Q&A
+
+Ask questions about your conversation in a dedicated sliding panel. It searches message history, pulls relevant context, and streams answers without altering your live chat.
+
+![History Q&A](docs/screenshots/chat-history-qa-panel.png)
+
 ### Guided Generation & Prompt Tooling
 
-A per-tab notes sidebar, AI-generated suggestions, quick guide flows, and director/surprise tools help you steer replies without rebuilding the prompt stack. Full prompt-debug inspector included.
+A per-tab notes sidebar, AI-generated suggestions, quick guide flows, and director/surprise tools help you steer replies without rebuilding the prompt stack.
+
+- Director mode: type one directive and get four distinct continuation options.
+- Surprise mode: arm a beat that triggers at a later reply.
 
 ![Suggestions Results](docs/screenshots/guided-gen-suggestions-results.png)
+![Director Options](docs/screenshots/guided-gen-director-options.png)
 ![Prompt Debug Inspector](docs/screenshots/panels-prompt-debug.png)
 
 ### TLS, ACME & mTLS
 
-Built-in TLS with ACME (Let’s Encrypt) and mTLS for remote agents. Choose No HTTPS, Self-Signed, Bring Your Own Key, or fully automated ACME with DNS-01 and renewal. Optional, flexible, and designed for both local-first and production deployments.
+Built-in TLS with ACME (Let’s Encrypt) and mTLS for remote agents. Choose No HTTPS, Self-Signed, Bring Your Own Key, or fully automated ACME with DNS-01 and renewal.
 
-- Token-protected API endpoints
-- In-place token rotation from the UI
-- Certificate lifecycle controls
+See [TLS Architecture](docs/reference/tls-architecture.md) for full details.
 
 ![Security & Certificates](docs/screenshots/tls-certificates-tab.png)
 
@@ -60,9 +68,12 @@ An integrated wizard for discovering, downloading, configuring, and launching a 
   - HuggingFace search and curated community picks
   - Third-party import (Ollama, LM Studio, Jan, GPT4All, HF cache)
   - Local GGUF files with VRAM estimates
-- **VRAM-aware tuning**: live breakdown bar (weights · KV cache · mmproj · MTP · overhead) with auto-size and quant-compare
-- **Speculative decoding**: N-gram, MTP, and draft-model modes
+- **VRAM-aware tuning**: live breakdown bar with auto-size and quant-compare
 - **llama.cpp binary management**: auto-download, install, and update the llama.cpp runtime
+
+A version pill in the navbar shows the current llama.cpp version and opens release notes for managed builds.
+
+![Llama Updater](docs/screenshots/llama-updater-pill.png)
 
 ![Spawn Wizard Flow](docs/screenshots/spawn-wizard-flow.gif)
 

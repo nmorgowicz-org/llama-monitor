@@ -265,6 +265,10 @@ Only one should be set at a time. If both are configured, the output mode settin
 
 - Public repos can be searched and browsed without an HF token.
 - A read-only token is recommended for gated/private repos and to avoid stricter anonymous rate limits.
+- The discover panel includes:
+  - Curated community picks (including MoE models).
+  - “Trending” and model-specific views (e.g., Qwen3).
+  - Quantizer-focused listings (e.g., Bartowski) for easier selection.
 - The Step 2 wizard helper links directly to the Hugging Face token settings page and explains the `New token` → `Read` flow.
 
 #### POST /api/hf/search

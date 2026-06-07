@@ -275,6 +275,8 @@ Enter-to-send is stored in shared settings. When disabled, `Enter` inserts a new
 
 The History Q&A panel lets you ask natural language questions about an active conversation without disturbing the live chat context.
 
+![History Q&A Panel](../screenshots/chat-history-qa-panel.png)
+
 ### Opening the Panel
 
 Click the **History** button (clock icon) in the chat header, to the left of the Focus button. The panel slides in from the right edge of the screen. Click the button again, or the × in the panel header, to close it.

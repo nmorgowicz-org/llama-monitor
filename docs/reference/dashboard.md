@@ -40,6 +40,8 @@ The popover is populated in real time from WebSocket data; each row shows a gree
 
 The Server tab is the main monitoring dashboard. It combines llama.cpp inference data from `/metrics` and `/slots` with host telemetry when available.
 
+![Inference Section](../screenshots/dashboard-inference-section.png)
+
 | Card | What it shows |
 |------|----------------|
 | **Throughput** | Prompt and generation speeds, peak tracking, throughput ratio bar, metric age, and delta indicators |
@@ -71,6 +73,16 @@ Additional metrics and indicators shown on the Server tab when data is available
 - **Activity rail**: A timeline bar of recent requests, color-coded by prompt vs. generation phases.
 - **Recent task strip**: Summarizes the last completed task (task ID, output tokens, duration, estimated t/s).
 - **Request stats**: Total completed requests and average duration over the last 10 minutes.
+
+### Tuning panel
+
+The Tuning panel provides access to server tuning settings, including sampling parameters and system-level tuning knobs.
+
+- Open the **Tune** button in the Server tab header to reveal the panel.
+- Adjust sampling (temperature, top_p, etc.), memory tuning, and speculative decoding settings where available.
+- Changes apply to the running llama-server when supported.
+
+![Tuning Panel](../screenshots/tune-panel-server-tab.png)
 
 ### Context Window card
 
