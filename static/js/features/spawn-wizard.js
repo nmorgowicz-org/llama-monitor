@@ -3971,12 +3971,18 @@ function renderHardwareModelHeader() {
 
   const repoEl = document.getElementById('hw-model-repo');
   if (repoEl) {
-    const fullRepo = hfRepo || path.split(/[/\\]/).pop() || path;
-    const slashIdx = fullRepo.indexOf('/');
-    if (hfRepo && slashIdx > 0) {
-      const author = fullRepo.slice(0, slashIdx + 1); // "owner/"
+    // Remove any previous inline editor
+    repoEl.classList.remove('hw-model-repo-editing');
+    repoEl.innerHTML = '';
+    repoEl.style.cursor = 'default';
+
+    const fullRepo = hfRepo || (wizardState.model.originRepo || '');
+    const displayName = fullRepo || path.split(/[/\\]/).pop() || path;
+    const slashIdx = fullRepo ? fullRepo.indexOf('/') : -1;
+
+    if (fullRepo && slashIdx > 0) {
+      const author = fullRepo.slice(0, slashIdx + 1);
       const modelName = fullRepo.slice(slashIdx + 1);
-      repoEl.textContent = '';
       const authorSpan = document.createElement('span');
       authorSpan.className = 'hw-model-author';
       authorSpan.textContent = author;
@@ -3986,8 +3992,22 @@ function renderHardwareModelHeader() {
       repoEl.appendChild(authorSpan);
       repoEl.appendChild(nameSpan);
     } else {
-      repoEl.textContent = fullRepo;
+      repoEl.textContent = displayName;
     }
+
+    // Add a subtle change button so the user can alter the HF repo.
+    const changeBtn = document.createElement('span');
+    changeBtn.className = 'hw-model-repo-change';
+    changeBtn.textContent = '✎';
+    changeBtn.title = 'Change HuggingFace repo';
+    changeBtn.style.cssText =
+      'margin-left:6px;font-size:10px;cursor:pointer;opacity:0.35;';
+    changeBtn.addEventListener('mouseenter', () => { changeBtn.style.opacity = '1'; });
+    changeBtn.addEventListener('mouseleave', () => { changeBtn.style.opacity = '0.35'; });
+    changeBtn.addEventListener('click', () => {
+      _openHwRepoEditor(repoEl, fullRepo || '');
+    });
+    repoEl.appendChild(changeBtn);
   }
 
   const quantRow = document.getElementById('hw-quant-row');
@@ -3996,19 +4016,34 @@ function renderHardwareModelHeader() {
 
   if (quantSelect && quantFiles && quantFiles.length > 1) {
     quantSelect.innerHTML = '';
+    const loadedBasename = (wizardState.model.path || '').split(/[\\/]/).pop().toLowerCase();
+    let matched = false;
+    let recOpt = null;
+
     quantFiles.forEach(qf => {
       const fpath = qf.path || qf.name || '';
       const fname = fpath.split('/').pop();
       if (!fname) return;
       const opt = document.createElement('option');
       opt.value = fpath;
-      const dispLabel = qf.label || fname; // prefer "Q4_K_M" over full filename
+      const dispLabel = qf.label || fname;
       const sizeStr = qf.size ? ` · ${formatBytes(qf.size)}` : '';
       const isRec = qf.label && vramGb > 0 && qf.label === getRecommendedQuant(vramGb);
       opt.textContent = dispLabel + sizeStr + (isRec ? ' ★' : '');
-      if (fpath === hfFile) opt.selected = true;
+
+      // Primary: match exact HF path
+      if (fpath === hfFile) { opt.selected = true; matched = true; }
+      // Secondary: local file basename matches
+      else if (!matched && loadedBasename && fname.toLowerCase() === loadedBasename) {
+        opt.selected = true; matched = true;
+      }
+
+      if (!recOpt && isRec) recOpt = opt;
       quantSelect.appendChild(opt);
     });
+
+    // Tertiary: if still nothing selected, pick the VRAM-appropriate recommended quant
+    if (!matched && recOpt) { recOpt.selected = true; }
     if (quantRow) quantRow.style.display = '';
   } else {
     if (quantRow) quantRow.style.display = 'none';
@@ -4403,6 +4438,124 @@ async function _fetchHfTagsWithBaseModel(repoId) {
 // Fetch HF model metadata and render the tags row for the hardware step.
 // No-ops if originRepo is unknown or the row element is missing.
 let _tagsRowOrigin = ''; // track which repo is currently loaded in the row
+
+// Inline repo editor: lets user change HF repo from hardware step.
+function _openHwRepoEditor(repoEl, currentRepo) {
+  if (!repoEl) return;
+
+  // If already editing, skip
+  if (repoEl.classList.contains('hw-model-repo-editing')) return;
+
+  repoEl.classList.add('hw-model-repo-editing');
+  repoEl.innerHTML = '';
+
+  const wrap = document.createElement('span');
+  wrap.style.cssText =
+    'display:inline-flex;align-items:center;gap:4px;margin-left:4px;';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = currentRepo;
+  input.placeholder = 'owner/repo-GGUF';
+  input.style.cssText =
+    'width:170px;padding:3px 6px;border-radius:4px;border:1px solid rgba(148,163,253,0.4);' +
+    'background:rgba(15,23,42,0.95);color:var(--color-text-primary);font-size:10px;';
+
+  const loadBtn = document.createElement('button');
+  loadBtn.type = 'button';
+  loadBtn.className = 'btn-wizard-tertiary';
+  loadBtn.style.cssText =
+    'font-size:10px;min-height:20px;padding:1px 7px;flex-shrink:0;';
+  loadBtn.textContent = 'Load';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'btn-wizard-tertiary';
+  cancelBtn.style.cssText =
+    'font-size:10px;min-height:20px;padding:1px 7px;flex-shrink:0;opacity:0.7;';
+  cancelBtn.textContent = '✕';
+
+  wrap.appendChild(input);
+  wrap.appendChild(loadBtn);
+  wrap.appendChild(cancelBtn);
+  repoEl.appendChild(wrap);
+  input.focus();
+  input.select();
+
+  const restore = () => {
+    repoEl.classList.remove('hw-model-repo-editing');
+    renderHardwareModelHeader();
+  };
+
+  const doLoad = async () => {
+    const repoId = input.value.trim();
+    if (!repoId) return;
+    loadBtn.disabled = true;
+    loadBtn.textContent = '⠋';
+
+    // Fetch files for the chosen repo.
+    try {
+      const data = await _hfFilesPost(repoId);
+      loadBtn.disabled = false;
+      loadBtn.textContent = 'Load';
+
+      if (!data?.ok) {
+        showToast('Repo not found', 'error', 'Check the repo ID and try again.');
+        restore();
+        return;
+      }
+
+      const rawFiles = (data.files || []).filter(f =>
+        !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
+
+      if (!rawFiles.length) {
+        showToast('No GGUFs', 'error', 'No GGUF files found in this repo.');
+        restore();
+        return;
+      }
+
+      // Update wizard state with new repo and quant files.
+      wizardState.model.originRepo = repoId;
+      wizardState.model.hfRepo = repoId; // keep header display in sync
+      wizardState.model.quantFiles = rawFiles.map(f => ({
+        path: f.rfilename || f.path || '',
+        name: f.rfilename || f.path || '',
+        size: f.size || 0,
+        label: _extractQuantLabel(f.rfilename || f.path || ''),
+      }));
+      wizardState.model._quantSwapRepo = repoId;
+
+      // For mmproj files
+      wizardState.model.mmprojFiles = (data.files || []).filter(f => f.is_mmproj).map(f => ({
+        path: f.rfilename || f.path || '',
+        name: f.rfilename || f.path || '',
+        size: f.size || 0,
+        is_mmproj: true,
+        is_recommended_mmproj: f.is_recommended_mmproj || false,
+        mmproj_recommendation: f.mmproj_recommendation || '',
+      }));
+
+      // Restore tags cache
+      _tagsRowOrigin = '';
+
+      showToast('Repo updated', 'success', `${rawFiles.length} quants loaded`);
+      renderHardwareModelHeader();
+    } catch {
+      loadBtn.disabled = false;
+      loadBtn.textContent = 'Load';
+      showToast('Error', 'error', 'Failed to load repo.');
+      restore();
+    }
+  };
+
+  loadBtn.addEventListener('click', doLoad);
+  cancelBtn.addEventListener('click', restore);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); doLoad(); }
+    if (e.key === 'Escape') { restore(); }
+  });
+}
+
 async function _refreshHwTagsRow() {
   const row = document.getElementById('hw-tags-row');
   if (!row) return;

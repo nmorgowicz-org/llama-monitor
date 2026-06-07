@@ -441,8 +441,8 @@ export async function hfListFiles({
       container.appendChild(item);
     }
 
-    const autoFn = autoSelectFn || firstSelectFn;
-    if (autoFn) autoFn();
+    // Do NOT auto-select first file on load; let the user pick from the list.
+    // Recommendation badges (★) still guide the eye.
   } catch {
     container.innerHTML = '<div class="hf-file-empty">Error loading files. Check the repo ID and your HF token.</div>';
   }

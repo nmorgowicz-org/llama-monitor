@@ -771,7 +771,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   column-gap: 10px;
-  row-gap: 5px;
+  row-gap: 8px;
   align-items: start;
 }
 
@@ -782,6 +782,13 @@
   margin-top: 6px;
   padding-top: 8px;
   border-top: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+/* Give MoE autotune area more room within compact hardware fields */
+
+.hardware-field .moe-autotune {
+  margin-top: 10px;
+  margin-bottom: 6px;
 }
 
 .advanced-only.visible {
@@ -3984,7 +3991,31 @@
   min-width: 0;
   word-break: break-word;
   overflow-wrap: break-word;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
 }
+
+.hw-model-repo-change {
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.16s ease, transform 0.12s ease;
+}
+.hw-model-repo-change:hover {
+  transform: scale(1.15);
+}
+
+.hw-model-repo-editing {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.hw-model-repo-editing input:focus {
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(148, 163, 253, 0.6);
+}
+
 .hw-model-author {
   display: block;
   font-size: 11px;
