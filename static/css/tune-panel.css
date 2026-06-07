@@ -450,7 +450,9 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 10px;
+  margin-bottom: 4px;
+  min-width: 0;
 }
 
 .moe-autotune-btn,
@@ -485,6 +487,12 @@
   font-size: var(--text-2xs, 11px);
   color: var(--color-text-muted);
   font-family: var(--font-mono);
+  display: inline-block;
+  padding-left: 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* ── Depth sweep ───────────────────────────────────────────────────────────── */
