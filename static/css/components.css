@@ -2624,6 +2624,24 @@ button:disabled {
   border-color: rgba(16, 185, 129, 0.3);
 }
 
+.fb-mtp-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.12);
+  color: rgba(252, 196, 100, 0.75);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.fb-mtp-badge.fb-mtp-matched {
+  background: rgba(245, 158, 11, 0.15);
+  color: rgb(251, 191, 36);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
 .fb-empty {
   padding: 24px 16px;
   text-align: center;

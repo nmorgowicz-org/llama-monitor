@@ -25,6 +25,16 @@ function _mmprojMatchesModel(mmprojName, modelName) {
     return false;
 }
 
+// Returns true if draftName looks like an MTP draft companion for modelName.
+function _draftMatchesModel(draftName, modelName) {
+    const stem = _fbModelStem(modelName).toLowerCase();
+    // Strip quant suffix then strip MTP keyword + tail to get draft's base prefix
+    const dr = draftName.toLowerCase()
+        .replace(/\.gguf$/i, '')
+        .replace(/[-_](?:mtp[-_]draft|draft[-_]model|mtp_small|mtp[-_]heads|mtp[-_]\d+|assistant)\b.*$/i, '');
+    return stem.length > 4 && (stem.includes(dr) || dr.includes(stem));
+}
+
 export function openFileBrowser(targetId, filter, defaultPath, context) {
     fbTargetId = targetId;
     fbFilter = filter === 'dir' ? '' : (filter || '');
@@ -110,24 +120,33 @@ export async function fileBrowserGo(path) {
         // badge base models that have a companion.
         let entries = data.entries;
         let mmprojNames = [];
+        let draftNames = [];
         if (fbContext === 'model') {
-            const isAssist = (name) => {
-                const n = name.toLowerCase();
-                return n.includes('assistant')
-                    || n.includes('mtp-draft')
-                    || n.includes('draft-model')
+            // Mirror src/models/mod.rs is_draft_assistant_filename: unambiguous keywords
+            // are safe at any size; broad keywords require size <= 3 GB to avoid
+            // mis-tagging instruct-tuned main models.
+            const isAssist = (e) => {
+                const n = e.name.toLowerCase();
+                const sz = e.size || 0;
+                const isUnambiguous = n.includes('mtp-draft')
                     || n.includes('mtp_small')
                     || n.includes('mtp-heads')
-                    || n.startsWith('mtp-');
+                    || (n.startsWith('mtp-') && sz <= 3_000_000_000);
+                if (isUnambiguous) return true;
+                const isBroad = n.includes('assistant') || n.includes('draft-model');
+                return isBroad && sz > 0 && sz <= 3_000_000_000;
             };
             mmprojNames = entries
                 .filter(e => !e.is_dir && e.name.toLowerCase().includes('mmproj'))
+                .map(e => e.name);
+            draftNames = entries
+                .filter(e => !e.is_dir && isAssist(e))
                 .map(e => e.name);
             entries = entries.filter(e => {
                 if (e.is_dir) return true;
                 const n = e.name.toLowerCase();
                 if (n.includes('mmproj')) return false;
-                if (isAssist(n)) return false;
+                if (isAssist(e)) return false;
                 return true;
             });
         }
@@ -142,13 +161,23 @@ export async function fileBrowserGo(path) {
                     '<span class="fb-entry-name">' + name + '</span></div>';
             } else {
                 let badge = '';
-                if (fbContext === 'model' && mmprojNames.length > 0) {
-                    const matched = mmprojNames.some(mp => _mmprojMatchesModel(mp, e.name));
-                    if (matched) {
-                        badge = '<span class="fb-mmproj-badge fb-mmproj-matched" title="A companion mmproj file was found in this folder">mmproj ✓</span>';
-                    } else {
-                        // Dir has unmatched mmproj files — softer hint
-                        badge = '<span class="fb-mmproj-badge" title="mmproj file(s) present in this folder">mmproj</span>';
+                if (fbContext === 'model') {
+                    if (mmprojNames.length > 0) {
+                        const matched = mmprojNames.some(mp => _mmprojMatchesModel(mp, e.name));
+                        if (matched) {
+                            badge += '<span class="fb-mmproj-badge fb-mmproj-matched" title="A companion mmproj file was found in this folder">mmproj ✓</span>';
+                        } else {
+                            // Dir has unmatched mmproj files — softer hint
+                            badge += '<span class="fb-mmproj-badge" title="mmproj file(s) present in this folder">mmproj</span>';
+                        }
+                    }
+                    if (draftNames.length > 0) {
+                        const matched = draftNames.some(d => _draftMatchesModel(d, e.name));
+                        if (matched) {
+                            badge += '<span class="fb-mtp-badge fb-mtp-matched" title="A companion MTP draft file was found in this folder">mtp ✓</span>';
+                        } else {
+                            badge += '<span class="fb-mtp-badge" title="MTP draft file(s) present in this folder">mtp</span>';
+                        }
                     }
                 }
                 return `<div class="fb-entry fb-entry-file fb-match" data-path="${escapeHtml(e.path)}">` +
