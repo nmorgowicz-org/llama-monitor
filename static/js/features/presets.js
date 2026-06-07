@@ -1024,19 +1024,7 @@ export function initPresets() {
         }
         try {
             const auth = window.authHeaders ? window.authHeaders() : {};
-            const [presetsResp, settingsResp] = await Promise.all([
-                fetch('/api/presets', { headers: auth }),
-                fetch('/api/settings', { headers: auth }),
-            ]);
-
-            sessionState.presets = await presetsResp.json();
-            const preset = sessionState.presets.find(pr => pr.id === id);
-            if (!preset) {
-                showToast('Preset not found', 'error');
-                return;
-            }
-
-            const copy = { ...preset, id: null, name: preset.name + ' (copy)' };
+            const copy = { ...p, id: null, name: p.name + ' (copy)' };
             const resp = await fetch('/api/presets', {
                 method: 'POST',
                 headers: { ...auth, 'Content-Type': 'application/json' },
