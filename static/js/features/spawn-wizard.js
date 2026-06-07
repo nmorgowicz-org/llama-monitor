@@ -184,6 +184,8 @@ export const wizardState = {
     quantFiles: [],      // GGUF files from HF repo for hardware-step quant swap
     mmprojFiles: [],     // mmproj files found in HF repo
     mmprojHfRepo: '',    // HF repo owning the selected projector
+    draftCandidates: [], // assistant/draft files detected near this model
+    selectedDraftPath: '', // path of chosen assistant for MTP
     chatTemplatePath: null,  // local path to installed .jinja template (null = use embedded)
     chatTemplateMode: 'auto', // 'auto' | 'custom' | 'embedded'
   },
@@ -500,6 +502,8 @@ function cacheDom() {
   dom.vramEstimateText = document.getElementById('spawn-vram-estimate-text');
   dom.vramPill         = document.getElementById('spawn-vram-pill');
   dom.specTypeSelect     = document.getElementById('spawn-spec-type');
+   dom.mtpAssistantSection = document.getElementById('hw-mtp-assistant-section');
+   dom.mtpAssistantSelect  = document.getElementById('hw-mtp-assistant-select');
   dom.draftModelWrap     = document.getElementById('spawn-draft-model-wrap');
   dom.draftModelInput    = document.getElementById('spawn-draft-model');
   dom.specNgramWrap      = document.getElementById('spawn-spec-ngram-wrap');
@@ -1715,6 +1719,46 @@ async function doIntrospect(path) {
       } catch { /* browse may be rate-limited; skip silently */ }
     }
 
+    // Scan directory for MTP assistant/draft model files (local models)
+    if (wizardState.model.source === 'local' || wizardState.model.source === 'import') {
+      const dir = path.replace(/[/\\][^/\\]+$/, '');
+      try {
+        const browseResp = await fetch(
+          `/api/browse?path=${encodeURIComponent(dir)}&filter=gguf`,
+          { headers }
+        );
+        if (browseResp.ok) {
+          const bd = await browseResp.json();
+          const assistants = (bd.entries || []).filter(e => {
+            if (e.is_dir) return false;
+            const n = e.name.toLowerCase();
+            return n.includes('assistant')
+              || n.includes('mtp-draft')
+              || n.includes('draft-model')
+              || n.includes('mtp_small')
+              || n.includes('mtp-heads')
+              || n.startsWith('mtp-');
+          });
+          if (assistants.length) {
+            wizardState.model.draftCandidates = assistants.map(e => ({
+              path: e.path,
+              name: e.name,
+              size: e.size || 0,
+              is_draft: true,
+            }));
+            const modelFilename = path.split(/[\\/]/).pop() || '';
+            const bestDraft = _bestDraftForModel(modelFilename, wizardState.model.draftCandidates);
+            if (bestDraft) {
+              wizardState.model.selectedDraftPath = bestDraft.path;
+            }
+            // Re-render MTP section to include assistant selector
+            if (wizardState.currentStep === 2) renderMtpSection();
+            scheduleVramUpdate();
+          }
+        }
+      } catch { /* non-fatal */ }
+    }
+
     // Update MoE slider max — n_cpu_moe counts layers, so the max is the layer count
     if (wizardState.arch.nExperts > 0 && dom.moeOffloadSlider) {
       dom.moeOffloadSlider.max = wizardState.arch.nLayers || wizardState.arch.nExperts;
@@ -2830,6 +2874,11 @@ async function fetchHfFiles(repo) {
         return;
       }
 
+      if (file.is_draft_assistant) {
+        showToast('Assistant file', 'info', 'Select a base model first — this file will be offered as the MTP draft assistant.');
+        return;
+      }
+
       dom.hfFileList.querySelectorAll('.hf-file-item.selected:not([data-mmproj])').forEach(el => el.classList.remove('selected'));
       const itemEl = dom.hfFileList.querySelector(`.hf-file-item[data-filename="${fname}"]`);
       if (itemEl) itemEl.classList.add('selected');
@@ -2858,11 +2907,13 @@ async function fetchHfFiles(repo) {
           size: el.dataset.size ? Number(el.dataset.size) : 0,
           label: el.dataset.label || '',
           is_mmproj: el.dataset.mmproj === '1',
+          is_draft_assistant: el.dataset.draftAssistant === '1',
           repo_id: el.dataset.repoId || repoId,
           is_recommended_mmproj: el.dataset.recommendedMmproj === '1',
           mmproj_recommendation: el.dataset.mmprojRecommendation || '',
         };
         if (f.is_mmproj) wizardState.model.mmprojFiles.push(f);
+        else if (f.is_draft_assistant) wizardState.model.draftCandidates.push(f);
         else wizardState.model.quantFiles.push(f);
       });
 
@@ -4144,6 +4195,56 @@ function _bestMmprojForModel(modelFilename, files) {
   if (bestScore >= 5) return best;
   const recommended = files.filter(f => _isRecommendedMmproj(f, modelFilename));
   return recommended.length === 1 ? recommended[0] : null;
+}
+
+// Generic draft-assistant matching: score candidates by shared token overlap.
+function _bestDraftForModel(modelFilename, candidates) {
+  if (!candidates.length) return null;
+  const stem = _modelStemForSearch(modelFilename)
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  const scoreCandidate = (f) => {
+    const base = (f.path || f.name || '').split(/[\\/]/).pop() || '';
+    const fstem = _modelStemForSearch(base)
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, ' ')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+
+    // Count shared tokens between model stem and candidate stem.
+    const cset = new Set(fstem);
+    let shared = 0;
+    for (const t of stem) {
+      if (cset.has(t)) shared++;
+    }
+
+    // Prefer smaller candidates (more likely real draft/assistant).
+    const size = f.size || 0;
+    const sizeBonus = size > 0 && size < 1_500_000_000 ? 1 : 0;
+
+    return { shared, sizeBonus };
+  };
+
+  let best = null, bestShared = -1, bestSizeBonus = 0;
+  for (const f of candidates) {
+    const { shared, sizeBonus } = scoreCandidate(f);
+    if (shared >= 3 &&
+        (shared > bestShared || (shared === bestShared && sizeBonus > bestSizeBonus))) {
+      bestShared = shared;
+      bestSizeBonus = sizeBonus;
+      best = f;
+    }
+  }
+
+  // Allow a single candidate even with a weak score.
+  if (best) return best;
+  if (candidates.length === 1) return candidates[0];
+  return null;
 }
 
 // ── Hardware step: mmproj section ────────────────────────────────────────────
@@ -5542,11 +5643,61 @@ function renderMtpSection() {
   if (!section) return;
   const hasMtp = wizardState.arch.mtpDepth > 0 ||
     detectMtpFromName(wizardState.model.hfFile || wizardState.model.path || '');
-  if (!hasMtp) { section.style.display = 'none'; return; }
+  if (!hasMtp) {
+    section.style.display = 'none';
+    if (dom.mtpAssistantSection) dom.mtpAssistantSection.style.display = 'none';
+    return;
+  }
   section.style.display = '';
 
   const infoNote = document.getElementById('hw-mtp-info-note');
   if (infoNote && hasMtp) { infoNote.style.display = ''; }
+
+  // Render companion assistant selector when candidates available
+  if (dom.mtpAssistantSection && dom.mtpAssistantSelect) {
+    const candidates = wizardState.model.draftCandidates || [];
+    if (candidates.length > 0) {
+      dom.mtpAssistantSection.style.display = '';
+
+      // Bind the change listener once; always repopulate options so new
+      // candidates discovered after first render (or from a different model)
+      // are not silently lost.
+      if (!dom.mtpAssistantSelect.dataset.bound) {
+        dom.mtpAssistantSelect.dataset.bound = '1';
+        dom.mtpAssistantSelect.addEventListener('change', () => {
+          const selected = dom.mtpAssistantSelect.value || '';
+          wizardState.model.selectedDraftPath = selected;
+          // When assistant is selected, recommend higher n-max.
+          if (selected) {
+            wizardState.hardware.mtpDraftNMax = wizardState.hardware.mtpDraftNMax || 4;
+          }
+          scheduleVramUpdate();
+        });
+      }
+
+      dom.mtpAssistantSelect.innerHTML = '';
+      const noneOpt = document.createElement('option');
+      noneOpt.value = '';
+      noneOpt.textContent = '(none — use built-in MTP only)';
+      dom.mtpAssistantSelect.appendChild(noneOpt);
+
+      candidates.forEach(f => {
+        const fpath = f.path || f.name || '';
+        const fname = fpath.split(/[\\/]/).pop();
+        const sizeStr = f.size ? ` · ${formatBytes(f.size)}` : '';
+        const opt = document.createElement('option');
+        opt.value = fpath;
+        opt.textContent = fname + sizeStr;
+        dom.mtpAssistantSelect.appendChild(opt);
+      });
+
+      // Sync selection
+      const current = wizardState.model.selectedDraftPath || '';
+      if (current) dom.mtpAssistantSelect.value = current;
+    } else {
+      dom.mtpAssistantSection.style.display = 'none';
+    }
+  }
 
   const checkbox = document.getElementById('hw-use-mtp');
   // The user-facing control is spec-draft-n-max (draft tokens per step), not "depth"
@@ -5558,7 +5709,7 @@ function renderMtpSection() {
       draftNMaxInput.dataset.bound = '1';
       draftNMaxInput.addEventListener('input', () => {
         const v = parseInt(draftNMaxInput.value, 10);
-        if (v >= 0 && v <= 4) {
+        if (v >= 0 && v <= 8) {
           wizardState.hardware.mtpDraftNMax = v;
         }
       });
@@ -7078,13 +7229,31 @@ function buildSpawnPayload() {
 
   // MTP: when enabled, use draft-mtp spec type and force parallel=1
   const mtpActive = arch.mtpDepth > 0 && h.mtpEnabled;
-  const specType = mtpActive ? 'draft-mtp,ngram-mod' : (dom.specTypeSelect?.value || '');
+  const specTypeUser = dom.specTypeSelect?.value || '';
+  // Respect an explicit 'draft-mtp' choice from the advanced dropdown; only
+  // default to 'draft-mtp,ngram-mod' when the user hasn't already chosen a
+  // draft-mtp variant (covers the common case where the dropdown is empty).
+  const specType = mtpActive
+    ? (specTypeUser.includes('draft-mtp') ? specTypeUser : 'draft-mtp,ngram-mod')
+    : specTypeUser;
   const parallelSlots = mtpActive ? 1 : h.parallelSlots;
+
+  // Resolve draft assistant: prefer MTP section selection, fall back to
+  // advanced draft-model input if user configured one.
+  const assistantPath = m.selectedDraftPath || (dom.draftModelInput?.value || '').trim() || '';
 
   // Resolve mmproj local path: prefer mmprojPath (local file), fall back to
   // mmprojHfFile only if it looks like an absolute path (i.e. was set from
   // a directory scan, not from an HF file list).
   const mmprojLocal = m.mmprojPath && m.mmprojPath.startsWith('/') ? m.mmprojPath : null;
+
+  // MTP n-max: 4 when assistant is present (recommended for Gemma4-style), 2 otherwise.
+  // Use != null so an explicit 0 from the user is not treated as "unset".
+  const mtpNMaxDefault = assistantPath ? 4 : 2;
+  const mtpNMax =
+    (mtpActive || (assistantPath && (specType.includes('draft-mtp') || specType.includes('draft-model'))))
+      ? (h.mtpDraftNMax != null ? h.mtpDraftNMax : mtpNMaxDefault)
+      : undefined;
 
   return {
     model_path: m.source !== 'hf' ? (m.path || '') : '',
@@ -7105,10 +7274,10 @@ function buildSpawnPayload() {
     no_mmap: true,
     ngram_spec: false,
     spec_type: specType,
-    spec_draft_n_max: mtpActive ? (h.mtpDraftNMax || 2) : undefined,
+    spec_draft_n_max: mtpNMax,
     spec_draft_n_min: mtpActive && h.mtpDraftNMin != null ? h.mtpDraftNMin : undefined,
     spec_draft_p_min: mtpActive && h.mtpDraftPMin != null ? h.mtpDraftPMin : undefined,
-    draft_model: (dom.draftModelInput?.value || '').trim() || '',
+    draft_model: assistantPath || '',
     kv_unified: h.kvUnified || null,
     flash_attn: h.flashAttn || '',
     mlock: h.mlock || false,

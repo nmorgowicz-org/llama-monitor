@@ -233,6 +233,8 @@ pub struct HfGgufFile {
     pub is_recommended_mmproj: bool,
     /// Short explanation for the family-specific projector recommendation.
     pub mmproj_recommendation: String,
+    /// MTP assistant / draft model file: used with --model-draft for speculative decoding.
+    pub is_draft_assistant: bool,
 }
 
 /// High-level model info from HF (for the model info endpoint).
@@ -790,11 +792,13 @@ async fn list_repo_gguf_files(
         .map(|name| {
             let quant_type = detect_quant_type(name);
             let is_imatrix = matches!(quant_type, QuantFileType::Imatrix);
-            let is_mmproj = name.to_ascii_lowercase().contains("mmproj")
-                || name.to_ascii_lowercase().contains("projector");
+            let name_lower = name.to_ascii_lowercase();
+            let is_mmproj = name_lower.contains("mmproj") || name_lower.contains("projector");
             let label = infer_quant_label(name);
             let is_recommended_mmproj =
                 is_mmproj && mmproj_preference.is_some_and(|preference| preference.label == label);
+            let is_draft_assistant =
+                is_draft_assistant_hf(&name_lower, sizes.get(name).copied().unwrap_or(0));
             HfGgufFile {
                 repo_id: repo_id.to_string(),
                 path: name.to_string(),
@@ -811,6 +815,7 @@ async fn list_repo_gguf_files(
                 } else {
                     String::new()
                 },
+                is_draft_assistant,
             }
         })
         .collect();
@@ -820,11 +825,25 @@ async fn list_repo_gguf_files(
 }
 
 fn sort_gguf_files(result: &mut [HfGgufFile]) {
-    // Sort main model files first. Within projector files, put the family-specific
-    // recommendation ahead of generic precision ordering.
+    // Group order: main models (0) → assistant/draft files (1) → mmproj (2).
+    // Within each group, apply the appropriate precision/quality ranking.
     result.sort_by(|a, b| {
-        a.is_mmproj
-            .cmp(&b.is_mmproj)
+        let a_group: u8 = if a.is_mmproj {
+            2
+        } else if a.is_draft_assistant {
+            1
+        } else {
+            0
+        };
+        let b_group: u8 = if b.is_mmproj {
+            2
+        } else if b.is_draft_assistant {
+            1
+        } else {
+            0
+        };
+        a_group
+            .cmp(&b_group)
             .then_with(|| b.is_recommended_mmproj.cmp(&a.is_recommended_mmproj))
             .then_with(|| {
                 let a_rank = if a.is_mmproj {
@@ -841,6 +860,26 @@ fn sort_gguf_files(result: &mut [HfGgufFile]) {
             })
             .then_with(|| b.size.cmp(&a.size))
     });
+}
+
+/// Conservative heuristic for HF file classification as MTP assistant / draft model.
+fn is_draft_assistant_hf(name_lower: &str, size_bytes: u64) -> bool {
+    // Unambiguous MTP keywords: safe to match even when size is unknown (0).
+    let is_unambiguous = name_lower.contains("mtp-draft")
+        || name_lower.contains("mtp_small")
+        || name_lower.contains("mtp-heads")
+        || name_lower.starts_with("mtp-");
+
+    if is_unambiguous {
+        // Still reject if we know the file is a large main model.
+        return size_bytes == 0 || size_bytes <= 3_000_000_000;
+    }
+
+    // Broad keywords require a confirmed, non-zero size to avoid mis-tagging
+    // instruct-tuned main models (e.g. "Llama-3-8B-assistant-Q8_0.gguf") when
+    // the HF tree API fails and size falls back to 0.
+    let is_broad = name_lower.contains("assistant") || name_lower.contains("draft-model");
+    is_broad && size_bytes > 0 && size_bytes <= 3_000_000_000
 }
 
 async fn find_mmproj_companion_repo(repo_id: &str, token: Option<&str>) -> Option<String> {

@@ -2372,9 +2372,10 @@
   margin-left: 5px;
   vertical-align: middle;
 }
-.hf-file-badge-imatrix { background:rgba(16,185,129,0.15); color:#6ee7b7; }
-.hf-file-badge-ud      { background:rgba(245,158,11,0.15);  color:#fcd34d; }
-.hf-file-badge-mmproj  { background:rgba(6,182,212,0.15);   color:#67e8f9; }
+.hf-file-badge-imatrix    { background:rgba(16,185,129,0.15);  color:#6ee7b7; }
+.hf-file-badge-ud         { background:rgba(245,158,11,0.15);  color:#fcd34d; }
+.hf-file-badge-mmproj     { background:rgba(6,182,212,0.15);   color:#67e8f9; }
+.hf-file-badge-assistant  { background:rgba(168,85,247,0.15);  color:#c4b5fd; }
 .hf-file-badge-recommended { background:rgba(99,102,241,0.15); color:#a5b4fc; }
 
 [data-theme="light"] .hf-qp-btn { border-color:rgba(17,24,39,0.12); background:rgba(0,0,0,0.03); color:#475569; }

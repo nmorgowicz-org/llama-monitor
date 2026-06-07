@@ -106,14 +106,30 @@ export async function fileBrowserGo(path) {
             return;
         }
 
-        // In model-selection context: hide mmproj files; badge base models that have a companion.
+        // In model-selection context: hide mmproj and draft assistant files;
+        // badge base models that have a companion.
         let entries = data.entries;
         let mmprojNames = [];
         if (fbContext === 'model') {
+            const isAssist = (name) => {
+                const n = name.toLowerCase();
+                return n.includes('assistant')
+                    || n.includes('mtp-draft')
+                    || n.includes('draft-model')
+                    || n.includes('mtp_small')
+                    || n.includes('mtp-heads')
+                    || n.startsWith('mtp-');
+            };
             mmprojNames = entries
                 .filter(e => !e.is_dir && e.name.toLowerCase().includes('mmproj'))
                 .map(e => e.name);
-            entries = entries.filter(e => e.is_dir || !e.name.toLowerCase().includes('mmproj'));
+            entries = entries.filter(e => {
+                if (e.is_dir) return true;
+                const n = e.name.toLowerCase();
+                if (n.includes('mmproj')) return false;
+                if (isAssist(n)) return false;
+                return true;
+            });
         }
 
         // eslint-disable-next-line no-unsanitized/property -- all server strings (name, path, size_display) wrapped in escapeHtml()

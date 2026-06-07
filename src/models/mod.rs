@@ -19,6 +19,12 @@ pub struct DiscoveredModel {
     pub quant_style: Option<&'static str>,
     /// Unix timestamp (seconds) of last modification.
     pub last_modified: u64,
+    /// True if this looks like a vision projector file (mmproj).
+    #[serde(default)]
+    pub is_mmproj: bool,
+    /// True if this looks like an MTP assistant / draft model file.
+    #[serde(default)]
+    pub is_draft_assistant: bool,
 }
 
 /// Scan a directory for .gguf model files.
@@ -65,6 +71,9 @@ pub fn scan_models_dir(dir: &Path) -> Result<Vec<DiscoveredModel>> {
             .zip(quant_type.as_deref())
             .map(|(pb, qt)| estimate_vram_gb(pb, qt));
 
+        let mm = filename.to_ascii_lowercase();
+        let is_mmproj = mm.contains("mmproj") || mm.contains("projector");
+
         models.push(DiscoveredModel {
             path: path.clone(),
             filename,
@@ -77,6 +86,8 @@ pub fn scan_models_dir(dir: &Path) -> Result<Vec<DiscoveredModel>> {
             vram_est_gb,
             quant_style,
             last_modified,
+            is_mmproj,
+            is_draft_assistant: is_draft_assistant_filename(&mm, size_bytes),
         });
     }
 
@@ -231,6 +242,25 @@ fn format_size(bytes: u64) -> String {
     } else {
         format!("{} KB", bytes / 1024)
     }
+}
+
+/// Conservative heuristic to detect MTP assistant / draft model files.
+fn is_draft_assistant_filename(name: &str, size_bytes: u64) -> bool {
+    // Unambiguous MTP keywords: safe to match even when size is unknown (0).
+    let is_unambiguous = name.contains("mtp-draft")
+        || name.contains("mtp_small")
+        || name.contains("mtp-heads")
+        || name.starts_with("mtp-");
+
+    if is_unambiguous {
+        // Still reject if the file is clearly a large main model.
+        return size_bytes == 0 || size_bytes <= 3_000_000_000;
+    }
+
+    // Broad keywords require a confirmed, non-zero size to avoid mis-tagging
+    // instruct-tuned main models (e.g. "mistral-7b-assistant-Q2_K.gguf").
+    let is_broad = name.contains("assistant") || name.contains("draft-model");
+    is_broad && size_bytes > 0 && size_bytes <= 3_000_000_000
 }
 
 #[cfg(test)]

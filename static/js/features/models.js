@@ -61,6 +61,7 @@ function loadPrefs() {
         showMmproj: true,
         showMain: true,
         showSplit: true,
+        showDraftAssistant: true,
         quantFilters: {},
         tagFilter: '',
     };
@@ -187,12 +188,31 @@ function isMmproj(m) {
     return f.includes('mmproj') || f.includes('.mmproj.') || f.includes('-mmproj-');
 }
 
+function isDraftAssistant(m) {
+    const f = (m.filename || '').toLowerCase();
+    // Explicit assistant keywords
+    const hasKeyword =
+        f.includes('assistant') ||
+        f.includes('mtp-draft') ||
+        f.includes('draft-model') ||
+        f.includes('mtp_small') ||
+        f.includes('mtp-heads') ||
+        f.startsWith('mtp-');
+    // Exclude huge files that are likely main models
+    const size = m.size_bytes || 0;
+    return hasKeyword && size <= 3_000_000_000;
+}
+
 function applyFilters(models) {
     return models.filter(m => {
         // mmproj vs main
         const mmproj = isMmproj(m);
         if (mmproj && !prefs.showMmproj) return false;
         if (!mmproj && !prefs.showMain) return false;
+
+        // draft assistant vs main
+        const draft = isDraftAssistant(m);
+        if (draft && !prefs.showDraftAssistant) return false;
 
         // split
         if (m.is_split && !prefs.showSplit) return false;

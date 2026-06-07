@@ -548,14 +548,15 @@ function _toggleSpecFields(specType) {
     const hint    = document.getElementById('spec-type-hint');
     if (ngWrap)  ngWrap.style.display  = hasNgram ? '' : 'none';
     if (mtpWrap) mtpWrap.style.display = hasMtp   ? '' : 'none';
-    if (dmWrap)  dmWrap.style.display  = hasDraft ? '' : 'none';
+    // Show draft-model input for both draft-model and MTP with external assistant.
+    if (dmWrap)  dmWrap.style.display  = (hasDraft || hasMtp) ? '' : 'none';
     const hints = {
         'ngram-mod': 'Best for server deployments with multiple slots. Uses a shared hash pool — requires no extra files or VRAM.',
         'ngram-simple': 'Lightest-weight option. Scans recent history for matching n-grams. Good for single-slot use.',
         'ngram-map-k': 'Hash-map based pattern matching. Works well for repetitive content like code or structured data.',
         'ngram-map-k4v': 'Experimental. Tracks up to 4 candidate tokens per n-gram key. May outperform ngram-map-k on long repetitive content.',
-        'draft-mtp,ngram-mod': 'For models with built-in MTP heads. MTP handles main predictions; ngram-mod fills gaps. Forces --parallel 1. Benchmark on your backend; MTP can reduce throughput on Metal.',
-        'draft-mtp': 'Pure MTP with no n-gram fallback. Forces --parallel 1. Benchmark on your backend; MTP can reduce throughput on Metal.',
+        'draft-mtp,ngram-mod': 'For models with MTP heads. If your model requires an external assistant (e.g. Gemma4-style), set the Draft Model path below. MTP + ngram-mod forces --parallel 1. Benchmark on your backend; MTP can reduce throughput on Metal.',
+        'draft-mtp': 'Pure MTP with no n-gram fallback. For models with MTP heads. If your model requires an external assistant (e.g. Gemma4-style), set the Draft Model path below. Forces --parallel 1. Benchmark on your backend; MTP can reduce throughput on Metal.',
         'draft-model': 'Needs a separate draft model (same family, smaller size). Highest potential speedup but requires downloading and managing an additional file.',
     };
     if (hint) {
