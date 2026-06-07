@@ -69,6 +69,40 @@
     background: rgba(129, 140, 248, 0.08);
 }
 
+.log-font-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.log-font-btn {
+    justify-content: center;
+    width: 28px;
+    padding: 4px;
+    font-size: 0.9rem;
+    line-height: 1;
+}
+
+.log-font-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.log-font-size {
+    min-width: 42px;
+    padding: 4px 5px;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted, #94a3b8);
+    font-family: var(--font-mono, monospace);
+    font-size: 0.7rem;
+    cursor: pointer;
+}
+
+.log-font-size:hover {
+    color: var(--text-primary, #e2e8f0);
+}
+
 /* ── Spawn command debug panel ─────────────────────────────────────────────── */
 
 .log-cmd-panel {
@@ -119,8 +153,9 @@
 /* ── Log panel (line-by-line) ────────────────────────────────────────────────── */
 
 #page-logs .log-panel {
+    --log-font-size: 13px;
     font-family: var(--font-mono, "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", Menlo, monospace);
-    font-size: 0.78rem;
+    font-size: var(--log-font-size);
     line-height: 1.65;
     color: rgba(203, 213, 225, 0.88);
     background: rgba(8, 12, 22, 0.82);
@@ -128,14 +163,12 @@
     border-top: none;
     border-radius: 0 0 10px 10px;
     padding: 10px 0;
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow: auto;
 }
 
 .log-line {
     padding: 1px 14px;
-    white-space: pre-wrap;
-    word-break: break-all;
+    white-space: pre;
     border-left: 2px solid transparent;
     transition: background 0.1s;
 }

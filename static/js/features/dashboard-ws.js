@@ -70,6 +70,10 @@ import { hideConnectingState, switchView } from './setup-view.js';
 let cachedElements = null;
 let dashboardSocket = null;
 let overlayStateObserver = null;
+const LOG_FONT_SIZE_KEY = 'llama-monitor-log-font-size';
+const LOG_FONT_SIZE_DEFAULT = 13;
+const LOG_FONT_SIZE_MIN = 8;
+const LOG_FONT_SIZE_MAX = 18;
 
 // ── Badge change detection — skip DOM writes when badge content is unchanged ──
 let prevBadgeState = { server: null, chat: null, logs: null };
@@ -235,6 +239,7 @@ function ensureCachedElements() {
 
 export function initWebSocket() {
     ensureOverlayStateObserver();
+    _initLogFontControls();
     const ws = new WebSocket(
         (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'
     );
@@ -848,6 +853,57 @@ function _syncLogScrollLockBtn() {
     if (!btn) return;
     btn.setAttribute('aria-pressed', String(logAutoScroll));
     btn.classList.toggle('log-tool-btn--locked', !logAutoScroll);
+}
+
+function _readLogFontSize() {
+    try {
+        const stored = Number.parseInt(localStorage.getItem(LOG_FONT_SIZE_KEY), 10);
+        if (Number.isFinite(stored)) {
+            return Math.min(LOG_FONT_SIZE_MAX, Math.max(LOG_FONT_SIZE_MIN, stored));
+        }
+    } catch {
+        // Storage can be unavailable in hardened browser contexts.
+    }
+    return LOG_FONT_SIZE_DEFAULT;
+}
+
+function _applyLogFontSize(size) {
+    const normalized = Math.min(LOG_FONT_SIZE_MAX, Math.max(LOG_FONT_SIZE_MIN, size));
+    const panel = document.getElementById('log-panel');
+    const valueBtn = document.getElementById('log-font-size-btn');
+    const decreaseBtn = document.getElementById('log-font-decrease-btn');
+    const increaseBtn = document.getElementById('log-font-increase-btn');
+
+    if (panel) panel.style.setProperty('--log-font-size', `${normalized}px`);
+    if (valueBtn) valueBtn.textContent = `${normalized}px`;
+    if (decreaseBtn) decreaseBtn.disabled = normalized <= LOG_FONT_SIZE_MIN;
+    if (increaseBtn) increaseBtn.disabled = normalized >= LOG_FONT_SIZE_MAX;
+
+    try {
+        localStorage.setItem(LOG_FONT_SIZE_KEY, String(normalized));
+    } catch {
+        // Keep the current-page setting even when persistence is unavailable.
+    }
+    return normalized;
+}
+
+function _initLogFontControls() {
+    const decreaseBtn = document.getElementById('log-font-decrease-btn');
+    const increaseBtn = document.getElementById('log-font-increase-btn');
+    const valueBtn = document.getElementById('log-font-size-btn');
+    if (!decreaseBtn || !increaseBtn || !valueBtn || decreaseBtn._logFontBound) return;
+
+    decreaseBtn._logFontBound = true;
+    let size = _applyLogFontSize(_readLogFontSize());
+    decreaseBtn.addEventListener('click', () => {
+        size = _applyLogFontSize(size - 1);
+    });
+    increaseBtn.addEventListener('click', () => {
+        size = _applyLogFontSize(size + 1);
+    });
+    valueBtn.addEventListener('click', () => {
+        size = _applyLogFontSize(LOG_FONT_SIZE_DEFAULT);
+    });
 }
 
 function _initLogToolbar(el) {

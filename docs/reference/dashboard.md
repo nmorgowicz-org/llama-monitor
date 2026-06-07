@@ -257,6 +257,10 @@ Device-local appearance choices such as theme, spacing, chat style, and font sca
 
 The endpoint you attach to is still chosen from the main session/setup flow. Configuration does not replace the attach/spawn session controls.
 
+### Log console
+
+The **Logs** page keeps each llama-server output entry on one line and provides horizontal scrolling for long entries. Use the `-` and `+` toolbar controls to adjust the console font from 8px to 18px. The selected size is stored in browser `localStorage`; click the size readout to reset it to 13px.
+
 ## Visualization options
 
 GPU and System cards each have a gear menu with per-metric visualization choices and a reset button. Selected styles persist in `localStorage`.

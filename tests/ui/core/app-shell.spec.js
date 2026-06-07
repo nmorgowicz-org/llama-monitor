@@ -54,6 +54,32 @@ test.describe('app shell', () => {
     await page.getByRole('button', { name: /server/i }).click();
     await expect(page.locator('#page-server')).toBeVisible();
   });
+
+  test('log font controls resize the no-wrap console and persist the setting', async ({ page }) => {
+    await enterMonitorView(page);
+    await page.getByRole('button', { name: /logs/i }).click();
+    await page.evaluate(() => {
+      document.getElementById('page-logs')?.classList.remove('logs-empty-mode');
+      const line = document.createElement('div');
+      line.className = 'log-line';
+      line.textContent = 'a long log line that should remain on one line';
+      document.getElementById('log-panel')?.appendChild(line);
+    });
+
+    const panel = page.locator('#log-panel');
+    const increase = page.getByRole('button', { name: 'Increase log font size' });
+    await expect(page.locator('#log-font-size-btn')).toHaveText('13px');
+    await increase.click();
+    await expect(page.locator('#log-font-size-btn')).toHaveText('14px');
+    await expect(panel).toHaveCSS('font-size', '14px');
+    await expect(page.locator('.log-line')).toHaveCSS('white-space', 'pre');
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('llama-monitor-log-font-size'))).toBe('14');
+
+    await page.reload();
+    await page.waitForSelector('html.modules-ready');
+    await dismissAuthShell(page);
+    await expect(page.locator('#log-font-size-btn')).toHaveText('14px');
+  });
 });
 
 test.describe('modals and menus', () => {
