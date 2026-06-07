@@ -214,32 +214,58 @@ test.describe('pin and favorite tabs', () => {
   });
 
   test('toggle pin button toggles pinned state', async ({ page }) => {
-    const item = page.locator('#csp-list .csp-item').first();
+    // Use a deterministic tab via JS so we can reliably locate its sidebar row
+    const tabTitle = 'Playwright Pin Test';
+    await page.evaluate(async () => {
+      const { chat } = await import('/js/core/app-state.js');
+      const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
+      chat.addTab({ title: tabTitle });
+      renderChatSessionsSidebar();
+    });
 
-    // Hover first item to reveal actions
-    await item.hover();
+    const itemByTitle = () =>
+      page.locator('#csp-list .csp-item', { hasText: tabTitle });
+
+    // Hover and confirm pin button is present
+    await itemByTitle().hover();
     await page.waitForTimeout(150);
-    const pinButton = item.locator('button[data-action="pin"]');
-    await expect(pinButton).toBeVisible();
+    const pinBtn = itemByTitle().locator('button[data-action="pin"]');
+    await expect(pinBtn).toBeVisible();
 
-    // Initially unpinned (⊙)
-    const initialText = await pinButton.textContent();
-    expect(initialText).toContain('⊙');
+    // Initially unpinned
+    expect(await pinBtn.textContent()).toContain('⊙');
+    expect(await pinBtn.getAttribute('title')).toBe('Pin');
 
-    // Pin it → title="Unpin"
-    await pinButton.click();
-    // After pinning, sidebar may reorder or re-render; re-locate and re-hover
-    const pinnedItem = page.locator('#csp-list .csp-item', { hasText: '⊙' }).first()
-      || page.locator('#csp-list .csp-item').first();
-    await pinnedItem.hover();
+    // Pin it → now pinned, sidebar refreshes; re-hover
+    await pinBtn.click();
+    await itemByTitle().hover();
     await page.waitForTimeout(150);
-    const pinAfter = pinnedItem.locator('button[data-action="pin"]');
-    await expect(pinAfter).toBeVisible();
-    await expect(pinAfter).toHaveAttribute('title', 'Unpin');
+    const pinBtn2 = itemByTitle().locator('button[data-action="pin"]');
+    await expect(pinBtn2).toBeVisible();
+    expect(await pinBtn2.getAttribute('title')).toBe('Unpin');
 
-    // Unpin → title="Pin"
-    await pinAfter.click({ force: true }); // actions row can be under hover overlay
-    await expect(pinAfter).toHaveAttribute('title', 'Pin');
+    // Unpin → back to unpinned
+    await pinBtn2.click();
+    // After unpinning the hover may be lost again
+    await itemByTitle().hover();
+    await page.waitForTimeout(150);
+    const pinBtn3 = itemByTitle().locator('button[data-action="pin"]');
+    await expect(pinBtn3).toBeVisible();
+    expect(await pinBtn3.getAttribute('title')).toBe('Pin');
+
+    // Cleanup
+    await page.evaluate(async () => {
+      const { chat } = await import('/js/core/app-state.js');
+      const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
+      const idx = chat.tabs.findIndex(t => t.title === tabTitle);
+      if (idx !== -1) {
+        chat.tabs.splice(idx, 1);
+        if (chat.activeTabId === chat.tabs.length + 1) {
+          chat.activeTabId = 1;
+        }
+      }
+      renderChatSessionsSidebar();
+    });
   });
 
  test('pinned tabs appear before unpinned tabs', async ({ page }) => {
