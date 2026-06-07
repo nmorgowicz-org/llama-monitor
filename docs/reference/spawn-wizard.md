@@ -505,6 +505,8 @@ When the wizard opens and no `llama-server` binary is found at the configured pa
 
 After the binary is installed, the nav bar shows a version pill (e.g. "llama.cpp · b9512"). Clicking the pill opens the version modal — a release picker with the last 8 builds and a release notes panel. Any build can be installed from here, including older ones.
 
+When you install a new build while a llama-server is already running, llama-monitor automatically restarts the server with the new binary using its existing configuration. The preset, model path, and tuning settings are preserved; only the binary is swapped.
+
 ![Llama.cpp Version Modal](../screenshots/llama-updater-version-modal.png)
 
 #### GET /api/llama-binary/platform-info

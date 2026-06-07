@@ -4778,7 +4778,8 @@ pub fn api_routes(
         .or(api_llama_binary_releases(app_config.clone()))
         .or(api_llama_binary_release(app_config.clone()))
         .or(api_llama_binary_platform_info(app_config.clone()))
-        .or(api_llama_binary_update(app_config.clone()));
+        .or(api_llama_binary_update(app_config.clone()))
+        .or(api_llama_restart(state.clone(), app_config.clone()));
 
     server_routes
         .or(get_gpu_metrics)
@@ -11372,6 +11373,84 @@ fn api_llama_binary_update(
         })
 }
 
+/// POST /api/llama/restart — restart the running llama-server with the current
+/// binary (useful after installing a new llama-server version).
+fn api_llama_restart(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "llama" / "restart")
+        .and(warp::post())
+        .and(warp::header::optional::<String>("authorization"))
+        .and_then(move |auth: Option<String>| {
+            let state = state.clone();
+            let cfg = app_config.clone();
+            async move {
+                if !check_api_token(&auth, &cfg) {
+                    return Ok(unauthorized_api_token());
+                }
+
+                let state_clone = state.clone();
+                let local_running = *state.local_server_running.lock().unwrap();
+
+                if !local_running {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "No local llama-server is running."
+                        })),
+                    ));
+                }
+
+                // Read and save server_config BEFORE stop_server clears it
+                let saved_config = {
+                    let guard = state_clone.server_config.lock().unwrap();
+                    guard.clone()
+                };
+
+                let Some(config) = saved_config else {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "No saved server configuration found."
+                        })),
+                    ));
+                };
+
+                // Stop current server
+                if let Err(e) = crate::llama::server::stop_server(&state_clone).await {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("Failed to stop server: {}", e)
+                        })),
+                    ));
+                }
+
+                // Brief pause to let the old process fully shut down
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+                // Restart with the same config (uses the current llama_server_path)
+                if let Err(e) = crate::llama::server::start_server(&state_clone, config, &cfg).await
+                {
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": format!("Failed to restart server: {}", e)
+                        })),
+                    ));
+                }
+
+                Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
+                    &serde_json::json!({
+                        "ok": true,
+                        "message": "Server restart initiated."
+                    }),
+                )))
+            }
+        })
+}
+
 // ── Debug endpoints ──────────────────────────────────────────────────────────
 
 fn api_debug_spawn_cmd(
@@ -12318,5 +12397,6 @@ mod tests {
             "/api/llama-binary/update",
             Some("{}")
         ),
+        (api_llama_restart, "POST", "/api/llama/restart", Some("{}")),
     ];
 }

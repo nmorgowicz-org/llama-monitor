@@ -311,8 +311,46 @@ async function installRelease(btn, release) {
     if (!data.ok) throw new Error(data.error || 'Install failed');
 
     _currentBuild = release.build ?? _latestBuild;
-    const sha = data.sha256 ? `SHA256: ${data.sha256}` : 'Restart the server to use the new binary.';
-    showToast(`Installed ${tag}`, 'success', sha);
+    const sha = data.sha256 ? `SHA256: ${data.sha256}` : '';
+    showToast(`Installed ${tag}`, 'success', sha || 'Installed. Click to restart server.');
+
+    // Attempt to restart the running server so it uses the new binary immediately.
+    // This is safe: if no local server is running, the backend will return a clear error.
+    try {
+      const restartResp = await fetch('/api/llama/restart', {
+        method: 'POST',
+        headers: window.authHeaders
+          ? { ...window.authHeaders(), 'Content-Type': 'application/json' }
+          : { 'Content-Type': 'application/json' },
+      });
+      const restartData = await restartResp.json();
+      if (restartData.ok) {
+        showToast(
+          `Server restarted with ${tag}`,
+          'success',
+          'Chat may reconnect shortly.',
+        );
+      } else if (
+        restartData.error &&
+        (restartData.error.includes('No local') ||
+         restartData.error.includes('no local'))
+      ) {
+        // Server not running — nothing special needed.
+      } else {
+        showToast(
+          'Restart failed',
+          'error',
+          (restartData.error || 'Could not restart server automatically.'),
+        );
+      }
+    } catch (restartErr) {
+      // Network error while restarting: warn but don’t block install success.
+      showToast(
+        'Restart pending',
+        'info',
+        `Installed ${tag}. Restart llama-server manually or refresh your session to use the new binary.`,
+      );
+    }
 
     // Refresh pill
     if (verSpan) verSpan.textContent = `llama.cpp · b${_currentBuild}`;

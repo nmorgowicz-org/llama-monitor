@@ -1833,3 +1833,20 @@ Download and install a specific llama.cpp release.
   - Downloads release archive to `bin/`.
   - Applies `chmod 755` on Unix.
   - Copies all files (CUDA/Vulkan/SYCL builds require co-located libs).
+
+### `POST /api/llama/restart`
+Restart a locally running llama-server with the current binary (useful after installing a new version).
+
+- Auth: `api-token`.
+- Precondition:
+  - A local llama-server must be running (`local_server_running: true`).
+- Behavior:
+  - Captures the current `ServerConfig` from AppState.
+  - Calls `stop_server()` (kills process, clears child/metrics).
+  - Calls `start_server()` with the captured config.
+  - The restarted server uses the current `llama_server_path` (so after a binary update, it will use the new build).
+- Errors:
+  - 200 with `ok: false` if:
+    - No local server is running.
+    - No saved server config found.
+    - Stop or restart fails.
