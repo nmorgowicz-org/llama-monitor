@@ -3005,8 +3005,17 @@ function selectImportedModel(m) {
 
 let vramDebounce = null;
 
-function onHardwareChange() {
-  if (wizardState.currentStep === 2 && !pendingHardwareScrollReset) {
+function onHardwareChange(e) {
+  // Only save scroll position for toggle checkboxes that cause layout shifts
+  // (fitTargetWrap appearing/disappearing). Regular number inputs don't shift
+  // layout, so the deferred restore's nested rAF can conflict with the
+  // browser's own Tab/focus scroll, making content appear to disappear.
+  const isToggle = e && (
+    e.target === dom.fitEnableCheck ||
+    e.target === dom.kvUnifiedCheck ||
+    e.target === dom.mlockCheck
+  );
+  if (isToggle && wizardState.currentStep === 2 && !pendingHardwareScrollReset) {
     const main = document.querySelector('#wizard-step-2 .wizard-main');
     const sidebar = document.querySelector('#wizard-step-2 .hw-vram-sidebar');
     pendingHardwareScrollRestore = {
