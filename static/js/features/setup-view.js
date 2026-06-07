@@ -10,6 +10,9 @@ import { quickStartSession } from './sessions.js';
 
 const _MEM_OS_RESERVE = 512 * 1024 * 1024; // 512 MB
 
+// Cached memory state shared between the memory bar and card VRAM estimates.
+let _memState = { availBytes: 0, isUnified: false };
+
 function _metalCap(totalBytes, metalGpuLimitMb) {
     if (metalGpuLimitMb > 0) return metalGpuLimitMb * 1024 * 1024;
     const fraction = totalBytes <= 36 * 1024 ** 3 ? 2 / 3 : 3 / 4;
@@ -82,6 +85,9 @@ export async function fetchAndRenderMemoryBar() {
         const totalEl = document.getElementById('setup-mem-bar-total');
         if (totalEl) totalEl.textContent = totalLabel;
         bar.style.display = '';
+
+        _memState = { availBytes, isUnified };
+        _fetchCardVramEstimates(availBytes, isUnified);
     } catch {
         // leave bar hidden if metrics unavailable
     }
@@ -397,6 +403,7 @@ function _buildLaunchCard(preset, activePresetId) {
                 <span class="launch-chip">${ctkDisplay}</span>
                 ${preset.ngram_spec ? '<span class="launch-chip launch-chip--accent">n-gram</span>' : ''}
             </div>
+            ${hasModel ? '<div class="launch-card-vram launch-card-vram--loading"><span class="launch-card-vram-total">…</span></div>' : ''}
             <div class="launch-card-actions">
                 <button class="launch-card-btn-edit" type="button">Edit</button>
                 <button class="launch-card-btn-start ${hasModel ? '' : 'launch-card-btn-start--configure'}" type="button">
@@ -450,6 +457,85 @@ function _buildLaunchCard(preset, activePresetId) {
     }
 
     return card;
+}
+
+// ── Card VRAM estimates ───────────────────────────────────────────────────────
+
+async function _fetchCardVramEstimates(availBytes, isUnified) {
+    const cards = document.querySelectorAll('.launch-card[data-preset-id]');
+    const presets = sessionState.presets || [];
+
+    await Promise.all([...cards].map(async (card) => {
+        const preset = presets.find(p => p.id === card.dataset.presetId);
+        if (!preset?.model_path) return;
+        const vramEl = card.querySelector('.launch-card-vram');
+        if (!vramEl) return;
+
+        try {
+            const headers = window.authHeaders ? window.authHeaders() : {};
+            const resp = await fetch('/api/vram-estimate', {
+                method: 'POST',
+                headers: { ...headers, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model_path: preset.model_path,
+                    n_ctx: preset.context_size || 131072,
+                    ctk: preset.ctk || 'q8_0',
+                    ctv: preset.ctv || 'q8_0',
+                    parallel_slots: preset.parallel_slots || 1,
+                    ubatch_size: preset.ubatch_size || 1024,
+                    n_cpu_moe: preset.n_cpu_moe || 0,
+                    available_vram_bytes: availBytes,
+                    is_unified_memory: isUnified,
+                }),
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (!data.ok) return;
+            // Guard: card may have been re-rendered while awaiting
+            if (!document.contains(vramEl)) return;
+            _renderCardVram(vramEl, data, availBytes);
+        } catch {
+            // silently skip — VRAM row stays in loading state
+        }
+    }));
+}
+
+function _renderCardVram(el, data, availBytes) {
+    const budget = availBytes > 0 ? availBytes : data.total_bytes * 1.25;
+    const totalGb = data.total_bytes / 1e9;
+    const weightsGb = data.weights_bytes / 1e9;
+    const kvGb = data.kv_cache_bytes / 1e9;
+    const extrasBytes = (data.mmproj_bytes || 0) + (data.mtp_bytes || 0) +
+                        (data.linear_attn_state_bytes || 0) + (data.overhead_bytes || 0);
+
+    // Under budget: segments + empty track shows headroom.
+    // Over budget: bar is full, segments proportional to total (not budget).
+    const denominator = data.total_bytes > budget ? data.total_bytes : budget;
+    const toWidth = (b) => Math.min(100, (b / denominator) * 100).toFixed(1) + '%';
+
+    const rec = data.recommendation || 'risk';
+    const dotClass = rec === 'fit' ? 'fit' : rec === 'tight' ? 'tight' : 'risk';
+
+    const parts = [
+        `Weights ${weightsGb.toFixed(1)} GB`,
+        `KV ${kvGb.toFixed(1)} GB`,
+    ];
+    if (data.mmproj_bytes > 0) parts.push(`mmproj ${(data.mmproj_bytes / 1e9).toFixed(1)} GB`);
+    if (data.mtp_bytes > 0)    parts.push(`MTP ${(data.mtp_bytes / 1e9).toFixed(1)} GB`);
+    parts.push(`overhead ${(data.overhead_bytes / 1e9).toFixed(2)} GB`);
+
+    el.classList.remove('launch-card-vram--loading');
+    el.title = parts.join(' · ');
+    // eslint-disable-next-line no-unsanitized/property -- all values are numeric; no user strings
+    el.innerHTML = `
+        <div class="launch-card-vram-bar">
+            <div class="launch-card-vram-seg launch-card-vram-seg--weights" style="width:${toWidth(data.weights_bytes)}"></div>
+            <div class="launch-card-vram-seg launch-card-vram-seg--kv" style="width:${toWidth(data.kv_cache_bytes)}"></div>
+            <div class="launch-card-vram-seg launch-card-vram-seg--extras" style="width:${toWidth(extrasBytes)}"></div>
+        </div>
+        <span class="launch-card-vram-total">~${totalGb.toFixed(1)} GB</span>
+        <span class="launch-card-vram-dot launch-card-vram-dot--${dotClass}"></span>
+    `;
 }
 
 function _buildNewConfigCard(isPrimary = false) {

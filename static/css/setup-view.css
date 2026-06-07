@@ -2811,6 +2811,67 @@ body.setup-active .sidebar-nav {
   margin-top: 2px;
 }
 
+/* ── Card VRAM estimate row ──────────────────────────────────────────────────── */
+
+.launch-card-vram {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 1px;
+  cursor: default;
+}
+
+.launch-card-vram-bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 2px;
+  overflow: hidden;
+  display: flex;
+}
+
+.launch-card-vram-seg {
+  height: 100%;
+  transition: width 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.launch-card-vram-seg--weights {
+  background: rgba(99, 102, 241, 0.75);
+}
+
+.launch-card-vram-seg--kv {
+  background: rgba(20, 184, 166, 0.7);
+}
+
+.launch-card-vram-seg--extras {
+  background: rgba(245, 158, 11, 0.6);
+}
+
+.launch-card-vram-total {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+  opacity: 0.8;
+}
+
+.launch-card-vram--loading .launch-card-vram-total {
+  opacity: 0.35;
+}
+
+.launch-card-vram-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background 0.3s ease;
+}
+
+.launch-card-vram-dot--fit    { background: #22c55e; box-shadow: 0 0 4px rgba(34, 197, 94, 0.4); }
+.launch-card-vram-dot--tight  { background: #f59e0b; box-shadow: 0 0 4px rgba(245, 158, 11, 0.4); }
+.launch-card-vram-dot--risk   { background: #ef4444; box-shadow: 0 0 4px rgba(239, 68, 68, 0.4); }
+
 /* ── Memory bar ─────────────────────────────────────────────────────────────── */
 
 .setup-mem-bar {
