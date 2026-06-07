@@ -70,7 +70,13 @@ When selected, the wizard immediately scans known tool directories and renders d
 The core tuning step. Populated using `POST /api/vram/auto-size` after model selection.
 
 #### Model Header
-Shows the selected repo (`owner/model-name`) and selected quant. If multiple GGUF files exist in the repo, a **Quantization** dropdown lets the user swap without leaving the step. A **Vision (mmproj)** dropdown appears when mmproj files are detected in the repo.
+Shows the selected repo (`owner/model-name`) and selected quant. If multiple GGUF files exist in the repo, a **Quantization** dropdown lets the user swap without leaving the step. A **Vision (mmproj)** dropdown appears when projector files are detected. For imatrix repositories whose model card links to a separate static-quant repository, the wizard follows that link and lists the static repository's projector files automatically.
+
+To change the HuggingFace repo after initial selection:
+- Click the small ✎ icon next to the repo label.
+- Type a new repo ID (e.g. `owner/model-GGUF`), then press Enter or click Load.
+- The wizard re-fetches GGUF files and quants from the new repo and refreshes the header.
+- Escape or the ✕ button cancels and restores the previous repo.
 
 Projector choices are ranked only after matching the selected model's filename/stem.
 The wizard marks and auto-selects these family-specific formats when available:
@@ -313,6 +319,10 @@ Update the quantizer author list.
 
 ### File Listing
 
+- GGUF lists are rendered without auto-selecting the first file.
+  - The user must click a file explicitly so the selected quant is always intentional.
+  - Recommended quants are still marked with a badge (★) for guidance.
+
 #### POST /api/hf/files
 List GGUF files in a repo.
 
@@ -331,6 +341,7 @@ List GGUF files in a repo.
       "quant_type": "standard",
       "is_imatrix": false,
       "is_mmproj": false,
+      "repo_id": "owner/model-GGUF",
       "is_recommended_mmproj": false,
       "mmproj_recommendation": ""
     }
@@ -342,6 +353,7 @@ List GGUF files in a repo.
 - `label`: normalized quant type extracted from filename (e.g. `"Q4_K_M"`, `"IQ3_S"`)
 - `is_recommended_mmproj`: true when an mmproj matches the known family preference
 - `mmproj_recommendation`: user-facing reason for that family preference, otherwise empty
+- `repo_id`: repository that owns the file; companion mmproj files can come from a linked static-quant repository
 
 ### Download
 
