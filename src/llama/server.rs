@@ -3,6 +3,16 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
 use crate::config::AppConfig;
+
+/// Filter noisy llama-server internal log lines from the logs view.
+fn is_noise_log(line: &str) -> bool {
+    let l = line.trim();
+    // Internal task scheduler churn (high-frequency, no operational value)
+    if l.starts_with("srv          stop: cancel task") {
+        return true;
+    }
+    false
+}
 use crate::gpu::env::{build_nvidia_env, build_rocm_env};
 use crate::state::AppState;
 
@@ -612,11 +622,14 @@ pub async fn start_server(
     }
     if let Some(v) = config.cache_idle_slots {
         if v {
-            // --cache-idle-slots requires --kv-unified; auto-enable if not explicitly set
-            if config.kv_unified.is_none() {
-                cmd.arg("--kv-unified");
+            // --cache-idle-slots requires --cache-ram > 0; skip when cache disabled
+            let cache_enabled = config.cache_ram_mib.map(|mib| mib > 0).unwrap_or(true);
+            if cache_enabled {
+                if config.kv_unified.is_none() {
+                    cmd.arg("--kv-unified");
+                }
+                cmd.arg("--cache-idle-slots");
             }
-            cmd.arg("--cache-idle-slots");
         } else {
             cmd.arg("--no-cache-idle-slots");
         }
@@ -689,7 +702,9 @@ pub async fn start_server(
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                state_clone.push_log(line);
+                if !is_noise_log(&line) {
+                    state_clone.push_log(line);
+                }
             }
         });
     }
@@ -701,7 +716,9 @@ pub async fn start_server(
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                state_clone.push_log(line);
+                if !is_noise_log(&line) {
+                    state_clone.push_log(line);
+                }
             }
         });
     }

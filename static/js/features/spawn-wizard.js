@@ -6664,7 +6664,6 @@ async function saveAsPreset() {
       dom.savedPresetName.textContent = `✓ ${isUpdate ? 'Updated' : 'Saved'} as "${name}"`;
       dom.savedPresetName.style.display = '';
     }
-    if (nameInput) nameInput.value = '';
   } catch (err) {
     showToast('Save preset failed: ' + (err.message || String(err)), 'error');
   } finally {
@@ -7020,6 +7019,12 @@ async function spawnServer() {
         switchView('monitor');
       }
       showTunePanel();
+      // Select the preset that was saved during this wizard run (if any)
+      if (wizardState.savedPresetId) {
+        import('./presets.js').then(({ loadPresets }) => {
+          loadPresets(wizardState.savedPresetId);
+        });
+      }
       setTimeout(() => window.restorePreviousPosition?.(), 600);
     }, 1200);
   } catch (err) {

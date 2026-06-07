@@ -106,6 +106,8 @@ export async function loadPresets(selectId) {
     const sel = document.getElementById('preset-select');
     sel.innerHTML = '';
     sessionState.presets.forEach(p => {
+        // Skip built-in/example presets that have no model (they are templates, not usable)
+        if (!p.model_path && !p.hf_repo) return;
         const opt = document.createElement('option');
         opt.value = p.id;
         opt.textContent = p.name;
@@ -406,7 +408,9 @@ function _renderPresetsPanel() {
     if (!body) return;
     body.innerHTML = '';
 
-    const presets = sessionState.presets || [];
+    const presets = (sessionState.presets || []).filter(
+        p => p.model_path || p.hf_repo
+    );
     if (!presets.length) {
         const empty = document.createElement('div');
         empty.className = 'presets-panel-empty';
