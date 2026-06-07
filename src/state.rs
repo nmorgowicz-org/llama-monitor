@@ -608,12 +608,17 @@ impl AppState {
         // Prune old inactive sessions on startup (older than 7 days)
         state.prune_old_sessions(7 * 24 * 60 * 60);
 
+        // If there are many stale sessions but no active session, clear them so
+        // the app doesn’t present an empty welcome screen while silently hitting
+        // the session limit.
+        state.cleanup_startup_stale_sessions();
+
         state
     }
 
     pub fn push_log(&self, line: String) {
         // Filter high-frequency poll noise that clutters the console
-        if line.contains("update_slots") && line.contains("all slots are idle") {
+        if is_noise_log(&line) {
             return;
         }
         let mut logs = self.server_logs.lock().unwrap();
@@ -687,6 +692,41 @@ impl AppState {
                 }
             }
 
+            // If still at capacity, try to remove obviously stale sessions:
+            // - Spawn sessions with status=Running but no local server running.
+            // - Sessions stuck in Error(...) (non-recoverable / not usable).
+            if sessions.len() >= MAX_SESSIONS {
+                let active_id = self.active_session_id.lock().unwrap();
+                let local_running = *self.local_server_running.lock().unwrap();
+
+                let mut to_remove: Option<usize> = None;
+
+                for (i, s) in sessions.iter().enumerate() {
+                    // Never evict the current active session.
+                    if s.id == *active_id {
+                        continue;
+                    }
+
+                    let stale = matches!(&s.status, SessionStatus::Error(_))
+                        || (matches!(&s.status, SessionStatus::Running)
+                            && matches!(&s.mode, SessionMode::Spawn { .. })
+                            && !local_running);
+
+                    if stale {
+                        to_remove = Some(i);
+                        break;
+                    }
+                }
+
+                if let Some(idx) = to_remove {
+                    eprintln!(
+                        "[info] Auto-removing stale session (making room): {} ({})",
+                        sessions[idx].name, sessions[idx].id
+                    );
+                    sessions.remove(idx);
+                }
+            }
+
             // If still at capacity and no inactive sessions, we're truly full
             if sessions.len() >= MAX_SESSIONS {
                 eprintln!(
@@ -716,12 +756,16 @@ impl AppState {
 
         let len_before = sessions.len();
         sessions.retain(|s| {
-            let is_old = now.saturating_sub(s.created_at) > max_age_secs;
-            let is_inactive = s.is_inactive();
+            let age_secs = now.saturating_sub(s.created_at);
+            let is_old = age_secs > max_age_secs;
+            let is_error = matches!(&s.status, SessionStatus::Error(_));
+            let is_inactive = s.is_inactive() || is_error;
+
             if is_old && is_inactive {
+                let days = (age_secs / 86_400).max(1);
                 eprintln!(
-                    "[info] Pruning old inactive session: {} ({} days old)",
-                    s.name, is_old as u64
+                    "[info] Pruning old inactive session: {} (~{} days old)",
+                    s.name, days
                 );
                 removed += 1;
                 false
@@ -735,6 +779,82 @@ impl AppState {
         }
 
         removed
+    }
+
+    /// On startup: if we have many stale sessions but no active session selected,
+    /// wipe them and start fresh so the user doesn’t encounter “session limit reached”
+    /// on an otherwise empty welcome screen.
+    pub fn cleanup_startup_stale_sessions(&self) {
+        let (active_id, local_running) = {
+            let active_id = self.active_session_id.lock().unwrap();
+            let local_running = *self.local_server_running.lock().unwrap();
+            (active_id.clone(), local_running)
+        };
+
+        // Only act if there’s no meaningful active session.
+        if !active_id.is_empty() {
+            return;
+        }
+
+        let (total, stale_count) = {
+            let sessions = match self.sessions.lock() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("[error] Failed to acquire sessions lock for startup cleanup: {e}");
+                    return;
+                }
+            };
+
+            let total = sessions.len();
+            let stale_count = sessions
+                .iter()
+                .filter(|s| {
+                    // Spawn-only sessions: disposable (must re-spawn) → aggressively stale.
+                    if matches!(&s.mode, SessionMode::Spawn { .. }) {
+                        return matches!(
+                            &s.status,
+                            SessionStatus::Stopped
+                                | SessionStatus::Disconnected
+                                | SessionStatus::Error(_)
+                                | SessionStatus::Running if !local_running
+                        );
+                    }
+
+                    // Attach sessions: keep longer (user may reconnect).
+                    // Only treat as stale if definitively not in use.
+                    if matches!(&s.mode, SessionMode::Attach { .. }) {
+                        return matches!(
+                            &s.status,
+                            SessionStatus::Stopped | SessionStatus::Error(_)
+                        );
+                    }
+
+                    false
+                })
+                .count();
+
+            (total, stale_count)
+        };
+
+        // Threshold: if there are several stale sessions and almost all are stale,
+        // treat it as “ghost sessions” and reset.
+        if total >= 5 && stale_count >= total {
+            eprintln!(
+                "[info] Startup cleanup: {} of {} sessions are stale; resetting to empty",
+                stale_count, total
+            );
+
+            let mut sessions = self.sessions.lock().unwrap();
+            sessions.clear();
+
+            let mut active = self.active_session_id.lock().unwrap();
+            active.clear();
+
+            // Force a fresh sessions.json.
+            if let Err(e) = save_sessions(&self.sessions_path, &sessions) {
+                eprintln!("[error] Failed to persist cleared sessions list: {e}");
+            }
+        }
     }
 
     pub fn remove_session(&self, session_id: &str) -> bool {
@@ -946,6 +1066,11 @@ impl AppState {
     }
 }
 
+fn is_noise_log(line: &str) -> bool {
+    (line.contains("update_slots") && line.contains("all slots are idle"))
+        || (line.contains("stop: cancel task") && line.contains("id_task"))
+}
+
 #[allow(dead_code)]
 pub fn endpoint_kind_from_endpoint(endpoint: &str) -> EndpointKind {
     if endpoint_is_local(endpoint) {
@@ -1044,6 +1169,29 @@ mod tests {
 
     fn test_tls_config() -> TLSConfig {
         TLSConfig::default()
+    }
+
+    #[test]
+    fn filters_llama_server_cancel_task_noise_with_variable_prefixes() {
+        assert!(is_noise_log(
+            "0.43.327.046 W srv          stop: cancel task, id_task = 28"
+        ));
+        assert!(is_noise_log(
+            "5.41.976.030 W srv          stop: cancel task, id_task = 168"
+        ));
+        assert!(is_noise_log(
+            "\u{1b}[1;36msrv\u{1b}[0m          stop: cancel task, id_task = 66"
+        ));
+    }
+
+    #[test]
+    fn preserves_other_llama_server_stop_logs() {
+        assert!(!is_noise_log(
+            "0.43.327.046 W srv          stop: server shutdown requested"
+        ));
+        assert!(!is_noise_log(
+            "0.43.327.046 E srv          stop: cancel task queue failed"
+        ));
     }
 
     #[test]
