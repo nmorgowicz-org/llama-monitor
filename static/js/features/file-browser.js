@@ -32,7 +32,25 @@ function _draftMatchesModel(draftName, modelName) {
     const dr = draftName.toLowerCase()
         .replace(/\.gguf$/i, '')
         .replace(/[-_](?:mtp[-_]draft|draft[-_]model|mtp_small|mtp[-_]heads|mtp[-_]\d+|assistant)\b.*$/i, '');
-    return stem.length > 4 && (stem.includes(dr) || dr.includes(stem));
+    if (stem.length <= 4) return false;
+    // QAT parity: a QAT-trained draft only works with QAT bases and vice versa
+    const drQat = /-qat[-_]/.test(dr) || dr.endsWith('-qat');
+    const stemQat = /-qat[-_]/.test(stem) || stem.endsWith('-qat');
+    if (drQat !== stemQat) return false;
+    // Direct containment covers the generic assistant case
+    if (stem.includes(dr) || dr.includes(stem)) return true;
+    // QAT/variant drafts diverge from the base name after a shared prefix
+    // (e.g. "...-qat-q4_0-unquantized" vs "...-qat-UD"). Match when >= 5
+    // leading dash-segments are identical so "gemma-4-31b-it-qat" qualifies
+    // but a plain "gemma-4-31b-it" draft doesn't over-match a different family.
+    const drSegs = dr.split('-');
+    const stemSegs = stem.split('-');
+    let shared = 0;
+    for (let i = 0; i < Math.min(drSegs.length, stemSegs.length); i++) {
+        if (drSegs[i] === stemSegs[i]) shared++;
+        else break;
+    }
+    return shared >= 5;
 }
 
 export function openFileBrowser(targetId, filter, defaultPath, context) {
