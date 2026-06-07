@@ -3,16 +3,6 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
 use crate::config::AppConfig;
-
-/// Filter noisy llama-server internal log lines from the logs view.
-fn is_noise_log(line: &str) -> bool {
-    let l = line.trim();
-    // Internal task scheduler churn (high-frequency, no operational value)
-    if l.starts_with("srv          stop: cancel task") {
-        return true;
-    }
-    false
-}
 use crate::gpu::env::{build_nvidia_env, build_rocm_env};
 use crate::state::AppState;
 
@@ -702,9 +692,7 @@ pub async fn start_server(
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                if !is_noise_log(&line) {
-                    state_clone.push_log(line);
-                }
+                state_clone.push_log(line);
             }
         });
     }
@@ -716,9 +704,7 @@ pub async fn start_server(
             let reader = BufReader::new(stderr);
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                if !is_noise_log(&line) {
-                    state_clone.push_log(line);
-                }
+                state_clone.push_log(line);
             }
         });
     }
