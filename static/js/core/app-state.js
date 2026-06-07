@@ -78,6 +78,8 @@ export const sessionState = {
     serverRunning: false,
     /** Previous log length for incremental rendering */
     prevLogLen: 0,
+    /** Previous backend log snapshot, used to detect fixed-size ring rotation */
+    prevLogs: [],
 };
 
 // ── Remote Agent ──────────────────────────────────────────────────────────────

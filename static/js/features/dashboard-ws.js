@@ -271,6 +271,7 @@ window.onChatTabsLoaded = () => {
         ensureCachedElements();
         if (cachedElements.statusText) cachedElements.statusText.textContent = 'Disconnected';
         sessionState.prevLogLen = 0;
+        sessionState.prevLogs = [];
     };
 
     return ws;
@@ -956,7 +957,24 @@ function _initLogToolbar(el) {
     }
 }
 
-function updateLogs(d) {
+function _findLogOverlap(previous, current) {
+    const maxOverlap = Math.min(previous.length, current.length);
+    for (let overlap = maxOverlap; overlap > 0; overlap--) {
+        const previousStart = previous.length - overlap;
+        let matches = true;
+        for (let i = 0; i < overlap; i++) {
+            if (previous[previousStart + i] !== current[i]) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) return overlap;
+    }
+    return 0;
+}
+
+export function updateLogs(d) {
+    ensureCachedElements();
     const logs = d.logs || [];
     const emptyState = document.getElementById('logs-empty-state');
     const logsPage = document.getElementById('page-logs');
@@ -982,25 +1000,31 @@ function updateLogs(d) {
     const copyBtn = document.getElementById('log-copy-btn');
     if (copyBtn) copyBtn._currentLogs = logs;
 
-    const prevLen = sessionState.prevLogLen;
+    const previousLogs = sessionState.prevLogs || [];
+    const overlap = _findLogOverlap(previousLogs, logs);
+    const expiredCount = previousLogs.length - overlap;
+    const newLines = logs.slice(overlap);
 
-    if (logs.length < prevLen) {
-        // Log buffer was cleared/rotated — full re-render
+    if (previousLogs.length > 0 && overlap === 0) {
+        // The buffer was cleared or replaced with unrelated output.
         el.innerHTML = '';
-        sessionState.prevLogLen = 0;
+    } else {
+        for (let i = 0; i < expiredCount; i++) {
+            el.firstElementChild?.remove();
+        }
     }
 
-    if (logs.length !== sessionState.prevLogLen) {
-        const newLines = logs.slice(sessionState.prevLogLen);
+    if (newLines.length > 0) {
         const frag = document.createDocumentFragment();
         for (const line of newLines) {
             frag.appendChild(_renderLogLine(line));
         }
         el.appendChild(frag);
-        sessionState.prevLogLen = logs.length;
 
         if (logAutoScroll) el.scrollTop = el.scrollHeight;
     }
+    sessionState.prevLogLen = logs.length;
+    sessionState.prevLogs = logs.slice();
 
     // Update count badge
     const badge = document.getElementById('log-count-badge');

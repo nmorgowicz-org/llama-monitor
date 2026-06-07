@@ -80,6 +80,23 @@ test.describe('app shell', () => {
     await dismissAuthShell(page);
     await expect(page.locator('#log-font-size-btn')).toHaveText('14px');
   });
+
+  test('log console keeps updating when the fixed-size backend buffer rotates', async ({ page }) => {
+    await enterMonitorView(page);
+    await page.getByRole('button', { name: /logs/i }).click();
+
+    await page.evaluate(async () => {
+      const { updateLogs } = await import('/js/features/dashboard-ws.js');
+      const first = Array.from({ length: 500 }, (_, i) => `log line ${i}`);
+      updateLogs({ logs: first });
+      updateLogs({ logs: [...first.slice(1), 'log line 500'] });
+    });
+
+    const lines = page.locator('#log-panel .log-line');
+    await expect(lines).toHaveCount(500);
+    await expect(lines.first()).toHaveText('log line 1');
+    await expect(lines.last()).toHaveText('log line 500');
+  });
 });
 
 test.describe('modals and menus', () => {
