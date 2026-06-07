@@ -5536,6 +5536,9 @@ function renderMtpSection() {
   if (!hasMtp) { section.style.display = 'none'; return; }
   section.style.display = '';
 
+  const infoNote = document.getElementById('hw-mtp-info-note');
+  if (infoNote && hasMtp) { infoNote.style.display = ''; }
+
   const checkbox = document.getElementById('hw-use-mtp');
   // The user-facing control is spec-draft-n-max (draft tokens per step), not "depth"
   // arch.mtpDepth = number of MTP heads built into the model (VRAM estimation only)

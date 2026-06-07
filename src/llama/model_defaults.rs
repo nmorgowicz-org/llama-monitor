@@ -74,6 +74,116 @@ pub struct ModelPreset {
 pub fn get_model_presets(name_or_repo: &str, size_bytes: u64, tags: &[String]) -> Vec<ModelPreset> {
     let lower = name_or_repo.to_ascii_lowercase();
 
+    // Qwen3.5 family: hybrid-reasoning MoE + dense, thinking-enabled.
+    // Presets from https://unsloth.ai/docs/models/qwen3.5
+    let is_qwen35 = lower.contains("qwen3.5") || lower.contains("qwen35");
+
+    if is_qwen35 {
+        let thinking_general = ModelDefaults {
+            temperature: 1.0,
+            top_p: 0.95,
+            top_k: 20,
+            min_p: 0.0,
+            repeat_penalty: 1.0,
+            presence_penalty: 1.5,
+            max_tokens: 32768,
+            enable_thinking: Some(true),
+            preserve_thinking: None,
+            reasoning_budget: None,
+            reasoning: true,
+            reasoning_budget_message: None,
+        };
+        let thinking_agentic_coding = ModelDefaults {
+            temperature: 1.0,
+            top_p: 0.95,
+            top_k: 20,
+            min_p: 0.0,
+            repeat_penalty: 1.0,
+            presence_penalty: 0.0,
+            max_tokens: 32768,
+            enable_thinking: Some(true),
+            preserve_thinking: None,
+            reasoning_budget: None,
+            reasoning: true,
+            reasoning_budget_message: None,
+        };
+        let thinking_precise_coding = ModelDefaults {
+            temperature: 0.6,
+            top_p: 0.95,
+            top_k: 20,
+            min_p: 0.0,
+            repeat_penalty: 1.0,
+            presence_penalty: 0.0,
+            max_tokens: 32768,
+            enable_thinking: Some(true),
+            preserve_thinking: None,
+            reasoning_budget: None,
+            reasoning: true,
+            reasoning_budget_message: None,
+        };
+        let not_thinking_general = ModelDefaults {
+            temperature: 0.7,
+            top_p: 0.8,
+            top_k: 20,
+            min_p: 0.0,
+            repeat_penalty: 1.0,
+            presence_penalty: 1.5,
+            max_tokens: 32768,
+            enable_thinking: Some(false),
+            preserve_thinking: Some(false),
+            reasoning_budget: None,
+            reasoning: false,
+            reasoning_budget_message: None,
+        };
+        let not_thinking_reasoning = ModelDefaults {
+            temperature: 1.0,
+            top_p: 0.95,
+            top_k: 20,
+            min_p: 0.0,
+            repeat_penalty: 1.0,
+            presence_penalty: 1.5,
+            max_tokens: 32768,
+            enable_thinking: Some(false),
+            preserve_thinking: Some(false),
+            reasoning_budget: None,
+            reasoning: false,
+            reasoning_budget_message: None,
+        };
+        return vec![
+            ModelPreset {
+                name: "Thinking (General)".into(),
+                description: Some(
+                    "Recommended default for general chat and reasoning tasks.".into(),
+                ),
+                defaults: thinking_general,
+            },
+            ModelPreset {
+                name: "Thinking (Agentic / Coding)".into(),
+                description: Some(
+                    "Optimized for agentic tool use, planning, and code generation.".into(),
+                ),
+                defaults: thinking_agentic_coding,
+            },
+            ModelPreset {
+                name: "Thinking (Precise coding)".into(),
+                description: Some(
+                    "Lower temperature for deterministic coding and debugging.".into(),
+                ),
+                defaults: thinking_precise_coding,
+            },
+            ModelPreset {
+                name: "Non-thinking (General)".into(),
+                description: Some("Balanced chat mode with thinking explicitly disabled.".into()),
+                defaults: not_thinking_general,
+            },
+            ModelPreset {
+                name: "Non-thinking (Reasoning)".into(),
+                description: Some("High-entropy chat mode without visible thinking blocks.".into()),
+                defaults: not_thinking_reasoning,
+            },
+        ];
+    }
+
     // Qwen3.6 family (including Qwopus and other derivatives):
     // preset values from https://unsloth.ai/docs/models/qwen3.6
     let is_qwen36 =
@@ -546,6 +656,37 @@ mod tests {
         assert_eq!(presets[2].name, "Precise coding (thinking)");
         assert_eq!(presets[3].defaults.enable_thinking, Some(false));
         assert!(!presets[4].defaults.reasoning);
+    }
+
+    #[test]
+    fn qwen35_122b_a10b_exposes_presets_including_agentic() {
+        // Source: https://unsloth.ai/docs/models/qwen3.5
+        let presets = get_model_presets("Qwen3.5-122B-A10B-GGUF", 0, &[]);
+        assert_eq!(presets.len(), 5);
+        assert_eq!(presets[0].name, "Thinking (General)");
+        assert_eq!(presets[1].name, "Thinking (Agentic / Coding)");
+        assert_eq!(presets[2].name, "Thinking (Precise coding)");
+        assert_eq!(
+            presets[1].defaults.temperature, 1.0,
+            "agentic uses temp 1.0"
+        );
+        assert_eq!(
+            presets[2].defaults.temperature, 0.6,
+            "precise uses temp 0.6"
+        );
+        assert!(presets[1].defaults.reasoning, "agentic has reasoning");
+        assert!(
+            presets[3].defaults.enable_thinking == Some(false),
+            "non-thinking general"
+        );
+    }
+
+    #[test]
+    fn qwen35_reap_variant_gets_qwen35_presets() {
+        // REAP (expert-pruned) variants must still match Qwen3.5 presets.
+        let presets = get_model_presets("Qwen3.5-122B-A10B-REAP-20-i1-GGUF", 0, &[]);
+        assert_eq!(presets.len(), 5);
+        assert_eq!(presets[0].name, "Thinking (General)");
     }
 
     #[test]

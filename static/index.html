@@ -3203,6 +3203,9 @@
                     <div class="hw-mtp-section" id="hw-mtp-section" style="display:none;">
                         <div class="hw-section-divider">Multi-Token Prediction (MTP) <span class="info-tip" title="Built-in prediction heads guess multiple tokens ahead. Throughput depends on the model, backend, context, and draft acceptance; benchmark before relying on it.">i</span></div>
                         <div class="hw-mtp-content">
+                            <div class="field-hint" id="hw-mtp-info-note" style="display:none;margin-bottom:6px;font-size:11px;color:var(--color-text-muted);">
+                                This model has MTP prediction heads built-in. Enabling draft-mtp can give ~1.4–2× faster generation with no quality change. Benchmark enabled versus disabled on your hardware; some backends (notably Metal) can run slower.
+                            </div>
                             <label class="hw-toggle-label" title="Uses the model's built-in Multi-Token Prediction heads to guess ahead, then verifies in one pass. No extra model needed. Disabled by default on Apple Metal because current llama.cpp builds can lose throughput there.">
                                  <input type="checkbox" id="hw-use-mtp">
                                  Enable MTP (experimental)
