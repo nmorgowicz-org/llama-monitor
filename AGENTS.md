@@ -333,6 +333,11 @@ All repo-managed screenshots and animated UI captures use the single harness:
 node tests/ui/capture.mjs --scenario <name>
 ```
 
+IMPORTANT: capture.mjs MUST ONLY be run sequentially, one scenario at a time.
+- Do not run multiple scenarios in parallel (no &, no &&, no parallel tool calls).
+- Each scenario launches its own llama-monitor instance and may attach to a shared remote server.
+- Running in parallel causes port conflicts, attach-timeouts, and race conditions.
+
 The harness spawns a fresh `target/release/llama-monitor` binary on a temporary port with a clean config dir, then attaches to `REMOTE_SERVER` (default `http://192.168.2.16:8001`). The remote llama.cpp server must be reachable for any scenario that sends chat messages.
 
 ### Environment Variables

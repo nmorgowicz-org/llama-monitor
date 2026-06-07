@@ -1,6 +1,12 @@
 /**
  * Consolidated screenshot and GIF capture harness for llama-monitor.
  *
+ * THIS SCRIPT MUST ONLY BE RUN SEQUENTIALLY.
+ * - Do not run multiple scenarios in parallel (no background tasks, no && chains, no &).
+ * - Each scenario launches its own llama-monitor instance, uses its own temp config,
+ *   and may attach to the remote llama-server. Running in parallel causes port conflicts,
+ *   attach-timeouts, and race conditions in the capture harness.
+ *
  * This is the single entrypoint for repo-owned visual capture automation.
  * Prefer adding new scenarios here instead of creating new one-off scripts.
  *
