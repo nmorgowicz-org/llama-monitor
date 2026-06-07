@@ -216,12 +216,12 @@ test.describe('pin and favorite tabs', () => {
   test('toggle pin button toggles pinned state', async ({ page }) => {
     // Use a deterministic tab via JS so we can reliably locate its sidebar row
     const tabTitle = 'Playwright Pin Test';
-    await page.evaluate(async () => {
+    await page.evaluate(async (title) => {
       const { chat } = await import('/js/core/app-state.js');
       const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
-      chat.addTab({ title: tabTitle });
+      chat.addTab({ title });
       renderChatSessionsSidebar();
-    });
+    }, tabTitle);
 
     const itemByTitle = () =>
       page.locator('#csp-list .csp-item', { hasText: tabTitle });
@@ -254,18 +254,18 @@ test.describe('pin and favorite tabs', () => {
     expect(await pinBtn3.getAttribute('title')).toBe('Pin');
 
     // Cleanup
-    await page.evaluate(async () => {
+    await page.evaluate(async (title) => {
       const { chat } = await import('/js/core/app-state.js');
       const { renderChatSessionsSidebar } = await import('/js/features/chat-sessions-sidebar.js');
-      const idx = chat.tabs.findIndex(t => t.title === tabTitle);
+      const idx = chat.tabs.findIndex(t => t.title === title);
       if (idx !== -1) {
         chat.tabs.splice(idx, 1);
-        if (chat.activeTabId === chat.tabs.length + 1) {
-          chat.activeTabId = 1;
+        if (chat.activeTabId > chat.tabs.length && chat.tabs.length > 0) {
+          chat.activeTabId = chat.tabs.length;
         }
       }
       renderChatSessionsSidebar();
-    });
+    }, tabTitle);
   });
 
  test('pinned tabs appear before unpinned tabs', async ({ page }) => {
