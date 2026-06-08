@@ -1517,7 +1517,22 @@ pub async fn hf_resolve_origin(filename: &str, size_bytes: u64) -> Result<HfReso
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let confident = scored.first().is_some_and(|c| c.confidence >= 0.8);
+    // Only auto-select when:
+    // - top candidate is strong
+    // - there is a clear lead over others (or no close rival)
+    let confident = if let Some(top) = scored.first() {
+        let top_score = top.confidence;
+        if top_score < 0.85 {
+            false
+        } else {
+            match scored.get(1) {
+                Some(next) if next.confidence >= top_score - 0.05 => false, // too close
+                _ => true,
+            }
+        }
+    } else {
+        false
+    };
 
     Ok(HfResolveResult {
         confident,
@@ -1527,56 +1542,45 @@ pub async fn hf_resolve_origin(filename: &str, size_bytes: u64) -> Result<HfReso
     })
 }
 
-/// Try to find a file in the repo that corresponds to the local GGUF.
+/// Try to find the best matching file in the repo that corresponds to the local GGUF.
 /// Returns (confirmed_exists, matched_filename).
-/// A match requires:
-/// - same model stem tokens mostly present
-/// - same quant-like token
-/// - if we know the local file size, within ±5% of the HF file size.
+///
+/// Uses:
+/// - token coverage: how many local filename tokens appear in HF filename
+/// - token order: approximate order match to distinguish similar repos
+/// - quant match: required if present
+/// - size match: within ±5% if size known
+///
+/// Only returns confirmed if the match is strong on both token coverage and (when known) size.
 fn find_matching_file_in_repo(
     files: &std::collections::HashMap<String, u64>,
-    stem: &str,
+    _stem: &str,
     filename: &str,
     size_bytes: u64,
 ) -> (bool, Option<String>) {
     let filename_lower = filename.to_ascii_lowercase();
-    let stem_lower = stem.to_ascii_lowercase();
 
-    // Extract quant-like token from filename (e.g. "Q4_K_M", "Q8_0", "BF16")
+    // Normalize filename into tokens (non-empty, not purely numeric)
+    let local_tokens: Vec<&str> = filename_lower
+        .split(['-', ' ', '_', '.', '/'])
+        .filter(|t| !t.is_empty() && !t.chars().all(|c| c.is_ascii_digit()))
+        .collect();
+
+    if local_tokens.is_empty() {
+        return (false, None);
+    }
+
+    // Extract quant token
     let quant_tok: Option<String> = extract_quant_token(&filename_lower);
 
-    let stem_parts: Vec<&str> = stem_lower
-        .split(['-', ' ', '_'])
-        .filter(|p| !p.is_empty())
-        .collect();
+    let mut best_match: Option<(String, f64)> = None;
+    let min_coverage = 0.8; // require 80% token coverage to consider "confirmed"
 
     for (path, file_size) in files {
         let base = path.rsplit('/').next().unwrap_or(path);
         let base_lower = base.to_ascii_lowercase();
 
-        // Must share core stem parts
-        let mut stem_matches = 0;
-        for part in &stem_parts {
-            if part.len() > 2 && base_lower.contains(part) {
-                stem_matches += 1;
-            }
-        }
-        if stem_parts.is_empty() || stem_matches == 0 {
-            continue;
-        }
-        let stem_ratio = stem_matches as f64 / stem_parts.len() as f64;
-        if stem_ratio < 0.6 {
-            continue;
-        }
-
-        // Must include a similar quant token, if present in local filename
-        if let Some(ref q) = quant_tok
-            && !base_lower.contains(q)
-        {
-            continue;
-        }
-
-        // If we have a local size, enforce ±5% constraint
+        // Size check: within ±5% if size known
         if size_bytes > 1_000_000 && *file_size > 0 {
             let diff = (*file_size).abs_diff(size_bytes);
             let rel_diff = diff as f64 / size_bytes as f64;
@@ -1585,10 +1589,96 @@ fn find_matching_file_in_repo(
             }
         }
 
-        return (true, Some(base.to_string()));
+        // Check quant token presence if we have one
+        if let Some(ref q) = quant_tok
+            && !base_lower.contains(q)
+        {
+            continue;
+        }
+
+        // Token coverage: fraction of local_tokens found in HF filename
+        let mut matched = 0usize;
+        for token in &local_tokens {
+            if base_lower.contains(token) {
+                matched += 1;
+            }
+        }
+        let coverage = matched as f64 / local_tokens.len() as f64;
+        if coverage < min_coverage {
+            continue;
+        }
+
+        // Order bonus: approximate order match of tokens.
+        // If multiple repos match by tokens, better order -> better match.
+        let order_score = token_order_score(&local_tokens, &base_lower);
+
+        let score = coverage * 0.7 + order_score * 0.3;
+
+        match &best_match {
+            Some((_, best_score)) if score > *best_score => {
+                best_match = Some((base.to_string(), score));
+            }
+            None => {
+                best_match = Some((base.to_string(), score));
+            }
+            _ => {}
+        }
     }
 
-    (false, None)
+    match best_match {
+        Some((name, score)) if score >= 0.85 => (true, Some(name)),
+        _ => (false, None),
+    }
+}
+
+/// Compute a simple order-based score for token sequence in candidate filename.
+/// 0.0 = poor, 1.0 = nearly same order.
+fn token_order_score(local_tokens: &[&str], candidate: &str) -> f64 {
+    if local_tokens.len() <= 1 || candidate.is_empty() {
+        return 1.0;
+    }
+
+    // Normalize candidate into token sequence positions.
+    let candidate_tokens: Vec<&str> = candidate
+        .split(['-', ' ', '_', '.', '/'])
+        .filter(|t| !t.is_empty() && !t.chars().all(|c| c.is_ascii_digit()))
+        .collect();
+
+    // For each local token, find its index in candidate_tokens or use INF
+    let mut positions: Vec<usize> = Vec::new();
+    for t in local_tokens {
+        if let Some(pos) = candidate_tokens
+            .iter()
+            .position(|ct| *ct == *t || ct.contains(t))
+        {
+            positions.push(pos);
+        } else {
+            return 0.0;
+        }
+    }
+
+    if positions.is_empty() {
+        return 0.0;
+    }
+
+    // Measure how monotonic the positions are
+    let mut increasing = 0usize;
+    let mut total_pairs = 0usize;
+    let len = positions.len();
+    for i in 1..len {
+        for j in (i + 1)..len {
+            total_pairs += 1;
+            if positions[i] < positions[j] {
+                increasing += 1;
+            }
+        }
+    }
+
+    if total_pairs == 0 {
+        return 1.0;
+    }
+
+    increasing as f64 / total_pairs as f64
 }
 
 /// Extract a quant-like token from the filename for matching, e.g. "q4_k_m", "q8_0", "f16", "bf16".
@@ -1654,13 +1744,15 @@ fn score_resolve_candidate(
     // Strong base for repos that actually host the matching file.
     score += 0.45;
 
-    // 1. Stem match in repo name
+    // Build reusable token lists.
     let stem_parts: Vec<&str> = stem_lower.split('-').filter(|p| !p.is_empty()).collect();
     let repo_name_lower = repo_id
         .split('/')
         .next_back()
         .unwrap_or(repo_id)
         .to_ascii_lowercase();
+
+    // 1. Stem match in repo name
     let mut matched_parts = 0;
     for part in &stem_parts {
         if part.len() > 2 && repo_name_lower.contains(part) {
@@ -1669,25 +1761,45 @@ fn score_resolve_candidate(
     }
     if matched_parts > 0 {
         let ratio = matched_parts as f64 / stem_parts.len() as f64;
-        score += 0.25 * ratio;
+        score += 0.20 * ratio;
         if matched_parts == stem_parts.len() {
             score += 0.05; // perfect stem match bonus
         }
     }
 
-    // 2. Filename token match
+    // 2. Filename token match (more important than stem for distinguishing variants)
     let file_tokens: Vec<&str> = filename_lower
         .split(['-', '.', '_'])
-        .filter(|t| t.len() > 2 && !t.chars().all(|c| c.is_ascii_digit()))
+        .filter(|t| t.len() >= 2 && !t.chars().all(|c| c.is_ascii_digit()))
         .collect();
+
+    // Give extra weight to "rare" tokens: short, non-numeric tokens (e.g. "ud", "qat", "it", "mtp")
+    // that help differentiate similar repos.
+    let rare_token_chars: usize = file_tokens
+        .iter()
+        .filter(|t| t.len() <= 4 && !t.chars().all(|c| c.is_ascii_digit()))
+        .count()
+        .max(1);
     let mut file_matches = 0;
+    let mut rare_matches = 0;
+
     for token in &file_tokens {
         if repo_name_lower.contains(token) {
             file_matches += 1;
+            // Rare token if short and non-numeric; these are strong differentiators.
+            if token.len() <= 4 && !token.chars().all(|c| c.is_ascii_digit()) {
+                rare_matches += 1;
+            }
         }
     }
+
     if file_matches > 0 {
+        // Base filename token match
         score += 0.10 * (file_matches as f64 / file_tokens.len().max(1) as f64);
+        // Rare-token match bonus: heavily rewards repos that include key discriminators like "ud"
+        if rare_matches > 0 {
+            score += 0.06 * (rare_matches as f64 / rare_token_chars as f64);
+        }
     }
 
     // 3. Parameter count match
@@ -1697,7 +1809,7 @@ fn score_resolve_candidate(
         for tag in raw_tags {
             let tag_lower = tag.to_ascii_lowercase();
             if tag_lower.starts_with("parameter_size:") && tag_lower.contains(&param_str) {
-                score += 0.10;
+                score += 0.08;
                 break;
             }
         }
@@ -1707,14 +1819,13 @@ fn score_resolve_candidate(
     }
 
     // 4. Size agreement bonus when file_exists is true and size is known
-    // (Already enforced by find_matching_file_in_repo for ±5%, but give a small extra bonus)
     if file_exists_in_repo && size_bytes > 1_000_000 {
-        score += 0.05;
+        score += 0.04;
     }
 
-    // 5. Popularity tiebreaker (weak signal)
+    // 5. Popularity tiebreaker (keep very weak to avoid overshadowing semantic match)
     if downloads > 1000 && score > 0.0 {
-        score += 0.05;
+        score += 0.02;
     }
 
     score.clamp(0.0, 1.0)
@@ -1746,13 +1857,13 @@ fn base_resolve_score(
     }
     if matched_parts > 0 {
         let ratio = matched_parts as f64 / stem_parts.len() as f64;
-        score += 0.4 * ratio;
+        score += 0.35 * ratio;
     }
 
     // Filename token match
     let file_tokens: Vec<&str> = filename_lower
         .split(['-', '.', '_'])
-        .filter(|t| t.len() > 2 && !t.chars().all(|c| c.is_ascii_digit()))
+        .filter(|t| t.len() >= 2 && !t.chars().all(|c| c.is_ascii_digit()))
         .collect();
     let mut file_matches = 0;
     for token in &file_tokens {
@@ -1771,7 +1882,7 @@ fn base_resolve_score(
         for tag in raw_tags {
             let tag_lower = tag.to_ascii_lowercase();
             if tag_lower.starts_with("parameter_size:") && tag_lower.contains(&param_str) {
-                score += 0.1;
+                score += 0.08;
                 break;
             }
         }
@@ -1780,8 +1891,8 @@ fn base_resolve_score(
         }
     }
 
-    // Popularity (weak)
-    if downloads > 1000 && score > 0.0 {
+    // Popularity (very weak)
+    if downloads > 2000 && score > 0.0 {
         score += 0.02;
     }
 

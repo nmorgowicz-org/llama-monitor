@@ -5080,60 +5080,70 @@ async function _autoDiscoverLocalModelQuants() {
   if (btn) btn.disabled = true;
 
   try {
-    let repoId = originRepo || '';
-    let rawFiles = [];
-    let showCandidateList = false;
+        let repoId = originRepo || '';
+        let rawFiles = [];
+        let showCandidateList = false;
 
-    if (repoId) {
-      const data = await _hfFilesPost(repoId);
-      if (data?.ok) rawFiles = (data.files || []).filter(f =>
-        !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
-    } else {
-      const stem = _modelStemForSearch(filename);
-      if (stem.length >= 4) {
-         // Try progressively broader queries: exact stem, stem + GGUF keyword,
-         // then a shorter version without minor version/variant suffixes.
-         const shorter = stem
-           .replace(/-v\d+(?:\.\d+)?(?:-[A-Za-z]+)*$/i, '')
-           .replace(/-MTP$/i, '');
-         const queries = [...new Set([stem, `${stem} GGUF`, shorter])]
-           .filter(q => q.length >= 4);
+        if (repoId) {
+          const data = await _hfFilesPost(repoId);
+          if (data?.ok) rawFiles = (data.files || []).filter(f =>
+            !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
+        } else {
+          // Use resolve-origin to get ranked, file-validated candidates
+          const headers = window.authHeaders ? { ...window.authHeaders(), 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+          const modelBytes = wizardState.model.modelBytes || 0;
+          const res = await fetch('/api/hf/resolve-origin', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ filename, size_bytes: modelBytes }),
+          });
 
-         const candidates = []; // collect multiple candidates instead of stopping at first
-         const headers = window.authHeaders ? window.authHeaders() : {};
-         for (const query of queries) {
-           const res = await fetch('/api/hf/search', {
-             method: 'POST',
-             headers: { ...headers, 'Content-Type': 'application/json' },
-             body: JSON.stringify({ query, sort: 'downloads', limit: 8 }),
-           });
-           if (!res.ok) continue;
-           const sd = await res.json();
-           for (const candidate of (sd.models || []).slice(0, 4)) {
-             const fd = await _hfFilesPost(candidate.id);
-             if (!fd?.ok) continue;
-             const gguf = (fd.files || []).filter(f =>
-               !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
-             if (gguf.length >= 2) {
-               candidates.push({ repoId: candidate.id, ggufFiles: gguf });
-             }
-           }
-           // If we have several candidates, continue briefly but cap to avoid overloading.
-           if (candidates.length >= 5) break;
-         }
+          if (res.ok) {
+            const data = await res.json();
+            const candidates = (data.candidates || [])
+              .slice(0, 5)
+              .map(c => ({ repoId: c.repoId, confidence: c.confidence }));
 
-         if (candidates.length === 1) {
-           // Single strong candidate → safe to use.
-           repoId = candidates[0].repoId;
-           rawFiles = candidates[0].ggufFiles;
-        } else if (candidates.length > 1) {
-     // Multiple candidates → show choices; no auto-select.
-            if (statusEl) statusEl.textContent = 'Multiple possible sources found';
-            _showQuantSwapCandidateList(candidates);
-            showCandidateList = true;
+            if (data.confident && candidates.length > 0) {
+              // Confident match: use top candidate
+              repoId = candidates[0].repoId;
+              const fd = await _hfFilesPost(repoId);
+              if (fd?.ok) {
+                rawFiles = (fd.files || []).filter(f =>
+                  !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
+              }
+            } else if (candidates.length > 1) {
+              // Multiple plausible repos: filter to those with ≥2 GGUFs, then show list
+              const withFiles = [];
+              for (const c of candidates) {
+                const fd = await _hfFilesPost(c.repoId);
+                if (!fd?.ok) continue;
+                const gguf = (fd.files || []).filter(f =>
+                  !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
+                if (gguf.length >= 2) {
+                  withFiles.push({ repoId: c.repoId, ggufFiles: gguf });
+                }
+              }
+              if (withFiles.length > 0) {
+                if (statusEl) statusEl.textContent = 'Multiple possible sources found';
+                _showQuantSwapCandidateList(withFiles);
+                showCandidateList = true;
+              }
+            } else if (candidates.length === 1) {
+              // Single candidate only if it has GGUFs
+              const c = candidates[0];
+              const fd = await _hfFilesPost(c.repoId);
+              if (fd?.ok) {
+                const gguf = (fd.files || []).filter(f =>
+                  !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
+                if (gguf.length >= 2) {
+                  repoId = c.repoId;
+                  rawFiles = gguf;
+                }
+              }
+            }
           }
-      }
-    }
+        }
 
      if (showCandidateList) {
        return;
