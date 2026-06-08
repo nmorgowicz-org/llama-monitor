@@ -1344,30 +1344,45 @@ pub struct HfResolveResult {
     pub errors: Vec<String>,
 }
 
-/// Extract the model stem from a GGUF filename, stripping quant suffix and
-/// .gguf extension.  Mirrors the JS `_modelStemForSearch` logic.
-/// E.g. "Llama-3.3-70B-Instruct-Q4_K_M.gguf" → "Llama-3.3-70B-Instruct"
+/// Extract the model stem from a GGUF filename, stripping quant suffix,
+/// Unsloth-distilled markers ("-UD"), and version/variant suffixes.
+/// E.g. "gemma-4-31B-it-qat-UD-Q4_K_XL.gguf" → "gemma-4-31B-it-qat"
 fn resolve_model_stem(filename: &str) -> String {
     let mut stem = filename
         .strip_suffix(".gguf")
         .unwrap_or(filename)
         .to_string();
-    // Strip quant suffix: last token after '-' that starts with Q, I, BF, or UD
+
+    // Strip quant suffix: last token after '-' that starts with Q, I, B, or U (e.g. Q4_K_XL, UD-…)
     if let Some(pos) = stem.rfind('-') {
         let suffix = &stem[pos + 1..];
         if matches!(suffix.chars().next(), Some('Q' | 'I' | 'B' | 'U')) && suffix.len() > 2 {
             stem = stem[..pos].to_string();
         }
     }
+
+    // Strip Unsloth-distilled marker "-UD" or "-ud" if present
+    if let Some(pos) = stem.rfind("-UD") {
+        let after = &stem[pos + 3..];
+        if after.is_empty() || after.starts_with('-') {
+            stem = stem[..pos].to_string();
+        }
+    } else if let Some(pos) = stem.rfind("-ud") {
+        let after = &stem[pos + 3..];
+        if after.is_empty() || after.starts_with('-') {
+            stem = stem[..pos].to_string();
+        }
+    }
+
     // Strip trailing -v1, -v2, -v1.1, -MTP, etc.
     stem = stem.strip_suffix("-MTP").unwrap_or(&stem).to_string();
-    // Strip trailing -vN or -vN.N
     if let Some(pos) = stem.rfind("-v") {
         let after = &stem[pos + 2..];
         if after.is_empty() || after.chars().next().is_some_and(|c| c.is_ascii_digit()) {
             stem = stem[..pos].to_string();
         }
     }
+
     stem
 }
 
@@ -1397,14 +1412,14 @@ pub async fn hf_resolve_origin(filename: &str, size_bytes: u64) -> Result<HfReso
     let _token = hf_load_token();
 
     for query in &queries {
-        if !candidates.is_empty() {
-            break; // already found matches
+        if candidates.len() >= 40 {
+            break; // enough candidates
         }
         let params = HfSearchParams {
             query: query.clone(),
             author: None,
             sort: HfSort::Downloads,
-            limit: 10,
+            limit: 15,
             cursor: None,
         };
         let result = hf_search_models(&params).await;
@@ -1518,15 +1533,15 @@ pub async fn hf_resolve_origin(filename: &str, size_bytes: u64) -> Result<HfReso
     });
 
     // Only auto-select when:
-    // - top candidate is strong
+    // - top candidate is very strong
     // - there is a clear lead over others (or no close rival)
     let confident = if let Some(top) = scored.first() {
         let top_score = top.confidence;
-        if top_score < 0.85 {
+        if top_score < 0.90 {
             false
         } else {
             match scored.get(1) {
-                Some(next) if next.confidence >= top_score - 0.05 => false, // too close
+                Some(next) if next.confidence >= top_score - 0.06 => false, // too close
                 _ => true,
             }
         }
@@ -1574,7 +1589,8 @@ fn find_matching_file_in_repo(
     let quant_tok: Option<String> = extract_quant_token(&filename_lower);
 
     let mut best_match: Option<(String, f64)> = None;
-    let min_coverage = 0.8; // require 80% token coverage to consider "confirmed"
+    // Higher required coverage for longer token sets (e.g., "gemma-4-31B-it-qat-UD-Q4_K_XL")
+    let min_coverage = if local_tokens.len() >= 6 { 0.9 } else { 0.8 };
 
     for (path, file_size) in files {
         let base = path.rsplit('/').next().unwrap_or(path);
@@ -1626,7 +1642,7 @@ fn find_matching_file_in_repo(
     }
 
     match best_match {
-        Some((name, score)) if score >= 0.85 => (true, Some(name)),
+        Some((name, score)) if score >= 0.9 => (true, Some(name)),
         _ => (false, None),
     }
 }
