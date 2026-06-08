@@ -625,11 +625,26 @@ impl AppState {
             return;
         }
 
-        // Echo non-noise logs to stderr so they are visible both
-        // in the app UI (via WebSocket) and in the terminal where
-        // llama-monitor was launched.  This is especially important
-        // for llama-server output and monitor lifecycle / error lines.
-        eprintln!("[llama-monitor] {line}");
+        // Only echo important lines to stderr (terminal):
+        // - Internal monitor messages ([monitor])
+        // - Lines indicating an error/failure/health issue
+        // All lines are still stored for the UI and Logs tab.
+        let line_lower = line.to_lowercase();
+        let is_important = line.starts_with("[monitor]")
+            || line_lower.contains("error")
+            || line_lower.contains("oom")
+            || line_lower.contains("out of memory")
+            || line_lower.contains("killed")
+            || line_lower.contains("health check")
+            || line_lower.contains("failed")
+            || line_lower.contains("cannot update")
+            || line_lower.contains("not responding")
+            || line_lower.contains("corrupt")
+            || line_lower.contains("incompatible");
+
+        if is_important {
+            eprintln!("[llama-monitor] {line}");
+        }
 
         let mut logs = self.server_logs.lock().unwrap();
         if logs.len() >= MAX_LOG_LINES {

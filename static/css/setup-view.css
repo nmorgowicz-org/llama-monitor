@@ -3598,3 +3598,88 @@ body.setup-active .sidebar-nav {
 [data-theme="light"] .local-server-error-details-body code {
   background: rgba(15, 23, 42, 0.04);
 }
+
+/* ── Setup Local Server header with New Configuration button ─────────── */
+
+.setup-pane-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  opacity: 0.65;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 4px;
+}
+
+.setup-pane-label-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.setup-new-config-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  font-size: 9.5px;
+  font-weight: 600;
+  font-family: inherit;
+  letter-spacing: 0.04em;
+  color: rgba(148, 163, 253, 0.9);
+  background: radial-gradient(
+    far at top left,
+    rgba(99, 102, 241, 0.14),
+    transparent
+  );
+  border-radius: 999px;
+  border: 1px solid rgba(139, 92, 246, 0.22);
+  box-shadow: 0 4px 16px rgba(79, 70, 229, 0.25);
+  cursor: pointer;
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  opacity: 1;
+}
+
+.setup-new-config-btn:hover {
+  color: #e5e7eb;
+  background: radial-gradient(
+    far at top left,
+    rgba(139, 92, 246, 0.22),
+    transparent
+  );
+  box-shadow: 0 8px 24px rgba(139, 92, 246, 0.35);
+  transform: translateY(-1px);
+}
+
+.setup-new-config-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 3px 10px rgba(139, 92, 246, 0.25);
+}
+
+[data-theme="light"] .setup-new-config-btn {
+  color: #4f46e5;
+  background: radial-gradient(
+    far at top left,
+    rgba(99, 102, 241, 0.06),
+    transparent
+  );
+  border-color: rgba(99, 102, 241, 0.24);
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.16);
+}
+
+[data-theme="light"] .setup-new-config-btn:hover {
+  color: #1d4ed8;
+  background: radial-gradient(
+    far at top left,
+    rgba(99, 102, 241, 0.09),
+    transparent
+  );
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.25);
+  transform: translateY(-1px);
+}

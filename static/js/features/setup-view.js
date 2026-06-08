@@ -310,6 +310,8 @@ export function renderLaunchGrid() {
     const presets = _visiblePresetsLocal(allPresets);
     const activePresetId = document.getElementById('preset-select')?.value || '';
 
+    const showNewConfigCard = presets.length <= 2;
+
     if (!hasUserPresets) {
         // Onboarding hint (first-time / no presets)
         const hint = document.createElement('div');
@@ -319,24 +321,28 @@ export function renderLaunchGrid() {
         grid.appendChild(hint);
 
         // No user presets: New Config goes first so it's the obvious CTA
-        const newCard = _buildNewConfigCard(true);
-        newCard.style.animationDelay = '80ms';
-        grid.appendChild(newCard);
+        if (showNewConfigCard) {
+            const newCard = _buildNewConfigCard(true);
+            newCard.style.animationDelay = '80ms';
+            grid.appendChild(newCard);
+        }
         presets.forEach((preset, i) => {
             const card = _buildLaunchCard(preset, activePresetId);
-            card.style.animationDelay = `${(i + 2) * 55}ms`;
+            card.style.animationDelay = `${(i + (showNewConfigCard ? 2 : 1)) * 55}ms`;
             grid.appendChild(card);
         });
     } else {
-        // User has presets: show them first (leftmost), New Config goes last
+        // User has presets: show them first (leftmost), New Config goes last only when presets are few
         presets.forEach((preset, i) => {
             const card = _buildLaunchCard(preset, activePresetId);
             card.style.animationDelay = `${i * 55}ms`;
             grid.appendChild(card);
         });
-        const newCard = _buildNewConfigCard(false);
-        newCard.style.animationDelay = `${presets.length * 55}ms`;
-        grid.appendChild(newCard);
+        if (showNewConfigCard) {
+            const newCard = _buildNewConfigCard(false);
+            newCard.style.animationDelay = `${presets.length * 55}ms`;
+            grid.appendChild(newCard);
+        }
     }
     // Stamp last-launched timestamps if session data is already available
     _applyLastLaunchedToCards();
@@ -913,6 +919,22 @@ export function initViewState() {
     }
     if (monitorView) monitorView.style.display = 'none';
     loadRecentSessions();
+
+// ── New Configuration button (header) ──────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('setup-new-config-btn');
+    if (btn) {
+        btn.addEventListener('click', async () => {
+            try {
+                const { openSpawnWizard } = await import('./spawn-wizard.js');
+                openSpawnWizard();
+            } catch (e) {
+                console.error('Failed to open spawn wizard from new-config button:', e);
+            }
+        });
+    }
+});
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

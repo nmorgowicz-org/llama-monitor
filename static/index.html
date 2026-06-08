@@ -268,8 +268,25 @@
                     <!-- RIGHT PANE: Local Servers (preset launch cards) -->
                     <div class="setup-pane setup-pane-local">
                         <div class="setup-pane-label">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-                            Local Server
+                            <div class="setup-pane-label-left">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                                Local Server
+                            </div>
+                            <button class="setup-new-config-btn" id="setup-new-config-btn" type="button" title="Create a new preset">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                <span>New Configuration</span>
+                            </button>
+                        </div>
+
+                        <!-- VRAM bar (moved up from bottom; populated by JS after /metrics fetch) -->
+                        <div id="setup-mem-bar" class="setup-mem-bar" style="display:none;" aria-label="Inference memory budget">
+                            <div class="setup-mem-bar-track" aria-hidden="true">
+                                <div class="setup-mem-bar-fill" id="setup-mem-bar-fill"></div>
+                            </div>
+                            <div class="setup-mem-bar-labels">
+                                <span id="setup-mem-bar-avail"></span>
+                                <span id="setup-mem-bar-total"></span>
+                            </div>
                         </div>
 
                         <!-- Running server banner (shown when a spawn session is active) -->
@@ -302,17 +319,6 @@
                             <div class="local-server-error-details-body" id="local-server-error-details-body"></div>
                             <div class="local-server-error-details-footer">
                                 <button class="btn-sm btn-ghost" id="local-server-error-details-close" type="button">Close</button>
-                            </div>
-                        </div>
-
-                        <!-- Memory bar (populated by JS after /metrics fetch) -->
-                        <div id="setup-mem-bar" class="setup-mem-bar" style="display:none;" aria-label="Inference memory budget">
-                            <div class="setup-mem-bar-track" aria-hidden="true">
-                                <div class="setup-mem-bar-fill" id="setup-mem-bar-fill"></div>
-                            </div>
-                            <div class="setup-mem-bar-labels">
-                                <span id="setup-mem-bar-avail"></span>
-                                <span id="setup-mem-bar-total"></span>
                             </div>
                         </div>
 
