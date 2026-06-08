@@ -624,6 +624,13 @@ impl AppState {
         if is_noise_log(&line) {
             return;
         }
+
+        // Echo non-noise logs to stderr so they are visible both
+        // in the app UI (via WebSocket) and in the terminal where
+        // llama-monitor was launched.  This is especially important
+        // for llama-server output and monitor lifecycle / error lines.
+        eprintln!("[llama-monitor] {line}");
+
         let mut logs = self.server_logs.lock().unwrap();
         if logs.len() >= MAX_LOG_LINES {
             logs.pop_front();

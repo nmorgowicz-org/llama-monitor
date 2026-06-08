@@ -747,11 +747,12 @@ pub async fn start_server(
         *cfg = Some(config);
     }
 
-    // Notify user-gated pollers to start after an explicit UI start action.
+   // Notify user-gated pollers to start after an explicit UI start action.
     state.llama_poll_notify.notify_waiters();
 
     // Child death watcher: detect when llama-server exits unexpectedly
-    // and report a clear, user-visible error (OOM, killed, etc.).
+    // and report a clear, user-visible error (OOM, killed, etc.) along
+    // with the last N lines of its output so the user can diagnose it.
     {
         let watcher_state = state.clone();
         tokio::spawn(async move {
@@ -776,6 +777,40 @@ pub async fn start_server(
                             ));
                             return;
                         }
+
+                        // Collect last N lines, excluding our own [monitor] lines,
+                        // so we only surface actual llama-server output in the error.
+                        let tail_lines: Vec<String> = {
+                            let logs = watcher_state.server_logs.lock().unwrap();
+                            // Take last 20 lines (some may be [monitor]) and filter.
+                            let from = if logs.len() > 20 {
+                                logs.len() - 20
+                            } else {
+                                0
+                            };
+                            logs.iter()
+                                .skip(from)
+                                .filter(|l| !l.starts_with("[monitor]"))
+                                .cloned()
+                                .collect()
+                        };
+
+                        let tail_text = if tail_lines.is_empty() {
+                            // If all recent lines are [monitor]-only, likely killed
+                            // before llama-server printed anything useful; note that.
+                            "\nNo llama-server output captured before it was killed."
+                                .to_string()
+                        } else {
+                            format!(
+                                "\nLast relevant lines from llama-server:\n{}",
+                                tail_lines
+                                    .iter()
+                                    .map(|l| format!("  {l}"))
+                                    .collect::<Vec<_>>()
+                                    .join("\n")
+                            )
+                        };
+
                         let reason = if exit_status.success() {
                             "llama-server exited normally".to_string()
                         } else if let Some(code) = exit_status.code() {
@@ -790,8 +825,21 @@ pub async fn start_server(
                                 ),
                             }
                         } else {
-                            "llama-server was killed by an external signal. Check the server logs for details.".to_string()
+                            "llama-server was killed by an external signal.".to_string()
                         };
+
+                        // For non-successful exits, attach tail logs so the
+                        // toast and user-visible message include key context.
+                        let reason_display = if exit_status.success()
+                            || exit_status.code() == Some(137)
+                            || exit_status.code() == Some(9)
+                        {
+                            // For OOM / well-known codes, keep the message short; full logs are available.
+                            reason
+                        } else {
+                            format!("{}{}", reason, tail_text)
+                        };
+
                         // Detect if a new spawn already took over:
                         let server_running = *watcher_state.server_running.lock().unwrap();
                         if server_running {
@@ -815,8 +863,8 @@ pub async fn start_server(
                             let mut cfg = watcher_state.server_config.lock().unwrap();
                             *cfg = None;
                         }
-                        watcher_state.push_log(format!("[monitor] {}", reason));
-                        // Set session status to Error with the reason
+                        watcher_state.push_log(format!("[monitor] {}", reason_display));
+                        // Set session status to Error with the reason including tail logs
                         let active_id = {
                             let aid = watcher_state.active_session_id.lock().unwrap();
                             aid.clone()
@@ -825,7 +873,7 @@ pub async fn start_server(
                             use crate::state::SessionStatus;
                             watcher_state.update_session_status(
                                 &active_id,
-                                SessionStatus::Error(reason.clone()),
+                                SessionStatus::Error(reason_display.clone()),
                             );
                         }
                     }
