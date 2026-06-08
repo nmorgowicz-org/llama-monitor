@@ -83,9 +83,10 @@ function clearFieldErrors() {
 export async function loadPresets(selectId) {
     const auth = window.authHeaders ? window.authHeaders() : {};
 
-    const [presetsResp, settingsResp] = await Promise.all([
+    const [presetsResp, settingsResp, activeResp] = await Promise.all([
         fetch('/api/presets', { headers: auth }),
         selectId === undefined ? fetch('/api/settings', { headers: auth }) : Promise.resolve(null),
+        selectId === undefined ? fetch('/api/sessions/active', { headers: auth }) : Promise.resolve(null),
     ]);
 
     if (presetsResp.status === 401) {
@@ -114,7 +115,23 @@ export async function loadPresets(selectId) {
         sel.appendChild(opt);
     });
 
-    const targetId = selectId ?? (saved?.preset_id || null);
+    // Determine which preset to select:
+    // 1) explicit selectId (used by spawn-wizard / CRUD)
+    // 2) running session's preset_id (if available and session is Running)
+    // 3) saved UiSettings.preset_id
+    // 4) first preset as fallback
+    let targetId = selectId ?? null;
+    if (targetId === null && activeResp) {
+        const activeData = await activeResp.json().catch(() => null);
+        if (activeData && activeData.preset_id &&
+            (String(activeData.status || '').toLowerCase() === 'running')) {
+            targetId = activeData.preset_id;
+        }
+    }
+    if (targetId === null) {
+        targetId = saved?.preset_id || null;
+    }
+
     if (targetId && sessionState.presets.find(p => p.id === targetId)) {
         sel.value = targetId;
     } else if (sessionState.presets.length > 0) {

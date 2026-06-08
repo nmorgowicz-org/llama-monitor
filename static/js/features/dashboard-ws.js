@@ -340,6 +340,15 @@ function updateDashboard(d) {
     // Store for use by status alert and other components
     setWsData(d);
 
+    // Sync preset selector to match the running session's preset (spawn mode only)
+    if (d.session_mode === 'spawn' && d.active_session_preset_id) {
+        const sel = document.getElementById('preset-select');
+        if (sel && sel.value !== d.active_session_preset_id) {
+            const opt = sel.querySelector(`option[value="${d.active_session_preset_id}"]`);
+            if (opt) sel.value = d.active_session_preset_id;
+        }
+    }
+
     // Derive and store telemetry grade for consumption by all dashboard components
     const grade = deriveTelemetryGrade(d);
     window.__telemetryGrade = grade;
@@ -1058,7 +1067,7 @@ function _syncLogTailVisibility() {
     const minusBtn = cachedElements.logTailMinus;
     const plusBtn = cachedElements.logTailPlus;
 
-    if (group) group.style.display = logTailActive ? 'inline-flex' : 'none';
+    if (group) group.style.display = 'inline-flex';
     if (tail) tail.style.display = logTailActive ? '' : 'none';
     if (minusBtn) minusBtn.classList.toggle('show', logTailActive);
     if (plusBtn) plusBtn.classList.toggle('show', logTailActive);

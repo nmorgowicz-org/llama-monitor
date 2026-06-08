@@ -4,6 +4,7 @@
 import { sessionState, setupViewState } from '../core/app-state.js';
 import { updateActiveSessionInfo } from './sessions.js';
 import { showToast } from './toast.js';
+import { saveSettings } from './settings.js';
 import { hideConnectingState, saveLastSessionData, showConnectingState, switchView, restorePreviousPosition } from './setup-view.js';
 import { setTuneConfig, showTunePanel, hideTunePanel } from './tune-panel.js';
 import { hideDisconnectedBanner } from './chat-transport.js';
@@ -17,6 +18,7 @@ export function getConfig() {
     const p = sessionState.presets.find(pr => pr.id === id) || {};
 
     return {
+        preset_id: id,
         model_path: p.model_path || '',
         hf_repo: p.hf_repo || null,
         context_size: p.context_size || 128000,
@@ -178,6 +180,7 @@ export async function doStart(cooldownBtn) {
         switchView('monitor');
         hideConnectingState();
         showTunePanel();
+        saveSettings();
         setTimeout(() => restorePreviousPosition(), 600);
     } catch (e) {
         const msg = (e.message || 'network or server error').split('\n')[0].trim();

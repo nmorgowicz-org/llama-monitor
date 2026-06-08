@@ -151,6 +151,19 @@ pub fn ws_route(
                                         }
                                     })
                             };
+                            let active_session_preset_id = {
+                                let sessions = state.sessions.lock().unwrap();
+                                sessions
+                                    .iter()
+                                    .find(|s| s.id == active_session_id)
+                                    .and_then(|s| {
+                                        if s.preset_id.is_empty() {
+                                            None
+                                        } else {
+                                            Some(s.preset_id.clone())
+                                        }
+                                    })
+                            };
                             serde_json::json!({
                                 "gpu": gpu,
                                 "llama": llama,
@@ -164,6 +177,7 @@ pub fn ws_route(
                                 "active_session_error": active_session_error,
                                 "active_session_id": active_session_id,
                                 "active_session_endpoint": active_session_endpoint,
+                                "active_session_preset_id": active_session_preset_id,
                                 "local_metrics_available": local_metrics_available,
                                 "host_metrics_available": host_metrics_available,
                                 "remote_agent_connected": remote_agent_connected,

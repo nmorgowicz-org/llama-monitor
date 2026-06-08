@@ -9310,7 +9310,8 @@ fn api_get_active_session(
                                 "name": s.name,
                                 "mode": mode_str,
                                 "status": s.status,
-                                "last_active": s.last_active
+                                "last_active": s.last_active,
+                                "preset_id": s.preset_id
                             })),
                         ))
                     }
