@@ -964,9 +964,9 @@ function _colorizeLogLine(line) {
         '$1 <span class="log-lev">$2</span>'
     );
 
-    // 3) Key components / actions (subset optimized for readability)
+    // 3) Key components / actions (llama.cpp style: "slot", "srv", "llm_load_tensors", etc.)
     s = s.replace(
-        /\b((?:slot|srv|begin|create_check|update_slots|release_slot|launch_slot|print_timing|statistics|reasoning-budget|ngram-mod|draft-acceptance|draft-mtp))\b/g,
+        /\b((?:slot|srv|begin|create_check|update_slots|release_slot|launch_slot|print_timing|statistics|reasoning-budget|ngram-mod|draft-acceptance|draft-mtp|llm_load_tensors|llama_perf_context|ggml_backend_\w+_log_allocated_size|prompt_cache|prompt_save|prompt_load))\b/g,
         '<span class="log-comp">$1</span>'
     );
 
@@ -993,22 +993,63 @@ function _colorizeLogLine(line) {
         'n_tokens = <span class="log-important">$1</span>'
     );
 
-    // 6) progress (prompt processing progress, e.g. "progress = 0.84")
+    // 6) n_decoded (generation progress)
+    s = s.replace(
+        /\bn_decoded\s*=\s*(\d+)/g,
+        'n_decoded = <span class="log-important">$1</span>'
+    );
+
+    // 7) progress (prompt processing progress, e.g. "progress = 0.84")
     s = s.replace(
         /\bprogress\s*=\s*([\d.]+)/g,
         'progress = <span class="log-important">$1</span>'
     );
 
-    // 7) draft acceptance rate (e.g. "draft acceptance = 0.47953")
+    // 8) draft acceptance rate and related stats
     s = s.replace(
         /\bdraft acceptance\s*=\s*([\d.]+)/g,
         'draft acceptance = <span class="log-metric">$1</span>'
     );
+    // - "N accepted" / "N generated" in speculative lines
+    s = s.replace(
+        /(\d+)\s+(?:accepted|generated)\b/g,
+        '<span class="log-metric">$1</span> $2'
+    );
 
-    // 8) Memory / cache sizes (MiB/GiB)
+    // 9) Cache and checkpoint metrics
+    // - "cache reuse" / "cache state"
+    s = s.replace(
+        /cache (?:reuse|state|save|rm|load)\b/gi,
+        '<span class="log-metric">cache $1</span>'
+    );
+    // - "checkpoints: N"
+    s = s.replace(
+        /\bcheckpoints:\s*(\d+)/gi,
+        'checkpoints: <span class="log-metric">$1</span>'
+    );
+
+    // 10) graphs reused
+    s = s.replace(
+        /graphs reused = (\d+)/g,
+        'graphs reused = <span class="log-metric">$1</span>'
+    );
+
+    // 11) prompt eval time / eval time / total time in print_timing output
+    s = s.replace(
+        /(prompt eval time|eval time|total time)\s*=/g,
+        '<span class="log-metric">$1</span> ='
+    );
+
+    // 12) Memory / cache sizes (MiB/GiB)
     s = s.replace(
         /(\d+\.?\d*)\s*(MiB|GiB)/gi,
         '<span class="log-size">$1 $2</span>'
+    );
+
+    // 13) Similarity scores (f_keep, sim) important for caching
+    s = s.replace(
+        /\b(f_keep|sim)\s*=\s*([\d.]+)/g,
+        '$1 = <span class="log-metric">$2</span>'
     );
 
     return s;

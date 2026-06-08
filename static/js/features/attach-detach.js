@@ -5,7 +5,7 @@ import { sessionState, setupViewState } from '../core/app-state.js';
 import { updateActiveSessionInfo } from './sessions.js';
 import { showToast } from './toast.js';
 import { saveSettings } from './settings.js';
-import { hideConnectingState, saveLastSessionData, showConnectingState, switchView, restorePreviousPosition } from './setup-view.js';
+import { hideConnectingState, saveLastSessionData, showConnectingState, switchView, restorePreviousPosition, savePreviousPosition } from './setup-view.js';
 import { setTuneConfig, showTunePanel, hideTunePanel } from './tune-panel.js';
 import { hideDisconnectedBanner } from './chat-transport.js';
 import { monitorState } from '../core/app-state.js';
@@ -200,11 +200,71 @@ export async function doStop() {
     hideTunePanel();
     setHeaderMode(null);
 
-    // Switch back to setup/welcome view
-    if (document.body.classList.contains('setup-active') === false) {
-        // Only switch view if we're in the monitor
-        switchView('setup');
-    }
+    // Instead of jumping straight to the welcome screen,
+    // show a small modal and let the user choose what's next.
+    const modal = document.createElement('div');
+    modal.className = 'stop-choice-modal';
+    modal.innerHTML = `
+        <div class="stop-choice-card">
+            <div class="stop-choice-title">Server stopped</div>
+            <div class="stop-choice-actions">
+                <button class="btn btn-stop-choice-welcome" id="stop-choice-welcome">
+                    Go to welcome screen
+                </button>
+                <button class="btn btn-stop-choice-stay" id="stop-choice-stay">
+                    Stay on dashboard
+                </button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const welcomeBtn = modal.querySelector('#stop-choice-welcome');
+    const stayBtn = modal.querySelector('#stop-choice-stay');
+
+    const removeModal = () => {
+        if (modal && modal.parentNode) {
+            modal.parentNode.removeChild(modal);
+        }
+    };
+
+    welcomeBtn.addEventListener('click', () => {
+        // Go to welcome screen (previous behavior).
+        if (document.body.classList.contains('setup-active') === false) {
+            switchView('setup');
+        }
+        removeModal();
+    });
+
+    stayBtn.addEventListener('click', () => {
+        // Stay on dashboard; disable buttons to avoid double-click.
+        stayBtn.disabled = true;
+        welcomeBtn.disabled = true;
+
+        // Fade out, then remove.
+        modal.style.transition = 'opacity 250ms ease';
+        modal.style.opacity = '0.5';
+        modal.style.pointerEvents = 'none';
+
+        setTimeout(() => {
+            removeModal();
+        }, 3000);
+    });
+
+    // On any Escape: default to welcome screen.
+    const onKey = (e) => {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            if (document.body.classList.contains('setup-active') === false) {
+                switchView('setup');
+            }
+            removeModal();
+            document.removeEventListener('keydown', onKey);
+        }
+    };
+    document.addEventListener('keydown', onKey);
+
     if (btnStop) btnStop.disabled = false;
 }
 
