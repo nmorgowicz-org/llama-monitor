@@ -854,15 +854,49 @@ impl ModelMetadata {
             .as_deref()
             .map(gguf_arch_to_heuristic_name)
             .unwrap_or(model_name);
-        let heuristic = ModelArch::from_name_and_params(heuristic_name, param_b);
+
+        // For Gemma4, the tier (e2b/e4b/12b/26b/31b) is normally chosen from
+        // param_b, which can be unreliable. If we know the exact layer count from
+        // the GGUF, we can pick the correct tier: only Gemma4-31B uses 60 layers.
+        let param_b_for_heuristic =
+            if self.gguf_arch.as_deref() == Some("gemma4") && self.n_layers == Some(60) {
+                31.0
+            } else {
+                param_b
+            };
+
+        let heuristic = ModelArch::from_name_and_params(heuristic_name, param_b_for_heuristic);
+
+        // For Gemma4 with sliding window, the GGUF n_kv_heads encodes the local
+        // sliding-window layers' KV heads; the correct global-layer KV heads are
+        // smaller and captured by the heuristic. Using the GGUF value for global
+        // layers will massively inflate the KV cache estimate.
+        let gemma4_sw = self.gguf_arch.as_deref() == Some("gemma4") && heuristic.has_local_attn();
+        let kv_heads = if gemma4_sw {
+            heuristic.n_kv_heads
+        } else {
+            self.n_kv_heads.unwrap_or(heuristic.n_kv_heads)
+        };
+        let local_kv_heads = if heuristic.has_local_attn() {
+            heuristic.local_kv_heads
+        } else {
+            heuristic.local_kv_heads
+        };
 
         ModelArch {
             n_layers: self.n_layers.unwrap_or(heuristic.n_layers),
-            n_kv_heads: self.n_kv_heads.unwrap_or(heuristic.n_kv_heads),
-            head_dim: head_dim.unwrap_or(heuristic.head_dim),
+            n_kv_heads: kv_heads,
+            // For sliding-window models (e.g. Gemma4), GGUF’s key_length is the
+            // global head_dim (512) but local layers use a smaller dim (256).
+            // Trust the heuristic’s local head_dim in that case.
+            head_dim: if heuristic.has_local_attn() {
+                heuristic.head_dim
+            } else {
+                head_dim.unwrap_or(heuristic.head_dim)
+            },
             n_global_attn_layers: heuristic.n_global_attn_layers,
             local_attn_window: heuristic.local_attn_window,
-            local_kv_heads: heuristic.local_kv_heads,
+            local_kv_heads,
             // Hybrid linear attention: preserve from heuristic; introspection will refine
             n_attn_layers: heuristic.n_attn_layers,
             linear_attn_state_bytes: heuristic.linear_attn_state_bytes,

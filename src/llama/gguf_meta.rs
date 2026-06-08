@@ -655,7 +655,6 @@ mod tests {
             Some("qwen35"),
             "Qwopus3.6-27B-v2-MTP GGUF reports qwen35"
         );
-        // Same note: 65 blocks in these GGUFs, confirmed Qwen3.6 family by block_count < 96
         assert!(
             gguf.block_count.unwrap() < 96,
             "block_count {} < 96 confirms Qwen3.6 family",
