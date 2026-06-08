@@ -4,7 +4,7 @@
 import { sessionState } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
 import { doAttach, doStart, setHeaderMode } from './attach-detach.js';
-import { openDeferredFileBrowser } from './file-browser-launcher.js';
+import { openModelFileBrowser } from './file-browser-launcher.js';
 import { loadPresets } from './presets.js';
 import { saveSettings } from './settings.js';
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
@@ -413,7 +413,7 @@ export function initSessions() {
     document.getElementById('session-modal-cancel')?.addEventListener('click', closeSessionModal);
     document.getElementById('btn-new-session')?.addEventListener('click', showNewSessionForm);
     document.getElementById('session-create-first')?.addEventListener('click', showNewSessionForm);
-    document.getElementById('session-browse-model-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-session-model-path', 'gguf'));
+    document.getElementById('session-browse-model-btn')?.addEventListener('click', () => openModelFileBrowser('modal-session-model-path', 'gguf', null, 'model'));
 
     // Bind session form submit
     const sessionForm = document.getElementById('session-form');

@@ -4,6 +4,7 @@
 import { showToast } from './toast.js';
 
 let fileBrowserPromise = null;
+let modelsDirCache = null;      // Cached from /api/hf/download-dir
 
 async function ensureFileBrowser() {
     if (!fileBrowserPromise) {
@@ -13,6 +14,32 @@ async function ensureFileBrowser() {
         });
     }
     return fileBrowserPromise;
+}
+
+async function getModelsDir() {
+    if (modelsDirCache !== null) return modelsDirCache;
+    try {
+        const headers = window.authHeaders ? window.authHeaders() : {};
+        const r = await fetch('/api/hf/download-dir', { headers });
+        if (r.ok) {
+            const d = await r.json();
+            modelsDirCache = d.dir || null;
+        } else {
+            modelsDirCache = null;
+        }
+    } catch {
+        modelsDirCache = null;
+    }
+    return modelsDirCache;
+}
+
+// Public helper: for model-related browse, use the configured models dir
+// (unless an explicit defaultPath was already provided).
+export async function openModelFileBrowser(targetId, filter, defaultPath, context) {
+    if (!defaultPath) {
+        defaultPath = await getModelsDir() || '';
+    }
+    return openDeferredFileBrowser(targetId, filter, defaultPath, context);
 }
 
 export async function openDeferredFileBrowser(targetId, filter, defaultPath, context) {

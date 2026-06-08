@@ -10,7 +10,7 @@
 //  - Auto-size button pulls backend recommendation
 //  - Step validation before advancing
 
-import { openDeferredFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
+import { openDeferredFileBrowser, openModelFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
 import { showToast } from './toast.js';
 import { switchView } from './setup-view.js';
 import { setTuneConfig, showTunePanel } from './tune-panel.js';
@@ -764,7 +764,7 @@ function bindEvents() {
     }
     openDeferredFileBrowser('spawn-model-path', 'gguf', defaultPath, 'model');
   });
-  dom.importBrowseBtn?.addEventListener('click', () => openDeferredFileBrowser('spawn-import-path', 'gguf'));
+  dom.importBrowseBtn?.addEventListener('click', () => openModelFileBrowser('spawn-import-path', 'gguf', null, 'model'));
 
   dom.modelPathInput?.addEventListener('input', () => {
     wizardState.model.path = dom.modelPathInput.value.trim();
@@ -836,14 +836,14 @@ function bindEvents() {
   // mmproj "Browse" button: open file browser for mmproj projectors
   const mmprojBrowseBtn = document.querySelector('#hw-mmproj-browse-btn');
   if (mmprojBrowseBtn) {
-    mmprojBrowseBtn.addEventListener('click', () => {
+    mmprojBrowseBtn.addEventListener('click', async () => {
       const row = document.getElementById('hw-mmproj-row');
       const select = document.getElementById('hw-mmproj-select');
       const hfPanel = row?.querySelector('.hw-mmproj-hf-panel');
       // When HF download panel is shown, clear it and restore the select
       if (hfPanel) hfPanel.remove();
       if (select && select.style.display === 'none') select.style.display = '';
-      openDeferredFileBrowser('hw-mmproj-select', 'gguf', '', 'mmproj');
+      await openModelFileBrowser('hw-mmproj-select', 'gguf', null, 'mmproj');
     });
   }
 
@@ -864,8 +864,8 @@ function bindEvents() {
   // draft-model "Browse" button: open file browser for draft model
   const draftBrowseBtn = document.querySelector('#spawn-draft-browse-btn');
   if (draftBrowseBtn) {
-    draftBrowseBtn.addEventListener('click', () => {
-      openDeferredFileBrowser('spawn-draft-model', 'gguf', '', 'draft-model');
+    draftBrowseBtn.addEventListener('click', async () => {
+      await openModelFileBrowser('spawn-draft-model', 'gguf', null, 'draft-model');
     });
   }
 
@@ -5921,14 +5921,14 @@ function renderMtpSection() {
     // are not silently lost.
     if (!dom.mtpAssistantSelect.dataset.bound) {
       dom.mtpAssistantSelect.dataset.bound = '1';
-      dom.mtpAssistantSelect.addEventListener('change', () => {
+      dom.mtpAssistantSelect.addEventListener('change', async () => {
         const selected = dom.mtpAssistantSelect.value || '';
         // Browse sentinel: open file browser for companion assistant
         if (selected === '__browse__') {
-          openDeferredFileBrowser(
+          await openModelFileBrowser(
             'hw-mtp-assistant-select',
             'gguf',
-            '',
+            null,
             'draft-model',
           );
           return;

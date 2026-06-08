@@ -3,7 +3,7 @@
 
 import { sessionState, lastSystemMetrics } from '../core/app-state.js';
 import { escapeHtml } from '../core/format.js';
-import { openDeferredFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
+import { openModelFileBrowser, openChatTemplateLibraryBrowser, uploadChatTemplateFromBrowser } from './file-browser-launcher.js';
 import { applySettings, saveSettings } from './settings.js';
 import { showToast } from './toast.js';
 import { renderSuggestionCards, suggestionPatch, requestNcpuMoeTune } from './tuning-cards.js';
@@ -1083,8 +1083,8 @@ export function initPresets() {
             showToast('Delete failed: ' + err.message, 'error');
         }
     });
-    document.getElementById('preset-browse-model-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-model-path', 'gguf'));
-    document.getElementById('preset-browse-mmproj-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-mmproj', 'gguf'));
+    document.getElementById('preset-browse-model-btn')?.addEventListener('click', () => openModelFileBrowser('modal-model-path', 'gguf', null, 'model'));
+    document.getElementById('preset-browse-mmproj-btn')?.addEventListener('click', () => openModelFileBrowser('modal-mmproj', 'gguf', null, 'mmproj'));
     document.getElementById('preset-browse-chat-template-btn')?.addEventListener('click', async () => {
         try {
             await openChatTemplateLibraryBrowser('modal-chat-template-file');
@@ -1105,7 +1105,7 @@ export function initPresets() {
     document.getElementById('preset-clear-chat-template-btn')?.addEventListener('click', () => {
         setVal('modal-chat-template-file', '');
     });
-    document.getElementById('preset-browse-draft-model-btn')?.addEventListener('click', () => openDeferredFileBrowser('modal-draft-model', 'gguf'));
+    document.getElementById('preset-browse-draft-model-btn')?.addEventListener('click', () => openModelFileBrowser('modal-draft-model', 'gguf', null, 'draft-model'));
 
     // Fit-to-VRAM toggle shows/hides fit target
     document.getElementById('modal-fit-enabled')?.addEventListener('change', function() {
