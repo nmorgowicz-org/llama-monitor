@@ -218,6 +218,11 @@ pub async fn download_and_extract(
         }
     }
 
+    // Run cleanup after each install.
+    if let Err(e) = cleanup_old_binaries(binaries_dir).await {
+        eprintln!("[warn] llama.cpp binary cleanup failed: {}", e);
+    }
+
     Ok(())
 }
 
@@ -225,7 +230,6 @@ async fn extract_archive(path: &Path, dest: &Path) -> Result<()> {
     if path.extension().is_some_and(|e| e == "zip") {
         use std::io::Read;
         use zip::ZipArchive;
-        // Use std::fs for zip crate (sync, blocking on read).
         let file = std::fs::File::open(path)?;
         let mut archive = ZipArchive::new(std::io::BufReader::new(file))?;
         for i in 0..archive.len() {
@@ -242,7 +246,6 @@ async fn extract_archive(path: &Path, dest: &Path) -> Result<()> {
             }
         }
     } else {
-        // For tar.gz/tgz, read bytes then unpack synchronously.
         let bytes = tokio::fs::read(path).await?;
         let tar_gz = std::io::Cursor::new(bytes);
         let decompressed = flate2::read::GzDecoder::new(tar_gz);
@@ -250,6 +253,129 @@ async fn extract_archive(path: &Path, dest: &Path) -> Result<()> {
         archive.unpack(dest)?;
     }
     Ok(())
+}
+
+/// Clean up old llama.cpp artifacts in the binaries directory.
+///
+/// This is run automatically after each new download/extract.
+///
+/// Behavior:
+/// - Keeps current binaries (llama-server, llama-bench, etc.), symlinks, and non-versioned libs.
+/// - For llama-<build>-bin-*.tar.gz: keep only the latest build; remove others.
+/// - For versioned dylibs like libllama.0.0.<build>.dylib:
+///   keep only the highest build number in each family.
+pub async fn cleanup_old_binaries(binaries_dir: &Path) -> Result<()> {
+    use std::collections::HashMap;
+
+    let mut entries = fs::read_dir(binaries_dir).await?;
+    let mut files = Vec::new();
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        files.push(entry);
+    }
+
+    // Track tarballs by build number: llama-<digits>-bin-*.tar.gz
+    let mut tarball_map: HashMap<u64, PathBuf> = HashMap::new();
+    // Track versioned dylibs by family prefix
+    let mut versioned_map: HashMap<String, Vec<(PathBuf, u64)>> = HashMap::new();
+
+    for entry in &files {
+        if entry.file_type().await?.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        let lower = name.to_lowercase();
+
+        // Handle tarballs: llama-<digits>-bin-*.tar.gz
+        if lower.starts_with("llama-") && lower.ends_with(".tar.gz") && lower.contains("-bin-") {
+            if let Ok(build) = digits_between(&lower, "llama-", "-bin-") {
+                tarball_map.insert(build, entry.path());
+            }
+            continue;
+        }
+
+        // Handle versioned dylibs: <prefix><digits>.dylib
+        if let Some(build) = extract_trailing_build_number(&lower) {
+            let prefix = &lower[..lower.len() - build.to_string().len() - 6];
+            versioned_map
+                .entry(prefix.to_string())
+                .or_default()
+                .push((entry.path(), build));
+        }
+    }
+
+    let mut removed = 0usize;
+
+    // Tarballs: keep only the highest build.
+    if tarball_map.len() > 1
+        && let Some(max_build) = tarball_map.keys().cloned().max()
+    {
+        for (&build, path) in &tarball_map {
+            if build != max_build {
+                if let Err(e) = fs::remove_file(path).await {
+                    eprintln!("[warn] failed to remove old tarball {:?}: {}", path, e);
+                } else {
+                    removed += 1;
+                }
+            }
+        }
+    }
+
+    // Versioned dylibs: for each family, keep only highest build.
+    for (_prefix, variants) in versioned_map {
+        if variants.len() <= 1 {
+            continue;
+        }
+        let max_build = variants.iter().map(|(_, b)| b).max().copied().unwrap_or(0);
+        let to_remove: Vec<_> = variants
+            .iter()
+            .filter(|(_, b)| b != &max_build)
+            .map(|(p, _)| p.clone())
+            .collect();
+        for path in to_remove {
+            if let Err(e) = fs::remove_file(&path).await {
+                eprintln!("[warn] failed to remove old dylib {:?}: {}", path, e);
+            } else {
+                removed += 1;
+            }
+        }
+    }
+
+    if removed > 0 {
+        eprintln!(
+            "[llama-monitor] cleaned up {} old llama.cpp artifact(s) in {:?}",
+            removed, binaries_dir
+        );
+    }
+
+    Ok(())
+}
+
+fn digits_between(s: &str, left: &str, right: &str) -> Result<u64> {
+    let start = s
+        .find(left)
+        .map(|i| i + left.len())
+        .ok_or_else(|| anyhow::anyhow!("missing left marker"))?;
+    let end = s[start..]
+        .find(right)
+        .map(|i| i + start)
+        .ok_or_else(|| anyhow::anyhow!("missing right marker"))?;
+    let digits = &s[start..end];
+    digits
+        .parse::<u64>()
+        .map_err(|_| anyhow::anyhow!("bad digits"))
+}
+
+fn extract_trailing_build_number(name: &str) -> Option<u64> {
+    // Match: <something>.<digits>.dylib (e.g. libllama.0.0.9559.dylib)
+    if !name.ends_with(".dylib") {
+        return None;
+    }
+    let before_ext = &name[..name.len() - 6]; // strip ".dylib"
+    let parts: Vec<&str> = before_ext.rsplitn(2, '.').collect();
+    if parts.len() == 2 && parts[0].chars().all(|c| c.is_ascii_digit()) {
+        return parts[0].parse::<u64>().ok();
+    }
+    None
 }
 
 #[cfg(test)]
