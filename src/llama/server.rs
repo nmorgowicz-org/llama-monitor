@@ -278,20 +278,18 @@ pub async fn start_server(
     // we fail fast with a clear message instead of spawning and getting killed.
     {
         let bin_path = &app_config.llama_server_path;
-        let health_result = tokio::time::timeout(
-            std::time::Duration::from_secs(4),
-            async {
-                match TokioCommand::new(bin_path)
-                    .arg("--help")
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn()
-                {
-                    Ok(mut child) => child.wait().await.ok(),
-                    Err(_) => None,
-                }
+        let health_result = tokio::time::timeout(std::time::Duration::from_secs(4), async {
+            match TokioCommand::new(bin_path)
+                .arg("--help")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+            {
+                Ok(mut child) => child.wait().await.ok(),
+                Err(_) => None,
             }
-        ).await
+        })
+        .await
         .ok()
         .flatten();
 
@@ -797,7 +795,7 @@ pub async fn start_server(
         *cfg = Some(config);
     }
 
-   // Notify user-gated pollers to start after an explicit UI start action.
+    // Notify user-gated pollers to start after an explicit UI start action.
     state.llama_poll_notify.notify_waiters();
 
     // Child death watcher: detect when llama-server exits unexpectedly
@@ -833,11 +831,7 @@ pub async fn start_server(
                         let tail_lines: Vec<String> = {
                             let logs = watcher_state.server_logs.lock().unwrap();
                             // Take last 20 lines (some may be [monitor]) and filter.
-                            let from = if logs.len() > 20 {
-                                logs.len() - 20
-                            } else {
-                                0
-                            };
+                            let from = if logs.len() > 20 { logs.len() - 20 } else { 0 };
                             logs.iter()
                                 .skip(from)
                                 .filter(|l| !l.starts_with("[monitor]"))
@@ -848,8 +842,7 @@ pub async fn start_server(
                         let tail_text = if tail_lines.is_empty() {
                             // If all recent lines are [monitor]-only, likely killed
                             // before llama-server printed anything useful; note that.
-                            "\nNo llama-server output captured before it was killed."
-                                .to_string()
+                            "\nNo llama-server output captured before it was killed.".to_string()
                         } else {
                             format!(
                                 "\nLast relevant lines from llama-server:\n{}",

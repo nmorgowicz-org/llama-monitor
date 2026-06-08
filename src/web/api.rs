@@ -11100,7 +11100,7 @@ fn api_llama_binary_update(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
-        warp::path!("api" / "llama-binary" / "update")
+    warp::path!("api" / "llama-binary" / "update")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
         .and(super::safe_json_body::<serde_json::Value>())
