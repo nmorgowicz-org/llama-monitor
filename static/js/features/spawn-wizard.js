@@ -4556,207 +4556,232 @@ async function _fetchHfTagsWithBaseModel(repoId) {
 // No-ops if originRepo is unknown or the row element is missing.
 let _tagsRowOrigin = ''; // track which repo is currently loaded in the row
 
-// Inline repo editor: lets user change HF repo from hardware step.
- // Behavior:
- //  1) Try auto-discovery using the local model filename.
- //  2) If it finds a strong match, apply it automatically.
- //  3) Otherwise, show an inline input so the user can type the repo.
- function _openHwRepoEditor(repoEl, currentRepo) {
-   if (!repoEl) return;
+// Inline repo editor / picker: always shows candidates + custom input.
+  //  - Searches by filename, builds a short candidate list.
+  //  - If currentRepo is known, it is first and marked recommended.
+  //  - User can pick a candidate pill or type a custom repo ID.
+  function _openHwRepoEditor(repoEl, currentRepo) {
+    if (!repoEl) return;
+    if (repoEl.classList.contains('hw-model-repo-editing')) return;
 
-   // If already editing, skip
-   if (repoEl.classList.contains('hw-model-repo-editing')) return;
+    repoEl.classList.add('hw-model-repo-editing');
+    repoEl.innerHTML = '';
 
-   repoEl.classList.add('hw-model-repo-editing');
-   repoEl.innerHTML = '';
+    const statusEl = document.createElement('span');
+    statusEl.style.cssText =
+      'font-size:10px;color:var(--color-text-muted);margin-left:6px;white-space:nowrap;';
+    statusEl.textContent = 'Searching HuggingFace…';
+    repoEl.appendChild(statusEl);
 
-   // Show searching label
-   const statusEl = document.createElement('span');
-   statusEl.style.cssText =
-     'font-size:10px;color:var(--color-text-muted);margin-left:6px;white-space:nowrap;';
-   statusEl.textContent = 'Searching HuggingFace…';
-   repoEl.appendChild(statusEl);
+    const restore = () => {
+      repoEl.classList.remove('hw-model-repo-editing');
+      renderHardwareModelHeader();
+    };
 
-   const restore = () => {
-     repoEl.classList.remove('hw-model-repo-editing');
-     renderHardwareModelHeader();
-   };
+    const filename = (wizardState.model.path || '').split(/[\\/]/).pop() || '';
+    const stem = _modelStemForSearch(filename);
 
-   const filename = (wizardState.model.path || '').split(/[\\/]/).pop() || '';
-   const stem = _modelStemForSearch(filename);
+    // Collect candidate repo IDs from HF search (no auto-apply).
+    const searchCandidates = async () => {
+      const ids = [];
+      const seen = new Set();
+      const add = (id) => { if (id && !seen.has(id)) { seen.add(id); ids.push(id); } };
 
-   const autoDiscover = async () => {
-     if (stem.length < 4) return false;
+      if (stem.length < 4) return ids;
 
-     const shorter = stem
-       .replace(/-v\d+(?:\.\d+)?(?:-[A-Za-z]+)*$/i, '')
-       .replace(/-MTP$/i, '');
-     const queries = [...new Set([stem, `${stem} GGUF`, shorter])]
-       .filter(q => q.length >= 4);
+      const shorter = stem
+        .replace(/-v\d+(?:\.\d+)?(?:-[A-Za-z]+)*$/i, '')
+        .replace(/-MTP$/i, '');
+      const queries = [...new Set([stem, `${stem} GGUF`, shorter])].filter(q => q.length >= 4);
 
-     const headers = window.authHeaders ? window.authHeaders() : {};
+      const headers = window.authHeaders ? window.authHeaders() : {};
 
-     for (const query of queries) {
-       try {
-         const res = await fetch('/api/hf/search', {
-           method: 'POST',
-           headers: { ...headers, 'Content-Type': 'application/json' },
-           body: JSON.stringify({ query, sort: 'downloads', limit: 8 }),
-         });
-         if (!res.ok) continue;
-         const sd = await res.json();
-         for (const candidate of (sd.models || []).slice(0, 4)) {
-           const fd = await _hfFilesPost(candidate.id);
-           if (!fd?.ok) continue;
-           const gguf = (fd.files || []).filter(f =>
-             !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
-           if (gguf.length >= 2) {
-             // Found a strong match: apply it.
-             wizardState.model.originRepo = candidate.id;
-             wizardState.model.hfRepo = candidate.id;
-             wizardState.model.quantFiles = gguf.map(f => ({
-               path: f.rfilename || f.path || '',
-               name: f.rfilename || f.path || '',
-               size: f.size || 0,
-               label: _extractQuantLabel(f.rfilename || f.path || ''),
-             }));
-             wizardState.model._quantSwapRepo = candidate.id;
+      for (const query of queries) {
+        try {
+          const res = await fetch('/api/hf/search', {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, sort: 'downloads', limit: 5 }),
+          });
+          if (!res.ok) continue;
+          const sd = await res.json();
+          (sd.models || []).slice(0, 3).forEach(m => add(m.id));
+        } catch { /* continue trying */ }
+        if (ids.length >= 5) break;
+      }
 
-             // mmproj files
-             const mmprojs = (fd.files || []).filter(f => f.is_mmproj);
-             wizardState.model.mmprojFiles = mmprojs.map(f => ({
-               repo_id: f.repo_id || candidate.id,
-               path: f.rfilename || f.path || '',
-               name: f.rfilename || f.path || '',
-               size: f.size || 0,
-               is_mmproj: true,
-               is_recommended_mmproj: f.is_recommended_mmproj || false,
-               mmproj_recommendation: f.mmproj_recommendation || '',
-             }));
+      return ids;
+    };
 
-             _tagsRowOrigin = '';
-             showToast('Repo found', 'success', `${gguf.length} quants loaded`);
-             renderHardwareModelHeader();
-             return true;
-           }
-         }
-       } catch {
-         // continue trying
-       }
-     }
-     return false;
-   };
+    // Build final picker candidates: currentRepo first (if set), then search results, deduped.
+    const buildPickerCandidates = (searchIds) => {
+      const result = [];
+      const seen = new Set();
+      const add = (id) => { if (id && !seen.has(id)) { seen.add(id); result.push(id); } };
 
-   const showManualInput = () => {
-     repoEl.classList.remove('hw-model-repo-editing');
-     repoEl.classList.add('hw-model-repo-editing');
-     repoEl.innerHTML = '';
+      if (currentRepo) add(currentRepo); // recommended
+      for (const id of searchIds) add(id);
+      return result.slice(0, 5);
+    };
 
-     const wrap = document.createElement('span');
-     wrap.style.cssText =
-       'display:inline-flex;align-items:center;gap:4px;margin-left:4px;';
+    // Apply a selected repo: fetch files, validate, and set wizardState.
+    const applyRepo = async (repoId, btn) => {
+      if (!repoId || btn.disabled) return;
+      btn.disabled = true;
+      btn.textContent = '⠋';
 
-     const input = document.createElement('input');
-     input.type = 'text';
-     input.value = currentRepo || '';
-     input.placeholder = 'owner/repo-GGUF';
-     input.style.cssText =
-       'width:170px;padding:3px 6px;border-radius:4px;border:1px solid rgba(148,163,253,0.4);' +
-       'background:rgba(15,23,42,0.95);color:var(--color-text-primary);font-size:10px;';
+      try {
+        const data = await _hfFilesPost(repoId);
+        btn.disabled = false;
+        btn.textContent = 'Use';
 
-     const loadBtn = document.createElement('button');
-     loadBtn.type = 'button';
-     loadBtn.className = 'btn-wizard-tertiary';
-     loadBtn.style.cssText =
-       'font-size:10px;min-height:20px;padding:1px 7px;flex-shrink:0;';
-     loadBtn.textContent = 'Load';
+        if (!data?.ok) {
+          showToast('Repo not found', 'error', 'Check the repo ID and try again.');
+          restore();
+          return;
+        }
 
-     const cancelBtn = document.createElement('button');
-     cancelBtn.type = 'button';
-     cancelBtn.className = 'btn-wizard-tertiary';
-     cancelBtn.style.cssText =
-       'font-size:10px;min-height:20px;padding:1px 7px;flex-shrink:0;opacity:0.7;';
-     cancelBtn.textContent = '✕';
+        const rawFiles = (data.files || []).filter(f =>
+          !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
+        if (!rawFiles.length) {
+          showToast('No GGUFs', 'error', 'No GGUF files found in this repo.');
+          restore();
+          return;
+        }
 
-     wrap.appendChild(input);
-     wrap.appendChild(loadBtn);
-     wrap.appendChild(cancelBtn);
-     repoEl.appendChild(wrap);
-     input.focus();
-     input.select();
+        wizardState.model.originRepo = repoId;
+        wizardState.model.hfRepo = repoId;
+        wizardState.model.quantFiles = rawFiles.map(f => ({
+          path: f.rfilename || f.path || '',
+          name: f.rfilename || f.path || '',
+          size: f.size || 0,
+          label: _extractQuantLabel(f.rfilename || f.path || ''),
+        }));
+        wizardState.model._quantSwapRepo = repoId;
 
-     const doLoad = async () => {
-       const repoId = input.value.trim();
-       if (!repoId) return;
-       loadBtn.disabled = true;
-       loadBtn.textContent = '⠋';
+        wizardState.model.mmprojFiles = (data.files || []).filter(f => f.is_mmproj).map(f => ({
+          repo_id: f.repo_id || repoId,
+          path: f.rfilename || f.path || '',
+          name: f.rfilename || f.path || '',
+          size: f.size || 0,
+          is_mmproj: true,
+          is_recommended_mmproj: f.is_recommended_mmproj || false,
+          mmproj_recommendation: f.mmproj_recommendation || '',
+        }));
 
-       try {
-         const data = await _hfFilesPost(repoId);
-         loadBtn.disabled = false;
-         loadBtn.textContent = 'Load';
+        _tagsRowOrigin = '';
+        showToast('Repo updated', 'success', `${rawFiles.length} quants loaded`);
+        renderHardwareModelHeader();
+      } catch {
+        btn.disabled = false;
+        btn.textContent = 'Use';
+        showToast('Error', 'error', 'Failed to load repo.');
+        restore();
+      }
+    };
 
-         if (!data?.ok) {
-           showToast('Repo not found', 'error', 'Check the repo ID and try again.');
-           restore();
-           return;
-         }
+    // Render picker: candidate pills + custom input.
+    const renderPicker = (candidates) => {
+      repoEl.innerHTML = '';
 
-         const rawFiles = (data.files || []).filter(f =>
-           !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
+      const wrap = document.createElement('span');
+      wrap.style.cssText =
+        'display:inline-flex;align-items:center;gap:4px;margin-left:4px;flex-wrap:wrap;';
 
-         if (!rawFiles.length) {
-           showToast('No GGUFs', 'error', 'No GGUF files found in this repo.');
-           restore();
-           return;
-         }
+      // Candidate pills (up to 4 visible; if none, skip pills block).
+      if (candidates.length > 0) {
+        const pillsWrap = document.createElement('span');
+        pillsWrap.style.cssText = 'display:inline-flex;gap:3px;flex-wrap:wrap;';
 
-         wizardState.model.originRepo = repoId;
-         wizardState.model.hfRepo = repoId;
-         wizardState.model.quantFiles = rawFiles.map(f => ({
-           path: f.rfilename || f.path || '',
-           name: f.rfilename || f.path || '',
-           size: f.size || 0,
-           label: _extractQuantLabel(f.rfilename || f.path || ''),
-         }));
-         wizardState.model._quantSwapRepo = repoId;
+        candidates.forEach((repoId, i) => {
+          const isRecommended = i === 0 && currentRepo && repoId === currentRepo;
+          const pill = document.createElement('button');
+          pill.type = 'button';
+          pill.className = 'btn-wizard-tertiary';
+          const shortName = repoId.split('/').slice(-1)[0];
+          pill.style.cssText =
+            'font-size:9px;min-height:18px;padding:1px 6px;cursor:pointer;border-radius:3px;' +
+            'border:1px solid rgba(255,255,255,0.12);' +
+            (isRecommended
+              ? 'background:rgba(80,120,200,0.25);border-color:rgba(100,160,255,0.35);'
+              : 'background:rgba(80,120,200,0.12);') +
+            'color:var(--color-text-primary);white-space:nowrap;';
+          pill.textContent = shortName;
+          pill.title = `${repoId}${isRecommended ? ' (recommended)' : ''}`;
+          pill.addEventListener('click', () => applyRepo(repoId, pill));
+          pillsWrap.appendChild(pill);
+        });
 
-         wizardState.model.mmprojFiles = (data.files || []).filter(f => f.is_mmproj).map(f => ({
-           repo_id: f.repo_id || repoId,
-           path: f.rfilename || f.path || '',
-           name: f.rfilename || f.path || '',
-           size: f.size || 0,
-           is_mmproj: true,
-           is_recommended_mmproj: f.is_recommended_mmproj || false,
-           mmproj_recommendation: f.mmproj_recommendation || '',
-         }));
+        wrap.appendChild(pillsWrap);
+      }
 
-         _tagsRowOrigin = '';
-         showToast('Repo updated', 'success', `${rawFiles.length} quants loaded`);
-         renderHardwareModelHeader();
-       } catch {
-         loadBtn.disabled = false;
-         loadBtn.textContent = 'Load';
-         showToast('Error', 'error', 'Failed to load repo.');
-         restore();
-       }
-     };
+      // Separator
+      const sep = document.createElement('span');
+      sep.style.cssText = 'font-size:8px;color:var(--color-text-muted);margin:0 1px;';
+      sep.textContent = '|';
+      wrap.appendChild(sep);
 
-     loadBtn.addEventListener('click', doLoad);
-     cancelBtn.addEventListener('click', restore);
-     input.addEventListener('keydown', e => {
-       if (e.key === 'Enter') { e.preventDefault(); doLoad(); }
-       if (e.key === 'Escape') { restore(); }
-     });
-   };
+      // Custom input
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = currentRepo || '';
+      input.placeholder = 'owner/repo-GGUF';
+      input.style.cssText =
+        'width:160px;padding:2px 5px;border-radius:3px;border:1px solid rgba(148,163,253,0.4);' +
+        'background:rgba(15,23,42,0.95);color:var(--color-text-primary);font-size:9px;';
 
-   (async () => {
-     const found = await autoDiscover();
-     if (!found) {
-       showManualInput();
-     }
-   })();
- }
+      const loadBtn = document.createElement('button');
+      loadBtn.type = 'button';
+      loadBtn.className = 'btn-wizard-tertiary';
+      loadBtn.style.cssText =
+        'font-size:9px;min-height:18px;padding:1px 5px;flex-shrink:0;';
+      loadBtn.textContent = 'Load';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'btn-wizard-tertiary';
+      cancelBtn.style.cssText =
+        'font-size:9px;min-height:18px;padding:1px 5px;flex-shrink:0;opacity:0.7;';
+      cancelBtn.textContent = '✕';
+
+      wrap.appendChild(input);
+      wrap.appendChild(loadBtn);
+      wrap.appendChild(cancelBtn);
+      repoEl.appendChild(wrap);
+
+      input.focus();
+      input.select();
+
+      const doLoad = async () => {
+        const repoId = input.value.trim();
+        if (!repoId) return;
+        loadBtn.disabled = true;
+        loadBtn.textContent = '⠋';
+
+        try {
+          await applyRepo(repoId, loadBtn);
+        } catch {
+          loadBtn.disabled = false;
+          loadBtn.textContent = 'Load';
+          showToast('Error', 'error', 'Failed to load repo.');
+          restore();
+        }
+      };
+
+      loadBtn.addEventListener('click', doLoad);
+      cancelBtn.addEventListener('click', restore);
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); doLoad(); }
+        if (e.key === 'Escape') { restore(); }
+      });
+    };
+
+    (async () => {
+      const searchIds = await searchCandidates();
+      const candidates = buildPickerCandidates(searchIds);
+      renderPicker(candidates);
+    })();
+  }
 
 async function _refreshHwTagsRow() {
   const row = document.getElementById('hw-tags-row');

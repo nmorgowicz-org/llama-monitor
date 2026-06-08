@@ -1435,11 +1435,60 @@ pub async fn hf_resolve_origin(filename: &str, size_bytes: u64) -> Result<HfReso
         });
     }
 
-    // Score and rank candidates
+    // Score and rank candidates, validating that each candidate repo actually
+    // hosts a GGUF file matching the local file (name + size).
     let mut scored: Vec<HfResolveCandidate> = Vec::new();
+    let token_for_file_check = _token.as_deref();
+
     for (repo_id, downloads, raw_tags) in &candidates {
-        let score =
-            score_resolve_candidate(repo_id, &stem, filename, size_bytes, *downloads, raw_tags);
+        // Fetch repo files to see if the file exists there
+        let files = match fetch_file_sizes(repo_id, token_for_file_check).await {
+            Ok(f) => f,
+            Err(_) => {
+                // If we cannot list repo files, we can’t confirm existence;
+                // treat it as unknown but still score weakly.
+                let score = score_resolve_candidate(
+                    repo_id, &stem, filename, size_bytes, *downloads, raw_tags, false, None,
+                );
+                if score > 0.1 {
+                    let repo_name = repo_id.split('/').next_back().unwrap_or(repo_id);
+                    let (preview_tags, family) = match hf_get_model_info(repo_id).await {
+                        Ok(info) => {
+                            let preview_tags: Vec<String> =
+                                info.tags.iter().take(6).cloned().collect();
+                            let family = detect_model_family(&info, repo_name);
+                            (preview_tags, family)
+                        }
+                        Err(_) => (Vec::new(), infer_family_from_name(repo_name)),
+                    };
+                    scored.push(HfResolveCandidate {
+                        repo_id: repo_id.clone(),
+                        confidence: (score * 100.0).round() / 100.0,
+                        reason: derive_resolve_reason(&score),
+                        preview_tags,
+                        card_url: format!("https://huggingface.co/{repo_id}"),
+                        family,
+                    });
+                }
+                continue;
+            }
+        };
+
+        // Look for a file in this repo that matches the local file.
+        let (file_confirmed, matched_file) =
+            find_matching_file_in_repo(&files, &stem, filename, size_bytes);
+
+        let score = score_resolve_candidate(
+            repo_id,
+            &stem,
+            filename,
+            size_bytes,
+            *downloads,
+            raw_tags,
+            file_confirmed,
+            matched_file.as_deref(),
+        );
+
         if score > 0.1 {
             // Fetch model info for tags and family detection (non-blocking best-effort)
             let repo_name = repo_id.split('/').next_back().unwrap_or(repo_id);
@@ -1478,19 +1527,211 @@ pub async fn hf_resolve_origin(filename: &str, size_bytes: u64) -> Result<HfReso
     })
 }
 
+/// Try to find a file in the repo that corresponds to the local GGUF.
+/// Returns (confirmed_exists, matched_filename).
+/// A match requires:
+/// - same model stem tokens mostly present
+/// - same quant-like token
+/// - if we know the local file size, within ±5% of the HF file size.
+fn find_matching_file_in_repo(
+    files: &std::collections::HashMap<String, u64>,
+    stem: &str,
+    filename: &str,
+    size_bytes: u64,
+) -> (bool, Option<String>) {
+    let filename_lower = filename.to_ascii_lowercase();
+    let stem_lower = stem.to_ascii_lowercase();
+
+    // Extract quant-like token from filename (e.g. "Q4_K_M", "Q8_0", "BF16")
+    let quant_tok: Option<String> = extract_quant_token(&filename_lower);
+
+    let stem_parts: Vec<&str> = stem_lower
+        .split(['-', ' ', '_'])
+        .filter(|p| !p.is_empty())
+        .collect();
+
+    for (path, file_size) in files {
+        let base = path.rsplit('/').next().unwrap_or(path);
+        let base_lower = base.to_ascii_lowercase();
+
+        // Must share core stem parts
+        let mut stem_matches = 0;
+        for part in &stem_parts {
+            if part.len() > 2 && base_lower.contains(part) {
+                stem_matches += 1;
+            }
+        }
+        if stem_parts.is_empty() || stem_matches == 0 {
+            continue;
+        }
+        let stem_ratio = stem_matches as f64 / stem_parts.len() as f64;
+        if stem_ratio < 0.6 {
+            continue;
+        }
+
+        // Must include a similar quant token, if present in local filename
+        if let Some(ref q) = quant_tok
+            && !base_lower.contains(q)
+        {
+            continue;
+        }
+
+        // If we have a local size, enforce ±5% constraint
+        if size_bytes > 1_000_000 && *file_size > 0 {
+            let diff = (*file_size).abs_diff(size_bytes);
+            let rel_diff = diff as f64 / size_bytes as f64;
+            if rel_diff > 0.05 {
+                continue;
+            }
+        }
+
+        return (true, Some(base.to_string()));
+    }
+
+    (false, None)
+}
+
+/// Extract a quant-like token from the filename for matching, e.g. "q4_k_m", "q8_0", "f16", "bf16".
+fn extract_quant_token(filename_lower: &str) -> Option<String> {
+    let parts: Vec<&str> = filename_lower.split(['-', '_', '.']).collect();
+    for (i, p) in parts.iter().enumerate() {
+        // Look for Q/I/B/F as first char and adjacent alphanumeric
+        if p.len() > 1
+            && matches!(p.chars().next(), Some('q' | 'i' | 'b' | 'f'))
+            && (p.chars().nth(1).is_some_and(|c| c.is_ascii_alphanumeric())
+                || p.chars().nth(1) == Some('_'))
+        {
+            // If next part is also related, merge (e.g. "Q4" + "K" + "M")
+            if i + 1 < parts.len()
+                && parts[i + 1].len() == 1
+                && parts[i + 1]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic())
+            {
+                if i + 2 < parts.len()
+                    && parts[i + 2].len() == 1
+                    && parts[i + 2]
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_alphabetic())
+                {
+                    return Some(format!("{}_{}-{}", p, parts[i + 1], parts[i + 2]));
+                }
+                return Some(format!("{}_{}", p, parts[i + 1]));
+            }
+            return Some(p.to_string());
+        }
+    }
+    None
+}
+
+#[allow(clippy::too_many_arguments)]
 fn score_resolve_candidate(
     repo_id: &str,
     stem: &str,
     filename: &str,
-    _size_bytes: u64,
+    size_bytes: u64,
     downloads: u64,
     raw_tags: &[String],
+    file_exists_in_repo: bool,
+    _matched_file: Option<&str>,
 ) -> f64 {
     let filename_lower = filename.to_ascii_lowercase();
     let stem_lower = stem.to_ascii_lowercase();
     let mut score = 0.0;
 
-    // 1. Stem match in repo name (strongest signal)
+    // If we can't confirm the file actually exists in this repo,
+    // heavily penalize unless the score is already trivially small (so it only appears as suggestion).
+    if !file_exists_in_repo {
+        // This repo is unlikely to be the true origin.
+        // We still allow it to appear as low-confidence suggestion (based on name similarity),
+        // but cap its score so it cannot become `confident:true`.
+        let base = base_resolve_score(repo_id, stem, &filename_lower, downloads, raw_tags);
+        return base.min(0.35); // never confident if file not found here
+    }
+
+    // Strong base for repos that actually host the matching file.
+    score += 0.45;
+
+    // 1. Stem match in repo name
+    let stem_parts: Vec<&str> = stem_lower.split('-').filter(|p| !p.is_empty()).collect();
+    let repo_name_lower = repo_id
+        .split('/')
+        .next_back()
+        .unwrap_or(repo_id)
+        .to_ascii_lowercase();
+    let mut matched_parts = 0;
+    for part in &stem_parts {
+        if part.len() > 2 && repo_name_lower.contains(part) {
+            matched_parts += 1;
+        }
+    }
+    if matched_parts > 0 {
+        let ratio = matched_parts as f64 / stem_parts.len() as f64;
+        score += 0.25 * ratio;
+        if matched_parts == stem_parts.len() {
+            score += 0.05; // perfect stem match bonus
+        }
+    }
+
+    // 2. Filename token match
+    let file_tokens: Vec<&str> = filename_lower
+        .split(['-', '.', '_'])
+        .filter(|t| t.len() > 2 && !t.chars().all(|c| c.is_ascii_digit()))
+        .collect();
+    let mut file_matches = 0;
+    for token in &file_tokens {
+        if repo_name_lower.contains(token) {
+            file_matches += 1;
+        }
+    }
+    if file_matches > 0 {
+        score += 0.10 * (file_matches as f64 / file_tokens.len().max(1) as f64);
+    }
+
+    // 3. Parameter count match
+    let param_b = infer_param_b_from_name(&filename_lower);
+    if param_b > 0.0 {
+        let param_str = format!("{}", param_b as u64);
+        for tag in raw_tags {
+            let tag_lower = tag.to_ascii_lowercase();
+            if tag_lower.starts_with("parameter_size:") && tag_lower.contains(&param_str) {
+                score += 0.10;
+                break;
+            }
+        }
+        if repo_name_lower.contains(&param_str) {
+            score += 0.05;
+        }
+    }
+
+    // 4. Size agreement bonus when file_exists is true and size is known
+    // (Already enforced by find_matching_file_in_repo for ±5%, but give a small extra bonus)
+    if file_exists_in_repo && size_bytes > 1_000_000 {
+        score += 0.05;
+    }
+
+    // 5. Popularity tiebreaker (weak signal)
+    if downloads > 1000 && score > 0.0 {
+        score += 0.05;
+    }
+
+    score.clamp(0.0, 1.0)
+}
+
+/// Minimal "name-only" score for repos that do not host the file,
+/// so we can still show them as weak suggestions.
+fn base_resolve_score(
+    repo_id: &str,
+    stem: &str,
+    filename_lower: &str,
+    downloads: u64,
+    raw_tags: &[String],
+) -> f64 {
+    let stem_lower = stem.to_ascii_lowercase();
+    let mut score = 0.0;
+
     let stem_parts: Vec<&str> = stem_lower.split('-').filter(|p| !p.is_empty()).collect();
     let repo_name_lower = repo_id
         .split('/')
@@ -1506,13 +1747,9 @@ fn score_resolve_candidate(
     if matched_parts > 0 {
         let ratio = matched_parts as f64 / stem_parts.len() as f64;
         score += 0.4 * ratio;
-        if matched_parts == stem_parts.len() {
-            score += 0.15; // perfect stem match bonus
-        }
     }
 
-    // 2. Filename token match (moderate signal)
-    // Check if any token from filename appears in the repo name
+    // Filename token match
     let file_tokens: Vec<&str> = filename_lower
         .split(['-', '.', '_'])
         .filter(|t| t.len() > 2 && !t.chars().all(|c| c.is_ascii_digit()))
@@ -1527,29 +1764,28 @@ fn score_resolve_candidate(
         score += 0.15 * (file_matches as f64 / file_tokens.len().max(1) as f64);
     }
 
-    // 3. Parameter count match from tags (strong signal if present)
-    let param_b = infer_param_b_from_name(&filename_lower);
+    // Parameter match
+    let param_b = infer_param_b_from_name(filename_lower);
     if param_b > 0.0 {
         let param_str = format!("{}", param_b as u64);
         for tag in raw_tags {
             let tag_lower = tag.to_ascii_lowercase();
             if tag_lower.starts_with("parameter_size:") && tag_lower.contains(&param_str) {
-                score += 0.2;
+                score += 0.1;
                 break;
             }
         }
-        // Also check if param appears in the repo name
         if repo_name_lower.contains(&param_str) {
-            score += 0.1;
+            score += 0.05;
         }
     }
 
-    // 4. Popularity tiebreaker (weak signal, prevents obscure repos from winning)
+    // Popularity (weak)
     if downloads > 1000 && score > 0.0 {
-        score += 0.05;
+        score += 0.02;
     }
 
-    score.clamp(0.0, 1.0)
+    score.clamp(0.0, 0.7)
 }
 
 fn derive_resolve_reason(score: &f64) -> String {
