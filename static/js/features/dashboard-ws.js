@@ -927,6 +927,15 @@ function _parseLogLevel(line) {
     // Legacy format: starts with timestamp + level, e.g. "2024-01-01T... INFO ..."
     const tsFmt = line.match(/^\d{4}-\d{2}-\d{2}T\S+\s+(INFO|WARN|ERROR|DEBUG)\b/i);
     if (tsFmt) return tsFmt[1].toUpperCase();
+    // llama.cpp single-letter level after short timestamp, e.g. "1515.01.190.648 W slot ..."
+    const singleLetter = line.match(/^\d[\d\.]+\s+([IiWwEeDd])\b/);
+    if (singleLetter) {
+        const c = singleLetter[1].toUpperCase();
+        if (c === 'W') return 'WARN';
+        if (c === 'E') return 'ERROR';
+        if (c === 'I') return 'INFO';
+        if (c === 'D') return 'DEBUG';
+    }
     return 'OTHER';
 }
 
@@ -976,6 +985,30 @@ function _colorizeLogLine(line) {
     s = s.replace(
         /(?<=\s)(\d+\.?\d*)\s*tokens?\b/g,
         ' <span class="log-metric">$1 tokens</span>'
+    );
+
+    // 5) n_tokens values (prompt processing / final token counts)
+    s = s.replace(
+        /\bn_tokens\s*=\s*(\d+)/g,
+        'n_tokens = <span class="log-important">$1</span>'
+    );
+
+    // 6) progress (prompt processing progress, e.g. "progress = 0.84")
+    s = s.replace(
+        /\bprogress\s*=\s*([\d.]+)/g,
+        'progress = <span class="log-important">$1</span>'
+    );
+
+    // 7) draft acceptance rate (e.g. "draft acceptance = 0.47953")
+    s = s.replace(
+        /\bdraft acceptance\s*=\s*([\d.]+)/g,
+        'draft acceptance = <span class="log-metric">$1</span>'
+    );
+
+    // 8) Memory / cache sizes (MiB/GiB)
+    s = s.replace(
+        /(\d+\.?\d*)\s*(MiB|GiB)/gi,
+        '<span class="log-size">$1 $2</span>'
     );
 
     return s;

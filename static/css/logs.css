@@ -183,9 +183,11 @@
 .log-debug { color: rgba(148, 163, 184, 0.55); }
 
 /* Log token coloring (llama.cpp / llama-server logs) */
-.log-lev  { color: #e5e5e5; }
-.log-comp { color: #38bdf8; }
-.log-metric { color: #22c55e; }
+.log-lev       { color: #e5e5e5; }
+.log-comp      { color: #38bdf8; }
+.log-metric    { color: #22c55e; }
+.log-important { color: #fde047; }
+.log-size      { color: #e879f9; }
 
 /* ── Logs Empty State ──────────────────────────────────────────────────────── */
 
@@ -583,7 +585,9 @@
 /* Log token coloring - light theme */
 [data-theme="light"] .log-lev    { color: #0f172a; }
 [data-theme="light"] .log-comp   { color: #0284c7; }
-[data-theme="light"] .log-metric { color: #16a34a; }
+[data-theme="light"] .log-metric    { color: #16a34a; }
+[data-theme="light"] .log-important { color: #b45309; }
+[data-theme="light"] .log-size      { color: #9333ea; }
 
 /* ── Reduced Motion ─────────────────────────────────────────────────────────── */
 
