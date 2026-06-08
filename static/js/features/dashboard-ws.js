@@ -655,6 +655,12 @@ function updateServerState(d) {
             sessionError,
             { duration: 12000 }
         );
+
+        // Show diagnostics in the main control bar if present
+        showServerErrorDetails(d);
+
+        // Show diagnostics on the welcome / Local Server panel if present
+        showLocalServerErrorBar(sessionError, d);
     }
 
     if (isError) {
@@ -666,6 +672,8 @@ function updateServerState(d) {
     } else {
         dot.className = 'status-dot ' + (sessionState.serverRunning ? 'running' : 'stopped');
         txt.textContent = sessionState.serverRunning ? 'Running' : 'Stopped';
+        hideServerErrorDetails();
+        hideLocalServerErrorBar();
     }
 
     if (!isError) {
@@ -1377,7 +1385,12 @@ function updateBadges(d) {
     if (serverText !== prevBadgeState.server) {
         prevBadgeState.server = serverText;
         const badgeServer = ce.badgeServer;
-        if (badgeServer) badgeServer.textContent = serverText;
+        if (badgeServer) {
+            badgeServer.textContent = serverText;
+            if (!serverText) {
+                badgeServer.style.display = 'none';
+            }
+        }
     }
 
     // Chat badge \u2014 message count rarely changes between ticks
@@ -1412,4 +1425,212 @@ function updateBadges(d) {
             }
         }
     }
+}
+
+// ── Server error details panel ─────────────────────────────────────────
+
+let _lastServerErrorData = null;
+
+function showServerErrorDetails(d) {
+    _lastServerErrorData = d;
+    const wrapper = document.getElementById('server-error-details-wrapper');
+    const btn = document.getElementById('btn-server-error-details');
+    if (!wrapper || !btn) return;
+    wrapper.style.display = 'flex';
+    btn.style.display = '';
+}
+
+function hideServerErrorDetails() {
+    const wrapper = document.getElementById('server-error-details-wrapper');
+    const btn = document.getElementById('btn-server-error-details');
+    if (wrapper) wrapper.style.display = 'none';
+    if (btn) btn.style.display = 'none';
+    _lastServerErrorData = null;
+}
+
+function populateServerErrorDetails(data) {
+    const wrapper = document.getElementById('server-error-details-wrapper');
+    const panel = document.getElementById('server-error-details-panel');
+    const body = document.getElementById('server-error-details-body');
+    if (!wrapper || !panel || !body || !data) return;
+
+    const err = data.active_session_error || '';
+    const cmd = data.last_spawn_cmd || '';
+    const logs = data.logs || [];
+
+    // Short summary (first ~200 chars)
+    const summary = err.length > 200
+        ? err.substring(0, 200).trim() + '...'
+        : err;
+
+    // Filter non-[monitor] lines and take last 20
+    const serverLogs = logs
+        .filter(l => !l.startsWith('[monitor]'))
+        .slice(-20);
+
+    let html = '';
+
+    if (summary) {
+        html += `<div class="error-summary">${escapeHtml(summary)}</div>`;
+    }
+
+    if (cmd) {
+        html += `<code class="error-cmd">${escapeHtml(cmd)}</code>`;
+    }
+
+    if (serverLogs.length > 0) {
+        html += `<code class="error-logs">${serverLogs.map(escapeHtml).join('\n')}</code>`;
+    }
+
+    if (!summary && !cmd && serverLogs.length === 0) {
+        html += `<div class="error-summary">
+No additional context captured. Check the full Logs tab for more details.
+</div>`;
+    }
+
+    html += `<div style="margin-top:4px;">
+    <a href="#" id="error-open-logs-link" style="color:var(--color-primary);font-size:10px;text-decoration:underline;">
+        Open Logs tab
+    </a>
+</div>`;
+
+    // eslint-disable-next-line no-unsanitized/property -- values sanitized via escapeHtml
+    body.innerHTML = html;
+
+    const link = body.querySelector('#error-open-logs-link');
+    if (link) {
+        link.addEventListener('click', e => {
+            e.preventDefault();
+            const logsBtn = document.querySelector('.sidebar-btn[data-tab="logs"]');
+            if (logsBtn) logsBtn.click();
+        });
+    }
+
+    wrapper.style.display = 'flex';
+    panel.style.display = '';
+}
+
+// Bind buttons once (after DOM ready).
+document.addEventListener('DOMContentLoaded', () => {
+    const detailsBtn = document.getElementById('btn-server-error-details');
+    const closeBtn = document.getElementById('server-error-details-close');
+
+    if (detailsBtn) {
+        detailsBtn.addEventListener('click', () => {
+            if (!_lastServerErrorData) return;
+            populateServerErrorDetails(_lastServerErrorData);
+            detailsBtn.blur();
+        });
+    }
+
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            const panel = document.getElementById('server-error-details-panel');
+            if (panel) panel.style.display = 'none';
+        });
+    }
+
+    // Welcome screen "Show details"
+    const localDetailsBtn = document.getElementById('local-server-error-details-btn');
+    const localCloseBtn = document.getElementById('local-server-error-details-close');
+
+    if (localDetailsBtn) {
+        localDetailsBtn.addEventListener('click', () => {
+            if (!_lastLocalServerErrorData) return;
+            populateLocalServerErrorDetails(_lastLocalServerErrorData);
+            localDetailsBtn.blur();
+        });
+    }
+
+    if (localCloseBtn) {
+        localCloseBtn.addEventListener('click', () => {
+            const panel = document.getElementById('local-server-error-details');
+            if (panel) panel.style.display = 'none';
+        });
+    }
+});
+
+// ── Local Server (welcome screen) spawn error bar ──────────────────────
+
+let _lastLocalServerErrorData = null;
+
+function showLocalServerErrorBar(sessionError, d) {
+    const bar = document.getElementById('local-server-error-bar');
+    const textEl = document.getElementById('local-server-error-bar-text');
+    if (!bar || !textEl) return;
+
+    _lastLocalServerErrorData = d;
+
+    const short = (sessionError || '').length > 140
+        ? (sessionError || '').substring(0, 140).trim() + '...'
+        : (sessionError || '');
+
+    textEl.textContent = short || 'Launch failed';
+    bar.style.display = 'flex';
+}
+
+function hideLocalServerErrorBar() {
+    const bar = document.getElementById('local-server-error-bar');
+    const details = document.getElementById('local-server-error-details');
+    if (bar) bar.style.display = 'none';
+    if (details) details.style.display = 'none';
+    _lastLocalServerErrorData = null;
+}
+
+function populateLocalServerErrorDetails(data) {
+    const details = document.getElementById('local-server-error-details');
+    const body = document.getElementById('local-server-error-details-body');
+    if (!details || !body || !data) return;
+
+    const err = data.active_session_error || '';
+    const cmd = data.last_spawn_cmd || '';
+    const logs = data.logs || [];
+
+    const summary = (err || '').length > 220
+        ? (err || '').substring(0, 220).trim() + '...'
+        : (err || '');
+
+    const serverLogs = logs
+        .filter(l => !l.startsWith('[monitor]'))
+        .slice(-20);
+
+    let html = '';
+
+    if (summary) {
+        html += `<div class="error-summary">${escapeHtml(summary)}</div>`;
+    }
+
+    if (cmd) {
+        html += `<code class="error-cmd">${escapeHtml(cmd)}</code>`;
+    }
+
+    if (serverLogs.length > 0) {
+        html += `<code class="error-logs">${serverLogs.map(escapeHtml).join('\n')}</code>`;
+    }
+
+    if (!summary && !cmd && serverLogs.length === 0) {
+        html += `<div class="error-summary">
+No additional context captured. Open the Logs tab or run llama-monitor from a terminal to see full output.
+</div>`;
+    }
+
+    html += `<div style="margin-top:4px;">
+    <a href="#" id="local-error-open-logs-link" style="color:var(--color-primary);font-size:10px;text-decoration:underline;">
+        Open Logs tab
+    </a>
+</div>`;
+
+    // eslint-disable-next-line no-unsanitized/property -- values sanitized via escapeHtml
+    body.innerHTML = html;
+
+    const link = body.querySelector('#local-error-open-logs-link');
+    if (link) {
+        link.addEventListener('click', e => {
+            e.preventDefault();
+            const logsBtn = document.querySelector('.sidebar-btn[data-tab="logs"]');
+            if (logsBtn) logsBtn.click();
+        });
+    }
+
+    details.style.display = 'block';
 }

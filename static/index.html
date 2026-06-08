@@ -121,8 +121,7 @@
                 <span class="status-text" id="status-text"></span>
                 <span class="badge-server" id="badge-server"></span>
                 <span class="badge-chat" id="badge-chat"></span>
-                <span class="badge-logs" id="badge-logs"></span>
-            </div>
+             </div>
         </div>
     </div>
     <div class="top-nav-bar">
@@ -289,6 +288,23 @@
                             <div class="launch-card-skeleton"></div>
                         </div>
 
+                        <!-- Spawn error diagnostics bar (shown when launch fails) -->
+                        <div class="local-server-error-bar" id="local-server-error-bar" style="display:none;">
+                            <div class="local-server-error-bar-left">
+                                <span class="local-server-error-bar-icon">!</span>
+                                <span class="local-server-error-bar-text" id="local-server-error-bar-text"></span>
+                            </div>
+                            <button class="btn-sm btn-ghost" id="local-server-error-details-btn" type="button">Show details</button>
+                        </div>
+
+                        <!-- Expanded diagnostics panel (toggled by "Show details") -->
+                        <div class="local-server-error-details" id="local-server-error-details" style="display:none;">
+                            <div class="local-server-error-details-body" id="local-server-error-details-body"></div>
+                            <div class="local-server-error-details-footer">
+                                <button class="btn-sm btn-ghost" id="local-server-error-details-close" type="button">Close</button>
+                            </div>
+                        </div>
+
                         <!-- Memory bar (populated by JS after /metrics fetch) -->
                         <div id="setup-mem-bar" class="setup-mem-bar" style="display:none;" aria-label="Inference memory budget">
                             <div class="setup-mem-bar-track" aria-hidden="true">
@@ -383,10 +399,24 @@
                     <div class="control-bar-zone control-bar-ops-zone">
                         <button class="btn btn-start" id="btn-start" title="Start server using selected preset">Start</button>
                         <button class="btn btn-stop" id="btn-stop" disabled title="Stop the running server">Stop</button>
-                        <button class="btn btn-switch-model" id="btn-switch-model" style="display:none;" title="Switch model in the current server using this preset's settings">
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
-                            Switch Model
-                        </button>
+                     <button class="btn btn-switch-model" id="btn-switch-model" style="display:none;" title="Switch model in the current server using this preset's settings">
+                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 16V4m0 0L3 8m4-4l4 4"/><path d="M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
+                             Switch Model
+                         </button>
+                         <button class="btn btn-sm btn-secondary" id="btn-server-error-details" style="display:none;" title="Show launch diagnostics when server failed">
+                             Show details
+                         </button>
+                     </div>
+                </div>
+
+                <!-- Server error details panel: compact diagnostics when llama-server fails -->
+                <div class="server-error-details-wrapper" id="server-error-details-wrapper" style="display:none;">
+                    <div class="server-error-details-panel" id="server-error-details-panel">
+                        <div class="server-error-details-header">
+                            <strong>Launch diagnostics</strong>
+                            <button class="btn-sm btn-ghost" id="server-error-details-close" title="Close">✕</button>
+                        </div>
+                        <div class="server-error-details-body" id="server-error-details-body"></div>
                     </div>
                 </div>
 
@@ -472,7 +502,7 @@
                                         <span>Live generation estimate</span>
                                         <strong id="m-live-velocity">&mdash;</strong>
                                     </div>
-                                    <svg class="metric-sparkline live-output-sparkline" id="m-live-output-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+                                    <svg class="metric-sparkline live-output-sparkline" id="m-live-output-spark" viewBox="0 0 120 28" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
                                     <div class="token-flow" id="m-token-flow" aria-hidden="true">
                                         <span></span><span></span><span></span><span></span><span></span>
                                     </div>
@@ -602,19 +632,19 @@
                             <div class="hw-metric-block" id="gpu-load-block">
                                 <div class="hw-metric-label">Load</div>
                                 <div class="hw-metric-viz" id="gpu-load-viz"></div>
-                                <svg class="hw-metric-sparkline" id="gpu-load-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+                                <svg class="hw-metric-sparkline" id="gpu-load-spark" viewBox="0 0 120 28" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
                                 <div class="hw-metric-value" id="gpu-load-value">&mdash;</div>
                             </div>
                             <div class="hw-metric-block" id="gpu-power-block">
                                 <div class="hw-metric-label">Power</div>
                                 <div class="hw-metric-viz" id="gpu-power-viz"></div>
-                                <svg class="hw-metric-sparkline" id="gpu-power-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+                                <svg class="hw-metric-sparkline" id="gpu-power-spark" viewBox="0 0 120 28" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
                                 <div class="hw-metric-value" id="gpu-power-value">&mdash;</div>
                             </div>
                             <div class="hw-metric-block" id="gpu-vram-block">
                                 <div class="hw-metric-label">VRAM</div>
                                 <div class="hw-metric-viz" id="gpu-vram-viz"></div>
-                                <svg class="hw-metric-sparkline" id="gpu-vram-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+                                <svg class="hw-metric-sparkline" id="gpu-vram-spark" viewBox="0 0 120 28" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
                                 <div class="hw-metric-value" id="gpu-vram-value">&mdash;</div>
                             </div>
                             <div class="hw-metric-block" id="gpu-clocks-block">
@@ -653,13 +683,13 @@
                             <div class="hw-metric-block" id="sys-load-block">
                                 <div class="hw-metric-label">CPU Load</div>
                                 <div class="hw-metric-viz" id="sys-load-viz"></div>
-                                <svg class="hw-metric-sparkline" id="sys-load-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+                                <svg class="hw-metric-sparkline" id="sys-load-spark" viewBox="0 0 120 28" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
                                 <div class="hw-metric-value" id="sys-load-value">&mdash;</div>
                             </div>
                             <div class="hw-metric-block" id="sys-ram-block">
                                 <div class="hw-metric-label">RAM</div>
                                 <div class="hw-metric-viz" id="sys-ram-viz"></div>
-                                <svg class="hw-metric-sparkline" id="sys-ram-spark" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+                                <svg class="hw-metric-sparkline" id="sys-ram-spark" viewBox="0 0 120 28" preserveAspectRatio="xMidYMid slice" aria-hidden="true"></svg>
                                 <div class="hw-metric-value" id="sys-ram-value">&mdash;</div>
                             </div>
                             <div class="hw-metric-block" id="sys-clock-block">

@@ -1722,7 +1722,7 @@
 }
 
 .live-output-sparkline {
-  height: 28px;
+  height: clamp(24px, 5vw, 36px);
 }
 
 .sparkline-line.live-output {

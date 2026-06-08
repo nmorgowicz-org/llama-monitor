@@ -273,6 +273,56 @@ pub async fn start_server(
         anyhow::bail!("No model source specified. Provide model_path or hf_repo.");
     }
 
+    // Quick health check on llama-server binary before starting.
+    // If this fails, the binary is likely corrupted, incomplete, or incompatible;
+    // we fail fast with a clear message instead of spawning and getting killed.
+    {
+        let bin_path = &app_config.llama_server_path;
+        let health_result = tokio::time::timeout(
+            std::time::Duration::from_secs(4),
+            async {
+                match TokioCommand::new(bin_path)
+                    .arg("--help")
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                {
+                    Ok(mut child) => child.wait().await.ok(),
+                    Err(_) => None,
+                }
+            }
+        ).await
+        .ok()
+        .flatten();
+
+        match health_result {
+            Some(st) if st.success() => {
+                // OK — binary is usable.
+            }
+            Some(st) => {
+                let code = st.code().map_or("unknown".into(), |c| c.to_string());
+                state.push_log(format!(
+                    "[monitor] start_server: llama-server health check failed (exit code {}). Binary may be corrupted or incompatible.", code
+                ));
+                anyhow::bail!(
+                    "llama-server health check failed (exit code {}). The binary may be corrupted, \
+                     truncated, or incompatible. Reinstall or update the llama.cpp binary.",
+                    code
+                );
+            }
+            None => {
+                state.push_log(
+                    "[monitor] start_server: llama-server health check timed out or failed to execute. Binary may be invalid."
+                        .into(),
+                );
+                anyhow::bail!(
+                    "llama-server did not respond to health check. The binary may be invalid, \
+                     corrupted, or missing. Reinstall or update the llama.cpp binary."
+                );
+            }
+        }
+    }
+
     // Clear old logs
     {
         let mut logs = state.server_logs.lock().unwrap();

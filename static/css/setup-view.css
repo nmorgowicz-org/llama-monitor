@@ -3472,12 +3472,129 @@ body.setup-active .sidebar-nav {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
+  @media (prefers-reduced-motion: reduce) {
+   *,
+   *::before,
+   *::after {
+     animation-duration: 0.01ms !important;
+     animation-iteration-count: 1 !important;
+     transition-duration: 0.01ms !important;
+   }
+}
+
+/* Local Server: spawn error diagnostics bar */
+
+.local-server-error-bar {
+  margin-top: 8px;
+  margin-bottom: 2px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  background: radial-gradient(
+    far at top,
+    rgba(239, 68, 68, 0.06),
+    transparent
+  );
+  border: 1px solid rgba(239, 68, 68, 0.18);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+}
+
+.local-server-error-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.local-server-error-bar-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fef2f2;
+  background: rgba(239, 68, 68, 0.9);
+  flex-shrink: 0;
+}
+
+.local-server-error-bar-text {
+  display: inline-block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+
+.local-server-error-details {
+  margin-top: 4px;
+  margin-bottom: 4px;
+  padding: 6px 8px;
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  background: radial-gradient(
+    far at top,
+    rgba(15, 23, 42, 0.06),
+    transparent
+  );
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.local-server-error-details-body {
+  font-size: 10px;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.local-server-error-details-body code {
+  display: block;
+  font-family: ui-monospace, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 9px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin-bottom: 4px;
+  overflow-x: auto;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.local-server-error-details-footer {
+  margin-top: 4px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Light theme tweaks */
+
+[data-theme="light"] .local-server-error-bar {
+  background: radial-gradient(
+    far at top,
+    rgba(239, 68, 68, 0.08),
+    transparent
+  );
+  border-color: rgba(239, 68, 68, 0.28);
+}
+
+[data-theme="light"] .local-server-error-details {
+  background: radial-gradient(
+    far at top,
+    rgba(15, 23, 42, 0.03),
+    transparent
+  );
+  border-color: rgba(15, 23, 42, 0.1);
+}
+
+[data-theme="light"] .local-server-error-details-body code {
+  background: rgba(15, 23, 42, 0.04);
 }

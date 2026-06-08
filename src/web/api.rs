@@ -4766,7 +4766,7 @@ pub fn api_routes(
         .or(api_llama_binary_releases(app_config.clone()))
         .or(api_llama_binary_release(app_config.clone()))
         .or(api_llama_binary_platform_info(app_config.clone()))
-        .or(api_llama_binary_update(app_config.clone()))
+        .or(api_llama_binary_update(state.clone(), app_config.clone()))
         .or(api_llama_restart(state.clone(), app_config.clone()));
 
     server_routes
@@ -11097,17 +11097,36 @@ fn api_llama_binary_platform_info(
 
 /// POST /api/llama-binary/update — downloads latest release and overwrites llama-server binary
 fn api_llama_binary_update(
+    state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::reply::Reply,), Error = warp::Rejection> + Clone {
-    warp::path!("api" / "llama-binary" / "update")
+        warp::path!("api" / "llama-binary" / "update")
         .and(warp::post())
         .and(warp::header::optional::<String>("authorization"))
         .and(super::safe_json_body::<serde_json::Value>())
         .and_then(move |auth: Option<String>, _body: serde_json::Value| {
+            let state = state.clone();
             let cfg = app_config.clone();
             async move {
                 if !check_api_token(&auth, &cfg) {
                     return Ok(unauthorized_api_token());
+                }
+
+                // Prevent updating while a local llama-server is running.
+                // Hot-replacing the live binary can corrupt it or leave it
+                // in an inconsistent state.
+                let local_running = *state.local_server_running.lock().unwrap();
+                if local_running {
+                    state.push_log(
+                        "[monitor] llama-binary/update: blocked — llama-server is currently running"
+                            .into(),
+                    );
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "Cannot update llama-server while it is running. Stop the server first."
+                        })),
+                    ));
                 }
 
                 let dest_path = cfg.llama_server_path.clone();
@@ -11298,47 +11317,119 @@ fn api_llama_binary_update(
                     ));
                 }
 
-                if found_path != dest_path
-                    && let Err(e) = std::fs::copy(&found_path, &dest_path)
-                {
+                // Log update intent.
+                state.push_log(format!(
+                    "[monitor] llama-binary/update: installing {} to {}",
+                    tag,
+                    dest_path.display()
+                ));
+
+                // Stage new binary as llama-server.new instead of overwriting in-place.
+                // This avoids corrupting the live file if the process restarts mid-update.
+                let new_path = {
+                    let mut p = dest_path.clone();
+                    if let Some(ext) = p.extension() {
+                        p.set_extension(format!("{}.new", ext.to_string_lossy()));
+                    } else {
+                        p.set_extension("new");
+                    }
+                    p
+                };
+
+                if let Err(e) = std::fs::copy(&found_path, &new_path) {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
                             "ok": false,
                             "error": format!(
-                                "Failed to install {} at {}: {}",
-                                binary_name,
-                                dest_path.display(),
+                                "Failed to write new binary to {}: {}",
+                                new_path.display(),
                                 e
                             )
                         })),
                     ));
                 }
 
-                // Set executable bit on all extracted files (unix)
+                // Set executable bit on the new binary (unix).
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    if let Ok(entries) = std::fs::read_dir(dest_dir) {
-                        for entry in entries.filter_map(|e| e.ok()) {
-                            let _ = std::fs::set_permissions(
-                                entry.path(),
-                                std::fs::Permissions::from_mode(0o755),
-                            );
-                        }
-                    }
                     let _ = std::fs::set_permissions(
-                        &dest_path,
+                        &new_path,
                         std::fs::Permissions::from_mode(0o755),
                     );
                 }
 
+                // Quick health check: run llama-server --help with a short timeout.
+                // If this fails, the binary is likely corrupted or incompatible.
+                let health_ok = tokio::time::timeout(
+                    std::time::Duration::from_secs(6),
+                    async {
+                        match tokio::process::Command::new(&new_path)
+                            .arg("--help")
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null())
+                            .spawn()
+                        {
+                            Ok(mut child) => {
+                                if let Ok(status) = child.wait().await {
+                                    status.success()
+                                } else {
+                                    false
+                                }
+                            }
+                            Err(_) => false,
+                        }
+                    }
+                ).await
+                .ok()
+                .unwrap_or(false);
+
+                if !health_ok {
+                    let _ = std::fs::remove_file(&new_path);
+                    state.push_log(
+                        "[monitor] llama-binary/update: new binary failed health check (llama-server --help). Not replacing.".into(),
+                    );
+                    return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                        warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "New llama-server binary failed basic health check. \
+                                The downloaded file may be corrupted or incompatible. \
+                                Try updating again or install manually."
+                        })),
+                    ));
+                }
+
+                // Atomically replace the current binary with the validated one.
+                // On POSIX, rename is atomic at the filesystem level and avoids
+                // partial-file races when llama-server is started shortly after.
+                if let Err(e) = std::fs::rename(&new_path, &dest_path) {
+                    // Fallback to copy-replace if rename fails (e.g. cross-device on some setups).
+                    if let Err(e2) = std::fs::copy(&new_path, &dest_path) {
+                        let _ = std::fs::remove_file(&new_path);
+                        return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
+                            warp::reply::json(&serde_json::json!({
+                                "ok": false,
+                                "error": format!(
+                                    "Failed to activate new llama-server at {}: {}; fallback copy also failed: {}",
+                                    dest_path.display(),
+                                    e,
+                                    e2
+                                )
+                            })),
+                        ));
+                    }
+                    let _ = std::fs::remove_file(&new_path);
+                }
+
+                state.push_log(format!(
+                    "[monitor] llama-binary/update: successfully installed {} (binary: {})",
+                    tag,
+                    dest_path.display()
+                ));
+
                 // Compute SHA256 of the llama-server binary so users can
                 // verify integrity out-of-band (e.g. `sha256sum llama-server`).
-                let installed_path = if dest_path.exists() {
-                    &dest_path
-                } else {
-                    &found_path
-                };
+                let installed_path = &dest_path;
                 let sha256_hex = std::fs::read(installed_path).ok().map(|bytes| {
                     use sha2::Digest;
                     let mut hasher = sha2::Sha256::new();

@@ -572,7 +572,8 @@
   50% { box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 24px rgba(136, 192, 209, 0.45); border-color: rgba(136, 192, 209, 0.4); background: rgba(136, 192, 209, 0.08); }
 }
 
-.endpoint-status-wrap:hover .endpoint-status {
+.endpoint-status-wrap .endpoint-status:hover,
+.endpoint-status-wrap.open .endpoint-status {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(136, 192, 209, 0.6);
   box-shadow:
@@ -584,10 +585,8 @@
 }
 
  .capability-popover {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
-  z-index: 220;
+  position: fixed;
+  z-index: 500;
   display: grid;
   gap: 8px;
   width: min(360px, 88vw);
@@ -604,8 +603,6 @@
   backdrop-filter: blur(18px) saturate(160%);
 }
 
-.endpoint-status-wrap:hover .capability-popover,
-.endpoint-status-wrap:focus-within .capability-popover,
 .endpoint-status-wrap.open .capability-popover {
   opacity: 1;
   pointer-events: auto;
@@ -2005,10 +2002,86 @@ body.chat-focus-mode #focus-mode-exit-beacon {
   color: var(--color-text-muted);
 }
 
-[data-theme="light"] .badge-server,
+ [data-theme="light"] .badge-server,
 [data-theme="light"] .badge-chat,
 [data-theme="light"] .badge-logs {
   background: rgba(15, 23, 42, 0.06);
   border-color: rgba(15, 23, 42, 0.1);
+}
+
+/* ── Server error details panel ───────────────────────────────────────── */
+
+.server-error-details-wrapper {
+  margin-top: 6px;
+  margin-bottom: 4px;
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  font-size: 11px;
+}
+
+.server-error-details-panel {
+  flex: 1;
+  padding: 6px 8px;
+  background: radial-gradient(
+    far at top left,
+    rgba(255, 255, 255, 0.02),
+    transparent
+  );
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  color: var(--color-text-primary);
+}
+
+.server-error-details-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+  font-size: 10px;
   color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.server-error-details-body {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  max-height: 260px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
+.server-error-details-body .error-summary {
+  margin-bottom: 4px;
+  color: var(--color-text-primary);
+}
+
+.server-error-details-body code {
+  display: block;
+  font-family: ui-monospace, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 9px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin-bottom: 4px;
+  overflow-x: auto;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+[data-theme="light"] .server-error-details-panel {
+  background: radial-gradient(
+    far at top left,
+    rgba(15, 23, 42, 0.01),
+    transparent
+  );
+  border-color: rgba(15, 23, 42, 0.12);
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.15);
+}
+
+[data-theme="light"] .server-error-details-body code {
+  background: rgba(15, 23, 42, 0.04);
 }

@@ -72,12 +72,20 @@ function restoreSidebarState() {
 function initEndpointStatus() {
     const endpointStatus = document.getElementById('endpoint-status');
     const endpointStatusWrap = endpointStatus?.closest('.endpoint-status-wrap');
-    if (!endpointStatus || !endpointStatusWrap) return;
+    const popover = document.getElementById('capability-popover');
+    if (!endpointStatus || !endpointStatusWrap || !popover) return;
+
+    function positionPopover() {
+        const rect = endpointStatusWrap.getBoundingClientRect();
+        popover.style.top = (rect.bottom + 8) + 'px';
+        popover.style.left = Math.min(rect.left, window.innerWidth - 370) + 'px';
+    }
 
     endpointStatus.addEventListener('click', event => {
         event.stopPropagation();
         const open = endpointStatusWrap.classList.toggle('open');
         endpointStatus.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) positionPopover();
     });
 
     document.addEventListener('click', event => {
