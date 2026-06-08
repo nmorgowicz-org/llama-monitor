@@ -359,6 +359,7 @@ function applyReducedMotion() {
 
 export function openSpawnWizard(opts = {}) {
   if (!dom.overlay) return;
+  resetWizardState();
   document.getElementById('models-modal')?.classList.remove('open');
   window.closePresetsPanel?.();
   dom.overlay.classList.add('open');
@@ -389,6 +390,93 @@ export function openSpawnWizard(opts = {}) {
     renderLocalModelHint();
     showStep(0);
   }
+}
+
+// Clear all wizard state for a fresh start
+function resetWizardState() {
+  // Reset model state
+  wizardState.model.source = '';
+  wizardState.model.path = '';
+  wizardState.model.hfRepo = '';
+  wizardState.model.hfFile = '';
+  wizardState.model.mmprojPath = '';
+  wizardState.model.mmprojHfFile = '';
+  wizardState.model.mmprojHfRepo = '';
+  wizardState.model.originRepo = '';
+  wizardState.model.originFile = '';
+  wizardState.model.delivery = '';
+  wizardState.model.cardUrl = '';
+  wizardState.model.family = '';
+  wizardState.model.paramB = 0;
+  wizardState.model.modelBytes = 0;
+  wizardState.model.nCtxTrain = 0;
+  wizardState.model.chatTemplatePath = '';
+  wizardState.model.localMeta = null;
+  wizardState.model.mmprojFiles = [];
+  wizardState.model.quantFiles = [];
+  wizardState.model.hfTokenSet = false;
+
+  // Reset hardware state
+  wizardState.hardware.gpuLayers = '';
+  wizardState.hardware.contextSize = 0;
+  wizardState.hardware.batchSize = 0;
+  wizardState.hardware.ubatchSize = 0;
+  wizardState.hardware.parallelSlots = 1;
+  wizardState.hardware.cacheTypeK = '';
+  wizardState.hardware.cacheTypeV = '';
+  wizardState.hardware.flashAttn = '';
+  wizardState.hardware.kvUnified = false;
+  wizardState.hardware.mlock = false;
+  wizardState.hardware.prio = null;
+  wizardState.hardware.nCpuMoe = 0;
+  wizardState.hardware.tensorSplit = '';
+  wizardState.hardware.fitTarget = null;
+  wizardState.hardware.cacheRam = null;
+  wizardState.hardware.temperature = null;
+  wizardState.hardware.topP = null;
+  wizardState.hardware.topK = null;
+  wizardState.hardware.minP = null;
+  wizardState.hardware.repeatPenalty = null;
+  wizardState.hardware.presencePenalty = null;
+  wizardState.hardware.maxTokens = null;
+  wizardState.hardware.seed = null;
+  wizardState.hardware.mtpEnabled = false;
+  wizardState.hardware.mtpDraftNMax = 2;
+  wizardState.hardware.enableThinking = null;
+  wizardState.hardware.preserveThinking = null;
+  wizardState.hardware.reasoningMode = null;
+  wizardState.hardware.reasoningBudget = null;
+  wizardState.hardware.reasoningBudgetMessage = null;
+  wizardState.hardware.specType = '';
+  wizardState.hardware.draftModelPath = '';
+  wizardState.hardware.grammar = '';
+  wizardState.hardware.jsonSchema = '';
+
+  // Reset architecture
+  wizardState.arch.nLayers = 0;
+  wizardState.arch.nKvHeads = 0;
+  wizardState.arch.headDim = 0;
+  wizardState.arch.globalHeadDim = 0;
+  wizardState.arch.nGlobalAttnLayers = 0;
+  wizardState.arch.localAttnWindow = 0;
+  wizardState.arch.localKvHeads = 1;
+  wizardState.arch.nExperts = 0;
+  wizardState.arch.nExpertsUsed = 0;
+  wizardState.arch.expertFraction = 0.65;
+  wizardState.arch.mtpDepth = 0;
+  wizardState.arch.mmprojBytes = 0;
+  wizardState.arch.linearAttnStateBytes = 0;
+  wizardState.arch.isHybridAttn = false;
+
+  // Reset UI state
+  wizardState.currentStep = 0;
+  wizardState.useCase = 'general';
+  wizardState.profile = 'balanced';
+  wizardState.mode = 'guided';
+  wizardState.model.chatTemplateMode = 'auto';
+  wizardState.access.port = 8001;
+  wizardState.access.bindHost = '127.0.0.1';
+  wizardState.access.apiKey = '';
 }
 
 export function closeSpawnWizard() {
@@ -745,6 +833,42 @@ function bindEvents() {
     el?.addEventListener('change', onHardwareChange);
   });
 
+  // mmproj "Browse" button: open file browser for mmproj projectors
+  const mmprojBrowseBtn = document.querySelector('#hw-mmproj-browse-btn');
+  if (mmprojBrowseBtn) {
+    mmprojBrowseBtn.addEventListener('click', () => {
+      const row = document.getElementById('hw-mmproj-row');
+      const select = document.getElementById('hw-mmproj-select');
+      const hfPanel = row?.querySelector('.hw-mmproj-hf-panel');
+      // When HF download panel is shown, clear it and restore the select
+      if (hfPanel) hfPanel.remove();
+      if (select && select.style.display === 'none') select.style.display = '';
+      openDeferredFileBrowser('hw-mmproj-select', 'gguf', '', 'mmproj');
+    });
+  }
+
+  // Ensure mmproj select always updates wizardState on change, even when
+  // file was chosen via Browse (and no auto-detected local mmprojs existed).
+  const mmprojSelect = document.getElementById('hw-mmproj-select');
+  if (mmprojSelect && !mmprojSelect.dataset.boundGlobal) {
+    mmprojSelect.dataset.boundGlobal = '1';
+    mmprojSelect.addEventListener('change', () => {
+      const fpath = mmprojSelect.value || '';
+      wizardState.model.mmprojPath = fpath || '';
+      wizardState.model.mmprojHfFile = fpath || '';
+      wizardState.arch.mmprojBytes = 0;
+      scheduleVramUpdate();
+    });
+  }
+
+  // draft-model "Browse" button: open file browser for draft model
+  const draftBrowseBtn = document.querySelector('#spawn-draft-browse-btn');
+  if (draftBrowseBtn) {
+    draftBrowseBtn.addEventListener('click', () => {
+      openDeferredFileBrowser('spawn-draft-model', 'gguf', '', 'draft-model');
+    });
+  }
+
   bindHardwareToggleSwitch(dom.kvUnifiedLabel, dom.kvUnifiedCheck);
   bindHardwareToggleSwitch(dom.mlockLabel, dom.mlockCheck);
   bindHardwareToggleSwitch(dom.fitEnableLabel, dom.fitEnableCheck);
@@ -757,7 +881,53 @@ function bindEvents() {
   dom.specTypeSelect?.addEventListener('change', () => {
     const v = dom.specTypeSelect.value;
     const isNgram = v && (v.includes('ngram') || v === 'ngram');
-    if (dom.draftModelWrap) dom.draftModelWrap.style.display = v === 'draft-model' ? '' : 'none';
+    const isDraftMtp = v && v.includes('draft-mtp');
+    const isDraftModel = v === 'draft-model';
+
+    // Show/hide draft-model path input - now visible for both draft-model and MTP modes
+    // (since MTP may require a separate draft model file)
+    if (dom.draftModelWrap) {
+      dom.draftModelWrap.style.display = (isDraftModel || isDraftMtp) ? '' : 'none';
+    }
+
+    // For draft-mtp: ensure MTP assistant section is visible and auto-populate
+    // from candidates if not already set.
+    if (isDraftMtp) {
+      renderMtpSection();
+      // Also auto-populate the draft model input from candidates
+      const candidates = wizardState.model.draftCandidates || [];
+      const existing = (dom.draftModelInput?.value || '').trim();
+      if (!existing && candidates.length > 0) {
+        const best = _bestDraftForModel(
+          (wizardState.model.path || wizardState.model.hfFile || '').split(/[\\/]/).pop() || '',
+          candidates,
+        );
+        if (best && dom.draftModelInput) {
+          dom.draftModelInput.value = best.path;
+        }
+      }
+      // Sync from selectedDraftPath if set (e.g. from MTP assistant dropdown)
+      const selectedPath = wizardState.model.selectedDraftPath || '';
+      if (selectedPath && dom.draftModelInput && !dom.draftModelInput.value) {
+        dom.draftModelInput.value = selectedPath;
+      }
+    }
+
+    // Auto-populate draft-model input when mode matches and candidates exist
+    if (isDraftModel) {
+      const candidates = wizardState.model.draftCandidates || [];
+      const existing = (dom.draftModelInput?.value || '').trim();
+      if (!existing && candidates.length > 0) {
+        const best = _bestDraftForModel(
+          (wizardState.model.path || wizardState.model.hfFile || '').split(/[\\/]/).pop() || '',
+          candidates,
+        );
+        if (best && dom.draftModelInput) {
+          dom.draftModelInput.value = best.path;
+        }
+      }
+    }
+
     if (dom.specNgramWrap) dom.specNgramWrap.style.display = isNgram ? '' : 'none';
     _updateSpecHint(v);
     refreshStepGuardrails();
@@ -1001,8 +1171,11 @@ function getStepGuardState(step = wizardState.currentStep) {
     if (dom.fitEnableCheck?.checked && !dom.fitTargetInput?.value.trim()) {
       return error('Enter a fit target in MB or turn Auto-fit context to memory off.', dom.fitTargetInput);
     }
-    if ((dom.specTypeSelect?.value || '') === 'draft-model' && !dom.draftModelInput?.value.trim()) {
-      return error('Enter a draft model path to use draft-model speculative decoding.', dom.draftModelInput);
+    // Validate draft model input when shown (for draft-model or MTP modes with external assistant)
+    const specType = dom.specTypeSelect?.value || '';
+    const showDraftInput = specType === 'draft-model' || specType.includes('draft-mtp');
+    if (showDraftInput && !dom.draftModelInput?.value.trim()) {
+      return error('Enter a draft model path for speculative decoding.', dom.draftModelInput);
     }
     return info('Review the VRAM estimate and adjust context, KV cache, or auto-size before continuing.');
   }
@@ -3057,6 +3230,14 @@ function onHardwareChange(e) {
     e.target === dom.kvUnifiedCheck ||
     e.target === dom.mlockCheck
   );
+
+  // If any non-toggle field fires after a toggle, cancel the pending scroll
+  // restore so we don't undo the browser's natural scroll-into-view when the
+  // user tabs away from their input.
+  if (!isToggle && pendingHardwareScrollRestore) {
+    pendingHardwareScrollRestore = null;
+  }
+
   if (isToggle && wizardState.currentStep === 2 && !pendingHardwareScrollReset) {
     const main = document.querySelector('#wizard-step-2 .wizard-main');
     const sidebar = document.querySelector('#wizard-step-2 .hw-vram-sidebar');
@@ -3179,9 +3360,20 @@ function bindHardwareToggleSwitch(labelEl, inputEl) {
 
 function getEffectiveArch() {
   const a = wizardState.arch;
-  // If we don't have introspection data, build heuristic from param count
-  if (!a.nLayers && wizardState.model.paramB > 0) {
-    return buildHeuristicArch(wizardState.model.path || wizardState.model.hfRepo, wizardState.model.paramB);
+  // Always apply heuristics to ensure sliding window fields are populated
+  // for models that support them (Gemma4, Gemma3, etc.)
+  if (wizardState.model.paramB > 0) {
+    const heuristicArch = buildHeuristicArch(wizardState.model.path || wizardState.model.hfRepo, wizardState.model.paramB);
+    // Merge heuristic values with existing introspection data
+    // Heuristic provides defaults; introspection provides actual values when available
+    return {
+      ...heuristicArch,
+      ...a,
+      // Preserve existing non-default fields that might be set by introspection
+      nLayers: a.nLayers || heuristicArch.nLayers,
+      nKvHeads: a.nKvHeads || heuristicArch.nKvHeads,
+      headDim: a.headDim || heuristicArch.headDim,
+    };
   }
   return a;
 }
@@ -4223,19 +4415,61 @@ function _bestDraftForModel(modelFilename, candidates) {
 
   let best = null, bestShared = -1, bestSizeBonus = 0;
   for (const f of candidates) {
-    const { shared, sizeBonus } = scoreCandidate(f);
-    if (shared >= 3 &&
-        (shared > bestShared || (shared === bestShared && sizeBonus > bestSizeBonus))) {
-      bestShared = shared;
-      bestSizeBonus = sizeBonus;
-      best = f;
-    }
+     const { shared, sizeBonus } = scoreCandidate(f);
+     if (shared >= 3 &&
+         (shared > bestShared || (shared === bestShared && sizeBonus > bestSizeBonus))) {
+       bestShared = shared;
+       bestSizeBonus = sizeBonus;
+       best = f;
+     }
+   }
+
+   // Allow a single candidate even with a weak score.
+   if (best) return best;
+   if (candidates.length === 1) return candidates[0];
+   return null;
+}
+
+// ── Draft candidate pill buttons ─────────────────────────────────────────────
+
+function _renderDraftCandidatePills() {
+  const container = document.getElementById('spawn-draft-candidates');
+  if (!container) return;
+
+  const candidates = wizardState.model.draftCandidates || [];
+  container.innerHTML = '';
+
+  if (candidates.length === 0) {
+    const emptySpan = document.createElement('span');
+    emptySpan.style.cssText = 'color:var(--color-text-secondary);font-size:12px;';
+    emptySpan.textContent = '(no draft model candidates detected)';
+    container.appendChild(emptySpan);
+    return;
   }
 
-  // Allow a single candidate even with a weak score.
-  if (best) return best;
-  if (candidates.length === 1) return candidates[0];
-  return null;
+  candidates.forEach((candidate, index) => {
+    const pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'btn-wizard-tertiary';
+    pill.style.cssText =
+      'font-size:11px;min-height:24px;padding:0 8px;cursor:pointer;border-radius:12px;' +
+      'border:1px solid rgba(148,163,253,0.25);' +
+      'background:rgba(80,120,200,0.15);color:var(--color-text-primary);white-space:nowrap;';
+    
+    const fname = (candidate.path || candidate.name || '').split(/[\\/]/).pop();
+    const sizeStr = candidate.size ? ` · ${formatBytes(candidate.size)}` : '';
+    pill.textContent = fname + sizeStr;
+    pill.title = candidate.path || '';
+    pill.dataset.index = index;
+
+    pill.addEventListener('click', () => {
+      wizardState.model.selectedDraftPath = candidate.path;
+      if (dom.draftModelInput) dom.draftModelInput.value = candidate.path;
+      scheduleVramUpdate();
+    });
+
+    container.appendChild(pill);
+  });
 }
 
 // ── Hardware step: mmproj section ────────────────────────────────────────────
@@ -5500,6 +5734,16 @@ function _renderMmprojDownloadFromHf(row) {
         _showMmprojHfFetchForm(row, panel);
       });
       panel.appendChild(manualLink);
+
+      const browseLocalLink = document.createElement('a');
+      browseLocalLink.href = '#';
+      browseLocalLink.style.cssText = 'font-size:10px;color:var(--color-text-muted);margin-top:2px;display:inline-block;';
+      browseLocalLink.textContent = 'Or browse local files…';
+      browseLocalLink.addEventListener('click', e => {
+        e.preventDefault();
+        document.getElementById('hw-mmproj-browse-btn')?.click();
+      });
+      panel.appendChild(browseLocalLink);
     } else {
       // Auto-find failed — show manual form with the stem pre-filled and a note
       const stem = _modelStemForSearch(modelFilename);
@@ -5667,51 +5911,71 @@ function renderMtpSection() {
   const infoNote = document.getElementById('hw-mtp-info-note');
   if (infoNote && hasMtp) { infoNote.style.display = ''; }
 
-  // Render companion assistant selector when candidates available
+  // Render companion assistant selector: always show for MTP models even
+  // if no candidates were auto-detected, so user can still browse.
   if (dom.mtpAssistantSection && dom.mtpAssistantSelect) {
     const candidates = wizardState.model.draftCandidates || [];
-    if (candidates.length > 0) {
-      dom.mtpAssistantSection.style.display = '';
 
-      // Bind the change listener once; always repopulate options so new
-      // candidates discovered after first render (or from a different model)
-      // are not silently lost.
-      if (!dom.mtpAssistantSelect.dataset.bound) {
-        dom.mtpAssistantSelect.dataset.bound = '1';
-        dom.mtpAssistantSelect.addEventListener('change', () => {
-          const selected = dom.mtpAssistantSelect.value || '';
-          wizardState.model.selectedDraftPath = selected;
-          // When assistant is selected, recommend higher n-max.
-          if (selected) {
-            wizardState.hardware.mtpDraftNMax = wizardState.hardware.mtpDraftNMax || 4;
-          }
-          scheduleVramUpdate();
-        });
-      }
-
-      dom.mtpAssistantSelect.innerHTML = '';
-      const noneOpt = document.createElement('option');
-      noneOpt.value = '';
-      noneOpt.textContent = '(none — use built-in MTP only)';
-      dom.mtpAssistantSelect.appendChild(noneOpt);
-
-      candidates.forEach(f => {
-        const fpath = f.path || f.name || '';
-        const fname = fpath.split(/[\\/]/).pop();
-        const sizeStr = f.size ? ` · ${formatBytes(f.size)}` : '';
-        const opt = document.createElement('option');
-        opt.value = fpath;
-        opt.textContent = fname + sizeStr;
-        dom.mtpAssistantSelect.appendChild(opt);
+    // Bind the change listener once; always repopulate options so new
+    // candidates discovered after first render (or from a different model)
+    // are not silently lost.
+    if (!dom.mtpAssistantSelect.dataset.bound) {
+      dom.mtpAssistantSelect.dataset.bound = '1';
+      dom.mtpAssistantSelect.addEventListener('change', () => {
+        const selected = dom.mtpAssistantSelect.value || '';
+        // Browse sentinel: open file browser for companion assistant
+        if (selected === '__browse__') {
+          openDeferredFileBrowser(
+            'hw-mtp-assistant-select',
+            'gguf',
+            '',
+            'draft-model',
+          );
+          return;
+        }
+        wizardState.model.selectedDraftPath = selected;
+        // When assistant is selected, recommend higher n-max.
+        if (selected) {
+          wizardState.hardware.mtpDraftNMax = wizardState.hardware.mtpDraftNMax || 4;
+        }
+        scheduleVramUpdate();
       });
-
-      // Sync selection
-      const current = wizardState.model.selectedDraftPath || '';
-      if (current) dom.mtpAssistantSelect.value = current;
-    } else {
-      dom.mtpAssistantSection.style.display = 'none';
     }
+
+    dom.mtpAssistantSection.style.display = '';
+
+    dom.mtpAssistantSelect.innerHTML = '';
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = '(none — use built-in MTP only)';
+    dom.mtpAssistantSelect.appendChild(noneOpt);
+
+    candidates.forEach(f => {
+      const fpath = f.path || f.name || '';
+      const fname = fpath.split(/[\\/]/).pop();
+      const sizeStr = f.size ? ` · ${formatBytes(f.size)}` : '';
+      const opt = document.createElement('option');
+      opt.value = fpath;
+      opt.textContent = fname + sizeStr;
+      dom.mtpAssistantSelect.appendChild(opt);
+    });
+
+    // If no candidates were auto-detected, add a sentinel option that
+    // triggers a file browser when chosen by the user.
+    if (candidates.length === 0) {
+      const browseOpt = document.createElement('option');
+      browseOpt.value = '__browse__';
+      browseOpt.textContent = '(browse for a companion assistant GGUF…)';
+      dom.mtpAssistantSelect.appendChild(browseOpt);
+    }
+
+    // Sync selection
+    const current = wizardState.model.selectedDraftPath || '';
+    if (current) dom.mtpAssistantSelect.value = current;
   }
+
+  // Render draft candidate pills (quick selection buttons)
+  _renderDraftCandidatePills();
 
   const checkbox = document.getElementById('hw-use-mtp');
   // The user-facing control is spec-draft-n-max (draft tokens per step), not "depth"
@@ -6441,11 +6705,16 @@ function renderSummary() {
   }
 
   const specType = dom.specTypeSelect?.value || '';
-  if (specType) {
-    let sv = { 'ngram-mod': 'N-gram (fast)', 'draft-model': 'Draft model' }[specType] || specType;
-    if (specType === 'draft-model' && dom.draftModelInput?.value) sv += ` (${dom.draftModelInput.value.split(/[\\/]/).pop()})`;
-    rows.push({ label: 'Speculative', value: sv });
-  }
+    if (specType) {
+      let sv = { 'ngram-mod': 'N-gram (fast)', 'draft-model': 'Draft model' }[specType] || specType;
+      // Show draft model filename for draft-model or MTP modes with external assistant
+      if (dom.draftModelInput?.value) {
+        const fileName = dom.draftModelInput.value.split(/[\\/]/).pop();
+        if (specType === 'draft-model') sv += ` (${fileName})`;
+        else if (specType.includes('draft-mtp')) sv += ` + ${fileName}`;
+      }
+      rows.push({ label: 'Speculative', value: sv });
+    }
   if (hw.fitTarget) rows.push({ label: '--fit-target', value: `${hw.fitTarget} MB` });
   if (hw.cacheRam !== null && hw.cacheRam !== undefined) {
     const cramDisplay = hw.cacheRam < 0 ? 'no limit' : hw.cacheRam === 0 ? 'disabled' : `${hw.cacheRam} MiB`;
@@ -6991,13 +7260,16 @@ function _renderPresetParamsStep() {
 
   const specType = dom.specTypeSelect?.value || '';
   if (specType) {
-    const rows = [{ label: 'Type', value: specType }];
-    if (specType === 'draft-model' && dom.draftModelInput?.value) {
-      rows.push({ label: 'Draft model', value: dom.draftModelInput.value.split(/[\\/]/).pop() || dom.draftModelInput.value });
+      const rows = [{ label: 'Type', value: specType }];
+      // Show draft model info for draft-model or MTP modes with external assistant
+      if (dom.draftModelInput?.value) {
+        const fileName = dom.draftModelInput.value.split(/[\\/]/).pop() || dom.draftModelInput.value;
+        if (specType === 'draft-model') rows.push({ label: 'Draft model', value: fileName });
+        else if (specType.includes('draft-mtp')) rows.push({ label: 'Draft model', value: fileName });
+      }
+      if (dom.specNgramSizeInput?.value) rows.push({ label: 'N-gram size', value: dom.specNgramSizeInput.value });
+      sections.push({ label: 'Speculative Decoding', rows });
     }
-    if (dom.specNgramSizeInput?.value) rows.push({ label: 'N-gram size', value: dom.specNgramSizeInput.value });
-    sections.push({ label: 'Speculative Decoding', rows });
-  }
 
   if (h.extraArgs) {
     sections.push({ label: 'Extra', rows: [{ label: 'Extra args', value: h.extraArgs }] });

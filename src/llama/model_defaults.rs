@@ -46,7 +46,7 @@ impl Default for ModelDefaults {
             min_p: 0.05,
             repeat_penalty: 1.1,
             presence_penalty: 0.0,
-            max_tokens: 2048,
+            max_tokens: 32768,
             enable_thinking: None,
             preserve_thinking: None,
             reasoning_budget: None,
@@ -570,7 +570,7 @@ mod tests {
         assert_eq!(d.temperature, 0.7);
         assert_eq!(d.top_p, 0.9);
         assert_eq!(d.top_k, 40);
-        assert_eq!(d.max_tokens, 2048);
+        assert_eq!(d.max_tokens, 32768);
     }
 
     #[test]
