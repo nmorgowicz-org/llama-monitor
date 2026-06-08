@@ -8,7 +8,7 @@
 // still stays connected and receives data, but we discard the messages until
 // the tab becomes visible again. This saves ~100+ DOM writes per tick.
 
-import { formatMetricAge, formatMetricNumber } from '../core/format.js';
+import { formatMetricAge, formatMetricNumber, escapeHtml } from '../core/format.js';
 import { deriveTelemetryGrade, gradeLabel, gradeStatusClass, gradeActionCopy } from '../features/telemetry-grade.js';
 import {
     sessionState,
@@ -937,10 +937,55 @@ function _levelClass(level) {
     return 'log-info';
 }
 
+function _colorizeLogLine(line) {
+    if (!line) return escapeHtml(line || '');
+
+    let s = escapeHtml(line);
+
+    // 1) Full-level words: INFO/WARN/ERROR/DEBUG/VERB/FATAL
+    s = s.replace(
+        /\b((?:INFO|WARN(ING)?|ERROR|DEBUG|VERB|FATAL))\b/g,
+        '<span class="log-lev">$1</span>'
+    );
+
+    // 2) Single-letter level after timestamp/IP-like prefix: e.g. "1392.56.898.909 W slot ..."
+    // Match: leading digits/letters/dots, then space, then one of I/W/E/D near a word boundary.
+    s = s.replace(
+        /^([\w\.]+)\s+([IiWwEeDd])\b/g,
+        '$1 <span class="log-lev">$2</span>'
+    );
+
+    // 3) Key components / actions (subset optimized for readability)
+    s = s.replace(
+        /\b((?:slot|srv|begin|create_check|update_slots|release_slot|launch_slot|print_timing|statistics|reasoning-budget|ngram-mod|draft-acceptance|draft-mtp))\b/g,
+        '<span class="log-comp">$1</span>'
+    );
+
+    // 4) Metrics: e.g. "335.46 ms", "635 tokens", "124.16 tokens per second"
+    // - "X.Y ms" or integer ms
+    s = s.replace(
+        /(\d+\.?\d*)\s*ms\b/g,
+        '<span class="log-metric">$1 ms</span>'
+    );
+    // - tokens per second
+    s = s.replace(
+        /(\d+\.?\d*)\s*tokens?\s+per\s+second\b/g,
+        '<span class="log-metric">$1 tokens per second</span>'
+    );
+    // - "N tokens" (only when preceded by space, to avoid hitting random IDs too harshly)
+    s = s.replace(
+        /(?<=\s)(\d+\.?\d*)\s*tokens?\b/g,
+        ' <span class="log-metric">$1 tokens</span>'
+    );
+
+    return s;
+}
+
 function _renderLogLine(line) {
     const div = document.createElement('div');
     div.className = 'log-line ' + _levelClass(_parseLogLevel(line));
-    div.textContent = line;
+    // eslint-disable-next-line no-unsanitized/property -- _colorizeLogLine uses escapeHtml and only safe inline spans
+    div.innerHTML = _colorizeLogLine(line);
     return div;
 }
 
@@ -1090,25 +1135,25 @@ function _updateLogTail(d) {
     }
 
     const lastN = logs.slice(-logTailLines);
-    const existing = tail.children;
+
+    // Ensure tail only contains the lines we want to show
+    while (tail.children.length > lastN.length) {
+        tail.removeChild(tail.lastChild);
+    }
 
     for (let i = 0; i < lastN.length; i++) {
         const line = lastN[i];
         if (!line) continue;
 
-        let el = existing[i];
+        let el = tail.children[i];
         if (!el) {
             el = document.createElement('div');
             tail.appendChild(el);
         }
 
         el.className = 'log-line ' + _levelClass(_parseLogLevel(line));
-        el.textContent = line;
-    }
-
-    // Remove extra lines if line count decreased
-    for (let i = lastN.length; i < existing.length; i++) {
-        tail.removeChild(existing[i]);
+        // eslint-disable-next-line no-unsanitized/property -- _colorizeLogLine uses escapeHtml and only safe inline spans
+        el.innerHTML = _colorizeLogLine(line);
     }
 }
 

@@ -386,6 +386,7 @@ export function openSpawnWizard(opts = {}) {
     renderLocalModelHint();
     showStep(1); // step 1 = Model (0-indexed)
   } else {
+    wizardState.model.source = 'local';
     updateModelInputVisibility();
     renderLocalModelHint();
     showStep(0);
@@ -3360,19 +3361,32 @@ function bindHardwareToggleSwitch(labelEl, inputEl) {
 
 function getEffectiveArch() {
   const a = wizardState.arch;
-  // Always apply heuristics to ensure sliding window fields are populated
-  // for models that support them (Gemma4, Gemma3, etc.)
+  // Always apply heuristics to ensure sliding window and hybrid-attention fields
+  // are populated for models that support them (Gemma4, Gemma3, Qwen3.6, etc.).
   if (wizardState.model.paramB > 0) {
     const heuristicArch = buildHeuristicArch(wizardState.model.path || wizardState.model.hfRepo, wizardState.model.paramB);
-    // Merge heuristic values with existing introspection data
-    // Heuristic provides defaults; introspection provides actual values when available
+    // For sliding-window models, GGUF head_dim is the global head_dim (e.g., 512),
+    // but local layers use a smaller dim (e.g., 256). Trust the heuristic head_dim
+    // in that case to avoid inflating KV cache.
+    const hasLocalAttn = heuristicArch.localAttnWindow > 0;
     return {
+      // Base from heuristic (includes sliding-window fields, MoE, MTP hints)
       ...heuristicArch,
-      ...a,
-      // Preserve existing non-default fields that might be set by introspection
+      // Override with introspection-only fields
       nLayers: a.nLayers || heuristicArch.nLayers,
       nKvHeads: a.nKvHeads || heuristicArch.nKvHeads,
-      headDim: a.headDim || heuristicArch.headDim,
+      // head_dim: heuristic for sliding-window models; introspection otherwise
+      headDim: hasLocalAttn
+        ? heuristicArch.headDim
+        : (a.headDim || heuristicArch.headDim),
+      // Preserve sliding-window + hybrid-attention from the heuristic
+      // unless introspection explicitly set them (non-zero).
+      nGlobalAttnLayers: a.nGlobalAttnLayers || heuristicArch.nGlobalAttnLayers,
+      localAttnWindow: a.localAttnWindow || heuristicArch.localAttnWindow,
+      localKvHeads: a.localKvHeads || heuristicArch.localKvHeads,
+      // Hybrid linear-attention (DeltaNet, etc.): preserve if set
+      nAttnLayers: a.nAttnLayers || heuristicArch.nAttnLayers,
+      linearAttnStateBytes: a.linearAttnStateBytes || heuristicArch.linearAttnStateBytes,
     };
   }
   return a;
@@ -5899,17 +5913,28 @@ function _pollMmprojDownload(downloadId, localPath, expectedSize, statusEl) {
 function renderMtpSection() {
   const section = document.getElementById('hw-mtp-section');
   if (!section) return;
-  const hasMtp = wizardState.arch.mtpDepth > 0 ||
-    detectMtpFromName(wizardState.model.hfFile || wizardState.model.path || '');
-  if (!hasMtp) {
+
+  const modelPath = wizardState.model.hfFile || wizardState.model.path || '';
+  const hasBuiltInMtp = wizardState.arch.mtpDepth > 0 || detectMtpFromName(modelPath);
+  const hasAssistantSelected = (wizardState.model.selectedDraftPath || '').trim().length > 0;
+  const showMtp = hasBuiltInMtp || hasAssistantSelected;
+
+  if (!showMtp) {
     section.style.display = 'none';
     if (dom.mtpAssistantSection) dom.mtpAssistantSection.style.display = 'none';
     return;
   }
+
+  // If an assistant is selected but MTP is not explicitly disabled by the user,
+  // we consider the MTP section "active" so tuning controls and draft-mtp mode are exposed.
+  if (hasAssistantSelected && !hasBuiltInMtp && !_mtpUserConfigured) {
+    wizardState.hardware.mtpEnabled = true;
+  }
+
   section.style.display = '';
 
   const infoNote = document.getElementById('hw-mtp-info-note');
-  if (infoNote && hasMtp) { infoNote.style.display = ''; }
+  if (infoNote && hasBuiltInMtp) { infoNote.style.display = ''; }
 
   // Render companion assistant selector: always show for MTP models even
   // if no candidates were auto-detected, so user can still browse.
@@ -5921,25 +5946,39 @@ function renderMtpSection() {
     // are not silently lost.
     if (!dom.mtpAssistantSelect.dataset.bound) {
       dom.mtpAssistantSelect.dataset.bound = '1';
-      dom.mtpAssistantSelect.addEventListener('change', async () => {
-        const selected = dom.mtpAssistantSelect.value || '';
-        // Browse sentinel: open file browser for companion assistant
-        if (selected === '__browse__') {
-          await openModelFileBrowser(
-            'hw-mtp-assistant-select',
-            'gguf',
-            null,
-            'draft-model',
-          );
-          return;
-        }
-        wizardState.model.selectedDraftPath = selected;
-        // When assistant is selected, recommend higher n-max.
-        if (selected) {
-          wizardState.hardware.mtpDraftNMax = wizardState.hardware.mtpDraftNMax || 4;
-        }
-        scheduleVramUpdate();
-      });
+       dom.mtpAssistantSelect.addEventListener('change', async () => {
+         const selected = dom.mtpAssistantSelect.value || '';
+         // Browse sentinel: open file browser for companion assistant
+         if (selected === '__browse__') {
+           await openModelFileBrowser(
+             'hw-mtp-assistant-select',
+             'gguf',
+             null,
+             'draft-model',
+           );
+           return;
+         }
+         wizardState.model.selectedDraftPath = selected;
+
+         // If assistant selected and no explicit conflicting choice, default to draft-mtp.
+         if (selected && dom.specTypeSelect && !dom.specTypeSelect.value.includes('draft-mtp')) {
+           dom.specTypeSelect.value = 'draft-mtp,ngram-mod';
+         }
+
+         // Ensure MTP is enabled for assistant-based drafts (unless user explicitly disabled).
+         if (selected && !_mtpUserConfigured) {
+           wizardState.hardware.mtpEnabled = true;
+         }
+
+         // When assistant is selected, recommend higher n-max.
+         if (selected) {
+           wizardState.hardware.mtpDraftNMax = wizardState.hardware.mtpDraftNMax || 4;
+         }
+
+         // Refresh MTP section to expose tuning controls and update visibility.
+         renderMtpSection();
+         scheduleVramUpdate();
+       });
     }
 
     dom.mtpAssistantSection.style.display = '';
@@ -5995,22 +6034,38 @@ function renderMtpSection() {
     draftNMaxInput.value = wizardState.hardware.mtpDraftNMax;
   }
 
+  // Derive whether MTP tuning controls should be visible:
+  // - If user explicitly enabled via checkbox, OR
+  // - If an assistant is selected (implies draft-mtp mode), OR
+  // - If the speculative decoding dropdown is on draft-mtp.
+  const specVal = dom.specTypeSelect?.value || '';
+  const specUsesMtp = specVal && (specVal.includes('draft-mtp') || specVal.includes('draft-model'));
+  const mtpEffectivelyEnabled = wizardState.hardware.mtpEnabled || hasAssistantSelected || specUsesMtp;
+
   if (checkbox) {
     if (!checkbox.dataset.bound) {
       checkbox.dataset.bound = '1';
       checkbox.addEventListener('change', () => {
         _mtpUserConfigured = true;
         wizardState.hardware.mtpEnabled = checkbox.checked;
-        // MTP requires parallel=1 — update state
         if (checkbox.checked) wizardState.hardware.parallelSlots = 1;
-        const depthRow = document.getElementById('hw-mtp-depth-row');
-        if (depthRow) depthRow.style.display = checkbox.checked ? '' : 'none';
+
+        // Sync spec dropdown to draft-mtp when enabling
+        if (checkbox.checked && dom.specTypeSelect && !dom.specTypeSelect.value.includes('draft-mtp')) {
+          dom.specTypeSelect.value = 'draft-mtp,ngram-mod';
+        }
+
+        renderMtpSection();
         scheduleVramUpdate();
       });
     }
-    checkbox.checked = wizardState.hardware.mtpEnabled;
-    const depthRow = document.getElementById('hw-mtp-depth-row');
-    if (depthRow) depthRow.style.display = checkbox.checked ? '' : 'none';
+    checkbox.checked = mtpEffectivelyEnabled;
+  }
+
+  // Ensure hw-mtp-depth-row is visible when MTP is in use.
+  const depthRow = document.getElementById('hw-mtp-depth-row');
+  if (depthRow) {
+    depthRow.style.display = mtpEffectivelyEnabled ? '' : 'none';
   }
 }
 
@@ -7545,20 +7600,26 @@ function buildSpawnPayload() {
   const arch = getEffectiveArch();
   const gpuLayers = h.gpuLayers === 'manual' ? (h.gpuLayersManual ?? -1) : (h.gpuLayers === 'all' ? -1 : null);
 
-  // MTP: when enabled, use draft-mtp spec type and force parallel=1
+ // MTP: when enabled, use draft-mtp spec type and force parallel=1
   const mtpActive = arch.mtpDepth > 0 && h.mtpEnabled;
   const specTypeUser = dom.specTypeSelect?.value || '';
   // Respect an explicit 'draft-mtp' choice from the advanced dropdown; only
   // default to 'draft-mtp,ngram-mod' when the user hasn't already chosen a
   // draft-mtp variant (covers the common case where the dropdown is empty).
-  const specType = mtpActive
-    ? (specTypeUser.includes('draft-mtp') ? specTypeUser : 'draft-mtp,ngram-mod')
-    : specTypeUser;
-  const parallelSlots = mtpActive ? 1 : h.parallelSlots;
-
-  // Resolve draft assistant: prefer MTP section selection, fall back to
-  // advanced draft-model input if user configured one.
   const assistantPath = m.selectedDraftPath || (dom.draftModelInput?.value || '').trim() || '';
+  const hasAssistant = assistantPath.length > 0;
+
+  // When the user has an assistant/draft model configured and has not
+  // explicitly chosen a conflicting mode, default to draft-mtp.
+  let specType = specTypeUser;
+  if (mtpActive || hasAssistant) {
+    if (!specType) {
+      specType = 'draft-mtp,ngram-mod';
+    }
+  }
+
+  // MTP requires parallel=1 when active.
+  const parallelSlots = (mtpActive || (hasAssistant && specType.includes('draft-mtp'))) ? 1 : h.parallelSlots;
 
   // Resolve mmproj local path: prefer mmprojPath (local file), fall back to
   // mmprojHfFile only if it looks like an absolute path (i.e. was set from
@@ -7567,11 +7628,11 @@ function buildSpawnPayload() {
 
   // MTP n-max: 4 when assistant is present (recommended for Gemma4-style), 2 otherwise.
   // Use != null so an explicit 0 from the user is not treated as "unset".
-  const mtpNMaxDefault = assistantPath ? 4 : 2;
-  const mtpNMax =
-    (mtpActive || (assistantPath && (specType.includes('draft-mtp') || specType.includes('draft-model'))))
-      ? (h.mtpDraftNMax != null ? h.mtpDraftNMax : mtpNMaxDefault)
-      : undefined;
+  const usesMtpSpec = mtpActive || (hasAssistant && (specType.includes('draft-mtp') || specType.includes('draft-model')));
+  const mtpNMaxDefault = usesMtpSpec && assistantPath ? 4 : 2;
+  const mtpNMax = usesMtpSpec
+    ? (h.mtpDraftNMax != null ? h.mtpDraftNMax : mtpNMaxDefault)
+    : undefined;
 
   return {
     model_path: m.source !== 'hf' ? (m.path || '') : '',
@@ -7593,8 +7654,8 @@ function buildSpawnPayload() {
     ngram_spec: false,
     spec_type: specType,
     spec_draft_n_max: mtpNMax,
-    spec_draft_n_min: mtpActive && h.mtpDraftNMin != null ? h.mtpDraftNMin : undefined,
-    spec_draft_p_min: mtpActive && h.mtpDraftPMin != null ? h.mtpDraftPMin : undefined,
+    spec_draft_n_min: usesMtpSpec && h.mtpDraftNMin != null ? h.mtpDraftNMin : undefined,
+    spec_draft_p_min: usesMtpSpec && h.mtpDraftPMin != null ? h.mtpDraftPMin : undefined,
     draft_model: assistantPath || '',
     kv_unified: h.kvUnified || null,
     flash_attn: h.flashAttn || '',
@@ -7632,6 +7693,7 @@ function buildSpawnPayload() {
     chat_template_file: wizardState.model.chatTemplatePath || null,
     profile: wizardState.profile,
     use_case: wizardState.useCase,
+    preset_id: wizardState.savedPresetId || null,
   };
 }
 

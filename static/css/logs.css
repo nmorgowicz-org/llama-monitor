@@ -182,6 +182,11 @@
 .log-error { color: #f87171; border-left-color: rgba(248, 113, 113, 0.4);  background: rgba(248, 113, 113, 0.05); }
 .log-debug { color: rgba(148, 163, 184, 0.55); }
 
+/* Log token coloring (llama.cpp / llama-server logs) */
+.log-lev  { color: #e5e5e5; }
+.log-comp { color: #38bdf8; }
+.log-metric { color: #22c55e; }
+
 /* ── Logs Empty State ──────────────────────────────────────────────────────── */
 
 #page-logs {
@@ -574,6 +579,11 @@
 [data-theme="light"] .log-warn  { color: #92400e; background: rgba(217, 119, 6, 0.06); }
 [data-theme="light"] .log-error { color: #991b1b; background: rgba(220, 38, 38, 0.05); }
 [data-theme="light"] .log-debug { color: rgba(100, 116, 139, 0.65); }
+
+/* Log token coloring - light theme */
+[data-theme="light"] .log-lev    { color: #0f172a; }
+[data-theme="light"] .log-comp   { color: #0284c7; }
+[data-theme="light"] .log-metric { color: #16a34a; }
 
 /* ── Reduced Motion ─────────────────────────────────────────────────────────── */
 
