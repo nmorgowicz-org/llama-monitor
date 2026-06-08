@@ -17,8 +17,329 @@
  *           .sidebar-nav, .sidebar-btn, .sidebar-label, .sidebar-badge,
  *           .sidebar-collapse-btn, .content-area, .page,
  *           .dashboard-grid, .dashboard-header, .control-bar, .inference-grid,
- *           .widget-card (glass shell + hover + live/idle states + @keyframes card-float)
+ *           .widget-card (glass shell + hover + live/idle states + @keyframes card-float),
+ *           .control-bar buttons + .stop-choice-modal
  */
+
+/* ── Control bar: unified glassy buttons ── */
+
+.control-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.control-bar-zone {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.control-bar-divider {
+  width: 1px;
+  height: 22px;
+  background: linear-gradient(to bottom,
+    transparent,
+    rgba(148, 163, 184, 0.18),
+    transparent
+  );
+  margin: 0 6px;
+}
+
+/* Base: pill/glass style for all control-bar buttons */
+.control-bar-zone .btn,
+.btn-spawn-wizard,
+.btn-start,
+.btn-stop,
+.btn-switch-model,
+.btn-preset {
+  appearance: none;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 5px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border-subtle);
+  background:
+    radial-gradient(circle at top, rgba(15, 23, 42, 0.97), rgba(15, 23, 42, 0.96)),
+    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.99));
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  outline: none;
+  transition:
+    all 0.18s ease,
+    box-shadow 0.18s ease;
+  white-space: nowrap;
+}
+
+/* Spawn Server: primary but not urgent */
+.btn-spawn-wizard {
+  color: #ffffff;
+  border-color: color-mix(in srgb, var(--color-primary-soft) 50%, transparent);
+  background:
+    radial-gradient(circle at top, rgba(99, 102, 241, 0.16), rgba(59, 130, 246, 0.14)),
+    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.97));
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(99, 102, 241, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.btn-spawn-wizard:hover {
+  border-color: rgba(99, 102, 241, 0.6);
+  background:
+    radial-gradient(circle at top, rgba(99, 102, 241, 0.24), rgba(59, 130, 246, 0.19)),
+    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.98));
+  box-shadow:
+    0 10px 28px rgba(79, 70, 229, 0.18),
+    0 0 16px rgba(59, 130, 246, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+  color: #ffffff;
+}
+
+/* Start: green “go” accent */
+.btn-start {
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 40%, transparent);
+  background:
+    radial-gradient(circle at top, rgba(74, 222, 128, 0.09), rgba(22, 163, 74, 0.05)),
+    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.97));
+  box-shadow:
+    0 6px 16px rgba(22, 163, 74, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.btn-start:hover {
+  color: #ffffff;
+  border-color: var(--color-success);
+  background:
+    radial-gradient(circle at top, rgba(74, 222, 128, 0.17), rgba(22, 163, 74, 0.13)),
+    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.98));
+  box-shadow:
+    0 8px 24px rgba(22, 163, 74, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transform: translateY(-1px);
+}
+
+/* Stop: red “stop” accent */
+.btn-stop {
+  color: var(--color-danger);
+  border-color: color-mix(in srgb, var(--color-danger) 35%, transparent);
+  background:
+    radial-gradient(circle at top, rgba(248, 113, 113, 0.07), rgba(220, 38, 38, 0.04)),
+    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.97));
+  box-shadow:
+    0 6px 14px rgba(220, 38, 38, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.btn-stop:hover {
+  color: #ffffff;
+  border-color: var(--color-danger);
+  background:
+    radial-gradient(circle at top, rgba(248, 113, 113, 0.16), rgba(220, 38, 38, 0.09)),
+    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.98));
+  box-shadow:
+    0 8px 24px rgba(220, 38, 38, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transform: translateY(-1px);
+}
+
+/* Switch Model: secondary, neutral */
+.btn-switch-model {
+  color: var(--color-text-secondary);
+  border-color: var(--border-subtle);
+}
+
+.btn-switch-model:hover {
+  color: var(--color-text-primary);
+  border-color: rgba(99, 102, 241, 0.4);
+  box-shadow: var(--shadow-surface);
+  transform: translateY(-1px);
+}
+
+/* Preset buttons: ghost-style, small */
+.btn-preset-ghost {
+  padding: 4px 8px;
+  font-size: 0.68rem;
+  border-radius: 999px;
+  color: var(--color-text-muted);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.018), rgba(15, 23, 42, 0.97)),
+    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.99));
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.btn-preset-ghost:hover {
+  color: var(--color-text-primary);
+  border-color: rgba(99, 102, 241, 0.4);
+  background:
+    radial-gradient(circle at top, rgba(99, 102, 241, 0.08), rgba(15, 23, 42, 0.98)),
+    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.99));
+  box-shadow:
+    0 6px 18px rgba(15, 23, 42, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* Pressed/active */
+.btn-spawn-wizard:active,
+.btn-start:active,
+.btn-stop:active,
+.btn-switch-model:active,
+.btn-preset-ghost:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow:
+    0 4px 14px rgba(15, 23, 42, 0.45),
+    inset 0 1px 0 rgba(15, 23, 42, 0.4);
+}
+
+/* Disabled */
+.control-bar-zone .btn:disabled,
+.btn-spawn-wizard:disabled,
+.btn-start:disabled,
+.btn-stop:disabled,
+.btn-switch-model:disabled,
+.btn-preset-ghost:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow:
+    0 4px 12px rgba(15, 23, 42, 0.28),
+    inset 0 1px 0 rgba(15, 23, 42, 0.2);
+}
+
+/* ── “Server stopped” modal: glass card ── */
+
+.stop-choice-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: radial-gradient(
+    ellipse at top,
+    rgba(15, 23, 42, 0.75),
+    rgba(15, 23, 42, 0.98)
+  );
+  backdrop-filter: blur(16px) saturate(180%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.stop-choice-card {
+  width: min(340px, 100%);
+  padding: 16px 18px 16px 18px;
+  background:
+    radial-gradient(circle at top, rgba(99, 102, 241, 0.1), transparent 60%),
+    radial-gradient(circle at bottom right, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.97));
+  border-radius: 16px;
+  border: 1px solid var(--border-subtle);
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(99, 102, 241, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stop-choice-title {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stop-choice-title::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.6);
+  box-shadow: 0 0 6px rgba(148, 163, 184, 0.35);
+}
+
+.stop-choice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stop-choice-actions .btn {
+  flex: 1 1 min-content;
+  font-size: 0.74rem;
+  padding: 6px 12px;
+  border-radius: 999px;
+}
+
+/* Go to welcome screen: primary */
+.btn-stop-choice-welcome {
+  color: #ffffff;
+  border: 1px solid var(--color-primary-soft);
+  background:
+    radial-gradient(circle at top, rgba(99, 102, 241, 0.18), rgba(59, 130, 246, 0.14)),
+    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.97));
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(99, 102, 241, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.btn-stop-choice-welcome:hover {
+  border-color: rgba(99, 102, 241, 0.6);
+  box-shadow:
+    0 10px 28px rgba(79, 70, 229, 0.18),
+    0 0 16px rgba(59, 130, 246, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+}
+
+/* Stay on dashboard: secondary */
+.btn-stop-choice-stay {
+  color: var(--color-text-secondary);
+  border: 1px solid var(--border-subtle);
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.018), rgba(15, 23, 42, 0.97)),
+    radial-gradient(circle at bottom, rgba(15, 23, 42, 0.99), rgba(15, 23, 42, 0.99));
+}
+
+.btn-stop-choice-stay:hover {
+  border-color: rgba(99, 102, 241, 0.4);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-surface);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  /* control-bar buttons */
+  .control-bar-zone .btn,
+  .btn-spawn-wizard,
+  .btn-start,
+  .btn-stop,
+  .btn-switch-model,
+  .btn-preset,
+  .btn-preset-ghost {
+    transition: none !important;
+  }
+
+  /* stop-choice modal */
+  .stop-choice-modal,
+  .stop-choice-card {
+    transition: none !important;
+  }
+}
+
 .endpoint-health-strip {
   position: sticky;
   top: 0;

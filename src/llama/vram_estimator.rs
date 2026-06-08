@@ -2250,7 +2250,7 @@ mod tests {
 
     #[test]
     fn gemma4_26b_a4b_gets_moe_and_alternating_attention() {
-        // Source: same reference. 30 layers, 128 total experts, 9 active (8 routed + 1 shared).
+        // Source: same reference. 30 layers, 128 total experts, 8 active.
         // "A4B" = 4B active PARAMETERS — not 4 active experts.
         let arch =
             ModelArch::from_name_and_params("gemma-4-26B-A4B-it-heretic-ara.Q5_K_XL.gguf", 26.0);
@@ -2261,8 +2261,8 @@ mod tests {
         assert!(arch.is_moe(), "26B-A4B should be MoE");
         assert_eq!(arch.n_experts, 128, "Gemma4-26B-A4B has 128 total experts");
         assert_eq!(
-            arch.n_experts_used, 9,
-            "Gemma4-26B-A4B has 9 active experts (8 routed + 1 shared)"
+            arch.n_experts_used, 8,
+            "Gemma4-26B-A4B has 8 active experts"
         );
         assert_eq!(
             arch.local_attn_window, 1024,

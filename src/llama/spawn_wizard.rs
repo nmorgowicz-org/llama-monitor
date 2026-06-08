@@ -877,11 +877,7 @@ impl ModelMetadata {
         } else {
             self.n_kv_heads.unwrap_or(heuristic.n_kv_heads)
         };
-        let local_kv_heads = if heuristic.has_local_attn() {
-            heuristic.local_kv_heads
-        } else {
-            heuristic.local_kv_heads
-        };
+        let local_kv_heads = heuristic.local_kv_heads;
 
         ModelArch {
             n_layers: self.n_layers.unwrap_or(heuristic.n_layers),
