@@ -550,14 +550,28 @@ function _toggleSpecFields(specType) {
     if (mtpWrap) mtpWrap.style.display = hasMtp   ? '' : 'none';
     // Show draft-model input for both draft-model and MTP with external assistant.
     if (dmWrap)  dmWrap.style.display  = (hasDraft || hasMtp) ? '' : 'none';
+
+    // Auto-populate draft model path from modal-draft-model if available and empty
+    const draftInput = document.getElementById('modal-draft-model');
+    if (dmWrap && (hasDraft || hasMtp)) {
+        if (draftInput && !draftInput.value.trim()) {
+            // Try to get from session state preset if available
+            const currentPreset = sessionState?.presets?.find(p =>
+                document.getElementById('modal-preset-id')?.value === p.id
+            );
+            if (currentPreset && currentPreset.draft_model) {
+                draftInput.value = currentPreset.draft_model;
+            }
+        }
+    }
+
     const hints = {
         'ngram-mod': 'Best for server deployments with multiple slots. Uses a shared hash pool — requires no extra files or VRAM.',
         'ngram-simple': 'Lightest-weight option. Scans recent history for matching n-grams. Good for single-slot use.',
         'ngram-map-k': 'Hash-map based pattern matching. Works well for repetitive content like code or structured data.',
         'ngram-map-k4v': 'Experimental. Tracks up to 4 candidate tokens per n-gram key. May outperform ngram-map-k on long repetitive content.',
-        'draft-mtp,ngram-mod': 'For models with MTP heads. If your model requires an external assistant (e.g. Gemma4-style), set the Draft Model path below. MTP + ngram-mod forces --parallel 1. Benchmark on your backend; MTP can reduce throughput on Metal.',
-        'draft-mtp': 'Pure MTP with no n-gram fallback. For models with MTP heads. If your model requires an external assistant (e.g. Gemma4-style), set the Draft Model path below. Forces --parallel 1. Benchmark on your backend; MTP can reduce throughput on Metal.',
-        'draft-model': 'Needs a separate draft model (same family, smaller size). Highest potential speedup but requires downloading and managing an additional file.',
+        'draft-mtp,ngram-mod': 'MTP with n-gram fallback. If your model requires an external assistant (e.g. Gemma4-style), set the Draft Model path below. MTP + ngram-mod forces --parallel 1.',
+        'draft-mtp': 'Pure MTP with no n-gram fallback. If your model requires an external assistant (e.g. Gemma4-style), set the Draft Model path below. Forces --parallel 1.',
     };
     if (hint) {
         const text = hints[specType] || '';

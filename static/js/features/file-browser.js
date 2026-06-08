@@ -219,8 +219,26 @@ export function fileBrowserUp() {
 }
 
 export function fileBrowserSelect(path) {
-    document.getElementById(fbTargetId).value = path || fbCurrentPath;
-    document.getElementById(fbTargetId).dispatchEvent(new Event('input', { bubbles: true }));
+    const value = path || fbCurrentPath;
+    const el = document.getElementById(fbTargetId);
+    if (!el) { closeFileBrowser(); return; }
+
+    if (el.tagName === 'SELECT') {
+        // For <select> targets: add or update an option for this value
+        let opt = el.querySelector(`option[value="${value.replace(/"/g, '\\"')}"]`);
+        if (!opt) {
+            const file = value.split(/[\\/]/).pop() || value;
+            opt = document.createElement('option');
+            opt.value = value;
+            opt.textContent = file;
+            el.appendChild(opt);
+        }
+        el.value = value;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+    } else {
+        el.value = value;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
     closeFileBrowser();
 }
 

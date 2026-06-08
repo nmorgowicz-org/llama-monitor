@@ -330,6 +330,14 @@ export async function saveSession(event) {
         showToast('Failed: authentication required', 'error');
         return;
     }
+    if (resp.status === 429) {
+        const data429 = await resp.json().catch(() => ({}));
+        const wait = data429?.seconds_remaining
+            ? `Please wait ${data429.seconds_remaining}s`
+            : 'Too soon; please wait';
+        showToast('Failed: ' + wait, 'warning');
+        return;
+    }
     const data = await resp.json();
     if (data.ok) {
         closeSessionModal();
@@ -343,8 +351,10 @@ export async function saveSession(event) {
             const port = parseInt(target, 10) || 8001;
             try {
                 await waitForSpawnReadiness(port);
-            } catch {
-                // Non-fatal — switch view anyway; the WebSocket will start pushing data once ready
+            } catch (err) {
+                // Non-fatal — switch view anyway; show a warning with the key message.
+                const msg = (err?.message || 'Server did not become ready').split('\n')[0].trim();
+                showToast('Server starting – this may take a moment. If it stays unresponsive, check logs for details: ' + msg, 'warning');
             }
             setHeaderMode('Spawn:' + (parseInt(target, 10) || 8001));
             showTunePanel();

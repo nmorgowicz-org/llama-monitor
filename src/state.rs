@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use crate::chat_storage::ChatStorage;
@@ -473,6 +474,7 @@ pub struct AppState {
     pub llama_metrics: Arc<Mutex<LlamaMetrics>>,
     pub server_logs: Arc<Mutex<VecDeque<String>>>,
     pub server_child: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
+    pub server_stopping: Arc<AtomicBool>, // True when stop_server is in progress (for death-watcher coordination)
     pub server_running: Arc<Mutex<bool>>, // Whether active endpoint is reachable (for inference)
     pub local_server_running: Arc<Mutex<bool>>, // Whether a local llama-server was spawned by this app
     pub server_config: Arc<Mutex<Option<ServerConfig>>>,
@@ -556,6 +558,7 @@ impl AppState {
             llama_metrics: Arc::new(Mutex::new(LlamaMetrics::default())),
             server_logs: Arc::new(Mutex::new(VecDeque::new())),
             server_child: Arc::new(tokio::sync::Mutex::new(None)),
+            server_stopping: Arc::new(AtomicBool::new(false)),
             server_running: Arc::new(Mutex::new(false)),
             local_server_running: Arc::new(Mutex::new(false)),
             server_config: Arc::new(Mutex::new(None)),

@@ -464,6 +464,38 @@ Playwright UI tests are separate from the Puppeteer screenshot harness. They:
 - Validate behavior and flows, not pixel-perfect visuals.
 - Are typically run near the end of a feature branch before marking a PR ready.
 
+### Live Instance Protection (MANDATORY)
+
+When running Playwright tests while a live llama-monitor instance is in use (e.g., for
+coding assistance, running a model, or as the AI’s active environment), the test run MUST
+not kill, restart, or connect to that instance.
+
+Default Playwright behavior:
+- Uses `run-server.mjs` on port 7778.
+- Playwright will kill any existing process on 7778 before starting its own test server.
+
+This is dangerous: an AI coding session may be running on that instance via a spawned
+model. Killing it silently terminates that model and may corrupt ongoing work.
+
+HARD RULE:
+- NEVER run Playwright tests on the same port as the live/active llama-monitor.
+- NEVER run bare `npm test` or `npx playwright test` when port 7778 is in use for
+  anything other than the test run itself.
+
+CORRECT: use a separate port:
+- Fastest / preferred:
+  - From repo root:
+    - `cd tests/ui && LLAMA_MONITOR_TEST_PORT=17778 npx playwright test --workers=1 --retries=2`
+- Or via LLAMA_MONITOR_UI_URL (tests attach to that instance, do not auto-manage):
+  - Start a dedicated test instance:
+    - `cargo run --release -- --headless --port 17778` (or use target/release/llama-monitor)
+  - Then:
+    - `cd tests/ui && LLAMA_MONITOR_UI_URL=http://127.0.0.1:17778 npx playwright test --workers=1 --retries=2`
+
+If you are unsure whether port 7778 is in use:
+- Assume it is.
+- Always use LLAMA_MONITOR_TEST_PORT.
+
 ### Running Locally
 
 From the repository root:
@@ -472,14 +504,16 @@ From the repository root:
 cd tests/ui
 npm install
 npx playwright install chromium
-npm test
+
+# MANDATORY: use a non-7778 port when a live llama-monitor is running:
+LLAMA_MONITOR_TEST_PORT=17778 npm test
 ```
 
 **IMPORTANT: Always run with CI-equivalent flags to catch real failures and match CI behavior exactly:**
 
 ```bash
 # CI-equivalent run (sequential, 2 retries) — use this before marking a PR ready
-npx playwright test --workers=1 --retries=2
+LLAMA_MONITOR_TEST_PORT=17778 npx playwright test --workers=1 --retries=2
 ```
 
 Running without `--workers=1` uses multiple workers in parallel, which can cause false
@@ -489,17 +523,18 @@ workers in parallel is a timing issue, not a functional bug. A test that fails w
 
 Useful variants:
 
-- `npm test` — run all tests headless (default workers, no retries)
-- `npx playwright test --workers=1 --retries=2` — CI-equivalent sequential run (**preferred**)
-- `npm run test:headed` — run with browser visible
-- `npm run test:debug` — run in Playwright inspector
+- `LLAMA_MONITOR_TEST_PORT=17778 npm test` — run all tests headless (default workers, no retries)
+- `LLAMA_MONITOR_TEST_PORT=17778 npx playwright test --workers=1 --retries=2` — CI-equivalent sequential run (**preferred**)
+- `LLAMA_MONITOR_TEST_PORT=17778 npm run test:headed` — run with browser visible
+- `LLAMA_MONITOR_TEST_PORT=17778 npm run test:debug` — run in Playwright inspector
 - `npm run test:ssh` — run SSH integration tests (requires LLAMA_MONITOR_SSH_TARGET)
 - `LLAMA_MONITOR_HAS_AI=1 npm run test:ai` — include AI-dependent tests
 
 Notes:
 
 - Tests use a fresh temporary config dir via `run-server.mjs`; they do not depend on your local `~/.config/llama-monitor/`.
-- The UI URL defaults to `http://127.0.0.1:7778`. You can override with `LLAMA_MONITOR_UI_URL`.
+- The UI URL defaults to `http://127.0.0.1:7778` only when no test port override is set.
+- You MUST override with `LLAMA_MONITOR_TEST_PORT` (e.g., 17778) or `LLAMA_MONITOR_UI_URL` when the live instance is using 7778.
 
 ### When to Run
 
@@ -540,9 +575,9 @@ Some tests exhibit timing issues when run with multiple workers in parallel. CI 
 - `retries: 2` — failed tests retry up to 2 times
 
 **Debugging flaky failures:**
-1. Run with CI-equivalent flags first: `npx playwright test --workers=1 --retries=2`
+1. Run with CI-equivalent flags first: `LLAMA_MONITOR_TEST_PORT=17778 npx playwright test --workers=1 --retries=2`
 2. If that passes, the local failure was a parallel timing race — not a real bug
-3. Run the test in isolation to confirm: `npx playwright test --workers=1 --grep "test name"`
+3. Run the test in isolation to confirm: `LLAMA_MONITOR_TEST_PORT=17778 npx playwright test --workers=1 --grep "test name"`
 4. Do not mark PR as ready-to-test if `--workers=1 --retries=2` fails — that is a real bug
 
 **Cargo test flakiness from concurrent processes:**
@@ -556,6 +591,10 @@ time (e.g., you have a background build running while launching another test run
 ### Maintenance Rules
 
 UI e2e tests are first-class and must be kept in sync with the application. Agents MUST treat them similarly to reference documentation: update them as part of the same PR that changes the feature.
+
+IMPORTANT: When running Playwright tests locally, ALWAYS:
+- Use LLAMA_MONITOR_TEST_PORT=17778 (or similar) to avoid killing the live llama-monitor
+- Rebuild release first when UI code changed, as tests run against the current binary.
 
 #### Must Update
 

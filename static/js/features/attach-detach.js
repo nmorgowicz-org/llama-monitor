@@ -86,7 +86,26 @@ async function _fetchDbAdminToken() {
     return tokenData.token || null;
 }
 
-export async function doStart() {
+// Disable start buttons for N seconds, showing countdown.
+function applyCooldown(seconds, button) {
+    if (!seconds || seconds <= 0 || !button) return;
+    button.disabled = true;
+    const remaining = seconds;
+    const label = button.textContent || button.value || '';
+    const orig = label;
+    const interval = setInterval(() => {
+        if (seconds <= 0) {
+            clearInterval(interval);
+            button.disabled = false;
+            button.textContent = orig;
+            return;
+        }
+        button.textContent = `Wait ${seconds}s`;
+        seconds--;
+    }, 1000);
+}
+
+export async function doStart(cooldownBtn) {
     const config = getConfig();
     if (!config.model_path && !config.hf_repo) {
         showToast('No model source set. Edit the preset to select a local model or HuggingFace repo.', 'error');
@@ -117,6 +136,23 @@ export async function doStart() {
         });
 
         if (!resp.ok) {
+            if (resp.status === 429) {
+                try {
+                    const data = await resp.json().catch(() => null);
+                    const wait = data?.seconds_remaining || data?.error || '';
+                    if (typeof wait === 'number') {
+                        showToast('Start failed: Please wait ' + wait + 's', 'warning');
+                        applyCooldown(wait, cooldownBtn || btnStart);
+                    } else {
+                        showToast('Start failed: too soon; please wait', 'warning');
+                    }
+                } catch {
+                    showToast('Start failed: too soon; please wait', 'warning');
+                }
+                hideConnectingState();
+                return;
+            }
+
             const text = await resp.text().catch(() => 'Request failed');
             showToast('Start failed: ' + text, 'error');
             hideConnectingState();
@@ -132,8 +168,11 @@ export async function doStart() {
         }
 
         // Wait for the spawned server to become reachable
+        // Show a "starting" toast so the user knows something is happening
+        showToast('Starting llama-server…', 'info', 'Loading model on port ' + config.port, { duration: 12000 });
         await waitForSpawnReadiness(config.port);
 
+        showToast('llama-server is running', 'success', '', { duration: 6000 });
         setTuneConfig(config);
         setHeaderMode('Spawn:' + config.port);
         switchView('monitor');
@@ -141,7 +180,8 @@ export async function doStart() {
         showTunePanel();
         setTimeout(() => restorePreviousPosition(), 600);
     } catch (e) {
-        showToast('Start failed: ' + (e.message || 'network or server error'), 'error');
+        const msg = (e.message || 'network or server error').split('\n')[0].trim();
+        showToast('Start failed: ' + msg, 'error');
         hideConnectingState();
     } finally {
         if (btnStart) btnStart.disabled = false;
@@ -197,7 +237,13 @@ export async function doKillLlama() {
 
         if (!data.ok) {
             if (resp.status === 429) {
-                showToast('Kill failed: too soon; please wait', 'error');
+                const wait = data?.seconds_remaining
+                    ? `Too soon; please wait ${data.seconds_remaining}s`
+                    : 'Too soon; please wait';
+                showToast('Kill failed: ' + wait, 'warning');
+                if (data?.seconds_remaining) {
+                    applyCooldown(data.seconds_remaining, btnKill);
+                }
             } else {
                 showToast('Kill failed: ' + (data.error || 'unknown'), 'error');
             }
@@ -355,7 +401,7 @@ export function doStartFromSetup() {
         if (presetSelect) presetSelect.value = select.value;
     }
     showConnectingState();
-    doStart();
+    doStart(document.getElementById('setup-start-btn'));
 }
 
 // ── Button init ────────────────────────────────────────────────────────────────

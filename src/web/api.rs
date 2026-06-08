@@ -2453,23 +2453,11 @@ fn api_vram_auto_size(
                     parallel_slots,
                     fit_granularity,
                     is_unified_memory,
+                    context_cap, // n_ctx_train cap from GGUF metadata
                 );
 
-                // Cap the recommended context at the model's training context length.
-                // Scenario cards still show VRAM-limited maxes — the user can override
-                // via RoPE/YaRN scaling.
-                let capped_result = if let Some(cap) = context_cap {
-                    let mut r = result;
-                    if r.context_size > cap {
-                        r.context_size = cap;
-                    }
-                    r
-                } else {
-                    result
-                };
-
                 Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(warp::reply::json(
-                    &serde_json::json!({ "ok": true, "result": capped_result }),
+                    &serde_json::json!({ "ok": true, "result": result }),
                 )))
             }
         })
@@ -2489,7 +2477,7 @@ fn gguf_arch_to_heuristic_name(gguf_arch: &str) -> String {
         // since renamed 27B finetunes (Pantheon, Qwopus) are qwen3.6 derivatives.
         "qwen35" => "qwen3.6-model".into(),
         "qwen3_coder_next" | "qwen3-coder-next" => "qwen3-coder-next-model".into(),
-        "gemma4" | "gemma-4" => "gemma4-12b".into(),
+        "gemma4" | "gemma-4" => "gemma4-model".into(),
         "gemma3" | "gemma-3" => "gemma3-27b".into(),
         // For all other architectures, pass through — from_name_and_params
         // falls through to standard_heuristic which is correct for llama, mistral, etc.
@@ -10128,6 +10116,7 @@ fn api_kill_llama(
                 // (server_child, local_server_running, server_config, llama_metrics).
                 // Platform-specific pkill/taskkill below is a fallback if the child
                 // reference was already lost.
+                state.push_log("[monitor] kill-llama: kill-llama requested (best-effort)".into());
                 if let Err(e) = crate::llama::server::stop_server(&state).await {
                     state.push_log(format!("[monitor] stop_server fallback: {}", e));
                 }
@@ -11417,6 +11406,8 @@ fn api_llama_restart(
                     ));
                 };
 
+                state.push_log("[monitor] restart: stopping existing server".into());
+
                 // Stop current server
                 if let Err(e) = crate::llama::server::stop_server(&state_clone).await {
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
@@ -11428,11 +11419,17 @@ fn api_llama_restart(
                 }
 
                 // Brief pause to let the old process fully shut down
+                let pause_start = std::time::Instant::now();
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                state.push_log(format!(
+                    "[monitor] restart: re-spawning after {}ms",
+                    pause_start.elapsed().as_millis()
+                ));
 
                 // Restart with the same config (uses the current llama_server_path)
                 if let Err(e) = crate::llama::server::start_server(&state_clone, config, &cfg).await
                 {
+                    state.push_log(format!("[monitor] restart: start_server failed: {}", e));
                     return Ok::<Box<dyn warp::reply::Reply>, warp::Rejection>(Box::new(
                         warp::reply::json(&serde_json::json!({
                             "ok": false,

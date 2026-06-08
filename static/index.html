@@ -392,7 +392,16 @@
                 </div>
 
                 <section class="metric-section" id="inference-section">
-                    <h2 class="dashboard-section-title">Inference Metrics <span class="metric-badge" id="inference-historic-badge" style="display:none;">Historic</span></h2>
+                    <h2 class="dashboard-section-title">
+                        Inference Metrics
+                        <span class="metric-badge" id="inference-historic-badge" style="display:none;">Historic</span>
+                        <span class="inference-log-tail-group" id="inference-log-tail-group" style="display:none;">
+                            <span class="metric-badge inference-log-tail-btn" id="inference-log-tail-badge" title="Show a small live tail of llama-server logs">Live log tail</span>
+                            <span class="inference-log-tail-btn-small" id="inference-log-tail-minus" title="Show fewer log lines">−</span>
+                            <span class="inference-log-tail-btn-small" id="inference-log-tail-plus" title="Show more log lines">+</span>
+                        </span>
+                    </h2>
+                    <div class="inference-log-tail" id="inference-log-tail" style="display:none;"></div>
                     <div class="inference-grid" id="inference">
                         <!-- Throughput Card -->
                         <div class="widget-card widget-metric widget-speed">
@@ -2590,7 +2599,7 @@
                         </div>
                         <div class="pe-section-body">
                             <div class="pe-field">
-                               <label class="pe-label" for="modal-spec-type" title="Speculative decoding predicts tokens ahead and verifies them in a single forward pass, boosting generation speed with no quality cost. Types can be combined with commas (e.g. draft-mtp,ngram-mod). N-gram methods need no extra files; MTP requires a model with built-in prediction heads; draft-model needs a separate smaller model file.">Speculative Mode</label>
+                               <label class="pe-label" for="modal-spec-type" title="Speculative decoding predicts tokens ahead and verifies them in a single forward pass, boosting generation speed with no quality cost. Types can be combined with commas (e.g. draft-mtp,ngram-mod). N-gram methods need no extra files; MTP requires a model with built-in prediction heads or a draft model file.">Speculative Mode</label>
                                  <select class="pe-select" id="modal-spec-type">
                                      <option value="">Disabled</option>
                                      <optgroup label="N-gram methods (no extra files required)">
@@ -2599,13 +2608,10 @@
                                          <option value="ngram-map-k">ngram-map-k — hash-map patterns, good for repetitive/code content</option>
                                          <option value="ngram-map-k4v">ngram-map-k4v — experimental: 4 values/key, complex repetition patterns</option>
                                      </optgroup>
-                                     <optgroup label="MTP — Multi-Token Prediction (requires model with MTP heads)">
-                                         <option value="draft-mtp,ngram-mod">draft-mtp + ngram-mod — MTP with n-gram fallback</option>
-                                         <option value="draft-mtp">draft-mtp — pure MTP, no n-gram fallback</option>
-                                     </optgroup>
-                                     <optgroup label="Draft model (requires separate small model file)">
-                                         <option value="draft-model">draft-model — separate draft model, highest potential speedup</option>
-                                    </optgroup>
+                                     <optgroup label="MTP — Multi-Token Prediction">
+                                          <option value="draft-mtp,ngram-mod">draft-mtp + ngram-mod — MTP with n-gram fallback</option>
+                                          <option value="draft-mtp">draft-mtp — pure MTP, no n-gram fallback</option>
+                                      </optgroup>
                                 </select>
                                 <div class="pe-field-hint" id="spec-type-hint" style="display:none;"></div>
                             </div>
@@ -3142,9 +3148,10 @@
                             <div id="hw-tags-pills" style="display:contents;"></div>
                             <button type="button" id="hw-tags-add-btn" class="btn-wizard-tertiary" style="font-size:10px;min-height:22px;padding:2px 8px;flex-shrink:0;" title="Add or remove tags for this model in your library">+</button>
                         </div>
-                        <div class="hw-quant-row" id="hw-mmproj-row" style="display:none;">
-                            <label for="hw-mmproj-select" class="hw-quant-label" title="Adds ~0.5–1.5 GB VRAM. Required for multimodal inference.">Vision (mmproj)</label>
-                            <select id="hw-mmproj-select" class="hw-quant-select" title="Vision projector file. Choose (none) for text-only inference."></select>
+                        <div class="hw-quant-row" id="hw-mmproj-row" style="display:none; align-items:center; gap:6px;">
+                            <label for="hw-mmproj-select" class="hw-quant-label" title="Adds ~0.5–1.5 GB VRAM. Required for multimodal inference;">Vision (mmproj)</label>
+                            <select id="hw-mmproj-select" class="hw-quant-select" style="flex:1 1 auto;" title="Vision projector file. Choose (none) for text-only inference."></select>
+                            <button type="button" id="hw-mmproj-browse-btn" class="btn-wizard-tertiary" style="flex-shrink:0; font-size:10px; min-height:22px; padding:2px 7px;" title="Browse for an mmproj / projector file on this machine">Browse…</button>
                         </div>
                     </div>
 
@@ -3366,29 +3373,29 @@
                                          <option value="ngram-map-k">ngram-map-k — hash-map patterns, good for repetitive/code content</option>
                                          <option value="ngram-map-k4v">ngram-map-k4v — experimental: 4 values/key, complex repetition patterns</option>
                                      </optgroup>
-                                     <optgroup label="MTP — Multi-Token Prediction (requires model with MTP heads)">
-                                         <option value="draft-mtp,ngram-mod">draft-mtp + ngram-mod — MTP with n-gram fallback</option>
-                                         <option value="draft-mtp">draft-mtp — pure MTP, no n-gram fallback</option>
-                                     </optgroup>
-                                     <optgroup label="Draft model (requires separate small model file)">
-                                         <option value="draft-model">draft-model — separate draft model, highest potential speedup</option>
-                                     </optgroup>
-                                 </select>
-                                <div class="field-hint" id="spawn-spec-hint">
-                                    <span data-spec="">Pick a mode to see a description.</span>
-                                    <span data-spec="ngram-mod" style="display:none;">Shared hash pool n-gram: efficient for server use, good for general and roleplay. ~10–30% speedup, no extra files.</span>
-                                    <span data-spec="ngram-simple" style="display:none;">Minimal-overhead n-gram: looks up last n-gram in history. Lightweight and safe for most models.</span>
-                                    <span data-spec="ngram-map-k" style="display:none;">Hash-map patterns: strong for repetitive or code-heavy content where longer sequences recur.</span>
-                                    <span data-spec="ngram-map-k4v" style="display:none;">Experimental: 4 values per key for complex repetition patterns. Best for very repetitive or structured outputs.</span>
-                                    <span data-spec="draft-mtp,ngram-mod" style="display:none;">MTP plus n-gram fallback for models with built-in prediction heads. Requires <code>--parallel 1</code>. Benchmark against MTP disabled; current Metal builds can be slower.</span>
-                                    <span data-spec="draft-mtp" style="display:none;">Pure MTP with built-in prediction heads only. Requires <code>--parallel 1</code>. Benchmark against MTP disabled; current Metal builds can be slower.</span>
-                                    <span data-spec="draft-model" style="display:none;">Separate small draft model (1–3B) proposes tokens; main model verifies. Highest theoretical speedup (~2–3×) but requires an extra model file.</span>
-                                </div>
+                                     <optgroup label="MTP — Multi-Token Prediction">
+                                          <option value="draft-mtp,ngram-mod">draft-mtp + ngram-mod — MTP with n-gram fallback</option>
+                                          <option value="draft-mtp">draft-mtp — pure MTP, no n-gram fallback</option>
+                                      </optgroup>
+                                  </select>
+                                 <div class="field-hint" id="spawn-spec-hint">
+                                     <span data-spec="">Pick a mode to see a description.</span>
+                                     <span data-spec="ngram-mod" style="display:none;">Shared hash pool n-gram: efficient for server use, good for general and roleplay. ~10–30% speedup, no extra files.</span>
+                                     <span data-spec="ngram-simple" style="display:none;">Minimal-overhead n-gram: looks up last n-gram in history. Lightweight and safe for most models.</span>
+                                     <span data-spec="ngram-map-k" style="display:none;">Hash-map patterns: strong for repetitive or code-heavy content where longer sequences recur.</span>
+                                     <span data-spec="ngram-map-k4v" style="display:none;">Experimental: 4 values per key for complex repetition patterns. Best for very repetitive or structured outputs.</span>
+                                     <span data-spec="draft-mtp,ngram-mod" style="display:none;">MTP plus n-gram fallback for models with built-in prediction heads. Requires <code>--parallel 1</code>. Benchmark against MTP disabled; current Metal builds can be slower.</span>
+                                     <span data-spec="draft-mtp" style="display:none;">Pure MTP with built-in prediction heads only. Requires <code>--parallel 1</code>. Benchmark against MTP disabled; current Metal builds can be slower.</span>
+                                 </div>
                             </div>
                             <div class="hardware-field" id="spawn-draft-model-wrap" style="display:none;">
-                                <label for="spawn-draft-model">Draft model path</label>
-                                <input type="text" id="spawn-draft-model" placeholder="/path/to/draft-model.gguf">
-                            </div>
+                                 <label for="spawn-draft-model">Draft model path</label>
+                                 <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                                     <input type="text" id="spawn-draft-model" placeholder="/path/to/draft-model.gguf" style="flex:1;min-width:200px;">
+                                     <button type="button" id="spawn-draft-browse-btn" class="btn-wizard-tertiary" title="Browse for a draft model GGUF file">Browse…</button>
+                                     <div id="spawn-draft-candidates" style="display:flex;gap:4px;"></div>
+                                 </div>
+                             </div>
 
                             <!-- N-gram advanced knobs (shown for n-gram modes) -->
                           <div class="hardware-field" id="spawn-spec-ngram-wrap" style="display:none; grid-column: 1/-1;">

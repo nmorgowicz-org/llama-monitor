@@ -113,7 +113,7 @@ function renderSparkline(id, points, className, isBlocked) {
     const max = Math.max(...points, 1);
     const step = width / (points.length - 1);
     const currentValue = points[points.length - 1];
-    const currentX = width - 10;
+    const currentX = width;
     const currentY = height - ((currentValue / max) * (height - 4)) - 2;
     const path = points.map((value, index) => {
         const x = index * step;
@@ -130,7 +130,7 @@ function renderSparkline(id, points, className, isBlocked) {
         buildSparklineFillDefs(fillId, fillColor, 0.66, 0.22, 0.05) +
         '<path class="sparkline-fill ' + className + '" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + fillId + ')"></path>' +
         '<path class="sparkline-line ' + className + '" d="' + path + '"></path>' +
-        '<line class="sparkline-current-trace ' + className + '" x1="' + Math.max(currentX - 16, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>' +
+        '<line class="sparkline-current-trace ' + className + '" x1="' + Math.max(currentX - 8, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>' +
         '<circle class="sparkline-current-halo ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="7.4"></circle>' +
         '<circle class="sparkline-current ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="3.6"></circle>' +
         '<circle class="sparkline-current-core ' + className + '" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.2"></circle>' +
@@ -165,7 +165,7 @@ function renderLiveSparkline(id, points) {
         return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
     }).join(' ');
     const currentValue = points[points.length - 1];
-    const currentX = width - 10;
+    const currentX = width;
     const currentY = height - ((currentValue / max) * (height - 6)) - 3;
     const ratio = max > 0 ? currentValue / max : 0;
     const fillColor = getThemedSparklineFillColor(getInferenceSparklineColor('live-output'), ratio);
@@ -175,7 +175,7 @@ function renderLiveSparkline(id, points) {
         buildSparklineFillDefs(fillId, fillColor, 0.68, 0.24, 0.05),
         '<path class="sparkline-fill live-output" d="' + path + ' L 120 28 L 0 28 Z" fill="url(#' + fillId + ')"></path>',
         '<path class="sparkline-line live-output" d="' + path + '"></path>',
-        '<line class="sparkline-current-trace live-output" x1="' + Math.max(currentX - 16, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>',
+        '<line class="sparkline-current-trace live-output" x1="' + Math.max(currentX - 8, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>',
         '<circle class="sparkline-peak live-output" cx="' + peak.x.toFixed(2) + '" cy="' + peak.y.toFixed(2) + '" r="2.6"></circle>',
         '<circle class="sparkline-current-halo live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="7.4"></circle>',
         '<circle class="sparkline-current live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="3.6"></circle>',

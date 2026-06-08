@@ -104,7 +104,7 @@ function buildCockpitSparkline(points) {
     const max = Math.max(...points, 1);
     const step = width / (points.length - 1);
     const currentValue = points[points.length - 1];
-    const currentX = width - 10;
+    const currentX = width;
     const currentY = height - ((currentValue / max) * (height - 6)) - 3;
     const path = points.map((value, index) => {
         const x = index * step;
@@ -114,7 +114,7 @@ function buildCockpitSparkline(points) {
     return [
         '<path class="sparkline-fill live-output" d="' + path + ' L 120 28 L 0 28 Z" fill="currentColor"></path>',
         '<path class="sparkline-line live-output" d="' + path + '"></path>',
-        '<line class="sparkline-current-trace live-output" x1="' + Math.max(currentX - 16, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>',
+        '<line class="sparkline-current-trace live-output" x1="' + Math.max(currentX - 8, 0).toFixed(2) + '" y1="' + currentY.toFixed(2) + '" x2="' + currentX.toFixed(2) + '" y2="' + currentY.toFixed(2) + '"></line>',
         '<circle class="sparkline-current-halo live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="7.4"></circle>',
         '<circle class="sparkline-current live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="3.6"></circle>',
         '<circle class="sparkline-current-core live-output" cx="' + currentX.toFixed(2) + '" cy="' + currentY.toFixed(2) + '" r="1.2"></circle>',

@@ -501,7 +501,11 @@ impl ModelArch {
         arch.mtp_depth = mtp_depth;
 
         if let Some((total_b, active_b)) = moe_info {
-            let sparsity = active_b / total_b;
+            let sparsity = if total_b > 0.0 {
+                active_b / total_b
+            } else {
+                0.0
+            };
             arch.n_experts = if sparsity < 0.05 {
                 512 // extremely sparse (Qwen3-Coder-Next style)
             } else if total_b > 100.0 {
@@ -513,51 +517,80 @@ impl ModelArch {
             } else {
                 8 // Mixtral style
             };
-            arch.n_experts_used = active_b.round() as u32;
+            // n_experts_used = experts activated per token, not "active billions."
+            // Derive from sparsity; exact values should come from introspection.
+            arch.n_experts_used = if sparsity < 0.05 {
+                11
+            } else if sparsity <= 0.15 {
+                9
+            } else {
+                8
+            };
         }
 
         arch
     }
 
     /// Parse "NB-AMB" or "NB_AMB" MoE suffix, returning (total_params_b, active_params_b).
+    ///
+    /// Guardrails vs previous version:
+    /// - total_b >= 7.0: avoids false positives on names like "llama-3-a4b".
+    /// - active_b <= total_b: rejects obviously invalid suffixes.
+    /// - Takes the last valid pattern (rightmost) to reduce confusion on odd names.
     fn parse_moe_suffix(name: &str) -> Option<(f64, f64)> {
-        // Match patterns like "35B-A3B", "26B-A4B", "122B-A10B"
-        let re_src = name.to_ascii_lowercase();
-        // Find "-a<N>b" pattern preceded by a param count
-        let bytes = re_src.as_bytes();
+        let src = name.to_ascii_lowercase();
+        let bytes = src.as_bytes();
+        let len = bytes.len();
+        let mut best: Option<(f64, f64)> = None;
+
         let mut i = 0;
-        while i < bytes.len() {
+        while i < len {
             // Look for "-a" or "_a"
-            if i + 2 < bytes.len() && (bytes[i] == b'-' || bytes[i] == b'_') && bytes[i + 1] == b'a'
-            {
-                // Try to parse a number after "a"
+            if i + 2 < len && (bytes[i] == b'-' || bytes[i] == b'_') && bytes[i + 1] == b'a' {
+                // Read digits after 'a' until 'b'
                 let start = i + 2;
                 let end = bytes[start..]
                     .iter()
                     .position(|&b| b == b'b')
                     .map(|p| start + p);
+
                 if let Some(end_idx) = end {
-                    let active_str = &re_src[start..end_idx];
+                    let active_str = &src[start..end_idx];
                     if let Ok(active) = active_str.parse::<f64>() {
-                        // Now find the total before this marker
-                        let before = &re_src[..i];
-                        // Find last number + "b" before this point
-                        let total_match = before.rmatch_indices('b').find_map(|(bi, _)| {
-                            let num_start = before[..bi]
-                                .rfind(|c: char| !c.is_ascii_digit() && c != '.')
-                                .map(|p| p + 1)
-                                .unwrap_or(0);
-                            before[num_start..bi].parse::<f64>().ok()
+                        // Find last "<digits>b" before this marker
+                        let before = &src[..i];
+                        let total = before.rmatch_indices('b').find_map(|(bi, _)| {
+                            let mut num_start = bi;
+                            while num_start > 0
+                                && before[..num_start]
+                                    .chars()
+                                    .next_back()
+                                    .is_some_and(|c| c.is_ascii_digit() || c == '.')
+                            {
+                                num_start -= 1;
+                            }
+                            if num_start < bi {
+                                before[num_start..bi].parse::<f64>().ok()
+                            } else {
+                                None
+                            }
                         });
-                        if let Some(total) = total_match {
-                            return Some((total, active));
+
+                        if let Some(total) = total {
+                            // Enforce reasonableness:
+                            // - total_b >= 7.0: avoids "llama-3-a4b" style false positives
+                            // - active_b > 0 and <= total_b
+                            if total >= 7.0 && active > 0.0 && active <= total {
+                                best = Some((total, active));
+                            }
                         }
                     }
                 }
             }
             i += 1;
         }
-        None
+
+        best
     }
 
     /// Standard full-attention architecture heuristic.
@@ -628,8 +661,10 @@ impl ModelArch {
         let named_e2b = name.contains("e2b");
         let named_e4b = name.contains("e4b");
         let named_12b = name.contains("12b");
-        let named_26b_a4b =
-            name.contains("26b-a4b") || name.contains("26b_a4b") || name.contains("a4b");
+        // Only match explicit "26B-A4B" — a bare "a4b" can appear in unrelated
+        // fine-tune tags (e.g. "ablated-a4b-v2"). The param_b fallback at line 654
+        // covers unnamed ~26B Gemma4 models.
+        let named_26b_a4b = name.contains("26b-a4b") || name.contains("26b_a4b");
         let named_31b = name.contains("31b");
         let has_named_size = named_e2b || named_e4b || named_12b || named_26b_a4b || named_31b;
 
@@ -1082,6 +1117,9 @@ pub fn full_estimate(
 ///
 /// `fit_granularity` rounds the result down to a multiple (e.g. 1024 for --fit-ctx 1024).
 /// `headroom_fraction` reserves a fraction of VRAM as a safety buffer (default 0.05 = 5%).
+/// `n_ctx_train` is an optional hard cap: even if more context fits in VRAM, we should not
+/// silently exceed the model's training context length (unless the user extends it via
+/// RoPE/YaRN scaling or a manual override).
 #[allow(clippy::too_many_arguments)]
 pub fn max_context(
     model_size_bytes: u64,
@@ -1094,6 +1132,7 @@ pub fn max_context(
     available_vram_bytes: u64,
     fit_granularity: u64,
     headroom_fraction: f64,
+    n_ctx_train: Option<u64>,
 ) -> u64 {
     if available_vram_bytes == 0 {
         return 0;
@@ -1113,11 +1152,18 @@ pub fn max_context(
 
     // Binary search for context such that kv_cache_bytes(ctx) ≤ kv_budget
     // For non-sliding-window models we can solve directly; for Gemma we binary-search.
-    let ctx = if arch.has_local_attn() {
+    let mut ctx = if arch.has_local_attn() {
         binary_search_context(arch, ctk, ctv, parallel_slots, kv_budget)
     } else {
         direct_max_context(arch, ctk, ctv, parallel_slots, kv_budget)
     };
+
+    // Cap at training context (unless user has extended via RoPE/YaRN).
+    if let Some(cap) = n_ctx_train
+        && ctx > cap
+    {
+        ctx = cap;
+    }
 
     // Round down to fit_granularity
     let g = fit_granularity.max(1);
@@ -1250,6 +1296,7 @@ pub struct ContextScenario {
 ///
 /// `is_unified_memory`: true for Apple Silicon — tightens headroom reservation and
 /// removes the CPU-spill budget zone (paging on unified memory is not a graceful fallback).
+/// `n_ctx_train`: optional training context length to cap the recommended context.
 #[allow(clippy::too_many_arguments)]
 pub fn auto_size(
     model_size_bytes: u64,
@@ -1259,6 +1306,7 @@ pub fn auto_size(
     requested_parallel_slots: u32,
     preferred_fit_granularity: u64,
     is_unified_memory: bool,
+    n_ctx_train: Option<u64>,
 ) -> AutoSizeResult {
     let fit_gran = preferred_fit_granularity.max(512);
     let parallel_slots = requested_parallel_slots.max(1);
@@ -1296,6 +1344,7 @@ pub fn auto_size(
         available_vram_bytes,
         fit_gran,
         headroom,
+        n_ctx_train,
     );
 
     let breakdown = full_estimate(
@@ -1366,6 +1415,7 @@ pub fn auto_size(
         use_case,
         &kv_k,
         is_unified_memory,
+        n_ctx_train,
     );
 
     AutoSizeResult {
@@ -1442,6 +1492,7 @@ fn build_scenarios(
     _use_case: UseCase,
     recommended_kv: &str,
     is_unified_memory: bool,
+    n_ctx_train: Option<u64>,
 ) -> Vec<ContextScenario> {
     let mut scenarios = Vec::new();
     let headroom = compute_headroom(available_vram_bytes, is_unified_memory);
@@ -1464,6 +1515,7 @@ fn build_scenarios(
             available_vram_bytes,
             fit_gran,
             headroom,
+            n_ctx_train,
         );
         let bd = full_estimate(
             model_size_bytes,
@@ -1510,6 +1562,7 @@ fn build_scenarios(
             available_vram_bytes,
             fit_gran,
             headroom,
+            n_ctx_train,
         );
         let bd = full_estimate(
             model_size_bytes,
@@ -1636,6 +1689,7 @@ pub fn quant_comparison_table(
             available_vram_bytes,
             1024,
             headroom,
+            None, // pre-download advisor: VRAM-limited maxes only
         );
         let max_q4 = max_context(
             model_bytes,
@@ -1648,6 +1702,7 @@ pub fn quant_comparison_table(
             available_vram_bytes,
             1024,
             headroom,
+            None, // pre-download advisor: VRAM-limited maxes only
         );
 
         let mut notes = Vec::new();
@@ -1889,6 +1944,7 @@ mod tests {
             32 * 1024 * 1024 * 1024,
             1024,
             0.05,
+            None,
         );
         // Should be in the 180K–240K range
         assert!(
@@ -1959,6 +2015,7 @@ mod tests {
             1,
             1024,
             false, // not unified memory in this test
+            None,  // no training context cap in test
         );
         assert!(
             result.context_size >= 100_000,
@@ -2226,6 +2283,43 @@ mod tests {
     }
 
     #[test]
+    fn gemma4_a4b_tightened_ignores_random_a4b_tag() {
+        // The "a4b" pattern in gemma4_heuristic is now tightened:
+        // it must include "26b-a4b" / "26b_a4b", not a bare "a4b".
+        // A fine-tune named "Gemma-4-26B-ablated-a4b-v2" should NOT be
+        // forced into the 26B-A4B MoE profile.
+        let arch = ModelArch::from_name_and_params("Gemma-4-26B-ablated-a4b-v2-Q4_K_M.gguf", 26.0);
+        // Without explicit "26b-a4b", it falls back to param_b logic
+        // (param_b < 30 and no named size → treated as 26B MoE fallback),
+        // but the bare "a4b" is not enough on its own.
+        // We can validate that the pattern is tightened by checking
+        // a model whose name is clearly not the 26B-A4B but contains "a4b".
+
+        // A 31B Gemma4 whose name has a meaningless "a4b" tag:
+        let arch2 =
+            ModelArch::from_name_and_params("Gemma-4-31B-uncensored-a4b-test-Q8_0.gguf", 31.0);
+        // This should get 31B dense arch (60 layers), not 26B-A4B MoE (30 layers)
+        assert_eq!(
+            arch2.n_layers, 60,
+            "31B dense should not be confused with 26B-A4B MoE"
+        );
+        assert!(
+            !arch2.is_moe(),
+            "31B should be dense, not MoE, despite 'a4b' tag"
+        );
+    }
+
+    #[test]
+    fn moe_suffix_ignores_small_model_false_positives() {
+        // "llama-3-a4b" → total 3 < 7 → should NOT match as MoE.
+        let arch = ModelArch::from_name_and_params("meta-llama/llama-3-a4b-test-GGUF", 8.0);
+        assert!(
+            !arch.is_moe(),
+            "llama-3-a4b should not be parsed as MoE (total_b < 7)"
+        );
+    }
+
+    #[test]
     fn gemma4_12b_is_dense_unified_architecture() {
         let arch = ModelArch::from_name_and_params("gemma-4-12B-it-qat-Q4_0.gguf", 11.95);
         assert!(!arch.is_moe(), "Gemma4-12B is dense, not the 26B MoE");
@@ -2355,6 +2449,7 @@ mod tests {
             1,
             1024,
             false,
+            None,
         );
         // Should recommend substantial CPU offload
         assert!(

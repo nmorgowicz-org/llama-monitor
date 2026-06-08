@@ -2,6 +2,15 @@
 // run-server.mjs — cross-platform replacement for run-server.sh.
 // Creates a fresh temp config dir, starts the llama-monitor binary, and
 // cleans up on exit. Works on Linux, macOS, and Windows.
+//
+// IMPORTANT (live dev instance):
+// - Default port is 7778. When running tests locally while a live
+//   llama-monitor (or AI coding session) is using 7778, ALWAYS set:
+//     LLAMA_MONITOR_TEST_PORT=17778 (or another free port)
+//   before running Playwright tests.
+// - Never let tests kill, restart, or connect to the active 7778
+//   instance; doing so will drop any running model session without
+//   warning.
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -34,12 +43,17 @@ const extraArgs = (process.env.LLAMA_MONITOR_TEST_ARGS || '').split(/\s+/).filte
 // Useful for local test runs to avoid long build times.
 const useRelease = process.env.LLAMA_MONITOR_USE_RELEASE === '1';
 
+// LLAMA_MONITOR_TEST_PORT:
+// - Override the test server port when a live instance is already using 7778.
+// - CRITICAL: Do NOT leave this at 7778 while a coding session is running there.
+const testPort = process.env.LLAMA_MONITOR_TEST_PORT || '7778';
+
 let child;
 if (useRelease) {
     const binaryPath = join(repoRoot, 'target', 'release', process.platform === 'win32' ? 'llama-monitor.exe' : 'llama-monitor');
     child = spawn(binaryPath, [
         '--headless',
-        '--port', '7778',
+        '--port', testPort,
         '--config-dir', testConfigDir,
         ...extraArgs,
     ], {
@@ -51,7 +65,7 @@ if (useRelease) {
         'run',
         '--',
         '--headless',
-        '--port', '7778',
+        '--port', testPort,
         '--config-dir', testConfigDir,
         ...extraArgs,
     ];

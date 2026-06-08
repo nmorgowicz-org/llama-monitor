@@ -122,6 +122,35 @@ pub fn ws_route(
                             let (system_reason, gpu_reason, cpu_temp_reason) =
                                 state.calculate_availability_reasons();
                             let last_spawn_cmd = state.last_spawn_cmd.lock().unwrap().clone();
+                            // Include active session status so UI can show errors (OOM, crash) prominently
+                            let active_session_status = {
+                                let sessions = state.sessions.lock().unwrap();
+                                sessions
+                                    .iter()
+                                    .find(|s| s.id == active_session_id)
+                                    .map(|s| match &s.status {
+                                        crate::state::SessionStatus::Stopped => "stopped",
+                                        crate::state::SessionStatus::Running => "running",
+                                        crate::state::SessionStatus::Disconnected => "disconnected",
+                                        crate::state::SessionStatus::Error(_msg) => {
+                                            "error"
+                                        }
+                                    })
+                                    .unwrap_or("stopped")
+                            };
+                            let active_session_error = {
+                                let sessions = state.sessions.lock().unwrap();
+                                sessions
+                                    .iter()
+                                    .find(|s| s.id == active_session_id)
+                                    .and_then(|s| {
+                                        if let crate::state::SessionStatus::Error(msg) = &s.status {
+                                            Some(msg.clone())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                            };
                             serde_json::json!({
                                 "gpu": gpu,
                                 "llama": llama,
@@ -131,6 +160,8 @@ pub fn ws_route(
                                 "server_running": running,
                                 "local_server_running": local_running,
                                 "session_mode": session_mode,
+                                "active_session_status": active_session_status,
+                                "active_session_error": active_session_error,
                                 "active_session_id": active_session_id,
                                 "active_session_endpoint": active_session_endpoint,
                                 "local_metrics_available": local_metrics_available,

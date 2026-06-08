@@ -7449,14 +7449,46 @@ async function spawnServer() {
     const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` };
     const resp = await fetch('/api/sessions/spawn', { method: 'POST', headers, body: JSON.stringify(payload) });
     setProgress(60);
-    if (!resp.ok) { const t = await resp.text().catch(()=>'Unknown error'); throw new Error(t || `HTTP ${resp.status}`); }
+    if (!resp.ok) {
+      if (resp.status === 429) {
+        // Cooldown: parse seconds_remaining and disable button
+        const d = await resp.json().catch(() => null);
+        const seconds = d?.seconds_remaining || 15;
+        showErrorText(`Spawn request too soon. Please wait ${seconds} seconds.`);
+        setStatusText('Cooldown active.');
+        setProgress(0);
+        // Disable button with countdown
+        if (dom.spawnServerBtn) {
+          dom.spawnServerBtn.disabled = true;
+          const origText = dom.spawnServerBtn.textContent || '';
+          let left = seconds;
+          const iv = setInterval(() => {
+            if (left <= 0) {
+              clearInterval(iv);
+              if (dom.spawnServerBtn) {
+                dom.spawnServerBtn.disabled = false;
+                dom.spawnServerBtn.textContent = origText;
+              }
+            } else {
+              if (dom.spawnServerBtn) dom.spawnServerBtn.textContent = `Wait ${left}s`;
+              left--;
+            }
+          }, 1000);
+        }
+        wizardState.spawn.inFlight = false;
+        return;
+      }
+      const t = await resp.text().catch(()=>'Unknown error');
+      throw new Error(t || `HTTP ${resp.status}`);
+    }
     const data = await resp.json().catch(() => null);
     if (!data?.ok) throw new Error(data?.error || 'Spawn request failed.');
     setStatusText('Server process started. Waiting for endpoint…');
     setProgress(75);
     await waitForSpawnReadiness(payload.port);
     setProgress(100); setStatusText('Server started.');
-    showSuccessText('Server is running.'); showToast('Server started', 'success');
+    showSuccessText('Server is running.');
+    showToast('Server started', 'success', '', { duration: 8000 });
     setTuneConfig(payload);
     setTimeout(() => {
       closeSpawnWizard();

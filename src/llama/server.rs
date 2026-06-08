@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::sync::atomic::Ordering;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
@@ -221,6 +222,21 @@ pub async fn start_server(
     config: ServerConfig,
     app_config: &AppConfig,
 ) -> Result<()> {
+    // Ensure stopping flag is cleared for a fresh spawn.
+    state.server_stopping.store(false, Ordering::Relaxed);
+
+    // Log before spawn for kill→spawn traceability
+    state.push_log(format!(
+        "[monitor] start_server: launching llama-server on port={} model={}",
+        config.port,
+        if !config.model_path.is_empty() {
+            &config.model_path
+        } else if let Some(ref r) = config.hf_repo {
+            r
+        } else {
+            "<unknown>"
+        }
+    ));
     // Spawn V2: model source selection: either -m (local path) or -hf (HF repo), but not both.
     let use_hf = config.hf_repo.as_ref().is_some_and(|r| !r.is_empty());
     let has_model_path = !config.model_path.is_empty();
@@ -685,6 +701,11 @@ pub async fn start_server(
 
     let mut child = cmd.spawn()?;
 
+    state.push_log(format!(
+        "[monitor] start_server: llama-server spawned (pid={})",
+        child.id().unwrap_or(0)
+    ));
+
     // Capture stdout
     if let Some(stdout) = child.stdout.take() {
         let state_clone = state.clone();
@@ -729,14 +750,148 @@ pub async fn start_server(
     // Notify user-gated pollers to start after an explicit UI start action.
     state.llama_poll_notify.notify_waiters();
 
+    // Child death watcher: detect when llama-server exits unexpectedly
+    // and report a clear, user-visible error (OOM, killed, etc.).
+    {
+        let watcher_state = state.clone();
+        tokio::spawn(async move {
+            let (child_pid, child) = {
+                let mut guard = watcher_state.server_child.lock().await;
+                match guard.take() {
+                    Some(child) => {
+                        let pid = child.id().unwrap_or(0);
+                        (pid, Some(child))
+                    }
+                    None => (0, None),
+                }
+            };
+            if let Some(mut child) = child {
+                match child.wait().await {
+                    Ok(exit_status) => {
+                        // If we're in the middle of an intentional stop, don't treat it as an error.
+                        if watcher_state.server_stopping.load(Ordering::Relaxed) {
+                            watcher_state.push_log(format!(
+                                "[monitor] death_watcher: llama-server (pid={}) exited during intentional stop",
+                                child_pid
+                            ));
+                            return;
+                        }
+                        let reason = if exit_status.success() {
+                            "llama-server exited normally".to_string()
+                        } else if let Some(code) = exit_status.code() {
+                            match code {
+                                137 | 9 => format!(
+                                    "llama-server was terminated (code {}). This often means out-of-memory (OOM). Try a smaller context or a different model.",
+                                    code
+                                ),
+                                _ => format!(
+                                    "llama-server exited unexpectedly (code {}). Check the server logs for details.",
+                                    code
+                                ),
+                            }
+                        } else {
+                            "llama-server was killed by an external signal. Check the server logs for details.".to_string()
+                        };
+                        // Detect if a new spawn already took over:
+                        let server_running = *watcher_state.server_running.lock().unwrap();
+                        if server_running {
+                            // A new instance has started; likely race: old death raced with new spawn.
+                            watcher_state.push_log(format!(
+                                "[monitor] death_watcher: llama-server (pid={}) exited, but a new instance is running; ignoring stale exit.",
+                                child_pid
+                            ));
+                            return;
+                        }
+                        // Clear running flags
+                        {
+                            let mut r = watcher_state.server_running.lock().unwrap();
+                            *r = false;
+                        }
+                        {
+                            let mut lr = watcher_state.local_server_running.lock().unwrap();
+                            *lr = false;
+                        }
+                        {
+                            let mut cfg = watcher_state.server_config.lock().unwrap();
+                            *cfg = None;
+                        }
+                        watcher_state.push_log(format!("[monitor] {}", reason));
+                        // Set session status to Error with the reason
+                        let active_id = {
+                            let aid = watcher_state.active_session_id.lock().unwrap();
+                            aid.clone()
+                        };
+                        if !active_id.is_empty() {
+                            use crate::state::SessionStatus;
+                            watcher_state.update_session_status(
+                                &active_id,
+                                SessionStatus::Error(reason.clone()),
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        // If we're intentionally stopping, ignore process-level errors.
+                        if watcher_state.server_stopping.load(Ordering::Relaxed) {
+                            watcher_state.push_log(format!(
+                                "[monitor] death_watcher: llama-server (pid={}) wait error during intentional stop: {}",
+                                child_pid, e
+                            ));
+                            return;
+                        }
+                        let msg =
+                            format!("llama-server process error: {}. The server has stopped.", e);
+                        {
+                            let mut r = watcher_state.server_running.lock().unwrap();
+                            *r = false;
+                        }
+                        {
+                            let mut lr = watcher_state.local_server_running.lock().unwrap();
+                            *lr = false;
+                        }
+                        {
+                            let mut cfg = watcher_state.server_config.lock().unwrap();
+                            *cfg = None;
+                        }
+                        watcher_state.push_log(msg.clone());
+                        let active_id = {
+                            let aid = watcher_state.active_session_id.lock().unwrap();
+                            aid.clone()
+                        };
+                        if !active_id.is_empty() {
+                            use crate::state::SessionStatus;
+                            watcher_state
+                                .update_session_status(&active_id, SessionStatus::Error(msg));
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     Ok(())
 }
 
 pub async fn stop_server(state: &AppState) -> Result<()> {
+    // Signal that this is an intentional stop so the death watcher doesn't
+    // classify it as an unexpected error.
+    state.server_stopping.store(true, Ordering::Relaxed);
     let mut guard = state.server_child.lock().await;
     if let Some(ref mut child) = *guard {
+        let pid = child.id();
+        state.push_log(format!(
+            "[monitor] stop_server: initiating stop (pid={})",
+            pid.unwrap_or(0)
+        ));
         child.kill().await.ok();
+        state.push_log(format!(
+            "[monitor] stop_server: kill signaled to pid={}",
+            pid.unwrap_or(0)
+        ));
         child.wait().await.ok();
+        state.push_log(format!(
+            "[monitor] stop_server: old process fully exited (pid={})",
+            pid.unwrap_or(0)
+        ));
     }
     *guard = None;
     {
@@ -752,5 +907,7 @@ pub async fn stop_server(state: &AppState) -> Result<()> {
         *m = crate::llama::metrics::LlamaMetrics::default();
     }
     state.push_log("[monitor] Server stopped.".into());
+    // Clear the stopping flag so future spawns work cleanly.
+    state.server_stopping.store(false, Ordering::Relaxed);
     Ok(())
 }

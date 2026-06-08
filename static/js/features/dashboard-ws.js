@@ -65,6 +65,7 @@ import { refreshTopCockpit } from './nav.js';
 import { activeChatTab } from './chat-state.js';
 import { setRemoteAgentStatus } from './remote-agent.js';
 import { hideConnectingState, switchView } from './setup-view.js';
+import { showToast } from './toast.js';
 
 // ── Cached DOM elements (populated at init time to avoid repeated queries) ──
 let cachedElements = null;
@@ -74,6 +75,11 @@ const LOG_FONT_SIZE_KEY = 'llama-monitor-log-font-size';
 const LOG_FONT_SIZE_DEFAULT = 13;
 const LOG_FONT_SIZE_MIN = 8;
 const LOG_FONT_SIZE_MAX = 18;
+const LOG_TAIL_ENABLED_KEY = 'llama-monitor-log-tail-enabled';
+const LOG_TAIL_LINES_KEY = 'llama-monitor-log-tail-lines';
+const LOG_TAIL_LINES_DEFAULT = 2;
+const LOG_TAIL_LINES_MIN = 1;
+const LOG_TAIL_LINES_MAX = 6;
 
 // ── Badge change detection — skip DOM writes when badge content is unchanged ──
 let prevBadgeState = { server: null, chat: null, logs: null };
@@ -232,7 +238,54 @@ function ensureCachedElements() {
         mActivityState: document.getElementById('m-activity-state'),
         // Logs
         logPanel: document.getElementById('log-panel'),
+        // Live log tail (Inference Metrics)
+        logTailGroup: document.getElementById('inference-log-tail-group'),
+        logTailBadge: document.getElementById('inference-log-tail-badge'),
+        logTailEl: document.getElementById('inference-log-tail'),
+        logTailMinus: document.getElementById('inference-log-tail-minus'),
+        logTailPlus: document.getElementById('inference-log-tail-plus'),
     };
+}
+
+/** Live log tail feature state */
+let logTailActive = false;
+let logTailLines = LOG_TAIL_LINES_DEFAULT;
+let logTailAllowed = false;
+let logTailLastUpdateMs = 0;
+const LOG_TAIL_UPDATE_INTERVAL_MS = 600;
+
+function _readLogTailConfig() {
+    const cfg = { enabled: false, lines: LOG_TAIL_LINES_DEFAULT };
+    try {
+        const en = localStorage.getItem(LOG_TAIL_ENABLED_KEY);
+        if (en === '1' || en === 'true') cfg.enabled = true;
+        const n = Number.parseInt(localStorage.getItem(LOG_TAIL_LINES_KEY), 10);
+        if (Number.isFinite(n)) {
+            cfg.lines = Math.min(LOG_TAIL_LINES_MAX, Math.max(LOG_TAIL_LINES_MIN, n));
+        }
+    } catch {
+        // ignore
+    }
+    return cfg;
+}
+
+function _saveLogTailConfig(enabled, lines) {
+    try {
+        localStorage.setItem(LOG_TAIL_ENABLED_KEY, enabled ? '1' : '0');
+        localStorage.setItem(LOG_TAIL_LINES_KEY, String(lines));
+    } catch {
+        // ignore
+    }
+}
+
+function _applyLogTailLines(lines) {
+    logTailLines = Math.min(LOG_TAIL_LINES_MAX, Math.max(LOG_TAIL_LINES_MIN, lines));
+    ensureCachedElements();
+    const tail = cachedElements.logTailEl;
+    if (tail) {
+        tail.style.setProperty('--log-tail-lines', logTailLines);
+    }
+    _updateLogTail(wsData || null);
 }
 
 // ── WebSocket setup ───────────────────────────────────────────────────────────
@@ -240,6 +293,7 @@ function ensureCachedElements() {
 export function initWebSocket() {
     ensureOverlayStateObserver();
     _initLogFontControls();
+    _initLogTailFeature();
     const ws = new WebSocket(
         (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'
     );
@@ -312,6 +366,7 @@ function updateDashboard(d) {
 
     // Inference metrics
     updateInferenceMetrics(d);
+    _updateLogTail(d);
     if (activeTab === 'chat') {
         refreshChatTelemetry();
     }
@@ -541,10 +596,31 @@ function updateAttachDetach(d) {
         if (btnDetachTop) btnDetachTop.style.display = 'none';
     }
 
-    if (historicBadge) {
+   if (historicBadge) {
         historicBadge.style.display = isAttach ? 'none' : 'inline-block';
     }
+
+    // Live log tail pill group: only allowed when spawn mode and logs exist.
+    const allowed = isSpawn && d.logs && d.logs.length > 0;
+    logTailAllowed = allowed;
+
+    if (!allowed) {
+        logTailActive = false;
+        if (ce.logTailGroup) ce.logTailGroup.style.display = 'none';
+        if (ce.logTailBadge) ce.logTailBadge.classList.remove('is-active');
+        if (ce.logTailEl) {
+            ce.logTailEl.style.display = 'none';
+            ce.logTailEl.innerHTML = '';
+        }
+    } else if (ce.logTailGroup) {
+        // First time allowed or newly allowed: apply persisted visibility
+        _syncLogTailVisibility();
+    }
 }
+
+// Last session error tracking: used to show a prominent warning when the
+// server crashes (e.g., OOM) so the user can see/understand/take action.
+let lastSessionErrorShown = '';
 
 // ── Server state ─────────────────────────────────────────────────────────────
 
@@ -557,15 +633,40 @@ function updateServerState(d) {
     const btnStart = ce.btnStart;
     const btnStop = ce.btnStop;
 
-    dot.className = 'status-dot ' + (sessionState.serverRunning ? 'running' : 'stopped');
-    txt.textContent = sessionState.serverRunning ? 'Running' : 'Stopped';
+    // Handle active session error status (OOM, crash, etc.) prominently.
+    const sessionStatus = d.active_session_status || '';
+    const sessionError = d.active_session_error || '';
+    const isError = sessionStatus === 'error' && sessionError;
 
-    const localRunning = d.local_server_running || false;
-    if (btnStart) btnStart.disabled = localRunning;
-    if (btnStop) btnStop.disabled = !localRunning;
+    if (isError && sessionError !== lastSessionErrorShown) {
+        lastSessionErrorShown = sessionError;
+        showToast(
+            'Server error',
+            'error',
+            sessionError,
+            { duration: 12000 }
+        );
+    }
+
+    if (isError) {
+        dot.className = 'status-dot stopped';
+        txt.textContent = 'Error';
+        // Make sure Start button is enabled so user can try again immediately
+        if (btnStart) btnStart.disabled = false;
+        if (btnStop) btnStop.disabled = true;
+    } else {
+        dot.className = 'status-dot ' + (sessionState.serverRunning ? 'running' : 'stopped');
+        txt.textContent = sessionState.serverRunning ? 'Running' : 'Stopped';
+    }
+
+    if (!isError) {
+        const localRunning = d.local_server_running || false;
+        if (btnStart) btnStart.disabled = localRunning;
+        if (btnStop) btnStop.disabled = !localRunning;
+    }
 
     const btnSwitchModel = document.getElementById('btn-switch-model');
-    if (btnSwitchModel) btnSwitchModel.style.display = localRunning ? '' : 'none';
+    if (btnSwitchModel) btnSwitchModel.style.display = (d.local_server_running || false) ? '' : 'none';
 
     setLastServerState(d.server_running);
     setLastLlamaMetrics(d.llama);
@@ -905,6 +1006,101 @@ function _initLogFontControls() {
     valueBtn.addEventListener('click', () => {
         size = _applyLogFontSize(LOG_FONT_SIZE_DEFAULT);
     });
+}
+
+function _initLogTailFeature() {
+    ensureCachedElements();
+    const group = cachedElements.logTailGroup;
+    const badge = cachedElements.logTailBadge;
+    const tail = cachedElements.logTailEl;
+    const minusBtn = cachedElements.logTailMinus;
+    const plusBtn = cachedElements.logTailPlus;
+
+    if (!group || !badge || !tail || minusBtn === undefined || plusBtn === undefined || badge._logTailBound) return;
+    badge._logTailBound = true;
+
+    const cfg = _readLogTailConfig();
+    logTailActive = cfg.enabled;
+    _applyLogTailLines(cfg.lines);
+
+    // Pill toggle
+    badge.addEventListener('click', () => {
+        logTailActive = !logTailActive;
+        badge.classList.toggle('is-active', logTailActive);
+        _syncLogTailVisibility();
+        _saveLogTailConfig(logTailActive, logTailLines);
+        if (logTailActive) {
+            _updateLogTail(wsData || null);
+        } else {
+            tail.innerHTML = '';
+        }
+    });
+
+    // + / - buttons
+    minusBtn.addEventListener('click', () => {
+        _applyLogTailLines(logTailLines - 1);
+        _saveLogTailConfig(logTailActive, logTailLines);
+    });
+
+    plusBtn.addEventListener('click', () => {
+        _applyLogTailLines(logTailLines + 1);
+        _saveLogTailConfig(logTailActive, logTailLines);
+    });
+
+    // Don't show anything until updateAttachDetach confirms it is allowed.
+}
+
+function _syncLogTailVisibility() {
+    if (!logTailAllowed) return;
+
+    const group = cachedElements.logTailGroup;
+    const tail = cachedElements.logTailEl;
+    const minusBtn = cachedElements.logTailMinus;
+    const plusBtn = cachedElements.logTailPlus;
+
+    if (group) group.style.display = logTailActive ? 'inline-flex' : 'none';
+    if (tail) tail.style.display = logTailActive ? '' : 'none';
+    if (minusBtn) minusBtn.classList.toggle('show', logTailActive);
+    if (plusBtn) plusBtn.classList.toggle('show', logTailActive);
+}
+
+function _updateLogTail(d) {
+    if (!logTailActive || !logTailAllowed) return;
+    const now = Date.now();
+    if (now - logTailLastUpdateMs < LOG_TAIL_UPDATE_INTERVAL_MS) return;
+    logTailLastUpdateMs = now;
+
+    ensureCachedElements();
+    const tail = cachedElements.logTailEl;
+    if (!tail) return;
+
+    const logs = d.logs;
+    if (!Array.isArray(logs) || logs.length === 0) {
+        tail.innerHTML = '';
+        return;
+    }
+
+    const lastN = logs.slice(-logTailLines);
+    const existing = tail.children;
+
+    for (let i = 0; i < lastN.length; i++) {
+        const line = lastN[i];
+        if (!line) continue;
+
+        let el = existing[i];
+        if (!el) {
+            el = document.createElement('div');
+            tail.appendChild(el);
+        }
+
+        el.className = 'log-line ' + _levelClass(_parseLogLevel(line));
+        el.textContent = line;
+    }
+
+    // Remove extra lines if line count decreased
+    for (let i = lastN.length; i < existing.length; i++) {
+        tail.removeChild(existing[i]);
+    }
 }
 
 function _initLogToolbar(el) {

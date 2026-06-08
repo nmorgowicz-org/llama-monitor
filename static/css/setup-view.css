@@ -2516,6 +2516,25 @@ body.setup-active .sidebar-nav {
   z-index: 2;
   width: 100%;
   box-sizing: border-box;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 253, 0.16) transparent;
+}
+
+.launch-grid::-webkit-scrollbar {
+  width: 4px;
+}
+.launch-grid::-webkit-scrollbar-track {
+  background: transparent;
+}
+.launch-grid::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 253, 0.22);
+  border-radius: 999px;
+}
+.launch-grid::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 253, 0.35);
 }
 
 /* ── Preset launch card ───────────────────────────────────────────────────── */
@@ -3386,6 +3405,17 @@ body.setup-active .sidebar-nav {
   background: linear-gradient(90deg, rgba(15,23,42,0.04) 25%, rgba(15,23,42,0.07) 50%, rgba(15,23,42,0.04) 75%);
   background-size: 200% 100%;
   border-color: rgba(15, 23, 42, 0.06);
+}
+
+/* light-theme scrollbar for launch grid */
+[data-theme="light"] .launch-grid {
+  scrollbar-color: rgba(15, 23, 42, 0.08) transparent;
+}
+[data-theme="light"] .launch-grid::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.10);
+}
+[data-theme="light"] .launch-grid::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.18);
 }
 
 /* ── Responsive ───────────────────────────────────────────────────────────── */
