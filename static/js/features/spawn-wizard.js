@@ -5084,12 +5084,18 @@ async function _autoDiscoverLocalModelQuants() {
         let rawFiles = [];
         let showCandidateList = false;
 
+        // 1) If originRepo is already known (e.g., from pencil editor), use it.
+        //    Even a single GGUF is acceptable since this is the confirmed source.
         if (repoId) {
           const data = await _hfFilesPost(repoId);
-          if (data?.ok) rawFiles = (data.files || []).filter(f =>
-            !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
-        } else {
-          // Use resolve-origin to get ranked, file-validated candidates
+          if (data?.ok) {
+            rawFiles = (data.files || []).filter(f =>
+              !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
+          }
+        }
+
+        // 2) If no originRepo or it has no GGUFs, use resolve-origin to search.
+        if (!rawFiles.length && !repoId) {
           const headers = window.authHeaders ? { ...window.authHeaders(), 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
           const modelBytes = wizardState.model.modelBytes || 0;
           const res = await fetch('/api/hf/resolve-origin', {
@@ -5113,14 +5119,14 @@ async function _autoDiscoverLocalModelQuants() {
                   !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
               }
             } else if (candidates.length > 1) {
-              // Multiple plausible repos: filter to those with ≥2 GGUFs, then show list
+              // Multiple plausible repos: show list of those with ≥1 GGUF
               const withFiles = [];
               for (const c of candidates) {
                 const fd = await _hfFilesPost(c.repoId);
                 if (!fd?.ok) continue;
                 const gguf = (fd.files || []).filter(f =>
                   !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
-                if (gguf.length >= 2) {
+                if (gguf.length >= 1) {
                   withFiles.push({ repoId: c.repoId, ggufFiles: gguf });
                 }
               }
@@ -5130,13 +5136,13 @@ async function _autoDiscoverLocalModelQuants() {
                 showCandidateList = true;
               }
             } else if (candidates.length === 1) {
-              // Single candidate only if it has GGUFs
+              // Single candidate with ≥1 GGUF
               const c = candidates[0];
               const fd = await _hfFilesPost(c.repoId);
               if (fd?.ok) {
                 const gguf = (fd.files || []).filter(f =>
                   !f.is_mmproj && (f.rfilename || f.path || '').toLowerCase().endsWith('.gguf'));
-                if (gguf.length >= 2) {
+                if (gguf.length >= 1) {
                   repoId = c.repoId;
                   rawFiles = gguf;
                 }
@@ -5145,37 +5151,42 @@ async function _autoDiscoverLocalModelQuants() {
           }
         }
 
-     if (showCandidateList) {
-       return;
-     }
-     if (rawFiles.length >= 2 && repoId) {
-       wizardState.model.quantFiles = rawFiles.map(f => ({
-         path: f.rfilename || f.path || '',
-         name: f.rfilename || f.path || '',
-         size: f.size || 0,
-         label: _extractQuantLabel(f.rfilename || f.path || ''),
-       }));
-       wizardState.model._quantSwapRepo = repoId;
+      if (showCandidateList) {
+        return;
+      }
 
-       // Pre-select the entry matching the currently loaded local file.
-       const currentLower = filename.toLowerCase();
-       const match = rawFiles.find(f =>
-         (f.rfilename || f.path || '').split('/').pop().toLowerCase() === currentLower);
-       if (match) wizardState.model.hfFile = match.rfilename || match.path || '';
+      // 3) If we have any GGUFs from the chosen repo, use it.
+      if (rawFiles.length > 0 && repoId) {
+        wizardState.model.quantFiles = rawFiles.map(f => ({
+          path: f.rfilename || f.path || '',
+          name: f.rfilename || f.path || '',
+          size: f.size || 0,
+          label: _extractQuantLabel(f.rfilename || f.path || ''),
+        }));
+        wizardState.model._quantSwapRepo = repoId;
 
-       if (statusEl) statusEl.textContent = `${rawFiles.length} quants found`;
-       setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
-       renderHardwareModelHeader();
-     } else {
-       if (statusEl) statusEl.textContent = 'Not found — type or paste the repo:';
-       _showQuantSwapManualInput();
-     }
-  } catch {
-    if (statusEl) statusEl.textContent = 'Search failed';
-  } finally {
-    _quantSwapSearching = false;
-    if (btn) btn.disabled = false;
-  }
+        // Pre-select the entry matching the currently loaded local file.
+        const currentLower = filename.toLowerCase();
+        const match = rawFiles.find(f =>
+          (f.rfilename || f.path || '').split('/').pop().toLowerCase() === currentLower);
+        if (match) wizardState.model.hfFile = match.rfilename || match.path || '';
+
+        if (statusEl) statusEl.textContent = rawFiles.length === 1
+            ? 'Only your current quant is available'
+            : `${rawFiles.length} quants found`;
+        setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3000);
+        renderHardwareModelHeader();
+      } else {
+        // 4) Fallback: let user type a repo manually.
+        if (statusEl) statusEl.textContent = 'Not found — type or paste the repo:';
+        _showQuantSwapManualInput();
+      }
+   } catch {
+     if (statusEl) statusEl.textContent = 'Search failed';
+   } finally {
+     _quantSwapSearching = false;
+     if (btn) btn.disabled = false;
+   }
 }
 
 // Show a compact list of candidate repos when multiple are found.
