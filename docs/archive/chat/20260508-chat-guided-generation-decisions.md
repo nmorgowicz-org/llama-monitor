@@ -38,15 +38,6 @@ Fresh screenshots were captured on **2026-05-11** with:
 SCREENSHOT_PORT=9001 node tests/ui/capture.mjs --scenario new-features
 ```
 
-Artifacts:
-- [08-context-notes-expanded.png](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots/artifacts/08-context-notes-expanded.png)
-- [09-suggestions-dropdown.png](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots/artifacts/09-suggestions-dropdown.png)
-- [09b-suggestions-results.png](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots/artifacts/09b-suggestions-results.png)
-- [10-quick-guide-dropdown.png](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots/artifacts/10-quick-guide-dropdown.png)
-- [10b-quick-guide-response.png](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots/artifacts/10b-quick-guide-response.png)
-- [11-chat-input-buttons.png](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots/artifacts/11-chat-input-buttons.png)
-- [13a-suggestions-tag-cloud.png](/Users/nick/SCRIPTS/CLAUDE/llama-monitor/docs/screenshots/artifacts/13a-suggestions-tag-cloud.png)
-
 Observed current suggestions-panel geometry from capture logs:
 - Pre-generate panel width: `380px`
 - Pre-generate panel height: `392px`
