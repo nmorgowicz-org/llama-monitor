@@ -76,9 +76,9 @@ A version pill in the navbar shows the current llama.cpp version and opens relea
 
 ![Llama Updater](docs/screenshots/llama-updater-pill.png)
 
-![Model Discovery](docs/screenshots/spawn-wizard-model-discovery.png)
+![Model Discovery](docs/screenshots/models-discovery-overview.png)
 
-![VRAM Estimator](docs/screenshots/spawn-wizard-vram.png)
+![VRAM Estimator](docs/screenshots/spawn-wizard-step3-vram.png)
 
 ![Spawn Wizard Flow](docs/screenshots/spawn-wizard-flow.gif)
 
